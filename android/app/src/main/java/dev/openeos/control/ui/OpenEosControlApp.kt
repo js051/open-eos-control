@@ -1,6 +1,9 @@
 package dev.openeos.control.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -23,54 +25,63 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.openeos.control.data.CameraCapabilities
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraStatus
-import dev.openeos.control.data.CcapiClient
-import kotlinx.coroutines.launch
 
 @Composable
-fun OpenEosControlApp() {
+fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+
     MaterialTheme {
         Surface(color = Color(0xFF10131A), modifier = Modifier.fillMaxSize()) {
-            CameraControlScreen()
+            CameraControlScreen(
+                state = state,
+                actions = CameraActions(
+                    onBaseUrlChange = viewModel::setBaseUrl,
+                    onConnect = viewModel::connect,
+                    onRefresh = viewModel::refresh,
+                    onToggleRecording = viewModel::toggleRecording,
+                    onSetIso = viewModel::setIso,
+                    onSetShutter = viewModel::setShutter,
+                    onSetAperture = viewModel::setAperture,
+                    onSetWhiteBalance = viewModel::setWhiteBalance,
+                    onTapFocus = viewModel::tapFocus,
+                    onClearError = viewModel::clearError,
+                ),
+            )
         }
     }
 }
 
+private data class CameraActions(
+    val onBaseUrlChange: (String) -> Unit,
+    val onConnect: () -> Unit,
+    val onRefresh: () -> Unit,
+    val onToggleRecording: () -> Unit,
+    val onSetIso: (String) -> Unit,
+    val onSetShutter: (String) -> Unit,
+    val onSetAperture: (String) -> Unit,
+    val onSetWhiteBalance: (String) -> Unit,
+    val onTapFocus: (Double, Double) -> Unit,
+    val onClearError: () -> Unit,
+)
+
 @Composable
-private fun CameraControlScreen() {
-    val scope = rememberCoroutineScope()
-    var baseUrl by remember { mutableStateOf("http://10.0.2.2:18080") }
-    var info by remember { mutableStateOf<CameraInfo?>(null) }
-    var status by remember { mutableStateOf<CameraStatus?>(null) }
-    var capabilities by remember { mutableStateOf<CameraCapabilities?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-
-    fun runCamera(block: suspend (CcapiClient) -> Unit) {
-        scope.launch {
-            busy = true
-            error = null
-            try {
-                block(CcapiClient(baseUrl))
-            } catch (exception: Exception) {
-                error = exception.message ?: "Camera request failed"
-            } finally {
-                busy = false
-            }
-        }
-    }
-
+private fun CameraControlScreen(
+    state: CameraUiState,
+    actions: CameraActions,
+) {
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -85,34 +96,27 @@ private fun CameraControlScreen() {
         ) {
             Text("Open EOS Control", color = Color.White, fontWeight = FontWeight.Bold)
             OutlinedTextField(
-                value = baseUrl,
-                onValueChange = { baseUrl = it },
+                value = state.baseUrl,
+                onValueChange = actions.onBaseUrlChange,
                 label = { Text("Camera URL") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    enabled = !busy,
-                    onClick = {
-                        runCamera { client ->
-                            info = client.info()
-                            status = client.status()
-                            capabilities = client.capabilities()
-                        }
-                    },
-                ) {
-                    Text(if (busy) "Working" else "Connect")
+                Button(enabled = !state.busy, onClick = actions.onConnect) {
+                    Text(if (state.busy) "Working" else "Connect")
                 }
                 Button(
-                    enabled = status != null && !busy,
-                    onClick = { runCamera { status = it.status() } },
+                    enabled = state.connected && !state.busy,
+                    onClick = actions.onRefresh,
                 ) {
                     Text("Refresh")
                 }
             }
-            CameraSummary(info, status)
-            error?.let { ErrorPanel(it) }
+            CameraSummary(state.info, state.status)
+            state.error?.let {
+                ErrorPanel(message = it, onClick = actions.onClearError)
+            }
         }
 
         Column(
@@ -121,36 +125,36 @@ private fun CameraControlScreen() {
                 .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            MonitorPanel(status)
-            RecordButton(
-                enabled = status != null && !busy,
-                recording = status?.recording == true,
-                onClick = {
-                    runCamera { client ->
-                        status = if (status?.recording == true) {
-                            client.stopRecording()
-                        } else {
-                            client.startRecording()
-                        }
-                    }
-                },
+            MonitorPanel(
+                status = state.status,
+                focusPoint = state.focusPoint,
+                enabled = state.connected && !state.busy,
+                onTapFocus = actions.onTapFocus,
             )
-            ControlSection("ISO", capabilities?.iso.orEmpty(), status?.exposure?.iso) { value ->
-                runCamera { status = it.setExposure(iso = value) }
-            }
-            ControlSection("Shutter", capabilities?.shutter.orEmpty(), status?.exposure?.shutter) { value ->
-                runCamera { status = it.setExposure(shutter = value) }
-            }
-            ControlSection("Aperture", capabilities?.aperture.orEmpty(), status?.exposure?.aperture) { value ->
-                runCamera { status = it.setExposure(aperture = value) }
-            }
+            RecordButton(
+                enabled = state.connected && !state.busy,
+                recording = state.status?.recording == true,
+                onClick = actions.onToggleRecording,
+            )
+            ControlSection("ISO", state.capabilities?.iso.orEmpty(), state.status?.exposure?.iso, actions.onSetIso)
+            ControlSection(
+                "Shutter",
+                state.capabilities?.shutter.orEmpty(),
+                state.status?.exposure?.shutter,
+                actions.onSetShutter,
+            )
+            ControlSection(
+                "Aperture",
+                state.capabilities?.aperture.orEmpty(),
+                state.status?.exposure?.aperture,
+                actions.onSetAperture,
+            )
             ControlSection(
                 "White balance",
-                capabilities?.whiteBalance.orEmpty(),
-                status?.exposure?.whiteBalance,
-            ) { value ->
-                runCamera { status = it.setWhiteBalance(value) }
-            }
+                state.capabilities?.whiteBalance.orEmpty(),
+                state.status?.exposure?.whiteBalance,
+                actions.onSetWhiteBalance,
+            )
         }
     }
 }
@@ -166,13 +170,42 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
 }
 
 @Composable
-private fun MonitorPanel(status: CameraStatus?) {
+private fun MonitorPanel(
+    status: CameraStatus?,
+    focusPoint: FocusPoint?,
+    enabled: Boolean,
+    onTapFocus: (Double, Double) -> Unit,
+) {
+    MonitorFrame(
+        status = status,
+        focusPoint = focusPoint,
+        enabled = enabled,
+        onTapFocus = onTapFocus,
+    )
+}
+
+@Composable
+private fun MonitorFrame(
+    status: CameraStatus?,
+    focusPoint: FocusPoint?,
+    enabled: Boolean,
+    onTapFocus: (Double, Double) -> Unit,
+) {
     Panel {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(190.dp)
-                .background(Color(0xFF05070A), RoundedCornerShape(8.dp)),
+                .background(Color(0xFF05070A), RoundedCornerShape(8.dp))
+                .pointerInput(enabled) {
+                    detectTapGestures { offset ->
+                        if (enabled && size.width > 0 && size.height > 0) {
+                            val x = (offset.x / size.width).coerceIn(0f, 1f).toDouble()
+                            val y = (offset.y / size.height).coerceIn(0f, 1f).toDouble()
+                            onTapFocus(x, y)
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -186,8 +219,45 @@ private fun MonitorPanel(status: CameraStatus?) {
                     "ISO ${status?.exposure?.iso ?: "-"}  ${status?.exposure?.shutter ?: "-"}  F${status?.exposure?.aperture ?: "-"}",
                     color = Color(0xFFE2E8F0),
                 )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (enabled) "Tap monitor to focus" else "Connect camera to focus",
+                    color = Color(0xFF94A3B8),
+                )
             }
+            FocusOverlay(focusPoint = focusPoint)
         }
+    }
+}
+
+@Composable
+private fun FocusOverlay(focusPoint: FocusPoint?) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        if (focusPoint == null) return@Canvas
+        val strokePx = 2.dp.toPx()
+        val center = Offset(
+            x = (focusPoint.x.toFloat() * size.width).coerceIn(0f, size.width),
+            y = (focusPoint.y.toFloat() * size.height).coerceIn(0f, size.height),
+        )
+        val boxSize = 52.dp.toPx()
+        drawRect(
+            color = Color(0xFFFACC15),
+            topLeft = Offset(center.x - boxSize / 2f, center.y - boxSize / 2f),
+            size = Size(boxSize, boxSize),
+            style = Stroke(width = strokePx),
+        )
+        drawLine(
+            color = Color(0xFFFACC15),
+            start = Offset(center.x - boxSize * 0.8f, center.y),
+            end = Offset(center.x + boxSize * 0.8f, center.y),
+            strokeWidth = strokePx,
+        )
+        drawLine(
+            color = Color(0xFFFACC15),
+            start = Offset(center.x, center.y - boxSize * 0.8f),
+            end = Offset(center.x, center.y + boxSize * 0.8f),
+            strokeWidth = strokePx,
+        )
     }
 }
 
@@ -232,10 +302,11 @@ private fun ControlSection(
 }
 
 @Composable
-private fun ErrorPanel(message: String) {
+private fun ErrorPanel(message: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .background(Color(0xFF7F1D1D), RoundedCornerShape(8.dp))
             .padding(12.dp),
     ) {
