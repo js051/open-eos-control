@@ -1,25 +1,4 @@
 services:
-  backend:
-    build:
-      context: ./backend
-    environment:
-      OEC_DEFAULT_CAMERA_URL: http://simulator:18080
-      OEC_USE_FAKE_CAMERA: "true"
-    ports:
-      - "8000:8000"
-    depends_on:
-      - simulator
-
-  frontend:
-    build:
-      context: ./frontend
-    environment:
-      VITE_API_BASE_URL: http://localhost:8000
-    ports:
-      - "5173:5173"
-    depends_on:
-      - backend
-
   simulator:
     build:
       context: ./simulator

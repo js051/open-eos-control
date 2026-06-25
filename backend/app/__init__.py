@@ -1,1 +1,0 @@
-"""Open EOS Control backend."""

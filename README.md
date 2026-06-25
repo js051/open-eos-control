@@ -1,85 +1,70 @@
 # Open EOS Control
 
-Open EOS Control is an unofficial, open-source Canon EOS R6 Mark III-first control web app inspired by monitor/control tools such as ZineControl and Monitor+.
+Open EOS Control is an unofficial, open-source Android control app for Canon EOS cameras, starting with the Canon EOS R6 Mark III and Canon CCAPI over Wi-Fi.
 
-The MVP focuses on Wi-Fi control through Canon CCAPI-style HTTP endpoints, with a fake camera path that lets the app run without a physical camera. USB EDSDK, HDMI/UVC capture, LUTs, waveform, false color, zebra, and focus peaking are planned later phases.
+The product target is an Android phone/tablet app that talks directly to the camera. The desktop pieces in this repo are only development support, mainly a fake CCAPI camera simulator.
 
-## Stack
-
-- Backend: Python 3.12+, FastAPI, httpx, Pydantic, pytest, ruff
-- Frontend: Vue 3, Vite, TypeScript, Tailwind CSS, Pinia
-- Simulator: FastAPI fake camera server
-- Local orchestration: Docker Compose
-
-## Layout
+## Project Shape
 
 ```text
 open-eos-control/
-  backend/       FastAPI app that exposes UI-friendly camera APIs
-  frontend/      Vue 3 control surface
-  simulator/     Fake Canon camera server for local development
-  docker-compose.yml
+  android/       Android app, Kotlin + Jetpack Compose
+  simulator/     Fake Canon CCAPI-compatible camera server
+  docs/          Design notes and development references
 ```
 
-## Quick Start
+## Android App
+
+Open `android/` in Android Studio.
+
+This repo includes `android/local.properties.example`. A local `android/local.properties` can point at your SDK path, but it is intentionally ignored by git.
+
+The app currently includes:
+
+- Camera base URL input
+- Connect / refresh
+- Camera status display
+- ISO, shutter, aperture, and white balance controls
+- REC start / stop
+- Tap-focus API hook through the data layer
+
+For Android Emulator plus local simulator, use:
+
+```text
+http://10.0.2.2:18080
+```
+
+For a physical Android device, use the LAN IP of the development computer running the simulator, or the camera CCAPI URL when testing with a real body.
+
+CLI builds should use JDK 17 and a Gradle wrapper. The wrapper is not committed yet; Android Studio can sync the project with its bundled JDK.
+
+## Fake Camera Simulator
 
 ```bash
 docker compose up --build
 ```
 
-Services:
+Simulator URL:
 
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
-- Simulator: http://localhost:18080
-
-Use `http://simulator:18080` as the camera base URL when running through Docker Compose. Use `http://localhost:18080` when running the backend directly on the host.
-
-## Backend API
-
-- `GET /api/health`
-- `POST /api/camera/connect`
-- `GET /api/camera/status`
-- `GET /api/camera/capabilities`
-- `PATCH /api/camera/exposure`
-- `PATCH /api/camera/white-balance`
-- `POST /api/camera/record/start`
-- `POST /api/camera/record/stop`
-- `POST /api/camera/focus/tap`
-- `GET /api/liveview/frame`
-
-## Development
-
-Backend:
-
-```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8000
+```text
+http://localhost:18080
 ```
 
-Simulator:
+Useful endpoints:
 
-```bash
-cd simulator
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e ".[dev]"
-uvicorn main:app --reload --port 18080
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
+- `GET /health`
+- `GET /ccapi/info`
+- `GET /ccapi/status`
+- `GET /ccapi/capabilities`
+- `PATCH /ccapi/exposure`
+- `PATCH /ccapi/white-balance`
+- `POST /ccapi/record/start`
+- `POST /ccapi/record/stop`
+- `POST /ccapi/focus/tap`
+- `GET /ccapi/liveview/frame`
 
 ## Camera Notes
 
-`CcapiCameraClient` is intentionally a thin placeholder until the Canon CCAPI reference endpoints are verified against the target camera firmware. The UI and backend are written against the `CameraClient` interface so the fake client can be swapped for the real adapter without rewriting the app surface.
+The current CCAPI paths are simulator-friendly and intentionally isolated in the Android data layer. Real Canon endpoint verification should happen against Canon's CCAPI reference and an R6 Mark III body before the adapter is treated as stable.
 
 Open EOS Control is not affiliated with or endorsed by Canon. Canon and EOS are trademarks of their respective owners.

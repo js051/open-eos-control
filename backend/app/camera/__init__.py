@@ -1,1 +1,0 @@
-"""Camera clients and models."""

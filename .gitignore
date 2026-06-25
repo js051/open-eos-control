@@ -4,6 +4,12 @@ __pycache__/
 .ruff_cache/
 *.pyc
 
+.gradle/
+android/.gradle/
+android/local.properties
+android/**/build/
+*.apk
+
 node_modules/
 dist/
 .vite/

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Open EOS Control Fake Camera")
@@ -8,6 +8,23 @@ class FocusRequest(BaseModel):
     x: float = Field(ge=0.0, le=1.0)
     y: float = Field(ge=0.0, le=1.0)
 
+
+class ExposureUpdate(BaseModel):
+    iso: str | None = None
+    shutter: str | None = None
+    aperture: str | None = None
+
+
+class WhiteBalanceUpdate(BaseModel):
+    white_balance: str
+
+
+capabilities = {
+    "iso": ["100", "200", "400", "800", "1600", "3200", "6400"],
+    "shutter": ["1/25", "1/50", "1/60", "1/100", "1/125"],
+    "aperture": ["1.8", "2.0", "2.8", "4.0", "5.6"],
+    "white_balance": ["auto", "daylight", "cloudy", "tungsten", "kelvin"],
+}
 
 state = {
     "recording": False,
@@ -22,13 +39,7 @@ state = {
 }
 
 
-@app.get("/health")
-async def health() -> dict[str, bool | str]:
-    return {"ok": True, "service": "open-eos-control-simulator"}
-
-
-@app.get("/ccapi/status")
-async def status() -> dict[str, object]:
+def camera_status() -> dict[str, object]:
     return {
         "connected": True,
         "battery": {"level": 82, "status": "normal"},
@@ -37,6 +48,51 @@ async def status() -> dict[str, object]:
         "media": {"available": True, "remaining_minutes": 120},
         "exposure": state["exposure"],
     }
+
+
+def validate_setting(key: str, value: str) -> None:
+    if value not in capabilities[key]:
+        raise HTTPException(status_code=422, detail=f"Unsupported {key}: {value}")
+
+
+@app.get("/health")
+async def health() -> dict[str, bool | str]:
+    return {"ok": True, "service": "open-eos-control-simulator"}
+
+
+@app.get("/ccapi/info")
+async def info() -> dict[str, bool | str]:
+    return {
+        "connected": True,
+        "model": "Canon EOS R6 Mark III",
+        "serial": "sim-r6m3",
+        "api": "simulated-ccapi",
+    }
+
+
+@app.get("/ccapi/status")
+async def status() -> dict[str, object]:
+    return camera_status()
+
+
+@app.get("/ccapi/capabilities")
+async def get_capabilities() -> dict[str, list[str]]:
+    return capabilities
+
+
+@app.patch("/ccapi/exposure")
+async def update_exposure(payload: ExposureUpdate) -> dict[str, object]:
+    for key, value in payload.model_dump(exclude_none=True).items():
+        validate_setting(key, value)
+        state["exposure"][key] = value
+    return camera_status()
+
+
+@app.patch("/ccapi/white-balance")
+async def update_white_balance(payload: WhiteBalanceUpdate) -> dict[str, object]:
+    validate_setting("white_balance", payload.white_balance)
+    state["exposure"]["white_balance"] = payload.white_balance
+    return camera_status()
 
 
 @app.post("/ccapi/record/start")

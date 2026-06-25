@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.OpenEOSControl" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#FACC15</item>
+    </style>
+</resources>
