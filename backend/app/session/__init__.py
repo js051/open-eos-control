@@ -1,0 +1,1 @@
+"""Runtime camera session state."""
