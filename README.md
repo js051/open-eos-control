@@ -1,5 +1,7 @@
 # Open EOS Control
 
+[繁體中文](README.zh-TW.md) | English
+
 Open EOS Control is an unofficial, open-source Android control app for Canon EOS cameras, starting with the Canon EOS R6 Mark III and Canon CCAPI over Wi-Fi.
 
 The product target is an Android phone/tablet app that talks directly to the camera. The desktop pieces in this repo are only development support, mainly a fake CCAPI camera simulator.
