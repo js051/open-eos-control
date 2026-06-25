@@ -43,7 +43,13 @@ For Android Emulator plus local simulator, use the Dev Simulator preset:
 http://10.0.2.2:18080
 ```
 
-For a physical Android device with the local simulator, use the LAN IP of the development computer running the simulator.
+For a physical Android device with the local simulator, keep `docker compose up --build` running on the computer and enter the computer's LAN IP:
+
+```text
+http://<computer-lan-ip>:18080
+```
+
+The `10.0.2.2` address only works inside the Android Emulator.
 
 CLI builds use the committed Gradle wrapper. On this Windows dev machine, use the helper script so Gradle runs with Android Studio's bundled JDK 17:
 

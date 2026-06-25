@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,15 +13,18 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,8 +47,8 @@ import dev.openeos.control.data.CameraStatus
 fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    MaterialTheme {
-        Surface(color = Color(0xFF10131A), modifier = Modifier.fillMaxSize()) {
+    MaterialTheme(colorScheme = OpenEosColorScheme) {
+        Surface(color = AppBackground, modifier = Modifier.fillMaxSize()) {
             CameraControlScreen(
                 state = state,
                 actions = CameraActions(
@@ -82,6 +86,7 @@ private data class CameraActions(
 )
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun CameraControlScreen(
     state: CameraUiState,
     actions: CameraActions,
@@ -89,7 +94,7 @@ private fun CameraControlScreen(
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp),
+            .padding(16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Column(
@@ -98,27 +103,38 @@ private fun CameraControlScreen(
                 .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Open EOS Control", color = Color.White, fontWeight = FontWeight.Bold)
+            HeaderBlock()
             OutlinedTextField(
                 value = state.baseUrl,
                 onValueChange = actions.onBaseUrlChange,
                 label = { Text("Direct camera URL") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = AppText,
+                    unfocusedTextColor = AppText,
+                    focusedLabelColor = AppAccent,
+                    unfocusedLabelColor = AppMutedText,
+                    cursorColor = AppAccent,
+                    focusedBorderColor = AppAccent,
+                    unfocusedBorderColor = AppBorder,
+                    focusedContainerColor = Color(0xFF111827),
+                    unfocusedContainerColor = Color(0xFF111827),
+                ),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = !state.busy, onClick = actions.onUseDirectCamera) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SecondaryButton(enabled = !state.busy, onClick = actions.onUseDirectCamera) {
                     Text("Direct Camera")
                 }
-                Button(enabled = !state.busy, onClick = actions.onUseDevSimulator) {
+                SecondaryButton(enabled = !state.busy, onClick = actions.onUseDevSimulator) {
                     Text("Dev Simulator")
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = !state.busy, onClick = actions.onConnect) {
+                PrimaryButton(enabled = !state.busy, onClick = actions.onConnect) {
                     Text(if (state.busy) "Working" else "Connect")
                 }
-                Button(
+                SecondaryButton(
                     enabled = state.connected && !state.busy,
                     onClick = actions.onRefresh,
                 ) {
@@ -172,14 +188,23 @@ private fun CameraControlScreen(
 }
 
 @Composable
+private fun HeaderBlock() {
+    Panel {
+        Text("Open EOS Control", color = AppText, fontWeight = FontWeight.Bold)
+        Text("Direct Canon EOS CCAPI control", color = AppSubtleText)
+        Text("Simulator is for development only.", color = AppMutedText)
+    }
+}
+
+@Composable
 private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
     Panel {
-        Text(info?.model ?: "No camera connected", color = Color.White, fontWeight = FontWeight.Bold)
-        Text("API: ${info?.api ?: "-"}", color = Color(0xFFCBD5E1))
-        Text("Battery: ${status?.batteryLevel ?: 0}% ${status?.batteryStatus ?: ""}", color = Color(0xFFCBD5E1))
-        Text("Media: ${if (status?.mediaAvailable == true) "card ok" else "unknown"}", color = Color(0xFFCBD5E1))
+        Text(info?.model ?: "No camera connected", color = AppText, fontWeight = FontWeight.Bold)
+        Text("API: ${info?.api ?: "-"}", color = AppSubtleText)
+        Text("Battery: ${status?.batteryLevel ?: 0}% ${status?.batteryStatus ?: ""}", color = AppSubtleText)
+        Text("Media: ${if (status?.mediaAvailable == true) "card ok" else "unknown"}", color = AppSubtleText)
         if (info == null) {
-            Text("Connect phone to the camera Wi-Fi, then enter the camera CCAPI URL.", color = Color(0xFF94A3B8))
+            Text("Connect phone to the camera Wi-Fi, then enter the camera CCAPI URL.", color = AppMutedText)
         }
     }
 }
@@ -210,8 +235,9 @@ private fun MonitorFrame(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(190.dp)
-                .background(Color(0xFF05070A), RoundedCornerShape(8.dp))
+                .aspectRatio(16f / 9f)
+                .background(AppMonitor, RoundedCornerShape(8.dp))
+                .border(1.dp, AppBorder, RoundedCornerShape(8.dp))
                 .pointerInput(enabled) {
                     detectTapGestures { offset ->
                         if (enabled && size.width > 0 && size.height > 0) {
@@ -226,18 +252,18 @@ private fun MonitorFrame(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     if (status?.recording == true) "REC" else "STBY",
-                    color = if (status?.recording == true) Color(0xFFFF3B5B) else Color(0xFFE2E8F0),
+                    color = if (status?.recording == true) Color(0xFFFF3B5B) else AppSubtleText,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "ISO ${status?.exposure?.iso ?: "-"}  ${status?.exposure?.shutter ?: "-"}  F${status?.exposure?.aperture ?: "-"}",
-                    color = Color(0xFFE2E8F0),
+                    color = AppSubtleText,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     if (enabled) "Tap monitor to focus" else "Connect camera to focus",
-                    color = Color(0xFF94A3B8),
+                    color = AppMutedText,
                 )
             }
             FocusOverlay(focusPoint = focusPoint)
@@ -256,19 +282,19 @@ private fun FocusOverlay(focusPoint: FocusPoint?) {
         )
         val boxSize = 52.dp.toPx()
         drawRect(
-            color = Color(0xFFFACC15),
+            color = AppAccent,
             topLeft = Offset(center.x - boxSize / 2f, center.y - boxSize / 2f),
             size = Size(boxSize, boxSize),
             style = Stroke(width = strokePx),
         )
         drawLine(
-            color = Color(0xFFFACC15),
+            color = AppAccent,
             start = Offset(center.x - boxSize * 0.8f, center.y),
             end = Offset(center.x + boxSize * 0.8f, center.y),
             strokeWidth = strokePx,
         )
         drawLine(
-            color = Color(0xFFFACC15),
+            color = AppAccent,
             start = Offset(center.x, center.y - boxSize * 0.8f),
             end = Offset(center.x, center.y + boxSize * 0.8f),
             strokeWidth = strokePx,
@@ -281,8 +307,10 @@ private fun RecordButton(enabled: Boolean, recording: Boolean, onClick: () -> Un
     Button(
         enabled = enabled,
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (recording) Color(0xFFBE123C) else Color(0xFFFACC15),
+            containerColor = if (recording) AppDanger else AppAccent,
             contentColor = if (recording) Color.White else Color(0xFF111318),
+            disabledContainerColor = AppPanelAlt,
+            disabledContentColor = AppMutedText,
         ),
         onClick = onClick,
     ) {
@@ -299,14 +327,11 @@ private fun ControlSection(
     onSelect: (String) -> Unit,
 ) {
     Panel {
-        Text(label, color = Color.White, fontWeight = FontWeight.SemiBold)
+        Text(label, color = AppText, fontWeight = FontWeight.SemiBold)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             values.forEach { value ->
-                Button(
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (value == selected) Color(0xFFFACC15) else Color(0xFF263041),
-                        contentColor = if (value == selected) Color(0xFF111318) else Color.White,
-                    ),
+                ChoiceButton(
+                    selected = value == selected,
                     onClick = { onSelect(value) },
                 ) {
                     Text(value)
@@ -334,9 +359,68 @@ private fun Panel(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1A202C), RoundedCornerShape(8.dp))
+            .background(AppPanel, RoundedCornerShape(8.dp))
+            .border(1.dp, Color(0xFF263244), RoundedCornerShape(8.dp))
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         content = content,
     )
+}
+
+@Composable
+private fun PrimaryButton(
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Button(
+        enabled = enabled,
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = AppAccent,
+            contentColor = Color(0xFF111318),
+            disabledContainerColor = AppPanelAlt,
+            disabledContentColor = AppMutedText,
+        ),
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun SecondaryButton(
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Button(
+        enabled = enabled,
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = AppPanelAlt,
+            contentColor = AppText,
+            disabledContainerColor = Color(0xFF1B2230),
+            disabledContentColor = AppMutedText,
+        ),
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun ChoiceButton(
+    selected: Boolean,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Button(
+        modifier = Modifier.widthIn(min = 72.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (selected) AppAccent else AppPanelAlt,
+            contentColor = if (selected) Color(0xFF111318) else AppText,
+        ),
+        onClick = onClick,
+    ) {
+        content()
+    }
 }
