@@ -36,7 +36,11 @@ http://10.0.2.2:18080
 
 For a physical Android device, use the LAN IP of the development computer running the simulator, or the camera CCAPI URL when testing with a real body.
 
-CLI builds should use JDK 17 and a Gradle wrapper. The wrapper is not committed yet; Android Studio can sync the project with its bundled JDK.
+CLI builds use the committed Gradle wrapper. On this Windows dev machine, use the helper script so Gradle runs with Android Studio's bundled JDK 17:
+
+```powershell
+.\scripts\android-gradle.ps1 :app:assembleDebug
+```
 
 ## Fake Camera Simulator
 
