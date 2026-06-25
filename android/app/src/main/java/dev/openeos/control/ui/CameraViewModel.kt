@@ -19,6 +19,14 @@ class CameraViewModel(
         _uiState.update { it.copy(baseUrl = value) }
     }
 
+    fun useDirectCameraPreset() {
+        _uiState.update { it.copy(baseUrl = CameraRepository.DEFAULT_CAMERA_BASE_URL) }
+    }
+
+    fun useDevSimulatorPreset() {
+        _uiState.update { it.copy(baseUrl = CameraRepository.DEV_EMULATOR_SIMULATOR_URL) }
+    }
+
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }

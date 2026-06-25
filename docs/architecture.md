@@ -18,6 +18,8 @@ Android app
   -> fake camera state
 ```
 
+The simulator is not part of the product runtime. It exists so Android UI and state flows can be tested before a camera is connected.
+
 ## Boundaries
 
 - Android owns product UI, camera session state, connection handling, and monitor-style controls.

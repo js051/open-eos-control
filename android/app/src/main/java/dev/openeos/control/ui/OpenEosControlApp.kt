@@ -58,6 +58,8 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
                     onSetWhiteBalance = viewModel::setWhiteBalance,
                     onTapFocus = viewModel::tapFocus,
                     onClearError = viewModel::clearError,
+                    onUseDirectCamera = viewModel::useDirectCameraPreset,
+                    onUseDevSimulator = viewModel::useDevSimulatorPreset,
                 ),
             )
         }
@@ -75,6 +77,8 @@ private data class CameraActions(
     val onSetWhiteBalance: (String) -> Unit,
     val onTapFocus: (Double, Double) -> Unit,
     val onClearError: () -> Unit,
+    val onUseDirectCamera: () -> Unit,
+    val onUseDevSimulator: () -> Unit,
 )
 
 @Composable
@@ -98,10 +102,18 @@ private fun CameraControlScreen(
             OutlinedTextField(
                 value = state.baseUrl,
                 onValueChange = actions.onBaseUrlChange,
-                label = { Text("Camera URL") },
+                label = { Text("Direct camera URL") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(enabled = !state.busy, onClick = actions.onUseDirectCamera) {
+                    Text("Direct Camera")
+                }
+                Button(enabled = !state.busy, onClick = actions.onUseDevSimulator) {
+                    Text("Dev Simulator")
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(enabled = !state.busy, onClick = actions.onConnect) {
                     Text(if (state.busy) "Working" else "Connect")
@@ -166,6 +178,9 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
         Text("API: ${info?.api ?: "-"}", color = Color(0xFFCBD5E1))
         Text("Battery: ${status?.batteryLevel ?: 0}% ${status?.batteryStatus ?: ""}", color = Color(0xFFCBD5E1))
         Text("Media: ${if (status?.mediaAvailable == true) "card ok" else "unknown"}", color = Color(0xFFCBD5E1))
+        if (info == null) {
+            Text("Connect phone to the camera Wi-Fi, then enter the camera CCAPI URL.", color = Color(0xFF94A3B8))
+        }
     }
 }
 
