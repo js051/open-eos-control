@@ -1,5 +1,7 @@
 # Open EOS Control
 
+![Open EOS Control 封面](Image.png)
+
 繁體中文 | [English](README.md)
 
 Open EOS Control 是一個非官方、開源的 Android 相機控制 App，目標是先支援 Canon EOS R6 Mark III，並透過 Canon CCAPI over Wi-Fi 直接控制相機。
