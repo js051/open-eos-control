@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -321,23 +322,185 @@ private fun CameraControlsColumn(
 }
 
 @Composable
+private fun WifiIcon(connected: Boolean, modifier: Modifier = Modifier) {
+    val color = if (connected) AppAccent else AppMutedText
+    Canvas(modifier = modifier.size(24.dp)) {
+        val width = size.width
+        val height = size.height
+        
+        drawCircle(
+            color = color,
+            radius = width * 0.1f,
+            center = Offset(width / 2f, height * 0.85f)
+        )
+        
+        val strokeWidth = width * 0.08f
+        
+        drawArc(
+            color = color,
+            startAngle = 220f,
+            sweepAngle = 100f,
+            useCenter = false,
+            topLeft = Offset(width * 0.3f, height * 0.5f),
+            size = Size(width * 0.4f, height * 0.4f),
+            style = Stroke(width = strokeWidth)
+        )
+        
+        drawArc(
+            color = color,
+            startAngle = 220f,
+            sweepAngle = 100f,
+            useCenter = false,
+            topLeft = Offset(width * 0.1f, height * 0.25f),
+            size = Size(width * 0.8f, height * 0.8f),
+            style = Stroke(width = strokeWidth)
+        )
+    }
+}
+
+@Composable
+private fun BatteryIcon(level: Int, modifier: Modifier = Modifier) {
+    val color = when {
+        level > 50 -> Color(0xFF10B981)
+        level > 20 -> Color(0xFFFBBF24)
+        else -> Color(0xFFEF4444)
+    }
+    Canvas(modifier = modifier.size(height = 14.dp, width = 28.dp)) {
+        val w = size.width
+        val h = size.height
+        
+        val strokeWidth = 2.dp.toPx()
+        val capWidth = 3.dp.toPx()
+        
+        drawRoundRect(
+            color = AppMutedText,
+            topLeft = Offset.Zero,
+            size = Size(w - capWidth - 2.dp.toPx(), h),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Stroke(width = strokeWidth)
+        )
+        
+        drawRoundRect(
+            color = AppMutedText,
+            topLeft = Offset(w - capWidth, h * 0.3f),
+            size = Size(capWidth, h * 0.4f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx(), 1.dp.toPx())
+        )
+        
+        val fillWidth = (w - capWidth - 6.dp.toPx()) * (level / 100f)
+        if (fillWidth > 0) {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(strokeWidth + 1.dp.toPx(), strokeWidth + 1.dp.toPx()),
+                size = Size(fillWidth, h - (strokeWidth + 1.dp.toPx()) * 2f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx(), 1.dp.toPx())
+            )
+        }
+    }
+}
+
+@Composable
+private fun StorageIcon(available: Boolean, modifier: Modifier = Modifier) {
+    val color = if (available) Color(0xFF10B981) else AppMutedText
+    Canvas(modifier = modifier.size(24.dp)) {
+        val w = size.width
+        val h = size.height
+        
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.2f, h * 0.1f)
+            lineTo(w * 0.65f, h * 0.1f)
+            lineTo(w * 0.8f, h * 0.25f)
+            lineTo(w * 0.8f, h * 0.9f)
+            lineTo(w * 0.2f, h * 0.9f)
+            close()
+        }
+        
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(width = 2.dp.toPx())
+        )
+        
+        val pinW = w * 0.06f
+        val pinH = h * 0.15f
+        for (i in 0..3) {
+            drawRect(
+                color = color,
+                topLeft = Offset(w * (0.3f + i * 0.12f), h * 0.25f),
+                size = Size(pinW, pinH)
+            )
+        }
+    }
+}
+
+@Composable
 private fun HeaderBlock() {
     Panel {
-        Text("Open EOS Control", color = AppText, fontWeight = FontWeight.Bold)
-        Text("Direct Canon EOS CCAPI control", color = AppSubtleText)
-        Text("Simulator is for development only.", color = AppMutedText)
+        Text("Open EOS Control", color = AppText, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+        Text("Direct Canon EOS CCAPI client interface", color = AppSubtleText, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
 private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
     Panel {
-        Text(info?.model ?: "No camera connected", color = AppText, fontWeight = FontWeight.Bold)
-        Text("API: ${info?.api ?: "-"}", color = AppSubtleText)
-        Text("Battery: ${status?.batteryLevel ?: 0}% ${status?.batteryStatus ?: ""}", color = AppSubtleText)
-        Text("Media: ${if (status?.mediaAvailable == true) "card ok" else "unknown"}", color = AppSubtleText)
-        if (info == null) {
-            Text("Connect phone to the camera Wi-Fi, then enter the camera CCAPI URL.", color = AppMutedText)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            WifiIcon(connected = info != null)
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = info?.model ?: "Disconnected",
+                    color = AppText,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = if (info != null) "API: ${info.api}" else "Connect to camera Wi-Fi hotspot",
+                    color = AppSubtleText,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        
+        if (info != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            androidx.compose.material3.HorizontalDivider(color = AppBorder.copy(alpha = 0.5f))
+            Spacer(modifier = Modifier.height(6.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    BatteryIcon(level = status?.batteryLevel ?: 0)
+                    Text(
+                        text = "${status?.batteryLevel ?: 0}%",
+                        color = AppSubtleText,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    StorageIcon(available = status?.mediaAvailable == true)
+                    Text(
+                        text = if (status?.mediaAvailable == true) "SD Card OK" else "No Card",
+                        color = if (status?.mediaAvailable == true) Color(0xFF10B981) else AppMutedText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
     }
 }
@@ -407,18 +570,24 @@ private fun MonitorFrame(
                         }
                         .build()
                 }
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
+                val imageRequest = remember(context, liveViewFrameUrl) {
+                    val builder = ImageRequest.Builder(context)
                         .data(liveViewFrameUrl)
-                        .decoderFactory(SvgDecoder.Factory())
                         .crossfade(false)
-                        .build(),
+                    if (liveViewFrameUrl.contains("ccapi/liveview/frame")) {
+                        builder.decoderFactory(SvgDecoder.Factory())
+                    }
+                    builder.build()
+                }
+                AsyncImage(
+                    model = imageRequest,
                     imageLoader = imageLoader,
                     contentDescription = "Live view frame",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
                 MonitorStatusOverlay(status = status, enabled = enabled)
+                ViewfinderOverlay(recording = status?.recording == true)
             } else {
                 MonitorPlaceholder(enabled = enabled)
             }
@@ -492,6 +661,37 @@ private fun MonitorStatusOverlay(status: CameraStatus?, enabled: Boolean) {
 }
 
 @Composable
+private fun ViewfinderOverlay(recording: Boolean) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        val strokePx = 1.5f.dp.toPx()
+        val bracketLen = 16.dp.toPx()
+        val margin = 8.dp.toPx()
+        val color = if (recording) AppDanger.copy(alpha = 0.8f) else AppText.copy(alpha = 0.4f)
+        
+        // Top Left
+        drawLine(color, Offset(margin, margin), Offset(margin + bracketLen, margin), strokePx)
+        drawLine(color, Offset(margin, margin), Offset(margin, margin + bracketLen), strokePx)
+        
+        // Top Right
+        drawLine(color, Offset(w - margin, margin), Offset(w - margin - bracketLen, margin), strokePx)
+        drawLine(color, Offset(w - margin, margin), Offset(w - margin, margin + bracketLen), strokePx)
+        
+        // Bottom Left
+        drawLine(color, Offset(margin, h - margin), Offset(margin + bracketLen, h - margin), strokePx)
+        drawLine(color, Offset(margin, h - margin), Offset(margin, h - margin - bracketLen), strokePx)
+        
+        // Bottom Right
+        drawLine(color, Offset(w - margin, h - margin), Offset(w - margin - bracketLen, h - margin), strokePx)
+        drawLine(color, Offset(w - margin, h - margin), Offset(w - margin, h - margin - bracketLen), strokePx)
+        
+        // Center reticle
+        drawCircle(color, radius = 2.dp.toPx(), center = Offset(w / 2f, h / 2f))
+    }
+}
+
+@Composable
 private fun FocusOverlay(focusPoint: FocusPoint?) {
     Canvas(modifier = Modifier.fillMaxSize()) {
         if (focusPoint == null) return@Canvas
@@ -500,23 +700,24 @@ private fun FocusOverlay(focusPoint: FocusPoint?) {
             x = (focusPoint.x.toFloat() * size.width).coerceIn(0f, size.width),
             y = (focusPoint.y.toFloat() * size.height).coerceIn(0f, size.height),
         )
-        val boxSize = 52.dp.toPx()
+        val boxSize = 48.dp.toPx()
+        val color = Color(0xFF10B981)
         drawRect(
-            color = AppAccent,
+            color = color,
             topLeft = Offset(center.x - boxSize / 2f, center.y - boxSize / 2f),
             size = Size(boxSize, boxSize),
             style = Stroke(width = strokePx),
         )
         drawLine(
-            color = AppAccent,
-            start = Offset(center.x - boxSize * 0.8f, center.y),
-            end = Offset(center.x + boxSize * 0.8f, center.y),
+            color = color,
+            start = Offset(center.x - boxSize * 0.4f, center.y),
+            end = Offset(center.x + boxSize * 0.4f, center.y),
             strokeWidth = strokePx,
         )
         drawLine(
-            color = AppAccent,
-            start = Offset(center.x, center.y - boxSize * 0.8f),
-            end = Offset(center.x, center.y + boxSize * 0.8f),
+            color = color,
+            start = Offset(center.x, center.y - boxSize * 0.4f),
+            end = Offset(center.x, center.y + boxSize * 0.4f),
             strokeWidth = strokePx,
         )
     }
@@ -524,17 +725,34 @@ private fun FocusOverlay(focusPoint: FocusPoint?) {
 
 @Composable
 private fun RecordButton(enabled: Boolean, recording: Boolean, onClick: () -> Unit) {
-    Button(
+    androidx.compose.material3.Button(
         enabled = enabled,
+        shape = RoundedCornerShape(10.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (recording) AppDanger else AppAccent,
-            contentColor = if (recording) Color.White else Color(0xFF111318),
+            containerColor = if (recording) AppDanger else Color(0xFF1E293B),
+            contentColor = Color.White,
             disabledContainerColor = AppPanelAlt,
             disabledContentColor = AppMutedText,
         ),
         onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(48.dp)
     ) {
-        Text(if (recording) "Stop REC" else "Start REC")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Canvas(modifier = Modifier.size(14.dp)) {
+                drawCircle(
+                    color = if (recording) Color.White else AppDanger,
+                    radius = size.width / 2f
+                )
+            }
+            Text(
+                text = if (recording) "STOP RECORDING" else "START RECORDING",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelLarge
+            )
+        }
     }
 }
 
@@ -546,15 +764,17 @@ private fun ControlSection(
     selected: String?,
     onSelect: (String) -> Unit,
 ) {
-    Panel {
-        Text(label, color = AppText, fontWeight = FontWeight.SemiBold)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            values.forEach { value ->
-                ChoiceButton(
-                    selected = value == selected,
-                    onClick = { onSelect(value) },
-                ) {
-                    Text(value)
+    if (values.isNotEmpty()) {
+        Panel {
+            Text(label, color = AppText, fontWeight = FontWeight.SemiBold)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                values.forEach { value ->
+                    ChoiceButton(
+                        selected = value == selected,
+                        onClick = { onSelect(value) },
+                    ) {
+                        Text(value)
+                    }
                 }
             }
         }
@@ -603,6 +823,7 @@ private fun PrimaryButton(
     Button(
         enabled = enabled,
         onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = AppAccent,
             contentColor = Color(0xFF111318),
@@ -623,6 +844,7 @@ private fun SecondaryButton(
     Button(
         enabled = enabled,
         onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = AppPanelAlt,
             contentColor = AppText,
@@ -642,6 +864,7 @@ private fun ChoiceButton(
 ) {
     Button(
         modifier = Modifier.widthIn(min = 72.dp),
+        shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) AppAccent else AppPanelAlt,
             contentColor = if (selected) Color(0xFF111318) else AppText,
