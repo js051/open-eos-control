@@ -166,16 +166,35 @@ class CameraViewModel(
         liveViewJob?.cancel()
         val state = _uiState.value
         if (!state.connected || !state.liveViewAutoRefresh) return
-        liveViewJob = viewModelScope.launch {
-            while (isActive) {
-                delay(LIVE_VIEW_REFRESH_MILLIS)
-                val latest = _uiState.value
-                if (!latest.connected || !latest.liveViewAutoRefresh) break
-                _uiState.update {
-                    if (it.connected && it.liveViewAutoRefresh) {
-                        it.copy(liveViewFrameUrl = repository.nextLiveViewFrameUrl())
-                    } else {
-                        it
+        
+        if (repository.isRealCamera()) {
+            liveViewJob = viewModelScope.launch {
+                try {
+                    repository.streamLiveView { bitmap ->
+                        _uiState.update {
+                            if (it.connected && it.liveViewAutoRefresh) {
+                                it.copy(liveViewBitmap = bitmap)
+                            } else {
+                                it
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // stream failed or cancelled
+                }
+            }
+        } else {
+            liveViewJob = viewModelScope.launch {
+                while (isActive) {
+                    delay(LIVE_VIEW_REFRESH_MILLIS)
+                    val latest = _uiState.value
+                    if (!latest.connected || !latest.liveViewAutoRefresh) break
+                    _uiState.update {
+                        if (it.connected && it.liveViewAutoRefresh) {
+                            it.copy(liveViewFrameUrl = repository.nextLiveViewFrameUrl())
+                        } else {
+                            it
+                        }
                     }
                 }
             }
@@ -201,6 +220,7 @@ class CameraViewModel(
         status = null,
         capabilities = null,
         liveViewFrameUrl = null,
+        liveViewBitmap = null,
         focusPoint = null,
         error = error,
     )

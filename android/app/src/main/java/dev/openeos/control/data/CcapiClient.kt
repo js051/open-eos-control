@@ -2,11 +2,16 @@ package dev.openeos.control.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.BufferedInputStream
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
@@ -201,13 +206,28 @@ class CcapiClient(
             } catch (e: Exception) {
                 null
             }
-            val batteryLevelStr = batteryJson?.optString("level", "full") ?: "full"
-            val batteryLevel = when (batteryLevelStr) {
-                "full" -> 100
-                "middle" -> 50
-                "low" -> 20
-                "empty" -> 5
-                else -> 100
+            var batteryLevel = 100
+            var batteryLevelStr = "full"
+            if (batteryJson != null) {
+                if (batteryJson.has("level") && !batteryJson.isNull("level")) {
+                    val optLevel = batteryJson.optInt("level", -1)
+                    if (optLevel != -1) {
+                        batteryLevel = optLevel
+                    } else {
+                        val levelStr = batteryJson.optString("level", "full")
+                        batteryLevelStr = levelStr
+                        batteryLevel = when (levelStr) {
+                            "full" -> 100
+                            "middle" -> 50
+                            "low" -> 20
+                            "empty" -> 5
+                            else -> 100
+                        }
+                    }
+                }
+                if (batteryJson.has("state")) {
+                    batteryLevelStr = batteryJson.optString("state", "full")
+                }
             }
 
             val storageJson = try {
@@ -218,11 +238,16 @@ class CcapiClient(
             var cardReady = false
             if (storageJson != null) {
                 val storageArray = storageJson.optJSONArray("storage")
-                if (storageArray != null && storageArray.length() > 0) {
-                    val card = storageArray.getJSONObject(0)
-                    val status = card.optString("status")
-                    val access = card.optString("access")
-                    cardReady = status == "ready" || access == "ready"
+                if (storageArray != null) {
+                    for (i in 0 until storageArray.length()) {
+                        val card = storageArray.optJSONObject(i) ?: continue
+                        val status = card.optString("status")
+                        val access = card.optString("accesscapability") ?: card.optString("access")
+                        if (status == "ready" || access == "readwrite" || access == "readonly" || status == "access") {
+                            cardReady = true
+                            break
+                        }
+                    }
                 }
             }
 
@@ -363,6 +388,50 @@ class CcapiClient(
     suspend fun stopLiveView() {
         if (isRealCamera) {
             postJson("$apiVersionPrefix/shooting/liveview", JSONObject().put("action", "stop"))
+        }
+    }
+
+    suspend fun streamLiveView(onFrame: (Bitmap) -> Unit) {
+        val url = "$baseUrl$apiVersionPrefix/shooting/liveview"
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder().url(url).build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error("Failed to connect to live view stream: HTTP ${response.code}")
+                }
+                val bodyStream = response.body?.byteStream() ?: return@withContext
+                val bufferedStream = BufferedInputStream(bodyStream)
+                val buffer = ByteArrayOutputStream()
+                var lastByte = -1
+                var inFrame = false
+                
+                while (isActive) {
+                    val byte = bufferedStream.read()
+                    if (byte == -1) break
+                    
+                    if (!inFrame) {
+                        if (lastByte == 0xFF && byte == 0xD8) {
+                            buffer.write(0xFF)
+                            buffer.write(0xD8)
+                            inFrame = true
+                        }
+                    } else {
+                        buffer.write(byte)
+                        if (lastByte == 0xFF && byte == 0xD9) {
+                            val jpegBytes = buffer.toByteArray()
+                            val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
+                            if (bitmap != null) {
+                                withContext(Dispatchers.Main) {
+                                    onFrame(bitmap)
+                                }
+                            }
+                            buffer.reset()
+                            inFrame = false
+                        }
+                    }
+                    lastByte = byte
+                }
+            }
         }
     }
 

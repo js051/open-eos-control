@@ -53,9 +53,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.graphics.Bitmap
 import androidx.compose.foundation.text.selection.SelectionContainer
 import coil.compose.AsyncImage
 import coil.decode.SvgDecoder
@@ -287,6 +289,7 @@ private fun CameraControlsColumn(
         MonitorPanel(
             status = state.status,
             liveViewFrameUrl = state.liveViewFrameUrl,
+            liveViewBitmap = state.liveViewBitmap,
             liveViewAutoRefresh = state.liveViewAutoRefresh,
             focusPoint = state.focusPoint,
             enabled = state.connected && !state.busy,
@@ -509,6 +512,7 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
 private fun MonitorPanel(
     status: CameraStatus?,
     liveViewFrameUrl: String?,
+    liveViewBitmap: Bitmap?,
     liveViewAutoRefresh: Boolean,
     focusPoint: FocusPoint?,
     enabled: Boolean,
@@ -519,6 +523,7 @@ private fun MonitorPanel(
     MonitorFrame(
         status = status,
         liveViewFrameUrl = liveViewFrameUrl,
+        liveViewBitmap = liveViewBitmap,
         liveViewAutoRefresh = liveViewAutoRefresh,
         focusPoint = focusPoint,
         enabled = enabled,
@@ -532,6 +537,7 @@ private fun MonitorPanel(
 private fun MonitorFrame(
     status: CameraStatus?,
     liveViewFrameUrl: String?,
+    liveViewBitmap: Bitmap?,
     liveViewAutoRefresh: Boolean,
     focusPoint: FocusPoint?,
     enabled: Boolean,
@@ -557,7 +563,16 @@ private fun MonitorFrame(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            if (liveViewFrameUrl != null) {
+            if (liveViewBitmap != null) {
+                Image(
+                    bitmap = liveViewBitmap.asImageBitmap(),
+                    contentDescription = "Live view stream frame",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                MonitorStatusOverlay(status = status, enabled = enabled)
+                ViewfinderOverlay(recording = status?.recording == true)
+            } else if (liveViewFrameUrl != null) {
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val imageLoader = remember(context, liveViewFrameUrl) {
                     ImageLoader.Builder(context)
