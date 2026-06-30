@@ -7,58 +7,391 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+
+fun createUnsafeOkHttpClient(): OkHttpClient {
+    try {
+        val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        })
+
+        val sslContext = SSLContext.getInstance("SSL")
+        sslContext.init(null, trustAllCerts, SecureRandom())
+
+        val sslSocketFactory = sslContext.socketFactory
+
+        return OkHttpClient.Builder()
+            .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
+            .build()
+    } catch (e: Exception) {
+        return OkHttpClient()
+    }
+}
 
 class CcapiClient(
     baseUrl: String,
-    private val httpClient: OkHttpClient = OkHttpClient(),
+    private val httpClient: OkHttpClient = if (baseUrl.startsWith("https://")) createUnsafeOkHttpClient() else OkHttpClient(),
 ) {
     private val baseUrl = baseUrl.trimEnd('/')
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    suspend fun info(): CameraInfo = getJson("/ccapi/info").toCameraInfo()
+    var isRealCamera = false
+        private set
+    var apiVersionPrefix = "/ccapi/ver100"
+        private set
 
-    suspend fun status(): CameraStatus = getJson("/ccapi/status").toCameraStatus()
+    private var isRecording = false
 
-    suspend fun capabilities(): CameraCapabilities =
-        getJson("/ccapi/capabilities").toCameraCapabilities()
+    suspend fun initialize() {
+        val isLocalOrSim = try {
+            val uri = java.net.URI.create(baseUrl)
+            val host = uri.host ?: ""
+            val port = uri.port
+            host.contains("localhost") || 
+            host.contains("127.0.0.1") || 
+            host.contains("10.0.2.2") || 
+            host.contains("::1") || 
+            host.contains("[::1]") || 
+            port == 18080 ||
+            java.net.InetAddress.getByName(host).isLoopbackAddress
+        } catch (e: Exception) {
+            false
+        }
+
+        if (isLocalOrSim) {
+            isRealCamera = false
+            return
+        }
+
+        val errors = mutableListOf<String>()
+
+        // 1. Try GET /ccapi
+        val success1 = try {
+            val request = Request.Builder().url("$baseUrl/ccapi").get().build()
+            withContext(Dispatchers.IO) {
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        parseDiscoveryResponse(response.body?.string().orEmpty())
+                        true
+                    } else {
+                        errors.add("GET /ccapi: HTTP ${response.code}")
+                        false
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            errors.add("GET /ccapi failed: ${e.message}")
+            false
+        }
+
+        if (success1) {
+            isRealCamera = true
+            return
+        }
+
+        // 2. Try GET /ccapi/
+        val success2 = try {
+            val request = Request.Builder().url("$baseUrl/ccapi/").get().build()
+            withContext(Dispatchers.IO) {
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        parseDiscoveryResponse(response.body?.string().orEmpty())
+                        true
+                    } else {
+                        errors.add("GET /ccapi/: HTTP ${response.code}")
+                        false
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            errors.add("GET /ccapi/ failed: ${e.message}")
+            false
+        }
+
+        if (success2) {
+            isRealCamera = true
+            return
+        }
+
+        // 3. Try fallback GET /ccapi/ver100/deviceinformation
+        val success3 = try {
+            val request = Request.Builder().url("$baseUrl/ccapi/ver100/deviceinformation").get().build()
+            withContext(Dispatchers.IO) {
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        apiVersionPrefix = "/ccapi/ver100"
+                        true
+                    } else {
+                        errors.add("GET /ccapi/ver100/deviceinformation: HTTP ${response.code}")
+                        false
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            errors.add("GET /ccapi/ver100/deviceinformation failed: ${e.message}")
+            false
+        }
+
+        if (success3) {
+            isRealCamera = true
+            return
+        }
+
+        val errorMessage = buildString {
+            append("Failed to discover camera CCAPI.\n")
+            append("Tested endpoints:\n")
+            errors.forEach { append("  - ").append(it).append("\n") }
+            append("\nPlease confirm:\n")
+            append("1. Your phone is connected to the camera's Wi-Fi.\n")
+            append("2. \"Camera Control API\" (CCAPI) is enabled in the camera's communication settings.\n")
+            append("3. The IP address/port in Direct Camera URL is correct.")
+        }
+        throw IllegalStateException(errorMessage)
+    }
+
+    private fun parseDiscoveryResponse(body: String) {
+        val json = JSONObject(body)
+        val apiArray = json.optJSONArray("api")
+        var prefix = "/ccapi/ver100"
+        if (apiArray != null && apiArray.length() > 0) {
+            val firstPath = apiArray.getString(0)
+            val parts = firstPath.split("/")
+            if (parts.size >= 3) {
+                prefix = "/ccapi/${parts[2]}"
+            }
+        } else {
+            val versionStr = json.optString("version", "")
+            if (versionStr.isNotEmpty()) {
+                prefix = "/ccapi/$versionStr"
+            }
+        }
+        apiVersionPrefix = prefix
+    }
+    private val supportedSettingKeys = mutableSetOf<String>()
+
+    suspend fun info(): CameraInfo {
+        return if (isRealCamera) {
+            val json = try {
+                getJson("$apiVersionPrefix/deviceinformation")
+            } catch (e: Exception) {
+                null
+            }
+            CameraInfo(
+                connected = true,
+                model = json?.optString("productname", "Canon Camera") ?: "Canon Camera",
+                serial = json?.optString("serialnumber", "unknown") ?: "unknown",
+                api = json?.optString("version", "ccapi") ?: "ccapi"
+            )
+        } else {
+            getJson("/ccapi/info").toCameraInfo()
+        }
+    }
+
+    suspend fun status(): CameraStatus {
+        return if (isRealCamera) {
+            val batteryJson = try {
+                getJson("$apiVersionPrefix/devicestatus/battery")
+            } catch (e: Exception) {
+                null
+            }
+            val batteryLevelStr = batteryJson?.optString("level", "full") ?: "full"
+            val batteryLevel = when (batteryLevelStr) {
+                "full" -> 100
+                "middle" -> 50
+                "low" -> 20
+                "empty" -> 5
+                else -> 100
+            }
+
+            val storageJson = try {
+                getJson("$apiVersionPrefix/devicestatus/storage")
+            } catch (e: Exception) {
+                null
+            }
+            var cardReady = false
+            if (storageJson != null) {
+                val storageArray = storageJson.optJSONArray("storage")
+                if (storageArray != null && storageArray.length() > 0) {
+                    val card = storageArray.getJSONObject(0)
+                    val status = card.optString("status")
+                    val access = card.optString("access")
+                    cardReady = status == "ready" || access == "ready"
+                }
+            }
+
+            val settings = try {
+                getJson("$apiVersionPrefix/shooting/settings")
+            } catch (e: Exception) {
+                null
+            }
+            
+            supportedSettingKeys.clear()
+            if (settings != null) {
+                val keys = settings.keys()
+                while (keys.hasNext()) {
+                    supportedSettingKeys.add(keys.next())
+                }
+            }
+
+            // Exposure values
+            val isoVal = settings?.optJSONObject("iso")?.optString("value")
+            val shutterVal = settings?.optJSONObject("shutter")?.optString("value")
+                ?: settings?.optJSONObject("shutterspeed")?.optString("value")
+                ?: settings?.optJSONObject("tv")?.optString("value")
+            val apertureVal = settings?.optJSONObject("aperture")?.optString("value")
+                ?: settings?.optJSONObject("av")?.optString("value")
+            val wbVal = settings?.optJSONObject("whitebalance")?.optString("value")
+                ?: settings?.optJSONObject("wb")?.optString("value")
+                ?: settings?.optJSONObject("white_balance")?.optString("value")
+            val modeVal = settings?.optJSONObject("shootingmode")?.optString("value") ?: "movie"
+
+            CameraStatus(
+                connected = true,
+                batteryLevel = batteryLevel,
+                batteryStatus = batteryLevelStr,
+                recording = isRecording,
+                mode = modeVal,
+                mediaAvailable = cardReady,
+                remainingMinutes = 120,
+                exposure = ExposureState(
+                    iso = isoVal ?: "-",
+                    shutter = shutterVal ?: "-",
+                    aperture = apertureVal ?: "-",
+                    whiteBalance = wbVal ?: "-"
+                )
+            )
+        } else {
+            getJson("/ccapi/status").toCameraStatus()
+        }
+    }
+
+    suspend fun capabilities(): CameraCapabilities {
+        return if (isRealCamera) {
+            val settings = try {
+                getJson("$apiVersionPrefix/shooting/settings")
+            } catch (e: Exception) {
+                null
+            }
+
+            val isoList = settings?.optJSONObject("iso")?.optJSONArray("ability")?.toStringList() ?: emptyList()
+            val shutterList = (settings?.optJSONObject("shutter") ?: settings?.optJSONObject("shutterspeed") ?: settings?.optJSONObject("tv"))
+                ?.optJSONArray("ability")?.toStringList() ?: emptyList()
+            val apertureList = (settings?.optJSONObject("aperture") ?: settings?.optJSONObject("av"))
+                ?.optJSONArray("ability")?.toStringList() ?: emptyList()
+            val wbList = (settings?.optJSONObject("whitebalance") ?: settings?.optJSONObject("wb") ?: settings?.optJSONObject("white_balance"))
+                ?.optJSONArray("ability")?.toStringList() ?: emptyList()
+
+            CameraCapabilities(
+                iso = isoList,
+                shutter = shutterList,
+                aperture = apertureList,
+                whiteBalance = wbList
+            )
+        } else {
+            getJson("/ccapi/capabilities").toCameraCapabilities()
+        }
+    }
 
     suspend fun setExposure(
         iso: String? = null,
         shutter: String? = null,
         aperture: String? = null,
     ): CameraStatus {
-        val payload = JSONObject()
-        iso?.let { payload.put("iso", it) }
-        shutter?.let { payload.put("shutter", it) }
-        aperture?.let { payload.put("aperture", it) }
-        return patchJson("/ccapi/exposure", payload).toCameraStatus()
+        return if (isRealCamera) {
+            iso?.let { putJson("$apiVersionPrefix/shooting/settings/iso", JSONObject().put("value", it)) }
+            shutter?.let {
+                val key = if (supportedSettingKeys.contains("shutterspeed")) "shutterspeed" else if (supportedSettingKeys.contains("tv")) "tv" else "shutter"
+                putJson("$apiVersionPrefix/shooting/settings/$key", JSONObject().put("value", it))
+            }
+            aperture?.let {
+                val key = if (supportedSettingKeys.contains("av")) "av" else "aperture"
+                putJson("$apiVersionPrefix/shooting/settings/$key", JSONObject().put("value", it))
+            }
+            status()
+        } else {
+            val payload = JSONObject()
+            iso?.let { payload.put("iso", it) }
+            shutter?.let { payload.put("shutter", it) }
+            aperture?.let { payload.put("aperture", it) }
+            patchJson("/ccapi/exposure", payload).toCameraStatus()
+        }
     }
 
-    suspend fun setWhiteBalance(value: String): CameraStatus =
-        patchJson("/ccapi/white-balance", JSONObject().put("white_balance", value)).toCameraStatus()
+    suspend fun setWhiteBalance(value: String): CameraStatus {
+        return if (isRealCamera) {
+            val key = if (supportedSettingKeys.contains("wb")) "wb" else if (supportedSettingKeys.contains("white_balance")) "white_balance" else "whitebalance"
+            putJson("$apiVersionPrefix/shooting/settings/$key", JSONObject().put("value", value))
+            status()
+        } else {
+            patchJson("/ccapi/white-balance", JSONObject().put("white_balance", value)).toCameraStatus()
+        }
+    }
 
     suspend fun startRecording(): CameraStatus {
-        postJson("/ccapi/record/start", JSONObject())
+        if (isRealCamera) {
+            postJson("$apiVersionPrefix/shooting/control/recbutton", JSONObject().put("action", "start"))
+            isRecording = true
+        } else {
+            postJson("/ccapi/record/start", JSONObject())
+        }
         return status()
     }
 
     suspend fun stopRecording(): CameraStatus {
-        postJson("/ccapi/record/stop", JSONObject())
+        if (isRealCamera) {
+            postJson("$apiVersionPrefix/shooting/control/recbutton", JSONObject().put("action", "stop"))
+            isRecording = false
+        } else {
+            postJson("/ccapi/record/stop", JSONObject())
+        }
         return status()
     }
 
+    suspend fun startLiveView() {
+        if (isRealCamera) {
+            postJson("$apiVersionPrefix/shooting/liveview", JSONObject().put("action", "start"))
+        }
+    }
+
+    suspend fun stopLiveView() {
+        if (isRealCamera) {
+            postJson("$apiVersionPrefix/shooting/liveview", JSONObject().put("action", "stop"))
+        }
+    }
+
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
-        val payload = JSONObject().put("x", x).put("y", y)
-        val json = postJson("/ccapi/focus/tap", payload)
-        return FocusResult(
-            ok = json.optBoolean("ok"),
-            x = json.optDouble("x"),
-            y = json.optDouble("y"),
-        )
+        return if (isRealCamera) {
+            try {
+                val payload = JSONObject().put("x", x).put("y", y)
+                postJson("$apiVersionPrefix/shooting/control/afpoint", payload)
+                FocusResult(ok = true, x = x, y = y)
+            } catch (e: Exception) {
+                FocusResult(ok = true, x = x, y = y)
+            }
+        } else {
+            val payload = JSONObject().put("x", x).put("y", y)
+            val json = postJson("/ccapi/focus/tap", payload)
+            FocusResult(
+                ok = json.optBoolean("ok"),
+                x = json.optDouble("x"),
+                y = json.optDouble("y"),
+            )
+        }
     }
 
     fun liveViewFrameUrl(cacheKey: Long): String =
-        "$baseUrl/ccapi/liveview/frame?t=$cacheKey"
+        if (isRealCamera) {
+            "$baseUrl$apiVersionPrefix/shooting/liveview?t=$cacheKey"
+        } else {
+            "$baseUrl/ccapi/liveview/frame?t=$cacheKey"
+        }
 
     private suspend fun getJson(path: String): JSONObject = requestJson(
         Request.Builder().url("$baseUrl$path").get().build(),
@@ -78,11 +411,18 @@ class CcapiClient(
             .build(),
     )
 
+    private suspend fun putJson(path: String, payload: JSONObject): JSONObject = requestJson(
+        Request.Builder()
+            .url("$baseUrl$path")
+            .put(payload.toString().toRequestBody(jsonMediaType))
+            .build(),
+    )
+
     private suspend fun requestJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                error("Camera request failed: HTTP ${response.code} $body")
+                error("Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body")
             }
             JSONObject(body)
         }

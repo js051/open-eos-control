@@ -32,8 +32,15 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,40 +55,78 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.text.selection.SelectionContainer
 import coil.compose.AsyncImage
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraStatus
+import dev.openeos.control.data.createUnsafeOkHttpClient
+import okhttp3.OkHttpClient
+import coil.ImageLoader
 
 @Composable
 fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var showSplash by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        delay(2000)
+        showSplash = false
+    }
 
     MaterialTheme(colorScheme = OpenEosColorScheme) {
         Surface(color = AppBackground, modifier = Modifier.fillMaxSize()) {
-            CameraControlScreen(
-                state = state,
-                actions = CameraActions(
-                    onBaseUrlChange = viewModel::setBaseUrl,
-                    onConnect = viewModel::connect,
-                    onDisconnect = viewModel::disconnect,
-                    onRefresh = viewModel::refresh,
-                    onRefreshLiveView = viewModel::refreshLiveViewFrame,
-                    onLiveViewAutoRefreshChange = viewModel::setLiveViewAutoRefresh,
-                    onToggleRecording = viewModel::toggleRecording,
-                    onSetIso = viewModel::setIso,
-                    onSetShutter = viewModel::setShutter,
-                    onSetAperture = viewModel::setAperture,
-                    onSetWhiteBalance = viewModel::setWhiteBalance,
-                    onTapFocus = viewModel::tapFocus,
-                    onClearError = viewModel::clearError,
-                    onUseDirectCamera = viewModel::useDirectCameraPreset,
-                    onUseDevSimulator = viewModel::useDevSimulatorPreset,
-                ),
-            )
+            Crossfade(
+                targetState = showSplash,
+                animationSpec = tween(durationMillis = 800),
+                label = "SplashTransition"
+            ) { isSplash ->
+                if (isSplash) {
+                    SplashScreen()
+                } else {
+                    CameraControlScreen(
+                        state = state,
+                        actions = CameraActions(
+                            onBaseUrlChange = viewModel::setBaseUrl,
+                            onConnect = viewModel::connect,
+                            onDisconnect = viewModel::disconnect,
+                            onRefresh = viewModel::refresh,
+                            onRefreshLiveView = viewModel::refreshLiveViewFrame,
+                            onLiveViewAutoRefreshChange = viewModel::setLiveViewAutoRefresh,
+                            onToggleRecording = viewModel::toggleRecording,
+                            onSetIso = viewModel::setIso,
+                            onSetShutter = viewModel::setShutter,
+                            onSetAperture = viewModel::setAperture,
+                            onSetWhiteBalance = viewModel::setWhiteBalance,
+                            onTapFocus = viewModel::tapFocus,
+                            onClearError = viewModel::clearError,
+                            onUseDirectCamera = viewModel::useDirectCameraPreset,
+                            onUseDirectCameraHttps = viewModel::useDirectCameraHttpsPreset,
+                            onUseDevSimulator = viewModel::useDevSimulatorPreset,
+                        ),
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun SplashScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppBackground),
+        contentAlignment = Alignment.Center,
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.app_cover),
+            contentDescription = "App Cover Splash Screen",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 
@@ -100,6 +145,7 @@ private data class CameraActions(
     val onTapFocus: (Double, Double) -> Unit,
     val onClearError: () -> Unit,
     val onUseDirectCamera: () -> Unit,
+    val onUseDirectCameraHttps: () -> Unit,
     val onUseDevSimulator: () -> Unit,
 )
 
@@ -132,6 +178,8 @@ private fun CameraControlScreen(
                 )
             }
         } else {
+            val leftScrollState = rememberScrollState()
+            val rightScrollState = rememberScrollState()
             Row(
                 modifier = Modifier
                     .fillMaxSize()
@@ -143,14 +191,16 @@ private fun CameraControlScreen(
                     actions = actions,
                     modifier = Modifier
                         .weight(0.38f)
-                        .fillMaxSize(),
+                        .fillMaxSize()
+                        .verticalScroll(leftScrollState),
                 )
                 CameraControlsColumn(
                     state = state,
                     actions = actions,
                     modifier = Modifier
                         .weight(0.62f)
-                        .fillMaxSize(),
+                        .fillMaxSize()
+                        .verticalScroll(rightScrollState),
                 )
             }
         }
@@ -190,7 +240,10 @@ private fun ConnectionColumn(
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SecondaryButton(enabled = !state.busy, onClick = actions.onUseDirectCamera) {
-                Text("Direct Camera")
+                Text("Direct (HTTP)")
+            }
+            SecondaryButton(enabled = !state.busy, onClick = actions.onUseDirectCameraHttps) {
+                Text("Direct (HTTPS)")
             }
             SecondaryButton(enabled = !state.busy, onClick = actions.onUseDevSimulator) {
                 Text("Dev Simulator")
@@ -270,16 +323,6 @@ private fun CameraControlsColumn(
 @Composable
 private fun HeaderBlock() {
     Panel {
-        Image(
-            painter = painterResource(id = R.drawable.app_cover),
-            contentDescription = "Open EOS Control app cover",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, AppBorder, RoundedCornerShape(8.dp)),
-        )
         Text("Open EOS Control", color = AppText, fontWeight = FontWeight.Bold)
         Text("Direct Canon EOS CCAPI control", color = AppSubtleText)
         Text("Simulator is for development only.", color = AppMutedText)
@@ -352,12 +395,25 @@ private fun MonitorFrame(
             contentAlignment = Alignment.Center,
         ) {
             if (liveViewFrameUrl != null) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val imageLoader = remember(context, liveViewFrameUrl) {
+                    ImageLoader.Builder(context)
+                        .okHttpClient {
+                            if (liveViewFrameUrl.startsWith("https://")) {
+                                createUnsafeOkHttpClient()
+                            } else {
+                                OkHttpClient()
+                            }
+                        }
+                        .build()
+                }
                 AsyncImage(
-                    model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                    model = ImageRequest.Builder(context)
                         .data(liveViewFrameUrl)
                         .decoderFactory(SvgDecoder.Factory())
                         .crossfade(false)
                         .build(),
+                    imageLoader = imageLoader,
                     contentDescription = "Live view frame",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -507,14 +563,21 @@ private fun ControlSection(
 
 @Composable
 private fun ErrorPanel(message: String, onClick: () -> Unit) {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
             .background(Color(0xFF7F1D1D), RoundedCornerShape(8.dp))
             .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(message, color = Color(0xFFFFE4E6))
+        SelectionContainer {
+            Text(message, color = Color(0xFFFFE4E6))
+        }
+        SecondaryButton(
+            onClick = onClick,
+        ) {
+            Text("Clear Error")
+        }
     }
 }
 

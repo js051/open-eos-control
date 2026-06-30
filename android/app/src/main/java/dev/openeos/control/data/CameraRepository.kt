@@ -6,6 +6,12 @@ class CameraRepository {
 
     suspend fun connect(baseUrl: String): CameraSession {
         client = CcapiClient(baseUrl)
+        client.initialize()
+        try {
+            client.startLiveView()
+        } catch (e: Exception) {
+            // ignore failure to start live view
+        }
         frameVersion = 0L
         return CameraSession(
             info = client.info(),
@@ -13,6 +19,14 @@ class CameraRepository {
             capabilities = client.capabilities(),
             liveViewFrameUrl = nextLiveViewFrameUrl(),
         )
+    }
+
+    suspend fun disconnect() {
+        try {
+            client.stopLiveView()
+        } catch (e: Exception) {
+            // ignore failure to stop live view
+        }
     }
 
     suspend fun refreshStatus(): CameraStatus = client.status()
@@ -33,7 +47,8 @@ class CameraRepository {
     fun nextLiveViewFrameUrl(): String = client.liveViewFrameUrl(++frameVersion)
 
     companion object {
-        const val DEFAULT_CAMERA_BASE_URL = "http://192.168.0.1:8080"
+        const val DEFAULT_CAMERA_BASE_URL = "http://192.168.1.2:8080"
+        const val DEFAULT_CAMERA_HTTPS_URL = "https://192.168.1.2:443"
         const val DEV_EMULATOR_SIMULATOR_URL = "http://10.0.2.2:18080"
     }
 }

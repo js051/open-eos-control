@@ -31,6 +31,13 @@ class CameraViewModel(
         }
     }
 
+    fun useDirectCameraHttpsPreset() {
+        stopLiveViewLoop()
+        _uiState.update {
+            it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_HTTPS_URL, error = null)
+        }
+    }
+
     fun useDevSimulatorPreset() {
         stopLiveViewLoop()
         _uiState.update {
@@ -59,6 +66,13 @@ class CameraViewModel(
 
     fun disconnect() {
         stopLiveViewLoop()
+        viewModelScope.launch {
+            try {
+                repository.disconnect()
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
     }
 
@@ -125,8 +139,22 @@ class CameraViewModel(
             try {
                 block()
             } catch (exception: Exception) {
+                exception.printStackTrace()
+                val detailedMessage = buildString {
+                    append(exception.javaClass.simpleName)
+                    append(": ")
+                    append(exception.message ?: "Unknown error")
+                    var cause = exception.cause
+                    while (cause != null) {
+                        append("\nCaused by: ")
+                        append(cause.javaClass.simpleName)
+                        append(": ")
+                        append(cause.message ?: "Unknown cause")
+                        cause = cause.cause
+                    }
+                }
                 _uiState.update {
-                    it.copy(error = exception.message ?: "Camera request failed")
+                    it.copy(error = detailedMessage)
                 }
             } finally {
                 _uiState.update { it.copy(busy = false) }
