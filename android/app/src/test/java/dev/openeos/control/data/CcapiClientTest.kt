@@ -116,6 +116,13 @@ class CcapiClientTest {
         assertEquals(0.75, result.y, 0.0001)
     }
 
+    @Test
+    fun liveViewFrameUrlBuildsCacheBustedFrameUrl() {
+        val url = client.liveViewFrameUrl(cacheKey = 42)
+
+        assertEquals("${server.url("/").toString().trimEnd('/')}/ccapi/liveview/frame?t=42", url)
+    }
+
     private fun jsonResponse(body: String): MockResponse =
         MockResponse()
             .setHeader("content-type", "application/json")

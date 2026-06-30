@@ -38,12 +38,18 @@ class CameraViewModel(
                 info = session.info,
                 status = session.status,
                 capabilities = session.capabilities,
+                liveViewFrameUrl = session.liveViewFrameUrl,
             )
         }
     }
 
     fun refresh() = runCamera {
-        _uiState.update { it.copy(status = repository.refreshStatus()) }
+        _uiState.update {
+            it.copy(
+                status = repository.refreshStatus(),
+                liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
+            )
+        }
     }
 
     fun setIso(value: String) = updateStatus { repository.setIso(value) }
@@ -60,11 +66,21 @@ class CameraViewModel(
 
     fun tapFocus(x: Double, y: Double) = runCamera {
         val result = repository.tapFocus(x, y)
-        _uiState.update { it.copy(focusPoint = FocusPoint(result.x, result.y)) }
+        _uiState.update {
+            it.copy(
+                focusPoint = FocusPoint(result.x, result.y),
+                liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
+            )
+        }
     }
 
     private fun updateStatus(block: suspend () -> dev.openeos.control.data.CameraStatus) = runCamera {
-        _uiState.update { it.copy(status = block()) }
+        _uiState.update {
+            it.copy(
+                status = block(),
+                liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
+            )
+        }
     }
 
     private fun runCamera(block: suspend () -> Unit) {

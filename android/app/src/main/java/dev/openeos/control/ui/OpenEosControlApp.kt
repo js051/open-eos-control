@@ -44,6 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import coil.decode.SvgDecoder
+import coil.request.ImageRequest
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraStatus
@@ -160,6 +163,7 @@ private fun CameraControlScreen(
         ) {
             MonitorPanel(
                 status = state.status,
+                liveViewFrameUrl = state.liveViewFrameUrl,
                 focusPoint = state.focusPoint,
                 enabled = state.connected && !state.busy,
                 onTapFocus = actions.onTapFocus,
@@ -227,12 +231,14 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
 @Composable
 private fun MonitorPanel(
     status: CameraStatus?,
+    liveViewFrameUrl: String?,
     focusPoint: FocusPoint?,
     enabled: Boolean,
     onTapFocus: (Double, Double) -> Unit,
 ) {
     MonitorFrame(
         status = status,
+        liveViewFrameUrl = liveViewFrameUrl,
         focusPoint = focusPoint,
         enabled = enabled,
         onTapFocus = onTapFocus,
@@ -242,6 +248,7 @@ private fun MonitorPanel(
 @Composable
 private fun MonitorFrame(
     status: CameraStatus?,
+    liveViewFrameUrl: String?,
     focusPoint: FocusPoint?,
     enabled: Boolean,
     onTapFocus: (Double, Double) -> Unit,
@@ -264,25 +271,70 @@ private fun MonitorFrame(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    if (status?.recording == true) "REC" else "STBY",
-                    color = if (status?.recording == true) Color(0xFFFF3B5B) else AppSubtleText,
-                    fontWeight = FontWeight.Bold,
+            if (liveViewFrameUrl != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                        .data(liveViewFrameUrl)
+                        .decoderFactory(SvgDecoder.Factory())
+                        .crossfade(false)
+                        .build(),
+                    contentDescription = "Live view frame",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
                 )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "ISO ${status?.exposure?.iso ?: "-"}  ${status?.exposure?.shutter ?: "-"}  F${status?.exposure?.aperture ?: "-"}",
-                    color = AppSubtleText,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    if (enabled) "Tap monitor to focus" else "Connect camera to focus",
-                    color = AppMutedText,
-                )
+                MonitorStatusOverlay(status = status, enabled = enabled)
+            } else {
+                MonitorPlaceholder(enabled = enabled)
             }
             FocusOverlay(focusPoint = focusPoint)
         }
+    }
+}
+
+@Composable
+private fun MonitorPlaceholder(enabled: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("LIVE VIEW", color = AppSubtleText, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (enabled) "Tap monitor to focus" else "Connect camera to load frame",
+            color = AppMutedText,
+        )
+    }
+}
+
+@Composable
+private fun MonitorStatusOverlay(status: CameraStatus?, enabled: Boolean) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(12.dp)
+                .background(Color(0xAA05070A), RoundedCornerShape(6.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                if (status?.recording == true) "REC" else "STBY",
+                color = if (status?.recording == true) Color(0xFFFF3B5B) else AppSubtleText,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "ISO ${status?.exposure?.iso ?: "-"}",
+                color = AppSubtleText,
+            )
+            Text(status?.exposure?.shutter ?: "-", color = AppSubtleText)
+            Text("F${status?.exposure?.aperture ?: "-"}", color = AppSubtleText)
+        }
+        Text(
+            if (enabled) "Tap to focus" else "Connect camera",
+            color = AppSubtleText,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(12.dp)
+                .background(Color(0xAA05070A), RoundedCornerShape(6.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        )
     }
 }
 

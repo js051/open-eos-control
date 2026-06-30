@@ -27,6 +27,7 @@ open-eos-control/
 - `Direct Camera` 與 `Dev Simulator` preset
 - 連線 / refresh
 - 相機狀態顯示
+- Live view frame 顯示
 - ISO、shutter、aperture、white balance 控制
 - REC start / stop
 - Tap focus 的資料層 API hook

@@ -57,6 +57,9 @@ class CcapiClient(
         )
     }
 
+    fun liveViewFrameUrl(cacheKey: Long): String =
+        "$baseUrl/ccapi/liveview/frame?t=$cacheKey"
+
     private suspend fun getJson(path: String): JSONObject = requestJson(
         Request.Builder().url("$baseUrl$path").get().build(),
     )

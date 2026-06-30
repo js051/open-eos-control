@@ -27,6 +27,7 @@ The app currently includes:
 - Direct Camera and Dev Simulator presets
 - Connect / refresh
 - Camera status display
+- Live view frame display
 - ISO, shutter, aperture, and white balance controls
 - REC start / stop
 - Tap-focus API hook through the data layer
