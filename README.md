@@ -25,12 +25,13 @@ The app currently includes:
 
 - Direct camera URL input
 - Direct Camera and Dev Simulator presets
-- Connect / refresh
+- Connect / refresh / disconnect
 - Camera status display
-- Live view frame display
+- Live view frame display with auto/manual refresh controls
 - ISO, shutter, aperture, and white balance controls
 - REC start / stop
 - Tap-focus API hook through the data layer
+- Single-column scrolling layout for phone-width screens
 
 The default Android URL is aimed at direct camera Wi-Fi control:
 
@@ -58,6 +59,12 @@ CLI builds use the committed Gradle wrapper. On this Windows dev machine, use th
 
 ```powershell
 .\scripts\android-gradle.ps1 :app:assembleDebug
+```
+
+The debug APK is written to:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ## Self Tests

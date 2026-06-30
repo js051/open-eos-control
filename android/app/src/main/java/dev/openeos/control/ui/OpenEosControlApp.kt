@@ -6,8 +6,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -21,12 +23,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,7 +66,10 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
                 actions = CameraActions(
                     onBaseUrlChange = viewModel::setBaseUrl,
                     onConnect = viewModel::connect,
+                    onDisconnect = viewModel::disconnect,
                     onRefresh = viewModel::refresh,
+                    onRefreshLiveView = viewModel::refreshLiveViewFrame,
+                    onLiveViewAutoRefreshChange = viewModel::setLiveViewAutoRefresh,
                     onToggleRecording = viewModel::toggleRecording,
                     onSetIso = viewModel::setIso,
                     onSetShutter = viewModel::setShutter,
@@ -81,7 +88,10 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
 private data class CameraActions(
     val onBaseUrlChange: (String) -> Unit,
     val onConnect: () -> Unit,
+    val onDisconnect: () -> Unit,
     val onRefresh: () -> Unit,
+    val onRefreshLiveView: () -> Unit,
+    val onLiveViewAutoRefreshChange: (Boolean) -> Unit,
     val onToggleRecording: () -> Unit,
     val onSetIso: (String) -> Unit,
     val onSetShutter: (String) -> Unit,
@@ -99,100 +109,161 @@ private fun CameraControlScreen(
     state: CameraUiState,
     actions: CameraActions,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize(),
     ) {
-        Column(
-            modifier = Modifier
-                .weight(0.38f)
-                .fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            HeaderBlock()
-            OutlinedTextField(
-                value = state.baseUrl,
-                onValueChange = actions.onBaseUrlChange,
-                label = { Text("Direct camera URL") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = AppText,
-                    unfocusedTextColor = AppText,
-                    focusedLabelColor = AppAccent,
-                    unfocusedLabelColor = AppMutedText,
-                    cursorColor = AppAccent,
-                    focusedBorderColor = AppAccent,
-                    unfocusedBorderColor = AppBorder,
-                    focusedContainerColor = Color(0xFF111827),
-                    unfocusedContainerColor = Color(0xFF111827),
-                ),
-            )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SecondaryButton(enabled = !state.busy, onClick = actions.onUseDirectCamera) {
-                    Text("Direct Camera")
-                }
-                SecondaryButton(enabled = !state.busy, onClick = actions.onUseDevSimulator) {
-                    Text("Dev Simulator")
-                }
+        if (maxWidth < 720.dp) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ConnectionColumn(
+                    state = state,
+                    actions = actions,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                CameraControlsColumn(
+                    state = state,
+                    actions = actions,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryButton(enabled = !state.busy, onClick = actions.onConnect) {
-                    Text(if (state.busy) "Working" else "Connect")
-                }
-                SecondaryButton(
-                    enabled = state.connected && !state.busy,
-                    onClick = actions.onRefresh,
-                ) {
-                    Text("Refresh")
-                }
-            }
-            CameraSummary(state.info, state.status)
-            state.error?.let {
-                ErrorPanel(message = it, onClick = actions.onClearError)
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                ConnectionColumn(
+                    state = state,
+                    actions = actions,
+                    modifier = Modifier
+                        .weight(0.38f)
+                        .fillMaxSize(),
+                )
+                CameraControlsColumn(
+                    state = state,
+                    actions = actions,
+                    modifier = Modifier
+                        .weight(0.62f)
+                        .fillMaxSize(),
+                )
             }
         }
+    }
+}
 
-        Column(
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun ConnectionColumn(
+    state: CameraUiState,
+    actions: CameraActions,
+    modifier: Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HeaderBlock()
+        OutlinedTextField(
+            value = state.baseUrl,
+            onValueChange = actions.onBaseUrlChange,
+            label = { Text("Direct camera URL") },
+            singleLine = true,
             modifier = Modifier
-                .weight(0.62f)
-                .fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            MonitorPanel(
-                status = state.status,
-                liveViewFrameUrl = state.liveViewFrameUrl,
-                focusPoint = state.focusPoint,
-                enabled = state.connected && !state.busy,
-                onTapFocus = actions.onTapFocus,
-            )
-            RecordButton(
-                enabled = state.connected && !state.busy,
-                recording = state.status?.recording == true,
-                onClick = actions.onToggleRecording,
-            )
-            ControlSection("ISO", state.capabilities?.iso.orEmpty(), state.status?.exposure?.iso, actions.onSetIso)
-            ControlSection(
-                "Shutter",
-                state.capabilities?.shutter.orEmpty(),
-                state.status?.exposure?.shutter,
-                actions.onSetShutter,
-            )
-            ControlSection(
-                "Aperture",
-                state.capabilities?.aperture.orEmpty(),
-                state.status?.exposure?.aperture,
-                actions.onSetAperture,
-            )
-            ControlSection(
-                "White balance",
-                state.capabilities?.whiteBalance.orEmpty(),
-                state.status?.exposure?.whiteBalance,
-                actions.onSetWhiteBalance,
-            )
+                .fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = AppText,
+                unfocusedTextColor = AppText,
+                focusedLabelColor = AppAccent,
+                unfocusedLabelColor = AppMutedText,
+                cursorColor = AppAccent,
+                focusedBorderColor = AppAccent,
+                unfocusedBorderColor = AppBorder,
+                focusedContainerColor = Color(0xFF111827),
+                unfocusedContainerColor = Color(0xFF111827),
+            ),
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryButton(enabled = !state.busy, onClick = actions.onUseDirectCamera) {
+                Text("Direct Camera")
+            }
+            SecondaryButton(enabled = !state.busy, onClick = actions.onUseDevSimulator) {
+                Text("Dev Simulator")
+            }
         }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton(enabled = !state.busy, onClick = actions.onConnect) {
+                Text(if (state.busy) "Working" else "Connect")
+            }
+            SecondaryButton(
+                enabled = state.connected && !state.busy,
+                onClick = actions.onRefresh,
+            ) {
+                Text("Refresh")
+            }
+            SecondaryButton(
+                enabled = state.connected && !state.busy,
+                onClick = actions.onDisconnect,
+            ) {
+                Text("Disconnect")
+            }
+        }
+        CameraSummary(state.info, state.status)
+        state.error?.let {
+            ErrorPanel(message = it, onClick = actions.onClearError)
+        }
+    }
+}
+
+@Composable
+private fun CameraControlsColumn(
+    state: CameraUiState,
+    actions: CameraActions,
+    modifier: Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        MonitorPanel(
+            status = state.status,
+            liveViewFrameUrl = state.liveViewFrameUrl,
+            liveViewAutoRefresh = state.liveViewAutoRefresh,
+            focusPoint = state.focusPoint,
+            enabled = state.connected && !state.busy,
+            onTapFocus = actions.onTapFocus,
+            onRefreshLiveView = actions.onRefreshLiveView,
+            onLiveViewAutoRefreshChange = actions.onLiveViewAutoRefreshChange,
+        )
+        RecordButton(
+            enabled = state.connected && !state.busy,
+            recording = state.status?.recording == true,
+            onClick = actions.onToggleRecording,
+        )
+        ControlSection("ISO", state.capabilities?.iso.orEmpty(), state.status?.exposure?.iso, actions.onSetIso)
+        ControlSection(
+            "Shutter",
+            state.capabilities?.shutter.orEmpty(),
+            state.status?.exposure?.shutter,
+            actions.onSetShutter,
+        )
+        ControlSection(
+            "Aperture",
+            state.capabilities?.aperture.orEmpty(),
+            state.status?.exposure?.aperture,
+            actions.onSetAperture,
+        )
+        ControlSection(
+            "White balance",
+            state.capabilities?.whiteBalance.orEmpty(),
+            state.status?.exposure?.whiteBalance,
+            actions.onSetWhiteBalance,
+        )
     }
 }
 
@@ -232,16 +303,22 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
 private fun MonitorPanel(
     status: CameraStatus?,
     liveViewFrameUrl: String?,
+    liveViewAutoRefresh: Boolean,
     focusPoint: FocusPoint?,
     enabled: Boolean,
     onTapFocus: (Double, Double) -> Unit,
+    onRefreshLiveView: () -> Unit,
+    onLiveViewAutoRefreshChange: (Boolean) -> Unit,
 ) {
     MonitorFrame(
         status = status,
         liveViewFrameUrl = liveViewFrameUrl,
+        liveViewAutoRefresh = liveViewAutoRefresh,
         focusPoint = focusPoint,
         enabled = enabled,
         onTapFocus = onTapFocus,
+        onRefreshLiveView = onRefreshLiveView,
+        onLiveViewAutoRefreshChange = onLiveViewAutoRefreshChange,
     )
 }
 
@@ -249,9 +326,12 @@ private fun MonitorPanel(
 private fun MonitorFrame(
     status: CameraStatus?,
     liveViewFrameUrl: String?,
+    liveViewAutoRefresh: Boolean,
     focusPoint: FocusPoint?,
     enabled: Boolean,
     onTapFocus: (Double, Double) -> Unit,
+    onRefreshLiveView: () -> Unit,
+    onLiveViewAutoRefreshChange: (Boolean) -> Unit,
 ) {
     Panel {
         Box(
@@ -287,6 +367,23 @@ private fun MonitorFrame(
                 MonitorPlaceholder(enabled = enabled)
             }
             FocusOverlay(focusPoint = focusPoint)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Live view", color = AppText, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            Text(if (liveViewAutoRefresh) "Auto" else "Manual", color = AppSubtleText)
+            Switch(
+                checked = liveViewAutoRefresh,
+                enabled = enabled,
+                onCheckedChange = onLiveViewAutoRefreshChange,
+            )
+            SecondaryButton(enabled = enabled, onClick = onRefreshLiveView) {
+                Text("Frame")
+            }
         }
     }
 }

@@ -11,6 +11,7 @@ data class CameraUiState(
     val status: CameraStatus? = null,
     val capabilities: CameraCapabilities? = null,
     val liveViewFrameUrl: String? = null,
+    val liveViewAutoRefresh: Boolean = true,
     val focusPoint: FocusPoint? = null,
     val error: String? = null,
     val busy: Boolean = false,

@@ -3,10 +3,13 @@ package dev.openeos.control.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraRepository
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class CameraViewModel(
@@ -14,17 +17,25 @@ class CameraViewModel(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
+    private var liveViewJob: Job? = null
 
     fun setBaseUrl(value: String) {
-        _uiState.update { it.copy(baseUrl = value) }
+        stopLiveViewLoop()
+        _uiState.update { it.withClearedSession(baseUrl = value, error = null) }
     }
 
     fun useDirectCameraPreset() {
-        _uiState.update { it.copy(baseUrl = CameraRepository.DEFAULT_CAMERA_BASE_URL) }
+        stopLiveViewLoop()
+        _uiState.update {
+            it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_BASE_URL, error = null)
+        }
     }
 
     fun useDevSimulatorPreset() {
-        _uiState.update { it.copy(baseUrl = CameraRepository.DEV_EMULATOR_SIMULATOR_URL) }
+        stopLiveViewLoop()
+        _uiState.update {
+            it.withClearedSession(baseUrl = CameraRepository.DEV_EMULATOR_SIMULATOR_URL, error = null)
+        }
     }
 
     fun clearError() {
@@ -32,6 +43,8 @@ class CameraViewModel(
     }
 
     fun connect() = runCamera {
+        stopLiveViewLoop()
+        _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val session = repository.connect(_uiState.value.baseUrl)
         _uiState.update {
             it.copy(
@@ -41,6 +54,12 @@ class CameraViewModel(
                 liveViewFrameUrl = session.liveViewFrameUrl,
             )
         }
+        startLiveViewLoopIfNeeded()
+    }
+
+    fun disconnect() {
+        stopLiveViewLoop()
+        _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
     }
 
     fun refresh() = runCamera {
@@ -49,6 +68,21 @@ class CameraViewModel(
                 status = repository.refreshStatus(),
                 liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
             )
+        }
+    }
+
+    fun refreshLiveViewFrame() {
+        if (!_uiState.value.connected) return
+        _uiState.update { it.copy(liveViewFrameUrl = repository.nextLiveViewFrameUrl()) }
+    }
+
+    fun setLiveViewAutoRefresh(enabled: Boolean) {
+        _uiState.update { it.copy(liveViewAutoRefresh = enabled) }
+        if (enabled) {
+            refreshLiveViewFrame()
+            startLiveViewLoopIfNeeded()
+        } else {
+            stopLiveViewLoop()
         }
     }
 
@@ -72,6 +106,7 @@ class CameraViewModel(
                 liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
             )
         }
+        startLiveViewLoopIfNeeded()
     }
 
     private fun updateStatus(block: suspend () -> dev.openeos.control.data.CameraStatus) = runCamera {
@@ -81,6 +116,7 @@ class CameraViewModel(
                 liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
             )
         }
+        startLiveViewLoopIfNeeded()
     }
 
     private fun runCamera(block: suspend () -> Unit) {
@@ -96,5 +132,52 @@ class CameraViewModel(
                 _uiState.update { it.copy(busy = false) }
             }
         }
+    }
+
+    private fun startLiveViewLoopIfNeeded() {
+        liveViewJob?.cancel()
+        val state = _uiState.value
+        if (!state.connected || !state.liveViewAutoRefresh) return
+        liveViewJob = viewModelScope.launch {
+            while (isActive) {
+                delay(LIVE_VIEW_REFRESH_MILLIS)
+                val latest = _uiState.value
+                if (!latest.connected || !latest.liveViewAutoRefresh) break
+                _uiState.update {
+                    if (it.connected && it.liveViewAutoRefresh) {
+                        it.copy(liveViewFrameUrl = repository.nextLiveViewFrameUrl())
+                    } else {
+                        it
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stopLiveViewLoop() {
+        liveViewJob?.cancel()
+        liveViewJob = null
+    }
+
+    override fun onCleared() {
+        stopLiveViewLoop()
+        super.onCleared()
+    }
+
+    private fun CameraUiState.withClearedSession(
+        baseUrl: String,
+        error: String?,
+    ): CameraUiState = copy(
+        baseUrl = baseUrl,
+        info = null,
+        status = null,
+        capabilities = null,
+        liveViewFrameUrl = null,
+        focusPoint = null,
+        error = error,
+    )
+
+    private companion object {
+        const val LIVE_VIEW_REFRESH_MILLIS = 1_000L
     }
 }
