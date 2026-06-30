@@ -1,5 +1,6 @@
 package dev.openeos.control.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,15 +32,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraStatus
 
@@ -190,6 +195,16 @@ private fun CameraControlScreen(
 @Composable
 private fun HeaderBlock() {
     Panel {
+        Image(
+            painter = painterResource(id = R.drawable.app_cover),
+            contentDescription = "Open EOS Control app cover",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, AppBorder, RoundedCornerShape(8.dp)),
+        )
         Text("Open EOS Control", color = AppText, fontWeight = FontWeight.Bold)
         Text("Direct Canon EOS CCAPI control", color = AppSubtleText)
         Text("Simulator is for development only.", color = AppMutedText)

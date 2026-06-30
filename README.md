@@ -1,7 +1,5 @@
 # Open EOS Control
 
-![Open EOS Control cover](Image.png)
-
 [繁體中文](README.zh-TW.md) | English
 
 Open EOS Control is an unofficial, open-source Android control app for Canon EOS cameras, starting with the Canon EOS R6 Mark III and Canon CCAPI over Wi-Fi.
@@ -60,6 +58,22 @@ CLI builds use the committed Gradle wrapper. On this Windows dev machine, use th
 ```powershell
 .\scripts\android-gradle.ps1 :app:assembleDebug
 ```
+
+## Self Tests
+
+Run Android unit tests:
+
+```powershell
+.\scripts\android-gradle.ps1 :app:testDebugUnitTest
+```
+
+Build the debug APK:
+
+```powershell
+.\scripts\android-gradle.ps1 :app:assembleDebug
+```
+
+GitHub Actions runs both tasks on every push to `main` and on pull requests.
 
 ## Fake Camera Simulator
 
