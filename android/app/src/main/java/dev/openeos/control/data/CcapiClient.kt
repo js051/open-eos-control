@@ -2,16 +2,11 @@ package dev.openeos.control.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.isActive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
-import java.io.BufferedInputStream
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
@@ -59,11 +54,11 @@ class CcapiClient(
             val uri = java.net.URI.create(baseUrl)
             val host = uri.host ?: ""
             val port = uri.port
-            host.contains("localhost") || 
-            host.contains("127.0.0.1") || 
-            host.contains("10.0.2.2") || 
-            host.contains("::1") || 
-            host.contains("[::1]") || 
+            host.contains("localhost") ||
+            host.contains("127.0.0.1") ||
+            host.contains("10.0.2.2") ||
+            host.contains("::1") ||
+            host.contains("[::1]") ||
             port == 18080 ||
             java.net.InetAddress.getByName(host).isLoopbackAddress
         } catch (e: Exception) {
@@ -206,49 +201,25 @@ class CcapiClient(
             } catch (e: Exception) {
                 null
             }
-            var batteryLevel = 100
-            var batteryLevelStr = "full"
-            if (batteryJson != null) {
-                if (batteryJson.has("level") && !batteryJson.isNull("level")) {
-                    val optLevel = batteryJson.optInt("level", -1)
-                    if (optLevel != -1) {
-                        batteryLevel = optLevel
-                    } else {
-                        val levelStr = batteryJson.optString("level", "full")
-                        batteryLevelStr = levelStr
-                        batteryLevel = when (levelStr) {
-                            "full" -> 100
-                            "middle" -> 50
-                            "low" -> 20
-                            "empty" -> 5
-                            else -> 100
-                        }
-                    }
-                }
-                if (batteryJson.has("state")) {
-                    batteryLevelStr = batteryJson.optString("state", "full")
-                }
+            val (batteryLevel, batteryLevelStr) = if (batteryJson != null) {
+                parseBatteryInfo(batteryJson.toString())
+            } else {
+                Pair(100, "full")
             }
 
             val storageJson = try {
                 getJson("$apiVersionPrefix/devicestatus/storage")
             } catch (e: Exception) {
-                null
-            }
-            var cardReady = false
-            if (storageJson != null) {
-                val storageArray = storageJson.optJSONArray("storage")
-                if (storageArray != null) {
-                    for (i in 0 until storageArray.length()) {
-                        val card = storageArray.optJSONObject(i) ?: continue
-                        val status = card.optString("status")
-                        val access = card.optString("accesscapability") ?: card.optString("access")
-                        if (status == "ready" || access == "readwrite" || access == "readonly" || status == "access") {
-                            cardReady = true
-                            break
-                        }
-                    }
+                try {
+                    getJson("$apiVersionPrefix/contents")
+                } catch (ex: Exception) {
+                    null
                 }
+            }
+            val cardReady = if (storageJson != null) {
+                parseStorageInfo(storageJson.toString())
+            } else {
+                false
             }
 
             val settings = try {
@@ -256,7 +227,7 @@ class CcapiClient(
             } catch (e: Exception) {
                 null
             }
-            
+
             supportedSettingKeys.clear()
             if (settings != null) {
                 val keys = settings.keys()
@@ -290,7 +261,9 @@ class CcapiClient(
                     shutter = shutterVal ?: "-",
                     aperture = apertureVal ?: "-",
                     whiteBalance = wbVal ?: "-"
-                )
+                ),
+                rawBatteryJson = batteryJson?.toString() ?: "null",
+                rawStorageJson = storageJson?.toString() ?: "null"
             )
         } else {
             getJson("/ccapi/status").toCameraStatus()
@@ -381,56 +354,16 @@ class CcapiClient(
 
     suspend fun startLiveView() {
         if (isRealCamera) {
-            postJson("$apiVersionPrefix/shooting/liveview", JSONObject().put("action", "start"))
+            postJson("$apiVersionPrefix/shooting/liveview", JSONObject())
         }
     }
 
     suspend fun stopLiveView() {
         if (isRealCamera) {
-            postJson("$apiVersionPrefix/shooting/liveview", JSONObject().put("action", "stop"))
-        }
-    }
-
-    suspend fun streamLiveView(onFrame: (Bitmap) -> Unit) {
-        val url = "$baseUrl$apiVersionPrefix/shooting/liveview"
-        withContext(Dispatchers.IO) {
-            val request = Request.Builder().url(url).build()
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    error("Failed to connect to live view stream: HTTP ${response.code}")
-                }
-                val bodyStream = response.body?.byteStream() ?: return@withContext
-                val bufferedStream = BufferedInputStream(bodyStream)
-                val buffer = ByteArrayOutputStream()
-                var lastByte = -1
-                var inFrame = false
-                
-                while (isActive) {
-                    val byte = bufferedStream.read()
-                    if (byte == -1) break
-                    
-                    if (!inFrame) {
-                        if (lastByte == 0xFF && byte == 0xD8) {
-                            buffer.write(0xFF)
-                            buffer.write(0xD8)
-                            inFrame = true
-                        }
-                    } else {
-                        buffer.write(byte)
-                        if (lastByte == 0xFF && byte == 0xD9) {
-                            val jpegBytes = buffer.toByteArray()
-                            val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
-                            if (bitmap != null) {
-                                withContext(Dispatchers.Main) {
-                                    onFrame(bitmap)
-                                }
-                            }
-                            buffer.reset()
-                            inFrame = false
-                        }
-                    }
-                    lastByte = byte
-                }
+            try {
+                deleteJson("$apiVersionPrefix/shooting/liveview")
+            } catch (e: Exception) {
+                // ignore
             }
         }
     }
@@ -487,6 +420,13 @@ class CcapiClient(
             .build(),
     )
 
+    private suspend fun deleteJson(path: String): JSONObject = requestJson(
+        Request.Builder()
+            .url("$baseUrl$path")
+            .delete()
+            .build(),
+    )
+
     private suspend fun requestJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
@@ -535,3 +475,99 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
 
 private fun org.json.JSONArray.toStringList(): List<String> =
     List(length()) { index -> getString(index) }
+
+private fun parseBatteryInfo(jsonStr: String): Pair<Int, String> {
+    try {
+        val trimmed = jsonStr.trim()
+        if (trimmed.startsWith("[")) {
+            val array = org.json.JSONArray(trimmed)
+            if (array.length() > 0) {
+                return parseSingleBattery(array.getJSONObject(0))
+            }
+        } else {
+            val obj = JSONObject(trimmed)
+            if (obj.has("battery")) {
+                val array = obj.optJSONArray("battery")
+                if (array != null && array.length() > 0) {
+                    return parseSingleBattery(array.getJSONObject(0))
+                }
+            }
+            return parseSingleBattery(obj)
+        }
+    } catch (e: Exception) {
+        // ignore
+    }
+    return Pair(100, "full")
+}
+
+private fun parseSingleBattery(obj: JSONObject): Pair<Int, String> {
+    var batteryLevel = 100
+    var batteryLevelStr = "full"
+
+    if (obj.has("level") && !obj.isNull("level")) {
+        val optLevel = obj.optInt("level", -1)
+        if (optLevel != -1) {
+            batteryLevel = optLevel
+            batteryLevelStr = "$batteryLevel%"
+        } else {
+            val levelStr = obj.optString("level", "full")
+            batteryLevelStr = levelStr
+            batteryLevel = when (levelStr) {
+                "full" -> 100
+                "middle" -> 50
+                "low" -> 20
+                "empty" -> 5
+                else -> {
+                    levelStr.toIntOrNull() ?: 100
+                }
+            }
+        }
+    }
+    if (obj.has("state")) {
+        batteryLevelStr = obj.optString("state", batteryLevelStr)
+    }
+    return Pair(batteryLevel, batteryLevelStr)
+}
+
+private fun parseStorageInfo(jsonStr: String): Boolean {
+    try {
+        val trimmed = jsonStr.trim()
+        if (trimmed.startsWith("[")) {
+            val array = org.json.JSONArray(trimmed)
+            for (i in 0 until array.length()) {
+                if (isSingleCardReady(array.getJSONObject(i))) return true
+            }
+        } else {
+            val obj = JSONObject(trimmed)
+            if (obj.has("storage")) {
+                val array = obj.optJSONArray("storage")
+                if (array != null) {
+                    for (i in 0 until array.length()) {
+                        if (isSingleCardReady(array.getJSONObject(i))) return true
+                    }
+                }
+            }
+            if (obj.has("name") || obj.has("accesscapability") || obj.has("status")) {
+                return isSingleCardReady(obj)
+            }
+        }
+    } catch (e: Exception) {
+        // ignore
+    }
+    return false
+}
+
+private fun isSingleCardReady(card: JSONObject): Boolean {
+    val status = card.optString("status", "")
+    val access = card.optString("accesscapability", "") ?: card.optString("access", "")
+    if (status == "ready" || status == "access" || access == "readwrite" || access == "readonly") {
+        return true
+    }
+    if (card.has("free") || card.has("maxsize") || card.has("capacity")) {
+        val free = card.optString("free", "")
+        if (free.isNotEmpty() && free != "0" && free != "0 GB" && status != "not_inserted") {
+            return true
+        }
+    }
+    return false
+}

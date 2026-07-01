@@ -1,7 +1,5 @@
 package dev.openeos.control.data
 
-import android.graphics.Bitmap
-
 class CameraRepository {
     private var client = CcapiClient(DEFAULT_CAMERA_BASE_URL)
     private var frameVersion = 0L
@@ -50,9 +48,6 @@ class CameraRepository {
 
     fun nextLiveViewFrameUrl(): String = client.liveViewFrameUrl(++frameVersion)
 
-    suspend fun streamLiveView(onFrame: (Bitmap) -> Unit) {
-        client.streamLiveView(onFrame)
-    }
 
     companion object {
         const val DEFAULT_CAMERA_BASE_URL = "http://192.168.1.2:8080"

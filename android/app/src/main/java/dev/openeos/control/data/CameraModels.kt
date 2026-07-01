@@ -23,6 +23,8 @@ data class CameraStatus(
     val mediaAvailable: Boolean,
     val remainingMinutes: Int,
     val exposure: ExposureState,
+    val rawBatteryJson: String = "",
+    val rawStorageJson: String = "",
 )
 
 data class CameraCapabilities(

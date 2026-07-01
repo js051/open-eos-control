@@ -1,9 +1,7 @@
 package dev.openeos.control.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
@@ -33,36 +31,25 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import android.graphics.Bitmap
 import androidx.compose.foundation.text.selection.SelectionContainer
 import coil.compose.AsyncImage
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
-import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.createUnsafeOkHttpClient
@@ -72,64 +59,31 @@ import coil.ImageLoader
 @Composable
 fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    var showSplash by remember { mutableStateOf(true) }
-
-    LaunchedEffect(Unit) {
-        delay(2000)
-        showSplash = false
-    }
 
     MaterialTheme(colorScheme = OpenEosColorScheme) {
         Surface(color = AppBackground, modifier = Modifier.fillMaxSize()) {
-            Crossfade(
-                targetState = showSplash,
-                animationSpec = tween(durationMillis = 800),
-                label = "SplashTransition"
-            ) { isSplash ->
-                if (isSplash) {
-                    SplashScreen()
-                } else {
-                    CameraControlScreen(
-                        state = state,
-                        actions = CameraActions(
-                            onBaseUrlChange = viewModel::setBaseUrl,
-                            onConnect = viewModel::connect,
-                            onDisconnect = viewModel::disconnect,
-                            onRefresh = viewModel::refresh,
-                            onRefreshLiveView = viewModel::refreshLiveViewFrame,
-                            onLiveViewAutoRefreshChange = viewModel::setLiveViewAutoRefresh,
-                            onToggleRecording = viewModel::toggleRecording,
-                            onSetIso = viewModel::setIso,
-                            onSetShutter = viewModel::setShutter,
-                            onSetAperture = viewModel::setAperture,
-                            onSetWhiteBalance = viewModel::setWhiteBalance,
-                            onTapFocus = viewModel::tapFocus,
-                            onClearError = viewModel::clearError,
-                            onUseDirectCamera = viewModel::useDirectCameraPreset,
-                            onUseDirectCameraHttps = viewModel::useDirectCameraHttpsPreset,
-                            onUseDevSimulator = viewModel::useDevSimulatorPreset,
-                        ),
-                    )
-                }
-            }
+            CameraControlScreen(
+                state = state,
+                actions = CameraActions(
+                    onBaseUrlChange = viewModel::setBaseUrl,
+                    onConnect = viewModel::connect,
+                    onDisconnect = viewModel::disconnect,
+                    onRefresh = viewModel::refresh,
+                    onRefreshLiveView = viewModel::refreshLiveViewFrame,
+                    onLiveViewAutoRefreshChange = viewModel::setLiveViewAutoRefresh,
+                    onToggleRecording = viewModel::toggleRecording,
+                    onSetIso = viewModel::setIso,
+                    onSetShutter = viewModel::setShutter,
+                    onSetAperture = viewModel::setAperture,
+                    onSetWhiteBalance = viewModel::setWhiteBalance,
+                    onTapFocus = viewModel::tapFocus,
+                    onClearError = viewModel::clearError,
+                    onUseDirectCamera = viewModel::useDirectCameraPreset,
+                    onUseDirectCameraHttps = viewModel::useDirectCameraHttpsPreset,
+                    onUseDevSimulator = viewModel::useDevSimulatorPreset,
+                ),
+            )
         }
-    }
-}
-
-@Composable
-private fun SplashScreen() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AppBackground),
-        contentAlignment = Alignment.Center,
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.app_cover),
-            contentDescription = "App Cover Splash Screen",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
     }
 }
 
@@ -289,7 +243,6 @@ private fun CameraControlsColumn(
         MonitorPanel(
             status = state.status,
             liveViewFrameUrl = state.liveViewFrameUrl,
-            liveViewBitmap = state.liveViewBitmap,
             liveViewAutoRefresh = state.liveViewAutoRefresh,
             focusPoint = state.focusPoint,
             enabled = state.connected && !state.busy,
@@ -330,15 +283,15 @@ private fun WifiIcon(connected: Boolean, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.size(24.dp)) {
         val width = size.width
         val height = size.height
-        
+
         drawCircle(
             color = color,
             radius = width * 0.1f,
             center = Offset(width / 2f, height * 0.85f)
         )
-        
+
         val strokeWidth = width * 0.08f
-        
+
         drawArc(
             color = color,
             startAngle = 220f,
@@ -348,7 +301,7 @@ private fun WifiIcon(connected: Boolean, modifier: Modifier = Modifier) {
             size = Size(width * 0.4f, height * 0.4f),
             style = Stroke(width = strokeWidth)
         )
-        
+
         drawArc(
             color = color,
             startAngle = 220f,
@@ -371,10 +324,10 @@ private fun BatteryIcon(level: Int, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.size(height = 14.dp, width = 28.dp)) {
         val w = size.width
         val h = size.height
-        
+
         val strokeWidth = 2.dp.toPx()
         val capWidth = 3.dp.toPx()
-        
+
         drawRoundRect(
             color = AppMutedText,
             topLeft = Offset.Zero,
@@ -382,14 +335,14 @@ private fun BatteryIcon(level: Int, modifier: Modifier = Modifier) {
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx(), 3.dp.toPx()),
             style = Stroke(width = strokeWidth)
         )
-        
+
         drawRoundRect(
             color = AppMutedText,
             topLeft = Offset(w - capWidth, h * 0.3f),
             size = Size(capWidth, h * 0.4f),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx(), 1.dp.toPx())
         )
-        
+
         val fillWidth = (w - capWidth - 6.dp.toPx()) * (level / 100f)
         if (fillWidth > 0) {
             drawRoundRect(
@@ -408,7 +361,7 @@ private fun StorageIcon(available: Boolean, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.size(24.dp)) {
         val w = size.width
         val h = size.height
-        
+
         val path = androidx.compose.ui.graphics.Path().apply {
             moveTo(w * 0.2f, h * 0.1f)
             lineTo(w * 0.65f, h * 0.1f)
@@ -417,13 +370,13 @@ private fun StorageIcon(available: Boolean, modifier: Modifier = Modifier) {
             lineTo(w * 0.2f, h * 0.9f)
             close()
         }
-        
+
         drawPath(
             path = path,
             color = color,
             style = Stroke(width = 2.dp.toPx())
         )
-        
+
         val pinW = w * 0.06f
         val pinH = h * 0.15f
         for (i in 0..3) {
@@ -453,7 +406,7 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             WifiIcon(connected = info != null)
-            
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = info?.model ?: "Disconnected",
@@ -468,12 +421,12 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
                 )
             }
         }
-        
+
         if (info != null) {
             Spacer(modifier = Modifier.height(6.dp))
             androidx.compose.material3.HorizontalDivider(color = AppBorder.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(6.dp))
-            
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -484,13 +437,23 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     BatteryIcon(level = status?.batteryLevel ?: 0)
+                    val batteryText = when (status?.batteryStatus) {
+                        "full" -> "Full"
+                        "middle" -> "Medium"
+                        "low" -> "Low"
+                        "empty" -> "Empty"
+                        else -> {
+                            val level = status?.batteryLevel ?: 0
+                            if (level > 0) "$level%" else "Unknown"
+                        }
+                    }
                     Text(
-                        text = "${status?.batteryLevel ?: 0}%",
+                        text = batteryText,
                         color = AppSubtleText,
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
-                
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -504,6 +467,35 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            androidx.compose.material3.HorizontalDivider(color = AppBorder.copy(alpha = 0.3f))
+            Spacer(modifier = Modifier.height(6.dp))
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Raw Battery JSON:",
+                        color = AppMutedText,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                    Text(
+                        text = status?.rawBatteryJson ?: "null",
+                        color = AppSubtleText,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Raw Storage JSON:",
+                        color = AppMutedText,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                    Text(
+                        text = status?.rawStorageJson ?: "null",
+                        color = AppSubtleText,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
         }
     }
 }
@@ -512,7 +504,6 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
 private fun MonitorPanel(
     status: CameraStatus?,
     liveViewFrameUrl: String?,
-    liveViewBitmap: Bitmap?,
     liveViewAutoRefresh: Boolean,
     focusPoint: FocusPoint?,
     enabled: Boolean,
@@ -523,7 +514,6 @@ private fun MonitorPanel(
     MonitorFrame(
         status = status,
         liveViewFrameUrl = liveViewFrameUrl,
-        liveViewBitmap = liveViewBitmap,
         liveViewAutoRefresh = liveViewAutoRefresh,
         focusPoint = focusPoint,
         enabled = enabled,
@@ -537,7 +527,6 @@ private fun MonitorPanel(
 private fun MonitorFrame(
     status: CameraStatus?,
     liveViewFrameUrl: String?,
-    liveViewBitmap: Bitmap?,
     liveViewAutoRefresh: Boolean,
     focusPoint: FocusPoint?,
     enabled: Boolean,
@@ -563,16 +552,7 @@ private fun MonitorFrame(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            if (liveViewBitmap != null) {
-                Image(
-                    bitmap = liveViewBitmap.asImageBitmap(),
-                    contentDescription = "Live view stream frame",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-                MonitorStatusOverlay(status = status, enabled = enabled)
-                ViewfinderOverlay(recording = status?.recording == true)
-            } else if (liveViewFrameUrl != null) {
+            if (liveViewFrameUrl != null) {
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val imageLoader = remember(context, liveViewFrameUrl) {
                     ImageLoader.Builder(context)
@@ -684,23 +664,23 @@ private fun ViewfinderOverlay(recording: Boolean) {
         val bracketLen = 16.dp.toPx()
         val margin = 8.dp.toPx()
         val color = if (recording) AppDanger.copy(alpha = 0.8f) else AppText.copy(alpha = 0.4f)
-        
+
         // Top Left
         drawLine(color, Offset(margin, margin), Offset(margin + bracketLen, margin), strokePx)
         drawLine(color, Offset(margin, margin), Offset(margin, margin + bracketLen), strokePx)
-        
+
         // Top Right
         drawLine(color, Offset(w - margin, margin), Offset(w - margin - bracketLen, margin), strokePx)
         drawLine(color, Offset(w - margin, margin), Offset(w - margin, margin + bracketLen), strokePx)
-        
+
         // Bottom Left
         drawLine(color, Offset(margin, h - margin), Offset(margin + bracketLen, h - margin), strokePx)
         drawLine(color, Offset(margin, h - margin), Offset(margin, h - margin - bracketLen), strokePx)
-        
+
         // Bottom Right
         drawLine(color, Offset(w - margin, h - margin), Offset(w - margin - bracketLen, h - margin), strokePx)
         drawLine(color, Offset(w - margin, h - margin), Offset(w - margin, h - margin - bracketLen), strokePx)
-        
+
         // Center reticle
         drawCircle(color, radius = 2.dp.toPx(), center = Offset(w / 2f, h / 2f))
     }
