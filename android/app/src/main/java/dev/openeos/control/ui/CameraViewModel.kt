@@ -1,8 +1,10 @@
 package dev.openeos.control.ui
 
+import android.graphics.BitmapFactory
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class CameraViewModel(
     private val repository: CameraRepository = CameraRepository(),
@@ -59,8 +62,10 @@ class CameraViewModel(
                 status = session.status,
                 capabilities = session.capabilities,
                 liveViewFrameUrl = session.liveViewFrameUrl,
+                liveViewBitmap = null,
             )
         }
+        refreshLiveViewFrameInternal(reportErrors = true)
         startLiveViewLoopIfNeeded()
     }
 
@@ -77,17 +82,20 @@ class CameraViewModel(
     }
 
     fun refresh() = runCamera {
+        val status = repository.refreshStatus()
         _uiState.update {
             it.copy(
-                status = repository.refreshStatus(),
-                liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
+                status = status,
             )
         }
+        refreshLiveViewFrameInternal(reportErrors = true)
     }
 
     fun refreshLiveViewFrame() {
         if (!_uiState.value.connected) return
-        _uiState.update { it.copy(liveViewFrameUrl = repository.nextLiveViewFrameUrl()) }
+        viewModelScope.launch {
+            refreshLiveViewFrameInternal(reportErrors = true)
+        }
     }
 
     fun setLiveViewAutoRefresh(enabled: Boolean) {
@@ -117,9 +125,9 @@ class CameraViewModel(
         _uiState.update {
             it.copy(
                 focusPoint = FocusPoint(result.x, result.y),
-                liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
             )
         }
+        refreshLiveViewFrameInternal(reportErrors = false)
         startLiveViewLoopIfNeeded()
     }
 
@@ -127,9 +135,9 @@ class CameraViewModel(
         _uiState.update {
             it.copy(
                 status = block(),
-                liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
             )
         }
+        refreshLiveViewFrameInternal(reportErrors = false)
         startLiveViewLoopIfNeeded()
     }
 
@@ -140,25 +148,70 @@ class CameraViewModel(
                 block()
             } catch (exception: Exception) {
                 exception.printStackTrace()
-                val detailedMessage = buildString {
-                    append(exception.javaClass.simpleName)
-                    append(": ")
-                    append(exception.message ?: "Unknown error")
-                    var cause = exception.cause
-                    while (cause != null) {
-                        append("\nCaused by: ")
-                        append(cause.javaClass.simpleName)
-                        append(": ")
-                        append(cause.message ?: "Unknown cause")
-                        cause = cause.cause
-                    }
-                }
                 _uiState.update {
-                    it.copy(error = detailedMessage)
+                    it.copy(error = formatException(exception))
                 }
             } finally {
                 _uiState.update { it.copy(busy = false) }
             }
+        }
+    }
+
+    private suspend fun refreshLiveViewFrameInternal(reportErrors: Boolean) {
+        if (!_uiState.value.connected) return
+
+        if (!repository.isRealCamera()) {
+            _uiState.update {
+                if (it.connected) {
+                    it.copy(
+                        liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
+                        liveViewBitmap = null,
+                    )
+                } else {
+                    it
+                }
+            }
+            return
+        }
+
+        try {
+            val frame = repository.fetchLiveViewFrame()
+            val bitmap = withContext(Dispatchers.Default) {
+                BitmapFactory.decodeByteArray(frame.bytes, 0, frame.bytes.size)
+            } ?: error(
+                "Live view frame was received but Android could not decode it " +
+                    "(${frame.bytes.size} bytes, ${frame.contentType ?: "unknown content type"})."
+            )
+
+            _uiState.update {
+                if (it.connected) {
+                    it.copy(
+                        liveViewFrameUrl = frame.sourceUrl,
+                        liveViewBitmap = bitmap,
+                    )
+                } else {
+                    it
+                }
+            }
+        } catch (exception: Exception) {
+            exception.printStackTrace()
+            if (reportErrors) {
+                _uiState.update { it.copy(error = formatException(exception)) }
+            }
+        }
+    }
+
+    private fun formatException(exception: Exception): String = buildString {
+        append(exception.javaClass.simpleName)
+        append(": ")
+        append(exception.message ?: "Unknown error")
+        var cause = exception.cause
+        while (cause != null) {
+            append("\nCaused by: ")
+            append(cause.javaClass.simpleName)
+            append(": ")
+            append(cause.message ?: "Unknown cause")
+            cause = cause.cause
         }
     }
 
@@ -174,11 +227,18 @@ class CameraViewModel(
                 delay(delayMillis)
                 val latest = _uiState.value
                 if (!latest.connected || !latest.liveViewAutoRefresh) break
-                _uiState.update {
-                    if (it.connected && it.liveViewAutoRefresh) {
-                        it.copy(liveViewFrameUrl = repository.nextLiveViewFrameUrl())
-                    } else {
-                        it
+                if (repository.isRealCamera()) {
+                    refreshLiveViewFrameInternal(reportErrors = false)
+                } else {
+                    _uiState.update {
+                        if (it.connected && it.liveViewAutoRefresh) {
+                            it.copy(
+                                liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
+                                liveViewBitmap = null,
+                            )
+                        } else {
+                            it
+                        }
                     }
                 }
             }
@@ -204,6 +264,7 @@ class CameraViewModel(
         status = null,
         capabilities = null,
         liveViewFrameUrl = null,
+        liveViewBitmap = null,
         focusPoint = null,
         error = error,
     )

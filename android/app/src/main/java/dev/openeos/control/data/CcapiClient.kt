@@ -7,6 +7,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
@@ -354,14 +356,14 @@ class CcapiClient(
 
     suspend fun startLiveView() {
         if (isRealCamera) {
-            postJson("$apiVersionPrefix/shooting/liveview", JSONObject())
+            postOk("$apiVersionPrefix/shooting/liveview", JSONObject())
         }
     }
 
     suspend fun stopLiveView() {
         if (isRealCamera) {
             try {
-                deleteJson("$apiVersionPrefix/shooting/liveview")
+                deleteOk("$apiVersionPrefix/shooting/liveview")
             } catch (e: Exception) {
                 // ignore
             }
@@ -395,6 +397,20 @@ class CcapiClient(
             "$baseUrl/ccapi/liveview/frame?t=$cacheKey"
         }
 
+    suspend fun liveViewFrame(cacheKey: Long): LiveViewFrame {
+        val sourceUrl = liveViewFrameUrl(cacheKey)
+        val request = Request.Builder()
+            .url(sourceUrl)
+            .get()
+            .header("Accept", "multipart/x-mixed-replace,image/jpeg,image/*,*/*")
+            .header("Cache-Control", "no-cache")
+            .header("Pragma", "no-cache")
+            .header("Connection", "close")
+            .build()
+
+        return requestLiveViewFrame(request, sourceUrl)
+    }
+
     private suspend fun getJson(path: String): JSONObject = requestJson(
         Request.Builder().url("$baseUrl$path").get().build(),
     )
@@ -427,6 +443,20 @@ class CcapiClient(
             .build(),
     )
 
+    private suspend fun postOk(path: String, payload: JSONObject): Unit = requestOk(
+        Request.Builder()
+            .url("$baseUrl$path")
+            .post(payload.toString().toRequestBody(jsonMediaType))
+            .build(),
+    )
+
+    private suspend fun deleteOk(path: String): Unit = requestOk(
+        Request.Builder()
+            .url("$baseUrl$path")
+            .delete()
+            .build(),
+    )
+
     private suspend fun requestJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
@@ -435,6 +465,102 @@ class CcapiClient(
             }
             JSONObject(body)
         }
+    }
+
+    private suspend fun requestOk(request: Request): Unit = withContext(Dispatchers.IO) {
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                error("Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body")
+            }
+        }
+    }
+
+    private suspend fun requestLiveViewFrame(request: Request, sourceUrl: String): LiveViewFrame =
+        withContext(Dispatchers.IO) {
+            httpClient.newCall(request).execute().use { response ->
+                val contentType = response.header("content-type")
+                val body = response.body ?: error("Live view frame failed: empty response body")
+
+                if (!response.isSuccessful) {
+                    val preview = body.string().trim().take(MAX_ERROR_BODY_CHARS)
+                    error(
+                        "Live view frame failed: ${request.method} ${request.url} returned HTTP ${response.code}\n" +
+                            "Content-Type: ${contentType ?: "unknown"}\n" +
+                            "Body: $preview"
+                    )
+                }
+
+                if (contentType.isTextLikeContentType()) {
+                    val preview = body.string().trim().take(MAX_ERROR_BODY_CHARS)
+                    error(
+                        "Live view frame returned ${contentType ?: "text"} instead of image bytes.\n" +
+                            "Body: $preview"
+                    )
+                }
+
+                LiveViewFrame(
+                    bytes = readFirstJpegFrame(body.byteStream()),
+                    contentType = contentType,
+                    sourceUrl = sourceUrl,
+                )
+            }
+        }
+
+    private fun readFirstJpegFrame(input: InputStream): ByteArray {
+        val output = ByteArrayOutputStream()
+        var foundStart = false
+        var previous = -1
+        var scannedBytes = 0
+
+        while (true) {
+            val current = input.read()
+            if (current == -1) break
+
+            scannedBytes += 1
+            if (scannedBytes > MAX_LIVE_VIEW_SCAN_BYTES) {
+                error("Live view response did not contain a complete JPEG frame within $MAX_LIVE_VIEW_SCAN_BYTES bytes.")
+            }
+
+            if (!foundStart) {
+                if (previous == JPEG_MARKER_PREFIX && current == JPEG_START_MARKER) {
+                    foundStart = true
+                    output.write(JPEG_MARKER_PREFIX)
+                    output.write(JPEG_START_MARKER)
+                }
+            } else {
+                output.write(current)
+                if (output.size() > MAX_LIVE_VIEW_FRAME_BYTES) {
+                    error("Live view JPEG frame exceeded $MAX_LIVE_VIEW_FRAME_BYTES bytes.")
+                }
+                if (previous == JPEG_MARKER_PREFIX && current == JPEG_END_MARKER) {
+                    return output.toByteArray()
+                }
+            }
+
+            previous = current
+        }
+
+        if (foundStart) {
+            error("Live view response ended before the JPEG frame was complete.")
+        }
+        error("Live view response did not contain a JPEG frame.")
+    }
+
+    private fun String?.isTextLikeContentType(): Boolean =
+        this != null && (
+            startsWith("text/", ignoreCase = true) ||
+                contains("json", ignoreCase = true) ||
+                contains("html", ignoreCase = true)
+            )
+
+    private companion object {
+        const val JPEG_MARKER_PREFIX = 0xFF
+        const val JPEG_START_MARKER = 0xD8
+        const val JPEG_END_MARKER = 0xD9
+        const val MAX_LIVE_VIEW_SCAN_BYTES = 16 * 1024 * 1024
+        const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024
+        const val MAX_ERROR_BODY_CHARS = 2_000
     }
 }
 

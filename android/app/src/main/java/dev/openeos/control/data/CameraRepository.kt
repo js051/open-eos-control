@@ -48,6 +48,7 @@ class CameraRepository {
 
     fun nextLiveViewFrameUrl(): String = client.liveViewFrameUrl(++frameVersion)
 
+    suspend fun fetchLiveViewFrame(): LiveViewFrame = client.liveViewFrame(++frameVersion)
 
     companion object {
         const val DEFAULT_CAMERA_BASE_URL = "http://192.168.1.2:8080"

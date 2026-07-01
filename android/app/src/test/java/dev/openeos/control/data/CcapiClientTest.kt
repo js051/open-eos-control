@@ -3,8 +3,10 @@ package dev.openeos.control.data
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okio.Buffer
 import org.json.JSONObject
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -123,10 +125,45 @@ class CcapiClientTest {
         assertEquals("${server.url("/").toString().trimEnd('/')}/ccapi/liveview/frame?t=42", url)
     }
 
+    @Test
+    fun liveViewFrameExtractsSingleJpegFrame() = runTest {
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x01, 0x02, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(binaryResponse(jpeg, "image/jpeg"))
+
+        val frame = client.liveViewFrame(cacheKey = 7)
+        val request = server.takeRequest()
+
+        assertEquals("/ccapi/liveview/frame?t=7", request.path)
+        assertEquals("GET", request.method)
+        assertEquals("image/jpeg", frame.contentType)
+        assertEquals("${server.url("/").toString().trimEnd('/')}/ccapi/liveview/frame?t=7", frame.sourceUrl)
+        assertArrayEquals(jpeg, frame.bytes)
+    }
+
+    @Test
+    fun liveViewFrameExtractsFirstJpegFromMultipartStream() = runTest {
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x03, 0x04, 0xFF.toByte(), 0xD9.toByte())
+        val multipart = "--frame\r\nContent-Type: image/jpeg\r\n\r\n".toByteArray() +
+            jpeg +
+            "\r\n--frame\r\n".toByteArray()
+        server.enqueue(binaryResponse(multipart, "multipart/x-mixed-replace; boundary=frame"))
+
+        val frame = client.liveViewFrame(cacheKey = 8)
+
+        assertEquals("/ccapi/liveview/frame?t=8", server.takeRequest().path)
+        assertEquals("multipart/x-mixed-replace; boundary=frame", frame.contentType)
+        assertArrayEquals(jpeg, frame.bytes)
+    }
+
     private fun jsonResponse(body: String): MockResponse =
         MockResponse()
             .setHeader("content-type", "application/json")
             .setBody(body)
+
+    private fun binaryResponse(body: ByteArray, contentType: String): MockResponse =
+        MockResponse()
+            .setHeader("content-type", contentType)
+            .setBody(Buffer().write(body))
 
     private companion object {
         const val INFO_JSON = """

@@ -34,6 +34,12 @@ data class CameraCapabilities(
     val whiteBalance: List<String>,
 )
 
+data class LiveViewFrame(
+    val bytes: ByteArray,
+    val contentType: String?,
+    val sourceUrl: String,
+)
+
 data class FocusResult(
     val ok: Boolean,
     val x: Double,
