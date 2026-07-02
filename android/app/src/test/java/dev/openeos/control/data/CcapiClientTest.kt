@@ -126,6 +126,30 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realLiveViewFrameUrlUsesFlipEndpoint() {
+        client.forceRealCamera()
+
+        val url = client.liveViewFrameUrl(cacheKey = 42)
+
+        assertEquals("${server.url("/").toString().trimEnd('/')}/ccapi/ver100/shooting/liveview/flip?t=42", url)
+    }
+
+    @Test
+    fun startLiveViewPostsCanonDisplayAndSize() = runTest {
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.startLiveView()
+        val request = server.takeRequest()
+        val body = JSONObject(request.body.readUtf8())
+
+        assertEquals("/ccapi/ver100/shooting/liveview", request.path)
+        assertEquals("POST", request.method)
+        assertEquals("on", body.getString("cameradisplay"))
+        assertEquals("medium", body.getString("liveviewsize"))
+    }
+
+    @Test
     fun liveViewFrameExtractsSingleJpegFrame() = runTest {
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x01, 0x02, 0xFF.toByte(), 0xD9.toByte())
         server.enqueue(binaryResponse(jpeg, "image/jpeg"))
@@ -155,6 +179,22 @@ class CcapiClientTest {
         assertArrayEquals(jpeg, frame.bytes)
     }
 
+    @Test
+    fun liveViewFrameFallsBackFromFlipToFlipDetail() = runTest {
+        client.forceRealCamera()
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x05, 0x06, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(MockResponse().setResponseCode(404).setHeader("content-type", "text/plain").setBody("not found"))
+        server.enqueue(binaryResponse(jpeg, "image/jpeg"))
+
+        val frame = client.liveViewFrame(cacheKey = 9)
+        val flipRequest = server.takeRequest()
+        val flipDetailRequest = server.takeRequest()
+
+        assertEquals("/ccapi/ver100/shooting/liveview/flip?t=9", flipRequest.path)
+        assertEquals("/ccapi/ver100/shooting/liveview/flipdetail?kind=image&t=9", flipDetailRequest.path)
+        assertArrayEquals(jpeg, frame.bytes)
+    }
+
     private fun jsonResponse(body: String): MockResponse =
         MockResponse()
             .setHeader("content-type", "application/json")
@@ -164,6 +204,17 @@ class CcapiClientTest {
         MockResponse()
             .setHeader("content-type", contentType)
             .setBody(Buffer().write(body))
+
+    private fun CcapiClient.forceRealCamera(prefix: String = "/ccapi/ver100") {
+        javaClass.getDeclaredField("isRealCamera").apply {
+            isAccessible = true
+            setBoolean(this@forceRealCamera, true)
+        }
+        javaClass.getDeclaredField("apiVersionPrefix").apply {
+            isAccessible = true
+            set(this@forceRealCamera, prefix)
+        }
+    }
 
     private companion object {
         const val INFO_JSON = """

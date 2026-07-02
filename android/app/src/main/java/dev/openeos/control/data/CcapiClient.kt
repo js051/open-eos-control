@@ -356,7 +356,12 @@ class CcapiClient(
 
     suspend fun startLiveView() {
         if (isRealCamera) {
-            postOk("$apiVersionPrefix/shooting/liveview", JSONObject())
+            postOk(
+                "$apiVersionPrefix/shooting/liveview",
+                JSONObject()
+                    .put("cameradisplay", "on")
+                    .put("liveviewsize", "medium"),
+            )
         }
     }
 
@@ -391,24 +396,48 @@ class CcapiClient(
     }
 
     fun liveViewFrameUrl(cacheKey: Long): String =
-        if (isRealCamera) {
-            "$baseUrl$apiVersionPrefix/shooting/liveview?t=$cacheKey"
-        } else {
-            "$baseUrl/ccapi/liveview/frame?t=$cacheKey"
-        }
+        liveViewFrameUrls(cacheKey).first()
 
     suspend fun liveViewFrame(cacheKey: Long): LiveViewFrame {
-        val sourceUrl = liveViewFrameUrl(cacheKey)
-        val request = Request.Builder()
-            .url(sourceUrl)
-            .get()
-            .header("Accept", "multipart/x-mixed-replace,image/jpeg,image/*,*/*")
-            .header("Cache-Control", "no-cache")
-            .header("Pragma", "no-cache")
-            .header("Connection", "close")
-            .build()
+        val errors = mutableListOf<String>()
 
-        return requestLiveViewFrame(request, sourceUrl)
+        liveViewFrameUrls(cacheKey).forEach { sourceUrl ->
+            val request = Request.Builder()
+                .url(sourceUrl)
+                .get()
+                .header("Accept", "multipart/x-mixed-replace,image/jpeg,image/*,*/*")
+                .header("Cache-Control", "no-cache")
+                .header("Pragma", "no-cache")
+                .header("Connection", "close")
+                .build()
+
+            try {
+                return requestLiveViewFrame(request, sourceUrl)
+            } catch (exception: Exception) {
+                errors.add("$sourceUrl\n${exception.javaClass.simpleName}: ${exception.message ?: "Unknown error"}")
+            }
+        }
+
+        error(
+            "Live view frame failed on all candidate endpoints:\n" +
+                errors.joinToString(separator = "\n\n") { "- $it" }
+        )
+    }
+
+    private fun liveViewFrameUrls(cacheKey: Long): List<String> =
+        if (isRealCamera) {
+            listOf(
+                "$baseUrl$apiVersionPrefix/shooting/liveview/flip",
+                "$baseUrl$apiVersionPrefix/shooting/liveview/flipdetail?kind=image",
+                "$baseUrl$apiVersionPrefix/shooting/liveview",
+            ).map { it.withCacheBust(cacheKey) }
+        } else {
+            listOf("$baseUrl/ccapi/liveview/frame".withCacheBust(cacheKey))
+        }
+
+    private fun String.withCacheBust(cacheKey: Long): String {
+        val separator = if (contains("?")) "&" else "?"
+        return "$this${separator}t=$cacheKey"
     }
 
     private suspend fun getJson(path: String): JSONObject = requestJson(
