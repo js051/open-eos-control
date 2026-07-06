@@ -664,7 +664,7 @@ private fun MonitorFrame(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf(1, 6, 12, 15).forEach { fps ->
+                listOf(1, 6, 12, 15, 24, 30).forEach { fps ->
                     ChoiceButton(
                         selected = fps == liveViewFrameRateFps,
                         enabled = enabled,

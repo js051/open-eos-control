@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import android.graphics.BitmapFactory
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraRepository
@@ -229,13 +230,12 @@ class CameraViewModel(
         val state = _uiState.value
         if (!state.connected || !state.liveViewAutoRefresh) return
 
-        val delayMillis = fpsToDelayMillis(state.liveViewFrameRateFps)
-
         liveViewJob = viewModelScope.launch {
             while (isActive) {
-                delay(delayMillis)
                 val latest = _uiState.value
                 if (!latest.connected || !latest.liveViewAutoRefresh) break
+                val frameStartedAt = SystemClock.elapsedRealtime()
+
                 if (repository.isRealCamera()) {
                     refreshLiveViewFrameInternal(reportErrors = false)
                 } else {
@@ -250,6 +250,10 @@ class CameraViewModel(
                         }
                     }
                 }
+
+                val frameIntervalMillis = fpsToFrameIntervalMillis(_uiState.value.liveViewFrameRateFps)
+                val elapsedMillis = SystemClock.elapsedRealtime() - frameStartedAt
+                delay((frameIntervalMillis - elapsedMillis).coerceAtLeast(0L))
             }
         }
     }
@@ -278,6 +282,6 @@ class CameraViewModel(
         error = error,
     )
 
-    private fun fpsToDelayMillis(fps: Int): Long =
+    private fun fpsToFrameIntervalMillis(fps: Int): Long =
         (1_000L / fps.coerceIn(MIN_LIVE_VIEW_FPS, MAX_LIVE_VIEW_FPS)).coerceAtLeast(1L)
 }

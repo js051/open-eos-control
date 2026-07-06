@@ -7,7 +7,7 @@ import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 
 const val MIN_LIVE_VIEW_FPS = 1
-const val MAX_LIVE_VIEW_FPS = 15
+const val MAX_LIVE_VIEW_FPS = 30
 const val DEFAULT_LIVE_VIEW_FPS = 6
 
 data class CameraUiState(
