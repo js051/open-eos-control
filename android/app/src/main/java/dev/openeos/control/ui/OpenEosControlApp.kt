@@ -30,6 +30,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -58,6 +60,7 @@ import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.createUnsafeOkHttpClient
 import okhttp3.OkHttpClient
 import coil.ImageLoader
+import kotlin.math.roundToInt
 
 @Composable
 fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
@@ -74,6 +77,7 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
                     onRefresh = viewModel::refresh,
                     onRefreshLiveView = viewModel::refreshLiveViewFrame,
                     onLiveViewAutoRefreshChange = viewModel::setLiveViewAutoRefresh,
+                    onLiveViewFrameRateChange = viewModel::setLiveViewFrameRate,
                     onToggleRecording = viewModel::toggleRecording,
                     onSetIso = viewModel::setIso,
                     onSetShutter = viewModel::setShutter,
@@ -97,6 +101,7 @@ private data class CameraActions(
     val onRefresh: () -> Unit,
     val onRefreshLiveView: () -> Unit,
     val onLiveViewAutoRefreshChange: (Boolean) -> Unit,
+    val onLiveViewFrameRateChange: (Int) -> Unit,
     val onToggleRecording: () -> Unit,
     val onSetIso: (String) -> Unit,
     val onSetShutter: (String) -> Unit,
@@ -248,11 +253,13 @@ private fun CameraControlsColumn(
             liveViewFrameUrl = state.liveViewFrameUrl,
             liveViewBitmap = state.liveViewBitmap,
             liveViewAutoRefresh = state.liveViewAutoRefresh,
+            liveViewFrameRateFps = state.liveViewFrameRateFps,
             focusPoint = state.focusPoint,
             enabled = state.connected && !state.busy,
             onTapFocus = actions.onTapFocus,
             onRefreshLiveView = actions.onRefreshLiveView,
             onLiveViewAutoRefreshChange = actions.onLiveViewAutoRefreshChange,
+            onLiveViewFrameRateChange = actions.onLiveViewFrameRateChange,
         )
         RecordButton(
             enabled = state.connected && !state.busy,
@@ -510,36 +517,43 @@ private fun MonitorPanel(
     liveViewFrameUrl: String?,
     liveViewBitmap: Bitmap?,
     liveViewAutoRefresh: Boolean,
+    liveViewFrameRateFps: Int,
     focusPoint: FocusPoint?,
     enabled: Boolean,
     onTapFocus: (Double, Double) -> Unit,
     onRefreshLiveView: () -> Unit,
     onLiveViewAutoRefreshChange: (Boolean) -> Unit,
+    onLiveViewFrameRateChange: (Int) -> Unit,
 ) {
     MonitorFrame(
         status = status,
         liveViewFrameUrl = liveViewFrameUrl,
         liveViewBitmap = liveViewBitmap,
         liveViewAutoRefresh = liveViewAutoRefresh,
+        liveViewFrameRateFps = liveViewFrameRateFps,
         focusPoint = focusPoint,
         enabled = enabled,
         onTapFocus = onTapFocus,
         onRefreshLiveView = onRefreshLiveView,
         onLiveViewAutoRefreshChange = onLiveViewAutoRefreshChange,
+        onLiveViewFrameRateChange = onLiveViewFrameRateChange,
     )
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun MonitorFrame(
     status: CameraStatus?,
     liveViewFrameUrl: String?,
     liveViewBitmap: Bitmap?,
     liveViewAutoRefresh: Boolean,
+    liveViewFrameRateFps: Int,
     focusPoint: FocusPoint?,
     enabled: Boolean,
     onTapFocus: (Double, Double) -> Unit,
     onRefreshLiveView: () -> Unit,
     onLiveViewAutoRefreshChange: (Boolean) -> Unit,
+    onLiveViewFrameRateChange: (Int) -> Unit,
 ) {
     Panel {
         Box(
@@ -619,6 +633,46 @@ private fun MonitorFrame(
             )
             SecondaryButton(enabled = enabled, onClick = onRefreshLiveView) {
                 Text("Frame")
+            }
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Frame rate", color = AppSubtleText)
+                Spacer(Modifier.weight(1f))
+                Text("$liveViewFrameRateFps fps", color = AppText, fontWeight = FontWeight.SemiBold)
+            }
+            Slider(
+                value = liveViewFrameRateFps.toFloat(),
+                onValueChange = { onLiveViewFrameRateChange(it.roundToInt()) },
+                valueRange = MIN_LIVE_VIEW_FPS.toFloat()..MAX_LIVE_VIEW_FPS.toFloat(),
+                steps = (MAX_LIVE_VIEW_FPS - MIN_LIVE_VIEW_FPS - 1).coerceAtLeast(0),
+                enabled = enabled,
+                colors = SliderDefaults.colors(
+                    thumbColor = AppAccent,
+                    activeTrackColor = AppAccent,
+                    inactiveTrackColor = AppBorder,
+                ),
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(1, 6, 12, 15).forEach { fps ->
+                    ChoiceButton(
+                        selected = fps == liveViewFrameRateFps,
+                        enabled = enabled,
+                        onClick = { onLiveViewFrameRateChange(fps) },
+                    ) {
+                        Text("${fps} fps")
+                    }
+                }
             }
         }
     }
@@ -870,15 +924,19 @@ private fun SecondaryButton(
 @Composable
 private fun ChoiceButton(
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     Button(
         modifier = Modifier.widthIn(min = 72.dp),
+        enabled = enabled,
         shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) AppAccent else AppPanelAlt,
             contentColor = if (selected) Color(0xFF111318) else AppText,
+            disabledContainerColor = Color(0xFF1B2230),
+            disabledContentColor = AppMutedText,
         ),
         onClick = onClick,
     ) {

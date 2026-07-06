@@ -108,6 +108,15 @@ class CameraViewModel(
         }
     }
 
+    fun setLiveViewFrameRate(fps: Int) {
+        val clampedFps = fps.coerceIn(MIN_LIVE_VIEW_FPS, MAX_LIVE_VIEW_FPS)
+        val changed = _uiState.value.liveViewFrameRateFps != clampedFps
+        _uiState.update { it.copy(liveViewFrameRateFps = clampedFps) }
+        if (changed && _uiState.value.connected && _uiState.value.liveViewAutoRefresh) {
+            startLiveViewLoopIfNeeded()
+        }
+    }
+
     fun setIso(value: String) = updateStatus { repository.setIso(value) }
 
     fun setShutter(value: String) = updateStatus { repository.setShutter(value) }
@@ -220,7 +229,7 @@ class CameraViewModel(
         val state = _uiState.value
         if (!state.connected || !state.liveViewAutoRefresh) return
 
-        val delayMillis = if (repository.isRealCamera()) 150L else LIVE_VIEW_REFRESH_MILLIS
+        val delayMillis = fpsToDelayMillis(state.liveViewFrameRateFps)
 
         liveViewJob = viewModelScope.launch {
             while (isActive) {
@@ -269,7 +278,6 @@ class CameraViewModel(
         error = error,
     )
 
-    private companion object {
-        const val LIVE_VIEW_REFRESH_MILLIS = 1_000L
-    }
+    private fun fpsToDelayMillis(fps: Int): Long =
+        (1_000L / fps.coerceIn(MIN_LIVE_VIEW_FPS, MAX_LIVE_VIEW_FPS)).coerceAtLeast(1L)
 }

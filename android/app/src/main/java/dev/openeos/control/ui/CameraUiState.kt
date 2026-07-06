@@ -6,6 +6,10 @@ import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 
+const val MIN_LIVE_VIEW_FPS = 1
+const val MAX_LIVE_VIEW_FPS = 15
+const val DEFAULT_LIVE_VIEW_FPS = 6
+
 data class CameraUiState(
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
     val info: CameraInfo? = null,
@@ -14,6 +18,7 @@ data class CameraUiState(
     val liveViewFrameUrl: String? = null,
     val liveViewBitmap: Bitmap? = null,
     val liveViewAutoRefresh: Boolean = true,
+    val liveViewFrameRateFps: Int = DEFAULT_LIVE_VIEW_FPS,
     val focusPoint: FocusPoint? = null,
     val error: String? = null,
     val busy: Boolean = false,
