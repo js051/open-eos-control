@@ -33,6 +33,7 @@ class CameraRepositoryTest {
 
         val session = repository.connect(server.url("/").toString())
 
+        assertEquals(CameraTransport.CCAPI_NETWORK, session.transport)
         assertEquals("Canon EOS R6 Mark III", session.info.model)
         assertEquals("800", session.status.exposure.iso)
         assertEquals(listOf("100", "800", "1600"), session.capabilities.iso)

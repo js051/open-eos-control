@@ -1,58 +1,64 @@
 package dev.openeos.control.data
 
-class CameraRepository {
-    private var client = CcapiClient(DEFAULT_CAMERA_BASE_URL)
+class CameraRepository(
+    private val backendFactory: CameraBackendFactory = CameraBackendFactory(),
+) {
+    private var backend: CameraControlBackend = backendFactory.create(
+        CameraConnection.CcapiNetwork(DEFAULT_CAMERA_BASE_URL)
+    )
     private var frameVersion = 0L
 
-    fun isRealCamera(): Boolean = client.isRealCamera
+    fun isRealCamera(): Boolean = backend.prefersBitmapLiveViewFrames
 
     suspend fun connect(baseUrl: String): CameraSession {
-        client = CcapiClient(baseUrl)
-        client.initialize()
+        val connection = CameraConnection.CcapiNetwork(baseUrl)
+        backend = backendFactory.create(connection)
+        backend.initialize()
         try {
-            client.startLiveView()
+            backend.startLiveView()
         } catch (e: Exception) {
             // ignore failure to start live view
         }
         frameVersion = 0L
         return CameraSession(
-            info = client.info(),
-            status = client.status(),
-            capabilities = client.capabilities(),
+            transport = backend.transport,
+            info = backend.info(),
+            status = backend.status(),
+            capabilities = backend.capabilities(),
             liveViewFrameUrl = nextLiveViewFrameUrl(),
         )
     }
 
     suspend fun disconnect() {
         try {
-            client.stopLiveView()
+            backend.stopLiveView()
         } catch (e: Exception) {
             // ignore failure to stop live view
         }
     }
 
-    suspend fun refreshStatus(): CameraStatus = client.status()
+    suspend fun refreshStatus(): CameraStatus = backend.status()
 
-    suspend fun setIso(value: String): CameraStatus = client.setExposure(iso = value)
+    suspend fun setIso(value: String): CameraStatus = backend.setExposure(iso = value)
 
-    suspend fun setShutter(value: String): CameraStatus = client.setExposure(shutter = value)
+    suspend fun setShutter(value: String): CameraStatus = backend.setExposure(shutter = value)
 
-    suspend fun setAperture(value: String): CameraStatus = client.setExposure(aperture = value)
+    suspend fun setAperture(value: String): CameraStatus = backend.setExposure(aperture = value)
 
-    suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
+    suspend fun setWhiteBalance(value: String): CameraStatus = backend.setWhiteBalance(value)
 
-    suspend fun setCameraSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+    suspend fun setCameraSetting(key: String, value: String): CameraStatus = backend.setSetting(key, value)
 
-    suspend fun refreshCapabilities(): CameraCapabilities = client.capabilities()
+    suspend fun refreshCapabilities(): CameraCapabilities = backend.capabilities()
 
     suspend fun toggleRecording(recording: Boolean): CameraStatus =
-        if (recording) client.stopRecording() else client.startRecording()
+        if (recording) backend.stopRecording() else backend.startRecording()
 
-    suspend fun tapFocus(x: Double, y: Double): FocusResult = client.tapFocus(x, y)
+    suspend fun tapFocus(x: Double, y: Double): FocusResult = backend.tapFocus(x, y)
 
-    fun nextLiveViewFrameUrl(): String = client.liveViewFrameUrl(++frameVersion)
+    fun nextLiveViewFrameUrl(): String = backend.liveViewFrameUrl(++frameVersion)
 
-    suspend fun fetchLiveViewFrame(): LiveViewFrame = client.liveViewFrame(++frameVersion)
+    suspend fun fetchLiveViewFrame(): LiveViewFrame = backend.liveViewFrame(++frameVersion)
 
     companion object {
         const val DEFAULT_CAMERA_BASE_URL = "http://192.168.1.2:8080"
@@ -62,6 +68,7 @@ class CameraRepository {
 }
 
 data class CameraSession(
+    val transport: CameraTransport,
     val info: CameraInfo,
     val status: CameraStatus,
     val capabilities: CameraCapabilities,
