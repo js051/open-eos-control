@@ -8,25 +8,53 @@ enum class CameraTransport(
     DESKTOP_BRIDGE("Desktop bridge"),
 }
 
+enum class CameraHostPlatform {
+    ANDROID,
+    IOS,
+    WINDOWS,
+    MACOS,
+    LINUX,
+    UNKNOWN,
+}
+
 sealed interface CameraConnection {
     val transport: CameraTransport
+    val platform: CameraHostPlatform
 
     data class CcapiNetwork(
         val baseUrl: String,
+        override val platform: CameraHostPlatform = CameraHostPlatform.ANDROID,
     ) : CameraConnection {
         override val transport: CameraTransport = CameraTransport.CCAPI_NETWORK
+    }
+
+    data class AndroidUsbPtp(
+        val deviceName: String? = null,
+        val vendorId: Int = CANON_USB_VENDOR_ID,
+        val productId: Int? = null,
+    ) : CameraConnection {
+        override val transport: CameraTransport = CameraTransport.USB_PTP
+        override val platform: CameraHostPlatform = CameraHostPlatform.ANDROID
+    }
+
+    data class DesktopBridge(
+        val baseUrl: String,
+        override val platform: CameraHostPlatform = CameraHostPlatform.UNKNOWN,
+    ) : CameraConnection {
+        override val transport: CameraTransport = CameraTransport.DESKTOP_BRIDGE
     }
 }
 
 interface CameraControlBackend {
     val transport: CameraTransport
+    val connection: CameraConnection
     val prefersBitmapLiveViewFrames: Boolean
 
     suspend fun initialize()
     suspend fun info(): CameraInfo
     suspend fun status(): CameraStatus
     suspend fun capabilities(): CameraCapabilities
-    suspend fun startLiveView()
+    suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest())
     suspend fun stopLiveView()
     suspend fun setExposure(iso: String? = null, shutter: String? = null, aperture: String? = null): CameraStatus
     suspend fun setWhiteBalance(value: String): CameraStatus
@@ -34,14 +62,21 @@ interface CameraControlBackend {
     suspend fun startRecording(): CameraStatus
     suspend fun stopRecording(): CameraStatus
     suspend fun tapFocus(x: Double, y: Double): FocusResult
-    fun liveViewFrameUrl(cacheKey: Long): String
-    suspend fun liveViewFrame(cacheKey: Long): LiveViewFrame
+    suspend fun captureStill(): CameraStatus = unsupported(CameraFeature.STILL_CAPTURE)
+    suspend fun halfPressShutter(): CameraStatus = unsupported(CameraFeature.SHUTTER_HALF_PRESS)
+    suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusResult = unsupported(CameraFeature.FOCUS_DRIVE)
+    suspend fun listMedia(): List<CameraMediaItem> = unsupported(CameraFeature.MEDIA_BROWSER)
+    suspend fun downloadMedia(item: CameraMediaItem): CameraMediaFile = unsupported(CameraFeature.MEDIA_DOWNLOAD)
+    fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String
+    suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame
 }
 
 class CcapiCameraBackend(
     baseUrl: String,
 ) : CameraControlBackend {
     private val client = CcapiClient(baseUrl)
+
+    override val connection: CameraConnection = CameraConnection.CcapiNetwork(baseUrl)
 
     override val transport: CameraTransport = CameraTransport.CCAPI_NETWORK
 
@@ -56,7 +91,7 @@ class CcapiCameraBackend(
 
     override suspend fun capabilities(): CameraCapabilities = client.capabilities()
 
-    override suspend fun startLiveView() = client.startLiveView()
+    override suspend fun startLiveView(request: LiveViewRequest) = client.startLiveView(request)
 
     override suspend fun stopLiveView() = client.stopLiveView()
 
@@ -73,14 +108,110 @@ class CcapiCameraBackend(
 
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = client.tapFocus(x, y)
 
-    override fun liveViewFrameUrl(cacheKey: Long): String = client.liveViewFrameUrl(cacheKey)
+    override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
 
-    override suspend fun liveViewFrame(cacheKey: Long): LiveViewFrame = client.liveViewFrame(cacheKey)
+    override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame = client.liveViewFrame(cacheKey, request)
+}
+
+class PlannedCameraBackend(
+    override val connection: CameraConnection,
+) : CameraControlBackend {
+    override val transport: CameraTransport = connection.transport
+
+    override val prefersBitmapLiveViewFrames: Boolean = false
+
+    override suspend fun initialize() {
+        throw UnsupportedOperationException("${transport.label} is planned but not implemented in the Android app yet.")
+    }
+
+    override suspend fun info(): CameraInfo = CameraInfo(
+        connected = false,
+        model = "Planned ${transport.label}",
+        serial = "planned",
+        api = transport.name.lowercase(),
+    )
+
+    override suspend fun status(): CameraStatus = CameraStatus(
+        connected = false,
+        batteryLevel = 0,
+        batteryStatus = "unknown",
+        recording = false,
+        mode = "planned",
+        mediaAvailable = false,
+        remainingMinutes = 0,
+        exposure = ExposureState(
+            iso = "-",
+            shutter = "-",
+            aperture = "-",
+            whiteBalance = "-",
+        ),
+    )
+
+    override suspend fun capabilities(): CameraCapabilities {
+        val matrix = when (transport) {
+            CameraTransport.USB_PTP -> CapabilityMatrix.androidUsbPtpRoadmap()
+            CameraTransport.DESKTOP_BRIDGE -> CapabilityMatrix.desktopBridgeRoadmap()
+            CameraTransport.CCAPI_NETWORK -> CapabilityMatrix.ccapiNetwork()
+        }
+        return CameraCapabilities(
+            iso = emptyList(),
+            shutter = emptyList(),
+            aperture = emptyList(),
+            whiteBalance = emptyList(),
+            matrix = matrix,
+            liveView = LiveViewCapabilities(),
+            profile = CameraProfile.R6_MARK_III,
+        )
+    }
+
+    override suspend fun startLiveView(request: LiveViewRequest) = unsupported<Unit>(CameraFeature.LIVE_VIEW)
+
+    override suspend fun stopLiveView() = unsupported<Unit>(CameraFeature.LIVE_VIEW)
+
+    override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus =
+        unsupported(CameraFeature.EXPOSURE_CONTROL)
+
+    override suspend fun setWhiteBalance(value: String): CameraStatus =
+        unsupported(CameraFeature.WHITE_BALANCE_CONTROL)
+
+    override suspend fun setSetting(key: String, value: String): CameraStatus =
+        unsupported(CameraFeature.ADVANCED_SETTINGS)
+
+    override suspend fun startRecording(): CameraStatus = unsupported(CameraFeature.VIDEO_RECORDING)
+
+    override suspend fun stopRecording(): CameraStatus = unsupported(CameraFeature.VIDEO_RECORDING)
+
+    override suspend fun tapFocus(x: Double, y: Double): FocusResult = unsupported(CameraFeature.TAP_FOCUS)
+
+    override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String =
+        throw UnsupportedOperationException("${transport.label} live view is planned but not implemented yet.")
+
+    override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame =
+        unsupported(CameraFeature.LIVE_VIEW)
 }
 
 class CameraBackendFactory {
     fun create(connection: CameraConnection): CameraControlBackend =
         when (connection) {
             is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection.baseUrl)
+            is CameraConnection.AndroidUsbPtp -> PlannedCameraBackend(connection)
+            is CameraConnection.DesktopBridge -> PlannedCameraBackend(connection)
         }
 }
+
+enum class FocusDriveDirection {
+    NEAR,
+    FAR,
+}
+
+enum class FocusDriveStep {
+    SMALL,
+    MEDIUM,
+    LARGE,
+}
+
+fun <T> CameraControlBackend.unsupported(feature: CameraFeature): T {
+    throw UnsupportedOperationException("${feature.label} is not supported by ${transport.label}.")
+}
+
+const val CANON_USB_VENDOR_ID = 0x04A9

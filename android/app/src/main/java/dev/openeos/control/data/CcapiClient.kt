@@ -295,6 +295,8 @@ class CcapiClient(
                 aperture = apertureList,
                 whiteBalance = wbList,
                 advancedSettings = advancedSettings,
+                matrix = CapabilityMatrix.ccapiNetwork(),
+                liveView = LiveViewCapabilities.ccapiNetwork(),
             )
         } else {
             getJson("/ccapi/capabilities").toCameraCapabilities()
@@ -362,13 +364,13 @@ class CcapiClient(
         return status()
     }
 
-    suspend fun startLiveView() {
+    suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
         if (isRealCamera) {
             postOk(
                 "$apiVersionPrefix/shooting/liveview",
                 JSONObject()
                     .put("cameradisplay", "on")
-                    .put("liveviewsize", "medium"),
+                    .put("liveviewsize", request.size.ccapiValue),
             )
         }
     }
@@ -405,13 +407,13 @@ class CcapiClient(
         }
     }
 
-    fun liveViewFrameUrl(cacheKey: Long): String =
-        liveViewFrameUrls(cacheKey).first()
+    fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String =
+        liveViewFrameUrls(cacheKey, request).first()
 
-    suspend fun liveViewFrame(cacheKey: Long): LiveViewFrame {
+    suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame {
         val errors = mutableListOf<String>()
 
-        liveViewFrameUrls(cacheKey).forEach { sourceUrl ->
+        liveViewFrameUrls(cacheKey, request).forEach { sourceUrl ->
             val request = Request.Builder()
                 .url(sourceUrl)
                 .get()
@@ -434,13 +436,20 @@ class CcapiClient(
         )
     }
 
-    private fun liveViewFrameUrls(cacheKey: Long): List<String> =
+    private fun liveViewFrameUrls(cacheKey: Long, request: LiveViewRequest): List<String> =
         if (isRealCamera) {
-            listOf(
-                "$baseUrl$apiVersionPrefix/shooting/liveview/flip",
-                "$baseUrl$apiVersionPrefix/shooting/liveview/flipdetail?kind=image",
-                "$baseUrl$apiVersionPrefix/shooting/liveview",
-            ).map { it.withCacheBust(cacheKey) }
+            when (request.source) {
+                LiveViewSource.AUTO,
+                LiveViewSource.CCAPI_JPEG_POLLING -> listOf(
+                    "$baseUrl$apiVersionPrefix/shooting/liveview/flip",
+                    "$baseUrl$apiVersionPrefix/shooting/liveview/flipdetail?kind=image",
+                    "$baseUrl$apiVersionPrefix/shooting/liveview",
+                )
+
+                LiveViewSource.CCAPI_RTP -> error("CCAPI RTP live view is planned but not implemented by the JPEG frame reader yet.")
+
+                else -> error("${request.source.label} is not available through the CCAPI network backend.")
+            }.map { it.withCacheBust(cacheKey) }
         } else {
             listOf("$baseUrl/ccapi/liveview/frame".withCacheBust(cacheKey))
         }
@@ -732,6 +741,8 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
     shutter = getJSONArray("shutter").toStringList(),
     aperture = getJSONArray("aperture").toStringList(),
     whiteBalance = getJSONArray("white_balance").toStringList(),
+    matrix = CapabilityMatrix.ccapiNetwork(),
+    liveView = LiveViewCapabilities.simulator(),
 )
 
 private fun JSONObject.toAdvancedSettingControls(): List<CameraSettingControl> {

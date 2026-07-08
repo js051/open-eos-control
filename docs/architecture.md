@@ -1,15 +1,16 @@
 # Architecture
 
-Open EOS Control is Android-first.
+Open EOS Control is an Android-first project with a multi-platform camera core. The first real-camera target is Canon EOS R6 Mark III, but model-specific behavior must be expressed as profiles and capabilities so the same structure can grow across EOS bodies.
 
-## Runtime
+## Runtime Shape
 
 ```text
-Android app
+Android / iOS / PC app
+  -> CameraRepository / platform session state
   -> CameraControlBackend
      -> CCAPI network backend
-     -> future USB PTP backend
-     -> future desktop bridge backend
+     -> Android USB/PTP backend
+     -> desktop bridge backend
   -> Canon EOS camera
 ```
 
@@ -21,22 +22,33 @@ Android app
   -> fake camera state
 ```
 
-The simulator is not part of the product runtime. It exists so Android UI and state flows can be tested before a camera is connected.
+The simulator is not part of the product runtime. It exists so UI, state flows, and backend contracts can be tested before a camera is connected.
 
-## Boundaries
+## Core Contract
 
-- Android owns product UI, camera session state, connection handling, and monitor-style controls.
-- `CameraViewModel` owns UI state, busy/error transitions, and user actions.
-- `CameraRepository` owns camera session operations and hides transport-specific backends from UI code.
-- `CameraControlBackend` is the transport boundary. Each backend exposes the same camera actions, status, settings, and live view contract.
-- `CcapiCameraBackend` adapts the raw CCAPI client into the shared backend contract.
-- `CcapiClient` owns raw HTTP request/response mapping for the current CCAPI-compatible endpoint set.
-- Simulator owns fake CCAPI responses for local development and automated checks.
-- No desktop backend is required for the current product path, but the architecture leaves room for one.
+- `CameraControlBackend` is the transport boundary. Each backend exposes the same identity, status, settings, recording, focus, media, and live view surface.
+- `CameraConnection` identifies how the app reaches a camera: CCAPI network, Android USB/PTP, or desktop bridge.
+- `CameraProfile` identifies camera-family behavior. `Canon EOS R6 Mark III` is the primary profile and the golden validation target.
+- `CapabilityMatrix` tells the UI and tests what is supported now versus planned for a backend.
+- `LiveViewRequest` and `LiveViewCapabilities` describe FPS, source, and size without hard-coding CCAPI polling into the UI.
 
-## Next Decisions
+## Platform Strategy
 
-- Decide whether the first wired backend should be Android USB/PTP direct control or a desktop bridge to EDSDK/libgphoto2.
-- Decide how to represent capabilities that only exist on some backends, such as direct capture download, bulb capture, or higher quality live view streams.
-- Decide whether live view should stay per-backend or become a source switch that can show CCAPI JPEG polling, RTP, USB/PTP preview, UVC, or HDMI capture.
-- Add reconnect, timeout, and camera-busy states before expanding monitor tools.
+- Android keeps the first complete app UI and owns direct phone-to-camera workflows.
+- iOS should start with CCAPI/Wi-Fi using the same command and capability vocabulary; iOS USB/PTP remains research until platform constraints are proven.
+- PC should start as a desktop bridge service. The bridge exposes the shared open protocol while internally using libgphoto2 or an optional user-installed Canon EDSDK adapter.
+
+## Backend Rules
+
+- Backend-specific power should appear as capabilities, not UI assumptions.
+- Unsupported operations must fail with explicit transport/feature errors.
+- Canon EDSDK must not be committed or redistributed in this open-source repo; keep it as an optional local adapter.
+- Live view sources are interchangeable at the contract level: CCAPI JPEG polling, CCAPI RTP, USB/PTP preview, and bridge streams.
+
+## Near-Term Milestones
+
+1. Keep CCAPI stable for R6 Mark III.
+2. Add Android USB/PTP diagnostics: USB enumeration, permission flow, endpoint discovery, PTP session open, device info, property list.
+3. Add Android USB/PTP still capture and setting writes.
+4. Add USB/PTP live view if R6 Mark III exposes compatible Canon vendor operations.
+5. Add desktop bridge contract tests, then libgphoto2 and optional EDSDK adapters.

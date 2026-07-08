@@ -1,10 +1,10 @@
 # Open EOS Control
 
-[繁體中文](README.zh-TW.md) | English
+English | [Traditional Chinese](README.zh-TW.md)
 
-Open EOS Control is an unofficial, open-source Android control app for Canon EOS cameras, starting with the Canon EOS R6 Mark III and Canon CCAPI over Wi-Fi.
+Open EOS Control is an unofficial, open-source Canon EOS control project. It is Android-first today, targets Canon EOS R6 Mark III first, and is structured to grow into PC, iOS, and Android clients that share the same camera-control concepts.
 
-The product target is an Android phone/tablet app that talks directly to the camera. The desktop pieces in this repo are only development support, mainly a fake CCAPI camera simulator.
+The project is not CCAPI-only. CCAPI over Wi-Fi is the first working backend; Android USB/PTP and a PC desktop bridge are planned backends behind the same camera core contract.
 
 ## Project Shape
 
@@ -12,52 +12,53 @@ The product target is an Android phone/tablet app that talks directly to the cam
 open-eos-control/
   android/       Android app, Kotlin + Jetpack Compose
   simulator/     Fake Canon CCAPI-compatible camera server
-  docs/          Design notes and development references
+  docs/          Architecture, transport, and bridge notes
 ```
 
-## Android App
+## Current Android App
 
 Open `android/` in Android Studio.
 
-This repo includes `android/local.properties.example`. A local `android/local.properties` can point at your SDK path, but it is intentionally ignored by git.
-
 The app currently includes:
 
-- Direct camera URL input
-- Direct Camera and Dev Simulator presets
-- Connect / refresh / disconnect
-- Camera status display
-- Live view frame display with auto/manual refresh controls
-- ISO, shutter, aperture, and white balance controls
-- REC start / stop
-- Tap-focus API hook through the data layer
-- Single-column scrolling layout for phone-width screens
+- Direct CCAPI camera URL input with HTTP/HTTPS presets
+- Dev simulator preset
+- Connect, refresh, and disconnect
+- Camera identity, transport, profile, battery, and storage display
+- Live view frame display with auto/manual refresh and FPS control
+- ISO, shutter, aperture, white balance, and dynamic advanced settings
+- REC start/stop
+- Tap focus hook through the shared backend layer
 
-The default Android URL is aimed at direct camera Wi-Fi control:
+Default direct camera presets:
 
 ```text
-http://192.168.0.1:8080
+http://192.168.1.2:8080
+https://192.168.1.2:443
 ```
 
-That address is a starting preset, not a guarantee. Use the IP/port shown by the camera CCAPI setup when testing with a real body.
+Use the IP and port shown by the camera CCAPI setup screen when testing with a real camera.
 
-For Android Emulator plus local simulator, use the Dev Simulator preset:
+For Android Emulator plus local simulator:
 
 ```text
 http://10.0.2.2:18080
 ```
 
-For a physical Android device with the local simulator, keep `docker compose up --build` running on the computer and enter the computer's LAN IP:
+For a physical Android device with the local simulator, run the simulator on the computer and enter the computer LAN IP:
 
 ```text
 http://<computer-lan-ip>:18080
 ```
 
-The `10.0.2.2` address only works inside the Android Emulator.
+## Build And Test
 
-CLI builds use the committed Gradle wrapper. On this Windows dev machine, use the helper script so Gradle runs with Android Studio's bundled JDK 17:
+This repo includes `android/local.properties.example`. A local `android/local.properties` can point at your SDK path, but it is intentionally ignored by git.
+
+On this Windows dev machine, use the helper script so Gradle runs with Android Studio's bundled JDK 17:
 
 ```powershell
+.\scripts\android-gradle.ps1 :app:testDebugUnitTest
 .\scripts\android-gradle.ps1 :app:assembleDebug
 ```
 
@@ -67,21 +68,7 @@ The debug APK is written to:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Self Tests
-
-Run Android unit tests:
-
-```powershell
-.\scripts\android-gradle.ps1 :app:testDebugUnitTest
-```
-
-Build the debug APK:
-
-```powershell
-.\scripts\android-gradle.ps1 :app:assembleDebug
-```
-
-GitHub Actions runs both tasks on every push to `main` and on pull requests.
+GitHub Actions runs tests and debug builds on pushes to `main` and on pull requests.
 
 ## Fake Camera Simulator
 
@@ -108,8 +95,13 @@ Useful endpoints:
 - `POST /ccapi/focus/tap`
 - `GET /ccapi/liveview/frame`
 
-## Camera Notes
+## Roadmap
 
-Canon describes CCAPI as the Wi-Fi/wireless Camera Control API path with Android support through CAP. The current app is structured for direct phone-to-camera control, but the endpoint map is still simulator-shaped until it is verified against Canon's CCAPI reference and an R6 Mark III body.
+- Keep CCAPI stable for R6 Mark III wireless control.
+- Add Android USB/PTP diagnostics, then still capture, setting writes, and live view where Canon vendor operations allow it.
+- Add a desktop bridge that exposes the same camera core contract while using libgphoto2 or a user-installed Canon EDSDK adapter.
+- Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
+
+See [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), and [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md).
 
 Open EOS Control is not affiliated with or endorsed by Canon. Canon and EOS are trademarks of their respective owners.

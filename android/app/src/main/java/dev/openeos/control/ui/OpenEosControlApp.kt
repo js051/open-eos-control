@@ -55,6 +55,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import coil.compose.AsyncImage
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
+import dev.openeos.control.data.CameraCapabilities
+import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraStatus
@@ -234,7 +236,12 @@ private fun ConnectionColumn(
                 Text("Disconnect")
             }
         }
-        CameraSummary(state.info, state.status)
+        CameraSummary(
+            info = state.info,
+            status = state.status,
+            capabilities = state.capabilities,
+            transportLabel = state.transport?.label,
+        )
         state.error?.let {
             ErrorPanel(message = it, onClick = actions.onClearError)
         }
@@ -251,6 +258,7 @@ private fun CameraControlsColumn(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        val liveViewEnabled = state.connected && state.supports(CameraFeature.LIVE_VIEW) && !state.busy
         MonitorPanel(
             status = state.status,
             liveViewFrameUrl = state.liveViewFrameUrl,
@@ -258,14 +266,14 @@ private fun CameraControlsColumn(
             liveViewAutoRefresh = state.liveViewAutoRefresh,
             liveViewFrameRateFps = state.liveViewFrameRateFps,
             focusPoint = state.focusPoint,
-            enabled = state.connected && !state.busy,
+            enabled = liveViewEnabled,
             onTapFocus = actions.onTapFocus,
             onRefreshLiveView = actions.onRefreshLiveView,
             onLiveViewAutoRefreshChange = actions.onLiveViewAutoRefreshChange,
             onLiveViewFrameRateChange = actions.onLiveViewFrameRateChange,
         )
         RecordButton(
-            enabled = state.connected && !state.busy,
+            enabled = state.connected && state.supports(CameraFeature.VIDEO_RECORDING) && !state.busy,
             recording = state.status?.recording == true,
             onClick = actions.onToggleRecording,
         )
@@ -412,12 +420,17 @@ private fun StorageIcon(available: Boolean, modifier: Modifier = Modifier) {
 private fun HeaderBlock() {
     Panel {
         Text("Open EOS Control", color = AppText, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-        Text("Direct Canon EOS CCAPI client interface", color = AppSubtleText, style = MaterialTheme.typography.bodyMedium)
+        Text("Multi-transport Canon EOS control interface", color = AppSubtleText, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
-private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
+private fun CameraSummary(
+    info: CameraInfo?,
+    status: CameraStatus?,
+    capabilities: CameraCapabilities?,
+    transportLabel: String?,
+) {
     Panel {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -434,7 +447,11 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
-                    text = if (info != null) "API: ${info.api}" else "Connect to camera Wi-Fi hotspot",
+                    text = if (info != null) {
+                        listOfNotNull("API: ${info.api}", transportLabel).joinToString(" - ")
+                    } else {
+                        "Connect to camera Wi-Fi hotspot"
+                    },
                     color = AppSubtleText,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -445,6 +462,15 @@ private fun CameraSummary(info: CameraInfo?, status: CameraStatus?) {
             Spacer(modifier = Modifier.height(6.dp))
             androidx.compose.material3.HorizontalDivider(color = AppBorder.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(6.dp))
+
+            capabilities?.profile?.let { profile ->
+                Text(
+                    text = "Profile: ${profile.modelName} - ${profile.family.label} - ${profile.priority.name.lowercase()}",
+                    color = AppSubtleText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

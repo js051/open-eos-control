@@ -71,6 +71,8 @@ class CcapiClientTest {
         assertEquals(listOf("2.8", "4.0"), capabilities.aperture)
         assertEquals(listOf("auto", "daylight"), capabilities.whiteBalance)
         assertEquals(emptyList<CameraSettingControl>(), capabilities.advancedSettings)
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
+        assertEquals(listOf(LiveViewSource.SIMULATOR_FRAME), capabilities.liveView.sources)
     }
 
     @Test
@@ -140,14 +142,14 @@ class CcapiClientTest {
         client.forceRealCamera()
         server.enqueue(MockResponse().setResponseCode(204))
 
-        client.startLiveView()
+        client.startLiveView(LiveViewRequest(size = LiveViewSize.LARGE))
         val request = server.takeRequest()
         val body = JSONObject(request.body.readUtf8())
 
         assertEquals("/ccapi/ver100/shooting/liveview", request.path)
         assertEquals("POST", request.method)
         assertEquals("on", body.getString("cameradisplay"))
-        assertEquals("medium", body.getString("liveviewsize"))
+        assertEquals("large", body.getString("liveviewsize"))
     }
 
     @Test
@@ -164,6 +166,7 @@ class CcapiClientTest {
         assertEquals("Metering", metering.label)
         assertEquals("evaluative", metering.value)
         assertEquals(listOf("evaluative", "spot"), metering.values)
+        assertEquals(listOf(LiveViewSize.SMALL, LiveViewSize.MEDIUM, LiveViewSize.LARGE), capabilities.liveView.sizes)
     }
 
     @Test

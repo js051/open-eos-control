@@ -34,9 +34,13 @@ class CameraRepositoryTest {
         val session = repository.connect(server.url("/").toString())
 
         assertEquals(CameraTransport.CCAPI_NETWORK, session.transport)
+        assertEquals(CameraTransport.CCAPI_NETWORK, session.connection.transport)
         assertEquals("Canon EOS R6 Mark III", session.info.model)
         assertEquals("800", session.status.exposure.iso)
         assertEquals(listOf("100", "800", "1600"), session.capabilities.iso)
+        assertEquals(CameraModelPriority.PRIMARY, session.capabilities.profile.priority)
+        assertEquals(CameraModelFamily.EOS_R, session.capabilities.profile.family)
+        assertTrue(session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertTrue(session.liveViewFrameUrl.endsWith("/ccapi/liveview/frame?t=1"))
         assertEquals("/ccapi/info", server.takeRequest().path)
         assertEquals("/ccapi/status", server.takeRequest().path)
@@ -54,6 +58,16 @@ class CameraRepositoryTest {
 
         assertTrue(session.liveViewFrameUrl.endsWith("t=1"))
         assertTrue(nextFrame.endsWith("t=2"))
+    }
+
+    @Test
+    fun plannedUsbBackendExposesRoadmapCapabilities() = runTest {
+        val backend = CameraBackendFactory().create(CameraConnection.AndroidUsbPtp(deviceName = "r6m3"))
+        val capabilities = backend.capabilities()
+
+        assertEquals(CameraTransport.USB_PTP, backend.transport)
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.USB_DIAGNOSTICS))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.STILL_CAPTURE))
     }
 
     private fun jsonResponse(body: String): MockResponse =

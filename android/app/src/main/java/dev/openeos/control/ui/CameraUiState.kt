@@ -2,9 +2,11 @@ package dev.openeos.control.ui
 
 import android.graphics.Bitmap
 import dev.openeos.control.data.CameraCapabilities
+import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
+import dev.openeos.control.data.CameraTransport
 
 const val MIN_LIVE_VIEW_FPS = 1
 const val MAX_LIVE_VIEW_FPS = 30
@@ -12,6 +14,7 @@ const val DEFAULT_LIVE_VIEW_FPS = 6
 
 data class CameraUiState(
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
+    val transport: CameraTransport? = null,
     val info: CameraInfo? = null,
     val status: CameraStatus? = null,
     val capabilities: CameraCapabilities? = null,
@@ -25,6 +28,9 @@ data class CameraUiState(
 ) {
     val connected: Boolean
         get() = info != null && status?.connected == true
+
+    fun supports(feature: CameraFeature): Boolean =
+        capabilities?.matrix?.supports(feature) ?: connected
 }
 
 data class FocusPoint(

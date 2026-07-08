@@ -5,6 +5,7 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraRepository
+import dev.openeos.control.data.LiveViewRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -56,9 +57,13 @@ class CameraViewModel(
     fun connect() = runCamera {
         stopLiveViewLoop()
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
-        val session = repository.connect(_uiState.value.baseUrl)
+        val session = repository.connect(
+            baseUrl = _uiState.value.baseUrl,
+            request = LiveViewRequest(fps = _uiState.value.liveViewFrameRateFps),
+        )
         _uiState.update {
             it.copy(
+                transport = session.transport,
                 info = session.info,
                 status = session.status,
                 capabilities = session.capabilities,
@@ -112,6 +117,7 @@ class CameraViewModel(
     fun setLiveViewFrameRate(fps: Int) {
         val clampedFps = fps.coerceIn(MIN_LIVE_VIEW_FPS, MAX_LIVE_VIEW_FPS)
         val changed = _uiState.value.liveViewFrameRateFps != clampedFps
+        repository.updateLiveViewRequest(fps = clampedFps)
         _uiState.update { it.copy(liveViewFrameRateFps = clampedFps) }
         if (changed && _uiState.value.connected && _uiState.value.liveViewAutoRefresh) {
             startLiveViewLoopIfNeeded()
@@ -286,6 +292,7 @@ class CameraViewModel(
         error: String?,
     ): CameraUiState = copy(
         baseUrl = baseUrl,
+        transport = null,
         info = null,
         status = null,
         capabilities = null,
