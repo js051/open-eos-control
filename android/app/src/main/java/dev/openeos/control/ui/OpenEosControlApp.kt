@@ -56,6 +56,7 @@ import coil.compose.AsyncImage
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.createUnsafeOkHttpClient
 import okhttp3.OkHttpClient
@@ -83,6 +84,7 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
                     onSetShutter = viewModel::setShutter,
                     onSetAperture = viewModel::setAperture,
                     onSetWhiteBalance = viewModel::setWhiteBalance,
+                    onSetCameraSetting = viewModel::setCameraSetting,
                     onTapFocus = viewModel::tapFocus,
                     onClearError = viewModel::clearError,
                     onUseDirectCamera = viewModel::useDirectCameraPreset,
@@ -107,6 +109,7 @@ private data class CameraActions(
     val onSetShutter: (String) -> Unit,
     val onSetAperture: (String) -> Unit,
     val onSetWhiteBalance: (String) -> Unit,
+    val onSetCameraSetting: (String, String) -> Unit,
     val onTapFocus: (Double, Double) -> Unit,
     val onClearError: () -> Unit,
     val onUseDirectCamera: () -> Unit,
@@ -284,6 +287,11 @@ private fun CameraControlsColumn(
             state.capabilities?.whiteBalance.orEmpty(),
             state.status?.exposure?.whiteBalance,
             actions.onSetWhiteBalance,
+        )
+        AdvancedSettingsSection(
+            settings = state.capabilities?.advancedSettings.orEmpty(),
+            enabled = state.connected && !state.busy,
+            onSelect = actions.onSetCameraSetting,
         )
     }
 }
@@ -839,6 +847,47 @@ private fun ControlSection(
                         onClick = { onSelect(value) },
                     ) {
                         Text(value)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun AdvancedSettingsSection(
+    settings: List<CameraSettingControl>,
+    enabled: Boolean,
+    onSelect: (String, String) -> Unit,
+) {
+    if (settings.isEmpty()) return
+
+    Panel {
+        Text("Advanced settings", color = AppText, fontWeight = FontWeight.SemiBold)
+        settings.forEach { setting ->
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(setting.label, color = AppSubtleText, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    Text(setting.value, color = AppMutedText, style = MaterialTheme.typography.bodySmall)
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    setting.values.forEach { value ->
+                        ChoiceButton(
+                            selected = value == setting.value,
+                            enabled = enabled,
+                            onClick = { onSelect(setting.key, value) },
+                        ) {
+                            Text(value)
+                        }
                     }
                 }
             }

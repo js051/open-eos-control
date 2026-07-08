@@ -70,6 +70,7 @@ class CcapiClientTest {
         assertEquals(listOf("1/50", "1/100"), capabilities.shutter)
         assertEquals(listOf("2.8", "4.0"), capabilities.aperture)
         assertEquals(listOf("auto", "daylight"), capabilities.whiteBalance)
+        assertEquals(emptyList<CameraSettingControl>(), capabilities.advancedSettings)
     }
 
     @Test
@@ -150,6 +151,22 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realCapabilitiesExposeAdvancedSettingsFromShootingSettings() = runTest {
+        client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{}"""))
+
+        val capabilities = client.capabilities()
+        val metering = capabilities.advancedSettings.first { it.key == "meteringmode" }
+
+        assertEquals("/ccapi/ver110/shooting/settings", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+        assertEquals("Metering", metering.label)
+        assertEquals("evaluative", metering.value)
+        assertEquals(listOf("evaluative", "spot"), metering.values)
+    }
+
+    @Test
     fun realStatusUsesBatteryListStorageListAndMergedSettings() = runTest {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
@@ -193,6 +210,29 @@ class CcapiClientTest {
         assertEquals("1/100", JSONObject(putRequest.body.readUtf8()).getString("value"))
         repeat(4) { server.takeRequest() }
         assertEquals("1/100", status.exposure.shutter)
+    }
+
+    @Test
+    fun realSetCameraSettingUsesDiscoveredAdvancedSettingPath() = runTest {
+        client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON.replace("\"evaluative\"", "\"spot\"")))
+        server.enqueue(jsonResponse("""{}"""))
+
+        val status = client.setSetting("meteringmode", "spot")
+
+        assertEquals("/ccapi/ver110/shooting/settings", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+        val putRequest = server.takeRequest()
+        assertEquals("/ccapi/ver110/shooting/settings/meteringmode", putRequest.path)
+        assertEquals("PUT", putRequest.method)
+        assertEquals("spot", JSONObject(putRequest.body.readUtf8()).getString("value"))
+        repeat(4) { server.takeRequest() }
+        assertEquals("800", status.exposure.iso)
     }
 
     @Test
@@ -327,6 +367,8 @@ class CcapiClientTest {
               "tv": {"value": "1/50", "ability": ["1/50", "1/100"]},
               "av": {"value": "2.8", "ability": ["2.8", "4.0"]},
               "wb": {"value": "auto", "ability": ["auto", "daylight"]},
+              "meteringmode": {"value": "evaluative", "ability": ["evaluative", "spot"]},
+              "afmethod": {"value": "face+tracking", "ability": ["face+tracking", "1-point"]},
               "shootingmode": {"value": "movie", "ability": ["movie"]}
             }
         """

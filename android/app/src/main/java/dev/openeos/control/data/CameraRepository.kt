@@ -41,6 +41,10 @@ class CameraRepository {
 
     suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
 
+    suspend fun setCameraSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+
+    suspend fun refreshCapabilities(): CameraCapabilities = client.capabilities()
+
     suspend fun toggleRecording(recording: Boolean): CameraStatus =
         if (recording) client.stopRecording() else client.startRecording()
 

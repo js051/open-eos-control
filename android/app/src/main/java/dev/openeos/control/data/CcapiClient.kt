@@ -287,12 +287,14 @@ class CcapiClient(
                 ?.optJSONArray("ability")?.toStringList() ?: emptyList()
             val wbList = (settings?.optJSONObject("whitebalance") ?: settings?.optJSONObject("wb") ?: settings?.optJSONObject("white_balance"))
                 ?.optJSONArray("ability")?.toStringList() ?: emptyList()
+            val advancedSettings = settings?.toAdvancedSettingControls().orEmpty()
 
             CameraCapabilities(
                 iso = isoList,
                 shutter = shutterList,
                 aperture = apertureList,
-                whiteBalance = wbList
+                whiteBalance = wbList,
+                advancedSettings = advancedSettings,
             )
         } else {
             getJson("/ccapi/capabilities").toCameraCapabilities()
@@ -328,6 +330,15 @@ class CcapiClient(
             status()
         } else {
             patchJson("/ccapi/white-balance", JSONObject().put("white_balance", value)).toCameraStatus()
+        }
+    }
+
+    suspend fun setSetting(key: String, value: String): CameraStatus {
+        return if (isRealCamera) {
+            putSettingValue(listOf(key), value)
+            status()
+        } else {
+            status()
         }
     }
 
@@ -722,6 +733,67 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
     aperture = getJSONArray("aperture").toStringList(),
     whiteBalance = getJSONArray("white_balance").toStringList(),
 )
+
+private fun JSONObject.toAdvancedSettingControls(): List<CameraSettingControl> {
+    val controls = mutableListOf<CameraSettingControl>()
+    val keys = keys()
+    while (keys.hasNext()) {
+        val key = keys.next()
+        if (key in PRIMARY_SETTING_KEYS) continue
+
+        val setting = optJSONObject(key) ?: continue
+        val values = setting.optJSONArray("ability")?.toStringList().orEmpty()
+            .filter { it.isNotBlank() }
+            .distinct()
+        val value = setting.optString("value", "")
+        if (values.size < 2 || value.isBlank()) continue
+
+        controls.add(
+            CameraSettingControl(
+                key = key,
+                label = key.toSettingLabel(),
+                value = value,
+                values = values,
+            )
+        )
+    }
+    return controls.sortedWith(compareBy<CameraSettingControl> { it.label }.thenBy { it.key })
+}
+
+private val PRIMARY_SETTING_KEYS = setOf(
+    "iso",
+    "shutter",
+    "shutterspeed",
+    "tv",
+    "aperture",
+    "av",
+    "whitebalance",
+    "white_balance",
+    "wb",
+)
+
+private fun String.toSettingLabel(): String =
+    when (this) {
+        "afmethod" -> "AF method"
+        "afoperation" -> "AF operation"
+        "drivemode" -> "Drive mode"
+        "meteringmode" -> "Metering"
+        "picturestyle" -> "Picture style"
+        "shootingmode" -> "Shooting mode"
+        "stillimagequality" -> "Image quality"
+        "moviequality" -> "Movie quality"
+        "colortemperature" -> "Color temperature"
+        "exposurecompensation" -> "Exposure compensation"
+        "ae" -> "AE mode"
+        else -> split(Regex("[_\\-]"))
+            .flatMap { token -> token.splitCamelCaseWords() }
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { it.replaceFirstChar { char -> char.uppercaseChar() } }
+            .ifBlank { this }
+    }
+
+private fun String.splitCamelCaseWords(): List<String> =
+    replace(Regex("([a-z])([A-Z])"), "$1 $2").split(" ")
 
 private fun org.json.JSONArray.toStringList(): List<String> =
     List(length()) { index -> getString(index) }

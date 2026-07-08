@@ -126,6 +126,19 @@ class CameraViewModel(
 
     fun setWhiteBalance(value: String) = updateStatus { repository.setWhiteBalance(value) }
 
+    fun setCameraSetting(key: String, value: String) = runCamera {
+        val status = repository.setCameraSetting(key, value)
+        val capabilities = repository.refreshCapabilities()
+        _uiState.update {
+            it.copy(
+                status = status,
+                capabilities = capabilities,
+            )
+        }
+        refreshLiveViewFrameInternal(reportErrors = false)
+        startLiveViewLoopIfNeeded()
+    }
+
     fun toggleRecording() = updateStatus {
         repository.toggleRecording(_uiState.value.status?.recording == true)
     }

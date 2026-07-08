@@ -32,6 +32,14 @@ data class CameraCapabilities(
     val shutter: List<String>,
     val aperture: List<String>,
     val whiteBalance: List<String>,
+    val advancedSettings: List<CameraSettingControl> = emptyList(),
+)
+
+data class CameraSettingControl(
+    val key: String,
+    val label: String,
+    val value: String,
+    val values: List<String>,
 )
 
 data class LiveViewFrame(
