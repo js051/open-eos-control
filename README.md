@@ -25,6 +25,7 @@ The app currently includes:
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
+- USB/PTP diagnostics for connected Android USB host devices
 - Live view frame display with auto/manual refresh and FPS control
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
 - REC start/stop

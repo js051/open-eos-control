@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -60,6 +61,8 @@ import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraStatus
+import dev.openeos.control.data.UsbCameraDevice
+import dev.openeos.control.data.UsbPtpDiagnostics
 import dev.openeos.control.data.createUnsafeOkHttpClient
 import okhttp3.OkHttpClient
 import coil.ImageLoader
@@ -68,6 +71,7 @@ import kotlin.math.roundToInt
 @Composable
 fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     MaterialTheme(colorScheme = OpenEosColorScheme) {
         Surface(color = AppBackground, modifier = Modifier.fillMaxSize()) {
@@ -92,6 +96,8 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
                     onUseDirectCamera = viewModel::useDirectCameraPreset,
                     onUseDirectCameraHttps = viewModel::useDirectCameraHttpsPreset,
                     onUseDevSimulator = viewModel::useDevSimulatorPreset,
+                    onRefreshUsbDiagnostics = { viewModel.refreshUsbDiagnostics(context) },
+                    onRequestUsbPermission = { deviceName -> viewModel.requestUsbPermission(context, deviceName) },
                 ),
             )
         }
@@ -117,6 +123,8 @@ private data class CameraActions(
     val onUseDirectCamera: () -> Unit,
     val onUseDirectCameraHttps: () -> Unit,
     val onUseDevSimulator: () -> Unit,
+    val onRefreshUsbDiagnostics: () -> Unit,
+    val onRequestUsbPermission: (String) -> Unit,
 )
 
 @Composable
@@ -241,6 +249,12 @@ private fun ConnectionColumn(
             status = state.status,
             capabilities = state.capabilities,
             transportLabel = state.transport?.label,
+        )
+        UsbDiagnosticsPanel(
+            diagnostics = state.usbDiagnostics,
+            enabled = !state.busy,
+            onRefresh = actions.onRefreshUsbDiagnostics,
+            onRequestPermission = actions.onRequestUsbPermission,
         )
         state.error?.let {
             ErrorPanel(message = it, onClick = actions.onClearError)
@@ -417,12 +431,105 @@ private fun StorageIcon(available: Boolean, modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun UsbDiagnosticsPanel(
+    diagnostics: UsbPtpDiagnostics,
+    enabled: Boolean,
+    onRefresh: () -> Unit,
+    onRequestPermission: (String) -> Unit,
+) {
+    Panel {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("USB/PTP", color = AppText, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = "${diagnostics.devices.size} devices - ${diagnostics.canonDeviceCount} Canon - ${diagnostics.ptpDeviceCount} PTP",
+                    color = AppSubtleText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            SecondaryButton(enabled = enabled, onClick = onRefresh) {
+                Text("Scan")
+            }
+        }
+
+        if (diagnostics.devices.isEmpty()) {
+            Text("No USB devices detected", color = AppMutedText, style = MaterialTheme.typography.bodySmall)
+        } else {
+            diagnostics.devices.forEachIndexed { index, device ->
+                if (index > 0) {
+                    androidx.compose.material3.HorizontalDivider(color = AppBorder.copy(alpha = 0.4f))
+                }
+                UsbDeviceSummary(
+                    device = device,
+                    enabled = enabled,
+                    onRequestPermission = onRequestPermission,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsbDeviceSummary(
+    device: UsbCameraDevice,
+    enabled: Boolean,
+    onRequestPermission: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = device.displayName,
+                color = AppText,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (!device.hasPermission) {
+                SecondaryButton(enabled = enabled, onClick = { onRequestPermission(device.deviceName) }) {
+                    Text("Grant")
+                }
+            }
+        }
+        Text(
+            text = "${device.vendorId.hex4()}:${device.productId.hex4()} - ${device.diagnosticState.label}",
+            color = AppSubtleText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = "Permission: ${if (device.hasPermission) "granted" else "needed"} - Interfaces: ${device.interfaces.size}",
+            color = AppMutedText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        device.interfaces.firstOrNull { it.isPtp }?.let { ptpInterface ->
+            val endpoints = ptpInterface.endpoints.joinToString(", ") {
+                "${it.direction}/${it.transferType}/${it.maxPacketSize}"
+            }.ifBlank { "no endpoints" }
+            Text(
+                text = "ptp interface ${ptpInterface.id}: $endpoints",
+                color = AppMutedText,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
 private fun HeaderBlock() {
     Panel {
         Text("Open EOS Control", color = AppText, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
         Text("Multi-transport Canon EOS control interface", color = AppSubtleText, style = MaterialTheme.typography.bodyMedium)
     }
 }
+
+private fun Int.hex4(): String = "0x" + toString(16).uppercase().padStart(4, '0')
 
 @Composable
 private fun CameraSummary(

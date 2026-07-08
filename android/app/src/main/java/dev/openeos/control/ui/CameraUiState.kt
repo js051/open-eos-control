@@ -7,6 +7,7 @@ import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraTransport
+import dev.openeos.control.data.UsbPtpDiagnostics
 
 const val MIN_LIVE_VIEW_FPS = 1
 const val MAX_LIVE_VIEW_FPS = 30
@@ -20,6 +21,7 @@ data class CameraUiState(
     val capabilities: CameraCapabilities? = null,
     val liveViewFrameUrl: String? = null,
     val liveViewBitmap: Bitmap? = null,
+    val usbDiagnostics: UsbPtpDiagnostics = UsbPtpDiagnostics.Empty,
     val liveViewAutoRefresh: Boolean = true,
     val liveViewFrameRateFps: Int = DEFAULT_LIVE_VIEW_FPS,
     val focusPoint: FocusPoint? = null,

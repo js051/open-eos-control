@@ -1,11 +1,13 @@
 package dev.openeos.control.ui
 
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.LiveViewRequest
+import dev.openeos.control.data.UsbPtpDiagnosticScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -52,6 +54,18 @@ class CameraViewModel(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    fun refreshUsbDiagnostics(context: Context) = runCamera {
+        val diagnostics = UsbPtpDiagnosticScanner().scan(context.applicationContext)
+        _uiState.update { it.copy(usbDiagnostics = diagnostics) }
+    }
+
+    fun requestUsbPermission(context: Context, deviceName: String) = runCamera {
+        val scanner = UsbPtpDiagnosticScanner()
+        scanner.requestPermission(context.applicationContext, deviceName)
+        val diagnostics = scanner.scan(context.applicationContext)
+        _uiState.update { it.copy(usbDiagnostics = diagnostics) }
     }
 
     fun connect() = runCamera {

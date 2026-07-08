@@ -25,6 +25,7 @@ open-eos-control/
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
+- Android USB host 裝置的 USB/PTP 診斷
 - Live view 畫面，自動/手動更新與 FPS 控制
 - ISO、shutter、aperture、white balance 與動態 advanced settings
 - REC 開始/停止

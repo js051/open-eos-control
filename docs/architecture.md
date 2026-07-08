@@ -31,6 +31,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 - `CameraProfile` identifies camera-family behavior. `Canon EOS R6 Mark III` is the primary profile and the golden validation target.
 - `CapabilityMatrix` tells the UI and tests what is supported now versus planned for a backend.
 - `LiveViewRequest` and `LiveViewCapabilities` describe FPS, source, and size without hard-coding CCAPI polling into the UI.
+- `UsbPtpDiagnostics` describes Android USB host devices, Canon vendor IDs, PTP interfaces, permission state, and endpoints before a PTP session is opened.
 
 ## Platform Strategy
 
@@ -48,7 +49,8 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 ## Near-Term Milestones
 
 1. Keep CCAPI stable for R6 Mark III.
-2. Add Android USB/PTP diagnostics: USB enumeration, permission flow, endpoint discovery, PTP session open, device info, property list.
-3. Add Android USB/PTP still capture and setting writes.
-4. Add USB/PTP live view if R6 Mark III exposes compatible Canon vendor operations.
-5. Add desktop bridge contract tests, then libgphoto2 and optional EDSDK adapters.
+2. Open an Android USB/PTP session after the existing USB diagnostics finds a Canon PTP device with permission.
+3. Add PTP device info and property list.
+4. Add Android USB/PTP still capture and setting writes.
+5. Add USB/PTP live view if R6 Mark III exposes compatible Canon vendor operations.
+6. Add desktop bridge contract tests, then libgphoto2 and optional EDSDK adapters.

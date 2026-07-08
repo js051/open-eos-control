@@ -17,11 +17,11 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 ### Android USB/PTP
 
-- Status: planned backend in code; not product-ready yet.
+- Status: diagnostic scanner implemented; PTP session/backend control is not product-ready yet.
 - Connection: Android USB host/OTG to camera USB.
-- First milestone: enumerate Canon USB devices, request permission, open bulk/interrupt endpoints, open a PTP session, read device info, and list properties.
-- Second milestone: still capture, exposure writes, storage/media listing, and clear error reporting.
-- Third milestone: live view preview if EOS R6 Mark III exposes compatible Canon PTP vendor operations.
+- Current implementation: enumerate Android USB devices, identify Canon vendor ID `0x04A9`, identify PTP still-image interfaces, show endpoint direction/type/packet size, and trigger Android USB permission requests.
+- Next milestone: claim the PTP interface, open a PTP session, read device info, and list properties.
+- Later milestones: still capture, exposure writes, storage/media listing, clear error reporting, and live view preview if EOS R6 Mark III exposes compatible Canon PTP vendor operations.
 - Tradeoffs: best pure phone-to-camera wired path, but it requires a real PTP engine plus Canon vendor-extension testing.
 
 ### Desktop bridge
@@ -55,9 +55,10 @@ Each backend should map into this surface:
 ## Implementation Order
 
 1. Keep CCAPI stable and improve diagnostics.
-2. Add Android USB/PTP read-only diagnostics.
-3. Add Android USB/PTP still capture and setting writes.
-4. Add USB/PTP live view preview if R6 Mark III allows it.
-5. Add desktop bridge protocol tests.
-6. Add libgphoto2 bridge adapter.
-7. Add optional local EDSDK bridge adapter.
+2. Open Android USB/PTP sessions from the diagnostic device list.
+3. Add Android USB/PTP device info and property reads.
+4. Add Android USB/PTP still capture and setting writes.
+5. Add USB/PTP live view preview if R6 Mark III allows it.
+6. Add desktop bridge protocol tests.
+7. Add libgphoto2 bridge adapter.
+8. Add optional local EDSDK bridge adapter.
