@@ -150,6 +150,69 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realStatusUsesBatteryListStorageListAndMergedSettings() = runTest {
+        client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{}"""))
+
+        val status = client.status()
+
+        assertEquals("/ccapi/ver110/devicestatus/batterylist", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/devicestatus/storage", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/shooting/settings", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+        assertEquals(89, status.batteryLevel)
+        assertEquals("89%", status.batteryStatus)
+        assertTrue(status.mediaAvailable)
+        assertEquals("800", status.exposure.iso)
+        assertEquals("1/50", status.exposure.shutter)
+        assertEquals("2.8", status.exposure.aperture)
+        assertEquals("auto", status.exposure.whiteBalance)
+    }
+
+    @Test
+    fun realSetExposureUsesVersionedSettingPathAndAcceptsEmptySuccess() = runTest {
+        client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON.replace("\"1/50\"", "\"1/100\"")))
+        server.enqueue(jsonResponse("""{}"""))
+
+        val status = client.setExposure(shutter = "1/100")
+
+        assertEquals("/ccapi/ver110/shooting/settings", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+        val putRequest = server.takeRequest()
+        assertEquals("/ccapi/ver110/shooting/settings/tv", putRequest.path)
+        assertEquals("PUT", putRequest.method)
+        assertEquals("1/100", JSONObject(putRequest.body.readUtf8()).getString("value"))
+        repeat(4) { server.takeRequest() }
+        assertEquals("1/100", status.exposure.shutter)
+    }
+
+    @Test
+    fun realRecordingAcceptsEmptyCommandSuccess() = runTest {
+        client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{}"""))
+
+        val status = client.startRecording()
+        val recordRequest = server.takeRequest()
+
+        assertEquals("/ccapi/ver100/shooting/control/recbutton", recordRequest.path)
+        assertEquals("POST", recordRequest.method)
+        assertTrue(status.recording)
+    }
+
+    @Test
     fun liveViewFrameExtractsSingleJpegFrame() = runTest {
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x01, 0x02, 0xFF.toByte(), 0xD9.toByte())
         server.enqueue(binaryResponse(jpeg, "image/jpeg"))
@@ -205,7 +268,10 @@ class CcapiClientTest {
             .setHeader("content-type", contentType)
             .setBody(Buffer().write(body))
 
-    private fun CcapiClient.forceRealCamera(prefix: String = "/ccapi/ver100") {
+    private fun CcapiClient.forceRealCamera(
+        prefix: String = "/ccapi/ver100",
+        prefixes: List<String> = listOf(prefix),
+    ) {
         javaClass.getDeclaredField("isRealCamera").apply {
             isAccessible = true
             setBoolean(this@forceRealCamera, true)
@@ -213,6 +279,10 @@ class CcapiClientTest {
         javaClass.getDeclaredField("apiVersionPrefix").apply {
             isAccessible = true
             set(this@forceRealCamera, prefix)
+        }
+        javaClass.getDeclaredField("apiVersionPrefixes").apply {
+            isAccessible = true
+            set(this@forceRealCamera, prefixes)
         }
     }
 
@@ -248,6 +318,16 @@ class CcapiClientTest {
               "shutter": ["1/50", "1/100"],
               "aperture": ["2.8", "4.0"],
               "white_balance": ["auto", "daylight"]
+            }
+        """
+
+        const val REAL_SETTINGS_JSON = """
+            {
+              "iso": {"value": "800", "ability": ["100", "800", "1600"]},
+              "tv": {"value": "1/50", "ability": ["1/50", "1/100"]},
+              "av": {"value": "2.8", "ability": ["2.8", "4.0"]},
+              "wb": {"value": "auto", "ability": ["auto", "daylight"]},
+              "shootingmode": {"value": "movie", "ability": ["movie"]}
             }
         """
     }

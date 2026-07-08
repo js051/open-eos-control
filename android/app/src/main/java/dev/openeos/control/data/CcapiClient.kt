@@ -49,7 +49,10 @@ class CcapiClient(
     var apiVersionPrefix = "/ccapi/ver100"
         private set
 
+    private var apiVersionPrefixes = listOf("/ccapi/ver100")
     private var isRecording = false
+    private val supportedSettingKeys = mutableSetOf<String>()
+    private val settingPathsByKey = mutableMapOf<String, String>()
 
     suspend fun initialize() {
         val isLocalOrSim = try {
@@ -122,24 +125,28 @@ class CcapiClient(
             return
         }
 
-        // 3. Try fallback GET /ccapi/ver100/deviceinformation
-        val success3 = try {
-            val request = Request.Builder().url("$baseUrl/ccapi/ver100/deviceinformation").get().build()
-            withContext(Dispatchers.IO) {
-                httpClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        apiVersionPrefix = "/ccapi/ver100"
-                        true
-                    } else {
-                        errors.add("GET /ccapi/ver100/deviceinformation: HTTP ${response.code}")
-                        false
+        // 3. Try fallback device information endpoints.
+        val fallbackVersions = listOf("/ccapi/ver110", "/ccapi/ver100")
+        val success3 = fallbackVersions.firstOrNull { prefix ->
+            try {
+                val request = Request.Builder().url("$baseUrl$prefix/deviceinformation").get().build()
+                withContext(Dispatchers.IO) {
+                    httpClient.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            apiVersionPrefixes = fallbackVersions
+                            apiVersionPrefix = if (fallbackVersions.contains("/ccapi/ver100")) "/ccapi/ver100" else prefix
+                            true
+                        } else {
+                            errors.add("GET $prefix/deviceinformation: HTTP ${response.code}")
+                            false
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                errors.add("GET $prefix/deviceinformation failed: ${e.message}")
+                false
             }
-        } catch (e: Exception) {
-            errors.add("GET /ccapi/ver100/deviceinformation failed: ${e.message}")
-            false
-        }
+        } != null
 
         if (success3) {
             isRealCamera = true
@@ -160,31 +167,45 @@ class CcapiClient(
 
     private fun parseDiscoveryResponse(body: String) {
         val json = JSONObject(body)
+        val versions = linkedSetOf<String>()
         val apiArray = json.optJSONArray("api")
-        var prefix = "/ccapi/ver100"
         if (apiArray != null && apiArray.length() > 0) {
-            val firstPath = apiArray.getString(0)
-            val parts = firstPath.split("/")
-            if (parts.size >= 3) {
-                prefix = "/ccapi/${parts[2]}"
-            }
-        } else {
-            val versionStr = json.optString("version", "")
-            if (versionStr.isNotEmpty()) {
-                prefix = "/ccapi/$versionStr"
+            for (index in 0 until apiArray.length()) {
+                val path = apiArray.optString(index)
+                extractApiVersion(path)?.let { versions.add(it) }
             }
         }
-        apiVersionPrefix = prefix
+
+        val keys = json.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key.matches(Regex("ver\\d+"))) {
+                versions.add(key)
+            }
+        }
+
+        val versionStr = json.optString("version", "")
+        if (versionStr.matches(Regex("ver\\d+"))) {
+            versions.add(versionStr)
+        }
+
+        if (versions.isEmpty()) {
+            versions.add("ver100")
+        }
+
+        apiVersionPrefixes = versions.map { "/ccapi/$it" }.sortedByDescending { it.apiVersionNumber() }
+        apiVersionPrefix = if (apiVersionPrefixes.contains("/ccapi/ver100")) "/ccapi/ver100" else apiVersionPrefixes.first()
     }
-    private val supportedSettingKeys = mutableSetOf<String>()
+
+    private fun extractApiVersion(path: String): String? =
+        Regex("""/ccapi/(ver\d+)(/|$)""").find(path)?.groupValues?.get(1)
+
+    private fun String.apiVersionNumber(): Int =
+        substringAfterLast("ver").toIntOrNull() ?: 0
 
     suspend fun info(): CameraInfo {
         return if (isRealCamera) {
-            val json = try {
-                getJson("$apiVersionPrefix/deviceinformation")
-            } catch (e: Exception) {
-                null
-            }
+            val json = getFirstJson(versionedPaths("/deviceinformation"))
             CameraInfo(
                 connected = true,
                 model = json?.optString("productname", "Canon Camera") ?: "Canon Camera",
@@ -198,45 +219,28 @@ class CcapiClient(
 
     suspend fun status(): CameraStatus {
         return if (isRealCamera) {
-            val batteryJson = try {
-                getJson("$apiVersionPrefix/devicestatus/battery")
-            } catch (e: Exception) {
-                null
-            }
+            val batteryJson = getFirstJson(
+                versionedPaths("/devicestatus/batterylist") +
+                    versionedPaths("/devicestatus/battery")
+            )
             val (batteryLevel, batteryLevelStr) = if (batteryJson != null) {
                 parseBatteryInfo(batteryJson.toString())
             } else {
                 Pair(100, "full")
             }
 
-            val storageJson = try {
-                getJson("$apiVersionPrefix/devicestatus/storage")
-            } catch (e: Exception) {
-                try {
-                    getJson("$apiVersionPrefix/contents")
-                } catch (ex: Exception) {
-                    null
-                }
-            }
+            val storageJson = getFirstJson(
+                versionedPaths("/devicestatus/storage") +
+                    versionedPaths("/devicestatus/currentstorage") +
+                    versionedPaths("/contents")
+            )
             val cardReady = if (storageJson != null) {
                 parseStorageInfo(storageJson.toString())
             } else {
                 false
             }
 
-            val settings = try {
-                getJson("$apiVersionPrefix/shooting/settings")
-            } catch (e: Exception) {
-                null
-            }
-
-            supportedSettingKeys.clear()
-            if (settings != null) {
-                val keys = settings.keys()
-                while (keys.hasNext()) {
-                    supportedSettingKeys.add(keys.next())
-                }
-            }
+            val settings = loadShootingSettings()
 
             // Exposure values
             val isoVal = settings?.optJSONObject("iso")?.optString("value")
@@ -274,11 +278,7 @@ class CcapiClient(
 
     suspend fun capabilities(): CameraCapabilities {
         return if (isRealCamera) {
-            val settings = try {
-                getJson("$apiVersionPrefix/shooting/settings")
-            } catch (e: Exception) {
-                null
-            }
+            val settings = loadShootingSettings()
 
             val isoList = settings?.optJSONObject("iso")?.optJSONArray("ability")?.toStringList() ?: emptyList()
             val shutterList = (settings?.optJSONObject("shutter") ?: settings?.optJSONObject("shutterspeed") ?: settings?.optJSONObject("tv"))
@@ -305,14 +305,12 @@ class CcapiClient(
         aperture: String? = null,
     ): CameraStatus {
         return if (isRealCamera) {
-            iso?.let { putJson("$apiVersionPrefix/shooting/settings/iso", JSONObject().put("value", it)) }
+            iso?.let { putSettingValue(listOf("iso"), it) }
             shutter?.let {
-                val key = if (supportedSettingKeys.contains("shutterspeed")) "shutterspeed" else if (supportedSettingKeys.contains("tv")) "tv" else "shutter"
-                putJson("$apiVersionPrefix/shooting/settings/$key", JSONObject().put("value", it))
+                putSettingValue(listOf("tv", "shutterspeed", "shutter"), it)
             }
             aperture?.let {
-                val key = if (supportedSettingKeys.contains("av")) "av" else "aperture"
-                putJson("$apiVersionPrefix/shooting/settings/$key", JSONObject().put("value", it))
+                putSettingValue(listOf("av", "aperture"), it)
             }
             status()
         } else {
@@ -326,8 +324,7 @@ class CcapiClient(
 
     suspend fun setWhiteBalance(value: String): CameraStatus {
         return if (isRealCamera) {
-            val key = if (supportedSettingKeys.contains("wb")) "wb" else if (supportedSettingKeys.contains("white_balance")) "white_balance" else "whitebalance"
-            putJson("$apiVersionPrefix/shooting/settings/$key", JSONObject().put("value", value))
+            putSettingValue(listOf("wb", "whitebalance", "white_balance"), value)
             status()
         } else {
             patchJson("/ccapi/white-balance", JSONObject().put("white_balance", value)).toCameraStatus()
@@ -336,7 +333,7 @@ class CcapiClient(
 
     suspend fun startRecording(): CameraStatus {
         if (isRealCamera) {
-            postJson("$apiVersionPrefix/shooting/control/recbutton", JSONObject().put("action", "start"))
+            postOk("$apiVersionPrefix/shooting/control/recbutton", JSONObject().put("action", "start"))
             isRecording = true
         } else {
             postJson("/ccapi/record/start", JSONObject())
@@ -346,7 +343,7 @@ class CcapiClient(
 
     suspend fun stopRecording(): CameraStatus {
         if (isRealCamera) {
-            postJson("$apiVersionPrefix/shooting/control/recbutton", JSONObject().put("action", "stop"))
+            postOk("$apiVersionPrefix/shooting/control/recbutton", JSONObject().put("action", "stop"))
             isRecording = false
         } else {
             postJson("/ccapi/record/stop", JSONObject())
@@ -377,13 +374,15 @@ class CcapiClient(
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
         return if (isRealCamera) {
-            try {
-                val payload = JSONObject().put("x", x).put("y", y)
-                postJson("$apiVersionPrefix/shooting/control/afpoint", payload)
-                FocusResult(ok = true, x = x, y = y)
-            } catch (e: Exception) {
-                FocusResult(ok = true, x = x, y = y)
-            }
+            val payload = JSONObject().put("x", x).put("y", y)
+            postFirstOk(
+                listOf(
+                    "$apiVersionPrefix/shooting/control/afpoint" to payload,
+                    "$apiVersionPrefix/shooting/control/af" to JSONObject().put("action", "start"),
+                ),
+                label = "tap focus",
+            )
+            FocusResult(ok = true, x = x, y = y)
         } else {
             val payload = JSONObject().put("x", x).put("y", y)
             val json = postJson("/ccapi/focus/tap", payload)
@@ -440,6 +439,95 @@ class CcapiClient(
         return "$this${separator}t=$cacheKey"
     }
 
+    private fun versionedPaths(pathSuffix: String): List<String> =
+        apiVersionPrefixes.map { "$it$pathSuffix" }
+
+    private suspend fun getFirstJson(paths: List<String>): JSONObject? {
+        paths.forEach { path ->
+            try {
+                return getJson(path)
+            } catch (e: Exception) {
+                // Try the next API version or endpoint variant.
+            }
+        }
+        return null
+    }
+
+    private suspend fun loadShootingSettings(): JSONObject? {
+        supportedSettingKeys.clear()
+        settingPathsByKey.clear()
+        val merged = JSONObject()
+
+        versionedPaths("/shooting/settings").forEach { path ->
+            val settings = try {
+                getJson(path)
+            } catch (e: Exception) {
+                null
+            } ?: return@forEach
+
+            val prefix = path.removeSuffix("/shooting/settings")
+            val keys = settings.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                supportedSettingKeys.add(key)
+                settingPathsByKey.putIfAbsent(key, "$prefix/shooting/settings/$key")
+                if (!merged.has(key)) {
+                    merged.put(key, settings.get(key))
+                }
+            }
+        }
+
+        return if (merged.length() > 0) merged else null
+    }
+
+    private suspend fun putSettingValue(candidateKeys: List<String>, value: String) {
+        if (settingPathsByKey.isEmpty()) {
+            loadShootingSettings()
+        }
+
+        val supportedCandidates = candidateKeys
+            .filter { supportedSettingKeys.isEmpty() || supportedSettingKeys.contains(it) || settingPathsByKey.containsKey(it) }
+            .ifEmpty { candidateKeys }
+
+        val paths = supportedCandidates
+            .flatMap { key ->
+                settingPathsByKey[key]?.let { listOf(it) }
+                    ?: versionedPaths("/shooting/settings/$key")
+            }
+            .distinct()
+
+        val errors = mutableListOf<String>()
+        paths.forEach { path ->
+            try {
+                putOk(path, JSONObject().put("value", value))
+                return
+            } catch (exception: Exception) {
+                errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
+            }
+        }
+
+        error(
+            "Failed to set shooting setting to '$value'. Tried:\n" +
+                errors.joinToString(separator = "\n") { "  - $it" }
+        )
+    }
+
+    private suspend fun postFirstOk(candidates: List<Pair<String, JSONObject>>, label: String) {
+        val errors = mutableListOf<String>()
+        candidates.forEach { (path, payload) ->
+            try {
+                postOk(path, payload)
+                return
+            } catch (exception: Exception) {
+                errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
+            }
+        }
+        error(
+            "Failed to execute $label. Tried:\n" +
+                errors.joinToString(separator = "\n") { "  - $it" }
+        )
+    }
+
     private suspend fun getJson(path: String): JSONObject = requestJson(
         Request.Builder().url("$baseUrl$path").get().build(),
     )
@@ -476,6 +564,13 @@ class CcapiClient(
         Request.Builder()
             .url("$baseUrl$path")
             .post(payload.toString().toRequestBody(jsonMediaType))
+            .build(),
+    )
+
+    private suspend fun putOk(path: String, payload: JSONObject): Unit = requestOk(
+        Request.Builder()
+            .url("$baseUrl$path")
+            .put(payload.toString().toRequestBody(jsonMediaType))
             .build(),
     )
 
@@ -641,6 +736,12 @@ private fun parseBatteryInfo(jsonStr: String): Pair<Int, String> {
             }
         } else {
             val obj = JSONObject(trimmed)
+            if (obj.has("batterylist")) {
+                val array = obj.optJSONArray("batterylist")
+                if (array != null && array.length() > 0) {
+                    return parseSingleBattery(array.getJSONObject(0))
+                }
+            }
             if (obj.has("battery")) {
                 val array = obj.optJSONArray("battery")
                 if (array != null && array.length() > 0) {
@@ -694,12 +795,26 @@ private fun parseStorageInfo(jsonStr: String): Boolean {
             }
         } else {
             val obj = JSONObject(trimmed)
+            if (obj.has("storagelist")) {
+                val array = obj.optJSONArray("storagelist")
+                if (array != null) {
+                    for (i in 0 until array.length()) {
+                        if (isSingleCardReady(array.getJSONObject(i))) return true
+                    }
+                }
+            }
             if (obj.has("storage")) {
                 val array = obj.optJSONArray("storage")
                 if (array != null) {
                     for (i in 0 until array.length()) {
                         if (isSingleCardReady(array.getJSONObject(i))) return true
                     }
+                }
+            }
+            if (obj.has("path")) {
+                val array = obj.optJSONArray("path")
+                if (array != null && array.length() > 0) {
+                    return true
                 }
             }
             if (obj.has("name") || obj.has("accesscapability") || obj.has("status")) {
@@ -718,6 +833,9 @@ private fun isSingleCardReady(card: JSONObject): Boolean {
     if (status == "ready" || status == "access" || access == "readwrite" || access == "readonly") {
         return true
     }
+    if (hasPositiveStorageValue(card, "spacesize") || hasPositiveStorageValue(card, "maxsize") || hasPositiveStorageValue(card, "capacity")) {
+        return status != "not_inserted" && status != "none"
+    }
     if (card.has("free") || card.has("maxsize") || card.has("capacity")) {
         val free = card.optString("free", "")
         if (free.isNotEmpty() && free != "0" && free != "0 GB" && status != "not_inserted") {
@@ -725,4 +843,16 @@ private fun isSingleCardReady(card: JSONObject): Boolean {
         }
     }
     return false
+}
+
+private fun hasPositiveStorageValue(card: JSONObject, key: String): Boolean {
+    if (!card.has(key) || card.isNull(key)) return false
+    val numberValue = card.optLong(key, Long.MIN_VALUE)
+    if (numberValue > 0) return true
+    val textValue = card.optString(key, "")
+    return textValue
+        .filter { it.isDigit() }
+        .toLongOrNull()
+        ?.let { it > 0 }
+        ?: false
 }
