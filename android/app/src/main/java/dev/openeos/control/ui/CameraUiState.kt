@@ -32,7 +32,7 @@ data class CameraUiState(
         get() = info != null && status?.connected == true
 
     fun supports(feature: CameraFeature): Boolean =
-        capabilities?.matrix?.supports(feature) ?: connected
+        capabilities?.matrix?.supports(feature) ?: false
 }
 
 data class FocusPoint(

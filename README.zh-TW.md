@@ -103,6 +103,6 @@ http://localhost:18080
 - 加入 desktop bridge，對外使用同一套 camera core contract，內部可接 libgphoto2 或使用者自行安裝的 Canon EDSDK adapter。
 - iOS 先走 CCAPI/Wi-Fi；iOS USB/PTP 先列為研究線。
 
-可參考 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md) 與 [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md)。
+可參考 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
 
 Open EOS Control 與 Canon 無關，也未受 Canon 認可。Canon 與 EOS 是其各自權利人的商標。

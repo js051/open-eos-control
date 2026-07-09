@@ -103,6 +103,6 @@ Useful endpoints:
 - Add a desktop bridge that exposes the same camera core contract while using libgphoto2 or a user-installed Canon EDSDK adapter.
 - Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
 
-See [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), and [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md).
+See [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), and [docs/reference-projects.md](docs/reference-projects.md).
 
 Open EOS Control is not affiliated with or endorsed by Canon. Canon and EOS are trademarks of their respective owners.

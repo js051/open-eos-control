@@ -9,7 +9,6 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
-import android.os.Build
 
 private const val PTP_INTERFACE_SUBCLASS = 1
 private const val PTP_INTERFACE_PROTOCOL = 1
@@ -111,19 +110,13 @@ class UsbPtpDiagnosticScanner {
         val device = usbManager.deviceList[deviceName] ?: return false
         if (usbManager.hasPermission(device)) return true
 
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                PendingIntent.FLAG_MUTABLE
-            } else {
-                0
-            }
         val permissionIntent = PendingIntent.getBroadcast(
             context,
             deviceName.hashCode(),
             Intent(context, UsbPermissionReceiver::class.java)
                 .setAction(USB_PERMISSION_ACTION)
                 .putExtra(EXTRA_USB_DEVICE_NAME, deviceName),
-            flags,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         usbManager.requestPermission(device, permissionIntent)
         return true

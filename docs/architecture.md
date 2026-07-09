@@ -45,6 +45,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 - Unsupported operations must fail with explicit transport/feature errors.
 - Canon EDSDK must not be committed or redistributed in this open-source repo; keep it as an optional local adapter.
 - Live view sources are interchangeable at the contract level: CCAPI JPEG polling, CCAPI RTP, USB/PTP preview, and bridge streams.
+- Public references and validity status live in [reference-projects.md](reference-projects.md). Features should remain `planned` or `unsupported` until the repo has an executable path and test or real-device evidence.
 
 ## Near-Term Milestones
 

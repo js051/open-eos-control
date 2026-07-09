@@ -194,9 +194,9 @@ data class LiveViewRequest(
 }
 
 data class LiveViewCapabilities(
-    val sources: List<LiveViewSource> = listOf(LiveViewSource.CCAPI_JPEG_POLLING),
+    val sources: List<LiveViewSource> = emptyList(),
     val defaultSource: LiveViewSource = sources.firstOrNull() ?: LiveViewSource.AUTO,
-    val sizes: List<LiveViewSize> = listOf(LiveViewSize.MEDIUM),
+    val sizes: List<LiveViewSize> = emptyList(),
     val defaultSize: LiveViewSize = sizes.firstOrNull() ?: LiveViewSize.MEDIUM,
     val minFps: Int = 1,
     val maxFps: Int = 30,
@@ -251,8 +251,8 @@ data class CameraCapabilities(
     val aperture: List<String>,
     val whiteBalance: List<String>,
     val advancedSettings: List<CameraSettingControl> = emptyList(),
-    val matrix: CapabilityMatrix = CapabilityMatrix.ccapiNetwork(),
-    val liveView: LiveViewCapabilities = LiveViewCapabilities.ccapiNetwork(),
+    val matrix: CapabilityMatrix = CapabilityMatrix(),
+    val liveView: LiveViewCapabilities = LiveViewCapabilities(),
     val profile: CameraProfile = CameraProfile.genericEos(),
 )
 
