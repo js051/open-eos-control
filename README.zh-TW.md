@@ -22,6 +22,7 @@ open-eos-control/
 目前功能包含：
 
 - 直接輸入 CCAPI 相機 URL，並提供 HTTP/HTTPS preset
+- 可選填 CCAPI Basic Authentication 帳號與密碼
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
@@ -39,6 +40,8 @@ https://192.168.1.2:443
 ```
 
 真機測試時，請以相機 CCAPI 設定畫面顯示的 IP 與 port 為準。
+
+HTTPS 會使用 Android 正常的憑證驗證，不再接受任意自簽憑證。若相機無法提供系統信任的 HTTPS 憑證，請在隔離的相機網路使用 HTTP，或先安裝可信憑證。
 
 Android Emulator 搭配本機 simulator：
 
@@ -104,5 +107,9 @@ http://localhost:18080
 - iOS 先走 CCAPI/Wi-Fi；iOS USB/PTP 先列為研究線。
 
 可參考 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
+
+## 授權
+
+Open EOS Control 使用 [Apache License 2.0](LICENSE) 授權。
 
 Open EOS Control 與 Canon 無關，也未受 Canon 認可。Canon 與 EOS 是其各自權利人的商標。

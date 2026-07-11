@@ -22,6 +22,7 @@ Open `android/` in Android Studio.
 The app currently includes:
 
 - Direct CCAPI camera URL input with HTTP/HTTPS presets
+- Optional CCAPI Basic Authentication credentials
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
@@ -39,6 +40,8 @@ https://192.168.1.2:443
 ```
 
 Use the IP and port shown by the camera CCAPI setup screen when testing with a real camera.
+
+HTTPS uses Android's normal certificate validation. The app no longer accepts arbitrary self-signed certificates. Use HTTP on the isolated camera network or install a trusted certificate when the camera cannot present a system-trusted HTTPS certificate.
 
 For Android Emulator plus local simulator:
 
@@ -104,5 +107,9 @@ Useful endpoints:
 - Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
 
 See [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), and [docs/reference-projects.md](docs/reference-projects.md).
+
+## License
+
+Open EOS Control is licensed under the [Apache License 2.0](LICENSE).
 
 Open EOS Control is not affiliated with or endorsed by Canon. Canon and EOS are trademarks of their respective owners.

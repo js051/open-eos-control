@@ -28,7 +28,7 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 - Status: planned backend in code; bridge protocol to be implemented.
 - Connection: app talks to a local desktop service; desktop service controls the camera over USB.
-- Engines: libgphoto2 for the open-source path; optional user-installed Canon EDSDK adapter for Windows/macOS where licensing allows local use.
+- Engines: libgphoto2 for the open-source path; optional user-installed Canon EDSDK adapter for Windows, macOS, or Linux where Canon's current package and licensing allow local use.
 - Strengths: fastest path to mature tethering, capture download, and high-speed live view.
 - Tradeoffs: requires a computer in the loop, so it is a different product mode from direct mobile control.
 
