@@ -10,6 +10,7 @@ import dev.openeos.control.data.LiveViewRequest
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,11 +28,23 @@ class CameraViewModel(
     private var liveViewJob: Job? = null
 
     fun setBaseUrl(value: String) {
+        if (_uiState.value.connected) return
         stopLiveViewLoop()
         _uiState.update { it.withClearedSession(baseUrl = value, error = null) }
     }
 
+    fun setUsername(value: String) {
+        if (_uiState.value.connected) return
+        _uiState.update { it.copy(username = value, error = null) }
+    }
+
+    fun setPassword(value: String) {
+        if (_uiState.value.connected) return
+        _uiState.update { it.copy(password = value, error = null) }
+    }
+
     fun useDirectCameraPreset() {
+        if (_uiState.value.connected) return
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_BASE_URL, error = null)
@@ -39,6 +52,7 @@ class CameraViewModel(
     }
 
     fun useDirectCameraHttpsPreset() {
+        if (_uiState.value.connected) return
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_HTTPS_URL, error = null)
@@ -46,6 +60,7 @@ class CameraViewModel(
     }
 
     fun useDevSimulatorPreset() {
+        if (_uiState.value.connected) return
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEV_EMULATOR_SIMULATOR_URL, error = null)
@@ -73,6 +88,8 @@ class CameraViewModel(
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val session = repository.connect(
             baseUrl = _uiState.value.baseUrl,
+            username = _uiState.value.username,
+            password = _uiState.value.password,
             request = LiveViewRequest(fps = _uiState.value.liveViewFrameRateFps),
         )
         _uiState.update {
@@ -160,7 +177,7 @@ class CameraViewModel(
     }
 
     fun toggleRecording() = updateStatus {
-        repository.toggleRecording(_uiState.value.status?.recording == true)
+        repository.toggleRecording(_uiState.value.status?.recording)
     }
 
     fun tapFocus(x: Double, y: Double) = runCamera {
@@ -298,6 +315,9 @@ class CameraViewModel(
 
     override fun onCleared() {
         stopLiveViewLoop()
+        viewModelScope.launch(NonCancellable + Dispatchers.IO) {
+            repository.disconnect()
+        }
         super.onCleared()
     }
 

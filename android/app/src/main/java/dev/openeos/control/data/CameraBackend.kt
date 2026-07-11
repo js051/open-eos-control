@@ -23,6 +23,8 @@ sealed interface CameraConnection {
 
     data class CcapiNetwork(
         val baseUrl: String,
+        val username: String = "",
+        val password: String = "",
         override val platform: CameraHostPlatform = CameraHostPlatform.ANDROID,
     ) : CameraConnection {
         override val transport: CameraTransport = CameraTransport.CCAPI_NETWORK
@@ -72,11 +74,13 @@ interface CameraControlBackend {
 }
 
 class CcapiCameraBackend(
-    baseUrl: String,
+    override val connection: CameraConnection.CcapiNetwork,
 ) : CameraControlBackend {
-    private val client = CcapiClient(baseUrl)
-
-    override val connection: CameraConnection = CameraConnection.CcapiNetwork(baseUrl)
+    private val client = CcapiClient(
+        baseUrl = connection.baseUrl,
+        username = connection.username,
+        password = connection.password,
+    )
 
     override val transport: CameraTransport = CameraTransport.CCAPI_NETWORK
 
@@ -133,12 +137,12 @@ class PlannedCameraBackend(
 
     override suspend fun status(): CameraStatus = CameraStatus(
         connected = false,
-        batteryLevel = 0,
+        batteryLevel = null,
         batteryStatus = "unknown",
-        recording = false,
+        recording = null,
         mode = "planned",
-        mediaAvailable = false,
-        remainingMinutes = 0,
+        mediaAvailable = null,
+        remainingMinutes = null,
         exposure = ExposureState(
             iso = "-",
             shutter = "-",
@@ -193,7 +197,7 @@ class PlannedCameraBackend(
 class CameraBackendFactory {
     fun create(connection: CameraConnection): CameraControlBackend =
         when (connection) {
-            is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection.baseUrl)
+            is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection)
             is CameraConnection.AndroidUsbPtp -> PlannedCameraBackend(connection)
             is CameraConnection.DesktopBridge -> PlannedCameraBackend(connection)
         }

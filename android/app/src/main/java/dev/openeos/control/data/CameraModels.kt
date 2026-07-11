@@ -93,8 +93,8 @@ data class CapabilityMatrix(
     fun isPlanned(feature: CameraFeature): Boolean = feature in planned
 
     companion object {
-        fun ccapiNetwork(): CapabilityMatrix = CapabilityMatrix(
-            supported = setOf(
+        fun ccapiNetwork(
+            supported: Set<CameraFeature> = setOf(
                 CameraFeature.CAMERA_IDENTITY,
                 CameraFeature.BATTERY_STATUS,
                 CameraFeature.STORAGE_STATUS,
@@ -106,6 +106,8 @@ data class CapabilityMatrix(
                 CameraFeature.WHITE_BALANCE_CONTROL,
                 CameraFeature.ADVANCED_SETTINGS,
             ),
+        ): CapabilityMatrix = CapabilityMatrix(
+            supported = supported,
             planned = setOf(
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
@@ -234,12 +236,12 @@ data class ExposureState(
 
 data class CameraStatus(
     val connected: Boolean,
-    val batteryLevel: Int,
+    val batteryLevel: Int?,
     val batteryStatus: String,
-    val recording: Boolean,
+    val recording: Boolean?,
     val mode: String,
-    val mediaAvailable: Boolean,
-    val remainingMinutes: Int,
+    val mediaAvailable: Boolean?,
+    val remainingMinutes: Int?,
     val exposure: ExposureState,
     val rawBatteryJson: String = "",
     val rawStorageJson: String = "",

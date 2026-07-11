@@ -4,11 +4,16 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import android.os.Build
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
 
 private const val PTP_INTERFACE_SUBCLASS = 1
 private const val PTP_INTERFACE_PROTOCOL = 1
@@ -105,21 +110,51 @@ class UsbPtpDiagnosticScanner {
         )
     }
 
-    fun requestPermission(context: Context, deviceName: String): Boolean {
+    suspend fun requestPermission(context: Context, deviceName: String): Boolean {
         val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
         val device = usbManager.deviceList[deviceName] ?: return false
         if (usbManager.hasPermission(device)) return true
 
-        val permissionIntent = PendingIntent.getBroadcast(
-            context,
-            deviceName.hashCode(),
-            Intent(context, UsbPermissionReceiver::class.java)
-                .setAction(USB_PERMISSION_ACTION)
-                .putExtra(EXTRA_USB_DEVICE_NAME, deviceName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        usbManager.requestPermission(device, permissionIntent)
-        return true
+        return suspendCancellableCoroutine { continuation ->
+            val action = "$USB_PERMISSION_ACTION.${deviceName.hashCode()}"
+            val registered = AtomicBoolean(true)
+            lateinit var receiver: BroadcastReceiver
+
+            fun unregisterReceiver() {
+                if (registered.compareAndSet(true, false)) {
+                    runCatching { context.unregisterReceiver(receiver) }
+                }
+            }
+
+            receiver = object : BroadcastReceiver() {
+                override fun onReceive(receiverContext: Context, intent: Intent) {
+                    if (intent.action != action) return
+                    val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false) &&
+                        usbManager.hasPermission(device)
+                    unregisterReceiver()
+                    if (continuation.isActive) continuation.resume(granted)
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(receiver, IntentFilter(action), Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                context.registerReceiver(receiver, IntentFilter(action))
+            }
+
+            continuation.invokeOnCancellation { unregisterReceiver() }
+
+            val permissionIntent = PendingIntent.getBroadcast(
+                context,
+                action.hashCode(),
+                Intent(action)
+                    .setPackage(context.packageName)
+                    .putExtra(EXTRA_USB_DEVICE_NAME, deviceName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            usbManager.requestPermission(device, permissionIntent)
+        }
     }
 
     private fun UsbDevice.toUsbCameraDevice(usbManager: UsbManager): UsbCameraDevice =
@@ -177,12 +212,6 @@ class UsbPtpDiagnosticScanner {
             else -> "unknown"
         }
 
-}
-
-class UsbPermissionReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        // Permission state is read by scanning UsbManager again after the system dialog closes.
-    }
 }
 
 const val USB_PERMISSION_ACTION = "dev.openeos.control.USB_PERMISSION"

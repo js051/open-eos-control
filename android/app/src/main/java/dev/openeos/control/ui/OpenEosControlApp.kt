@@ -49,6 +49,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -63,7 +64,6 @@ import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.UsbCameraDevice
 import dev.openeos.control.data.UsbPtpDiagnostics
-import dev.openeos.control.data.createUnsafeOkHttpClient
 import okhttp3.OkHttpClient
 import coil.ImageLoader
 import kotlin.math.roundToInt
@@ -79,6 +79,8 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
                 state = state,
                 actions = CameraActions(
                     onBaseUrlChange = viewModel::setBaseUrl,
+                    onUsernameChange = viewModel::setUsername,
+                    onPasswordChange = viewModel::setPassword,
                     onConnect = viewModel::connect,
                     onDisconnect = viewModel::disconnect,
                     onRefresh = viewModel::refresh,
@@ -106,6 +108,8 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
 
 private data class CameraActions(
     val onBaseUrlChange: (String) -> Unit,
+    val onUsernameChange: (String) -> Unit,
+    val onPasswordChange: (String) -> Unit,
     val onConnect: () -> Unit,
     val onDisconnect: () -> Unit,
     val onRefresh: () -> Unit,
@@ -202,33 +206,48 @@ private fun ConnectionColumn(
             onValueChange = actions.onBaseUrlChange,
             label = { Text("Direct camera URL") },
             singleLine = true,
+            enabled = !state.connected && !state.busy,
             modifier = Modifier
                 .fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = AppText,
-                unfocusedTextColor = AppText,
-                focusedLabelColor = AppAccent,
-                unfocusedLabelColor = AppMutedText,
-                cursorColor = AppAccent,
-                focusedBorderColor = AppAccent,
-                unfocusedBorderColor = AppBorder,
-                focusedContainerColor = Color(0xFF111827),
-                unfocusedContainerColor = Color(0xFF111827),
-            ),
+            colors = connectionFieldColors(),
         )
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = state.username,
+                onValueChange = actions.onUsernameChange,
+                label = { Text("Username (optional)") },
+                singleLine = true,
+                enabled = !state.connected && !state.busy,
+                modifier = Modifier.fillMaxWidth(),
+                colors = connectionFieldColors(),
+            )
+            OutlinedTextField(
+                value = state.password,
+                onValueChange = actions.onPasswordChange,
+                label = { Text("Password (optional)") },
+                singleLine = true,
+                enabled = !state.connected && !state.busy,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = connectionFieldColors(),
+            )
+        }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SecondaryButton(enabled = !state.busy, onClick = actions.onUseDirectCamera) {
+            SecondaryButton(enabled = !state.connected && !state.busy, onClick = actions.onUseDirectCamera) {
                 Text("Direct (HTTP)")
             }
-            SecondaryButton(enabled = !state.busy, onClick = actions.onUseDirectCameraHttps) {
+            SecondaryButton(enabled = !state.connected && !state.busy, onClick = actions.onUseDirectCameraHttps) {
                 Text("Direct (HTTPS)")
             }
-            SecondaryButton(enabled = !state.busy, onClick = actions.onUseDevSimulator) {
+            SecondaryButton(enabled = !state.connected && !state.busy, onClick = actions.onUseDevSimulator) {
                 Text("Dev Simulator")
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PrimaryButton(enabled = !state.busy, onClick = actions.onConnect) {
+            PrimaryButton(enabled = !state.connected && !state.busy, onClick = actions.onConnect) {
                 Text(if (state.busy) "Working" else "Connect")
             }
             SecondaryButton(
@@ -263,6 +282,19 @@ private fun ConnectionColumn(
 }
 
 @Composable
+private fun connectionFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = AppText,
+    unfocusedTextColor = AppText,
+    focusedLabelColor = AppAccent,
+    unfocusedLabelColor = AppMutedText,
+    cursorColor = AppAccent,
+    focusedBorderColor = AppAccent,
+    unfocusedBorderColor = AppBorder,
+    focusedContainerColor = Color(0xFF111827),
+    unfocusedContainerColor = Color(0xFF111827),
+)
+
+@Composable
 private fun CameraControlsColumn(
     state: CameraUiState,
     actions: CameraActions,
@@ -281,6 +313,7 @@ private fun CameraControlsColumn(
             liveViewFrameRateFps = state.liveViewFrameRateFps,
             focusPoint = state.focusPoint,
             enabled = liveViewEnabled,
+            tapFocusEnabled = liveViewEnabled && state.supports(CameraFeature.TAP_FOCUS),
             onTapFocus = actions.onTapFocus,
             onRefreshLiveView = actions.onRefreshLiveView,
             onLiveViewAutoRefreshChange = actions.onLiveViewAutoRefreshChange,
@@ -288,31 +321,41 @@ private fun CameraControlsColumn(
         )
         RecordButton(
             enabled = state.connected && state.supports(CameraFeature.VIDEO_RECORDING) && !state.busy,
-            recording = state.status?.recording == true,
+            recording = state.status?.recording,
             onClick = actions.onToggleRecording,
         )
-        ControlSection("ISO", state.capabilities?.iso.orEmpty(), state.status?.exposure?.iso, actions.onSetIso)
+        val exposureEnabled = state.connected && state.supports(CameraFeature.EXPOSURE_CONTROL) && !state.busy
+        ControlSection(
+            label = "ISO",
+            values = state.capabilities?.iso.orEmpty(),
+            selected = state.status?.exposure?.iso,
+            enabled = exposureEnabled,
+            onSelect = actions.onSetIso,
+        )
         ControlSection(
             "Shutter",
             state.capabilities?.shutter.orEmpty(),
             state.status?.exposure?.shutter,
+            exposureEnabled,
             actions.onSetShutter,
         )
         ControlSection(
             "Aperture",
             state.capabilities?.aperture.orEmpty(),
             state.status?.exposure?.aperture,
+            exposureEnabled,
             actions.onSetAperture,
         )
         ControlSection(
             "White balance",
             state.capabilities?.whiteBalance.orEmpty(),
             state.status?.exposure?.whiteBalance,
+            state.connected && state.supports(CameraFeature.WHITE_BALANCE_CONTROL) && !state.busy,
             actions.onSetWhiteBalance,
         )
         AdvancedSettingsSection(
             settings = state.capabilities?.advancedSettings.orEmpty(),
-            enabled = state.connected && !state.busy,
+            enabled = state.connected && state.supports(CameraFeature.ADVANCED_SETTINGS) && !state.busy,
             onSelect = actions.onSetCameraSetting,
         )
     }
@@ -611,8 +654,13 @@ private fun CameraSummary(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     StorageIcon(available = status?.mediaAvailable == true)
+                    val storageText = when (status?.mediaAvailable) {
+                        true -> "SD Card OK"
+                        false -> "No Card"
+                        null -> "Storage Unknown"
+                    }
                     Text(
-                        text = if (status?.mediaAvailable == true) "SD Card OK" else "No Card",
+                        text = storageText,
                         color = if (status?.mediaAvailable == true) Color(0xFF10B981) else AppMutedText,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold
@@ -661,6 +709,7 @@ private fun MonitorPanel(
     liveViewFrameRateFps: Int,
     focusPoint: FocusPoint?,
     enabled: Boolean,
+    tapFocusEnabled: Boolean,
     onTapFocus: (Double, Double) -> Unit,
     onRefreshLiveView: () -> Unit,
     onLiveViewAutoRefreshChange: (Boolean) -> Unit,
@@ -674,6 +723,7 @@ private fun MonitorPanel(
         liveViewFrameRateFps = liveViewFrameRateFps,
         focusPoint = focusPoint,
         enabled = enabled,
+        tapFocusEnabled = tapFocusEnabled,
         onTapFocus = onTapFocus,
         onRefreshLiveView = onRefreshLiveView,
         onLiveViewAutoRefreshChange = onLiveViewAutoRefreshChange,
@@ -691,11 +741,17 @@ private fun MonitorFrame(
     liveViewFrameRateFps: Int,
     focusPoint: FocusPoint?,
     enabled: Boolean,
+    tapFocusEnabled: Boolean,
     onTapFocus: (Double, Double) -> Unit,
     onRefreshLiveView: () -> Unit,
     onLiveViewAutoRefreshChange: (Boolean) -> Unit,
     onLiveViewFrameRateChange: (Int) -> Unit,
 ) {
+    val sourceAspectRatio = liveViewBitmap
+        ?.takeIf { it.width > 0 && it.height > 0 }
+        ?.let { it.width.toFloat() / it.height.toFloat() }
+        ?: 16f / 9f
+
     Panel {
         Box(
             modifier = Modifier
@@ -703,12 +759,16 @@ private fun MonitorFrame(
                 .aspectRatio(16f / 9f)
                 .background(AppMonitor, RoundedCornerShape(8.dp))
                 .border(1.dp, AppBorder, RoundedCornerShape(8.dp))
-                .pointerInput(enabled) {
+                .pointerInput(tapFocusEnabled, sourceAspectRatio) {
                     detectTapGestures { offset ->
-                        if (enabled && size.width > 0 && size.height > 0) {
-                            val x = (offset.x / size.width).coerceIn(0f, 1f).toDouble()
-                            val y = (offset.y / size.height).coerceIn(0f, 1f).toDouble()
-                            onTapFocus(x, y)
+                        if (tapFocusEnabled && size.width > 0 && size.height > 0) {
+                            mapLiveViewTap(
+                                tapX = offset.x,
+                                tapY = offset.y,
+                                containerWidth = size.width.toFloat(),
+                                containerHeight = size.height.toFloat(),
+                                sourceAspectRatio = sourceAspectRatio,
+                            )?.let { point -> onTapFocus(point.x, point.y) }
                         }
                     }
                 },
@@ -718,22 +778,16 @@ private fun MonitorFrame(
                 Image(
                     bitmap = liveViewBitmap.asImageBitmap(),
                     contentDescription = "Live view frame",
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )
-                MonitorStatusOverlay(status = status, enabled = enabled)
+                MonitorStatusOverlay(status = status, tapFocusEnabled = tapFocusEnabled)
                 ViewfinderOverlay(recording = status?.recording == true)
             } else if (liveViewFrameUrl != null) {
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val imageLoader = remember(context, liveViewFrameUrl) {
                     ImageLoader.Builder(context)
-                        .okHttpClient {
-                            if (liveViewFrameUrl.startsWith("https://")) {
-                                createUnsafeOkHttpClient()
-                            } else {
-                                OkHttpClient()
-                            }
-                        }
+                        .okHttpClient { OkHttpClient() }
                         .build()
                 }
                 val imageRequest = remember(context, liveViewFrameUrl) {
@@ -749,15 +803,18 @@ private fun MonitorFrame(
                     model = imageRequest,
                     imageLoader = imageLoader,
                     contentDescription = "Live view frame",
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )
-                MonitorStatusOverlay(status = status, enabled = enabled)
+                MonitorStatusOverlay(status = status, tapFocusEnabled = tapFocusEnabled)
                 ViewfinderOverlay(recording = status?.recording == true)
             } else {
                 MonitorPlaceholder(enabled = enabled)
             }
-            FocusOverlay(focusPoint = focusPoint)
+            FocusOverlay(
+                focusPoint = focusPoint,
+                sourceAspectRatio = sourceAspectRatio,
+            )
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -832,7 +889,7 @@ private fun MonitorPlaceholder(enabled: Boolean) {
 }
 
 @Composable
-private fun MonitorStatusOverlay(status: CameraStatus?, enabled: Boolean) {
+private fun MonitorStatusOverlay(status: CameraStatus?, tapFocusEnabled: Boolean) {
     Box(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -843,7 +900,11 @@ private fun MonitorStatusOverlay(status: CameraStatus?, enabled: Boolean) {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                if (status?.recording == true) "REC" else "STBY",
+                when (status?.recording) {
+                    true -> "REC"
+                    false -> "STBY"
+                    null -> "REC ?"
+                },
                 color = if (status?.recording == true) Color(0xFFFF3B5B) else AppSubtleText,
                 fontWeight = FontWeight.Bold,
             )
@@ -855,7 +916,7 @@ private fun MonitorStatusOverlay(status: CameraStatus?, enabled: Boolean) {
             Text("F${status?.exposure?.aperture ?: "-"}", color = AppSubtleText)
         }
         Text(
-            if (enabled) "Tap to focus" else "Connect camera",
+            if (tapFocusEnabled) "Tap to focus" else "Focus position unavailable",
             color = AppSubtleText,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -898,14 +959,20 @@ private fun ViewfinderOverlay(recording: Boolean) {
 }
 
 @Composable
-private fun FocusOverlay(focusPoint: FocusPoint?) {
+private fun FocusOverlay(
+    focusPoint: FocusPoint?,
+    sourceAspectRatio: Float,
+) {
     Canvas(modifier = Modifier.fillMaxSize()) {
         if (focusPoint == null) return@Canvas
         val strokePx = 2.dp.toPx()
-        val center = Offset(
-            x = (focusPoint.x.toFloat() * size.width).coerceIn(0f, size.width),
-            y = (focusPoint.y.toFloat() * size.height).coerceIn(0f, size.height),
+        val displayPoint = mapFocusPointToDisplay(
+            focusPoint = focusPoint,
+            containerWidth = size.width,
+            containerHeight = size.height,
+            sourceAspectRatio = sourceAspectRatio,
         )
+        val center = Offset(displayPoint.x, displayPoint.y)
         val boxSize = 48.dp.toPx()
         val color = Color(0xFF10B981)
         drawRect(
@@ -930,12 +997,12 @@ private fun FocusOverlay(focusPoint: FocusPoint?) {
 }
 
 @Composable
-private fun RecordButton(enabled: Boolean, recording: Boolean, onClick: () -> Unit) {
+private fun RecordButton(enabled: Boolean, recording: Boolean?, onClick: () -> Unit) {
     androidx.compose.material3.Button(
         enabled = enabled,
         shape = RoundedCornerShape(10.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (recording) AppDanger else Color(0xFF1E293B),
+            containerColor = if (recording == true) AppDanger else Color(0xFF1E293B),
             contentColor = Color.White,
             disabledContainerColor = AppPanelAlt,
             disabledContentColor = AppMutedText,
@@ -949,12 +1016,12 @@ private fun RecordButton(enabled: Boolean, recording: Boolean, onClick: () -> Un
         ) {
             Canvas(modifier = Modifier.size(14.dp)) {
                 drawCircle(
-                    color = if (recording) Color.White else AppDanger,
+                    color = if (recording == true) Color.White else AppDanger,
                     radius = size.width / 2f
                 )
             }
             Text(
-                text = if (recording) "STOP RECORDING" else "START RECORDING",
+                text = if (recording == true) "STOP RECORDING" else "START RECORDING",
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.labelLarge
             )
@@ -968,6 +1035,7 @@ private fun ControlSection(
     label: String,
     values: List<String>,
     selected: String?,
+    enabled: Boolean,
     onSelect: (String) -> Unit,
 ) {
     if (values.isNotEmpty()) {
@@ -977,6 +1045,7 @@ private fun ControlSection(
                 values.forEach { value ->
                     ChoiceButton(
                         selected = value == selected,
+                        enabled = enabled,
                         onClick = { onSelect(value) },
                     ) {
                         Text(value)

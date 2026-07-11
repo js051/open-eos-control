@@ -3,11 +3,13 @@ package dev.openeos.control.data
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.Credentials
 import okio.Buffer
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -41,6 +43,23 @@ class CcapiClientTest {
         assertEquals("Canon EOS R6 Mark III", info.model)
         assertEquals("sim-r6m3", info.serial)
         assertEquals("simulated-ccapi", info.api)
+    }
+
+    @Test
+    fun authenticatedRequestsSendBasicAuthorizationHeader() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            username = "camera-user",
+            password = "camera-password",
+        )
+        server.enqueue(jsonResponse(INFO_JSON))
+
+        client.info()
+
+        assertEquals(
+            Credentials.basic("camera-user", "camera-password"),
+            server.takeRequest().getHeader("Authorization"),
+        )
     }
 
     @Test
@@ -101,7 +120,7 @@ class CcapiClientTest {
         assertEquals("/ccapi/record/start", startRequest.path)
         assertEquals("POST", startRequest.method)
         assertEquals("/ccapi/status", statusRequest.path)
-        assertTrue(status.recording)
+        assertTrue(status.recording == true)
     }
 
     @Test
@@ -119,6 +138,18 @@ class CcapiClientTest {
         assertTrue(result.ok)
         assertEquals(0.25, result.x, 0.0001)
         assertEquals(0.75, result.y, 0.0001)
+    }
+
+    @Test
+    fun realTapFocusDoesNotReportPlainAutofocusAsPositionSuccess() = runTest {
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setResponseCode(404).setBody("unsupported"))
+
+        val failure = runCatching { client.tapFocus(0.25, 0.75) }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals(1, server.requestCount)
+        assertEquals("/ccapi/ver100/shooting/control/afpoint", server.takeRequest().path)
     }
 
     @Test
@@ -150,6 +181,48 @@ class CcapiClientTest {
         assertEquals("POST", request.method)
         assertEquals("on", body.getString("cameradisplay"))
         assertEquals("large", body.getString("liveviewsize"))
+    }
+
+    @Test
+    fun discoveryFallbackUsesTheVersionThatActuallyResponded() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(jsonResponse("""{"productname":"Canon EOS R6 Mark III"}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        client.startLiveView()
+
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/deviceinformation", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/shooting/liveview", server.takeRequest().path)
+    }
+
+    @Test
+    fun realCapabilitiesFollowAdvertisedApiOperations() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(jsonResponse(DISCOVERY_JSON))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/shooting/settings", server.takeRequest().path)
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
+        assertTrue(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
+        assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
+        assertTrue(!capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
+        assertTrue(!capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
     }
 
     @Test
@@ -185,11 +258,28 @@ class CcapiClientTest {
         assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
         assertEquals(89, status.batteryLevel)
         assertEquals("89%", status.batteryStatus)
-        assertTrue(status.mediaAvailable)
+        assertTrue(status.mediaAvailable == true)
         assertEquals("800", status.exposure.iso)
         assertEquals("1/50", status.exposure.shutter)
         assertEquals("2.8", status.exposure.aperture)
         assertEquals("auto", status.exposure.whiteBalance)
+    }
+
+    @Test
+    fun unavailableRealStatusValuesRemainUnknown() = runTest {
+        client.forceRealCamera()
+        repeat(6) {
+            server.enqueue(MockResponse().setResponseCode(404))
+        }
+
+        val status = client.status()
+
+        assertNull(status.batteryLevel)
+        assertEquals("unknown", status.batteryStatus)
+        assertNull(status.recording)
+        assertEquals("unknown", status.mode)
+        assertNull(status.mediaAvailable)
+        assertNull(status.remainingMinutes)
     }
 
     @Test
@@ -252,7 +342,7 @@ class CcapiClientTest {
 
         assertEquals("/ccapi/ver100/shooting/control/recbutton", recordRequest.path)
         assertEquals("POST", recordRequest.method)
-        assertTrue(status.recording)
+        assertTrue(status.recording == true)
     }
 
     @Test
@@ -373,6 +463,17 @@ class CcapiClientTest {
               "meteringmode": {"value": "evaluative", "ability": ["evaluative", "spot"]},
               "afmethod": {"value": "face+tracking", "ability": ["face+tracking", "1-point"]},
               "shootingmode": {"value": "movie", "ability": ["movie"]}
+            }
+        """
+
+        const val DISCOVERY_JSON = """
+            {
+              "ver110": [
+                {"path":"/shooting/liveview","post":true,"delete":true},
+                {"path":"/shooting/liveview/flip","get":true},
+                {"path":"/shooting/control/recbutton","post":true},
+                {"path":"/shooting/settings","get":true}
+              ]
             }
         """
     }

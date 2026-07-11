@@ -2,6 +2,7 @@ package dev.openeos.control.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,39 +10,32 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
-fun createUnsafeOkHttpClient(): OkHttpClient {
-    try {
-        val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-        })
-
-        val sslContext = SSLContext.getInstance("SSL")
-        sslContext.init(null, trustAllCerts, SecureRandom())
-
-        val sslSocketFactory = sslContext.socketFactory
-
-        return OkHttpClient.Builder()
-            .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
-            .hostnameVerifier { _, _ -> true }
-            .build()
-    } catch (e: Exception) {
-        return OkHttpClient()
-    }
-}
+private data class CcapiApiOperation(
+    val method: String,
+    val path: String,
+)
 
 class CcapiClient(
     baseUrl: String,
-    private val httpClient: OkHttpClient = if (baseUrl.startsWith("https://")) createUnsafeOkHttpClient() else OkHttpClient(),
+    httpClient: OkHttpClient? = null,
+    private val treatAsSimulator: Boolean? = null,
+    username: String = "",
+    password: String = "",
 ) {
     private val baseUrl = baseUrl.trimEnd('/')
+    private val httpClient = httpClient ?: OkHttpClient.Builder().apply {
+        if (username.isNotBlank()) {
+            val authorization = Credentials.basic(username, password)
+            addInterceptor { chain ->
+                chain.proceed(
+                    chain.request().newBuilder()
+                        .header("Authorization", authorization)
+                        .build()
+                )
+            }
+        }
+    }.build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     var isRealCamera = false
@@ -50,9 +44,11 @@ class CcapiClient(
         private set
 
     private var apiVersionPrefixes = listOf("/ccapi/ver100")
-    private var isRecording = false
+    private var isRecording: Boolean? = null
     private val supportedSettingKeys = mutableSetOf<String>()
     private val settingPathsByKey = mutableMapOf<String, String>()
+    private val apiOperations = linkedSetOf<CcapiApiOperation>()
+    private val observedFeatures = mutableSetOf<CameraFeature>()
 
     suspend fun initialize() {
         val isLocalOrSim = try {
@@ -70,7 +66,7 @@ class CcapiClient(
             false
         }
 
-        if (isLocalOrSim) {
+        if (treatAsSimulator ?: isLocalOrSim) {
             isRealCamera = false
             return
         }
@@ -133,8 +129,8 @@ class CcapiClient(
                 withContext(Dispatchers.IO) {
                     httpClient.newCall(request).execute().use { response ->
                         if (response.isSuccessful) {
-                            apiVersionPrefixes = fallbackVersions
-                            apiVersionPrefix = if (fallbackVersions.contains("/ccapi/ver100")) "/ccapi/ver100" else prefix
+                            apiVersionPrefixes = listOf(prefix)
+                            apiVersionPrefix = prefix
                             true
                         } else {
                             errors.add("GET $prefix/deviceinformation: HTTP ${response.code}")
@@ -168,6 +164,7 @@ class CcapiClient(
     private fun parseDiscoveryResponse(body: String) {
         val json = JSONObject(body)
         val versions = linkedSetOf<String>()
+        apiOperations.clear()
         val apiArray = json.optJSONArray("api")
         if (apiArray != null && apiArray.length() > 0) {
             for (index in 0 until apiArray.length()) {
@@ -181,6 +178,7 @@ class CcapiClient(
             val key = keys.next()
             if (key.matches(Regex("ver\\d+"))) {
                 versions.add(key)
+                recordApiOperations(key, json.optJSONArray(key))
             }
         }
 
@@ -197,6 +195,36 @@ class CcapiClient(
         apiVersionPrefix = if (apiVersionPrefixes.contains("/ccapi/ver100")) "/ccapi/ver100" else apiVersionPrefixes.first()
     }
 
+    private fun recordApiOperations(version: String, entries: org.json.JSONArray?) {
+        if (entries == null) return
+        for (index in 0 until entries.length()) {
+            val entry = entries.optJSONObject(index) ?: continue
+            val path = entry.optString("path", "").trim()
+            if (path.isBlank()) continue
+            val fullPath = if (path.startsWith("/ccapi/")) {
+                path
+            } else {
+                "/ccapi/$version/${path.trimStart('/')}"
+            }
+            CCAPI_HTTP_METHODS.forEach { method ->
+                if (entry.has(method.lowercase()) && entry.methodIsSupported(method.lowercase())) {
+                    apiOperations.add(CcapiApiOperation(method, fullPath))
+                }
+            }
+        }
+    }
+
+    private fun JSONObject.methodIsSupported(key: String): Boolean {
+        val value = opt(key)
+        return when (value) {
+            null, JSONObject.NULL -> false
+            is Boolean -> value
+            is Number -> value.toInt() != 0
+            is String -> value.isNotBlank() && value.lowercase() !in setOf("false", "no", "none", "unsupported")
+            else -> true
+        }
+    }
+
     private fun extractApiVersion(path: String): String? =
         Regex("""/ccapi/(ver\d+)(/|$)""").find(path)?.groupValues?.get(1)
 
@@ -206,6 +234,7 @@ class CcapiClient(
     suspend fun info(): CameraInfo {
         return if (isRealCamera) {
             val json = getFirstJson(versionedPaths("/deviceinformation"))
+            if (json != null) observedFeatures.add(CameraFeature.CAMERA_IDENTITY)
             CameraInfo(
                 connected = true,
                 model = json?.optString("productname", "Canon Camera") ?: "Canon Camera",
@@ -223,11 +252,10 @@ class CcapiClient(
                 versionedPaths("/devicestatus/batterylist") +
                     versionedPaths("/devicestatus/battery")
             )
-            val (batteryLevel, batteryLevelStr) = if (batteryJson != null) {
-                parseBatteryInfo(batteryJson.toString())
-            } else {
-                Pair(100, "full")
-            }
+            if (batteryJson != null) observedFeatures.add(CameraFeature.BATTERY_STATUS)
+            val batteryInfo = batteryJson?.let { parseBatteryInfo(it.toString()) }
+            val batteryLevel = batteryInfo?.first
+            val batteryLevelStr = batteryInfo?.second ?: "unknown"
 
             val storageJson = getFirstJson(
                 versionedPaths("/devicestatus/storage") +
@@ -235,9 +263,10 @@ class CcapiClient(
                     versionedPaths("/contents")
             )
             val cardReady = if (storageJson != null) {
+                observedFeatures.add(CameraFeature.STORAGE_STATUS)
                 parseStorageInfo(storageJson.toString())
             } else {
-                false
+                null
             }
 
             val settings = loadShootingSettings()
@@ -252,7 +281,7 @@ class CcapiClient(
             val wbVal = settings?.optJSONObject("whitebalance")?.optString("value")
                 ?: settings?.optJSONObject("wb")?.optString("value")
                 ?: settings?.optJSONObject("white_balance")?.optString("value")
-            val modeVal = settings?.optJSONObject("shootingmode")?.optString("value") ?: "movie"
+            val modeVal = settings?.optJSONObject("shootingmode")?.optString("value") ?: "unknown"
 
             CameraStatus(
                 connected = true,
@@ -261,7 +290,7 @@ class CcapiClient(
                 recording = isRecording,
                 mode = modeVal,
                 mediaAvailable = cardReady,
-                remainingMinutes = 120,
+                remainingMinutes = null,
                 exposure = ExposureState(
                     iso = isoVal ?: "-",
                     shutter = shutterVal ?: "-",
@@ -288,6 +317,24 @@ class CcapiClient(
             val wbList = (settings?.optJSONObject("whitebalance") ?: settings?.optJSONObject("wb") ?: settings?.optJSONObject("white_balance"))
                 ?.optJSONArray("ability")?.toStringList() ?: emptyList()
             val advancedSettings = settings?.toAdvancedSettingControls().orEmpty()
+            val supportedFeatures = observedFeatures.toMutableSet()
+            if (settings.hasAnySetting("iso", "tv", "shutterspeed", "shutter", "av", "aperture")) {
+                supportedFeatures.add(CameraFeature.EXPOSURE_CONTROL)
+            }
+            if (settings.hasAnySetting("wb", "whitebalance", "white_balance")) {
+                supportedFeatures.add(CameraFeature.WHITE_BALANCE_CONTROL)
+            }
+            if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
+            if (supportsApi("POST", "/shooting/liveview") || CameraFeature.LIVE_VIEW in observedFeatures) {
+                supportedFeatures.add(CameraFeature.LIVE_VIEW)
+                supportedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+            }
+            if (supportsApi("POST", "/shooting/control/recbutton")) {
+                supportedFeatures.add(CameraFeature.VIDEO_RECORDING)
+            }
+            if (supportsApi("POST", "/shooting/control/afpoint")) {
+                supportedFeatures.add(CameraFeature.TAP_FOCUS)
+            }
 
             CameraCapabilities(
                 iso = isoList,
@@ -295,7 +342,7 @@ class CcapiClient(
                 aperture = apertureList,
                 whiteBalance = wbList,
                 advancedSettings = advancedSettings,
-                matrix = CapabilityMatrix.ccapiNetwork(),
+                matrix = CapabilityMatrix.ccapiNetwork(supportedFeatures),
                 liveView = LiveViewCapabilities.ccapiNetwork(),
             )
         } else {
@@ -346,7 +393,7 @@ class CcapiClient(
 
     suspend fun startRecording(): CameraStatus {
         if (isRealCamera) {
-            postOk("$apiVersionPrefix/shooting/control/recbutton", JSONObject().put("action", "start"))
+            postOk(apiPath("POST", "/shooting/control/recbutton"), JSONObject().put("action", "start"))
             isRecording = true
         } else {
             postJson("/ccapi/record/start", JSONObject())
@@ -356,7 +403,7 @@ class CcapiClient(
 
     suspend fun stopRecording(): CameraStatus {
         if (isRealCamera) {
-            postOk("$apiVersionPrefix/shooting/control/recbutton", JSONObject().put("action", "stop"))
+            postOk(apiPath("POST", "/shooting/control/recbutton"), JSONObject().put("action", "stop"))
             isRecording = false
         } else {
             postJson("/ccapi/record/stop", JSONObject())
@@ -367,18 +414,20 @@ class CcapiClient(
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
         if (isRealCamera) {
             postOk(
-                "$apiVersionPrefix/shooting/liveview",
+                apiPath("POST", "/shooting/liveview"),
                 JSONObject()
                     .put("cameradisplay", "on")
                     .put("liveviewsize", request.size.ccapiValue),
             )
+            observedFeatures.add(CameraFeature.LIVE_VIEW)
+            observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
         }
     }
 
     suspend fun stopLiveView() {
         if (isRealCamera) {
             try {
-                deleteOk("$apiVersionPrefix/shooting/liveview")
+                deleteOk(apiPath("DELETE", "/shooting/liveview"))
             } catch (e: Exception) {
                 // ignore
             }
@@ -388,13 +437,7 @@ class CcapiClient(
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
         return if (isRealCamera) {
             val payload = JSONObject().put("x", x).put("y", y)
-            postFirstOk(
-                listOf(
-                    "$apiVersionPrefix/shooting/control/afpoint" to payload,
-                    "$apiVersionPrefix/shooting/control/af" to JSONObject().put("action", "start"),
-                ),
-                label = "tap focus",
-            )
+            postOk(apiPath("POST", "/shooting/control/afpoint"), payload)
             FocusResult(ok = true, x = x, y = y)
         } else {
             val payload = JSONObject().put("x", x).put("y", y)
@@ -441,9 +484,9 @@ class CcapiClient(
             when (request.source) {
                 LiveViewSource.AUTO,
                 LiveViewSource.CCAPI_JPEG_POLLING -> listOf(
-                    "$baseUrl$apiVersionPrefix/shooting/liveview/flip",
-                    "$baseUrl$apiVersionPrefix/shooting/liveview/flipdetail?kind=image",
-                    "$baseUrl$apiVersionPrefix/shooting/liveview",
+                    "$baseUrl${apiPath("GET", "/shooting/liveview/flip")}",
+                    "$baseUrl${apiPath("GET", "/shooting/liveview/flipdetail")}?kind=image",
+                    "$baseUrl${apiPath("GET", "/shooting/liveview")}",
                 )
 
                 LiveViewSource.CCAPI_RTP -> error("CCAPI RTP live view is planned but not implemented by the JPEG frame reader yet.")
@@ -461,6 +504,16 @@ class CcapiClient(
 
     private fun versionedPaths(pathSuffix: String): List<String> =
         apiVersionPrefixes.map { "$it$pathSuffix" }
+
+    private fun supportsApi(method: String, pathSuffix: String): Boolean =
+        apiOperations.any { it.method == method && it.path.endsWith(pathSuffix) }
+
+    private fun apiPath(method: String, pathSuffix: String): String {
+        val matching = apiOperations.filter { it.method == method && it.path.endsWith(pathSuffix) }
+        return matching.firstOrNull { it.path.startsWith(apiVersionPrefix) }?.path
+            ?: matching.maxByOrNull { it.path.substringBefore(pathSuffix).apiVersionNumber() }?.path
+            ?: "$apiVersionPrefix$pathSuffix"
+    }
 
     private suspend fun getFirstJson(paths: List<String>): JSONObject? {
         paths.forEach { path ->
@@ -528,22 +581,6 @@ class CcapiClient(
 
         error(
             "Failed to set shooting setting to '$value'. Tried:\n" +
-                errors.joinToString(separator = "\n") { "  - $it" }
-        )
-    }
-
-    private suspend fun postFirstOk(candidates: List<Pair<String, JSONObject>>, label: String) {
-        val errors = mutableListOf<String>()
-        candidates.forEach { (path, payload) ->
-            try {
-                postOk(path, payload)
-                return
-            } catch (exception: Exception) {
-                errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
-            }
-        }
-        error(
-            "Failed to execute $label. Tried:\n" +
                 errors.joinToString(separator = "\n") { "  - $it" }
         )
     }
@@ -699,6 +736,7 @@ class CcapiClient(
             )
 
     private companion object {
+        val CCAPI_HTTP_METHODS = listOf("GET", "PUT", "POST", "DELETE")
         const val JPEG_MARKER_PREFIX = 0xFF
         const val JPEG_START_MARKER = 0xD8
         const val JPEG_END_MARKER = 0xD9
@@ -721,12 +759,12 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
     val exposure = getJSONObject("exposure")
     return CameraStatus(
         connected = optBoolean("connected"),
-        batteryLevel = battery.optInt("level"),
+        batteryLevel = battery.optNullableInt("level"),
         batteryStatus = battery.optString("status"),
-        recording = optBoolean("recording"),
+        recording = optNullableBoolean("recording"),
         mode = optString("mode"),
-        mediaAvailable = media.optBoolean("available"),
-        remainingMinutes = media.optInt("remaining_minutes"),
+        mediaAvailable = media.optNullableBoolean("available"),
+        remainingMinutes = media.optNullableInt("remaining_minutes"),
         exposure = ExposureState(
             iso = exposure.optString("iso"),
             shutter = exposure.optString("shutter"),
@@ -809,7 +847,16 @@ private fun String.splitCamelCaseWords(): List<String> =
 private fun org.json.JSONArray.toStringList(): List<String> =
     List(length()) { index -> getString(index) }
 
-private fun parseBatteryInfo(jsonStr: String): Pair<Int, String> {
+private fun JSONObject?.hasAnySetting(vararg keys: String): Boolean =
+    this != null && keys.any { has(it) && optJSONObject(it) != null }
+
+private fun JSONObject.optNullableInt(key: String): Int? =
+    if (has(key) && !isNull(key)) optInt(key) else null
+
+private fun JSONObject.optNullableBoolean(key: String): Boolean? =
+    if (has(key) && !isNull(key)) optBoolean(key) else null
+
+private fun parseBatteryInfo(jsonStr: String): Pair<Int?, String> {
     try {
         val trimmed = jsonStr.trim()
         if (trimmed.startsWith("[")) {
@@ -836,12 +883,12 @@ private fun parseBatteryInfo(jsonStr: String): Pair<Int, String> {
     } catch (e: Exception) {
         // ignore
     }
-    return Pair(100, "full")
+    return Pair(null, "unknown")
 }
 
-private fun parseSingleBattery(obj: JSONObject): Pair<Int, String> {
-    var batteryLevel = 100
-    var batteryLevelStr = "full"
+private fun parseSingleBattery(obj: JSONObject): Pair<Int?, String> {
+    var batteryLevel: Int? = null
+    var batteryLevelStr = "unknown"
 
     if (obj.has("level") && !obj.isNull("level")) {
         val optLevel = obj.optInt("level", -1)
@@ -857,7 +904,7 @@ private fun parseSingleBattery(obj: JSONObject): Pair<Int, String> {
                 "low" -> 20
                 "empty" -> 5
                 else -> {
-                    levelStr.toIntOrNull() ?: 100
+                    levelStr.toIntOrNull()
                 }
             }
         }

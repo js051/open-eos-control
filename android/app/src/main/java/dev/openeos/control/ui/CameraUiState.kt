@@ -15,6 +15,8 @@ const val DEFAULT_LIVE_VIEW_FPS = 6
 
 data class CameraUiState(
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
+    val username: String = "",
+    val password: String = "",
     val transport: CameraTransport? = null,
     val info: CameraInfo? = null,
     val status: CameraStatus? = null,
