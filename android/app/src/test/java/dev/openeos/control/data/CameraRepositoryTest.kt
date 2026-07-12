@@ -41,6 +41,7 @@ class CameraRepositoryTest {
         assertEquals(CameraModelPriority.PRIMARY, session.capabilities.profile.priority)
         assertEquals(CameraModelFamily.EOS_R, session.capabilities.profile.family)
         assertTrue(session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
+        assertTrue(session.capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(session.liveViewFrameUrl.endsWith("/ccapi/liveview/frame?t=1"))
         assertEquals("/ccapi/info", server.takeRequest().path)
         assertEquals("/ccapi/status", server.takeRequest().path)
@@ -58,6 +59,22 @@ class CameraRepositoryTest {
 
         assertTrue(session.liveViewFrameUrl.endsWith("t=1"))
         assertTrue(nextFrame.endsWith("t=2"))
+    }
+
+    @Test
+    fun captureStillRunsThroughRepositoryBackendBoundary() = runTest {
+        server.enqueue(jsonResponse(INFO_JSON))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        server.enqueue(jsonResponse("""{"ok":true,"capture_count":1}"""))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        repository.connect(server.url("/").toString())
+
+        repository.captureStill()
+
+        repeat(3) { server.takeRequest() }
+        assertEquals("/ccapi/capture/still", server.takeRequest().path)
+        assertEquals("/ccapi/status", server.takeRequest().path)
     }
 
     @Test

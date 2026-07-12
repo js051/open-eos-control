@@ -112,6 +112,8 @@ class CcapiCameraBackend(
 
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = client.tapFocus(x, y)
 
+    override suspend fun captureStill(): CameraStatus = client.captureStill()
+
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
 
     override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame = client.liveViewFrame(cacheKey, request)

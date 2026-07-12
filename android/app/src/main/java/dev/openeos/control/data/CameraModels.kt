@@ -115,7 +115,7 @@ data class CapabilityMatrix(
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_DOWNLOAD,
-            ),
+            ) - supported,
         )
 
         fun androidUsbPtpRoadmap(): CapabilityMatrix = CapabilityMatrix(
@@ -216,6 +216,7 @@ data class LiveViewCapabilities(
             defaultSource = LiveViewSource.SIMULATOR_FRAME,
             sizes = listOf(LiveViewSize.MEDIUM),
             defaultSize = LiveViewSize.MEDIUM,
+            maxFps = 2,
         )
     }
 }

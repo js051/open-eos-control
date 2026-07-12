@@ -1,3 +1,6 @@
+import struct
+import zlib
+
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
@@ -28,6 +31,7 @@ capabilities = {
 
 state = {
     "recording": False,
+    "capture_count": 0,
     "focus_x": 0.5,
     "focus_y": 0.5,
     "exposure": {
@@ -44,6 +48,7 @@ def camera_status() -> dict[str, object]:
         "connected": True,
         "battery": {"level": 82, "status": "normal"},
         "recording": state["recording"],
+        "capture_count": state["capture_count"],
         "mode": "movie",
         "media": {"available": True, "remaining_minutes": 120},
         "exposure": state["exposure"],
@@ -107,6 +112,12 @@ async def record_stop() -> dict[str, bool]:
     return {"ok": True, "recording": False}
 
 
+@app.post("/ccapi/capture/still")
+async def capture_still() -> dict[str, bool | int]:
+    state["capture_count"] += 1
+    return {"ok": True, "capture_count": state["capture_count"]}
+
+
 @app.post("/ccapi/focus/tap")
 async def tap_focus(payload: FocusRequest) -> dict[str, float | bool]:
     state["focus_x"] = payload.x
@@ -116,14 +127,53 @@ async def tap_focus(payload: FocusRequest) -> dict[str, float | bool]:
 
 @app.get("/ccapi/liveview/frame")
 async def liveview_frame() -> Response:
-    focus_x = int(float(state["focus_x"]) * 960)
-    focus_y = int(float(state["focus_y"]) * 540)
-    label = "REC" if state["recording"] else "STBY"
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540">
-  <rect width="960" height="540" fill="#111827"/>
-  <rect x="52" y="52" width="856" height="436" fill="#1f2937" stroke="#64748b" stroke-width="2"/>
-  <circle cx="{focus_x}" cy="{focus_y}" r="44" fill="none" stroke="#facc15" stroke-width="5"/>
-  <text x="72" y="92" font-family="Arial, sans-serif" font-size="30" fill="#f8fafc">{label}</text>
-  <text x="72" y="482" font-family="Arial, sans-serif" font-size="24" fill="#f8fafc">Fake Canon CCAPI frame</text>
-</svg>"""
-    return Response(content=svg.encode("utf-8"), media_type="image/svg+xml")
+    return Response(content=camera_frame_png(), media_type="image/png")
+
+
+def camera_frame_png() -> bytes:
+    width, height = 960, 540
+    stride = 1 + width * 3
+    pixels = bytearray()
+    background_row = bytes((17, 24, 39)) * width
+    for _ in range(height):
+        pixels.append(0)
+        pixels.extend(background_row)
+
+    def set_pixel(x: int, y: int, color: tuple[int, int, int]) -> None:
+        if 0 <= x < width and 0 <= y < height:
+            offset = y * stride + 1 + x * 3
+            pixels[offset:offset + 3] = bytes(color)
+
+    inner_row = bytes((31, 41, 55)) * 856
+    for y in range(52, 488):
+        offset = y * stride + 1 + 52 * 3
+        pixels[offset:offset + len(inner_row)] = inner_row
+
+    border = (100, 116, 139)
+    for x in range(52, 908):
+        set_pixel(x, 52, border)
+        set_pixel(x, 487, border)
+    for y in range(52, 488):
+        set_pixel(52, y, border)
+        set_pixel(907, y, border)
+
+    focus_x = int(float(state["focus_x"]) * width)
+    focus_y = int(float(state["focus_y"]) * height)
+    focus_color = (57, 197, 207)
+    for y in range(focus_y - 48, focus_y + 49):
+        for x in range(focus_x - 48, focus_x + 49):
+            distance_squared = (x - focus_x) ** 2 + (y - focus_y) ** 2
+            if 40 ** 2 <= distance_squared <= 46 ** 2:
+                set_pixel(x, y, focus_color)
+
+    status_color = (233, 75, 75) if state["recording"] else (88, 199, 123)
+    for y in range(72, 92):
+        for x in range(72, 92):
+            set_pixel(x, y, status_color)
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        checksum = zlib.crc32(kind + payload) & 0xFFFFFFFF
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(bytes(pixels), 6)) + chunk(b"IEND", b"")

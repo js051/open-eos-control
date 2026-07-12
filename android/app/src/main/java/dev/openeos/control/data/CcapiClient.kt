@@ -332,6 +332,9 @@ class CcapiClient(
             if (supportsApi("POST", "/shooting/control/recbutton")) {
                 supportedFeatures.add(CameraFeature.VIDEO_RECORDING)
             }
+            if (supportsApi("POST", "/shooting/control/shutterbutton")) {
+                supportedFeatures.add(CameraFeature.STILL_CAPTURE)
+            }
             if (supportsApi("POST", "/shooting/control/afpoint")) {
                 supportedFeatures.add(CameraFeature.TAP_FOCUS)
             }
@@ -407,6 +410,19 @@ class CcapiClient(
             isRecording = false
         } else {
             postJson("/ccapi/record/stop", JSONObject())
+        }
+        return status()
+    }
+
+    suspend fun captureStill(): CameraStatus {
+        if (isRealCamera) {
+            postOk(
+                apiPath("POST", "/shooting/control/shutterbutton"),
+                JSONObject().put("af", true),
+            )
+            observedFeatures.add(CameraFeature.STILL_CAPTURE)
+        } else {
+            postJson("/ccapi/capture/still", JSONObject().put("af", true))
         }
         return status()
     }
@@ -779,7 +795,9 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
     shutter = getJSONArray("shutter").toStringList(),
     aperture = getJSONArray("aperture").toStringList(),
     whiteBalance = getJSONArray("white_balance").toStringList(),
-    matrix = CapabilityMatrix.ccapiNetwork(),
+    matrix = CapabilityMatrix.ccapiNetwork(
+        CapabilityMatrix.ccapiNetwork().supported + CameraFeature.STILL_CAPTURE,
+    ),
     liveView = LiveViewCapabilities.simulator(),
 )
 

@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.LiveViewRequest
+import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,6 +27,28 @@ class CameraViewModel(
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
     private var liveViewJob: Job? = null
+    private val frameTimesMillis = ArrayDeque<Long>()
+    private var preferencesLoaded = false
+
+    fun initialize(context: Context) {
+        if (preferencesLoaded) return
+        preferencesLoaded = true
+        val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        _uiState.update {
+            it.copy(
+                baseUrl = preferences.getString(KEY_BASE_URL, it.baseUrl) ?: it.baseUrl,
+                username = preferences.getString(KEY_USERNAME, it.username) ?: it.username,
+            )
+        }
+    }
+
+    fun setUiMode(mode: UiMode) = _uiState.update { it.copy(uiMode = mode, activeSettingPicker = null) }
+
+    fun setCaptureMode(mode: CaptureMode) = _uiState.update { it.copy(captureMode = mode, activeSettingPicker = null) }
+
+    fun openSettingPicker(picker: SettingPicker) = _uiState.update { it.copy(activeSettingPicker = picker) }
+
+    fun closeSettingPicker() = _uiState.update { it.copy(activeSettingPicker = null) }
 
     fun setBaseUrl(value: String) {
         if (_uiState.value.connected) return
@@ -85,13 +108,22 @@ class CameraViewModel(
 
     fun connect() = runCamera {
         stopLiveViewLoop()
+        resetFrameMetrics()
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val session = repository.connect(
             baseUrl = _uiState.value.baseUrl,
             username = _uiState.value.username,
             password = _uiState.value.password,
-            request = LiveViewRequest(fps = _uiState.value.liveViewFrameRateFps),
+            request = LiveViewRequest(
+                fps = _uiState.value.liveViewFrameRateFps,
+                size = _uiState.value.liveViewSize,
+            ),
         )
+        val supportedFps = _uiState.value.liveViewFrameRateFps.coerceIn(
+            session.capabilities.liveView.minFps,
+            session.capabilities.liveView.maxFps,
+        )
+        repository.updateLiveViewRequest(fps = supportedFps)
         _uiState.update {
             it.copy(
                 transport = session.transport,
@@ -100,14 +132,25 @@ class CameraViewModel(
                 capabilities = session.capabilities,
                 liveViewFrameUrl = session.liveViewFrameUrl,
                 liveViewBitmap = null,
+                liveViewFrameRateFps = supportedFps,
             )
         }
         refreshLiveViewFrameInternal(reportErrors = true)
         startLiveViewLoopIfNeeded()
     }
 
+    fun rememberConnection(context: Context) {
+        val state = _uiState.value
+        context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_BASE_URL, state.baseUrl)
+            .putString(KEY_USERNAME, state.username)
+            .apply()
+    }
+
     fun disconnect() {
         stopLiveViewLoop()
+        resetFrameMetrics()
         viewModelScope.launch {
             try {
                 repository.disconnect()
@@ -146,13 +189,30 @@ class CameraViewModel(
     }
 
     fun setLiveViewFrameRate(fps: Int) {
-        val clampedFps = fps.coerceIn(MIN_LIVE_VIEW_FPS, MAX_LIVE_VIEW_FPS)
+        val liveView = _uiState.value.capabilities?.liveView
+        val clampedFps = fps.coerceIn(
+            liveView?.minFps ?: MIN_LIVE_VIEW_FPS,
+            liveView?.maxFps ?: MAX_LIVE_VIEW_FPS,
+        )
         val changed = _uiState.value.liveViewFrameRateFps != clampedFps
         repository.updateLiveViewRequest(fps = clampedFps)
         _uiState.update { it.copy(liveViewFrameRateFps = clampedFps) }
         if (changed && _uiState.value.connected && _uiState.value.liveViewAutoRefresh) {
             startLiveViewLoopIfNeeded()
         }
+    }
+
+    fun setLiveViewSize(size: LiveViewSize) {
+        if (_uiState.value.liveViewSize == size) return
+        repository.updateLiveViewRequest(size = size)
+        _uiState.update { it.copy(liveViewSize = size) }
+        restartLiveView()
+    }
+
+    fun restartLiveView() = runCamera {
+        repository.restartLiveView()
+        refreshLiveViewFrameInternal(reportErrors = true)
+        startLiveViewLoopIfNeeded()
     }
 
     fun setIso(value: String) = updateStatus { repository.setIso(value) }
@@ -178,6 +238,15 @@ class CameraViewModel(
 
     fun toggleRecording() = updateStatus {
         repository.toggleRecording(_uiState.value.status?.recording)
+    }
+
+    fun captureStill() = runCamera {
+        val status = repository.captureStill()
+        _uiState.update { it.copy(status = status, captureFeedback = CaptureFeedback.SUCCESS) }
+        delay(CAPTURE_FLASH_MILLIS)
+        _uiState.update { it.copy(captureFeedback = null) }
+        refreshLiveViewFrameInternal(reportErrors = false)
+        startLiveViewLoopIfNeeded()
     }
 
     fun tapFocus(x: Double, y: Double) = runCamera {
@@ -221,11 +290,17 @@ class CameraViewModel(
         if (!_uiState.value.connected) return
 
         if (!repository.isRealCamera()) {
+            val nextUrl = repository.nextLiveViewFrameUrl()
             _uiState.update {
                 if (it.connected) {
                     it.copy(
-                        liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
+                        liveViewFrameUrl = nextUrl,
                         liveViewBitmap = null,
+                        liveViewDiagnostics = recordFrame(
+                            current = it.liveViewDiagnostics,
+                            nowMillis = System.currentTimeMillis(),
+                            sourceUrl = nextUrl,
+                        ),
                     )
                 } else {
                     it
@@ -248,6 +323,13 @@ class CameraViewModel(
                     it.copy(
                         liveViewFrameUrl = frame.sourceUrl,
                         liveViewBitmap = bitmap,
+                        liveViewDiagnostics = recordFrame(
+                            current = it.liveViewDiagnostics,
+                            nowMillis = System.currentTimeMillis(),
+                            frameBytes = frame.bytes.size,
+                            contentType = frame.contentType,
+                            sourceUrl = frame.sourceUrl,
+                        ),
                     )
                 } else {
                     it
@@ -289,11 +371,17 @@ class CameraViewModel(
                 if (repository.isRealCamera()) {
                     refreshLiveViewFrameInternal(reportErrors = false)
                 } else {
+                    val nextUrl = repository.nextLiveViewFrameUrl()
                     _uiState.update {
                         if (it.connected && it.liveViewAutoRefresh) {
                             it.copy(
-                                liveViewFrameUrl = repository.nextLiveViewFrameUrl(),
+                                liveViewFrameUrl = nextUrl,
                                 liveViewBitmap = null,
+                                liveViewDiagnostics = recordFrame(
+                                    current = it.liveViewDiagnostics,
+                                    nowMillis = System.currentTimeMillis(),
+                                    sourceUrl = nextUrl,
+                                ),
                             )
                         } else {
                             it
@@ -332,10 +420,41 @@ class CameraViewModel(
         capabilities = null,
         liveViewFrameUrl = null,
         liveViewBitmap = null,
+        liveViewDiagnostics = LiveViewDiagnostics(),
         focusPoint = null,
         error = error,
     )
 
     private fun fpsToFrameIntervalMillis(fps: Int): Long =
         (1_000L / fps.coerceIn(MIN_LIVE_VIEW_FPS, MAX_LIVE_VIEW_FPS)).coerceAtLeast(1L)
+
+    private fun recordFrame(
+        current: LiveViewDiagnostics,
+        nowMillis: Long,
+        frameBytes: Int? = current.frameBytes,
+        contentType: String? = current.contentType,
+        sourceUrl: String? = current.sourceUrl,
+    ): LiveViewDiagnostics {
+        frameTimesMillis.addLast(nowMillis)
+        while (frameTimesMillis.size > FPS_WINDOW_SIZE) frameTimesMillis.removeFirst()
+        return LiveViewDiagnostics(
+            observedFps = rollingFps(frameTimesMillis.toList()),
+            frameBytes = frameBytes,
+            contentType = contentType,
+            sourceUrl = sourceUrl,
+            lastFrameAtMillis = nowMillis,
+        )
+    }
+
+    private fun resetFrameMetrics() {
+        frameTimesMillis.clear()
+    }
+
+    private companion object {
+        const val PREFERENCES_NAME = "camera_connection"
+        const val KEY_BASE_URL = "base_url"
+        const val KEY_USERNAME = "username"
+        const val CAPTURE_FLASH_MILLIS = 120L
+        const val FPS_WINDOW_SIZE = 30
+    }
 }

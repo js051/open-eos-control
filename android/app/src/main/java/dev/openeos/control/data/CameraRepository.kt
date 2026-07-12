@@ -89,6 +89,13 @@ class CameraRepository(
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult = backend.tapFocus(x, y)
 
+    suspend fun captureStill(): CameraStatus = backend.captureStill()
+
+    suspend fun restartLiveView() {
+        backend.stopLiveView()
+        backend.startLiveView(liveViewRequest)
+    }
+
     fun updateLiveViewRequest(
         fps: Int? = null,
         size: LiveViewSize? = null,

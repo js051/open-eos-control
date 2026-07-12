@@ -92,6 +92,7 @@ class CcapiClientTest {
         assertEquals(emptyList<CameraSettingControl>(), capabilities.advancedSettings)
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertEquals(listOf(LiveViewSource.SIMULATOR_FRAME), capabilities.liveView.sources)
+        assertEquals(2, capabilities.liveView.maxFps)
     }
 
     @Test
@@ -220,6 +221,8 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
         assertTrue(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
+        assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
+        assertTrue(!capabilities.matrix.isPlanned(CameraFeature.STILL_CAPTURE))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
         assertTrue(!capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
         assertTrue(!capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
@@ -343,6 +346,26 @@ class CcapiClientTest {
         assertEquals("/ccapi/ver100/shooting/control/recbutton", recordRequest.path)
         assertEquals("POST", recordRequest.method)
         assertTrue(status.recording == true)
+    }
+
+    @Test
+    fun realStillCaptureUsesAdvertisedShutterEndpointWithAutofocus() = runTest {
+        client.forceRealCamera(
+            prefix = "/ccapi/ver110",
+            prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{}"""))
+
+        client.captureStill()
+        val request = server.takeRequest()
+
+        assertEquals("/ccapi/ver110/shooting/control/shutterbutton", request.path)
+        assertEquals("POST", request.method)
+        assertTrue(JSONObject(request.body.readUtf8()).getBoolean("af"))
     }
 
     @Test
@@ -472,6 +495,7 @@ class CcapiClientTest {
                 {"path":"/shooting/liveview","post":true,"delete":true},
                 {"path":"/shooting/liveview/flip","get":true},
                 {"path":"/shooting/control/recbutton","post":true},
+                {"path":"/shooting/control/shutterbutton","post":true},
                 {"path":"/shooting/settings","get":true}
               ]
             }
