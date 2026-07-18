@@ -1,5 +1,6 @@
 package dev.openeos.control.ui
 
+import android.os.SystemClock
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,11 +23,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +44,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -49,12 +54,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -152,11 +159,44 @@ fun CameraHeader(state: CameraUiState, actions: CameraActions) {
 }
 
 @Composable
+fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
+    val battery = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
+        ?: stringResource(R.string.unknown)
+    Row(
+        modifier = modifier.fillMaxWidth().height(52.dp).background(Color(0xB8000000)).padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(8.dp).background(AppSuccess, CircleShape))
+        Column(Modifier.weight(1f)) {
+            Text(
+                state.info?.model ?: stringResource(R.string.unknown),
+                color = AppText,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(battery, color = AppSubtleText, maxLines = 1)
+        }
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_bug,
+            stringResource(R.string.debug),
+            { actions.setUiMode(UiMode.DEBUG) },
+        )
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_unplug,
+            stringResource(R.string.disconnect),
+            actions.disconnect,
+        )
+    }
+}
+
+@Composable
 fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val bitmap = state.liveViewBitmap
     val sourceAspectRatio = bitmap?.takeIf { it.width > 0 && it.height > 0 }
         ?.let { it.width.toFloat() / it.height.toFloat() } ?: 16f / 9f
-    val canFocus = state.supports(CameraFeature.TAP_FOCUS)
+    val canFocus = state.supports(CameraFeature.TAP_FOCUS) && !state.isBusy(CameraOperation.FOCUS)
     val context = LocalContext.current
     var lastFramePainter by remember { mutableStateOf<Painter?>(null) }
     val imageLoader = remember(context) {
@@ -200,37 +240,74 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             else -> Text(stringResource(R.string.live_view_unavailable), color = AppMutedText)
         }
 
-        Row(
-            Modifier.align(Alignment.TopStart).padding(12.dp).background(Color(0xA6000000), RoundedCornerShape(4.dp)).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (state.status?.recording == true) Text(stringResource(R.string.recording), color = AppRecord, fontWeight = FontWeight.Bold)
-            if (canFocus) Text(stringResource(R.string.tap_to_focus), color = AppAccent)
-        }
-        FocusIndicator(state.focusPoint, sourceAspectRatio)
+        if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
+        FocusIndicator(state.focusPoint, state.focusFeedback, sourceAspectRatio)
         if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
     }
 }
 
 @Composable
-private fun FocusIndicator(point: FocusPoint?, sourceAspectRatio: Float) {
+private fun FocusIndicator(point: FocusPoint?, feedback: FocusFeedback?, sourceAspectRatio: Float) {
     if (point == null) return
+    val color = when (feedback) {
+        FocusFeedback.SUCCESS -> AppSuccess
+        FocusFeedback.FAILURE -> AppRecord
+        else -> AppAccent
+    }
     Canvas(Modifier.fillMaxSize()) {
         val display = mapFocusPointToDisplay(point, size.width, size.height, sourceAspectRatio)
-        drawCircle(AppAccent, 28.dp.toPx(), Offset(display.x, display.y), style = Stroke(2.dp.toPx()))
-        drawLine(AppAccent, Offset(display.x - 36.dp.toPx(), display.y), Offset(display.x - 18.dp.toPx(), display.y), 2.dp.toPx())
-        drawLine(AppAccent, Offset(display.x + 18.dp.toPx(), display.y), Offset(display.x + 36.dp.toPx(), display.y), 2.dp.toPx())
+        drawCircle(color, 28.dp.toPx(), Offset(display.x, display.y), style = Stroke(if (feedback == FocusFeedback.FOCUSING) 3.dp.toPx() else 2.dp.toPx()))
+        drawLine(color, Offset(display.x - 36.dp.toPx(), display.y), Offset(display.x - 18.dp.toPx(), display.y), 2.dp.toPx())
+        drawLine(color, Offset(display.x + 18.dp.toPx(), display.y), Offset(display.x + 36.dp.toPx(), display.y), 2.dp.toPx())
+    }
+}
+
+@Composable
+private fun RecordingIndicator(modifier: Modifier = Modifier) {
+    var elapsedSeconds by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        val startedAt = SystemClock.elapsedRealtime()
+        while (true) {
+            elapsedSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1_000L
+            delay(1_000L)
+        }
+    }
+    val elapsed = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
+    Row(
+        modifier.background(Color(0xB8000000), RoundedCornerShape(4.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(8.dp).background(AppRecord, CircleShape))
+        Text(stringResource(R.string.recording_time, elapsed), color = AppText, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 fun ExposureStrip(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val exposure = state.status?.exposure
+    val available = !state.isBusy(CameraOperation.SETTING)
     Row(modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-        ExposureCell(stringResource(R.string.iso), exposure?.iso ?: "-", state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
-        ExposureCell(stringResource(R.string.shutter), exposure?.shutter ?: "-", state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
-        ExposureCell(stringResource(R.string.aperture), exposure?.aperture ?: "-", state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
-        ExposureCell(stringResource(R.string.white_balance), exposure?.whiteBalance ?: "-", state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+        ExposureCell(stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
+        ExposureCell(stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
+        ExposureCell(stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
+        ExposureCell(stringResource(R.string.white_balance), exposure?.whiteBalance ?: "-", available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+    }
+}
+
+@Composable
+fun LandscapeExposureGrid(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
+    val exposure = state.status?.exposure
+    val available = !state.isBusy(CameraOperation.SETTING)
+    Column(modifier.fillMaxWidth().height(112.dp)) {
+        Row(Modifier.fillMaxWidth().weight(1f)) {
+            ExposureCell(stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
+            ExposureCell(stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
+        }
+        Row(Modifier.fillMaxWidth().weight(1f)) {
+            ExposureCell(stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
+            ExposureCell(stringResource(R.string.white_balance), exposure?.whiteBalance ?: "-", available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+        }
     }
 }
 
@@ -256,14 +333,26 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
         else -> stringResource(R.string.start_recording)
     }
     val color = if (photo) AppText else AppRecord
+    val operation = if (photo) CameraOperation.CAPTURE else CameraOperation.RECORDING
+    val processing = state.isBusy(operation)
+    val haptic = LocalHapticFeedback.current
+    LaunchedEffect(state.captureFeedback) {
+        if (state.captureFeedback == CaptureFeedback.SUCCESS) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
     Box(
         Modifier.size(76.dp)
             .background(AppBackground, CircleShape)
-            .clickable(enabled = supported && !state.busy) { if (photo) actions.captureStill() else actions.toggleRecording() }
+            .clickable(enabled = supported && !processing) { if (photo) actions.captureStill() else actions.toggleRecording() }
             .semantics { contentDescription = description; role = Role.Button },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(if (photo) 58.dp else 52.dp).background(color, if (photo || state.status?.recording != true) CircleShape else RoundedCornerShape(8.dp)))
+        if (processing) {
+            CircularProgressIndicator(Modifier.size(48.dp), color = color, strokeWidth = 3.dp)
+        } else {
+            Box(Modifier.size(if (photo) 58.dp else 52.dp).background(color, if (photo || state.status?.recording != true) CircleShape else RoundedCornerShape(8.dp)))
+        }
     }
 }
 
@@ -271,7 +360,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
 fun ErrorBanner(error: String?, onDismiss: () -> Unit) {
     if (error == null) return
     Row(
-        Modifier.fillMaxWidth().background(Color(0xFF512326)).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+        Modifier.fillMaxWidth().navigationBarsPadding().background(Color(0xFF512326)).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(error, color = AppText, modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)

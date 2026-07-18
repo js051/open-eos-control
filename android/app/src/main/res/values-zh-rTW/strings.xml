@@ -11,7 +11,7 @@
     <string name="disconnect">中斷連線</string><string name="refresh">重新整理</string><string name="more_settings">更多設定</string><string name="live_view_settings">Live View 設定</string><string name="live_view">Live View</string>
     <string name="live_view_unavailable">無法使用 Live View</string><string name="tap_to_focus">點按對焦</string>
     <string name="iso">ISO</string><string name="shutter">Tv</string><string name="aperture">Av</string><string name="white_balance">WB</string>
-    <string name="capture_photo">拍攝照片</string><string name="start_recording">開始錄影</string><string name="stop_recording">停止錄影</string><string name="recording">REC</string>
+    <string name="capture_photo">拍攝照片</string><string name="start_recording">開始錄影</string><string name="stop_recording">停止錄影</string><string name="recording">REC</string><string name="recording_time">REC %1$s</string>
     <string name="capture_not_supported">相機未公告支援拍照快門。</string><string name="recording_not_supported">相機未公告支援錄影控制。</string>
     <string name="fps_value">%1$d fps</string><string name="size">Live View 尺寸</string><string name="auto_refresh">自動更新</string><string name="no_settings">此模式沒有可用設定。</string>
     <string name="overview">總覽</string><string name="ccapi">CCAPI</string><string name="usb_ptp">USB / PTP</string><string name="copy_diagnostic">複製診斷報告</string><string name="diagnostic_copied">已複製診斷報告</string>

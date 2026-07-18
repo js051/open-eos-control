@@ -10,9 +10,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -41,7 +45,12 @@ import com.composables.icons.lucide.R as LucideR
 fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
     var showAuthentication by remember { mutableStateOf(state.username.isNotBlank()) }
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 28.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Column(Modifier.widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -100,19 +109,19 @@ fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
 
             Button(
                 onClick = actions.connect,
-                enabled = !state.busy && state.baseUrl.isNotBlank(),
+                enabled = !state.isBusy(CameraOperation.CONNECT) && state.baseUrl.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(6.dp),
             ) {
                 Icon(painterResource(LucideR.drawable.lucide_ic_wifi), null, Modifier.size(20.dp))
                 Spacer(Modifier.size(8.dp))
-                Text(stringResource(if (state.busy) R.string.connecting else R.string.connect))
+                Text(stringResource(if (state.isBusy(CameraOperation.CONNECT)) R.string.connecting else R.string.connect))
             }
 
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.usb_camera), color = AppText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                ToolIconButton(LucideR.drawable.lucide_ic_refresh_cw, stringResource(R.string.usb_scan), actions.refreshUsb, enabled = !state.busy)
+                ToolIconButton(LucideR.drawable.lucide_ic_refresh_cw, stringResource(R.string.usb_scan), actions.refreshUsb, enabled = !state.isBusy(CameraOperation.USB))
             }
             Text(
                 pluralStringResource(

@@ -21,6 +21,8 @@ enum class CaptureMode { PHOTO, VIDEO }
 
 enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MORE }
 
+enum class CameraOperation { CONNECT, STATUS, SETTING, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, USB }
+
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,
     val frameBytes: Int? = null,
@@ -30,6 +32,8 @@ data class LiveViewDiagnostics(
 )
 
 enum class CaptureFeedback { SUCCESS }
+
+enum class FocusFeedback { FOCUSING, SUCCESS, FAILURE }
 
 data class CameraUiState(
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
@@ -51,14 +55,20 @@ data class CameraUiState(
     val activeSettingPicker: SettingPicker? = null,
     val captureFeedback: CaptureFeedback? = null,
     val focusPoint: FocusPoint? = null,
+    val focusFeedback: FocusFeedback? = null,
     val error: String? = null,
-    val busy: Boolean = false,
+    val pendingOperations: Set<CameraOperation> = emptySet(),
 ) {
     val connected: Boolean
         get() = info != null && status?.connected == true
 
     fun supports(feature: CameraFeature): Boolean =
         capabilities?.matrix?.supports(feature) ?: false
+
+    val busy: Boolean
+        get() = pendingOperations.isNotEmpty()
+
+    fun isBusy(operation: CameraOperation): Boolean = operation in pendingOperations
 }
 
 data class FocusPoint(

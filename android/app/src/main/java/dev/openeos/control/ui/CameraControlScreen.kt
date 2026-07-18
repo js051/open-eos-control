@@ -1,11 +1,13 @@
 package dev.openeos.control.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -13,21 +15,36 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,42 +54,66 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.LiveViewSize
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
 fun CameraControlScreen(state: CameraUiState, actions: CameraActions) {
-    Column(Modifier.fillMaxSize()) {
-        CameraHeader(state, actions)
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            if (maxWidth > maxHeight) LandscapeControls(state, actions) else PortraitControls(state, actions)
-        }
+    BoxWithConstraints(
+        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
+        if (maxWidth > maxHeight) LandscapeControls(state, actions) else PortraitControls(state, actions)
     }
     SettingSheets(state, actions)
 }
 
 @Composable
 private fun PortraitControls(state: CameraUiState, actions: CameraActions) {
-    Column(Modifier.fillMaxSize()) {
-        CaptureModeSegment(state, actions, Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-        LiveViewFrame(state, actions, Modifier.fillMaxWidth().weight(1f))
-        ExposureStrip(state, actions)
-        ModeQuickSettings(state, actions)
-        CaptureBar(state, actions)
+    Box(Modifier.fillMaxSize()) {
+        LiveViewFrame(state, actions, Modifier.fillMaxSize())
+        Column(Modifier.align(Alignment.TopCenter)) {
+            CameraOverlayHeader(state, actions)
+            CaptureModeSegment(
+                state,
+                actions,
+                Modifier.align(Alignment.CenterHorizontally).widthIn(max = 220.dp).padding(top = 6.dp),
+            )
+        }
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xE6101214)),
+        ) {
+            ExposureStrip(state, actions)
+            ModeQuickSettings(state, actions)
+            CaptureBar(state, actions)
+        }
     }
 }
 
 @Composable
 private fun LandscapeControls(state: CameraUiState, actions: CameraActions) {
-    Row(Modifier.fillMaxSize()) {
-        LiveViewFrame(state, actions, Modifier.weight(0.7f).fillMaxHeight())
+    Box(Modifier.fillMaxSize()) {
+        LiveViewFrame(
+            state,
+            actions,
+            Modifier.align(Alignment.CenterStart).fillMaxWidth(0.66f).fillMaxHeight(),
+        )
+        CameraOverlayHeader(state, actions, Modifier.align(Alignment.TopStart).fillMaxWidth(0.66f))
         Column(
-            Modifier.weight(0.3f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(10.dp),
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxWidth(0.34f)
+                .fillMaxHeight()
+                .background(Color(0xE6101214))
+                .verticalScroll(rememberScrollState())
+                .padding(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             CaptureModeSegment(state, actions)
-            ExposureStrip(state, actions)
-            ModeQuickSettings(state, actions)
+            LandscapeExposureGrid(state, actions)
             Spacer(Modifier.height(4.dp))
             CaptureBar(state, actions)
         }
@@ -146,10 +187,10 @@ private fun ModeQuickSettings(state: CameraUiState, actions: CameraActions) {
 @Composable
 private fun SettingSheets(state: CameraUiState, actions: CameraActions) {
     when (state.activeSettingPicker) {
-        SettingPicker.ISO -> ValueSheet(stringResource(R.string.iso), state.capabilities?.iso.orEmpty(), state.status?.exposure?.iso, actions.setIso, actions.closePicker)
-        SettingPicker.SHUTTER -> ValueSheet(stringResource(R.string.shutter), state.capabilities?.shutter.orEmpty(), state.status?.exposure?.shutter, actions.setShutter, actions.closePicker)
-        SettingPicker.APERTURE -> ValueSheet(stringResource(R.string.aperture), state.capabilities?.aperture.orEmpty(), state.status?.exposure?.aperture, actions.setAperture, actions.closePicker)
-        SettingPicker.WHITE_BALANCE -> ValueSheet(stringResource(R.string.white_balance), state.capabilities?.whiteBalance.orEmpty(), state.status?.exposure?.whiteBalance, actions.setWhiteBalance, actions.closePicker)
+        SettingPicker.ISO -> ValueSheet(stringResource(R.string.iso), state.capabilities?.iso.orEmpty(), state.status?.exposure?.iso, state.isBusy(CameraOperation.SETTING), actions.setIso, actions.closePicker)
+        SettingPicker.SHUTTER -> ValueSheet(stringResource(R.string.shutter), state.capabilities?.shutter.orEmpty(), state.status?.exposure?.shutter, state.isBusy(CameraOperation.SETTING), actions.setShutter, actions.closePicker)
+        SettingPicker.APERTURE -> ValueSheet(stringResource(R.string.aperture), state.capabilities?.aperture.orEmpty(), state.status?.exposure?.aperture, state.isBusy(CameraOperation.SETTING), actions.setAperture, actions.closePicker)
+        SettingPicker.WHITE_BALANCE -> ValueSheet(stringResource(R.string.white_balance), state.capabilities?.whiteBalance.orEmpty(), state.status?.exposure?.whiteBalance, state.isBusy(CameraOperation.SETTING), actions.setWhiteBalance, actions.closePicker)
         SettingPicker.LIVE_VIEW -> LiveViewSettingsSheet(state, actions)
         SettingPicker.MORE -> MoreSettingsSheet(state, actions)
         null -> Unit
@@ -158,21 +199,107 @@ private fun SettingSheets(state: CameraUiState, actions: CameraActions) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ValueSheet(title: String, values: List<String>, current: String?, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
+private fun ValueSheet(
+    title: String,
+    values: List<String>,
+    current: String?,
+    isApplying: Boolean,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AppSurface) {
-        Text(title, color = AppText, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(84.dp),
-            modifier = Modifier.fillMaxWidth().height(300.dp).padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            gridItems(values) { value ->
-                Box(
-                    Modifier.height(48.dp).background(if (value == current) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { onSelect(value); onDismiss() },
-                    contentAlignment = Alignment.Center,
-                ) { Text(value, color = if (value == current) AppBackground else AppText, maxLines = 1) }
+        ExposureDial(title, values, current, isApplying, onSelect, onDismiss)
+    }
+}
+
+@Composable
+private fun ExposureDial(
+    title: String,
+    values: List<String>,
+    current: String?,
+    isApplying: Boolean,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (values.isEmpty()) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+            Text(title, color = AppText, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.no_settings), color = AppSubtleText, modifier = Modifier.padding(top = 16.dp))
+        }
+        return
+    }
+
+    val initialIndex = values.indexOf(current).coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    val scope = rememberCoroutineScope()
+    var selectedIndex by remember(values, current) { mutableIntStateOf(initialIndex) }
+
+    LaunchedEffect(listState, values) {
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .filter { scrolling -> !scrolling }
+            .collect {
+                val viewportCenter = (listState.layoutInfo.viewportStartOffset + listState.layoutInfo.viewportEndOffset) / 2
+                val centered = listState.layoutInfo.visibleItemsInfo.minByOrNull { item ->
+                    abs((item.offset + item.size / 2) - viewportCenter)
+                } ?: return@collect
+                if (centered.index != selectedIndex) {
+                    selectedIndex = centered.index
+                    onSelect(values[centered.index])
+                }
             }
+    }
+
+    Column(Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+        Row(
+            Modifier.fillMaxWidth().height(52.dp).padding(start = 20.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, color = AppMutedText)
+                Text(values[selectedIndex], color = AppText, fontWeight = FontWeight.Bold)
+            }
+            if (isApplying) CircularProgressIndicator(Modifier.size(24.dp), color = AppAccent, strokeWidth = 2.dp)
+            ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), onDismiss)
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth().height(104.dp)) {
+            val itemWidth = 88.dp
+            val edgePadding = ((maxWidth - itemWidth) / 2).coerceAtLeast(0.dp)
+            LazyRow(
+                state = listState,
+                contentPadding = PaddingValues(horizontal = edgePadding),
+                flingBehavior = rememberSnapFlingBehavior(lazyListState = listState),
+            ) {
+                items(values.size, key = { values[it] }) { index ->
+                    val selected = index == selectedIndex
+                    Box(
+                        Modifier
+                            .width(itemWidth)
+                            .height(88.dp)
+                            .clickable(enabled = !isApplying) {
+                                selectedIndex = index
+                                onSelect(values[index])
+                                scope.launch { listState.animateScrollToItem(index) }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            values[index],
+                            color = if (selected) AppText else AppMutedText,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .width(itemWidth)
+                    .height(56.dp)
+                    .border(2.dp, AppAccent, RoundedCornerShape(6.dp)),
+            )
         }
     }
 }

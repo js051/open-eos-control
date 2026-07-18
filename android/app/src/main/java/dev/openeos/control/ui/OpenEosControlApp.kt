@@ -1,15 +1,20 @@
 package dev.openeos.control.ui
 
+import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.openeos.control.data.LiveViewSize
@@ -56,6 +61,7 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
     )
 
     MaterialTheme(colorScheme = OpenEosColorScheme) {
+        SystemBarsEffect(immersive = state.connected && state.uiMode == UiMode.CONTROL)
         Box(Modifier.fillMaxSize().background(AppBackground)) {
             if (!state.connected) {
                 ConnectionScreen(state, actions)
@@ -66,6 +72,36 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
             }
             Box(Modifier.align(Alignment.BottomCenter)) {
                 ErrorBanner(state.error, actions.clearError)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SystemBarsEffect(immersive: Boolean) {
+    val view = LocalView.current
+    val activity = view.context as? Activity ?: return
+    fun applySystemBars() {
+        WindowInsetsControllerCompat(activity.window, view).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+            if (immersive) {
+                hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+    DisposableEffect(view, immersive) {
+        applySystemBars()
+        val focusListener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+            if (hasFocus) applySystemBars()
+        }
+        view.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
+        onDispose {
+            if (view.viewTreeObserver.isAlive) {
+                view.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
             }
         }
     }

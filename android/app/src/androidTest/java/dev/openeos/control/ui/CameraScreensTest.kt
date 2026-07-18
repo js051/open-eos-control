@@ -2,15 +2,20 @@ package dev.openeos.control.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.runtime.mutableStateOf
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.ExposureState
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Assert.assertEquals
 
 class CameraScreensTest {
     @get:Rule val compose = createComposeRule()
@@ -19,7 +24,7 @@ class CameraScreensTest {
     fun disconnectedStateShowsDedicatedConnectionScreen() {
         compose.setContent { MaterialTheme { ConnectionScreen(CameraUiState(), noOpActions()) } }
         compose.onNodeWithText("Connect your EOS").assertIsDisplayed()
-        compose.onNodeWithText("Connect").assertIsDisplayed()
+        compose.onNodeWithText("Connect").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -33,8 +38,32 @@ class CameraScreensTest {
     fun debugStateShowsDiagnosticSections() {
         compose.setContent { MaterialTheme { DebugScreen(connectedState().copy(uiMode = UiMode.DEBUG), noOpActions()) } }
         compose.onNodeWithText("Overview").assertIsDisplayed()
-        compose.onNodeWithText("CCAPI").assertIsDisplayed()
+        compose.onNodeWithText("CCAPI").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("USB / PTP").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun exposureDialStaysOpenForContinuousAdjustments() {
+        val picker = mutableStateOf<SettingPicker?>(null)
+        var selectedIso: String? = null
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+            setIso = { selectedIso = it },
+        )
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(activeSettingPicker = picker.value),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithText("ISO").performClick()
+        compose.onNodeWithText("1600").performClick()
+        compose.runOnIdle { assertEquals("1600", selectedIso) }
+        compose.onAllNodesWithText("ISO").assertCountEquals(2)
     }
 
     private fun connectedState() = CameraUiState(
@@ -49,7 +78,12 @@ class CameraScreensTest {
             remainingMinutes = 120,
             exposure = ExposureState("800", "1/50", "2.8", "auto"),
         ),
-        capabilities = CameraCapabilities(emptyList(), emptyList(), emptyList(), emptyList()),
+        capabilities = CameraCapabilities(
+            iso = listOf("100", "200", "400", "800", "1600", "3200"),
+            shutter = listOf("1/30", "1/50", "1/60"),
+            aperture = listOf("2.8", "4.0", "5.6"),
+            whiteBalance = listOf("auto", "daylight", "cloudy"),
+        ),
     )
 
     private fun noOpActions() = CameraActions(

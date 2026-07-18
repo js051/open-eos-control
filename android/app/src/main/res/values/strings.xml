@@ -37,6 +37,7 @@
     <string name="start_recording">Start recording</string>
     <string name="stop_recording">Stop recording</string>
     <string name="recording">REC</string>
+    <string name="recording_time">REC %1$s</string>
     <string name="capture_not_supported">Still capture is not advertised by this camera.</string>
     <string name="recording_not_supported">Video recording is not advertised by this camera.</string>
     <string name="fps_value">%1$d fps</string>

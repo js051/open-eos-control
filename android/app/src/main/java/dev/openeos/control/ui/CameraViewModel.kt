@@ -94,19 +94,19 @@ class CameraViewModel(
         _uiState.update { it.copy(error = null) }
     }
 
-    fun refreshUsbDiagnostics(context: Context) = runCamera {
+    fun refreshUsbDiagnostics(context: Context) = runCamera(CameraOperation.USB) {
         val diagnostics = UsbPtpDiagnosticScanner().scan(context.applicationContext)
         _uiState.update { it.copy(usbDiagnostics = diagnostics) }
     }
 
-    fun requestUsbPermission(context: Context, deviceName: String) = runCamera {
+    fun requestUsbPermission(context: Context, deviceName: String) = runCamera(CameraOperation.USB) {
         val scanner = UsbPtpDiagnosticScanner()
         scanner.requestPermission(context.applicationContext, deviceName)
         val diagnostics = scanner.scan(context.applicationContext)
         _uiState.update { it.copy(usbDiagnostics = diagnostics) }
     }
 
-    fun connect() = runCamera {
+    fun connect() = runCamera(CameraOperation.CONNECT) {
         stopLiveViewLoop()
         resetFrameMetrics()
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
@@ -161,7 +161,7 @@ class CameraViewModel(
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
     }
 
-    fun refresh() = runCamera {
+    fun refresh() = runCamera(CameraOperation.STATUS) {
         val status = repository.refreshStatus()
         _uiState.update {
             it.copy(
@@ -209,21 +209,21 @@ class CameraViewModel(
         restartLiveView()
     }
 
-    fun restartLiveView() = runCamera {
+    fun restartLiveView() = runCamera(CameraOperation.LIVE_VIEW) {
         repository.restartLiveView()
         refreshLiveViewFrameInternal(reportErrors = true)
         startLiveViewLoopIfNeeded()
     }
 
-    fun setIso(value: String) = updateStatus { repository.setIso(value) }
+    fun setIso(value: String) = updateStatus(CameraOperation.SETTING) { repository.setIso(value) }
 
-    fun setShutter(value: String) = updateStatus { repository.setShutter(value) }
+    fun setShutter(value: String) = updateStatus(CameraOperation.SETTING) { repository.setShutter(value) }
 
-    fun setAperture(value: String) = updateStatus { repository.setAperture(value) }
+    fun setAperture(value: String) = updateStatus(CameraOperation.SETTING) { repository.setAperture(value) }
 
-    fun setWhiteBalance(value: String) = updateStatus { repository.setWhiteBalance(value) }
+    fun setWhiteBalance(value: String) = updateStatus(CameraOperation.SETTING) { repository.setWhiteBalance(value) }
 
-    fun setCameraSetting(key: String, value: String) = runCamera {
+    fun setCameraSetting(key: String, value: String) = runCamera(CameraOperation.SETTING) {
         val status = repository.setCameraSetting(key, value)
         val capabilities = repository.refreshCapabilities()
         _uiState.update {
@@ -236,31 +236,52 @@ class CameraViewModel(
         startLiveViewLoopIfNeeded()
     }
 
-    fun toggleRecording() = updateStatus {
+    fun toggleRecording() = updateStatus(CameraOperation.RECORDING) {
         repository.toggleRecording(_uiState.value.status?.recording)
     }
 
-    fun captureStill() = runCamera {
+    fun captureStill() = runCamera(CameraOperation.CAPTURE) {
         val status = repository.captureStill()
         _uiState.update { it.copy(status = status, captureFeedback = CaptureFeedback.SUCCESS) }
-        delay(CAPTURE_FLASH_MILLIS)
-        _uiState.update { it.copy(captureFeedback = null) }
-        refreshLiveViewFrameInternal(reportErrors = false)
-        startLiveViewLoopIfNeeded()
-    }
-
-    fun tapFocus(x: Double, y: Double) = runCamera {
-        val result = repository.tapFocus(x, y)
-        _uiState.update {
-            it.copy(
-                focusPoint = FocusPoint(result.x, result.y),
-            )
+        viewModelScope.launch {
+            delay(CAPTURE_FLASH_MILLIS)
+            _uiState.update { it.copy(captureFeedback = null) }
         }
         refreshLiveViewFrameInternal(reportErrors = false)
         startLiveViewLoopIfNeeded()
     }
 
-    private fun updateStatus(block: suspend () -> dev.openeos.control.data.CameraStatus) = runCamera {
+    fun tapFocus(x: Double, y: Double) {
+        _uiState.update {
+            it.copy(
+                focusPoint = FocusPoint(x, y),
+                focusFeedback = FocusFeedback.FOCUSING,
+            )
+        }
+        runCamera(
+            operation = CameraOperation.FOCUS,
+            onError = {
+                _uiState.update { state -> state.copy(focusFeedback = FocusFeedback.FAILURE) }
+                clearFocusFeedbackAfter(FocusFeedback.FAILURE)
+            },
+        ) {
+            val result = repository.tapFocus(x, y)
+            _uiState.update {
+                it.copy(
+                    focusPoint = FocusPoint(result.x, result.y),
+                    focusFeedback = FocusFeedback.SUCCESS,
+                )
+            }
+            clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
+            refreshLiveViewFrameInternal(reportErrors = false)
+            startLiveViewLoopIfNeeded()
+        }
+    }
+
+    private fun updateStatus(
+        operation: CameraOperation,
+        block: suspend () -> dev.openeos.control.data.CameraStatus,
+    ) = runCamera(operation) {
         _uiState.update {
             it.copy(
                 status = block(),
@@ -270,18 +291,44 @@ class CameraViewModel(
         startLiveViewLoopIfNeeded()
     }
 
-    private fun runCamera(block: suspend () -> Unit) {
+    private fun runCamera(
+        operation: CameraOperation,
+        onError: (Exception) -> Unit = {},
+        block: suspend () -> Unit,
+    ) {
+        if (_uiState.value.isBusy(operation)) return
+        _uiState.update {
+            it.copy(
+                pendingOperations = it.pendingOperations + operation,
+                error = null,
+            )
+        }
         viewModelScope.launch {
-            _uiState.update { it.copy(busy = true, error = null) }
             try {
                 block()
             } catch (exception: Exception) {
                 exception.printStackTrace()
+                onError(exception)
                 _uiState.update {
                     it.copy(error = formatException(exception))
                 }
             } finally {
-                _uiState.update { it.copy(busy = false) }
+                _uiState.update {
+                    it.copy(pendingOperations = it.pendingOperations - operation)
+                }
+            }
+        }
+    }
+
+    private fun clearFocusFeedbackAfter(expected: FocusFeedback) {
+        viewModelScope.launch {
+            delay(FOCUS_FEEDBACK_MILLIS)
+            _uiState.update {
+                if (it.focusFeedback == expected) {
+                    it.copy(focusFeedback = null, focusPoint = null)
+                } else {
+                    it
+                }
             }
         }
     }
@@ -422,6 +469,7 @@ class CameraViewModel(
         liveViewBitmap = null,
         liveViewDiagnostics = LiveViewDiagnostics(),
         focusPoint = null,
+        focusFeedback = null,
         error = error,
     )
 
@@ -455,6 +503,7 @@ class CameraViewModel(
         const val KEY_BASE_URL = "base_url"
         const val KEY_USERNAME = "username"
         const val CAPTURE_FLASH_MILLIS = 120L
+        const val FOCUS_FEEDBACK_MILLIS = 1_200L
         const val FPS_WINDOW_SIZE = 30
     }
 }
