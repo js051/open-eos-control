@@ -52,6 +52,8 @@ data class CameraUiState(
     val liveViewDiagnostics: LiveViewDiagnostics = LiveViewDiagnostics(),
     val uiMode: UiMode = UiMode.CONTROL,
     val captureMode: CaptureMode = CaptureMode.PHOTO,
+    val hudVisible: Boolean = true,
+    val showGrid: Boolean = false,
     val activeSettingPicker: SettingPicker? = null,
     val captureFeedback: CaptureFeedback? = null,
     val focusPoint: FocusPoint? = null,

@@ -24,6 +24,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipBox
@@ -162,32 +164,62 @@ fun CameraHeader(state: CameraUiState, actions: CameraActions) {
 fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val battery = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
         ?: stringResource(R.string.unknown)
+    var menuExpanded by remember { mutableStateOf(false) }
     Row(
-        modifier = modifier.fillMaxWidth().height(52.dp).background(Color(0xB8000000)).padding(start = 12.dp, end = 4.dp),
+        modifier = modifier.fillMaxWidth().height(48.dp).background(Color(0xB8000000)).padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(Modifier.size(8.dp).background(AppSuccess, CircleShape))
-        Column(Modifier.weight(1f)) {
-            Text(
-                state.info?.model ?: stringResource(R.string.unknown),
-                color = AppText,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        Text(
+            state.info?.model ?: stringResource(R.string.unknown),
+            color = AppText,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(battery, color = AppSubtleText, maxLines = 1)
+        ToolIconButton(
+            if (state.captureMode == CaptureMode.PHOTO) LucideR.drawable.lucide_ic_camera else LucideR.drawable.lucide_ic_video,
+            stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.switch_to_video else R.string.switch_to_photo),
+            {
+                actions.setCaptureMode(
+                    if (state.captureMode == CaptureMode.PHOTO) CaptureMode.VIDEO else CaptureMode.PHOTO,
+                )
+            },
+            tint = if (state.captureMode == CaptureMode.VIDEO) AppRecord else AppText,
+        )
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_eye_off,
+            stringResource(R.string.hide_hud),
+            { actions.setHudVisible(false) },
+        )
+        Box {
+            ToolIconButton(
+                LucideR.drawable.lucide_ic_ellipsis_vertical,
+                stringResource(R.string.more_actions),
+                { menuExpanded = true },
             )
-            Text(battery, color = AppSubtleText, maxLines = 1)
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.debug)) },
+                    leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_bug), null) },
+                    onClick = {
+                        menuExpanded = false
+                        actions.setUiMode(UiMode.DEBUG)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.disconnect)) },
+                    leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_unplug), null) },
+                    onClick = {
+                        menuExpanded = false
+                        actions.disconnect()
+                    },
+                )
+            }
         }
-        ToolIconButton(
-            LucideR.drawable.lucide_ic_bug,
-            stringResource(R.string.debug),
-            { actions.setUiMode(UiMode.DEBUG) },
-        )
-        ToolIconButton(
-            LucideR.drawable.lucide_ic_unplug,
-            stringResource(R.string.disconnect),
-            actions.disconnect,
-        )
     }
 }
 
@@ -241,8 +273,27 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         }
 
         if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
+        if (state.showGrid) GridOverlay(sourceAspectRatio)
         FocusIndicator(state.focusPoint, state.focusFeedback, sourceAspectRatio)
         if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
+    }
+}
+
+@Composable
+private fun GridOverlay(sourceAspectRatio: Float) {
+    val description = stringResource(R.string.composition_grid)
+    Canvas(
+        Modifier.fillMaxSize().semantics { contentDescription = description },
+    ) {
+        val content = fittedLiveViewRect(size.width, size.height, sourceAspectRatio)
+        val color = Color.White.copy(alpha = 0.42f)
+        val stroke = 1.dp.toPx()
+        for (step in 1..2) {
+            val x = content.left + content.width * step / 3f
+            val y = content.top + content.height * step / 3f
+            drawLine(color, Offset(x, content.top), Offset(x, content.top + content.height), stroke)
+            drawLine(color, Offset(content.left, y), Offset(content.left + content.width, y), stroke)
+        }
     }
 }
 

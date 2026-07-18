@@ -46,6 +46,10 @@ class CameraViewModel(
 
     fun setCaptureMode(mode: CaptureMode) = _uiState.update { it.copy(captureMode = mode, activeSettingPicker = null) }
 
+    fun setHudVisible(visible: Boolean) = _uiState.update { it.copy(hudVisible = visible) }
+
+    fun setGridVisible(visible: Boolean) = _uiState.update { it.copy(showGrid = visible) }
+
     fun openSettingPicker(picker: SettingPicker) = _uiState.update { it.copy(activeSettingPicker = picker) }
 
     fun closeSettingPicker() = _uiState.update { it.copy(activeSettingPicker = null) }

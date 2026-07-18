@@ -7,13 +7,13 @@
     <string name="camera_url">相機 URL</string><string name="authentication">帳號驗證</string><string name="username">使用者名稱</string><string name="password">密碼</string>
     <string name="connect">連接</string><string name="connecting">連接中…</string><string name="usb_camera">USB 相機</string><string name="usb_scan">掃描 USB</string>
     <plurals name="usb_devices_found"><item quantity="other">找到 %1$d 個裝置，%2$d 個 Canon</item></plurals>
-    <string name="control">控制</string><string name="debug">Debug</string><string name="photo">拍照</string><string name="video">錄影</string><string name="unknown">未知</string>
+    <string name="control">控制</string><string name="debug">Debug</string><string name="photo">拍照</string><string name="video">錄影</string><string name="switch_to_photo">切換為拍照</string><string name="switch_to_video">切換為錄影</string><string name="hide_hud">隱藏控制介面</string><string name="show_hud">顯示控制介面</string><string name="more_actions">更多操作</string><string name="unknown">未知</string>
     <string name="disconnect">中斷連線</string><string name="refresh">重新整理</string><string name="more_settings">更多設定</string><string name="live_view_settings">Live View 設定</string><string name="live_view">Live View</string>
     <string name="live_view_unavailable">無法使用 Live View</string><string name="tap_to_focus">點按對焦</string>
     <string name="iso">ISO</string><string name="shutter">Tv</string><string name="aperture">Av</string><string name="white_balance">WB</string>
     <string name="capture_photo">拍攝照片</string><string name="start_recording">開始錄影</string><string name="stop_recording">停止錄影</string><string name="recording">REC</string><string name="recording_time">REC %1$s</string>
     <string name="capture_not_supported">相機未公告支援拍照快門。</string><string name="recording_not_supported">相機未公告支援錄影控制。</string>
-    <string name="fps_value">%1$d fps</string><string name="size">Live View 尺寸</string><string name="auto_refresh">自動更新</string><string name="no_settings">此模式沒有可用設定。</string>
+    <string name="fps_value">%1$d fps</string><string name="size">Live View 尺寸</string><string name="auto_refresh">自動更新</string><string name="composition_grid">構圖格線</string><string name="no_settings">此模式沒有可用設定。</string>
     <string name="overview">總覽</string><string name="ccapi">CCAPI</string><string name="usb_ptp">USB / PTP</string><string name="copy_diagnostic">複製診斷報告</string><string name="diagnostic_copied">已複製診斷報告</string>
     <string name="camera_profile">相機 Profile</string><string name="transport">傳輸方式</string><string name="api_version">API</string><string name="supported_features">已支援功能</string><string name="planned_features">規劃功能</string>
     <string name="battery_raw">電池原始 JSON</string><string name="storage_raw">儲存卡原始 JSON</string><string name="last_error">最後錯誤</string>

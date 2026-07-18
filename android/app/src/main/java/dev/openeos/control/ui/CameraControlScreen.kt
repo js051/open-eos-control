@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -17,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,7 +46,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,7 +69,25 @@ import kotlin.math.roundToInt
 @Composable
 fun CameraControlScreen(state: CameraUiState, actions: CameraActions) {
     BoxWithConstraints(
-        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+        Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .pointerInput(state.hudVisible) {
+                var dragDistance = 0f
+                detectVerticalDragGestures(
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragDistance += dragAmount
+                    },
+                    onDragEnd = {
+                        if (abs(dragDistance) >= 48.dp.toPx()) {
+                            actions.setHudVisible(!state.hudVisible)
+                        }
+                        dragDistance = 0f
+                    },
+                    onDragCancel = { dragDistance = 0f },
+                )
+            },
     ) {
         if (maxWidth > maxHeight) LandscapeControls(state, actions) else PortraitControls(state, actions)
     }
@@ -74,20 +98,21 @@ fun CameraControlScreen(state: CameraUiState, actions: CameraActions) {
 private fun PortraitControls(state: CameraUiState, actions: CameraActions) {
     Box(Modifier.fillMaxSize()) {
         LiveViewFrame(state, actions, Modifier.fillMaxSize())
-        Column(Modifier.align(Alignment.TopCenter)) {
+        if (state.hudVisible) {
             CameraOverlayHeader(state, actions)
-            CaptureModeSegment(
-                state,
-                actions,
-                Modifier.align(Alignment.CenterHorizontally).widthIn(max = 220.dp).padding(top = 6.dp),
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xE6101214)),
+            ) {
+                ExposureStrip(state, actions)
+                CaptureBar(state, actions)
+            }
+        } else {
+            ToolIconButton(
+                LucideR.drawable.lucide_ic_eye,
+                stringResource(R.string.show_hud),
+                { actions.setHudVisible(true) },
+                Modifier.align(Alignment.TopEnd),
             )
-        }
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xE6101214)),
-        ) {
-            ExposureStrip(state, actions)
-            ModeQuickSettings(state, actions)
-            CaptureBar(state, actions)
         }
     }
 }
@@ -98,38 +123,38 @@ private fun LandscapeControls(state: CameraUiState, actions: CameraActions) {
         LiveViewFrame(
             state,
             actions,
-            Modifier.align(Alignment.CenterStart).fillMaxWidth(0.66f).fillMaxHeight(),
+            if (state.hudVisible) {
+                Modifier.align(Alignment.CenterStart).fillMaxWidth(0.66f).fillMaxHeight()
+            } else {
+                Modifier.fillMaxSize()
+            },
         )
-        CameraOverlayHeader(state, actions, Modifier.align(Alignment.TopStart).fillMaxWidth(0.66f))
-        Column(
-            Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxWidth(0.34f)
-                .fillMaxHeight()
-                .background(Color(0xE6101214))
-                .verticalScroll(rememberScrollState())
-                .padding(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CaptureModeSegment(state, actions)
-            LandscapeExposureGrid(state, actions)
-            Spacer(Modifier.height(4.dp))
-            CaptureBar(state, actions)
+        if (state.hudVisible) {
+            CameraOverlayHeader(state, actions, Modifier.align(Alignment.TopStart).fillMaxWidth(0.66f))
+            Column(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxWidth(0.34f)
+                    .fillMaxHeight()
+                    .background(Color(0xE6101214))
+                    .verticalScroll(rememberScrollState())
+                    .padding(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                LandscapeExposureGrid(state, actions)
+                Spacer(Modifier.height(4.dp))
+                CaptureBar(state, actions)
+            }
+        } else {
+            ToolIconButton(
+                LucideR.drawable.lucide_ic_eye,
+                stringResource(R.string.show_hud),
+                { actions.setHudVisible(true) },
+                Modifier.align(Alignment.TopEnd),
+            )
         }
     }
-}
-
-@Composable
-private fun CaptureModeSegment(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
-    ModeSegment(
-        firstLabel = stringResource(R.string.photo),
-        secondLabel = stringResource(R.string.video),
-        firstSelected = state.captureMode == CaptureMode.PHOTO,
-        onFirst = { actions.setCaptureMode(CaptureMode.PHOTO) },
-        onSecond = { actions.setCaptureMode(CaptureMode.VIDEO) },
-        modifier = modifier.fillMaxWidth(),
-    )
 }
 
 @Composable
@@ -155,42 +180,16 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
     }
 }
 
-@Composable
-private fun ModeQuickSettings(state: CameraUiState, actions: CameraActions) {
-    val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
-        .filter { setting ->
-            val key = setting.key.lowercase()
-            if (state.captureMode == CaptureMode.VIDEO) {
-                listOf("movie", "video", "frame", "codec", "record").any(key::contains)
-            } else {
-                listOf("af", "drive", "quality").any(key::contains)
-            }
-        }
-        .take(3)
-    if (settings.isEmpty()) return
-    LazyRow(
-        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(settings, key = { it.key }) { setting ->
-            Column(
-                Modifier.width(120.dp).fillMaxHeight().background(AppSurface, RoundedCornerShape(6.dp)).clickable { actions.openPicker(SettingPicker.MORE) }.padding(6.dp),
-            ) {
-                Text(setting.label, color = AppMutedText, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(setting.value, color = AppText, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingSheets(state: CameraUiState, actions: CameraActions) {
     when (state.activeSettingPicker) {
-        SettingPicker.ISO -> ValueSheet(stringResource(R.string.iso), state.capabilities?.iso.orEmpty(), state.status?.exposure?.iso, state.isBusy(CameraOperation.SETTING), actions.setIso, actions.closePicker)
-        SettingPicker.SHUTTER -> ValueSheet(stringResource(R.string.shutter), state.capabilities?.shutter.orEmpty(), state.status?.exposure?.shutter, state.isBusy(CameraOperation.SETTING), actions.setShutter, actions.closePicker)
-        SettingPicker.APERTURE -> ValueSheet(stringResource(R.string.aperture), state.capabilities?.aperture.orEmpty(), state.status?.exposure?.aperture, state.isBusy(CameraOperation.SETTING), actions.setAperture, actions.closePicker)
-        SettingPicker.WHITE_BALANCE -> ValueSheet(stringResource(R.string.white_balance), state.capabilities?.whiteBalance.orEmpty(), state.status?.exposure?.whiteBalance, state.isBusy(CameraOperation.SETTING), actions.setWhiteBalance, actions.closePicker)
+        SettingPicker.ISO,
+        SettingPicker.SHUTTER,
+        SettingPicker.APERTURE,
+        SettingPicker.WHITE_BALANCE,
+        -> ExposureSettingsSheet(state, actions)
         SettingPicker.LIVE_VIEW -> LiveViewSettingsSheet(state, actions)
         SettingPicker.MORE -> MoreSettingsSheet(state, actions)
         null -> Unit
@@ -199,16 +198,80 @@ private fun SettingSheets(state: CameraUiState, actions: CameraActions) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ValueSheet(
-    title: String,
-    values: List<String>,
-    current: String?,
-    isApplying: Boolean,
-    onSelect: (String) -> Unit,
-    onDismiss: () -> Unit,
+private fun ExposureSettingsSheet(state: CameraUiState, actions: CameraActions) {
+    val picker = state.activeSettingPicker ?: return
+    val title: String
+    val values: List<String>
+    val current: String?
+    val onSelect: (String) -> Unit
+    when (picker) {
+        SettingPicker.ISO -> {
+            title = stringResource(R.string.iso)
+            values = state.capabilities?.iso.orEmpty()
+            current = state.status?.exposure?.iso
+            onSelect = actions.setIso
+        }
+        SettingPicker.SHUTTER -> {
+            title = stringResource(R.string.shutter)
+            values = state.capabilities?.shutter.orEmpty()
+            current = state.status?.exposure?.shutter
+            onSelect = actions.setShutter
+        }
+        SettingPicker.APERTURE -> {
+            title = stringResource(R.string.aperture)
+            values = state.capabilities?.aperture.orEmpty()
+            current = state.status?.exposure?.aperture
+            onSelect = actions.setAperture
+        }
+        SettingPicker.WHITE_BALANCE -> {
+            title = stringResource(R.string.white_balance)
+            values = state.capabilities?.whiteBalance.orEmpty()
+            current = state.status?.exposure?.whiteBalance
+            onSelect = actions.setWhiteBalance
+        }
+        else -> return
+    }
+    ModalBottomSheet(onDismissRequest = actions.closePicker, containerColor = AppSurface) {
+        ExposurePickerTabs(state, picker, actions)
+        key(picker) {
+            ExposureDial(title, values, current, state.isBusy(CameraOperation.SETTING), onSelect)
+        }
+    }
+}
+
+@Composable
+private fun ExposurePickerTabs(state: CameraUiState, selected: SettingPicker, actions: CameraActions) {
+    Row(
+        Modifier.fillMaxWidth().height(52.dp).padding(start = 8.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ExposurePickerTab(stringResource(R.string.iso), SettingPicker.ISO, selected, state.capabilities?.iso?.isNotEmpty() == true, actions)
+        ExposurePickerTab(stringResource(R.string.shutter), SettingPicker.SHUTTER, selected, state.capabilities?.shutter?.isNotEmpty() == true, actions)
+        ExposurePickerTab(stringResource(R.string.aperture), SettingPicker.APERTURE, selected, state.capabilities?.aperture?.isNotEmpty() == true, actions)
+        ExposurePickerTab(stringResource(R.string.white_balance), SettingPicker.WHITE_BALANCE, selected, state.capabilities?.whiteBalance?.isNotEmpty() == true, actions)
+        ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), actions.closePicker)
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.ExposurePickerTab(
+    label: String,
+    picker: SettingPicker,
+    selected: SettingPicker,
+    enabled: Boolean,
+    actions: CameraActions,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AppSurface) {
-        ExposureDial(title, values, current, isApplying, onSelect, onDismiss)
+    Box(
+        Modifier
+            .weight(1f)
+            .height(44.dp)
+            .testTag("exposure-picker-${picker.name}")
+            .background(if (picker == selected) AppBorder else Color.Transparent, RoundedCornerShape(4.dp))
+            .clickable(enabled = enabled) { actions.openPicker(picker) }
+            .semantics { role = Role.Tab },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = if (enabled) AppText else AppMutedText, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -219,7 +282,6 @@ private fun ExposureDial(
     current: String?,
     isApplying: Boolean,
     onSelect: (String) -> Unit,
-    onDismiss: () -> Unit,
 ) {
     if (values.isEmpty()) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
@@ -252,7 +314,7 @@ private fun ExposureDial(
 
     Column(Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
         Row(
-            Modifier.fillMaxWidth().height(52.dp).padding(start = 20.dp, end = 8.dp),
+            Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -260,7 +322,6 @@ private fun ExposureDial(
                 Text(values[selectedIndex], color = AppText, fontWeight = FontWeight.Bold)
             }
             if (isApplying) CircularProgressIndicator(Modifier.size(24.dp), color = AppAccent, strokeWidth = 2.dp)
-            ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), onDismiss)
         }
         BoxWithConstraints(Modifier.fillMaxWidth().height(104.dp)) {
             val itemWidth = 88.dp
@@ -315,6 +376,10 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.auto_refresh), color = AppText, modifier = Modifier.weight(1f))
                 Switch(state.liveViewAutoRefresh, actions.setAutoRefresh)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.composition_grid), color = AppText, modifier = Modifier.weight(1f))
+                Switch(state.showGrid, actions.setGridVisible)
             }
             Text(stringResource(R.string.fps_value, state.liveViewFrameRateFps), color = AppText)
             Slider(
