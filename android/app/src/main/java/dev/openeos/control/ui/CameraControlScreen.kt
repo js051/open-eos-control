@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -168,7 +169,7 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
         ) {
             ToolIconButton(LucideR.drawable.lucide_ic_settings, stringResource(R.string.more_settings), { actions.openPicker(SettingPicker.MORE) })
             CaptureButton(state, actions)
-            ToolIconButton(LucideR.drawable.lucide_ic_video, stringResource(R.string.live_view_settings), { actions.openPicker(SettingPicker.LIVE_VIEW) }, tint = AppAccent)
+            LiveViewFpsButton(state, { actions.openPicker(SettingPicker.LIVE_VIEW) })
         }
         if (!state.supports(feature)) {
             Text(
@@ -370,8 +371,15 @@ private fun ExposureDial(
 private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val minFps = state.capabilities?.liveView?.minFps ?: MIN_LIVE_VIEW_FPS
     val maxFps = state.capabilities?.liveView?.maxFps ?: MAX_LIVE_VIEW_FPS
+    var pendingFps by remember(state.liveViewFrameRateFps) {
+        mutableFloatStateOf(state.liveViewFrameRateFps.toFloat())
+    }
+    val displayedFps = pendingFps.roundToInt().coerceIn(minFps, maxFps)
     ModalBottomSheet(onDismissRequest = actions.closePicker, containerColor = AppSurface) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             Text(stringResource(R.string.live_view_settings), color = AppText, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.auto_refresh), color = AppText, modifier = Modifier.weight(1f))
@@ -381,25 +389,65 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
                 Text(stringResource(R.string.composition_grid), color = AppText, modifier = Modifier.weight(1f))
                 Switch(state.showGrid, actions.setGridVisible)
             }
-            Text(stringResource(R.string.fps_value, state.liveViewFrameRateFps), color = AppText)
-            Slider(
-                value = state.liveViewFrameRateFps.toFloat(),
-                onValueChange = { actions.setFps(it.roundToInt()) },
-                valueRange = minFps.toFloat()..maxFps.toFloat(),
-                steps = (maxFps - minFps - 1).coerceAtLeast(0),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.live_view_frame_rate), color = AppText, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        stringResource(R.string.fps_requested_observed, displayedFps, state.liveViewDiagnostics.observedFps),
+                        color = AppSubtleText,
+                    )
+                }
+                Text(stringResource(R.string.fps_value, displayedFps), color = AppAccent, fontWeight = FontWeight.Bold)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_minus,
+                    stringResource(R.string.decrease_fps),
+                    {
+                        pendingFps = (displayedFps - 1).coerceAtLeast(minFps).toFloat()
+                        actions.setFps(pendingFps.roundToInt())
+                    },
+                    enabled = displayedFps > minFps,
+                )
+                Slider(
+                    value = pendingFps,
+                    onValueChange = { pendingFps = it },
+                    onValueChangeFinished = { actions.setFps(displayedFps) },
+                    valueRange = minFps.toFloat()..maxFps.toFloat(),
+                    steps = (maxFps - minFps - 1).coerceAtLeast(0),
+                    modifier = Modifier.weight(1f),
+                )
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_plus,
+                    stringResource(R.string.increase_fps),
+                    {
+                        pendingFps = (displayedFps + 1).coerceAtMost(maxFps).toFloat()
+                        actions.setFps(pendingFps.roundToInt())
+                    },
+                    enabled = displayedFps < maxFps,
+                )
+            }
             Text(stringResource(R.string.size), color = AppText)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.capabilities?.liveView?.sizes.orEmpty()) { size ->
                     Box(
                         Modifier.height(48.dp).background(if (size == state.liveViewSize) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { actions.setLiveViewSize(size) }.padding(horizontal = 18.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text(size.label, color = if (size == state.liveViewSize) AppBackground else AppText) }
+                    ) { Text(liveViewSizeLabel(size), color = if (size == state.liveViewSize) AppBackground else AppText) }
                 }
             }
         }
     }
 }
+
+@Composable
+private fun liveViewSizeLabel(size: LiveViewSize): String = stringResource(
+    when (size) {
+        LiveViewSize.SMALL -> R.string.size_small
+        LiveViewSize.MEDIUM -> R.string.size_medium
+        LiveViewSize.LARGE -> R.string.size_large
+    },
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

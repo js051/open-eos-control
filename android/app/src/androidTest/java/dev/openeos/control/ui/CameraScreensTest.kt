@@ -11,10 +11,15 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.annotation.StringRes
+import androidx.test.platform.app.InstrumentationRegistry
+import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.ExposureState
+import dev.openeos.control.data.LiveViewCapabilities
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -25,21 +30,21 @@ class CameraScreensTest {
     @Test
     fun disconnectedStateShowsDedicatedConnectionScreen() {
         compose.setContent { MaterialTheme { ConnectionScreen(CameraUiState(), noOpActions()) } }
-        compose.onNodeWithText("Connect your EOS").assertIsDisplayed()
-        compose.onNodeWithText("Connect").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.connect_title)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.connect)).performScrollTo().assertIsDisplayed()
     }
 
     @Test
     fun photoStateExplainsMissingStillCaptureCapability() {
         compose.setContent { MaterialTheme { CameraControlScreen(connectedState(), noOpActions()) } }
-        compose.onNodeWithContentDescription("Switch to video").assertIsDisplayed()
-        compose.onNodeWithText("Still capture is not advertised by this camera.").assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.switch_to_video)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.capture_not_supported)).assertIsDisplayed()
     }
 
     @Test
     fun debugStateShowsDiagnosticSections() {
         compose.setContent { MaterialTheme { DebugScreen(connectedState().copy(uiMode = UiMode.DEBUG), noOpActions()) } }
-        compose.onNodeWithText("Overview").assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.overview)).assertIsDisplayed()
         compose.onNodeWithText("CCAPI").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("USB / PTP").performScrollTo().assertIsDisplayed()
     }
@@ -83,7 +88,7 @@ class CameraScreensTest {
 
         compose.onAllNodesWithText("Canon EOS R6 Mark III").assertCountEquals(0)
         compose.onAllNodesWithText("ISO").assertCountEquals(0)
-        compose.onNodeWithContentDescription("Show controls").assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.show_hud)).assertIsDisplayed()
     }
 
     @Test
@@ -94,7 +99,34 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription("Composition grid").assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.composition_grid)).assertIsDisplayed()
+    }
+
+    @Test
+    fun frameRateControlIsVisibleAndChangesThePollingRate() {
+        val picker = mutableStateOf<SettingPicker?>(null)
+        val fps = mutableIntStateOf(6)
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+            setFps = { fps.intValue = it },
+        )
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(
+                        activeSettingPicker = picker.value,
+                        liveViewFrameRateFps = fps.intValue,
+                    ),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.fps_control_description, 6)).performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.increase_fps)).performClick()
+        compose.runOnIdle { assertEquals(7, fps.intValue) }
+        compose.onAllNodesWithText(resourceText(R.string.fps_value, 7)).assertCountEquals(2)
     }
 
     private fun connectedState() = CameraUiState(
@@ -114,6 +146,7 @@ class CameraScreensTest {
             shutter = listOf("1/30", "1/50", "1/60"),
             aperture = listOf("2.8", "4.0", "5.6"),
             whiteBalance = listOf("auto", "daylight", "cloudy"),
+            liveView = LiveViewCapabilities.ccapiNetwork(),
         ),
     )
 
@@ -126,4 +159,7 @@ class CameraScreensTest {
         captureStill = {}, toggleRecording = {}, tapFocus = { _, _ -> }, refreshLiveView = {}, restartLiveView = {},
         setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, clearError = {},
     )
+
+    private fun resourceText(@StringRes resource: Int, vararg arguments: Any): String =
+        InstrumentationRegistry.getInstrumentation().targetContext.getString(resource, *arguments)
 }

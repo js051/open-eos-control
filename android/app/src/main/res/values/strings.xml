@@ -45,8 +45,17 @@
     <string name="recording_time">REC %1$s</string>
     <string name="capture_not_supported">Still capture is not advertised by this camera.</string>
     <string name="recording_not_supported">Video recording is not advertised by this camera.</string>
-    <string name="fps_value">%1$d fps</string>
+    <string name="fps_value">%1$d FPS</string>
+    <string name="fps_compact">%1$d FPS</string>
+    <string name="live_view_frame_rate">Live View frame rate</string>
+    <string name="fps_control_description">Live View frame rate, %1$d FPS</string>
+    <string name="fps_requested_observed">Requested %1$d · Observed %2$.1f FPS</string>
+    <string name="decrease_fps">Decrease frame rate</string>
+    <string name="increase_fps">Increase frame rate</string>
     <string name="size">Live View size</string>
+    <string name="size_small">Small</string>
+    <string name="size_medium">Medium</string>
+    <string name="size_large">Large</string>
     <string name="auto_refresh">Auto refresh</string>
     <string name="composition_grid">Composition grid</string>
     <string name="no_settings">No settings are available for this mode.</string>
@@ -82,4 +91,17 @@
     <string name="battery_percent">%1$d%%</string>
     <string name="storage_ready">Card ready</string>
     <string name="storage_unknown">Card unknown</string>
+    <string name="none">None</string>
+    <string name="unavailable">Unavailable</string>
+    <string name="device">Device</string>
+    <string name="vid_pid">VID / PID</string>
+    <string name="ptp">PTP</string>
+    <string name="transport_ccapi_network">Canon CCAPI over network</string>
+    <string name="transport_usb_ptp">USB PTP</string>
+    <string name="transport_desktop_bridge">Desktop bridge</string>
+    <string name="usb_state_ready">Ready for PTP session</string>
+    <string name="usb_state_permission_needed">USB permission needed</string>
+    <string name="usb_state_canon_non_ptp">Canon USB device</string>
+    <string name="usb_state_non_canon_ptp">PTP device</string>
+    <string name="usb_state_unknown">USB device</string>
 </resources>

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,7 +21,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.openeos.control.data.LiveViewSize
 
 @Composable
-fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
+fun OpenEosControlApp(
+    viewModel: CameraViewModel = viewModel(),
+    controlRotationDegrees: Float = 0f,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(viewModel) { viewModel.initialize(context) }
@@ -62,18 +66,20 @@ fun OpenEosControlApp(viewModel: CameraViewModel = viewModel()) {
         clearError = viewModel::clearError,
     )
 
-    MaterialTheme(colorScheme = OpenEosColorScheme) {
-        SystemBarsEffect(immersive = state.connected && state.uiMode == UiMode.CONTROL)
-        Box(Modifier.fillMaxSize().background(AppBackground)) {
-            if (!state.connected) {
-                ConnectionScreen(state, actions)
-            } else if (state.uiMode == UiMode.DEBUG) {
-                DebugScreen(state, actions)
-            } else {
-                CameraControlScreen(state, actions)
-            }
-            Box(Modifier.align(Alignment.BottomCenter)) {
-                ErrorBanner(state.error, actions.clearError)
+    CompositionLocalProvider(LocalCameraControlRotation provides controlRotationDegrees) {
+        MaterialTheme(colorScheme = OpenEosColorScheme) {
+            SystemBarsEffect(immersive = state.connected && state.uiMode == UiMode.CONTROL)
+            Box(Modifier.fillMaxSize().background(AppBackground)) {
+                if (!state.connected) {
+                    ConnectionScreen(state, actions)
+                } else if (state.uiMode == UiMode.DEBUG) {
+                    DebugScreen(state, actions)
+                } else {
+                    CameraControlScreen(state, actions)
+                }
+                Box(Modifier.align(Alignment.BottomCenter)) {
+                    ErrorBanner(state.error, actions.clearError)
+                }
             }
         }
     }

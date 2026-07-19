@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -53,6 +54,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,6 +66,12 @@ import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
 import kotlinx.coroutines.delay
+
+@Composable
+fun Modifier.cameraControlRotation(): Modifier {
+    val rotation = LocalCameraControlRotation.current
+    return graphicsLayer { rotationZ = rotation }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,7 +93,51 @@ fun ToolIconButton(
             enabled = enabled,
             modifier = modifier.size(48.dp),
         ) {
-            Icon(painterResource(icon), description, tint = if (enabled) tint else AppMutedText)
+            Icon(
+                painterResource(icon),
+                description,
+                Modifier.cameraControlRotation(),
+                tint = if (enabled) tint else AppMutedText,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LiveViewFpsButton(
+    state: CameraUiState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val description = stringResource(R.string.fps_control_description, state.liveViewFrameRateFps)
+    TooltipBox(
+        positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(stringResource(R.string.live_view_frame_rate)) } },
+        state = rememberTooltipState(),
+    ) {
+        Column(
+            modifier
+                .size(64.dp)
+                .testTag("fps-control")
+                .clickable(onClick = onClick)
+                .semantics { contentDescription = description; role = Role.Button },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                painterResource(LucideR.drawable.lucide_ic_gauge),
+                null,
+                Modifier.size(24.dp).cameraControlRotation(),
+                tint = AppAccent,
+            )
+            Text(
+                stringResource(R.string.fps_compact, state.liveViewFrameRateFps),
+                Modifier.cameraControlRotation(),
+                color = AppText,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -177,9 +229,9 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).cameraControlRotation(),
         )
-        Text(battery, color = AppSubtleText, maxLines = 1)
+        Text(battery, Modifier.cameraControlRotation(), color = AppSubtleText, maxLines = 1)
         ToolIconButton(
             if (state.captureMode == CaptureMode.PHOTO) LucideR.drawable.lucide_ic_camera else LucideR.drawable.lucide_ic_video,
             stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.switch_to_video else R.string.switch_to_photo),
@@ -330,7 +382,12 @@ private fun RecordingIndicator(modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(Modifier.size(8.dp).background(AppRecord, CircleShape))
-        Text(stringResource(R.string.recording_time, elapsed), color = AppText, fontWeight = FontWeight.Bold)
+        Text(
+            stringResource(R.string.recording_time, elapsed),
+            Modifier.cameraControlRotation(),
+            color = AppText,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -369,8 +426,15 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(label: Stri
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(label, color = AppMutedText, maxLines = 1)
-        Text(value, color = if (enabled) AppText else AppMutedText, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, Modifier.cameraControlRotation(), color = AppMutedText, maxLines = 1)
+        Text(
+            value,
+            Modifier.cameraControlRotation(),
+            color = if (enabled) AppText else AppMutedText,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
