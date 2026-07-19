@@ -29,7 +29,7 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine("Open EOS Control diagnostic report")
         appendLine("camera=${state.info?.model ?: "unknown"}")
         appendLine("serial=${state.info?.serial ?: "unknown"}")
-        appendLine("transport=${state.transport?.name ?: "disconnected"}")
+        appendLine("transport=${if (state.previewMode) "OFFLINE_PREVIEW" else state.transport?.name ?: "disconnected"}")
         appendLine("baseUrl=$safeUrl")
         appendLine("api=${state.info?.api ?: "unknown"}")
         appendLine("cameraRoute=${network.routing.name}")

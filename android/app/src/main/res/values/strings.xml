@@ -130,4 +130,7 @@
     <string name="setting_color_temperature">Color temperature</string>
     <string name="setting_exposure_compensation">Exposure compensation</string>
     <string name="setting_ae_mode">AE mode</string>
+    <string name="preview_interface">Open offline preview</string>
+    <string name="offline_preview">Offline UI preview</string>
+    <string name="offline_preview_hint">Explore controls without sending commands to a camera</string>
 </resources>

@@ -89,6 +89,19 @@ fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
                 Spacer(Modifier.size(8.dp))
                 Text(stringResource(R.string.preset_simulator))
             }
+            Button(
+                onClick = actions.enterOfflinePreview,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AppSurfaceHigh,
+                    contentColor = AppText,
+                ),
+                shape = RoundedCornerShape(6.dp),
+            ) {
+                Icon(painterResource(LucideR.drawable.lucide_ic_eye), null, Modifier.size(20.dp))
+                Spacer(Modifier.size(8.dp))
+                Text(stringResource(R.string.preview_interface))
+            }
             OutlinedTextField(
                 value = state.baseUrl,
                 onValueChange = actions.setBaseUrl,

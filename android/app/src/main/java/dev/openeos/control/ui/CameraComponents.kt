@@ -314,6 +314,28 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         contentAlignment = Alignment.Center,
     ) {
         when {
+            state.previewMode -> Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    painterResource(LucideR.drawable.lucide_ic_camera),
+                    contentDescription = null,
+                    tint = AppAccent,
+                    modifier = Modifier.size(40.dp).cameraControlRotation(),
+                )
+                Text(
+                    stringResource(R.string.offline_preview),
+                    color = AppText,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.cameraControlRotation(),
+                )
+                Text(
+                    stringResource(R.string.offline_preview_hint),
+                    color = AppSubtleText,
+                    modifier = Modifier.padding(horizontal = 24.dp).cameraControlRotation(),
+                )
+            }
             bitmap != null -> Image(
                 bitmap.asImageBitmap(),
                 stringResource(R.string.live_view),

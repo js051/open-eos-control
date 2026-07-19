@@ -100,6 +100,12 @@ class CameraViewModel(
         }
     }
 
+    fun enterOfflinePreview() {
+        stopLiveViewLoop()
+        resetFrameMetrics()
+        _uiState.update { it.withOfflinePreview() }
+    }
+
     fun clearError() {
         _uiState.update { it.copy(error = null, errorOperation = null) }
     }
@@ -162,6 +168,10 @@ class CameraViewModel(
     fun disconnect() {
         stopLiveViewLoop()
         resetFrameMetrics()
+        if (_uiState.value.previewMode) {
+            _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+            return
+        }
         viewModelScope.launch {
             try {
                 repository.disconnect()
@@ -173,6 +183,7 @@ class CameraViewModel(
     }
 
     fun refresh() = runCamera(CameraOperation.STATUS) {
+        if (_uiState.value.previewMode) return@runCamera
         val status = repository.refreshStatus()
         _uiState.update {
             it.copy(
@@ -183,7 +194,7 @@ class CameraViewModel(
     }
 
     fun refreshLiveViewFrame() {
-        if (!_uiState.value.connected) return
+        if (!_uiState.value.connected || _uiState.value.previewMode) return
         viewModelScope.launch {
             refreshLiveViewFrameInternal(reportErrors = true)
         }
@@ -191,6 +202,7 @@ class CameraViewModel(
 
     fun setLiveViewAutoRefresh(enabled: Boolean) {
         _uiState.update { it.copy(liveViewAutoRefresh = enabled) }
+        if (_uiState.value.previewMode) return
         if (enabled) {
             refreshLiveViewFrame()
             startLiveViewLoopIfNeeded()
@@ -206,21 +218,26 @@ class CameraViewModel(
             liveView?.maxFps ?: MAX_LIVE_VIEW_FPS,
         )
         val changed = _uiState.value.liveViewFrameRateFps != clampedFps
-        repository.updateLiveViewRequest(fps = clampedFps)
+        if (!_uiState.value.previewMode) repository.updateLiveViewRequest(fps = clampedFps)
         _uiState.update { it.copy(liveViewFrameRateFps = clampedFps) }
-        if (changed && _uiState.value.connected && _uiState.value.liveViewAutoRefresh) {
+        if (changed && _uiState.value.connected && !_uiState.value.previewMode && _uiState.value.liveViewAutoRefresh) {
             startLiveViewLoopIfNeeded()
         }
     }
 
     fun setLiveViewSize(size: LiveViewSize) {
         if (_uiState.value.liveViewSize == size) return
+        if (_uiState.value.previewMode) {
+            _uiState.update { it.copy(liveViewSize = size) }
+            return
+        }
         repository.updateLiveViewRequest(size = size)
         _uiState.update { it.copy(liveViewSize = size) }
         restartLiveView()
     }
 
     fun restartLiveView() = runCamera(CameraOperation.LIVE_VIEW) {
+        if (_uiState.value.previewMode) return@runCamera
         repository.restartLiveView()
         val capabilities = repository.refreshCapabilities()
         _uiState.update { it.copy(capabilities = capabilities) }
@@ -228,15 +245,39 @@ class CameraViewModel(
         startLiveViewLoopIfNeeded()
     }
 
-    fun setIso(value: String) = updateStatus(CameraOperation.SETTING) { repository.setIso(value) }
+    fun setIso(value: String) {
+        if (updatePreviewExposure { it.copy(iso = value) }) return
+        updateStatus(CameraOperation.SETTING) { repository.setIso(value) }
+    }
 
-    fun setShutter(value: String) = updateStatus(CameraOperation.SETTING) { repository.setShutter(value) }
+    fun setShutter(value: String) {
+        if (updatePreviewExposure { it.copy(shutter = value) }) return
+        updateStatus(CameraOperation.SETTING) { repository.setShutter(value) }
+    }
 
-    fun setAperture(value: String) = updateStatus(CameraOperation.SETTING) { repository.setAperture(value) }
+    fun setAperture(value: String) {
+        if (updatePreviewExposure { it.copy(aperture = value) }) return
+        updateStatus(CameraOperation.SETTING) { repository.setAperture(value) }
+    }
 
-    fun setWhiteBalance(value: String) = updateStatus(CameraOperation.SETTING) { repository.setWhiteBalance(value) }
+    fun setWhiteBalance(value: String) {
+        if (updatePreviewExposure { it.copy(whiteBalance = value) }) return
+        updateStatus(CameraOperation.SETTING) { repository.setWhiteBalance(value) }
+    }
 
     fun setCameraSetting(key: String, value: String) = runCamera(CameraOperation.SETTING) {
+        if (_uiState.value.previewMode) {
+            _uiState.update { state ->
+                state.copy(
+                    capabilities = state.capabilities?.copy(
+                        advancedSettings = state.capabilities.advancedSettings.map { setting ->
+                            if (setting.key == key) setting.copy(value = value) else setting
+                        },
+                    ),
+                )
+            }
+            return@runCamera
+        }
         val status = repository.setCameraSetting(key, value)
         val capabilities = repository.refreshCapabilities()
         _uiState.update {
@@ -250,16 +291,22 @@ class CameraViewModel(
     }
 
     fun toggleRecording() = updateStatus(CameraOperation.RECORDING) {
+        if (_uiState.value.previewMode) {
+            return@updateStatus _uiState.value.status!!.copy(
+                recording = _uiState.value.status?.recording != true,
+            )
+        }
         repository.toggleRecording(_uiState.value.status?.recording)
     }
 
     fun captureStill() = runCamera(CameraOperation.CAPTURE) {
-        val status = repository.captureStill()
-        _uiState.update { it.copy(status = status, captureFeedback = CaptureFeedback.SUCCESS) }
-        viewModelScope.launch {
-            delay(CAPTURE_FLASH_MILLIS)
-            _uiState.update { it.copy(captureFeedback = null) }
+        if (_uiState.value.previewMode) {
+            showCaptureSuccess()
+            return@runCamera
         }
+        val status = repository.captureStill()
+        _uiState.update { it.copy(status = status) }
+        showCaptureSuccess()
         refreshLiveViewFrameInternal(reportErrors = false)
         startLiveViewLoopIfNeeded()
     }
@@ -270,6 +317,16 @@ class CameraViewModel(
                 focusPoint = FocusPoint(x, y),
                 focusFeedback = FocusFeedback.FOCUSING,
             )
+        }
+        if (_uiState.value.previewMode) {
+            _uiState.update {
+                it.copy(
+                    focusPoint = FocusPoint(x, y),
+                    focusFeedback = FocusFeedback.SUCCESS,
+                )
+            }
+            clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
+            return
         }
         runCamera(
             operation = CameraOperation.FOCUS,
@@ -302,6 +359,24 @@ class CameraViewModel(
         }
         refreshLiveViewFrameInternal(reportErrors = false)
         startLiveViewLoopIfNeeded()
+    }
+
+    private fun updatePreviewExposure(
+        update: (dev.openeos.control.data.ExposureState) -> dev.openeos.control.data.ExposureState,
+    ): Boolean {
+        if (!_uiState.value.previewMode) return false
+        _uiState.update { state ->
+            state.copy(status = state.status?.copy(exposure = update(state.status.exposure)))
+        }
+        return true
+    }
+
+    private fun showCaptureSuccess() {
+        _uiState.update { it.copy(captureFeedback = CaptureFeedback.SUCCESS) }
+        viewModelScope.launch {
+            delay(CAPTURE_FLASH_MILLIS)
+            _uiState.update { it.copy(captureFeedback = null) }
+        }
     }
 
     private fun runCamera(
@@ -351,7 +426,7 @@ class CameraViewModel(
     }
 
     private suspend fun refreshLiveViewFrameInternal(reportErrors: Boolean) {
-        if (!_uiState.value.connected) return
+        if (!_uiState.value.connected || _uiState.value.previewMode) return
 
         if (!repository.isRealCamera()) {
             val nextUrl = repository.nextLiveViewFrameUrl()
@@ -433,7 +508,7 @@ class CameraViewModel(
     private fun startLiveViewLoopIfNeeded() {
         liveViewJob?.cancel()
         val state = _uiState.value
-        if (!state.connected || !state.liveViewAutoRefresh) return
+        if (!state.connected || state.previewMode || !state.liveViewAutoRefresh) return
 
         liveViewJob = viewModelScope.launch {
             while (isActive) {
@@ -489,6 +564,7 @@ class CameraViewModel(
         error: String?,
     ): CameraUiState = copy(
         baseUrl = baseUrl,
+        previewMode = false,
         transport = null,
         info = null,
         status = null,

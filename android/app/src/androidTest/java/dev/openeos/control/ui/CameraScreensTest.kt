@@ -31,7 +31,21 @@ class CameraScreensTest {
     fun disconnectedStateShowsDedicatedConnectionScreen() {
         compose.setContent { MaterialTheme { ConnectionScreen(CameraUiState(), noOpActions()) } }
         compose.onNodeWithText(resourceText(R.string.connect_title)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.preview_interface)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.connect)).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun offlinePreviewShowsCameraControlsWithoutAConnection() {
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
+        compose.onNodeWithText("800").assertIsDisplayed()
     }
 
     @Test
@@ -168,7 +182,7 @@ class CameraScreensTest {
 
     private fun noOpActions() = CameraActions(
         setBaseUrl = {}, setUsername = {}, setPassword = {},
-        useHttpPreset = {}, useHttpsPreset = {}, useSimulatorPreset = {},
+        useHttpPreset = {}, useHttpsPreset = {}, useSimulatorPreset = {}, enterOfflinePreview = {},
         connect = {}, disconnect = {}, refresh = {}, refreshUsb = {}, requestUsbPermission = {},
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },

@@ -63,7 +63,10 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
         ) {
             DebugSection(stringResource(R.string.overview)) {
                 DebugValue(stringResource(R.string.camera_profile), state.capabilities?.profile?.modelName ?: unknown)
-                DebugValue(stringResource(R.string.transport), state.transport?.let { transportLabel(it) } ?: unknown)
+                DebugValue(
+                    stringResource(R.string.transport),
+                    if (state.previewMode) stringResource(R.string.offline_preview) else state.transport?.let { transportLabel(it) } ?: unknown,
+                )
                 DebugValue(stringResource(R.string.api_version), state.info?.api ?: unknown)
                 DebugValue(stringResource(R.string.last_error), state.error ?: none, warning = state.error != null)
             }

@@ -36,6 +36,7 @@ fun OpenEosControlApp(
         useHttpPreset = viewModel::useDirectCameraPreset,
         useHttpsPreset = viewModel::useDirectCameraHttpsPreset,
         useSimulatorPreset = viewModel::useDevSimulatorPreset,
+        enterOfflinePreview = viewModel::enterOfflinePreview,
         connect = {
             viewModel.rememberConnection(context)
             viewModel.connect()
@@ -127,6 +128,7 @@ data class CameraActions(
     val useHttpPreset: () -> Unit,
     val useHttpsPreset: () -> Unit,
     val useSimulatorPreset: () -> Unit,
+    val enterOfflinePreview: () -> Unit,
     val connect: () -> Unit,
     val disconnect: () -> Unit,
     val refresh: () -> Unit,
