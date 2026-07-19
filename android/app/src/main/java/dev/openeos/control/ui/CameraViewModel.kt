@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.LiveViewRequest
 import dev.openeos.control.data.LiveViewSize
@@ -29,8 +30,13 @@ class CameraViewModel(
     private var liveViewJob: Job? = null
     private val frameTimesMillis = ArrayDeque<Long>()
     private var preferencesLoaded = false
+    private var networkRoutingConfigured = false
 
     fun initialize(context: Context) {
+        if (!networkRoutingConfigured) {
+            repository.configureAndroidNetworkRouting(context.applicationContext)
+            networkRoutingConfigured = true
+        }
         if (preferencesLoaded) return
         preferencesLoaded = true
         val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -95,7 +101,7 @@ class CameraViewModel(
     }
 
     fun clearError() {
-        _uiState.update { it.copy(error = null) }
+        _uiState.update { it.copy(error = null, errorOperation = null) }
     }
 
     fun refreshUsbDiagnostics(context: Context) = runCamera(CameraOperation.USB) {
@@ -134,6 +140,7 @@ class CameraViewModel(
                 info = session.info,
                 status = session.status,
                 capabilities = session.capabilities,
+                networkDiagnostics = session.networkDiagnostics,
                 liveViewFrameUrl = session.liveViewFrameUrl,
                 liveViewBitmap = null,
                 liveViewFrameRateFps = supportedFps,
@@ -215,6 +222,8 @@ class CameraViewModel(
 
     fun restartLiveView() = runCamera(CameraOperation.LIVE_VIEW) {
         repository.restartLiveView()
+        val capabilities = repository.refreshCapabilities()
+        _uiState.update { it.copy(capabilities = capabilities) }
         refreshLiveViewFrameInternal(reportErrors = true)
         startLiveViewLoopIfNeeded()
     }
@@ -305,6 +314,7 @@ class CameraViewModel(
             it.copy(
                 pendingOperations = it.pendingOperations + operation,
                 error = null,
+                errorOperation = null,
             )
         }
         viewModelScope.launch {
@@ -314,7 +324,10 @@ class CameraViewModel(
                 exception.printStackTrace()
                 onError(exception)
                 _uiState.update {
-                    it.copy(error = formatException(exception))
+                    it.copy(
+                        error = formatException(exception),
+                        errorOperation = operation,
+                    )
                 }
             } finally {
                 _uiState.update {
@@ -347,6 +360,8 @@ class CameraViewModel(
                     it.copy(
                         liveViewFrameUrl = nextUrl,
                         liveViewBitmap = null,
+                        error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
+                        errorOperation = it.errorOperation.takeUnless { operation -> operation == CameraOperation.LIVE_VIEW },
                         liveViewDiagnostics = recordFrame(
                             current = it.liveViewDiagnostics,
                             nowMillis = System.currentTimeMillis(),
@@ -374,6 +389,8 @@ class CameraViewModel(
                     it.copy(
                         liveViewFrameUrl = frame.sourceUrl,
                         liveViewBitmap = bitmap,
+                        error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
+                        errorOperation = it.errorOperation.takeUnless { operation -> operation == CameraOperation.LIVE_VIEW },
                         liveViewDiagnostics = recordFrame(
                             current = it.liveViewDiagnostics,
                             nowMillis = System.currentTimeMillis(),
@@ -389,7 +406,12 @@ class CameraViewModel(
         } catch (exception: Exception) {
             exception.printStackTrace()
             if (reportErrors) {
-                _uiState.update { it.copy(error = formatException(exception)) }
+                _uiState.update {
+                    it.copy(
+                        error = formatException(exception),
+                        errorOperation = CameraOperation.LIVE_VIEW,
+                    )
+                }
             }
         }
     }
@@ -428,6 +450,8 @@ class CameraViewModel(
                             it.copy(
                                 liveViewFrameUrl = nextUrl,
                                 liveViewBitmap = null,
+                                error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
+                                errorOperation = it.errorOperation.takeUnless { operation -> operation == CameraOperation.LIVE_VIEW },
                                 liveViewDiagnostics = recordFrame(
                                     current = it.liveViewDiagnostics,
                                     nowMillis = System.currentTimeMillis(),
@@ -472,9 +496,11 @@ class CameraViewModel(
         liveViewFrameUrl = null,
         liveViewBitmap = null,
         liveViewDiagnostics = LiveViewDiagnostics(),
+        networkDiagnostics = CameraNetworkDiagnostics.Empty,
         focusPoint = null,
         focusFeedback = null,
         error = error,
+        errorOperation = null,
     )
 
     private fun fpsToFrameIntervalMillis(fps: Int): Long =

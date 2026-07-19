@@ -24,4 +24,6 @@
     <string name="none">無</string><string name="unavailable">無法取得</string><string name="device">裝置</string><string name="vid_pid">VID / PID</string><string name="ptp">PTP</string>
     <string name="transport_ccapi_network">Canon CCAPI 網路連線</string><string name="transport_usb_ptp">USB PTP</string><string name="transport_desktop_bridge">桌面橋接</string>
     <string name="usb_state_ready">可建立 PTP 工作階段</string><string name="usb_state_permission_needed">需要 USB 權限</string><string name="usb_state_canon_non_ptp">Canon USB 裝置</string><string name="usb_state_non_canon_ptp">PTP 裝置</string><string name="usb_state_unknown">USB 裝置</string>
+    <string name="network">網路</string><string name="camera_route">相機路由</string><string name="target_host">目標主機</string><string name="network_interface">網路介面</string><string name="network_handle">網路識別碼</string>
+    <string name="wifi_available">Wi-Fi 可用</string><string name="cellular_available">行動網路可用</string><string name="route_system_default">系統預設</string><string name="route_wifi_bound">已綁定相機 Wi-Fi</string><string name="yes">是</string><string name="no">否</string>
 </resources>

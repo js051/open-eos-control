@@ -16,6 +16,11 @@ private data class CcapiApiOperation(
     val path: String,
 )
 
+private class CcapiHttpException(
+    val statusCode: Int,
+    message: String,
+) : IllegalStateException(message)
+
 class CcapiClient(
     baseUrl: String,
     httpClient: OkHttpClient? = null,
@@ -24,7 +29,7 @@ class CcapiClient(
     password: String = "",
 ) {
     private val baseUrl = baseUrl.trimEnd('/')
-    private val httpClient = httpClient ?: OkHttpClient.Builder().apply {
+    private val httpClient = (httpClient ?: OkHttpClient()).newBuilder().apply {
         if (username.isNotBlank()) {
             val authorization = Credentials.basic(username, password)
             addInterceptor { chain ->
@@ -49,6 +54,8 @@ class CcapiClient(
     private val settingPathsByKey = mutableMapOf<String, String>()
     private val apiOperations = linkedSetOf<CcapiApiOperation>()
     private val observedFeatures = mutableSetOf<CameraFeature>()
+    private var liveViewSizeControlSupported = true
+    private var activeLiveViewSize = LiveViewSize.MEDIUM
 
     suspend fun initialize() {
         val isLocalOrSim = try {
@@ -339,6 +346,16 @@ class CcapiClient(
                 supportedFeatures.add(CameraFeature.TAP_FOCUS)
             }
 
+            val liveViewCapabilities = LiveViewCapabilities.ccapiNetwork().let { capabilities ->
+                if (liveViewSizeControlSupported) {
+                    capabilities
+                } else {
+                    capabilities.copy(
+                        sizes = listOf(activeLiveViewSize),
+                        defaultSize = activeLiveViewSize,
+                    )
+                }
+            }
             CameraCapabilities(
                 iso = isoList,
                 shutter = shutterList,
@@ -346,7 +363,7 @@ class CcapiClient(
                 whiteBalance = wbList,
                 advancedSettings = advancedSettings,
                 matrix = CapabilityMatrix.ccapiNetwork(supportedFeatures),
-                liveView = LiveViewCapabilities.ccapiNetwork(),
+                liveView = liveViewCapabilities,
             )
         } else {
             getJson("/ccapi/capabilities").toCameraCapabilities()
@@ -429,12 +446,19 @@ class CcapiClient(
 
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
         if (isRealCamera) {
-            postOk(
-                apiPath("POST", "/shooting/liveview"),
-                JSONObject()
-                    .put("cameradisplay", "on")
-                    .put("liveviewsize", request.size.ccapiValue),
-            )
+            val path = apiPath("POST", "/shooting/liveview")
+            val requestedPayload = JSONObject()
+                .put("cameradisplay", "on")
+                .put("liveviewsize", request.size.ccapiValue)
+            try {
+                postOk(path, requestedPayload)
+                liveViewSizeControlSupported = true
+            } catch (exception: CcapiHttpException) {
+                if (exception.statusCode != 400) throw exception
+                postOk(path, JSONObject().put("cameradisplay", "on"))
+                liveViewSizeControlSupported = false
+            }
+            activeLiveViewSize = request.size
             observedFeatures.add(CameraFeature.LIVE_VIEW)
             observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
         }
@@ -658,7 +682,10 @@ class CcapiClient(
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                error("Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body")
+                throw CcapiHttpException(
+                    statusCode = response.code,
+                    message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
+                )
             }
             JSONObject(body)
         }
@@ -668,7 +695,10 @@ class CcapiClient(
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                error("Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body")
+                throw CcapiHttpException(
+                    statusCode = response.code,
+                    message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
+                )
             }
         }
     }

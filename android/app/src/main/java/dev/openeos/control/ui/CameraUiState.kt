@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraSettingControl
@@ -46,6 +47,7 @@ data class CameraUiState(
     val liveViewFrameUrl: String? = null,
     val liveViewBitmap: Bitmap? = null,
     val usbDiagnostics: UsbPtpDiagnostics = UsbPtpDiagnostics.Empty,
+    val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty,
     val liveViewAutoRefresh: Boolean = true,
     val liveViewFrameRateFps: Int = DEFAULT_LIVE_VIEW_FPS,
     val liveViewSize: LiveViewSize = LiveViewSize.MEDIUM,
@@ -59,6 +61,7 @@ data class CameraUiState(
     val focusPoint: FocusPoint? = null,
     val focusFeedback: FocusFeedback? = null,
     val error: String? = null,
+    val errorOperation: CameraOperation? = null,
     val pendingOperations: Set<CameraOperation> = emptySet(),
 ) {
     val connected: Boolean

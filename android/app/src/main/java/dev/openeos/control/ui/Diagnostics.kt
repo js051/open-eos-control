@@ -23,6 +23,7 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         .sortedBy(CameraFeature::name)
         .joinToString { it.name }
     val live = state.liveViewDiagnostics
+    val network = state.networkDiagnostics
 
     return buildString {
         appendLine("Open EOS Control diagnostic report")
@@ -31,6 +32,11 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine("transport=${state.transport?.name ?: "disconnected"}")
         appendLine("baseUrl=$safeUrl")
         appendLine("api=${state.info?.api ?: "unknown"}")
+        appendLine("cameraRoute=${network.routing.name}")
+        appendLine("cameraNetworkHandle=${network.networkHandle ?: "none"}")
+        appendLine("cameraInterface=${network.interfaceName ?: "none"}")
+        appendLine("wifiAvailable=${network.wifiAvailable}")
+        appendLine("cellularAvailable=${network.cellularAvailable}")
         appendLine("supported=$supported")
         appendLine("planned=$planned")
         appendLine("battery=${state.status?.rawBatteryJson?.ifBlank { state.status?.batteryStatus } ?: "unknown"}")
@@ -41,6 +47,7 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine("contentType=${live.contentType ?: "unknown"}")
         appendLine("source=${live.sourceUrl?.let { redactDiagnosticText(it, state) } ?: "unknown"}")
         appendLine("lastFrameAtMillis=${live.lastFrameAtMillis ?: "unknown"}")
+        appendLine("liveViewHealthy=${live.lastFrameAtMillis != null}")
         appendLine("usbDevices=${state.usbDiagnostics.devices.size}")
         append("lastError=${state.error?.let { redactDiagnosticText(it, state) } ?: "none"}")
     }

@@ -104,4 +104,15 @@
     <string name="usb_state_canon_non_ptp">Canon USB device</string>
     <string name="usb_state_non_canon_ptp">PTP device</string>
     <string name="usb_state_unknown">USB device</string>
+    <string name="network">Network</string>
+    <string name="camera_route">Camera route</string>
+    <string name="target_host">Target host</string>
+    <string name="network_interface">Network interface</string>
+    <string name="network_handle">Network handle</string>
+    <string name="wifi_available">Wi-Fi available</string>
+    <string name="cellular_available">Mobile network available</string>
+    <string name="route_system_default">System default</string>
+    <string name="route_wifi_bound">Bound to camera Wi-Fi</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
 </resources>

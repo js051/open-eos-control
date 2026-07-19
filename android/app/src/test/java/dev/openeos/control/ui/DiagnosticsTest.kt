@@ -1,6 +1,8 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.CameraNetworkDiagnostics
+import dev.openeos.control.data.CameraNetworkRouting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -29,6 +31,28 @@ class DiagnosticsTest {
         assertFalse(report.contains("camera-user"))
         assertFalse(report.contains("Basic"))
         assertTrue(report.contains("192.168.1.2"))
+    }
+
+    @Test
+    fun diagnosticReportIncludesCameraNetworkRouteAndStreamHealth() {
+        val state = CameraUiState(
+            networkDiagnostics = CameraNetworkDiagnostics(
+                routing = CameraNetworkRouting.WIFI_BOUND,
+                targetHost = "192.168.1.2",
+                networkHandle = 42L,
+                interfaceName = "wlan0",
+                wifiAvailable = true,
+                cellularAvailable = true,
+            ),
+            liveViewDiagnostics = LiveViewDiagnostics(lastFrameAtMillis = 1_000L),
+        )
+
+        val report = buildDiagnosticReport(state)
+
+        assertTrue(report.contains("cameraRoute=WIFI_BOUND"))
+        assertTrue(report.contains("cameraInterface=wlan0"))
+        assertTrue(report.contains("cellularAvailable=true"))
+        assertTrue(report.contains("liveViewHealthy=true"))
     }
 
     @Test

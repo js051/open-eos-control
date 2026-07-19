@@ -1,8 +1,11 @@
 package dev.openeos.control.data
 
+import android.content.Context
+
 class CameraRepository(
-    private val backendFactory: CameraBackendFactory = CameraBackendFactory(),
+    backendFactory: CameraBackendFactory = CameraBackendFactory(),
 ) {
+    private var backendFactory = backendFactory
     private var backend: CameraControlBackend = backendFactory.create(
         CameraConnection.CcapiNetwork(DEFAULT_CAMERA_BASE_URL)
     )
@@ -11,6 +14,11 @@ class CameraRepository(
     private var active = false
 
     fun isRealCamera(): Boolean = backend.prefersBitmapLiveViewFrames
+
+    fun configureAndroidNetworkRouting(context: Context) {
+        check(!active) { "Camera network routing cannot change while connected." }
+        backendFactory = CameraBackendFactory(AndroidCameraHttpTransportFactory(context.applicationContext))
+    }
 
     suspend fun connect(
         baseUrl: String,
@@ -24,8 +32,8 @@ class CameraRepository(
             username = username,
             password = password,
         )
-        backend = backendFactory.create(connection)
         try {
+            backend = backendFactory.create(connection)
             backend.initialize()
             active = true
             liveViewRequest = request
@@ -44,6 +52,7 @@ class CameraRepository(
                 info = info,
                 status = status,
                 capabilities = capabilities,
+                networkDiagnostics = backend.networkDiagnostics,
                 liveViewFrameUrl = nextLiveViewFrameUrl(),
             )
         } catch (exception: Exception) {
@@ -125,6 +134,7 @@ data class CameraSession(
     val info: CameraInfo,
     val status: CameraStatus,
     val capabilities: CameraCapabilities,
+    val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty,
     val liveViewFrameUrl: String,
 )
 

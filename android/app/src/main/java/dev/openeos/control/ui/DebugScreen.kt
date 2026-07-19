@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
+import dev.openeos.control.data.CameraNetworkRouting
 import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.UsbDiagnosticState
 import java.text.DateFormat
@@ -70,6 +71,15 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
                 DebugValue(stringResource(R.string.planned_features), state.capabilities?.matrix?.planned.orEmpty().joinToString { it.name }.ifBlank { none })
                 DebugValue(stringResource(R.string.battery_raw), state.status?.rawBatteryJson?.ifBlank { unavailable } ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.storage_raw), state.status?.rawStorageJson?.ifBlank { unavailable } ?: unavailable, mono = true)
+            }
+            DebugSection(stringResource(R.string.network)) {
+                val network = state.networkDiagnostics
+                DebugValue(stringResource(R.string.camera_route), networkRoutingLabel(network.routing))
+                DebugValue(stringResource(R.string.target_host), network.targetHost ?: unknown, mono = true)
+                DebugValue(stringResource(R.string.network_interface), network.interfaceName ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.network_handle), network.networkHandle?.toString() ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.wifi_available), yesNoLabel(network.wifiAvailable))
+                DebugValue(stringResource(R.string.cellular_available), yesNoLabel(network.cellularAvailable))
             }
             DebugSection(stringResource(R.string.live_view)) {
                 val live = state.liveViewDiagnostics
@@ -142,6 +152,17 @@ private fun transportLabel(transport: CameraTransport): String = stringResource(
         CameraTransport.DESKTOP_BRIDGE -> R.string.transport_desktop_bridge
     },
 )
+
+@Composable
+private fun networkRoutingLabel(routing: CameraNetworkRouting): String = stringResource(
+    when (routing) {
+        CameraNetworkRouting.SYSTEM_DEFAULT -> R.string.route_system_default
+        CameraNetworkRouting.WIFI_BOUND -> R.string.route_wifi_bound
+    },
+)
+
+@Composable
+private fun yesNoLabel(value: Boolean): String = stringResource(if (value) R.string.yes else R.string.no)
 
 @Composable
 private fun usbStateLabel(state: UsbDiagnosticState): String = stringResource(

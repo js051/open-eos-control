@@ -4,6 +4,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.Credentials
+import okhttp3.OkHttpClient
 import okio.Buffer
 import org.json.JSONObject
 import org.junit.After
@@ -49,6 +50,24 @@ class CcapiClientTest {
     fun authenticatedRequestsSendBasicAuthorizationHeader() = runTest {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
+            username = "camera-user",
+            password = "camera-password",
+        )
+        server.enqueue(jsonResponse(INFO_JSON))
+
+        client.info()
+
+        assertEquals(
+            Credentials.basic("camera-user", "camera-password"),
+            server.takeRequest().getHeader("Authorization"),
+        )
+    }
+
+    @Test
+    fun authenticatedRequestsKeepAuthorizationWithInjectedHttpClient() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            httpClient = OkHttpClient(),
             username = "camera-user",
             password = "camera-password",
         )
@@ -182,6 +201,42 @@ class CcapiClientTest {
         assertEquals("POST", request.method)
         assertEquals("on", body.getString("cameradisplay"))
         assertEquals("large", body.getString("liveviewsize"))
+    }
+
+    @Test
+    fun startLiveViewRetriesWithoutSizeWhenCameraRejectsRequestedParameters() = runTest {
+        client.forceRealCamera()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(400)
+                .setBody("""{"message":"Invalid parameter"}"""),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+
+        client.startLiveView(LiveViewRequest(size = LiveViewSize.MEDIUM))
+        val capabilities = client.capabilities()
+        val rejectedRequest = server.takeRequest()
+        val fallbackRequest = server.takeRequest()
+        val rejectedBody = JSONObject(rejectedRequest.body.readUtf8())
+        val fallbackBody = JSONObject(fallbackRequest.body.readUtf8())
+
+        assertEquals("medium", rejectedBody.getString("liveviewsize"))
+        assertEquals("on", fallbackBody.getString("cameradisplay"))
+        assertTrue(!fallbackBody.has("liveviewsize"))
+        assertEquals(listOf(LiveViewSize.MEDIUM), capabilities.liveView.sizes)
+    }
+
+    @Test
+    fun startLiveViewDoesNotHideServerFailuresBehindParameterFallback() = runTest {
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setResponseCode(503).setBody("camera busy"))
+
+        val failure = runCatching { client.startLiveView() }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("HTTP 503"))
+        assertEquals(1, server.requestCount)
     }
 
     @Test

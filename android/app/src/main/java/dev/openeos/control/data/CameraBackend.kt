@@ -51,6 +51,7 @@ interface CameraControlBackend {
     val transport: CameraTransport
     val connection: CameraConnection
     val prefersBitmapLiveViewFrames: Boolean
+    val networkDiagnostics: CameraNetworkDiagnostics
 
     suspend fun initialize()
     suspend fun info(): CameraInfo
@@ -75,9 +76,12 @@ interface CameraControlBackend {
 
 class CcapiCameraBackend(
     override val connection: CameraConnection.CcapiNetwork,
+    httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
 ) : CameraControlBackend {
+    private val httpTransport = httpTransportFactory.create(connection.baseUrl)
     private val client = CcapiClient(
         baseUrl = connection.baseUrl,
+        httpClient = httpTransport.client,
         username = connection.username,
         password = connection.password,
     )
@@ -86,6 +90,8 @@ class CcapiCameraBackend(
 
     override val prefersBitmapLiveViewFrames: Boolean
         get() = client.isRealCamera
+
+    override val networkDiagnostics: CameraNetworkDiagnostics = httpTransport.diagnostics
 
     override suspend fun initialize() = client.initialize()
 
@@ -125,6 +131,8 @@ class PlannedCameraBackend(
     override val transport: CameraTransport = connection.transport
 
     override val prefersBitmapLiveViewFrames: Boolean = false
+
+    override val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty
 
     override suspend fun initialize() {
         throw UnsupportedOperationException("${transport.label} is planned but not implemented in the Android app yet.")
@@ -196,10 +204,12 @@ class PlannedCameraBackend(
         unsupported(CameraFeature.LIVE_VIEW)
 }
 
-class CameraBackendFactory {
+class CameraBackendFactory(
+    private val httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
+) {
     fun create(connection: CameraConnection): CameraControlBackend =
         when (connection) {
-            is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection)
+            is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection, httpTransportFactory)
             is CameraConnection.AndroidUsbPtp -> PlannedCameraBackend(connection)
             is CameraConnection.DesktopBridge -> PlannedCameraBackend(connection)
         }
