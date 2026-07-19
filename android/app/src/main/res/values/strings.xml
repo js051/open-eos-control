@@ -115,4 +115,19 @@
     <string name="route_wifi_bound">Bound to camera Wi-Fi</string>
     <string name="yes">Yes</string>
     <string name="no">No</string>
+    <string name="language">Language</string>
+    <string name="language_system">Automatic (system)</string>
+    <string name="language_english">English</string>
+    <string name="language_traditional_chinese">Traditional Chinese</string>
+    <string name="setting_af_method">AF method</string>
+    <string name="setting_af_operation">AF operation</string>
+    <string name="setting_drive_mode">Drive mode</string>
+    <string name="setting_metering_mode">Metering</string>
+    <string name="setting_picture_style">Picture style</string>
+    <string name="setting_shooting_mode">Shooting mode</string>
+    <string name="setting_image_quality">Image quality</string>
+    <string name="setting_movie_quality">Movie quality</string>
+    <string name="setting_color_temperature">Color temperature</string>
+    <string name="setting_exposure_compensation">Exposure compensation</string>
+    <string name="setting_ae_mode">AE mode</string>
 </resources>

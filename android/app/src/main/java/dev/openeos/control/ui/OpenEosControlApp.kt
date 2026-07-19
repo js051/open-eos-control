@@ -63,6 +63,10 @@ fun OpenEosControlApp(
         setAutoRefresh = viewModel::setLiveViewAutoRefresh,
         setFps = viewModel::setLiveViewFrameRate,
         setLiveViewSize = viewModel::setLiveViewSize,
+        setAppLanguage = { language ->
+            viewModel.closeSettingPicker()
+            AppLanguageManager.set(language)
+        },
         clearError = viewModel::clearError,
     )
 
@@ -81,6 +85,7 @@ fun OpenEosControlApp(
                     ErrorBanner(state.error, actions.clearError)
                 }
             }
+            LanguageSettingsSheet(state, actions)
         }
     }
 }
@@ -146,5 +151,6 @@ data class CameraActions(
     val setAutoRefresh: (Boolean) -> Unit,
     val setFps: (Int) -> Unit,
     val setLiveViewSize: (LiveViewSize) -> Unit,
+    val setAppLanguage: (AppLanguage) -> Unit,
     val clearError: () -> Unit,
 )

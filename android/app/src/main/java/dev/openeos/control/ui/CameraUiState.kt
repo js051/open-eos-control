@@ -20,7 +20,7 @@ enum class UiMode { CONTROL, DEBUG }
 
 enum class CaptureMode { PHOTO, VIDEO }
 
-enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MORE }
+enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MORE, LANGUAGE }
 
 enum class CameraOperation { CONNECT, STATUS, SETTING, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, USB }
 

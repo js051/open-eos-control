@@ -3,15 +3,15 @@ package dev.openeos.control
 import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.OrientationEventListener
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.core.view.WindowCompat
 import dev.openeos.control.ui.CameraDisplayOrientation
 import dev.openeos.control.ui.OpenEosControlApp
 import dev.openeos.control.ui.resolveCameraOrientation
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private val controlRotationDegrees = mutableFloatStateOf(0f)
     private lateinit var orientationListener: OrientationEventListener
 

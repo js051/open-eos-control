@@ -6,9 +6,16 @@ import org.junit.Test
 class CameraOrientationTest {
     @Test
     fun portraitAndLandscapeUseStableDisplayOrientations() {
-        assertEquals(CameraDisplayOrientation.PORTRAIT, resolveCameraOrientation(0).displayOrientation)
-        assertEquals(CameraDisplayOrientation.REVERSE_LANDSCAPE, resolveCameraOrientation(90).displayOrientation)
-        assertEquals(CameraDisplayOrientation.LANDSCAPE, resolveCameraOrientation(270).displayOrientation)
+        val portrait = resolveCameraOrientation(0)
+        val reverseLandscape = resolveCameraOrientation(90)
+        val landscape = resolveCameraOrientation(270)
+
+        assertEquals(CameraDisplayOrientation.PORTRAIT, portrait.displayOrientation)
+        assertEquals(CameraDisplayOrientation.REVERSE_LANDSCAPE, reverseLandscape.displayOrientation)
+        assertEquals(CameraDisplayOrientation.LANDSCAPE, landscape.displayOrientation)
+        assertEquals(0f, portrait.controlRotationDegrees)
+        assertEquals(0f, reverseLandscape.controlRotationDegrees)
+        assertEquals(0f, landscape.controlRotationDegrees)
     }
 
     @Test

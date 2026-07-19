@@ -52,6 +52,7 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
         CameraHeader(state, actions)
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.debug), color = AppText, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            ToolIconButton(LucideR.drawable.lucide_ic_languages, stringResource(R.string.language), { actions.openPicker(SettingPicker.LANGUAGE) })
             ToolIconButton(LucideR.drawable.lucide_ic_refresh_cw, stringResource(R.string.refresh), actions.refresh, enabled = !state.isBusy(CameraOperation.STATUS))
             ToolIconButton(LucideR.drawable.lucide_ic_rotate_ccw, stringResource(R.string.restart_live_view), actions.restartLiveView, enabled = !state.isBusy(CameraOperation.LIVE_VIEW))
             ToolIconButton(LucideR.drawable.lucide_ic_usb, stringResource(R.string.usb_scan), actions.refreshUsb, enabled = !state.isBusy(CameraOperation.USB))

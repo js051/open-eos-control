@@ -129,6 +129,22 @@ class CameraScreensTest {
         compose.onAllNodesWithText(resourceText(R.string.fps_value, 7)).assertCountEquals(2)
     }
 
+    @Test
+    fun languageSheetOffersAutomaticEnglishAndTraditionalChinese() {
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                LanguageSettingsSheet(
+                    CameraUiState(activeSettingPicker = SettingPicker.LANGUAGE),
+                    noOpActions(),
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.language_system)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.language_english)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.language_traditional_chinese)).assertIsDisplayed()
+    }
+
     private fun connectedState() = CameraUiState(
         info = CameraInfo(true, "Canon EOS R6 Mark III", "test", "ccapi"),
         status = CameraStatus(
@@ -157,7 +173,7 @@ class CameraScreensTest {
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
         captureStill = {}, toggleRecording = {}, tapFocus = { _, _ -> }, refreshLiveView = {}, restartLiveView = {},
-        setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, clearError = {},
+        setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setAppLanguage = {}, clearError = {},
     )
 
     private fun resourceText(@StringRes resource: Int, vararg arguments: Any): String =

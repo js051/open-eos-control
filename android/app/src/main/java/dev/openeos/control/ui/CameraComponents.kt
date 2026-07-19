@@ -255,6 +255,14 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             )
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 DropdownMenuItem(
+                    text = { Text(stringResource(R.string.language)) },
+                    leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_languages), null) },
+                    onClick = {
+                        menuExpanded = false
+                        actions.openPicker(SettingPicker.LANGUAGE)
+                    },
+                )
+                DropdownMenuItem(
                     text = { Text(stringResource(R.string.debug)) },
                     leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_bug), null) },
                     onClick = {

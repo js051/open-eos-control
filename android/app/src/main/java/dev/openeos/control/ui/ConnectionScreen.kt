@@ -54,7 +54,18 @@ fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Column(Modifier.widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(painterResource(LucideR.drawable.lucide_ic_camera), null, tint = AppAccent, modifier = Modifier.size(44.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Icon(painterResource(LucideR.drawable.lucide_ic_camera), null, tint = AppAccent, modifier = Modifier.size(44.dp))
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_languages,
+                    stringResource(R.string.language),
+                    { actions.openPicker(SettingPicker.LANGUAGE) },
+                )
+            }
             Text(stringResource(R.string.connect_title), color = AppText, fontWeight = FontWeight.Bold)
             Text(stringResource(R.string.connect_subtitle), color = AppSubtleText)
 

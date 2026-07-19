@@ -193,6 +193,7 @@ private fun SettingSheets(state: CameraUiState, actions: CameraActions) {
         -> ExposureSettingsSheet(state, actions)
         SettingPicker.LIVE_VIEW -> LiveViewSettingsSheet(state, actions)
         SettingPicker.MORE -> MoreSettingsSheet(state, actions)
+        SettingPicker.LANGUAGE -> Unit
         null -> Unit
     }
 }
@@ -465,7 +466,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
 @Composable
 private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraActions) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(setting.label, color = AppText, fontWeight = FontWeight.SemiBold)
+        Text(cameraSettingLabel(setting), color = AppText, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(setting.values) { value ->
                 Box(
@@ -475,4 +476,20 @@ private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraAct
             }
         }
     }
+}
+
+@Composable
+private fun cameraSettingLabel(setting: CameraSettingControl): String = when (setting.key.lowercase()) {
+    "afmethod" -> stringResource(R.string.setting_af_method)
+    "afoperation" -> stringResource(R.string.setting_af_operation)
+    "drivemode" -> stringResource(R.string.setting_drive_mode)
+    "meteringmode" -> stringResource(R.string.setting_metering_mode)
+    "picturestyle" -> stringResource(R.string.setting_picture_style)
+    "shootingmode" -> stringResource(R.string.setting_shooting_mode)
+    "stillimagequality" -> stringResource(R.string.setting_image_quality)
+    "moviequality" -> stringResource(R.string.setting_movie_quality)
+    "colortemperature" -> stringResource(R.string.setting_color_temperature)
+    "exposurecompensation" -> stringResource(R.string.setting_exposure_compensation)
+    "ae" -> stringResource(R.string.setting_ae_mode)
+    else -> setting.label
 }
