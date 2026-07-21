@@ -138,6 +138,13 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Verify bundled app resources
+        run: |
+          APP_PATH=".derived-data/Build/Products/Debug-iphonesimulator/OpenEOSControl.app"
+          test -f "$APP_PATH/Assets.car"
+          test -f "$APP_PATH/en.lproj/Localizable.strings"
+          test -f "$APP_PATH/zh-Hant.lproj/Localizable.strings"
+
       - name: Select iPhone simulator
         id: simulator
         run: |

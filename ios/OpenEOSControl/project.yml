@@ -13,10 +13,6 @@ targets:
     platform: iOS
     sources:
       - path: App
-        excludes:
-          - Resources
-    resources:
-      - path: App/Resources
     info:
       path: App/Info.plist
     dependencies:
