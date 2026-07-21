@@ -39,8 +39,8 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | Android PTP battery and standard property control | Implemented when advertised; device validation required | Descriptor/value codecs and command/data writes are unit-tested; record battery, ISO, Tv, Av, WB and any advanced standard properties advertised by R6 Mark III |
 | Android Canon EOS vendor property control | Research | Vendor codes, value mappings and state transitions are proven by authoritative documentation or recorded R6 Mark III traces |
 | Android PTP Live View | Research | Canon vendor operation and frame format proven on R6 Mark III |
-| Desktop Bridge HTTP service | Planned | Executable service passes the documented bridge contract tests |
-| libgphoto2 desktop adapter | Planned | Discovery, capture, settings, Live View and media tested on supported hardware |
+| Desktop Bridge HTTP service | Implemented; client integration pending | FastAPI service, loopback/Bearer security, stable errors, sessions, streaming responses and contract tests pass |
+| libgphoto2 desktop adapter | Implemented; device validation required | Discovery, dynamic capabilities/settings, capture, half-press, recording, focus drive, bounded JPEG preview, media listing/download and subprocess timeout are test-covered; validate on R6 Mark III |
 | Optional Canon EDSDK adapter | Research | User-installed SDK works without redistributing Canon binaries |
 | iOS CCAPI app | Planned | Native client connects, controls, renders Live View and passes shared fixtures |
 | iOS USB/PTP | Research | Public Apple API and a working physical-device path are demonstrated |

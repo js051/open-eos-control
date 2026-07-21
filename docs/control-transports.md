@@ -29,11 +29,12 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 ### Desktop bridge
 
-- Status: planned backend in code; bridge protocol to be implemented.
+- Status: HTTP service and libgphoto2 CLI engine implemented and contract-tested; Android client integration and EOS R6 Mark III device validation remain.
 - Connection: app talks to a local desktop service; desktop service controls the camera over USB.
-- Engines: libgphoto2 for the open-source path; optional user-installed Canon EDSDK adapter for Windows, macOS, or Linux where Canon's current package and licensing allow local use.
-- Strengths: fastest path to mature tethering, capture download, and high-speed live view.
-- Tradeoffs: requires a computer in the loop, so it is a different product mode from direct mobile control.
+- Engines: the executable open-source path currently uses the `gphoto2` CLI; the Canon EDSDK adapter remains optional research and no Canon binary is redistributed.
+- Current implementation: camera discovery and sessions, capability-driven settings, status, still capture, half-press, movie target control, relative focus drive, JPEG preview, media listing and streamed downloads. Loopback is the secure default; LAN use requires a Bearer token.
+- Strengths: immediate access to mature libgphoto2 Canon mappings, including the checked-in upstream R6 Mark III capability snapshot.
+- Tradeoffs: requires a computer in the loop. The CLI preview launches one process per JPEG and is truthfully capped at 5 FPS; persistent native libgphoto2 and physical-camera validation are later milestones.
 
 ### iOS CCAPI
 
@@ -62,6 +63,6 @@ Each backend should map into this surface:
 3. Validate the implemented Android USB/PTP property descriptors, values, and safe standard writes.
 4. Prove and add the minimum Canon EOS vendor operations required for capture and setting gaps.
 5. Add USB/PTP live view preview if R6 Mark III allows it.
-6. Add desktop bridge protocol tests.
-7. Add libgphoto2 bridge adapter.
-8. Add optional local EDSDK bridge adapter.
+6. Connect Android to the implemented desktop bridge and validate it with EOS R6 Mark III.
+7. Replace one-shot CLI preview with a persistent native libgphoto2 stream where it materially improves measured performance.
+8. Add an optional local EDSDK bridge adapter after SDK access, licensing, and supported host platforms are verified.

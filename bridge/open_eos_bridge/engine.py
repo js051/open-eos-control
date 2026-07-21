@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import Protocol
+
+from .models import (
+    CameraCapabilities,
+    CameraDescriptor,
+    CameraInfo,
+    CameraStatus,
+    FocusResult,
+    LiveViewStartRequest,
+    MediaItem,
+)
+
+
+class CameraEngineSession(Protocol):
+    engine_name: str
+    camera: CameraDescriptor
+
+    def close(self) -> None: ...
+
+    def info(self) -> CameraInfo: ...
+
+    def status(self) -> CameraStatus: ...
+
+    def capabilities(self) -> CameraCapabilities: ...
+
+    def set_setting(self, key: str, value: str) -> CameraStatus: ...
+
+    def capture_still(self) -> CameraStatus: ...
+
+    def half_press_shutter(self) -> CameraStatus: ...
+
+    def start_recording(self) -> CameraStatus: ...
+
+    def stop_recording(self) -> CameraStatus: ...
+
+    def drive_focus(self, direction: str, step: str) -> FocusResult: ...
+
+    def start_live_view(self, request: LiveViewStartRequest) -> None: ...
+
+    def stop_live_view(self) -> None: ...
+
+    def live_view_frame(self) -> bytes: ...
+
+    def list_media(self) -> list[MediaItem]: ...
+
+    def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]: ...
+
+
+class CameraEngine(Protocol):
+    name: str
+
+    def health(self) -> tuple[bool, str | None, str | None]: ...
+
+    def discover(self) -> list[CameraDescriptor]: ...
+
+    def open(self, camera_id: str | None = None, profile_hint: str | None = None) -> CameraEngineSession: ...

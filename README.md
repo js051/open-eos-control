@@ -4,13 +4,14 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It is Android-first today, targets Canon EOS R6 Mark III first, and is structured to grow into PC, iOS, and Android clients that share the same camera-control concepts.
 
-The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android now also has a standards-based USB/PTP backend behind the same camera core contract; Canon EOS vendor controls and the PC desktop bridge remain in development.
+The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend behind the same camera core contract, and the first executable PC desktop bridge now exposes a tested HTTP API over the open-source `gphoto2` CLI. Canon EOS vendor controls, physical bridge validation, the Android bridge client, and iOS remain in development.
 
 ## Project Shape
 
 ```text
 open-eos-control/
   android/       Android app, Kotlin + Jetpack Compose
+  bridge/        PC-side HTTP camera bridge, Python + FastAPI + gphoto2
   simulator/     Fake Canon CCAPI-compatible camera server
   docs/          Architecture, transport, and bridge notes
 ```
@@ -76,6 +77,30 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 GitHub Actions runs tests and debug builds on pushes to `main` and on pull requests.
 
+## Desktop Bridge
+
+The bridge is an executable local service for USB cameras managed by `gphoto2`. Its API discovers cameras and exposes capability-gated identity, status, settings, still capture, half-press, recording, focus drive, JPEG Live View, media listing, and streaming downloads. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
+
+Install `gphoto2` for the host platform first, then:
+
+```powershell
+cd bridge
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+gphoto2 --auto-detect
+.\.venv\Scripts\open-eos-bridge.exe
+```
+
+The default service listens only on `127.0.0.1:18181`. A mobile client requires an explicit LAN bind and Bearer token:
+
+```powershell
+$env:OPEN_EOS_BRIDGE_HOST = "0.0.0.0"
+$env:OPEN_EOS_BRIDGE_TOKEN = "replace-with-a-long-random-token"
+.\.venv\Scripts\open-eos-bridge.exe
+```
+
+The current CLI adapter deliberately advertises at most 5 FPS because each JPEG is a separate `gphoto2 --capture-preview` transaction. A persistent native libgphoto2 stream is a later performance path. The service and command contract are automated-test covered; this repository does not yet claim a physical R6 Mark III bridge pass, and this Windows development host currently has no `gphoto2` executable installed.
+
 ## Fake Camera Simulator
 
 ```bash
@@ -109,7 +134,7 @@ Useful endpoints:
 
 - Keep CCAPI stable for R6 Mark III wireless control.
 - Validate the Android USB/PTP session, storage, media, capture, and standard property paths on R6 Mark III, then add only the Canon vendor controls required to fill measured gaps.
-- Add a desktop bridge that exposes the same camera core contract while using libgphoto2 or a user-installed Canon EDSDK adapter.
+- Connect the Android and future PC UI to the implemented desktop bridge, validate its libgphoto2 path on R6 Mark III, and retain Canon EDSDK as an optional user-installed adapter.
 - Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
 
 See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/android-usb-ptp.md](docs/android-usb-ptp.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), and [docs/reference-projects.md](docs/reference-projects.md).
