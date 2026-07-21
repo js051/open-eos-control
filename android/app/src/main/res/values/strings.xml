@@ -161,4 +161,9 @@
     <string name="focus_with_shutter">Shutter autofocus</string>
     <string name="focus_with_shutter_hint">Momentarily half-press and safely release the camera shutter.</string>
     <string name="af_on">AF</string>
+    <string name="manual_focus_drive">Manual focus drive</string>
+    <string name="manual_focus_drive_hint">Move lens focus in one of three relative step sizes.</string>
+    <string name="focus_nearer">Near</string>
+    <string name="focus_farther">Far</string>
+    <string name="focus_drive_step">%1$s focus, step %2$d</string>
 </resources>

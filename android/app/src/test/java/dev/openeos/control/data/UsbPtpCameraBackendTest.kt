@@ -113,6 +113,102 @@ class UsbPtpCameraBackendTest {
         backend.close()
     }
 
+    @Test
+    fun canonEosVendorOperationsProvideCaptureFocusAndJpegLiveViewWhenAdvertised() = runTest {
+        val transport = CanonEosScriptedTransport()
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+
+        backend.initialize()
+        val capabilities = backend.capabilities()
+        backend.startLiveView(LiveViewRequest(fps = 30, size = LiveViewSize.MEDIUM))
+        val frame = backend.liveViewFrame(cacheKey = 27)
+        backend.halfPressShutter()
+        val focusDrive = backend.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.MEDIUM)
+        backend.captureStill()
+        backend.stopLiveView()
+        backend.close()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
+        assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
+        assertFalse(capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
+        assertFalse(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
+        assertEquals(listOf(LiveViewSource.USB_PTP_PREVIEW), capabilities.liveView.sources)
+        assertEquals(30, capabilities.liveView.maxFps)
+        assertArrayEquals(CANON_LIVE_VIEW_JPEG, frame.bytes)
+        assertEquals("image/jpeg", frame.contentType)
+        assertEquals("ptp-usb://canon-eos/viewfinder?frame=27", frame.sourceUrl)
+        assertEquals(FocusDriveDirection.FAR, focusDrive.direction)
+        assertEquals(FocusDriveStep.MEDIUM, focusDrive.step)
+        assertTrue(focusDrive.ok)
+
+        val viewfinderCommand = transport.sentContainers.single {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.GET_VIEWFINDER_DATA
+        }
+        assertEquals(listOf(0x00200000L, 0L, 0L), viewfinderCommand.parameters())
+        assertTrue(
+            transport.sentContainers.any {
+                it.type == PtpContainerType.COMMAND &&
+                    it.code == CanonEosOperationCode.DRIVE_LENS &&
+                    it.parameters() == listOf(0x8002L)
+            }
+        )
+        assertTrue(
+            transport.sentContainers.any {
+                it.type == PtpContainerType.COMMAND &&
+                    it.code == CanonEosOperationCode.REMOTE_RELEASE_ON &&
+                    it.parameters() == listOf(2L, 0L)
+            }
+        )
+        assertTrue(
+            transport.sentContainers.any {
+                it.type == PtpContainerType.COMMAND &&
+                    it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF &&
+                    it.parameters() == listOf(2L)
+            }
+        )
+        val propertyWrites = transport.sentContainers.filter {
+            it.type == PtpContainerType.DATA && it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX
+        }.map(PtpContainer::payload)
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.EVF_MODE, 1))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 2))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 0))
+            }
+        )
+        assertTrue(transport.closed)
+    }
+
+    @Test
+    fun canonCaptureDoesNotReportSuccessWhenTheConfirmationEventIsInvalid() = runTest {
+        val transport = CanonEosScriptedTransport(malformedCaptureEvent = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("event block"))
+        backend.close()
+    }
+
     private class ScriptedTransport(
         private val advertiseCapture: Boolean,
         private val descriptorFailureCode: Int? = null,
@@ -233,6 +329,108 @@ class UsbPtpCameraBackendTest {
                 (payload[3].toUByte().toLong() shl 24)
     }
 
+    private inner class CanonEosScriptedTransport(
+        private val malformedCaptureEvent: Boolean = false,
+    ) : PtpTransport {
+        private val incoming = ArrayDeque<PtpContainer>()
+        val sentContainers = mutableListOf<PtpContainer>()
+        var closed = false
+        private var pendingPropertyWrite = false
+        private var captureEventPending = false
+
+        override suspend fun send(container: PtpContainer) {
+            sentContainers += container
+            val transaction = container.transactionId
+            when (container.code) {
+                PtpOperationCode.GET_DEVICE_INFO -> {
+                    incoming += data(container.code, transaction, canonDeviceInfoPayload())
+                    incoming += ok(transaction)
+                }
+
+                PtpOperationCode.OPEN_SESSION,
+                PtpOperationCode.CLOSE_SESSION,
+                CanonEosOperationCode.SET_REMOTE_MODE,
+                CanonEosOperationCode.SET_EVENT_MODE,
+                CanonEosOperationCode.REMOTE_RELEASE_OFF,
+                CanonEosOperationCode.DRIVE_LENS,
+                -> incoming += ok(transaction)
+
+                CanonEosOperationCode.REMOTE_RELEASE_ON -> {
+                    if (container.parameters().firstOrNull() == 2L) captureEventPending = true
+                    incoming += ok(transaction)
+                }
+
+                CanonEosOperationCode.GET_EVENT -> {
+                    val payload = when {
+                        !captureEventPending -> eosBlock(0, byteArrayOf())
+                        malformedCaptureEvent -> byteArrayOf(40, 0, 0, 0, 0x81.toByte(), 0xC1.toByte(), 0, 0)
+                        else -> eosBlock(CanonEosEventCode.OBJECT_ADDED_EX, ByteArray(40)) + eosBlock(0, byteArrayOf())
+                    }
+                    captureEventPending = false
+                    incoming += data(container.code, transaction, payload)
+                    incoming += ok(transaction)
+                }
+
+                CanonEosOperationCode.GET_VIEWFINDER_DATA -> {
+                    val payload = eosBlock(2, byteArrayOf(1, 2, 3)) + eosBlock(1, CANON_LIVE_VIEW_JPEG)
+                    incoming += data(container.code, transaction, payload)
+                    incoming += ok(transaction)
+                }
+
+                CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX -> {
+                    if (container.type == PtpContainerType.COMMAND) {
+                        pendingPropertyWrite = true
+                    } else {
+                        check(pendingPropertyWrite) { "Canon property data arrived without a command." }
+                        pendingPropertyWrite = false
+                        incoming += ok(transaction)
+                    }
+                }
+
+                PtpOperationCode.GET_STORAGE_IDS -> {
+                    incoming += data(container.code, transaction, Writer().apply {
+                        u32(1)
+                        u32(STORAGE_ID)
+                    }.bytes())
+                    incoming += ok(transaction)
+                }
+
+                PtpOperationCode.GET_STORAGE_INFO -> {
+                    incoming += data(container.code, transaction, storageInfoPayload())
+                    incoming += ok(transaction)
+                }
+
+                else -> error("Unexpected Canon EOS operation 0x${container.code.toString(16)}")
+            }
+        }
+
+        override suspend fun receive(maxPayloadBytes: Int): PtpContainer =
+            incoming.removeFirstOrNull() ?: error("No Canon EOS scripted response is queued.")
+
+        override fun close() {
+            closed = true
+        }
+
+        private fun data(operation: Int, transaction: Long, payload: ByteArray) =
+            PtpContainer(PtpContainerType.DATA, operation, transaction, payload)
+
+        private fun ok(transaction: Long) =
+            PtpContainer(PtpContainerType.RESPONSE, PtpResponseCode.OK, transaction)
+    }
+
+    private fun PtpContainer.parameters(): List<Long> = payload.asList().chunked(4).map { bytes ->
+        bytes[0].toUByte().toLong() or
+            (bytes[1].toUByte().toLong() shl 8) or
+            (bytes[2].toUByte().toLong() shl 16) or
+            (bytes[3].toUByte().toLong() shl 24)
+    }
+
+    private fun eosBlock(type: Int, data: ByteArray): ByteArray = ByteArray(data.size + 8).also { block ->
+        repeat(4) { index -> block[index] = (block.size ushr (index * 8)).toByte() }
+        repeat(4) { index -> block[4 + index] = (type ushr (index * 8)).toByte() }
+        data.copyInto(block, destinationOffset = 8)
+    }
+
     private class Writer {
         private val output = ByteArrayOutputStream()
 
@@ -283,6 +481,43 @@ class UsbPtpCameraBackendTest {
         private const val STORAGE_ID = 0x00010001L
         private const val OBJECT_HANDLE = 0x42L
         private val OBJECT_BYTES = byteArrayOf(1, 3, 3, 7, 9)
+        private val CANON_LIVE_VIEW_JPEG = byteArrayOf(
+            0xFF.toByte(), 0xD8.toByte(), 1, 2, 3, 4, 0xFF.toByte(), 0xD9.toByte(),
+        )
+
+        private fun canonDeviceInfoPayload(): ByteArray = Writer().apply {
+            u16(100)
+            u32(CanonEosPtp.VENDOR_EXTENSION_ID)
+            u16(100)
+            string("")
+            u16(0)
+            u16Array(
+                listOf(
+                    PtpOperationCode.GET_DEVICE_INFO,
+                    PtpOperationCode.OPEN_SESSION,
+                    PtpOperationCode.CLOSE_SESSION,
+                    PtpOperationCode.GET_STORAGE_IDS,
+                    PtpOperationCode.GET_STORAGE_INFO,
+                    CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                    CanonEosOperationCode.SET_REMOTE_MODE,
+                    CanonEosOperationCode.SET_EVENT_MODE,
+                    CanonEosOperationCode.GET_EVENT,
+                    CanonEosOperationCode.REMOTE_RELEASE_ON,
+                    CanonEosOperationCode.REMOTE_RELEASE_OFF,
+                    CanonEosOperationCode.GET_VIEWFINDER_DATA,
+                    CanonEosOperationCode.DRIVE_LENS,
+                    CanonEosOperationCode.TOUCH_AF_POSITION,
+                )
+            )
+            u16Array(emptyList())
+            u16Array(emptyList())
+            u16Array(listOf(PtpObjectFormat.EXIF_JPEG))
+            u16Array(listOf(PtpObjectFormat.EXIF_JPEG))
+            string("Canon.Inc")
+            string("Canon EOS R6 Mark III")
+            string("3-1.0.0")
+            string("TEST-SERIAL-0001")
+        }.bytes()
 
         private fun deviceInfoPayload(advertiseCapture: Boolean, advertiseProperties: Boolean): ByteArray = Writer().apply {
             u16(100)

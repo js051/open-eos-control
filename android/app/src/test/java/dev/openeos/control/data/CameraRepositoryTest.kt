@@ -7,6 +7,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -137,7 +138,7 @@ class CameraRepositoryTest {
         assertEquals("/v1/session/session-1/liveview/start", startRequest.path)
         assertEquals(5, startPayload.getInt("fps"))
         assertEquals("MEDIUM", startPayload.getString("size"))
-        assertTrue(session.liveViewFrameUrl?.endsWith("/liveview/frame?t=1") == true)
+        assertNull(session.liveViewFrameUrl)
 
         server.enqueue(jsonResponse("""{"active":false}"""))
         server.enqueue(MockResponse().setResponseCode(204))

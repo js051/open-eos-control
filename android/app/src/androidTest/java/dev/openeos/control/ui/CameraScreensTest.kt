@@ -1,10 +1,11 @@
 package dev.openeos.control.ui
 
 import androidx.compose.material3.MaterialTheme
+import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -14,7 +15,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.annotation.StringRes
-import androidx.test.platform.app.InstrumentationRegistry
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraInfo
@@ -22,6 +22,8 @@ import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.ExposureState
+import dev.openeos.control.data.FocusDriveDirection
+import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewCapabilities
 import dev.openeos.control.data.UsbCameraDevice
 import dev.openeos.control.data.UsbCameraInterface
@@ -32,7 +34,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 
 class CameraScreensTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     fun disconnectedStateShowsDedicatedConnectionScreen() {
@@ -118,7 +120,7 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.desktop_bridge_token_hint)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.scan_desktop_bridge)).performClick()
         compose.onNodeWithText(camera.model).performClick()
-        compose.onNodeWithText(resourceText(R.string.connect_desktop_bridge)).performClick()
+        compose.onNodeWithText(resourceText(R.string.connect_desktop_bridge)).performScrollTo().performClick()
 
         compose.runOnIdle {
             assertTrue(scanRequested)
@@ -138,6 +140,34 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
+    }
+
+    @Test
+    fun offlinePreviewExposesCanonManualFocusDriveControls() {
+        val picker = mutableStateOf<SettingPicker?>(null)
+        var requestedFocusDrive: Pair<FocusDriveDirection, FocusDriveStep>? = null
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+            driveFocus = { direction, step -> requestedFocusDrive = direction to step },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    CameraUiState().withOfflinePreview().copy(activeSettingPicker = picker.value),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithText(resourceText(R.string.manual_focus_drive)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(
+            resourceText(R.string.focus_drive_step, resourceText(R.string.focus_farther), 3),
+        ).performScrollTo().assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(FocusDriveDirection.FAR to FocusDriveStep.LARGE, requestedFocusDrive)
+        }
     }
 
     @Test
@@ -318,12 +348,12 @@ class CameraScreensTest {
         connectUsb = { _, _, _ -> },
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
-        captureStill = {}, focusWithShutter = {}, toggleRecording = {}, tapFocus = { _, _ -> },
+        captureStill = {}, focusWithShutter = {}, driveFocus = { _, _ -> }, toggleRecording = {}, tapFocus = { _, _ -> },
         refreshMedia = {}, downloadMedia = { _, _ -> }, cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {},
         setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setAppLanguage = {}, clearError = {},
     )
 
     private fun resourceText(@StringRes resource: Int, vararg arguments: Any): String =
-        InstrumentationRegistry.getInstrumentation().targetContext.getString(resource, *arguments)
+        compose.activity.getString(resource, *arguments)
 }

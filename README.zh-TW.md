@@ -4,7 +4,7 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。目前先以 Android App 為主，第一個真機優先目標是 Canon EOS R6 Mark III，架構上會保留 PC、iOS、Android 三端共用同一套相機控制概念的空間。
 
-這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已經有走同一個 camera core contract 的標準 USB/PTP backend 與可執行的 Desktop Bridge client。PC bridge 則透過開源 `gphoto2` CLI 提供經測試的 HTTP API。Canon EOS 專有控制、Bridge 真機驗證與 iOS 仍在開發中。
+這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已經有走同一個 camera core contract 的標準 USB/PTP backend、依能力開放的 Canon EOS 遠端快門／焦點移動／JPEG Live View，以及可執行的 Desktop Bridge client。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 透過開源 `gphoto2` CLI 提供經測試的 HTTP API；Bridge 真機驗證與 iOS 仍在開發中。
 
 ## 專案結構
 
@@ -27,7 +27,7 @@ open-eos-control/
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
-- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／下載、相機有公告時的標準拍照命令，以及依能力開放的標準屬性讀寫
+- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／下載、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon EOS 遠端快門、半按、焦點移動與 JPEG Live View
 - Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、Live View、焦點移動與媒體串流
 - Live view 畫面，自動/手動更新與 FPS 控制
 - ISO、shutter、aperture、white balance 與動態 advanced settings
@@ -136,7 +136,7 @@ http://localhost:18080
 ## Roadmap
 
 - 先把 R6 Mark III 的 CCAPI 無線控制維持穩定。
-- 先在 R6 Mark III 真機驗證已實作的 Android USB/PTP session、儲存卡、媒體下載、拍照與標準屬性路徑，再只針對實測缺口加入有依據的 Canon 專有控制。
+- 在 R6 Mark III 真機驗證已實作的 Android USB/PTP 標準路徑，以及 Canon EOS 遠端快門、焦點移動與 Live View；後續只加入有可靠依據的專有設定、Touch AF 或錄影命令。
 - 在 R6 Mark III 完成已實作 Android-to-Desktop-Bridge libgphoto2 路徑的真機驗證，加入未來 PC UI，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
 - iOS 先走 CCAPI/Wi-Fi；iOS USB/PTP 先列為研究線。
 

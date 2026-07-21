@@ -4,7 +4,7 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It is Android-first today, targets Canon EOS R6 Mark III first, and is structured to grow into PC, iOS, and Android clients that share the same camera-control concepts.
 
-The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend and an executable Desktop Bridge client behind the same camera core contract. The PC bridge exposes a tested HTTP API over the open-source `gphoto2` CLI. Canon EOS vendor controls, physical bridge validation, and iOS remain in development.
+The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend, capability-gated Canon EOS remote release, focus drive and JPEG Live View, plus an executable Desktop Bridge client behind the same camera core contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge exposes a tested HTTP API over the open-source `gphoto2` CLI; physical bridge validation and iOS remain in development.
 
 ## Project Shape
 
@@ -27,7 +27,7 @@ The app currently includes:
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
-- Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, advertised standard still capture, and capability-gated standard property reads/writes
+- Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, advertised standard still capture/property control, and capability-gated Canon EOS remote release, half-press, focus drive, and JPEG Live View
 - Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, Live View, focus drive, and media streaming
 - Live view frame display with auto/manual refresh and FPS control
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
@@ -136,7 +136,7 @@ Useful endpoints:
 ## Roadmap
 
 - Keep CCAPI stable for R6 Mark III wireless control.
-- Validate the Android USB/PTP session, storage, media, capture, and standard property paths on R6 Mark III, then add only the Canon vendor controls required to fill measured gaps.
+- Validate the implemented Android USB/PTP standard and Canon EOS remote-release/focus/Live View paths on R6 Mark III, then add only vendor settings, touch AF, or movie commands backed by reliable evidence.
 - Validate the implemented Android-to-Desktop-Bridge libgphoto2 path on R6 Mark III, add a future PC UI, and retain Canon EDSDK as an optional user-installed adapter.
 - Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
 

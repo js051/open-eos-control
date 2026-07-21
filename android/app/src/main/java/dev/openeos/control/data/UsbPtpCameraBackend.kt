@@ -1,5 +1,6 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStream
@@ -10,7 +11,7 @@ class UsbPtpCameraBackend(
     private val transportFactory: PtpTransportFactory,
 ) : CameraControlBackend {
     override val transport: CameraTransport = CameraTransport.USB_PTP
-    override val prefersBitmapLiveViewFrames: Boolean = false
+    override val prefersBitmapLiveViewFrames: Boolean = true
     override val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty
 
     private var session: PtpSession? = null
@@ -21,6 +22,8 @@ class UsbPtpCameraBackend(
     private val propertyValues = mutableMapOf<Int, PtpPropertyValue>()
     private val propertyErrors = mutableMapOf<Int, String>()
     private var lastPropertyRefreshAtMillis = 0L
+    private var canonRemotePrepared = false
+    private var canonLiveViewActive = false
 
     override suspend fun initialize() {
         if (session != null) return
@@ -39,6 +42,16 @@ class UsbPtpCameraBackend(
 
     override suspend fun close() {
         val current = session
+        if (current != null) {
+            runCatching { stopLiveView() }
+            if (canonRemotePrepared) {
+                runCatching {
+                    current.executeOperation(CanonEosOperationCode.SET_REMOTE_MODE, listOf(0L))
+                    current.executeOperation(CanonEosOperationCode.SET_REMOTE_MODE, listOf(1L))
+                    current.executeOperation(CanonEosOperationCode.SET_EVENT_MODE, listOf(0L))
+                }
+            }
+        }
         session = null
         deviceInfo = null
         storageSnapshot = emptyList()
@@ -47,6 +60,8 @@ class UsbPtpCameraBackend(
         propertyValues.clear()
         propertyErrors.clear()
         lastPropertyRefreshAtMillis = 0L
+        canonRemotePrepared = false
+        canonLiveViewActive = false
         current?.shutdown()
     }
 
@@ -103,6 +118,9 @@ class UsbPtpCameraBackend(
         val aperture = writablePropertyOptions(PtpDevicePropertyCode.F_NUMBER, canSetProperties)
         val whiteBalance = writablePropertyOptions(PtpDevicePropertyCode.WHITE_BALANCE, canSetProperties)
         val advancedSettings = if (canSetProperties) advancedPropertyControls() else emptyList()
+        val supportsCanonRelease = CanonEosPtp.supportsRemoteRelease(info)
+        val supportsCanonLiveView = CanonEosPtp.supportsLiveView(info)
+        val supportsCanonFocusDrive = CanonEosPtp.supportsFocusDrive(info)
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
             add(CameraFeature.CAMERA_IDENTITY)
@@ -110,7 +128,15 @@ class UsbPtpCameraBackend(
             if (supportsStorage(info)) add(CameraFeature.STORAGE_STATUS)
             if (supportsMediaBrowser(info)) add(CameraFeature.MEDIA_BROWSER)
             if (info.supports(PtpOperationCode.GET_OBJECT)) add(CameraFeature.MEDIA_DOWNLOAD)
-            if (info.supports(PtpOperationCode.INITIATE_CAPTURE)) add(CameraFeature.STILL_CAPTURE)
+            if (info.supports(PtpOperationCode.INITIATE_CAPTURE) || supportsCanonRelease) {
+                add(CameraFeature.STILL_CAPTURE)
+            }
+            if (supportsCanonRelease) add(CameraFeature.SHUTTER_HALF_PRESS)
+            if (supportsCanonLiveView) {
+                add(CameraFeature.LIVE_VIEW)
+                add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+            }
+            if (supportsCanonFocusDrive) add(CameraFeature.FOCUS_DRIVE)
             if (iso.isNotEmpty() || shutter.isNotEmpty() || aperture.isNotEmpty()) {
                 add(CameraFeature.EXPOSURE_CONTROL)
             }
@@ -125,6 +151,7 @@ class UsbPtpCameraBackend(
             CameraFeature.VIDEO_RECORDING,
             CameraFeature.TAP_FOCUS,
             CameraFeature.LIVE_VIEW,
+            CameraFeature.LIVE_VIEW_JPEG_POLLING,
             CameraFeature.FOCUS_DRIVE,
             CameraFeature.EXPOSURE_CONTROL,
             CameraFeature.WHITE_BALANCE_CONTROL,
@@ -143,7 +170,11 @@ class UsbPtpCameraBackend(
                 planned = candidates - supported,
                 reasons = mapOf(
                     CameraFeature.STILL_CAPTURE to
-                        "Enabled only when DeviceInfo advertises standard PTP InitiateCapture (0x100E).",
+                        "Uses standard InitiateCapture or the advertised Canon EOS RemoteReleaseOn/Off sequence.",
+                    CameraFeature.SHUTTER_HALF_PRESS to
+                        "Uses Canon EOS RemoteReleaseOn/Off only when the camera advertises the full remote event sequence.",
+                    CameraFeature.FOCUS_DRIVE to
+                        "Uses Canon EOS DriveLens with the Near/Far 1-3 values documented by libgphoto2.",
                     CameraFeature.MEDIA_BROWSER to
                         "Uses standard GetStorageIDs, GetObjectHandles, and GetObjectInfo operations.",
                     CameraFeature.MEDIA_DOWNLOAD to
@@ -151,18 +182,80 @@ class UsbPtpCameraBackend(
                     CameraFeature.EXPOSURE_CONTROL to
                         "Standard properties are enabled only when DeviceInfo and writable DevicePropDesc datasets advertise them; Canon vendor properties remain unverified.",
                     CameraFeature.LIVE_VIEW to
-                        "Canon EOS USB Live View requires a validated vendor operation and frame format.",
+                        "Uses Canon EOS GetViewFinderData and extracts the documented type 1/11 JPEG block.",
                 ),
             ),
-            liveView = LiveViewCapabilities(),
+            liveView = if (supportsCanonLiveView) {
+                LiveViewCapabilities(
+                    sources = listOf(LiveViewSource.USB_PTP_PREVIEW),
+                    defaultSource = LiveViewSource.USB_PTP_PREVIEW,
+                    sizes = listOf(LiveViewSize.MEDIUM),
+                    defaultSize = LiveViewSize.MEDIUM,
+                    minFps = 1,
+                    maxFps = 30,
+                )
+            } else {
+                LiveViewCapabilities()
+            },
             profile = CameraProfile.fromModelName(info.model),
         )
     }
 
     override suspend fun captureStill(): CameraStatus {
-        requireOperation(PtpOperationCode.INITIATE_CAPTURE, CameraFeature.STILL_CAPTURE)
-        requireSession().initiateCapture()
+        val info = requireDeviceInfo()
+        if (info.supports(PtpOperationCode.INITIATE_CAPTURE)) {
+            requireSession().initiateCapture()
+            return status()
+        }
+        if (!CanonEosPtp.supportsRemoteRelease(info)) unsupported<Unit>(CameraFeature.STILL_CAPTURE)
+
+        ensureCanonRemoteMode()
+        drainCanonEvents()
+        val ptp = requireSession()
+        ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
+        try {
+            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(2L, 0L))
+            try {
+                Unit
+            } finally {
+                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(2L))
+            }
+        } finally {
+            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
+        }
+        awaitCanonCapturedObject()
         return status()
+    }
+
+    override suspend fun halfPressShutter(): CameraStatus {
+        if (!CanonEosPtp.supportsRemoteRelease(requireDeviceInfo())) {
+            unsupported<Unit>(CameraFeature.SHUTTER_HALF_PRESS)
+        }
+        ensureCanonRemoteMode()
+        drainCanonEvents()
+        val ptp = requireSession()
+        ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
+        try {
+            drainCanonEvents()
+        } finally {
+            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
+        }
+        drainCanonEvents()
+        return status()
+    }
+
+    override suspend fun driveFocus(
+        direction: FocusDriveDirection,
+        step: FocusDriveStep,
+    ): FocusDriveResult {
+        if (!CanonEosPtp.supportsFocusDrive(requireDeviceInfo())) unsupported<Unit>(CameraFeature.FOCUS_DRIVE)
+        ensureCanonRemoteMode()
+        requireSession().executeOperation(
+            CanonEosOperationCode.DRIVE_LENS,
+            listOf(CanonEosPtp.focusDriveAmount(direction, step)),
+        )
+        drainCanonEvents()
+        return FocusDriveResult(ok = true, direction = direction, step = step)
     }
 
     override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus {
@@ -225,9 +318,44 @@ class UsbPtpCameraBackend(
         )
     }
 
-    override suspend fun startLiveView(request: LiveViewRequest) = unsupported<Unit>(CameraFeature.LIVE_VIEW)
+    override suspend fun startLiveView(request: LiveViewRequest) {
+        if (!CanonEosPtp.supportsLiveView(requireDeviceInfo())) unsupported<Unit>(CameraFeature.LIVE_VIEW)
+        if (canonLiveViewActive) return
+        ensureCanonRemoteMode()
+        val ptp = requireSession()
+        ptp.executeDataOutOperation(
+            operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+            payload = CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.EVF_MODE, 1),
+        )
+        try {
+            ptp.executeDataOutOperation(
+                operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                payload = CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 2L),
+            )
+            canonLiveViewActive = true
+            drainCanonEvents()
+        } catch (exception: Exception) {
+            runCatching {
+                ptp.executeDataOutOperation(
+                    operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                    payload = CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 0L),
+                )
+            }
+            throw exception
+        }
+    }
 
-    override suspend fun stopLiveView() = Unit
+    override suspend fun stopLiveView() {
+        if (!canonLiveViewActive) return
+        try {
+            requireSession().executeDataOutOperation(
+                operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                payload = CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 0L),
+            )
+        } finally {
+            canonLiveViewActive = false
+        }
+    }
 
     override suspend fun startRecording(): CameraStatus = unsupported(CameraFeature.VIDEO_RECORDING)
 
@@ -236,10 +364,69 @@ class UsbPtpCameraBackend(
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = unsupported(CameraFeature.TAP_FOCUS)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String =
-        throw UnsupportedOperationException("USB PTP Live View is not validated for this camera.")
+        throw UnsupportedOperationException("USB PTP Live View frames are returned as in-memory JPEG data.")
 
-    override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame =
-        unsupported(CameraFeature.LIVE_VIEW)
+    override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame {
+        if (!canonLiveViewActive) throw PtpProtocolException("Canon EOS USB Live View is not running.")
+        val payload = readCanonViewfinderData()
+        return LiveViewFrame(
+            bytes = CanonEosPtp.liveViewJpeg(payload),
+            contentType = "image/jpeg",
+            sourceUrl = "ptp-usb://canon-eos/viewfinder?frame=$cacheKey",
+        )
+    }
+
+    private suspend fun ensureCanonRemoteMode() {
+        if (canonRemotePrepared) return
+        val info = requireDeviceInfo()
+        if (!CanonEosPtp.supportsRemotePreparation(info)) {
+            throw PtpProtocolException("Camera does not advertise the Canon EOS remote/event mode sequence.")
+        }
+        val ptp = requireSession()
+        ptp.executeOperation(CanonEosOperationCode.SET_REMOTE_MODE, listOf(1L))
+        try {
+            ptp.executeOperation(CanonEosOperationCode.SET_EVENT_MODE, listOf(1L))
+            drainCanonEvents()
+            canonRemotePrepared = true
+        } catch (exception: Exception) {
+            runCatching { ptp.executeOperation(CanonEosOperationCode.SET_REMOTE_MODE, listOf(0L)) }
+            throw exception
+        }
+    }
+
+    private suspend fun drainCanonEvents(): ByteArray =
+        requireSession().executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+
+    private suspend fun awaitCanonCapturedObject() {
+        val deadline = System.currentTimeMillis() + CANON_CAPTURE_EVENT_TIMEOUT_MILLIS
+        do {
+            if (CanonEosPtp.containsCapturedObjectEvent(drainCanonEvents())) return
+            delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+        } while (System.currentTimeMillis() < deadline)
+        throw PtpProtocolException(
+            "Canon EOS shutter commands completed, but the camera did not report a captured object " +
+                "within ${CANON_CAPTURE_EVENT_TIMEOUT_MILLIS / 1_000} seconds."
+        )
+    }
+
+    private suspend fun readCanonViewfinderData(): ByteArray {
+        val deadline = System.currentTimeMillis() + CANON_LIVE_VIEW_READY_TIMEOUT_MILLIS
+        var retryDelay = 5L
+        while (true) {
+            try {
+                return requireSession().executeDataInOperation(
+                    operationCode = CanonEosOperationCode.GET_VIEWFINDER_DATA,
+                    parameters = listOf(CanonEosPtp.VIEWFINDER_REQUEST_BYTES, 0L, 0L),
+                )
+            } catch (exception: PtpResponseException) {
+                val retryable = exception.responseCode == PtpResponseCode.DEVICE_BUSY ||
+                    exception.responseCode == CanonEosPtp.VIEWFINDER_NOT_READY_RESPONSE
+                if (!retryable || System.currentTimeMillis() >= deadline) throw exception
+                delay(retryDelay)
+                retryDelay = (retryDelay + 5L).coerceAtMost(100L)
+            }
+        }
+    }
 
     private suspend fun readStorageSnapshot(): List<PtpStorageInfo> {
         val ptp = requireSession()
@@ -468,3 +655,6 @@ private fun formatPtpVersion(value: Int): String =
 
 private const val MAX_USB_MEDIA_ITEMS = 500
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
+private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
+private const val CANON_CAPTURE_EVENT_TIMEOUT_MILLIS = 90_000L
+private const val CANON_LIVE_VIEW_READY_TIMEOUT_MILLIS = 3_000L

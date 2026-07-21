@@ -94,7 +94,9 @@ class CameraRepository(
             if (capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
                 try {
                     backend.startLiveView(liveViewRequest)
-                    liveViewFrameUrl = nextLiveViewFrameUrl()
+                    if (!backend.prefersBitmapLiveViewFrames) {
+                        liveViewFrameUrl = nextLiveViewFrameUrl()
+                    }
                 } catch (_: Exception) {
                     // A session can still provide settings and status without live view.
                 }
@@ -158,6 +160,11 @@ class CameraRepository(
     suspend fun captureStill(): CameraStatus = backend.captureStill()
 
     suspend fun halfPressShutter(): CameraStatus = backend.halfPressShutter()
+
+    suspend fun driveFocus(
+        direction: FocusDriveDirection,
+        step: FocusDriveStep,
+    ): FocusDriveResult = backend.driveFocus(direction, step)
 
     suspend fun listMedia(): List<CameraMediaItem> = backend.listMedia()
 

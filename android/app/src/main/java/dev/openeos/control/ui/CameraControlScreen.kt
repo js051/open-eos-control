@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,6 +38,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
@@ -64,6 +67,8 @@ import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.FocusDriveDirection
+import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewSize
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -290,7 +295,9 @@ private fun ExposureDial(
     onSelect: (String) -> Unit,
 ) {
     if (values.isEmpty()) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 56.dp)
+        ) {
             Text(title, color = AppText, fontWeight = FontWeight.Bold)
             Text(stringResource(R.string.no_settings), color = AppSubtleText, modifier = Modifier.padding(top = 16.dp))
         }
@@ -318,7 +325,7 @@ private fun ExposureDial(
             }
     }
 
-    Column(Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 52.dp)) {
         Row(
             Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -381,64 +388,67 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
     }
     val displayedFps = pendingFps.roundToInt().coerceIn(minFps, maxFps)
     ModalBottomSheet(onDismissRequest = actions.closePicker, containerColor = AppSurface) {
-        Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(stringResource(R.string.live_view_settings), color = AppText, fontWeight = FontWeight.Bold)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.auto_refresh), color = AppText, modifier = Modifier.weight(1f))
-                Switch(state.liveViewAutoRefresh, actions.setAutoRefresh)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.composition_grid), color = AppText, modifier = Modifier.weight(1f))
-                Switch(state.showGrid, actions.setGridVisible)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.live_view_frame_rate), color = AppText, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        stringResource(R.string.fps_requested_observed, displayedFps, state.liveViewDiagnostics.observedFps),
-                        color = AppSubtleText,
+        Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp)) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp).padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(stringResource(R.string.live_view_settings), color = AppText, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.auto_refresh), color = AppText, modifier = Modifier.weight(1f))
+                    Switch(state.liveViewAutoRefresh, actions.setAutoRefresh)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.composition_grid), color = AppText, modifier = Modifier.weight(1f))
+                    Switch(state.showGrid, actions.setGridVisible)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.live_view_frame_rate), color = AppText, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            stringResource(R.string.fps_requested_observed, displayedFps, state.liveViewDiagnostics.observedFps),
+                            color = AppSubtleText,
+                        )
+                    }
+                    Text(stringResource(R.string.fps_value, displayedFps), color = AppAccent, fontWeight = FontWeight.Bold)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_minus,
+                        stringResource(R.string.decrease_fps),
+                        {
+                            pendingFps = (displayedFps - 1).coerceAtLeast(minFps).toFloat()
+                            actions.setFps(pendingFps.roundToInt())
+                        },
+                        enabled = displayedFps > minFps,
+                    )
+                    Slider(
+                        value = pendingFps,
+                        onValueChange = { pendingFps = it },
+                        onValueChangeFinished = { actions.setFps(displayedFps) },
+                        valueRange = minFps.toFloat()..maxFps.toFloat(),
+                        steps = (maxFps - minFps - 1).coerceAtLeast(0),
+                        modifier = Modifier.weight(1f),
+                    )
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_plus,
+                        stringResource(R.string.increase_fps),
+                        {
+                            pendingFps = (displayedFps + 1).coerceAtMost(maxFps).toFloat()
+                            actions.setFps(pendingFps.roundToInt())
+                        },
+                        enabled = displayedFps < maxFps,
                     )
                 }
-                Text(stringResource(R.string.fps_value, displayedFps), color = AppAccent, fontWeight = FontWeight.Bold)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ToolIconButton(
-                    LucideR.drawable.lucide_ic_minus,
-                    stringResource(R.string.decrease_fps),
-                    {
-                        pendingFps = (displayedFps - 1).coerceAtLeast(minFps).toFloat()
-                        actions.setFps(pendingFps.roundToInt())
-                    },
-                    enabled = displayedFps > minFps,
-                )
-                Slider(
-                    value = pendingFps,
-                    onValueChange = { pendingFps = it },
-                    onValueChangeFinished = { actions.setFps(displayedFps) },
-                    valueRange = minFps.toFloat()..maxFps.toFloat(),
-                    steps = (maxFps - minFps - 1).coerceAtLeast(0),
-                    modifier = Modifier.weight(1f),
-                )
-                ToolIconButton(
-                    LucideR.drawable.lucide_ic_plus,
-                    stringResource(R.string.increase_fps),
-                    {
-                        pendingFps = (displayedFps + 1).coerceAtMost(maxFps).toFloat()
-                        actions.setFps(pendingFps.roundToInt())
-                    },
-                    enabled = displayedFps < maxFps,
-                )
-            }
-            Text(stringResource(R.string.size), color = AppText)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.capabilities?.liveView?.sizes.orEmpty()) { size ->
-                    Box(
-                        Modifier.height(48.dp).background(if (size == state.liveViewSize) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { actions.setLiveViewSize(size) }.padding(horizontal = 18.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { Text(liveViewSizeLabel(size), color = if (size == state.liveViewSize) AppBackground else AppText) }
+                Text(stringResource(R.string.size), color = AppText)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(state.capabilities?.liveView?.sizes.orEmpty()) { size ->
+                        Box(
+                            Modifier.height(48.dp).background(if (size == state.liveViewSize) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { actions.setLiveViewSize(size) }.padding(horizontal = 18.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(liveViewSizeLabel(size), color = if (size == state.liveViewSize) AppBackground else AppText) }
+                    }
                 }
             }
         }
@@ -458,30 +468,107 @@ private fun liveViewSizeLabel(size: LiveViewSize): String = stringResource(
 @Composable
 private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
-    ModalBottomSheet(onDismissRequest = actions.closePicker, containerColor = AppSurface) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(stringResource(R.string.more_settings), color = AppText, fontWeight = FontWeight.Bold)
-            if (state.supports(CameraFeature.SHUTTER_HALF_PRESS)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.focus_with_shutter), color = AppText, fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.focus_with_shutter_hint), color = AppSubtleText)
-                    }
-                    Button(
-                        onClick = actions.focusWithShutter,
-                        enabled = !state.isBusy(CameraOperation.FOCUS),
-                        colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.height(48.dp),
-                    ) {
-                        Icon(painterResource(LucideR.drawable.lucide_ic_focus), null, Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.af_on))
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = actions.closePicker,
+        sheetState = sheetState,
+        containerColor = AppSurface,
+    ) {
+        Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp)) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp).padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(stringResource(R.string.more_settings), color = AppText, fontWeight = FontWeight.Bold)
+                if (state.supports(CameraFeature.SHUTTER_HALF_PRESS)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.focus_with_shutter), color = AppText, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.focus_with_shutter_hint), color = AppSubtleText)
+                        }
+                        Button(
+                            onClick = actions.focusWithShutter,
+                            enabled = !state.isBusy(CameraOperation.FOCUS),
+                            colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(48.dp),
+                        ) {
+                            Icon(painterResource(LucideR.drawable.lucide_ic_focus), null, Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.af_on))
+                        }
                     }
                 }
+                if (state.supports(CameraFeature.FOCUS_DRIVE)) {
+                    ManualFocusDriveControls(state, actions)
+                }
+                if (
+                    settings.isEmpty() &&
+                    !state.supports(CameraFeature.SHUTTER_HALF_PRESS) &&
+                    !state.supports(CameraFeature.FOCUS_DRIVE)
+                ) {
+                    Text(stringResource(R.string.no_settings), color = AppSubtleText)
+                }
+                settings.forEach { setting -> AdvancedSettingRow(setting, actions) }
             }
-            if (settings.isEmpty()) Text(stringResource(R.string.no_settings), color = AppSubtleText)
-            settings.forEach { setting -> AdvancedSettingRow(setting, actions) }
+        }
+    }
+}
+
+@Composable
+private fun ManualFocusDriveControls(state: CameraUiState, actions: CameraActions) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.manual_focus_drive), color = AppText, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.manual_focus_drive_hint), color = AppSubtleText)
+        FocusDriveDirectionRow(
+            label = stringResource(R.string.focus_nearer),
+            icon = LucideR.drawable.lucide_ic_arrow_left,
+            direction = FocusDriveDirection.NEAR,
+            enabled = !state.isBusy(CameraOperation.FOCUS),
+            actions = actions,
+        )
+        FocusDriveDirectionRow(
+            label = stringResource(R.string.focus_farther),
+            icon = LucideR.drawable.lucide_ic_arrow_right,
+            direction = FocusDriveDirection.FAR,
+            enabled = !state.isBusy(CameraOperation.FOCUS),
+            actions = actions,
+        )
+    }
+}
+
+@Composable
+private fun FocusDriveDirectionRow(
+    label: String,
+    @androidx.annotation.DrawableRes icon: Int,
+    direction: FocusDriveDirection,
+    enabled: Boolean,
+    actions: CameraActions,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(label, Modifier.width(72.dp), color = AppSubtleText, maxLines = 1)
+        FocusDriveStep.entries.forEachIndexed { index, step ->
+            val description = stringResource(R.string.focus_drive_step, label, index + 1)
+            Button(
+                onClick = { actions.driveFocus(direction, step) },
+                enabled = enabled,
+                colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+                shape = RoundedCornerShape(6.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .semantics { contentDescription = description },
+            ) {
+                Icon(painterResource(icon), null, Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text((index + 1).toString())
+            }
         }
     }
 }

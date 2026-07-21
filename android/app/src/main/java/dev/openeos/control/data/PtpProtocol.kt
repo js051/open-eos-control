@@ -424,14 +424,47 @@ class PtpSession(
     }
 
     suspend fun initiateCapture(storageId: Long = 0L, objectFormat: Long = 0L) {
+        executeOperation(PtpOperationCode.INITIATE_CAPTURE, listOf(storageId, objectFormat))
+    }
+
+    suspend fun executeOperation(
+        operationCode: Int,
+        parameters: List<Long> = emptyList(),
+    ) {
         mutex.withLock {
             requireOpen()
             executeLocked(
-                operationCode = PtpOperationCode.INITIATE_CAPTURE,
-                parameters = listOf(storageId, objectFormat),
+                operationCode = operationCode,
+                parameters = parameters,
                 transactionId = takeTransactionId(),
                 expectData = false,
             )
+        }
+    }
+
+    suspend fun executeDataInOperation(
+        operationCode: Int,
+        parameters: List<Long> = emptyList(),
+    ): ByteArray = transaction(operationCode, parameters) { it }
+
+    suspend fun executeDataOutOperation(
+        operationCode: Int,
+        payload: ByteArray,
+        parameters: List<Long> = emptyList(),
+    ) {
+        mutex.withLock {
+            requireOpen()
+            val transactionId = takeTransactionId()
+            transport.send(PtpCodec.command(operationCode, transactionId, parameters))
+            transport.send(
+                PtpContainer(
+                    type = PtpContainerType.DATA,
+                    code = operationCode,
+                    transactionId = transactionId,
+                    payload = payload,
+                )
+            )
+            receiveResponseLocked(operationCode, transactionId)
         }
     }
 

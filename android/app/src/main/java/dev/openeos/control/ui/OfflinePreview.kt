@@ -58,6 +58,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
                 CameraFeature.LIVE_VIEW_JPEG_POLLING,
                 CameraFeature.STILL_CAPTURE,
                 CameraFeature.SHUTTER_HALF_PRESS,
+                CameraFeature.FOCUS_DRIVE,
                 CameraFeature.VIDEO_RECORDING,
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.EXPOSURE_CONTROL,

@@ -12,6 +12,8 @@ import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraSession
+import dev.openeos.control.data.FocusDriveDirection
+import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewRequest
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
@@ -446,6 +448,28 @@ class CameraViewModel(
         ) {
             val status = repository.halfPressShutter()
             _uiState.update { it.copy(status = status, focusFeedback = FocusFeedback.SUCCESS) }
+            clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
+            refreshLiveViewFrameInternal(reportErrors = false)
+            startLiveViewLoopIfNeeded()
+        }
+    }
+
+    fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep) {
+        _uiState.update { it.copy(focusFeedback = FocusFeedback.FOCUSING) }
+        if (_uiState.value.previewMode) {
+            _uiState.update { it.copy(focusFeedback = FocusFeedback.SUCCESS) }
+            clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
+            return
+        }
+        runCamera(
+            operation = CameraOperation.FOCUS,
+            onError = {
+                _uiState.update { state -> state.copy(focusFeedback = FocusFeedback.FAILURE) }
+                clearFocusFeedbackAfter(FocusFeedback.FAILURE)
+            },
+        ) {
+            repository.driveFocus(direction, step)
+            _uiState.update { it.copy(focusFeedback = FocusFeedback.SUCCESS) }
             clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
             refreshLiveViewFrameInternal(reportErrors = false)
             startLiveViewLoopIfNeeded()

@@ -222,6 +222,48 @@ class PtpProtocolTest {
         assertArrayEquals(byteArrayOf(0x20, 0x03), transport.sent[5].payload)
     }
 
+    @Test
+    fun vendorOperationsUseMonotonicNoDataDataInAndDataOutTransactions() = runTest {
+        val eventPayload = byteArrayOf(8, 0, 0, 0, 0, 0, 0, 0)
+        val propertyPayload = CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 2)
+        val transport = FakePtpTransport(
+            data(PtpOperationCode.GET_DEVICE_INFO, 0, deviceInfoPayload()),
+            ok(0),
+            ok(0),
+            ok(1),
+            data(CanonEosOperationCode.GET_EVENT, 2, eventPayload),
+            ok(2),
+            ok(3),
+            ok(4),
+        )
+        val session = PtpSession(transport)
+        session.initialize()
+
+        session.executeOperation(CanonEosOperationCode.SET_REMOTE_MODE, listOf(1L))
+        val events = session.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+        session.executeDataOutOperation(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX, propertyPayload)
+        session.shutdown()
+
+        assertArrayEquals(eventPayload, events)
+        assertEquals(
+            listOf(
+                PtpOperationCode.GET_DEVICE_INFO,
+                PtpOperationCode.OPEN_SESSION,
+                CanonEosOperationCode.SET_REMOTE_MODE,
+                CanonEosOperationCode.GET_EVENT,
+                CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                PtpOperationCode.CLOSE_SESSION,
+            ),
+            transport.sent.map(PtpContainer::code),
+        )
+        assertEquals(PtpContainerType.COMMAND, transport.sent[4].type)
+        assertEquals(PtpContainerType.DATA, transport.sent[5].type)
+        assertEquals(3L, transport.sent[4].transactionId)
+        assertEquals(3L, transport.sent[5].transactionId)
+        assertArrayEquals(propertyPayload, transport.sent[5].payload)
+    }
+
     private class FakePtpTransport(vararg incoming: PtpContainer) : PtpTransport {
         private val incoming = ArrayDeque(incoming.toList())
         val sent = mutableListOf<PtpContainer>()
