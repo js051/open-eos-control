@@ -46,6 +46,8 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             CameraSettingControl("whitebalanceadjusta", "White balance shift A", "0", (-9..9).map(Int::toString)),
             CameraSettingControl("whitebalanceadjustb", "White balance shift B", "0", (-9..9).map(Int::toString)),
             CameraSettingControl("colorspace", "Color space", "sRGB", listOf("sRGB", "AdobeRGB")),
+            CameraSettingControl("aspectratio", "Aspect ratio", "3:2", listOf("3:2", "1:1", "4:3", "16:9", "1.6x")),
+            CameraSettingControl("zoomspeed", "Power zoom speed", "8", (1..15).map(Int::toString)),
             CameraSettingControl("afmethod", "AF method", "WholeAreaAF", listOf("LiveSpotAF", "FlexibleZoneAF1", "WholeAreaAF")),
             CameraSettingControl("afoperation", "AF operation", "AI Servo", listOf("One Shot", "AI Servo", "AI Focus")),
             CameraSettingControl("continuousaf", "Continuous AF", "On", listOf("Off", "On")),

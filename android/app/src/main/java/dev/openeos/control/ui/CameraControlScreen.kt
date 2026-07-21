@@ -600,9 +600,16 @@ private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraAct
     LaunchedEffect(setting.key, setting.value, setting.values) {
         listState.scrollToItem(selectedIndex)
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        modifier = Modifier.testTag("advanced-setting-${setting.key}"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         Text(cameraSettingLabel(setting), color = AppText, fontWeight = FontWeight.SemiBold)
-        LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyRow(
+            state = listState,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.testTag("advanced-setting-values-${setting.key}"),
+        ) {
             items(setting.values) { value ->
                 Box(
                     Modifier.height(48.dp).background(if (value == setting.value) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { actions.setCameraSetting(setting.key, value) }.padding(horizontal = 14.dp),
@@ -640,6 +647,8 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "whitebalanceadjusta" -> stringResource(R.string.setting_white_balance_shift_a)
     "whitebalanceadjustb" -> stringResource(R.string.setting_white_balance_shift_b)
     "colorspace" -> stringResource(R.string.setting_color_space)
+    "aspectratio" -> stringResource(R.string.setting_aspect_ratio)
+    "zoomspeed" -> stringResource(R.string.setting_power_zoom_speed)
     "highisonr" -> stringResource(R.string.setting_high_iso_noise_reduction)
     "aeb" -> stringResource(R.string.setting_aeb)
     "ae" -> stringResource(R.string.setting_ae_mode)

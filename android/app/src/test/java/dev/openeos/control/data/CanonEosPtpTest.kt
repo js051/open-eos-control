@@ -118,6 +118,8 @@ class CanonEosPtpTest {
                 "whitebalanceadjusta",
                 "whitebalanceadjustb",
                 "colorspace",
+                "aspectratio",
+                "zoomspeed",
                 "afoperation",
                 "continuousaf",
                 "afmethod",
@@ -207,6 +209,25 @@ class CanonEosPtpTest {
         assertArrayEquals(
             CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.AEB, 0x10),
             CanonEosPtp.propertyPayload(CanonEosPropertyCode.AEB, 0x10),
+        )
+    }
+
+    @Test
+    fun r6MarkIIIAspectRatioAndPowerZoomMappingsMatchPinnedLibgphoto2Tables() {
+        assertEquals(0xD194, CanonEosPropertyCode.MULTI_ASPECT)
+        assertEquals(0xD149, CanonEosPropertyCode.POWER_ZOOM_SPEED)
+        assertEquals("3:2", CanonEosPtp.propertyLabel(CanonEosPropertyCode.MULTI_ASPECT, 0))
+        assertEquals("16:9", CanonEosPtp.propertyLabel(CanonEosPropertyCode.MULTI_ASPECT, 7))
+        assertEquals("1.6x", CanonEosPtp.propertyLabel(CanonEosPropertyCode.MULTI_ASPECT, 0x0D))
+        assertEquals("8", CanonEosPtp.propertyLabel(CanonEosPropertyCode.POWER_ZOOM_SPEED, 8))
+
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.MULTI_ASPECT, 7),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.MULTI_ASPECT, 7),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.POWER_ZOOM_SPEED, 12),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.POWER_ZOOM_SPEED, 12),
         )
     }
 

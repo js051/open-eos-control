@@ -29,7 +29,7 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Canon movie control writes `EVFRecordStatus (0xD1B8)` through `SetDevicePropValueEx`: Card (`4`) starts card recording and None (`0`) stops it. The capability is exposed only after camera events advertise both values; SDRAM (`3`) is treated as preview rather than recording.
 - The Canon mappings follow a pinned libgphoto2 revision and are test-covered. They remain in device-validation status until exercised and recorded on the physical R6 Mark III.
 - Next milestone: validate the standard and Canon paths, including movie start/stop, on the camera, then map only measured property gaps.
-- Research track: Touch AF and Canon vendor settings beyond core exposure and movie target. No active controls are exposed without proven state and value semantics.
+- Research track: Touch AF and Canon vendor settings beyond the implemented exposure, aspect-ratio, power-zoom and movie paths. No active controls are exposed without proven state and value semantics.
 - Tradeoffs: best pure phone-to-camera wired path, but it requires a real PTP engine plus Canon vendor-extension testing.
 
 ### Desktop bridge and PC control

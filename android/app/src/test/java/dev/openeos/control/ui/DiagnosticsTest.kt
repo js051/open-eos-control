@@ -136,15 +136,18 @@ class DiagnosticsTest {
     @Test
     fun advancedSettingsAreFilteredByCaptureMode() {
         val settings = listOf(
-            CameraSettingControl("moviequality", "Movie quality", "4K", listOf("4K")),
-            CameraSettingControl("drivemode", "Drive", "single", listOf("single")),
-            CameraSettingControl("stillimagequalitycf", "CF quality", "RAW", listOf("RAW")),
-            CameraSettingControl("colorspace", "Color space", "sRGB", listOf("sRGB")),
-            CameraSettingControl("highisonr", "High ISO NR", "Off", listOf("Off")),
-            CameraSettingControl("aeb", "AEB", "off", listOf("off")),
-            CameraSettingControl("exposurecompensation", "Exposure compensation", "0", listOf("0")),
-            CameraSettingControl("movieservoaf", "Movie Servo AF", "on", listOf("on")),
-            CameraSettingControl("afmethod", "AF", "face", listOf("face")),
+            CameraSettingControl("moviequality", "Movie quality", "4K", listOf("4K", "FHD")),
+            CameraSettingControl("drivemode", "Drive", "single", listOf("single", "continuous")),
+            CameraSettingControl("stillimagequalitycf", "CF quality", "RAW", listOf("RAW", "JPEG")),
+            CameraSettingControl("colorspace", "Color space", "sRGB", listOf("sRGB", "AdobeRGB")),
+            CameraSettingControl("highisonr", "High ISO NR", "Off", listOf("Off", "High")),
+            CameraSettingControl("aeb", "AEB", "off", listOf("off", "+/- 1")),
+            CameraSettingControl("aspectratio", "Aspect ratio", "3:2", listOf("3:2", "16:9")),
+            CameraSettingControl("zoomspeed", "Power zoom speed", "8", listOf("1", "8", "15")),
+            CameraSettingControl("exposurecompensation", "Exposure compensation", "0", listOf("-1", "0", "1")),
+            CameraSettingControl("movieservoaf", "Movie Servo AF", "on", listOf("off", "on")),
+            CameraSettingControl("afmethod", "AF", "face", listOf("face", "spot")),
+            CameraSettingControl("singleoption", "Single option", "only", listOf("only")),
         )
 
         assertEquals(
@@ -154,13 +157,15 @@ class DiagnosticsTest {
                 "colorspace",
                 "highisonr",
                 "aeb",
+                "aspectratio",
+                "zoomspeed",
                 "exposurecompensation",
                 "afmethod",
             ),
             settingsForMode(settings, CaptureMode.PHOTO).map { it.key },
         )
         assertEquals(
-            listOf("moviequality", "exposurecompensation", "movieservoaf", "afmethod"),
+            listOf("moviequality", "zoomspeed", "exposurecompensation", "movieservoaf", "afmethod"),
             settingsForMode(settings, CaptureMode.VIDEO).map { it.key },
         )
     }

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.annotation.StringRes
@@ -162,6 +163,22 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("advanced-setting-aspectratio")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-values-aspectratio").performScrollToIndex(3)
+        compose.onNodeWithText("16:9").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals("aspectratio" to "16:9", request)
+        }
+        compose.onNodeWithTag("advanced-setting-zoomspeed")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-values-zoomspeed").performScrollToIndex(11)
+        compose.onNodeWithText("12").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals("zoomspeed" to "12", request)
+        }
         compose.onNodeWithText(resourceText(R.string.setting_drive_mode))
             .performScrollTo()
             .assertIsDisplayed()

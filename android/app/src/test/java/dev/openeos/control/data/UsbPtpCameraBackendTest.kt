@@ -141,6 +141,8 @@ class UsbPtpCameraBackendTest {
         backend.setSetting("whitebalanceadjusta", "-9")
         backend.setSetting("whitebalanceadjustb", "9")
         backend.setSetting("colorspace", "AdobeRGB")
+        backend.setSetting("aspectratio", "16:9")
+        backend.setSetting("zoomspeed", "12")
         backend.setSetting("highisonr", "High")
         backend.setSetting("aeb", "+/- 2")
         val recordingStatus = backend.startRecording()
@@ -178,6 +180,9 @@ class UsbPtpCameraBackendTest {
         assertEquals("0", settings.getValue("whitebalanceadjusta").value)
         assertEquals("-2", settings.getValue("whitebalanceadjustb").value)
         assertEquals(listOf("sRGB", "AdobeRGB"), settings.getValue("colorspace").values)
+        assertEquals("1.6x", settings.getValue("aspectratio").value)
+        assertEquals(listOf("3:2", "1:1", "4:3", "16:9", "1.6x"), settings.getValue("aspectratio").values)
+        assertEquals("8", settings.getValue("zoomspeed").value)
         assertEquals(listOf("Off", "On"), settings.getValue("continuousaf").values)
         assertEquals("WholeAreaAF", settings.getValue("afmethod").value)
         assertEquals("Super high speed continuous shooting", settings.getValue("drivemode").value)
@@ -344,6 +349,16 @@ class UsbPtpCameraBackendTest {
         assertTrue(
             propertyWrites.any {
                 it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.COLOR_SPACE, 2))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.MULTI_ASPECT, 7))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.POWER_ZOOM_SPEED, 12))
             }
         )
         assertTrue(
@@ -810,6 +825,10 @@ class UsbPtpCameraBackendTest {
             payload += eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B, -9, -2, 0, 9)
             payload += eosPropertyValue(CanonEosPropertyCode.COLOR_SPACE, 1)
             payload += eosAvailableValues(CanonEosPropertyCode.COLOR_SPACE, 1, 2)
+            payload += eosPropertyValue(CanonEosPropertyCode.MULTI_ASPECT, 0x0D)
+            payload += eosAvailableValues(CanonEosPropertyCode.MULTI_ASPECT, 0, 1, 2, 7, 0x0D)
+            payload += eosPropertyValue(CanonEosPropertyCode.POWER_ZOOM_SPEED, 8)
+            payload += eosAvailableValues(CanonEosPropertyCode.POWER_ZOOM_SPEED, *IntArray(15) { it + 1 })
             payload += eosPropertyValue(CanonEosPropertyCode.FOCUS_MODE, 1)
             payload += eosAvailableValues(CanonEosPropertyCode.FOCUS_MODE, 0, 1, 2)
             payload += eosPropertyValue(CanonEosPropertyCode.CONTINUOUS_AF_MODE, 0)

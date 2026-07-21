@@ -157,6 +157,8 @@
     <string name="setting_white_balance_shift_a">White balance shift A</string>
     <string name="setting_white_balance_shift_b">White balance shift B</string>
     <string name="setting_color_space">Color space</string>
+    <string name="setting_aspect_ratio">Aspect ratio</string>
+    <string name="setting_power_zoom_speed">Power zoom speed</string>
     <string name="setting_high_iso_noise_reduction">High ISO noise reduction</string>
     <string name="setting_aeb">Auto exposure bracketing (AEB)</string>
     <string name="setting_ae_mode">AE mode</string>

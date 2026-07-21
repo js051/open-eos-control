@@ -31,8 +31,10 @@ object CanonEosPropertyCode {
     const val IMAGE_FORMAT = 0xD120
     const val IMAGE_FORMAT_CF = 0xD121
     const val IMAGE_FORMAT_SD = 0xD122
+    const val POWER_ZOOM_SPEED = 0xD149
     const val HIGH_ISO_NOISE_REDUCTION = 0xD178
     const val MOVIE_SERVO_AF = 0xD179
+    const val MULTI_ASPECT = 0xD194
     const val EVF_OUTPUT_DEVICE = 0xD1B0
     const val EVF_MODE = 0xD1B1
     const val EVF_RECORD_STATUS = 0xD1B8
@@ -95,6 +97,8 @@ object CanonEosPtp {
             "White balance shift B",
         ),
         CanonEosSettingSpec(CanonEosPropertyCode.COLOR_SPACE, "colorspace", "Color space"),
+        CanonEosSettingSpec(CanonEosPropertyCode.MULTI_ASPECT, "aspectratio", "Aspect ratio"),
+        CanonEosSettingSpec(CanonEosPropertyCode.POWER_ZOOM_SPEED, "zoomspeed", "Power zoom speed"),
         CanonEosSettingSpec(CanonEosPropertyCode.FOCUS_MODE, "afoperation", "AF operation"),
         CanonEosSettingSpec(CanonEosPropertyCode.CONTINUOUS_AF_MODE, "continuousaf", "Continuous AF"),
         CanonEosSettingSpec(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, "afmethod", "AF method"),
@@ -614,6 +618,18 @@ object CanonEosPtp {
 
     private val colorSpaceLabels = mapOf(1L to "sRGB", 2L to "AdobeRGB")
 
+    private val aspectRatioLabels = mapOf(
+        0x0000L to "3:2",
+        0x0001L to "1:1",
+        0x0002L to "4:3",
+        0x0007L to "16:9",
+        0x000DL to "1.6x",
+    )
+
+    private val powerZoomSpeedLabels = (1..15).associate { value ->
+        value.toLong() to value.toString()
+    }
+
     private val highIsoNoiseReductionLabels = mapOf(
         0L to "Off",
         1L to "Low",
@@ -684,6 +700,8 @@ object CanonEosPtp {
         CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B to
             CanonEosPropertySpec(4, whiteBalanceAdjustLabels, signed = true),
         CanonEosPropertyCode.COLOR_SPACE to CanonEosPropertySpec(2, colorSpaceLabels),
+        CanonEosPropertyCode.MULTI_ASPECT to CanonEosPropertySpec(4, aspectRatioLabels),
+        CanonEosPropertyCode.POWER_ZOOM_SPEED to CanonEosPropertySpec(4, powerZoomSpeedLabels),
         CanonEosPropertyCode.PICTURE_STYLE to CanonEosPropertySpec(1, pictureStyleLabels),
         CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION to CanonEosPropertySpec(2, highIsoNoiseReductionLabels),
         CanonEosPropertyCode.MOVIE_SERVO_AF to CanonEosPropertySpec(4, offOnLabels),
