@@ -22,6 +22,9 @@ import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.LiveViewCapabilities
+import dev.openeos.control.data.UsbCameraDevice
+import dev.openeos.control.data.UsbCameraInterface
+import dev.openeos.control.data.UsbPtpDiagnostics
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -35,6 +38,50 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.connect_title)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.preview_interface)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.connect)).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun readyCanonPtpDeviceOffersRealUsbConnectAction() {
+        var selectedDevice: Triple<String, Int, Int>? = null
+        val device = UsbCameraDevice(
+            deviceName = "usb-r6m3",
+            manufacturerName = "Canon",
+            productName = "EOS R6 Mark III",
+            vendorId = 0x04A9,
+            productId = 0x1234,
+            deviceClass = 0,
+            deviceSubclass = 0,
+            deviceProtocol = 0,
+            hasPermission = true,
+            interfaces = listOf(
+                UsbCameraInterface(
+                    id = 0,
+                    interfaceClass = 6,
+                    interfaceSubclass = 1,
+                    interfaceProtocol = 1,
+                    endpoints = emptyList(),
+                )
+            ),
+        )
+        val actions = noOpActions().copy(
+            connectUsb = { name, vendorId, productId ->
+                selectedDevice = Triple(name, vendorId, productId)
+            }
+        )
+        compose.setContent {
+            MaterialTheme {
+                ConnectionScreen(
+                    CameraUiState(usbDiagnostics = UsbPtpDiagnostics(listOf(device))),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.connect_usb_camera)).performScrollTo().performClick()
+
+        compose.runOnIdle {
+            assertEquals(Triple("usb-r6m3", 0x04A9, 0x1234), selectedDevice)
+        }
     }
 
     @Test
@@ -224,6 +271,7 @@ class CameraScreensTest {
         setBaseUrl = {}, setUsername = {}, setPassword = {},
         useHttpPreset = {}, useHttpsPreset = {}, useSimulatorPreset = {}, enterOfflinePreview = {},
         connect = {}, disconnect = {}, refresh = {}, refreshUsb = {}, requestUsbPermission = {},
+        connectUsb = { _, _, _ -> },
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
         captureStill = {}, focusWithShutter = {}, toggleRecording = {}, tapFocus = { _, _ -> },

@@ -44,7 +44,7 @@ class CameraRepositoryTest {
         assertEquals(CameraModelFamily.EOS_R, session.capabilities.profile.family)
         assertTrue(session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertTrue(session.capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
-        assertTrue(session.liveViewFrameUrl.endsWith("/ccapi/liveview/frame?t=1"))
+        assertTrue(session.liveViewFrameUrl?.endsWith("/ccapi/liveview/frame?t=1") == true)
         assertEquals("/ccapi/info", server.takeRequest().path)
         assertEquals("/ccapi/status", server.takeRequest().path)
         assertEquals("/ccapi/capabilities", server.takeRequest().path)
@@ -59,7 +59,7 @@ class CameraRepositoryTest {
         val session = repository.connect(server.url("/").toString())
         val nextFrame = repository.nextLiveViewFrameUrl()
 
-        assertTrue(session.liveViewFrameUrl.endsWith("t=1"))
+        assertTrue(session.liveViewFrameUrl?.endsWith("t=1") == true)
         assertTrue(nextFrame.endsWith("t=2"))
     }
 

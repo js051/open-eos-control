@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.CameraTransport
 import java.net.URI
 import java.util.Locale
 
@@ -12,10 +13,14 @@ fun rollingFps(frameTimesMillis: List<Long>): Double {
 }
 
 fun buildDiagnosticReport(state: CameraUiState): String {
-    val safeUrl = runCatching {
-        val uri = URI(state.baseUrl)
-        URI(uri.scheme, null, uri.host, uri.port, uri.path, uri.query, uri.fragment).toString()
-    }.getOrDefault(redactDiagnosticText(state.baseUrl, state))
+    val safeUrl = if (state.transport == CameraTransport.USB_PTP) {
+        "not-applicable"
+    } else {
+        runCatching {
+            val uri = URI(state.baseUrl)
+            URI(uri.scheme, null, uri.host, uri.port, uri.path, uri.query, uri.fragment).toString()
+        }.getOrDefault(redactDiagnosticText(state.baseUrl, state))
+    }
     val supported = state.capabilities?.matrix?.supported.orEmpty()
         .sortedBy(CameraFeature::name)
         .joinToString { it.name }

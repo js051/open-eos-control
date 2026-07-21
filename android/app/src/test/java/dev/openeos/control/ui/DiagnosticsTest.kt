@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraNetworkRouting
+import dev.openeos.control.data.CameraTransport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -53,6 +54,20 @@ class DiagnosticsTest {
         assertTrue(report.contains("cameraInterface=wlan0"))
         assertTrue(report.contains("cellularAvailable=true"))
         assertTrue(report.contains("liveViewHealthy=true"))
+    }
+
+    @Test
+    fun usbDiagnosticReportDoesNotShowTheStaleCcapiUrl() {
+        val report = buildDiagnosticReport(
+            CameraUiState(
+                baseUrl = "http://192.168.1.2:8080",
+                transport = CameraTransport.USB_PTP,
+            )
+        )
+
+        assertTrue(report.contains("transport=USB_PTP"))
+        assertTrue(report.contains("baseUrl=not-applicable"))
+        assertFalse(report.contains("192.168.1.2"))
     }
 
     @Test

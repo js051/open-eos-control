@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Open EOS Control</string>
     <string name="connect_title">連接你的 EOS</string>
-    <string name="connect_subtitle">選擇網路預設，或檢查 USB 相機。</string>
+    <string name="connect_subtitle">選擇網路預設，或連接 USB 相機。</string>
     <string name="preset_http">HTTP</string><string name="preset_https">HTTPS</string><string name="preset_simulator">模擬器</string>
     <string name="camera_url">相機 URL</string><string name="authentication">帳號驗證</string><string name="username">使用者名稱</string><string name="password">密碼</string>
     <string name="connect">連接</string><string name="connecting">連接中…</string><string name="usb_camera">USB 相機</string><string name="usb_scan">掃描 USB</string>
@@ -19,7 +19,7 @@
     <string name="camera_profile">相機 Profile</string><string name="transport">傳輸方式</string><string name="api_version">API</string><string name="supported_features">已支援功能</string><string name="planned_features">規劃功能</string>
     <string name="battery_raw">電池原始 JSON</string><string name="storage_raw">儲存卡原始 JSON</string><string name="last_error">最後錯誤</string>
     <string name="requested_fps">要求 FPS</string><string name="observed_fps">實測 FPS</string><string name="frame_bytes">畫面位元組</string><string name="content_type">內容類型</string><string name="source_endpoint">來源端點</string><string name="latest_frame">最新畫面</string><string name="restart_live_view">重啟 Live View</string>
-    <string name="no_usb_devices">找不到 USB 裝置。</string><string name="request_permission">要求權限</string><plurals name="interface_endpoint"><item quantity="other">介面 %1$d · %2$d 個端點</item></plurals><string name="permission_granted">已有權限</string><string name="permission_needed">需要權限</string>
+    <string name="no_usb_devices">找不到 USB 裝置。</string><string name="request_permission">要求權限</string><string name="connect_usb_camera">透過 USB 連接</string><plurals name="interface_endpoint"><item quantity="other">介面 %1$d · %2$d 個端點</item></plurals><string name="permission_granted">已有權限</string><string name="permission_needed">需要權限</string>
     <string name="dismiss">關閉</string><string name="battery_percent">%1$d%%</string><string name="storage_ready">記憶卡就緒</string><string name="storage_unknown">記憶卡未知</string>
     <string name="none">無</string><string name="unavailable">無法取得</string><string name="device">裝置</string><string name="vid_pid">VID / PID</string><string name="ptp">PTP</string>
     <string name="transport_ccapi_network">Canon CCAPI 網路連線</string><string name="transport_usb_ptp">USB PTP</string><string name="transport_desktop_bridge">桌面橋接</string>

@@ -7,9 +7,11 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraNetworkDiagnostics
+import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraRepository
+import dev.openeos.control.data.CameraSession
 import dev.openeos.control.data.LiveViewRequest
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
@@ -51,6 +53,9 @@ class CameraViewModel(
                 baseUrl = preferences.getString(KEY_BASE_URL, it.baseUrl) ?: it.baseUrl,
                 username = preferences.getString(KEY_USERNAME, it.username) ?: it.username,
             )
+        }
+        if (_uiState.value.usbDiagnostics.scannedAtMillis == 0L) {
+            refreshUsbDiagnostics(context.applicationContext)
         }
     }
 
@@ -144,6 +149,26 @@ class CameraViewModel(
                 size = _uiState.value.liveViewSize,
             ),
         )
+        applyConnectedSession(session)
+    }
+
+    fun connectUsb(deviceName: String, vendorId: Int, productId: Int) = runCamera(CameraOperation.CONNECT) {
+        stopLiveViewLoop()
+        resetFrameMetrics()
+        _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+        val session = repository.connectUsb(
+            deviceName = deviceName,
+            vendorId = vendorId,
+            productId = productId,
+            request = LiveViewRequest(
+                fps = _uiState.value.liveViewFrameRateFps,
+                size = _uiState.value.liveViewSize,
+            ),
+        )
+        applyConnectedSession(session)
+    }
+
+    private suspend fun applyConnectedSession(session: CameraSession) {
         val supportedFps = _uiState.value.liveViewFrameRateFps.coerceIn(
             session.capabilities.liveView.minFps,
             session.capabilities.liveView.maxFps,
@@ -161,8 +186,10 @@ class CameraViewModel(
                 liveViewFrameRateFps = supportedFps,
             )
         }
-        refreshLiveViewFrameInternal(reportErrors = true)
-        startLiveViewLoopIfNeeded()
+        if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
+            refreshLiveViewFrameInternal(reportErrors = true)
+            startLiveViewLoopIfNeeded()
+        }
     }
 
     fun rememberConnection(context: Context) {
@@ -247,7 +274,7 @@ class CameraViewModel(
     }
 
     fun restartLiveView() = runCamera(CameraOperation.LIVE_VIEW) {
-        if (_uiState.value.previewMode) return@runCamera
+        if (_uiState.value.previewMode || !_uiState.value.supports(CameraFeature.LIVE_VIEW)) return@runCamera
         repository.restartLiveView()
         val capabilities = repository.refreshCapabilities()
         _uiState.update { it.copy(capabilities = capabilities) }
@@ -523,7 +550,11 @@ class CameraViewModel(
     }
 
     private suspend fun refreshLiveViewFrameInternal(reportErrors: Boolean) {
-        if (!_uiState.value.connected || _uiState.value.previewMode) return
+        if (
+            !_uiState.value.connected ||
+            _uiState.value.previewMode ||
+            !_uiState.value.supports(CameraFeature.LIVE_VIEW)
+        ) return
 
         if (!repository.isRealCamera()) {
             val nextUrl = repository.nextLiveViewFrameUrl()
@@ -605,7 +636,12 @@ class CameraViewModel(
     private fun startLiveViewLoopIfNeeded() {
         liveViewJob?.cancel()
         val state = _uiState.value
-        if (!state.connected || state.previewMode || !state.liveViewAutoRefresh) return
+        if (
+            !state.connected ||
+            state.previewMode ||
+            !state.liveViewAutoRefresh ||
+            !state.supports(CameraFeature.LIVE_VIEW)
+        ) return
 
         liveViewJob = viewModelScope.launch {
             while (isActive) {

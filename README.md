@@ -4,7 +4,7 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It is Android-first today, targets Canon EOS R6 Mark III first, and is structured to grow into PC, iOS, and Android clients that share the same camera-control concepts.
 
-The project is not CCAPI-only. CCAPI over Wi-Fi is the first working backend; Android USB/PTP and a PC desktop bridge are planned backends behind the same camera core contract.
+The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android now also has a standards-based USB/PTP backend behind the same camera core contract; Canon EOS vendor controls and the PC desktop bridge remain in development.
 
 ## Project Shape
 
@@ -26,7 +26,7 @@ The app currently includes:
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
-- USB/PTP diagnostics for connected Android USB host devices
+- Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, and advertised standard still capture
 - Live view frame display with auto/manual refresh and FPS control
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
 - REC start/stop
@@ -108,11 +108,11 @@ Useful endpoints:
 ## Roadmap
 
 - Keep CCAPI stable for R6 Mark III wireless control.
-- Add Android USB/PTP diagnostics, then still capture, setting writes, and live view where Canon vendor operations allow it.
+- Validate the Android USB/PTP session, storage, media, download, and advertised standard capture paths on R6 Mark III, then add proven property and Canon vendor controls.
 - Add a desktop bridge that exposes the same camera core contract while using libgphoto2 or a user-installed Canon EDSDK adapter.
 - Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
 
-See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), and [docs/reference-projects.md](docs/reference-projects.md).
+See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/android-usb-ptp.md](docs/android-usb-ptp.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), and [docs/reference-projects.md](docs/reference-projects.md).
 
 ## License
 

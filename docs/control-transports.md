@@ -14,15 +14,16 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Device-validation queue: still capture, shutter half-press, movie recording, tap focus, media browser, and media download on EOS R6 Mark III.
 - Planned upgrades: focus drive where a documented endpoint is advertised and RTP live view experiments.
 
-## Planned Wired Backends
+## Wired Backends
 
 ### Android USB/PTP
 
-- Status: diagnostic scanner implemented; PTP session/backend control is not product-ready yet.
+- Status: standards-based backend implemented; EOS R6 Mark III device validation is required.
 - Connection: Android USB host/OTG to camera USB.
-- Current implementation: enumerate Android USB devices, identify Canon vendor ID `0x04A9`, identify PTP still-image interfaces, show endpoint direction/type/packet size, and trigger Android USB permission requests.
-- Next milestone: claim the PTP interface, open a PTP session, read device info, and list properties.
-- Later milestones: still capture, exposure writes, storage/media listing, clear error reporting, and live view preview if EOS R6 Mark III exposes compatible Canon PTP vendor operations.
+- Current implementation: enumerate Android USB devices, request permission, claim a `06/01/01` Still Image interface, use buffered bulk transfers, open/close a PTP session, read DeviceInfo and storage, list object metadata, and stream object downloads to Android SAF destinations.
+- Standard still capture is enabled only when DeviceInfo advertises `InitiateCapture (0x100E)`. A successful response is reported as command acceptance; the physical result still needs an R6 Mark III validation record.
+- Next milestone: record real-device session packets, then implement standard property descriptors/values and validate which Canon EOS vendor properties are required for exposure control.
+- Research track: USB Live View, half-press, focus, movie control, and any setting absent from standard PTP. These require proven Canon vendor operations on EOS R6 Mark III.
 - Tradeoffs: best pure phone-to-camera wired path, but it requires a real PTP engine plus Canon vendor-extension testing.
 
 ### Desktop bridge
@@ -56,9 +57,9 @@ Each backend should map into this surface:
 ## Implementation Order
 
 1. Keep CCAPI stable and improve diagnostics.
-2. Open Android USB/PTP sessions from the diagnostic device list.
-3. Add Android USB/PTP device info and property reads.
-4. Add Android USB/PTP still capture and setting writes.
+2. Validate the implemented Android USB/PTP session, DeviceInfo, storage, media, download, and conditional standard capture paths on EOS R6 Mark III.
+3. Add Android USB/PTP property descriptors, values, and safe standard writes.
+4. Prove and add the minimum Canon EOS vendor operations required for capture and setting gaps.
 5. Add USB/PTP live view preview if R6 Mark III allows it.
 6. Add desktop bridge protocol tests.
 7. Add libgphoto2 bridge adapter.

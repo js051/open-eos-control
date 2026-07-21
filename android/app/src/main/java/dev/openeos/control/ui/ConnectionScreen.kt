@@ -159,10 +159,31 @@ fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
             state.usbDiagnostics.devices.forEach { device ->
                 Column(Modifier.fillMaxWidth().background(AppSurface, RoundedCornerShape(6.dp)).padding(12.dp)) {
                     Text(device.displayName, color = AppText, fontWeight = FontWeight.SemiBold)
-                    Text("VID %04X · PID %04X".format(device.vendorId, device.productId), color = AppSubtleText)
+                    Text("VID %04X / PID %04X".format(device.vendorId, device.productId), color = AppSubtleText)
                     if (!device.hasPermission) {
                         Button(onClick = { actions.requestUsbPermission(device.deviceName) }, modifier = Modifier.padding(top = 8.dp)) {
                             Text(stringResource(R.string.request_permission))
+                        }
+                    } else if (device.isCanon && device.hasPtpInterface) {
+                        Button(
+                            onClick = {
+                                actions.connectUsb(device.deviceName, device.vendorId, device.productId)
+                            },
+                            enabled = !state.isBusy(CameraOperation.CONNECT),
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp),
+                            shape = RoundedCornerShape(6.dp),
+                        ) {
+                            Icon(painterResource(LucideR.drawable.lucide_ic_usb), null, Modifier.size(20.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text(
+                                stringResource(
+                                    if (state.isBusy(CameraOperation.CONNECT)) {
+                                        R.string.connecting
+                                    } else {
+                                        R.string.connect_usb_camera
+                                    }
+                                )
+                            )
                         }
                     }
                 }

@@ -56,6 +56,7 @@ interface CameraControlBackend {
     val networkDiagnostics: CameraNetworkDiagnostics
 
     suspend fun initialize()
+    suspend fun close() = Unit
     suspend fun info(): CameraInfo
     suspend fun status(): CameraStatus
     suspend fun capabilities(): CameraCapabilities
@@ -222,11 +223,14 @@ class PlannedCameraBackend(
 
 class CameraBackendFactory(
     private val httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
+    private val ptpTransportFactory: PtpTransportFactory? = null,
 ) {
     fun create(connection: CameraConnection): CameraControlBackend =
         when (connection) {
             is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection, httpTransportFactory)
-            is CameraConnection.AndroidUsbPtp -> PlannedCameraBackend(connection)
+            is CameraConnection.AndroidUsbPtp -> ptpTransportFactory
+                ?.let { UsbPtpCameraBackend(connection, it) }
+                ?: PlannedCameraBackend(connection)
             is CameraConnection.DesktopBridge -> PlannedCameraBackend(connection)
         }
 }

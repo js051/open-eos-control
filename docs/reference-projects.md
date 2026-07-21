@@ -10,6 +10,7 @@ This project should stay grounded in public specifications, official platform AP
 - PTP: PTP is ISO 15740:2013 and is defined as a transport- and platform-independent protocol for digital still photography devices. Reference: [ISO 15740:2013](https://www.iso.org/standard/63602.html).
 - USB still image class: USB-IF publishes the Still Image Capture Device Class specification used by USB PTP devices. Reference: [USB-IF Still Image Capture Device Definition](https://www.usb.org/document-library/still-image-capture-device-definition-10-and-errata-16-mar-2007).
 - libgphoto2 / gPhoto: libgphoto2 is the main open-source reference for camera access/control and PTP-backed Canon EOS tethering. Reference: [libgphoto2 GitHub](https://github.com/gphoto/libgphoto2), [gPhoto remote control docs](https://gphoto.sourceforge.io/doc/remote/), [supported cameras](https://gphoto.sourceforge.io/proj/libgphoto2/support.php).
+- PTP packet and dataset implementation reference: libgphoto2's maintained PTP engine corroborates the USB command/data/response container layout and standard operation codes used by this project. Reference: [libgphoto2 PTP source](https://github.com/gphoto/libgphoto2/tree/master/camlibs/ptp2).
 
 ## Open-Source Behavior To Mirror
 
@@ -23,17 +24,18 @@ Implemented and test-covered:
 
 - CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling, still/manual shutter control, paged media browsing, and streaming media download.
 - Android USB host diagnostics: enumerate devices, identify Canon vendor ID `0x04A9`, identify PTP still-image interfaces, show endpoints, and request Android USB permission.
+- Android standards-based USB/PTP path: claim the interface, open/close a session, parse DeviceInfo and storage/object datasets, conditionally issue advertised standard still capture, browse media, and stream `GetObject` downloads.
 - Multi-backend contract: unsupported operations throw explicit transport/feature errors.
 
 Implemented but requires real-camera verification:
 
 - Real Canon CCAPI endpoint variants for R6 Mark III live view and shooting settings.
 - R6 Mark III still/manual shutter, recording, tap focus, media browsing, and media download.
-- Android USB/PTP diagnostics on a physical Android device with the camera connected over OTG/USB-C.
+- Android USB/PTP diagnostics, session, DeviceInfo, storage/media, download, and advertised standard capture on a physical Android device with the camera connected over OTG/USB-C.
 
 Planned only, not product-valid yet:
 
-- Android PTP session open, transaction container parsing, device info, object/media operations, still capture, setting writes, and USB live view.
+- Android PTP battery/property reads and writes, Canon EOS vendor controls, and USB live view.
 - CCAPI RTP live view.
 - Desktop bridge service, libgphoto2 adapter, and optional EDSDK adapter.
 - iOS app/client.

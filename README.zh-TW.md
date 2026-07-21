@@ -4,7 +4,7 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。目前先以 Android App 為主，第一個真機優先目標是 Canon EOS R6 Mark III，架構上會保留 PC、iOS、Android 三端共用同一套相機控制概念的空間。
 
-這個專案不是只做 CCAPI。現在已經可用的第一條路線是 Wi-Fi 上的 CCAPI；後續會把 Android USB/PTP 直連與 PC desktop bridge 接到同一個 camera core contract 後面。
+這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已經有走同一個 camera core contract 的標準 USB/PTP backend。Canon EOS 專有控制與 PC desktop bridge 仍在開發中。
 
 ## 專案結構
 
@@ -26,7 +26,7 @@ open-eos-control/
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
-- Android USB host 裝置的 USB/PTP 診斷
+- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／下載，以及相機有公告時的標準拍照命令
 - Live view 畫面，自動/手動更新與 FPS 控制
 - ISO、shutter、aperture、white balance 與動態 advanced settings
 - REC 開始/停止
@@ -108,11 +108,11 @@ http://localhost:18080
 ## Roadmap
 
 - 先把 R6 Mark III 的 CCAPI 無線控制維持穩定。
-- 加入 Android USB/PTP 診斷，再逐步補 still capture、設定寫入，以及相機允許時的 live view。
+- 先在 R6 Mark III 真機驗證已實作的 Android USB/PTP session、儲存卡、媒體下載與相機公告的標準拍照命令，再加入有依據的 property 與 Canon 專有控制。
 - 加入 desktop bridge，對外使用同一套 camera core contract，內部可接 libgphoto2 或使用者自行安裝的 Canon EDSDK adapter。
 - iOS 先走 CCAPI/Wi-Fi；iOS USB/PTP 先列為研究線。
 
-功能是否真正完成以 [docs/feature-status.md](docs/feature-status.md) 為準；架構與後續路線請看 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
+功能是否真正完成以 [docs/feature-status.md](docs/feature-status.md) 為準；架構與後續路線請看 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/android-usb-ptp.md](docs/android-usb-ptp.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
 
 ## 授權
 

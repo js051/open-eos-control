@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Open EOS Control</string>
     <string name="connect_title">Connect your EOS</string>
-    <string name="connect_subtitle">Choose a network preset or inspect a USB camera.</string>
+    <string name="connect_subtitle">Choose a network preset or connect a USB camera.</string>
     <string name="preset_http">HTTP</string>
     <string name="preset_https">HTTPS</string>
     <string name="preset_simulator">Simulator</string>
@@ -81,6 +81,7 @@
     <string name="restart_live_view">Restart Live View</string>
     <string name="no_usb_devices">No USB devices found.</string>
     <string name="request_permission">Request permission</string>
+    <string name="connect_usb_camera">Connect over USB</string>
     <plurals name="interface_endpoint">
         <item quantity="one">Interface %1$d · %2$d endpoint</item>
         <item quantity="other">Interface %1$d · %2$d endpoints</item>

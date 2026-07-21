@@ -1,6 +1,8 @@
 package dev.openeos.control.data
 
 import android.content.Context
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.OutputStream
 
 class CameraRepository(
@@ -13,12 +15,16 @@ class CameraRepository(
     private var frameVersion = 0L
     private var liveViewRequest = LiveViewRequest()
     private var active = false
+    private val connectionMutex = Mutex()
 
     fun isRealCamera(): Boolean = backend.prefersBitmapLiveViewFrames
 
     fun configureAndroidNetworkRouting(context: Context) {
         check(!active) { "Camera network routing cannot change while connected." }
-        backendFactory = CameraBackendFactory(AndroidCameraHttpTransportFactory(context.applicationContext))
+        backendFactory = CameraBackendFactory(
+            httpTransportFactory = AndroidCameraHttpTransportFactory(context.applicationContext),
+            ptpTransportFactory = AndroidUsbPtpTransportFactory(context.applicationContext),
+        )
     }
 
     suspend fun connect(
@@ -26,54 +32,82 @@ class CameraRepository(
         username: String = "",
         password: String = "",
         request: LiveViewRequest = liveViewRequest,
-    ): CameraSession {
-        if (active) disconnect()
-        val connection = CameraConnection.CcapiNetwork(
+    ): CameraSession = connect(
+        connection = CameraConnection.CcapiNetwork(
             baseUrl = baseUrl,
             username = username,
             password = password,
-        )
+        ),
+        request = request,
+    )
+
+    suspend fun connectUsb(
+        deviceName: String,
+        vendorId: Int,
+        productId: Int,
+        request: LiveViewRequest = liveViewRequest,
+    ): CameraSession = connect(
+        connection = CameraConnection.AndroidUsbPtp(
+            deviceName = deviceName,
+            vendorId = vendorId,
+            productId = productId,
+        ),
+        request = request,
+    )
+
+    private suspend fun connect(
+        connection: CameraConnection,
+        request: LiveViewRequest,
+    ): CameraSession = connectionMutex.withLock {
+        if (active) disconnectLocked()
         try {
             backend = backendFactory.create(connection)
             backend.initialize()
             active = true
             liveViewRequest = request
-            try {
-                backend.startLiveView(liveViewRequest)
-            } catch (e: Exception) {
-                // A session can still provide settings and status without live view.
-            }
             frameVersion = 0L
             val info = backend.info()
             val status = backend.status()
             val capabilities = backend.capabilities().forCamera(info)
-            return CameraSession(
+            var liveViewFrameUrl: String? = null
+            if (capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
+                try {
+                    backend.startLiveView(liveViewRequest)
+                    liveViewFrameUrl = nextLiveViewFrameUrl()
+                } catch (_: Exception) {
+                    // A session can still provide settings and status without live view.
+                }
+            }
+            CameraSession(
                 transport = backend.transport,
                 connection = backend.connection,
                 info = info,
                 status = status,
                 capabilities = capabilities,
                 networkDiagnostics = backend.networkDiagnostics,
-                liveViewFrameUrl = nextLiveViewFrameUrl(),
+                liveViewFrameUrl = liveViewFrameUrl,
             )
         } catch (exception: Exception) {
-            if (active) {
-                try {
-                    backend.stopLiveView()
-                } catch (_: Exception) {
-                    // Keep the original connection failure.
-                }
-            }
+            runCatching { backend.close() }
             active = false
             throw exception
         }
     }
 
-    suspend fun disconnect() {
+    suspend fun disconnect() = connectionMutex.withLock {
+        disconnectLocked()
+    }
+
+    private suspend fun disconnectLocked() {
         if (!active) return
         try {
-            backend.stopLiveView()
-        } catch (e: Exception) {
+            try {
+                backend.stopLiveView()
+            } catch (_: Exception) {
+                // A backend without Live View still needs its session closed.
+            }
+            backend.close()
+        } catch (_: Exception) {
             // ignore failure to stop live view
         } finally {
             active = false
@@ -146,7 +180,7 @@ data class CameraSession(
     val status: CameraStatus,
     val capabilities: CameraCapabilities,
     val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty,
-    val liveViewFrameUrl: String,
+    val liveViewFrameUrl: String?,
 )
 
 private fun CameraCapabilities.forCamera(info: CameraInfo): CameraCapabilities =
