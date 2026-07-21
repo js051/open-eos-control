@@ -3,6 +3,7 @@ package dev.openeos.control.data
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -112,6 +113,37 @@ class CameraRepositoryTest {
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.STILL_CAPTURE))
     }
 
+    @Test
+    fun desktopBridgeConnectionClampsLiveViewRequestToAdvertisedCapabilities() = runTest {
+        server.enqueue(jsonResponse(BRIDGE_HEALTH_JSON))
+        server.enqueue(jsonResponse(BRIDGE_SESSION_JSON).setResponseCode(201))
+        server.enqueue(jsonResponse(BRIDGE_INFO_JSON))
+        server.enqueue(jsonResponse(BRIDGE_STATUS_JSON))
+        server.enqueue(jsonResponse(BRIDGE_CAPABILITIES_JSON))
+        server.enqueue(jsonResponse("""{"active":true,"requestedFps":5}"""))
+
+        val session = repository.connectBridge(
+            baseUrl = server.url("/").toString(),
+            token = "bridge-token",
+            request = LiveViewRequest(fps = 30, size = LiveViewSize.LARGE),
+        )
+
+        repeat(5) { server.takeRequest() }
+        val startRequest = server.takeRequest()
+        val startPayload = JSONObject(startRequest.body.readUtf8())
+        assertEquals(CameraTransport.DESKTOP_BRIDGE, session.transport)
+        assertEquals(5, session.liveViewRequest.fps)
+        assertEquals(LiveViewSize.MEDIUM, session.liveViewRequest.size)
+        assertEquals("/v1/session/session-1/liveview/start", startRequest.path)
+        assertEquals(5, startPayload.getInt("fps"))
+        assertEquals("MEDIUM", startPayload.getString("size"))
+        assertTrue(session.liveViewFrameUrl?.endsWith("/liveview/frame?t=1") == true)
+
+        server.enqueue(jsonResponse("""{"active":false}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        repository.disconnect()
+    }
+
     private fun jsonResponse(body: String): MockResponse =
         MockResponse()
             .setHeader("content-type", "application/json")
@@ -149,6 +181,52 @@ class CameraRepositoryTest {
               "shutter": ["1/50", "1/100"],
               "aperture": ["2.8", "4.0"],
               "white_balance": ["auto", "daylight"]
+            }
+        """
+
+        const val BRIDGE_HEALTH_JSON = """
+            {"service":"open-eos-control-bridge","version":"0.1.0","ok":true,"engines":{}}
+        """
+
+        const val BRIDGE_SESSION_JSON = """
+            {
+              "id":"session-1",
+              "engine":"libgphoto2",
+              "camera":{"id":"camera-1","model":"Canon EOS R6 Mark III","port":"usb:1","engine":"libgphoto2"}
+            }
+        """
+
+        const val BRIDGE_INFO_JSON = """
+            {"connected":true,"model":"Canon EOS R6 Mark III","serial":"bridge-r6m3","api":"desktop-bridge/v1"}
+        """
+
+        const val BRIDGE_STATUS_JSON = """
+            {
+              "connected":true,
+              "battery":{"level":82,"status":"normal"},
+              "recording":false,
+              "mode":"Manual",
+              "media":{"available":true,"devices":2},
+              "exposure":{"iso":"400","shutter":"1/50","aperture":"2.8","whiteBalance":"Auto"},
+              "raw":{"engine":"libgphoto2"}
+            }
+        """
+
+        const val BRIDGE_CAPABILITIES_JSON = """
+            {
+              "profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},
+              "supported":["DESKTOP_BRIDGE","LIVE_VIEW","LIVE_VIEW_JPEG_POLLING"],
+              "planned":["LIVE_VIEW_RTP"],
+              "reasons":{},
+              "liveView":{
+                "sources":["DESKTOP_BRIDGE_STREAM"],
+                "defaultSource":"DESKTOP_BRIDGE_STREAM",
+                "sizes":["MEDIUM"],
+                "defaultSize":"MEDIUM",
+                "minFps":1,
+                "maxFps":5
+              },
+              "settings":[]
             }
         """
     }

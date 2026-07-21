@@ -32,9 +32,14 @@ fun OpenEosControlApp(
     LaunchedEffect(viewModel) { viewModel.initialize(context) }
 
     val actions = CameraActions(
+        setConnectionTarget = viewModel::setConnectionTarget,
         setBaseUrl = viewModel::setBaseUrl,
         setUsername = viewModel::setUsername,
         setPassword = viewModel::setPassword,
+        setBridgeBaseUrl = viewModel::setBridgeBaseUrl,
+        setBridgeToken = viewModel::setBridgeToken,
+        scanDesktopBridge = viewModel::scanDesktopBridge,
+        selectBridgeCamera = viewModel::selectBridgeCamera,
         useHttpPreset = viewModel::useDirectCameraPreset,
         useHttpsPreset = viewModel::useDirectCameraHttpsPreset,
         useSimulatorPreset = viewModel::useDevSimulatorPreset,
@@ -42,6 +47,10 @@ fun OpenEosControlApp(
         connect = {
             viewModel.rememberConnection(context)
             viewModel.connect()
+        },
+        connectBridge = {
+            viewModel.rememberConnection(context)
+            viewModel.connectBridge()
         },
         disconnect = viewModel::disconnect,
         refresh = viewModel::refresh,
@@ -131,14 +140,20 @@ private fun SystemBarsEffect(immersive: Boolean) {
 }
 
 data class CameraActions(
+    val setConnectionTarget: (ConnectionTarget) -> Unit,
     val setBaseUrl: (String) -> Unit,
     val setUsername: (String) -> Unit,
     val setPassword: (String) -> Unit,
+    val setBridgeBaseUrl: (String) -> Unit,
+    val setBridgeToken: (String) -> Unit,
+    val scanDesktopBridge: () -> Unit,
+    val selectBridgeCamera: (String) -> Unit,
     val useHttpPreset: () -> Unit,
     val useHttpsPreset: () -> Unit,
     val useSimulatorPreset: () -> Unit,
     val enterOfflinePreview: () -> Unit,
     val connect: () -> Unit,
+    val connectBridge: () -> Unit,
     val disconnect: () -> Unit,
     val refresh: () -> Unit,
     val refreshUsb: () -> Unit,

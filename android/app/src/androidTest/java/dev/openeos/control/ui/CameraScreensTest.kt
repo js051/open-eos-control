@@ -20,6 +20,7 @@ import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
+import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.LiveViewCapabilities
 import dev.openeos.control.data.UsbCameraDevice
@@ -28,6 +29,7 @@ import dev.openeos.control.data.UsbPtpDiagnostics
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 
 class CameraScreensTest {
     @get:Rule val compose = createComposeRule()
@@ -81,6 +83,47 @@ class CameraScreensTest {
 
         compose.runOnIdle {
             assertEquals(Triple("usb-r6m3", 0x04A9, 0x1234), selectedDevice)
+        }
+    }
+
+    @Test
+    fun desktopBridgeModeCanScanSelectAndConnectWithoutPersistingTokenUi() {
+        var scanRequested = false
+        var selectedCamera: String? = null
+        var connectRequested = false
+        val camera = DesktopBridgeCamera(
+            id = "camera-r6m3",
+            model = "Canon EOS R6 Mark III",
+            port = "usb:001,007",
+            engine = "libgphoto2",
+        )
+        val actions = noOpActions().copy(
+            scanDesktopBridge = { scanRequested = true },
+            selectBridgeCamera = { selectedCamera = it },
+            connectBridge = { connectRequested = true },
+        )
+        compose.setContent {
+            MaterialTheme {
+                ConnectionScreen(
+                    CameraUiState(
+                        connectionTarget = ConnectionTarget.DESKTOP_BRIDGE,
+                        bridgeToken = "secret",
+                        bridgeCameras = listOf(camera),
+                    ),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.desktop_bridge_token_hint)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.scan_desktop_bridge)).performClick()
+        compose.onNodeWithText(camera.model).performClick()
+        compose.onNodeWithText(resourceText(R.string.connect_desktop_bridge)).performClick()
+
+        compose.runOnIdle {
+            assertTrue(scanRequested)
+            assertEquals(camera.id, selectedCamera)
+            assertTrue(connectRequested)
         }
     }
 
@@ -268,9 +311,10 @@ class CameraScreensTest {
     )
 
     private fun noOpActions() = CameraActions(
-        setBaseUrl = {}, setUsername = {}, setPassword = {},
+        setConnectionTarget = {}, setBaseUrl = {}, setUsername = {}, setPassword = {},
+        setBridgeBaseUrl = {}, setBridgeToken = {}, scanDesktopBridge = {}, selectBridgeCamera = {},
         useHttpPreset = {}, useHttpsPreset = {}, useSimulatorPreset = {}, enterOfflinePreview = {},
-        connect = {}, disconnect = {}, refresh = {}, refreshUsb = {}, requestUsbPermission = {},
+        connect = {}, connectBridge = {}, disconnect = {}, refresh = {}, refreshUsb = {}, requestUsbPermission = {},
         connectUsb = { _, _, _ -> },
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },

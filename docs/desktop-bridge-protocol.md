@@ -4,7 +4,7 @@ The desktop bridge is a local service that exposes the same camera-control conce
 
 ## Implementation Status
 
-`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and invokes `gphoto2` with argument arrays, never through a shell. Its HTTP and command mappings are covered by deterministic tests shaped from the public libgphoto2 EOS R6 Mark III configuration snapshot. Physical R6 Mark III validation is still required and must not be inferred from those tests.
+`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and invokes `gphoto2` with argument arrays, never through a shell. Android's `DesktopBridgeClient` implements this protocol behind the shared camera backend, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, and streamed media. Both sides are covered by deterministic tests shaped from the public libgphoto2 EOS R6 Mark III configuration snapshot. Physical R6 Mark III validation is still required and must not be inferred from those tests.
 
 ## Goals
 

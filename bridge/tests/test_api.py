@@ -38,7 +38,11 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
             headers=headers,
             json={"direction": "FAR", "step": "LARGE"},
         )
-        unsupported_tap = client.post(f"/v1/session/{session_id}/focus/tap", headers=headers)
+        unsupported_tap = client.post(
+            f"/v1/session/{session_id}/focus/tap",
+            headers=headers,
+            json={"x": 0.25, "y": 0.75},
+        )
         media = client.get(f"/v1/session/{session_id}/media", headers=headers)
         media_id = media.json()["items"][0]["id"]
         download = client.get(f"/v1/session/{session_id}/media/{media_id}", headers=headers)
@@ -95,6 +99,22 @@ def test_request_validation_uses_stable_bridge_error_shape() -> None:
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "INVALID_REQUEST"
     assert "body.engine" in response.json()["error"]["message"]
+
+
+def test_tap_focus_coordinates_are_validated_before_engine_dispatch() -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    with TestClient(create_app(engine=GPhoto2Engine(FakeRunner()), token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        response = client.post(
+            f"/v1/session/{session_id}/focus/tap",
+            headers=headers,
+            json={"x": 1.5, "y": 0.5},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "INVALID_REQUEST"
+    assert "body.x" in response.json()["error"]["message"]
 
 
 def test_health_stays_available_when_gphoto2_is_not_installed() -> None:

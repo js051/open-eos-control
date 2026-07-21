@@ -55,6 +55,27 @@ class CameraRepository(
         request = request,
     )
 
+    suspend fun discoverBridgeCameras(
+        baseUrl: String,
+        token: String = "",
+    ): List<DesktopBridgeCamera> = backendFactory.discoverDesktopBridge(
+        CameraConnection.DesktopBridge(baseUrl = baseUrl, token = token)
+    )
+
+    suspend fun connectBridge(
+        baseUrl: String,
+        token: String = "",
+        cameraId: String? = null,
+        request: LiveViewRequest = liveViewRequest,
+    ): CameraSession = connect(
+        connection = CameraConnection.DesktopBridge(
+            baseUrl = baseUrl,
+            token = token,
+            cameraId = cameraId,
+        ),
+        request = request,
+    )
+
     private suspend fun connect(
         connection: CameraConnection,
         request: LiveViewRequest,
@@ -64,11 +85,11 @@ class CameraRepository(
             backend = backendFactory.create(connection)
             backend.initialize()
             active = true
-            liveViewRequest = request
             frameVersion = 0L
             val info = backend.info()
             val status = backend.status()
             val capabilities = backend.capabilities().forCamera(info)
+            liveViewRequest = request.clampTo(capabilities.liveView)
             var liveViewFrameUrl: String? = null
             if (capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
                 try {
@@ -86,6 +107,7 @@ class CameraRepository(
                 capabilities = capabilities,
                 networkDiagnostics = backend.networkDiagnostics,
                 liveViewFrameUrl = liveViewFrameUrl,
+                liveViewRequest = liveViewRequest,
             )
         } catch (exception: Exception) {
             runCatching { backend.close() }
@@ -170,6 +192,7 @@ class CameraRepository(
         const val DEFAULT_CAMERA_BASE_URL = "http://192.168.1.2:8080"
         const val DEFAULT_CAMERA_HTTPS_URL = "https://192.168.1.2:443"
         const val DEV_EMULATOR_SIMULATOR_URL = "http://10.0.2.2:18080"
+        const val DEFAULT_DESKTOP_BRIDGE_URL = "http://10.0.2.2:18181"
     }
 }
 
@@ -181,6 +204,7 @@ data class CameraSession(
     val capabilities: CameraCapabilities,
     val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty,
     val liveViewFrameUrl: String?,
+    val liveViewRequest: LiveViewRequest,
 )
 
 private fun CameraCapabilities.forCamera(info: CameraInfo): CameraCapabilities =

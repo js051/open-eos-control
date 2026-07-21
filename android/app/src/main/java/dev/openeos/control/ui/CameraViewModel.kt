@@ -50,8 +50,12 @@ class CameraViewModel(
         val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
         _uiState.update {
             it.copy(
+                connectionTarget = preferences.getString(KEY_CONNECTION_TARGET, null)
+                    ?.let { value -> runCatching { ConnectionTarget.valueOf(value) }.getOrNull() }
+                    ?: it.connectionTarget,
                 baseUrl = preferences.getString(KEY_BASE_URL, it.baseUrl) ?: it.baseUrl,
                 username = preferences.getString(KEY_USERNAME, it.username) ?: it.username,
+                bridgeBaseUrl = preferences.getString(KEY_BRIDGE_BASE_URL, it.bridgeBaseUrl) ?: it.bridgeBaseUrl,
             )
         }
         if (_uiState.value.usbDiagnostics.scannedAtMillis == 0L) {
@@ -74,6 +78,11 @@ class CameraViewModel(
 
     fun closeSettingPicker() = _uiState.update { it.copy(activeSettingPicker = null) }
 
+    fun setConnectionTarget(target: ConnectionTarget) {
+        if (_uiState.value.connected) return
+        _uiState.update { it.copy(connectionTarget = target, error = null, errorOperation = null) }
+    }
+
     fun setBaseUrl(value: String) {
         if (_uiState.value.connected) return
         stopLiveViewLoop()
@@ -88,6 +97,42 @@ class CameraViewModel(
     fun setPassword(value: String) {
         if (_uiState.value.connected) return
         _uiState.update { it.copy(password = value, error = null) }
+    }
+
+    fun setBridgeBaseUrl(value: String) {
+        if (_uiState.value.connected) return
+        stopLiveViewLoop()
+        _uiState.update {
+            it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
+                bridgeBaseUrl = value,
+                bridgeCameras = emptyList(),
+                selectedBridgeCameraId = null,
+            )
+        }
+    }
+
+    fun setBridgeToken(value: String) {
+        if (_uiState.value.connected) return
+        _uiState.update {
+            it.copy(
+                bridgeToken = value,
+                bridgeCameras = emptyList(),
+                selectedBridgeCameraId = null,
+                error = null,
+                errorOperation = null,
+            )
+        }
+    }
+
+    fun selectBridgeCamera(cameraId: String) {
+        if (_uiState.value.connected) return
+        _uiState.update { state ->
+            state.copy(
+                selectedBridgeCameraId = cameraId.takeIf { id -> state.bridgeCameras.any { it.id == id } },
+                error = null,
+                errorOperation = null,
+            )
+        }
     }
 
     fun useDirectCameraPreset() {
@@ -168,6 +213,40 @@ class CameraViewModel(
         applyConnectedSession(session)
     }
 
+    fun scanDesktopBridge() = runCamera(CameraOperation.BRIDGE) {
+        val state = _uiState.value
+        val cameras = repository.discoverBridgeCameras(
+            baseUrl = state.bridgeBaseUrl,
+            token = state.bridgeToken,
+        )
+        _uiState.update { current ->
+            val selected = current.selectedBridgeCameraId
+                ?.takeIf { id -> cameras.any { it.id == id } }
+                ?: cameras.singleOrNull()?.id
+            current.copy(
+                bridgeCameras = cameras,
+                selectedBridgeCameraId = selected,
+            )
+        }
+    }
+
+    fun connectBridge() = runCamera(CameraOperation.CONNECT) {
+        stopLiveViewLoop()
+        resetFrameMetrics()
+        _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+        val state = _uiState.value
+        val session = repository.connectBridge(
+            baseUrl = state.bridgeBaseUrl,
+            token = state.bridgeToken,
+            cameraId = state.selectedBridgeCameraId,
+            request = LiveViewRequest(
+                fps = state.liveViewFrameRateFps,
+                size = state.liveViewSize,
+            ),
+        )
+        applyConnectedSession(session)
+    }
+
     private suspend fun applyConnectedSession(session: CameraSession) {
         val supportedFps = _uiState.value.liveViewFrameRateFps.coerceIn(
             session.capabilities.liveView.minFps,
@@ -184,6 +263,7 @@ class CameraViewModel(
                 liveViewFrameUrl = session.liveViewFrameUrl,
                 liveViewBitmap = null,
                 liveViewFrameRateFps = supportedFps,
+                liveViewSize = session.liveViewRequest.size,
             )
         }
         if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
@@ -198,6 +278,8 @@ class CameraViewModel(
             .edit()
             .putString(KEY_BASE_URL, state.baseUrl)
             .putString(KEY_USERNAME, state.username)
+            .putString(KEY_BRIDGE_BASE_URL, state.bridgeBaseUrl)
+            .putString(KEY_CONNECTION_TARGET, state.connectionTarget.name)
             .apply()
     }
 
@@ -746,6 +828,8 @@ class CameraViewModel(
         const val PREFERENCES_NAME = "camera_connection"
         const val KEY_BASE_URL = "base_url"
         const val KEY_USERNAME = "username"
+        const val KEY_BRIDGE_BASE_URL = "bridge_base_url"
+        const val KEY_CONNECTION_TARGET = "connection_target"
         const val CAPTURE_FLASH_MILLIS = 120L
         const val FOCUS_FEEDBACK_MILLIS = 1_200L
         const val FPS_WINDOW_SIZE = 30

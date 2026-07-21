@@ -40,6 +40,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 - iOS should start with CCAPI/Wi-Fi using the same command and capability vocabulary; iOS USB/PTP remains research until platform constraints are proven.
 - PC should start as a desktop bridge service. The bridge exposes the shared open protocol while internally using libgphoto2 or an optional user-installed Canon EDSDK adapter.
 - The first bridge implementation is executable under `bridge/`: FastAPI owns auth/session/HTTP concerns, while `GPhoto2Engine` maps only camera-advertised CLI abilities and configuration values into the shared contract.
+- Android's `DesktopBridgeClient` maps that HTTP contract back into `CameraControlBackend`, including memory-only Bearer auth, bridge camera discovery/selection, binary Live View, and streaming media transfers.
 
 ## Backend Rules
 
@@ -56,4 +57,4 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 3. Validate the implemented PTP property descriptors/values and safe writes on R6 Mark III.
 4. Add only those Canon EOS vendor capture and setting operations proven by R6 Mark III traces or authoritative documentation.
 5. Add USB/PTP live view if R6 Mark III exposes compatible Canon vendor operations.
-6. Connect Android to the tested libgphoto2 desktop bridge, validate it on R6 Mark III, then pursue persistent native streaming and an optional EDSDK adapter.
+6. Validate the tested Android-to-libgphoto2 desktop bridge on R6 Mark III, then pursue persistent native streaming and an optional EDSDK adapter.

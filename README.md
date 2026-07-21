@@ -4,7 +4,7 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It is Android-first today, targets Canon EOS R6 Mark III first, and is structured to grow into PC, iOS, and Android clients that share the same camera-control concepts.
 
-The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend behind the same camera core contract, and the first executable PC desktop bridge now exposes a tested HTTP API over the open-source `gphoto2` CLI. Canon EOS vendor controls, physical bridge validation, the Android bridge client, and iOS remain in development.
+The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend and an executable Desktop Bridge client behind the same camera core contract. The PC bridge exposes a tested HTTP API over the open-source `gphoto2` CLI. Canon EOS vendor controls, physical bridge validation, and iOS remain in development.
 
 ## Project Shape
 
@@ -28,6 +28,7 @@ The app currently includes:
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
 - Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, advertised standard still capture, and capability-gated standard property reads/writes
+- Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, Live View, focus drive, and media streaming
 - Live view frame display with auto/manual refresh and FPS control
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
 - REC start/stop
@@ -91,7 +92,7 @@ gphoto2 --auto-detect
 .\.venv\Scripts\open-eos-bridge.exe
 ```
 
-The default service listens only on `127.0.0.1:18181`. A mobile client requires an explicit LAN bind and Bearer token:
+The default service listens only on `127.0.0.1:18181`. The Android connection screen can use `http://10.0.2.2:18181` from an emulator. A physical phone requires an explicit LAN bind and Bearer token:
 
 ```powershell
 $env:OPEN_EOS_BRIDGE_HOST = "0.0.0.0"
@@ -99,7 +100,9 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "replace-with-a-long-random-token"
 .\.venv\Scripts\open-eos-bridge.exe
 ```
 
-The current CLI adapter deliberately advertises at most 5 FPS because each JPEG is a separate `gphoto2 --capture-preview` transaction. A persistent native libgphoto2 stream is a later performance path. The service and command contract are automated-test covered; this repository does not yet claim a physical R6 Mark III bridge pass, and this Windows development host currently has no `gphoto2` executable installed.
+Choose **Desktop bridge** on the Android connection screen, enter the URL and the same token, then scan and select the camera. The token is kept only in process memory and is never persisted or included in diagnostics.
+
+The current CLI adapter deliberately advertises at most 5 FPS because each JPEG is a separate `gphoto2 --capture-preview` transaction. A persistent native libgphoto2 stream is a later performance path. Both service and Android contract paths are automated-test covered; this repository does not yet claim a physical R6 Mark III bridge pass, and this Windows development host currently has no `gphoto2` executable installed.
 
 ## Fake Camera Simulator
 
@@ -134,7 +137,7 @@ Useful endpoints:
 
 - Keep CCAPI stable for R6 Mark III wireless control.
 - Validate the Android USB/PTP session, storage, media, capture, and standard property paths on R6 Mark III, then add only the Canon vendor controls required to fill measured gaps.
-- Connect the Android and future PC UI to the implemented desktop bridge, validate its libgphoto2 path on R6 Mark III, and retain Canon EDSDK as an optional user-installed adapter.
+- Validate the implemented Android-to-Desktop-Bridge libgphoto2 path on R6 Mark III, add a future PC UI, and retain Canon EDSDK as an optional user-installed adapter.
 - Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
 
 See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/android-usb-ptp.md](docs/android-usb-ptp.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), and [docs/reference-projects.md](docs/reference-projects.md).

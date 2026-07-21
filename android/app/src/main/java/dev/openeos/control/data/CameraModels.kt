@@ -226,6 +226,9 @@ data class CameraInfo(
     val model: String,
     val serial: String,
     val api: String,
+    val manufacturer: String? = null,
+    val deviceVersion: String? = null,
+    val engineVersion: String? = null,
 )
 
 data class ExposureState(
@@ -277,6 +280,12 @@ data class FocusResult(
     val ok: Boolean,
     val x: Double,
     val y: Double,
+)
+
+data class FocusDriveResult(
+    val ok: Boolean,
+    val direction: FocusDriveDirection,
+    val step: FocusDriveStep,
 )
 
 data class CameraMediaItem(

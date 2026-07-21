@@ -11,6 +11,7 @@ import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraTransport
+import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.UsbPtpDiagnostics
 
@@ -22,9 +23,11 @@ enum class UiMode { CONTROL, MEDIA, DEBUG }
 
 enum class CaptureMode { PHOTO, VIDEO }
 
+enum class ConnectionTarget { CCAPI, DESKTOP_BRIDGE }
+
 enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MORE, LANGUAGE }
 
-enum class CameraOperation { CONNECT, STATUS, SETTING, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB }
+enum class CameraOperation { CONNECT, STATUS, SETTING, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
 
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,
@@ -39,9 +42,14 @@ enum class CaptureFeedback { SUCCESS }
 enum class FocusFeedback { FOCUSING, SUCCESS, FAILURE }
 
 data class CameraUiState(
+    val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
     val username: String = "",
     val password: String = "",
+    val bridgeBaseUrl: String = CameraRepository.DEFAULT_DESKTOP_BRIDGE_URL,
+    val bridgeToken: String = "",
+    val bridgeCameras: List<DesktopBridgeCamera> = emptyList(),
+    val selectedBridgeCameraId: String? = null,
     val previewMode: Boolean = false,
     val transport: CameraTransport? = null,
     val info: CameraInfo? = null,

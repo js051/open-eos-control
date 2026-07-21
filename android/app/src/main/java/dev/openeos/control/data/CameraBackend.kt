@@ -43,6 +43,9 @@ sealed interface CameraConnection {
 
     data class DesktopBridge(
         val baseUrl: String,
+        val token: String = "",
+        val cameraId: String? = null,
+        val profileHint: String? = CameraProfile.R6_MARK_III.modelName,
         override val platform: CameraHostPlatform = CameraHostPlatform.UNKNOWN,
     ) : CameraConnection {
         override val transport: CameraTransport = CameraTransport.DESKTOP_BRIDGE
@@ -70,7 +73,10 @@ interface CameraControlBackend {
     suspend fun tapFocus(x: Double, y: Double): FocusResult
     suspend fun captureStill(): CameraStatus = unsupported(CameraFeature.STILL_CAPTURE)
     suspend fun halfPressShutter(): CameraStatus = unsupported(CameraFeature.SHUTTER_HALF_PRESS)
-    suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusResult = unsupported(CameraFeature.FOCUS_DRIVE)
+    suspend fun driveFocus(
+        direction: FocusDriveDirection,
+        step: FocusDriveStep,
+    ): FocusDriveResult = unsupported(CameraFeature.FOCUS_DRIVE)
     suspend fun listMedia(): List<CameraMediaItem> = unsupported(CameraFeature.MEDIA_BROWSER)
     suspend fun downloadMedia(
         item: CameraMediaItem,
@@ -140,6 +146,73 @@ class CcapiCameraBackend(
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
 
     override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame = client.liveViewFrame(cacheKey, request)
+}
+
+class DesktopBridgeCameraBackend(
+    override val connection: CameraConnection.DesktopBridge,
+    httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
+) : CameraControlBackend {
+    private val httpTransport = httpTransportFactory.create(connection.baseUrl)
+    private val client = DesktopBridgeClient(
+        baseUrl = connection.baseUrl,
+        httpClient = httpTransport.client,
+        token = connection.token,
+        cameraId = connection.cameraId,
+        profileHint = connection.profileHint,
+    )
+
+    override val transport: CameraTransport = CameraTransport.DESKTOP_BRIDGE
+
+    override val prefersBitmapLiveViewFrames: Boolean = true
+
+    override val networkDiagnostics: CameraNetworkDiagnostics = httpTransport.diagnostics
+
+    override suspend fun initialize() = client.initialize()
+
+    override suspend fun close() = client.close()
+
+    override suspend fun info(): CameraInfo = client.info()
+
+    override suspend fun status(): CameraStatus = client.status()
+
+    override suspend fun capabilities(): CameraCapabilities = client.capabilities()
+
+    override suspend fun startLiveView(request: LiveViewRequest) = client.startLiveView(request)
+
+    override suspend fun stopLiveView() = client.stopLiveView()
+
+    override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus =
+        client.setExposure(iso = iso, shutter = shutter, aperture = aperture)
+
+    override suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
+
+    override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+
+    override suspend fun startRecording(): CameraStatus = client.startRecording()
+
+    override suspend fun stopRecording(): CameraStatus = client.stopRecording()
+
+    override suspend fun tapFocus(x: Double, y: Double): FocusResult = client.tapFocus(x, y)
+
+    override suspend fun captureStill(): CameraStatus = client.captureStill()
+
+    override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
+
+    override suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusDriveResult =
+        client.driveFocus(direction, step)
+
+    override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
+
+    override suspend fun downloadMedia(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
+
+    override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey)
+
+    override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame =
+        client.liveViewFrame(cacheKey)
 }
 
 class PlannedCameraBackend(
@@ -231,8 +304,19 @@ class CameraBackendFactory(
             is CameraConnection.AndroidUsbPtp -> ptpTransportFactory
                 ?.let { UsbPtpCameraBackend(connection, it) }
                 ?: PlannedCameraBackend(connection)
-            is CameraConnection.DesktopBridge -> PlannedCameraBackend(connection)
+            is CameraConnection.DesktopBridge -> DesktopBridgeCameraBackend(connection, httpTransportFactory)
         }
+
+    suspend fun discoverDesktopBridge(connection: CameraConnection.DesktopBridge): List<DesktopBridgeCamera> {
+        val httpTransport = httpTransportFactory.create(connection.baseUrl)
+        return DesktopBridgeClient(
+            baseUrl = connection.baseUrl,
+            httpClient = httpTransport.client,
+            token = connection.token,
+            cameraId = connection.cameraId,
+            profileHint = connection.profileHint,
+        ).discoverCameras()
+    }
 }
 
 enum class FocusDriveDirection {

@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraNetworkRouting
 import dev.openeos.control.data.CameraStatus
@@ -21,7 +22,7 @@ class DiagnosticsTest {
     @Test
     fun diagnosticReportNeverIncludesCredentials() {
         val state = CameraUiState(
-            baseUrl = "https://camera-user:secret@192.168.1.2:443",
+            baseUrl = "https://camera-user:secret@192.168.1.2:443?access_token=query-secret",
             username = "camera-user",
             password = "secret",
             liveViewDiagnostics = LiveViewDiagnostics(sourceUrl = "https://camera-user:secret@192.168.1.2/frame"),
@@ -32,6 +33,7 @@ class DiagnosticsTest {
 
         assertFalse(report.contains("secret"))
         assertFalse(report.contains("camera-user"))
+        assertFalse(report.contains("query-secret"))
         assertFalse(report.contains("Basic"))
         assertTrue(report.contains("192.168.1.2"))
     }
@@ -82,6 +84,35 @@ class DiagnosticsTest {
         assertTrue(report.contains("baseUrl=not-applicable"))
         assertTrue(report.contains("transportDetails={\"kind\":\"ptp-usb\""))
         assertFalse(report.contains("192.168.1.2"))
+    }
+
+    @Test
+    fun bridgeDiagnosticUsesBridgeUrlAndRedactsBearerToken() {
+        val report = buildDiagnosticReport(
+            CameraUiState(
+                baseUrl = "http://192.168.1.2:8080",
+                bridgeBaseUrl = "http://10.0.2.2:18181",
+                bridgeToken = "bridge-super-secret",
+                transport = CameraTransport.DESKTOP_BRIDGE,
+                info = CameraInfo(
+                    connected = true,
+                    model = "Canon EOS R6 Mark III",
+                    serial = "test",
+                    api = "desktop-bridge/v1/libgphoto2",
+                    manufacturer = "Canon.Inc",
+                    deviceVersion = "3-1.0.0",
+                    engineVersion = "gphoto2 2.5.33",
+                ),
+                error = "Authorization: Bearer bridge-super-secret",
+            )
+        )
+
+        assertTrue(report.contains("transport=DESKTOP_BRIDGE"))
+        assertTrue(report.contains("baseUrl=http://10.0.2.2:18181"))
+        assertFalse(report.contains("192.168.1.2"))
+        assertFalse(report.contains("bridge-super-secret"))
+        assertFalse(report.contains("Bearer"))
+        assertTrue(report.contains("engineVersion=gphoto2 2.5.33"))
     }
 
     @Test

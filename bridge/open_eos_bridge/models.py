@@ -171,6 +171,11 @@ class FocusDriveRequest(ApiModel):
     step: str
 
 
+class TapFocusRequest(ApiModel):
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+
+
 class FocusResult(ApiModel):
     accepted: bool
     direction: str | None = None

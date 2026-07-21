@@ -1,7 +1,9 @@
 <resources>
     <string name="app_name">Open EOS Control</string>
     <string name="connect_title">Connect your EOS</string>
-    <string name="connect_subtitle">Choose a network preset or connect a USB camera.</string>
+    <string name="connect_subtitle">Connect directly, through a desktop bridge, or over USB.</string>
+    <string name="direct_camera">Direct camera</string>
+    <string name="desktop_bridge">Desktop bridge</string>
     <string name="preset_http">HTTP</string>
     <string name="preset_https">HTTPS</string>
     <string name="preset_simulator">Simulator</string>
@@ -11,6 +13,13 @@
     <string name="password">Password</string>
     <string name="connect">Connect</string>
     <string name="connecting">Connecting&#8230;</string>
+    <string name="desktop_bridge_hint">Run Open EOS Bridge on the computer attached to the camera. LAN access requires the same Bearer token configured on that computer.</string>
+    <string name="desktop_bridge_url">Desktop Bridge URL</string>
+    <string name="desktop_bridge_token">Bearer token</string>
+    <string name="desktop_bridge_token_hint">Kept only until the app process closes; never saved.</string>
+    <string name="scan_desktop_bridge">Scan bridge cameras</string>
+    <string name="scanning_desktop_bridge">Scanning&#8230;</string>
+    <string name="connect_desktop_bridge">Connect through desktop</string>
     <string name="usb_camera">USB camera</string>
     <string name="usb_scan">Scan USB</string>
     <plurals name="usb_devices_found">
@@ -67,6 +76,9 @@
     <string name="camera_profile">Camera profile</string>
     <string name="transport">Transport</string>
     <string name="api_version">API</string>
+    <string name="manufacturer">Manufacturer</string>
+    <string name="device_version">Camera version</string>
+    <string name="engine_version">Engine version</string>
     <string name="supported_features">Supported features</string>
     <string name="planned_features">Planned features</string>
     <string name="battery_raw">Battery raw JSON</string>

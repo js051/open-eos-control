@@ -13,13 +13,17 @@ fun rollingFps(frameTimesMillis: List<Long>): Double {
 }
 
 fun buildDiagnosticReport(state: CameraUiState): String {
+    val activeBaseUrl = when (state.transport) {
+        CameraTransport.DESKTOP_BRIDGE -> state.bridgeBaseUrl
+        else -> state.baseUrl
+    }
     val safeUrl = if (state.transport == CameraTransport.USB_PTP) {
         "not-applicable"
     } else {
         runCatching {
-            val uri = URI(state.baseUrl)
-            URI(uri.scheme, null, uri.host, uri.port, uri.path, uri.query, uri.fragment).toString()
-        }.getOrDefault(redactDiagnosticText(state.baseUrl, state))
+            val uri = URI(activeBaseUrl)
+            URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toString()
+        }.getOrDefault(redactDiagnosticText(activeBaseUrl, state))
     }
     val supported = state.capabilities?.matrix?.supported.orEmpty()
         .sortedBy(CameraFeature::name)
@@ -37,6 +41,9 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine("transport=${if (state.previewMode) "OFFLINE_PREVIEW" else state.transport?.name ?: "disconnected"}")
         appendLine("baseUrl=$safeUrl")
         appendLine("api=${state.info?.api ?: "unknown"}")
+        appendLine("manufacturer=${state.info?.manufacturer ?: "unknown"}")
+        appendLine("deviceVersion=${state.info?.deviceVersion ?: "unknown"}")
+        appendLine("engineVersion=${state.info?.engineVersion ?: "unknown"}")
         appendLine("cameraRoute=${network.routing.name}")
         appendLine("cameraNetworkHandle=${network.networkHandle ?: "none"}")
         appendLine("cameraInterface=${network.interfaceName ?: "none"}")
@@ -66,5 +73,6 @@ private fun redactDiagnosticText(value: String, state: CameraUiState): String {
         .replace(Regex("(?i)(authorization\\s*[:=]\\s*)([^\\r\\n,]+)"), "\$1[redacted]")
         .replace(Regex("(https?://)[^/@\\s]+@"), "\$1")
     if (state.password.isNotBlank()) redacted = redacted.replace(state.password, "[redacted]")
+    if (state.bridgeToken.isNotBlank()) redacted = redacted.replace(state.bridgeToken, "[redacted]")
     return redacted
 }

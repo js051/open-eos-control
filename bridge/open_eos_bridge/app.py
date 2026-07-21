@@ -31,6 +31,7 @@ from .models import (
     SessionCreated,
     SessionCreateRequest,
     SettingUpdate,
+    TapFocusRequest,
 )
 from .sessions import SessionManager
 
@@ -164,7 +165,8 @@ def create_app(*, engine: CameraEngine | None = None, token: str | None = None) 
         return manager.get(session_id).stop_recording()
 
     @router.post("/session/{session_id}/focus/tap", response_model=FocusResult)
-    def tap_focus(session_id: str) -> FocusResult:
+    def tap_focus(session_id: str, payload: TapFocusRequest) -> FocusResult:
+        del payload
         session = manager.get(session_id)
         raise unsupported(
             CameraFeature.TAP_FOCUS.value,

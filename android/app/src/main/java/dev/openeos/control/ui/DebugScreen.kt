@@ -68,6 +68,9 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
                     if (state.previewMode) stringResource(R.string.offline_preview) else state.transport?.let { transportLabel(it) } ?: unknown,
                 )
                 DebugValue(stringResource(R.string.api_version), state.info?.api ?: unknown)
+                DebugValue(stringResource(R.string.manufacturer), state.info?.manufacturer ?: unavailable)
+                DebugValue(stringResource(R.string.device_version), state.info?.deviceVersion ?: unavailable)
+                DebugValue(stringResource(R.string.engine_version), state.info?.engineVersion ?: unavailable)
                 DebugValue(stringResource(R.string.last_error), state.error ?: none, warning = state.error != null)
             }
             DebugSection(stringResource(R.string.ccapi)) {
