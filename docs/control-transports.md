@@ -22,12 +22,12 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Connection: Android USB host/OTG to camera USB.
 - Current implementation: enumerate Android USB devices, request permission, claim a `06/01/01` Still Image interface, use buffered bulk transfers, open/close a PTP session, read DeviceInfo/storage/property descriptors and values, perform safe advertised standard property writes, list object metadata, and stream object downloads to Android SAF destinations.
 - Standard still capture is enabled only when DeviceInfo advertises `InitiateCapture (0x100E)`. A successful response is reported as command acceptance; the physical result still needs an R6 Mark III validation record.
-- Standard property controls are enabled only for writable camera-advertised descriptors with bounded options; the physical values and required Canon EOS vendor gaps still need an R6 Mark III validation record.
+- Standard property controls are enabled only for writable camera-advertised descriptors with bounded options. Canon ISO/Tv/Av/WB controls separately require `0xC189/0xC18A` event state and use only camera-advertised choices with `SetDevicePropValueEx`; both paths still need an R6 Mark III validation record.
 - Canon still capture and half-press require the full remote/event operation set. Capture is not reported as success until a captured-object event arrives; press/release commands are balanced on failure paths.
 - Canon manual focus uses the advertised `DriveLens` operation with Near/Far steps 1-3. Canon JPEG Live View enables EVF mode/output, polls `GetViewFinderData`, and parses only validated JPEG block types.
 - The Canon mappings follow a pinned libgphoto2 revision and are test-covered. They remain in device-validation status until exercised and recorded on the physical R6 Mark III.
 - Next milestone: validate the standard and Canon paths on the camera, then map only measured property gaps.
-- Research track: USB movie control, Touch AF and Canon vendor exposure/settings. No active controls are exposed without proven state and value semantics.
+- Research track: USB movie control, Touch AF and Canon vendor settings beyond core exposure. No active controls are exposed without proven state and value semantics.
 - Tradeoffs: best pure phone-to-camera wired path, but it requires a real PTP engine plus Canon vendor-extension testing.
 
 ### Desktop bridge
@@ -63,8 +63,8 @@ Each backend should map into this surface:
 
 1. Keep CCAPI stable and improve diagnostics.
 2. Validate the implemented Android USB/PTP session, DeviceInfo, storage, media, download, standard properties, and conditional standard capture paths on EOS R6 Mark III.
-3. Validate the implemented Canon EOS remote release, half-press, manual focus drive, and JPEG Live View paths.
-4. Record the R6 Mark III vendor property/event gaps and add only mappings supported by reliable evidence.
+3. Validate the implemented Canon EOS remote release, half-press, ISO/Tv/Av/WB, manual focus drive, and JPEG Live View paths.
+4. Record the remaining R6 Mark III vendor property/event gaps and add only mappings supported by reliable evidence.
 5. Prove USB movie and Touch AF semantics before exposing those controls.
 6. Validate the implemented Android-to-desktop bridge path with EOS R6 Mark III.
 7. Replace one-shot CLI preview with a persistent native libgphoto2 stream where it materially improves measured performance.

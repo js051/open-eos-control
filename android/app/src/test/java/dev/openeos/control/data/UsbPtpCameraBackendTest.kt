@@ -123,6 +123,8 @@ class UsbPtpCameraBackendTest {
 
         backend.initialize()
         val capabilities = backend.capabilities()
+        val exposureStatus = backend.setExposure(iso = "800", shutter = "1/50", aperture = "4")
+        val whiteBalanceStatus = backend.setWhiteBalance("Daylight")
         backend.startLiveView(LiveViewRequest(fps = 30, size = LiveViewSize.MEDIUM))
         val frame = backend.liveViewFrame(cacheKey = 27)
         backend.halfPressShutter()
@@ -136,8 +138,19 @@ class UsbPtpCameraBackendTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
         assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.WHITE_BALANCE_CONTROL))
         assertFalse(capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
         assertFalse(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
+        assertEquals(listOf("100", "400", "800"), capabilities.iso)
+        assertEquals(listOf("1/30", "1/50"), capabilities.shutter)
+        assertEquals(listOf("2.8", "4"), capabilities.aperture)
+        assertEquals(listOf("Auto", "Daylight", "Shadow"), capabilities.whiteBalance)
+        assertEquals("800", exposureStatus.exposure.iso)
+        assertEquals("1/50", exposureStatus.exposure.shutter)
+        assertEquals("4", exposureStatus.exposure.aperture)
+        assertEquals("Daylight", whiteBalanceStatus.exposure.whiteBalance)
+        assertTrue(whiteBalanceStatus.rawTransportJson.contains("\"canonVendorProperties\""))
         assertEquals(listOf(LiveViewSource.USB_PTP_PREVIEW), capabilities.liveView.sources)
         assertEquals(30, capabilities.liveView.maxFps)
         assertArrayEquals(CANON_LIVE_VIEW_JPEG, frame.bytes)
@@ -188,6 +201,26 @@ class UsbPtpCameraBackendTest {
         assertTrue(
             propertyWrites.any {
                 it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 0))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.ISO_SPEED, 0x60))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.SHUTTER_SPEED, 0x65))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.APERTURE, 0x28))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint8PropertyPayload(CanonEosPropertyCode.WHITE_BALANCE, 1))
             }
         )
         assertTrue(transport.closed)
@@ -337,6 +370,7 @@ class UsbPtpCameraBackendTest {
         var closed = false
         private var pendingPropertyWrite = false
         private var captureEventPending = false
+        private var initialPropertyEventsPending = true
 
         override suspend fun send(container: PtpContainer) {
             sentContainers += container
@@ -362,6 +396,9 @@ class UsbPtpCameraBackendTest {
 
                 CanonEosOperationCode.GET_EVENT -> {
                     val payload = when {
+                        initialPropertyEventsPending -> canonExposurePropertyEvents().also {
+                            initialPropertyEventsPending = false
+                        }
                         !captureEventPending -> eosBlock(0, byteArrayOf())
                         malformedCaptureEvent -> byteArrayOf(40, 0, 0, 0, 0x81.toByte(), 0xC1.toByte(), 0, 0)
                         else -> eosBlock(CanonEosEventCode.OBJECT_ADDED_EX, ByteArray(40)) + eosBlock(0, byteArrayOf())
@@ -430,6 +467,35 @@ class UsbPtpCameraBackendTest {
         repeat(4) { index -> block[4 + index] = (type ushr (index * 8)).toByte() }
         data.copyInto(block, destinationOffset = 8)
     }
+
+    private fun canonExposurePropertyEvents(): ByteArray =
+        eosPropertyValue(CanonEosPropertyCode.ISO_SPEED, 0x58) +
+            eosAvailableValues(CanonEosPropertyCode.ISO_SPEED, 0x48, 0x58, 0x60) +
+            eosPropertyValue(CanonEosPropertyCode.SHUTTER_SPEED, 0x60) +
+            eosAvailableValues(CanonEosPropertyCode.SHUTTER_SPEED, 0x60, 0x65) +
+            eosPropertyValue(CanonEosPropertyCode.APERTURE, 0x20) +
+            eosAvailableValues(CanonEosPropertyCode.APERTURE, 0x20, 0x28) +
+            eosPropertyValue(CanonEosPropertyCode.WHITE_BALANCE, 0) +
+            eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE, 0, 1, 8) +
+            eosBlock(0, byteArrayOf())
+
+    private fun eosPropertyValue(propertyCode: Int, value: Int): ByteArray = eosBlock(
+        CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+        Writer().apply {
+            u32(propertyCode)
+            u32(value)
+        }.bytes(),
+    )
+
+    private fun eosAvailableValues(propertyCode: Int, vararg values: Int): ByteArray = eosBlock(
+        CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+        Writer().apply {
+            u32(propertyCode)
+            u32(3)
+            u32(values.size)
+            values.forEach(::u32)
+        }.bytes(),
+    )
 
     private class Writer {
         private val output = ByteArrayOutputStream()

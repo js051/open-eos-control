@@ -24,6 +24,9 @@ class UsbPtpCameraBackend(
     private var lastPropertyRefreshAtMillis = 0L
     private var canonRemotePrepared = false
     private var canonLiveViewActive = false
+    private val canonProperties = mutableMapOf<Int, CanonEosPropertyState>()
+    private var canonPropertyDiscoveryAttempted = false
+    private var canonPropertyError: String? = null
 
     override suspend fun initialize() {
         if (session != null) return
@@ -62,6 +65,9 @@ class UsbPtpCameraBackend(
         lastPropertyRefreshAtMillis = 0L
         canonRemotePrepared = false
         canonLiveViewActive = false
+        synchronized(canonProperties) { canonProperties.clear() }
+        canonPropertyDiscoveryAttempted = false
+        canonPropertyError = null
         current?.shutdown()
     }
 
@@ -82,6 +88,7 @@ class UsbPtpCameraBackend(
 
     override suspend fun status(): CameraStatus {
         val info = requireDeviceInfo()
+        refreshCanonPropertyState(info)
         refreshPropertyValuesIfNeeded(info)
         val storageResult = if (supportsStorage(info)) runCatching { readStorageSnapshot() } else null
         storageSnapshot = storageResult?.getOrDefault(emptyList()).orEmpty()
@@ -99,10 +106,16 @@ class UsbPtpCameraBackend(
             mediaAvailable = storageSnapshot.isNotEmpty(),
             remainingMinutes = null,
             exposure = ExposureState(
-                iso = propertyDisplay(PtpDevicePropertyCode.EXPOSURE_INDEX),
-                shutter = propertyDisplay(PtpDevicePropertyCode.EXPOSURE_TIME),
-                aperture = propertyDisplay(PtpDevicePropertyCode.F_NUMBER),
-                whiteBalance = propertyDisplay(PtpDevicePropertyCode.WHITE_BALANCE),
+                iso = corePropertyDisplay(CanonEosPropertyCode.ISO_SPEED, PtpDevicePropertyCode.EXPOSURE_INDEX),
+                shutter = corePropertyDisplay(
+                    CanonEosPropertyCode.SHUTTER_SPEED,
+                    PtpDevicePropertyCode.EXPOSURE_TIME,
+                ),
+                aperture = corePropertyDisplay(CanonEosPropertyCode.APERTURE, PtpDevicePropertyCode.F_NUMBER),
+                whiteBalance = corePropertyDisplay(
+                    CanonEosPropertyCode.WHITE_BALANCE,
+                    PtpDevicePropertyCode.WHITE_BALANCE,
+                ),
             ),
             rawBatteryJson = batteryPropertyJson(batteryLevel),
             rawStorageJson = storageError?.let(::storageErrorJson) ?: storageSnapshot.toStorageJson(),
@@ -112,11 +125,28 @@ class UsbPtpCameraBackend(
 
     override suspend fun capabilities(): CameraCapabilities {
         val info = requireDeviceInfo()
+        refreshCanonPropertyState(info)
         val canSetProperties = info.supports(PtpOperationCode.SET_DEVICE_PROP_VALUE)
-        val iso = writablePropertyOptions(PtpDevicePropertyCode.EXPOSURE_INDEX, canSetProperties)
-        val shutter = writablePropertyOptions(PtpDevicePropertyCode.EXPOSURE_TIME, canSetProperties)
-        val aperture = writablePropertyOptions(PtpDevicePropertyCode.F_NUMBER, canSetProperties)
-        val whiteBalance = writablePropertyOptions(PtpDevicePropertyCode.WHITE_BALANCE, canSetProperties)
+        val iso = corePropertyOptions(
+            CanonEosPropertyCode.ISO_SPEED,
+            PtpDevicePropertyCode.EXPOSURE_INDEX,
+            canSetProperties,
+        )
+        val shutter = corePropertyOptions(
+            CanonEosPropertyCode.SHUTTER_SPEED,
+            PtpDevicePropertyCode.EXPOSURE_TIME,
+            canSetProperties,
+        )
+        val aperture = corePropertyOptions(
+            CanonEosPropertyCode.APERTURE,
+            PtpDevicePropertyCode.F_NUMBER,
+            canSetProperties,
+        )
+        val whiteBalance = corePropertyOptions(
+            CanonEosPropertyCode.WHITE_BALANCE,
+            PtpDevicePropertyCode.WHITE_BALANCE,
+            canSetProperties,
+        )
         val advancedSettings = if (canSetProperties) advancedPropertyControls() else emptyList()
         val supportsCanonRelease = CanonEosPtp.supportsRemoteRelease(info)
         val supportsCanonLiveView = CanonEosPtp.supportsLiveView(info)
@@ -160,10 +190,10 @@ class UsbPtpCameraBackend(
             CameraFeature.MEDIA_DOWNLOAD,
         )
         return CameraCapabilities(
-            iso = iso.map(PtpPropertyOption::label),
-            shutter = shutter.map(PtpPropertyOption::label),
-            aperture = aperture.map(PtpPropertyOption::label),
-            whiteBalance = whiteBalance.map(PtpPropertyOption::label),
+            iso = iso,
+            shutter = shutter,
+            aperture = aperture,
+            whiteBalance = whiteBalance,
             advancedSettings = advancedSettings,
             matrix = CapabilityMatrix(
                 supported = supported,
@@ -180,7 +210,7 @@ class UsbPtpCameraBackend(
                     CameraFeature.MEDIA_DOWNLOAD to
                         "Uses standard GetObject with bounded USB reads and streaming output.",
                     CameraFeature.EXPOSURE_CONTROL to
-                        "Standard properties are enabled only when DeviceInfo and writable DevicePropDesc datasets advertise them; Canon vendor properties remain unverified.",
+                        "Uses writable standard PTP descriptors or Canon EOS PropValueChanged/AvailListChanged events with SetDevicePropValueEx.",
                     CameraFeature.LIVE_VIEW to
                         "Uses Canon EOS GetViewFinderData and extracts the documented type 1/11 JPEG block.",
                 ),
@@ -259,14 +289,40 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus {
-        iso?.let { setProperty(PtpDevicePropertyCode.EXPOSURE_INDEX, it, CameraFeature.EXPOSURE_CONTROL) }
-        shutter?.let { setProperty(PtpDevicePropertyCode.EXPOSURE_TIME, it, CameraFeature.EXPOSURE_CONTROL) }
-        aperture?.let { setProperty(PtpDevicePropertyCode.F_NUMBER, it, CameraFeature.EXPOSURE_CONTROL) }
+        iso?.let {
+            setCoreProperty(
+                CanonEosPropertyCode.ISO_SPEED,
+                PtpDevicePropertyCode.EXPOSURE_INDEX,
+                it,
+                CameraFeature.EXPOSURE_CONTROL,
+            )
+        }
+        shutter?.let {
+            setCoreProperty(
+                CanonEosPropertyCode.SHUTTER_SPEED,
+                PtpDevicePropertyCode.EXPOSURE_TIME,
+                it,
+                CameraFeature.EXPOSURE_CONTROL,
+            )
+        }
+        aperture?.let {
+            setCoreProperty(
+                CanonEosPropertyCode.APERTURE,
+                PtpDevicePropertyCode.F_NUMBER,
+                it,
+                CameraFeature.EXPOSURE_CONTROL,
+            )
+        }
         return status()
     }
 
     override suspend fun setWhiteBalance(value: String): CameraStatus {
-        setProperty(PtpDevicePropertyCode.WHITE_BALANCE, value, CameraFeature.WHITE_BALANCE_CONTROL)
+        setCoreProperty(
+            CanonEosPropertyCode.WHITE_BALANCE,
+            PtpDevicePropertyCode.WHITE_BALANCE,
+            value,
+            CameraFeature.WHITE_BALANCE_CONTROL,
+        )
         return status()
     }
 
@@ -395,7 +451,57 @@ class UsbPtpCameraBackend(
     }
 
     private suspend fun drainCanonEvents(): ByteArray =
-        requireSession().executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+        requireSession().executeDataInOperation(CanonEosOperationCode.GET_EVENT).also(::applyCanonPropertyUpdates)
+
+    private suspend fun refreshCanonPropertyState(info: PtpDeviceInfo) {
+        if (!CanonEosPtp.supportsPropertyControl(info)) return
+        if (!canonRemotePrepared) {
+            try {
+                ensureCanonRemoteMode()
+            } catch (exception: Exception) {
+                canonPropertyError = exception.message ?: exception.javaClass.simpleName
+                return
+            }
+        }
+
+        try {
+            if (!canonPropertyDiscoveryAttempted) {
+                canonPropertyDiscoveryAttempted = true
+                for (attempt in 1 until CANON_PROPERTY_DISCOVERY_ATTEMPTS) {
+                    if (hasCanonCorePropertyOptions()) break
+                    delay(CANON_PROPERTY_DISCOVERY_RETRY_MILLIS)
+                    drainCanonEvents()
+                }
+            } else {
+                drainCanonEvents()
+            }
+            canonPropertyError = if (hasCanonCorePropertyOptions()) {
+                null
+            } else {
+                "Canon EOS remote mode returned no supported exposure property events."
+            }
+        } catch (exception: Exception) {
+            canonPropertyError = exception.message ?: exception.javaClass.simpleName
+        }
+    }
+
+    private fun applyCanonPropertyUpdates(payload: ByteArray) {
+        val updates = CanonEosPtp.propertyUpdates(payload)
+        if (updates.isEmpty()) return
+        synchronized(canonProperties) {
+            updates.forEach { update ->
+                val previous = canonProperties[update.propertyCode] ?: CanonEosPropertyState()
+                canonProperties[update.propertyCode] = previous.copy(
+                    currentValue = update.currentValue ?: previous.currentValue,
+                    availableValues = update.availableValues ?: previous.availableValues,
+                )
+            }
+        }
+    }
+
+    private fun hasCanonCorePropertyOptions(): Boolean = synchronized(canonProperties) {
+        canonProperties.values.any { it.availableValues.isNotEmpty() }
+    }
 
     private suspend fun awaitCanonCapturedObject() {
         val deadline = System.currentTimeMillis() + CANON_CAPTURE_EVENT_TIMEOUT_MILLIS
@@ -470,6 +576,32 @@ class UsbPtpCameraBackend(
         lastPropertyRefreshAtMillis = now
     }
 
+    private suspend fun setCoreProperty(
+        canonPropertyCode: Int,
+        standardPropertyCode: Int,
+        label: String,
+        feature: CameraFeature,
+    ) {
+        val canonState = canonPropertyState(canonPropertyCode)
+        if (CanonEosPtp.supportsPropertyControl(requireDeviceInfo()) && canonState.availableValues.isNotEmpty()) {
+            val value = CanonEosPtp.propertyValue(canonPropertyCode, canonState.availableValues, label)
+                ?: throw PtpProtocolException(
+                    "Value '$label' is not advertised for Canon EOS USB property " +
+                        "0x${canonPropertyCode.toString(16).uppercase().padStart(4, '0')}."
+                )
+            ensureCanonRemoteMode()
+            requireSession().executeDataOutOperation(
+                operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                payload = CanonEosPtp.propertyPayload(canonPropertyCode, value),
+            )
+            synchronized(canonProperties) {
+                canonProperties[canonPropertyCode] = canonState.copy(currentValue = value)
+            }
+            return
+        }
+        setProperty(standardPropertyCode, label, feature)
+    }
+
     private suspend fun setProperty(propertyCode: Int, label: String, feature: CameraFeature) {
         val info = requireDeviceInfo()
         if (!info.supports(PtpOperationCode.SET_DEVICE_PROP_VALUE)) unsupported<Unit>(feature)
@@ -492,6 +624,19 @@ class UsbPtpCameraBackend(
         return PtpStandardProperties.options(descriptor)
     }
 
+    private fun corePropertyOptions(
+        canonPropertyCode: Int,
+        standardPropertyCode: Int,
+        canSetStandardProperties: Boolean,
+    ): List<String> {
+        val canonOptions = canonPropertyState(canonPropertyCode).availableValues
+            .let { CanonEosPtp.propertyOptions(canonPropertyCode, it) }
+            .map(CanonEosPropertyOption::label)
+        return canonOptions.ifEmpty {
+            writablePropertyOptions(standardPropertyCode, canSetStandardProperties).map(PtpPropertyOption::label)
+        }
+    }
+
     private fun advancedPropertyControls(): List<CameraSettingControl> =
         PtpStandardProperties.advancedProperties.mapNotNull { spec ->
             val descriptor = propertyDescriptors[spec.propertyCode]?.takeIf { it.writable } ?: return@mapNotNull null
@@ -508,6 +653,15 @@ class UsbPtpCameraBackend(
     private fun propertyDisplay(propertyCode: Int): String = propertyValues[propertyCode]
         ?.let { PtpStandardProperties.format(propertyCode, it) }
         ?: "-"
+
+    private fun corePropertyDisplay(canonPropertyCode: Int, standardPropertyCode: Int): String =
+        canonPropertyState(canonPropertyCode).currentValue
+            ?.let { CanonEosPtp.propertyLabel(canonPropertyCode, it) }
+            ?: propertyDisplay(standardPropertyCode)
+
+    private fun canonPropertyState(propertyCode: Int): CanonEosPropertyState = synchronized(canonProperties) {
+        canonProperties[propertyCode] ?: CanonEosPropertyState()
+    }
 
     private fun batteryPropertyJson(level: Int?): String = JSONObject()
         .put("kind", "ptp-device-property")
@@ -541,12 +695,36 @@ class UsbPtpCameraBackend(
                 )
             }
         }
+        val canonVendorProperties = JSONArray()
+        val canonSnapshot = synchronized(canonProperties) { canonProperties.toSortedMap() }
+        canonSnapshot.forEach { (propertyCode, state) ->
+            canonVendorProperties.put(
+                JSONObject()
+                    .put("code", propertyCode.ptpHexCode())
+                    .put(
+                        "rawValue",
+                        state.currentValue?.let { "0x${it.toString(16).uppercase().padStart(8, '0')}" }
+                            ?: JSONObject.NULL,
+                    )
+                    .put(
+                        "current",
+                        state.currentValue?.let { CanonEosPtp.propertyLabel(propertyCode, it) } ?: JSONObject.NULL,
+                    )
+                    .put("optionCount", state.availableValues.size)
+                    .put(
+                        "options",
+                        JSONArray(CanonEosPtp.propertyOptions(propertyCode, state.availableValues).map { it.label }),
+                    )
+            )
+        }
         return JSONObject()
             .put("kind", "ptp-usb")
             .put("vendorExtensionId", info.vendorExtensionId.toInt().ptpHexCode(8))
             .put("operations", JSONArray(info.operations.sorted().map { it.ptpHexCode() }))
             .put("advertisedDeviceProperties", JSONArray(info.deviceProperties.sorted().map { it.ptpHexCode() }))
             .put("loadedProperties", properties)
+            .put("canonVendorProperties", canonVendorProperties)
+            .apply { canonPropertyError?.let { put("canonPropertyError", it) } }
             .toString()
     }
 
@@ -575,6 +753,11 @@ class UsbPtpCameraBackend(
 
 private fun Int.ptpHexCode(width: Int = 4): String =
     "0x${toUInt().toString(16).uppercase(Locale.ROOT).padStart(width, '0')}"
+
+private data class CanonEosPropertyState(
+    val currentValue: Long? = null,
+    val availableValues: List<Long> = emptyList(),
+)
 
 private fun PtpObjectInfo.toMediaItem(): CameraMediaItem = CameraMediaItem(
     id = "ptp:${handle.toString(16).uppercase(Locale.ROOT).padStart(8, '0')}",
@@ -656,5 +839,7 @@ private fun formatPtpVersion(value: Int): String =
 private const val MAX_USB_MEDIA_ITEMS = 500
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
+private const val CANON_PROPERTY_DISCOVERY_ATTEMPTS = 10
+private const val CANON_PROPERTY_DISCOVERY_RETRY_MILLIS = 50L
 private const val CANON_CAPTURE_EVENT_TIMEOUT_MILLIS = 90_000L
 private const val CANON_LIVE_VIEW_READY_TIMEOUT_MILLIS = 3_000L

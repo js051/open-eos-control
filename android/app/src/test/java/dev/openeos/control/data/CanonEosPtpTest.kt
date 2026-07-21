@@ -52,6 +52,53 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun eosPropertyEventsExposeCurrentValueAndCameraAdvertisedChoices() {
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.ISO_SPEED, 0x58),
+        ) + block(
+            type = CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.ISO_SPEED, 3, 3, 0x48, 0x58, 0x60),
+        ) + block(type = 0, bytes = byteArrayOf())
+
+        val updates = CanonEosPtp.propertyUpdates(payload)
+        val options = CanonEosPtp.propertyOptions(
+            CanonEosPropertyCode.ISO_SPEED,
+            updates.single { it.availableValues != null }.availableValues.orEmpty(),
+        )
+
+        assertEquals(0x58L, updates.single { it.currentValue != null }.currentValue)
+        assertEquals(listOf("100", "400", "800"), options.map(CanonEosPropertyOption::label))
+        assertEquals(0x60L, CanonEosPtp.propertyValue(CanonEosPropertyCode.ISO_SPEED, options.map { it.value }, "800"))
+    }
+
+    @Test(expected = PtpProtocolException::class)
+    fun eosPropertyParserRejectsTruncatedAvailableValueList() {
+        CanonEosPtp.propertyUpdates(
+            block(
+                type = CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+                bytes = u32Fields(CanonEosPropertyCode.APERTURE, 3, 2, 0x20),
+            )
+        )
+    }
+
+    @Test
+    fun corePropertyPayloadUsesTheCanonDataWidth() {
+        assertArrayEquals(
+            CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.SHUTTER_SPEED, 0x65),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.SHUTTER_SPEED, 0x65),
+        )
+        assertArrayEquals(
+            byteArrayOf(
+                0x0C, 0x00, 0x00, 0x00,
+                0x09, 0xD1.toByte(), 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+            ),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.WHITE_BALANCE, 1),
+        )
+    }
+
+    @Test
     fun capabilitiesRequireCanonVendorAndCompleteAdvertisedSequences() {
         val operations = setOf(
             CanonEosOperationCode.SET_REMOTE_MODE,
@@ -68,6 +115,7 @@ class CanonEosPtpTest {
         assertTrue(CanonEosPtp.supportsRemoteRelease(complete))
         assertTrue(CanonEosPtp.supportsLiveView(complete))
         assertTrue(CanonEosPtp.supportsFocusDrive(complete))
+        assertTrue(CanonEosPtp.supportsPropertyControl(complete))
         assertFalse(
             CanonEosPtp.supportsRemoteRelease(
                 deviceInfo(operations - CanonEosOperationCode.REMOTE_RELEASE_OFF)
@@ -87,6 +135,10 @@ class CanonEosPtpTest {
         putU32(block, 0, block.size)
         putU32(block, 4, type)
         bytes.copyInto(block, destinationOffset = 8)
+    }
+
+    private fun u32Fields(vararg values: Int): ByteArray = ByteArray(values.size * 4).also { bytes ->
+        values.forEachIndexed { index, value -> putU32(bytes, index * 4, value) }
     }
 
     private fun putU32(destination: ByteArray, offset: Int, value: Int) {

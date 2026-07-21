@@ -54,6 +54,6 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 
 1. Keep CCAPI stable for R6 Mark III.
 2. Validate the implemented Android USB/PTP session, DeviceInfo, storage, media, conditional standard capture and property paths on R6 Mark III.
-3. Validate the capability-gated Canon EOS remote release, half-press, focus drive and JPEG Live View paths on R6 Mark III.
-4. Record real vendor properties/events and add only setting, movie or Touch AF mappings supported by reliable evidence.
+3. Validate the capability-gated Canon EOS remote release, half-press, ISO/Tv/Av/WB, focus drive and JPEG Live View paths on R6 Mark III.
+4. Record remaining real vendor properties/events and add only setting, movie or Touch AF mappings supported by reliable evidence.
 6. Validate the tested Android-to-libgphoto2 desktop bridge on R6 Mark III, then pursue persistent native streaming and an optional EDSDK adapter.
