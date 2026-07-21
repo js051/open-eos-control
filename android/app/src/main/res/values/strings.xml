@@ -71,6 +71,7 @@
     <string name="planned_features">Planned features</string>
     <string name="battery_raw">Battery raw JSON</string>
     <string name="storage_raw">Storage raw JSON</string>
+    <string name="transport_raw">Transport raw JSON</string>
     <string name="last_error">Last error</string>
     <string name="requested_fps">Requested FPS</string>
     <string name="observed_fps">Observed FPS</string>
@@ -124,6 +125,7 @@
     <string name="setting_af_operation">AF operation</string>
     <string name="setting_drive_mode">Drive mode</string>
     <string name="setting_metering_mode">Metering</string>
+    <string name="setting_flash_mode">Flash mode</string>
     <string name="setting_picture_style">Picture style</string>
     <string name="setting_shooting_mode">Shooting mode</string>
     <string name="setting_image_quality">Image quality</string>

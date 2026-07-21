@@ -36,7 +36,8 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | Android PTP container transport, session and DeviceInfo | Implemented; device validation required | Exact USB packet, buffered reads, transaction sequencing and dataset parsing are unit-tested; record a real R6 Mark III response |
 | Android PTP storage and media | Implemented; device validation required | Standard storage/object operations, bounded listing and streaming `GetObject` are test-covered; validate card behavior and downloads on R6 Mark III |
 | Android PTP standard still capture | Implemented when advertised; device validation required | UI enables capture only when DeviceInfo advertises `InitiateCapture (0x100E)`; record the physical result |
-| Android PTP battery and property control | Planned | Standard property descriptors and Canon EOS vendor properties proven on R6 Mark III |
+| Android PTP battery and standard property control | Implemented when advertised; device validation required | Descriptor/value codecs and command/data writes are unit-tested; record battery, ISO, Tv, Av, WB and any advanced standard properties advertised by R6 Mark III |
+| Android Canon EOS vendor property control | Research | Vendor codes, value mappings and state transitions are proven by authoritative documentation or recorded R6 Mark III traces |
 | Android PTP Live View | Research | Canon vendor operation and frame format proven on R6 Mark III |
 | Desktop Bridge HTTP service | Planned | Executable service passes the documented bridge contract tests |
 | libgphoto2 desktop adapter | Planned | Discovery, capture, settings, Live View and media tested on supported hardware |

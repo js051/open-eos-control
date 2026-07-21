@@ -98,6 +98,11 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
                 )
             }
             DebugSection(stringResource(R.string.usb_ptp)) {
+                DebugValue(
+                    stringResource(R.string.transport_raw),
+                    state.status?.rawTransportJson?.ifBlank { unavailable } ?: unavailable,
+                    mono = true,
+                )
                 if (state.usbDiagnostics.devices.isEmpty()) Text(stringResource(R.string.no_usb_devices), color = AppSubtleText)
                 state.usbDiagnostics.devices.forEach { device ->
                     Column(Modifier.fillMaxWidth().background(AppSurfaceHigh, RoundedCornerShape(6.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

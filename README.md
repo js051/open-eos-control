@@ -26,7 +26,7 @@ The app currently includes:
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
-- Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, and advertised standard still capture
+- Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, advertised standard still capture, and capability-gated standard property reads/writes
 - Live view frame display with auto/manual refresh and FPS control
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
 - REC start/stop
@@ -108,7 +108,7 @@ Useful endpoints:
 ## Roadmap
 
 - Keep CCAPI stable for R6 Mark III wireless control.
-- Validate the Android USB/PTP session, storage, media, download, and advertised standard capture paths on R6 Mark III, then add proven property and Canon vendor controls.
+- Validate the Android USB/PTP session, storage, media, capture, and standard property paths on R6 Mark III, then add only the Canon vendor controls required to fill measured gaps.
 - Add a desktop bridge that exposes the same camera core contract while using libgphoto2 or a user-installed Canon EDSDK adapter.
 - Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
 

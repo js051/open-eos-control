@@ -144,6 +144,9 @@ class PtpProtocolTest {
         assertEquals(PtpOperationCode.OPEN_SESSION, exception.operationCode)
         assertEquals(PtpResponseCode.DEVICE_BUSY, exception.responseCode)
         assertTrue(exception.message.orEmpty().contains("DeviceBusy"))
+        assertEquals("DevicePropNotSupported", PtpResponseCode.label(PtpResponseCode.DEVICE_PROP_NOT_SUPPORTED))
+        assertEquals("InvalidDevicePropFormat", PtpResponseCode.label(PtpResponseCode.INVALID_DEVICE_PROP_FORMAT))
+        assertEquals("InvalidDevicePropValue", PtpResponseCode.label(PtpResponseCode.INVALID_DEVICE_PROP_VALUE))
     }
 
     @Test
@@ -172,6 +175,51 @@ class PtpProtocolTest {
         assertEquals(objectBytes.size.toLong() to objectBytes.size.toLong(), progress.last())
         assertEquals(PtpOperationCode.GET_OBJECT, transport.sent[2].code)
         assertArrayEquals(byteArrayOf(0x42, 0, 0, 0), transport.sent[2].payload)
+    }
+
+    @Test
+    fun propertyReadAndWriteUseStandardPtpDataPhases() = runTest {
+        val descriptorPayload = DatasetWriter().apply {
+            u16(PtpDevicePropertyCode.EXPOSURE_INDEX)
+            u16(PtpDataType.UINT16)
+            u8(1)
+            u16(100)
+            u16(400)
+            u8(2)
+            u16(3)
+            u16(100)
+            u16(400)
+            u16(800)
+        }.bytes()
+        val transport = FakePtpTransport(
+            data(PtpOperationCode.GET_DEVICE_INFO, 0, deviceInfoPayload()),
+            ok(0),
+            ok(0),
+            data(PtpOperationCode.GET_DEVICE_PROP_DESC, 1, descriptorPayload),
+            ok(1),
+            data(PtpOperationCode.GET_DEVICE_PROP_VALUE, 2, byteArrayOf(0x20, 0x03)),
+            ok(2),
+            ok(3),
+            ok(4),
+        )
+        val session = PtpSession(transport)
+        session.initialize()
+
+        val descriptor = session.devicePropertyDescriptor(PtpDevicePropertyCode.EXPOSURE_INDEX)
+        val value = session.devicePropertyValue(descriptor.code, descriptor.dataType)
+        session.setDevicePropertyValue(
+            descriptor.code,
+            descriptor.dataType,
+            PtpPropertyValue.Unsigned(800UL),
+        )
+        session.shutdown()
+
+        assertEquals(PtpPropertyValue.Unsigned(800UL), value)
+        assertEquals(PtpContainerType.COMMAND, transport.sent[4].type)
+        assertEquals(PtpContainerType.DATA, transport.sent[5].type)
+        assertEquals(PtpOperationCode.SET_DEVICE_PROP_VALUE, transport.sent[5].code)
+        assertEquals(3L, transport.sent[5].transactionId)
+        assertArrayEquals(byteArrayOf(0x20, 0x03), transport.sent[5].payload)
     }
 
     private class FakePtpTransport(vararg incoming: PtpContainer) : PtpTransport {
@@ -288,6 +336,10 @@ class PtpProtocolTest {
         fun u16(value: Int) {
             output.write(value and 0xFF)
             output.write((value ushr 8) and 0xFF)
+        }
+
+        fun u8(value: Int) {
+            output.write(value and 0xFF)
         }
 
         fun u32(value: Int) = u32(value.toLong())

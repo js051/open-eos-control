@@ -26,7 +26,7 @@ open-eos-control/
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
-- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／下載，以及相機有公告時的標準拍照命令
+- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／下載、相機有公告時的標準拍照命令，以及依能力開放的標準屬性讀寫
 - Live view 畫面，自動/手動更新與 FPS 控制
 - ISO、shutter、aperture、white balance 與動態 advanced settings
 - REC 開始/停止
@@ -108,7 +108,7 @@ http://localhost:18080
 ## Roadmap
 
 - 先把 R6 Mark III 的 CCAPI 無線控制維持穩定。
-- 先在 R6 Mark III 真機驗證已實作的 Android USB/PTP session、儲存卡、媒體下載與相機公告的標準拍照命令，再加入有依據的 property 與 Canon 專有控制。
+- 先在 R6 Mark III 真機驗證已實作的 Android USB/PTP session、儲存卡、媒體下載、拍照與標準屬性路徑，再只針對實測缺口加入有依據的 Canon 專有控制。
 - 加入 desktop bridge，對外使用同一套 camera core contract，內部可接 libgphoto2 或使用者自行安裝的 Canon EDSDK adapter。
 - iOS 先走 CCAPI/Wi-Fi；iOS USB/PTP 先列為研究線。
 

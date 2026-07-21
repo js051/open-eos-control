@@ -8,8 +8,9 @@ The Android wired backend is intentionally split into a standards-based core and
 2. `AndroidUsbPtpTransport` selects a USB Still Image interface with class/subclass/protocol `06/01/01`, requires bulk IN and OUT endpoints, opens the device, and claims the interface.
 3. `PtpSession` sends `GetDeviceInfo`, opens session ID 1, and assigns monotonically increasing transaction IDs to subsequent operations.
 4. The backend maps standard DeviceInfo, storage and object datasets into the shared camera models.
-5. Media downloads use `GetObject` and stream each USB chunk directly to the caller's `OutputStream`.
-6. Disconnect sends `CloseSession` on a best-effort basis and always releases the USB interface and device connection.
+5. Advertised standard device properties are decoded from `GetDevicePropDesc (0x1014)`, refreshed with `GetDevicePropValue (0x1015)`, and written through the command/data/response form of `SetDevicePropValue (0x1016)`.
+6. Media downloads use `GetObject` and stream each USB chunk directly to the caller's `OutputStream`.
+7. Disconnect sends `CloseSession` on a best-effort basis and always releases the USB interface and device connection.
 
 The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PTP header. This supports Android 8.x transfer limits while preserving payload bytes that arrive in the same USB transfer as the header.
 
@@ -20,7 +21,10 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 - Media browsing requires `GetStorageIDs`, `GetObjectHandles (0x1007)`, and `GetObjectInfo (0x1008)`.
 - Media download requires `GetObject (0x1009)`.
 - Still capture requires the camera to advertise standard `InitiateCapture (0x100E)`.
-- Exposure, white balance, focus, movie control, half-press and Live View remain unavailable until the required standard or Canon EOS vendor operations are validated on the target camera.
+- A property is read only when DeviceInfo advertises its code and the descriptor operation. One broken descriptor does not disable the rest of the session.
+- A property control is enabled only when the camera advertises the set operation, marks that descriptor writable, and supplies a bounded enumeration or range. UI labels map back to the exact advertised raw value.
+- Standard battery, ISO/exposure index, exposure time, f-number, white balance, exposure compensation, focus mode, metering, flash, exposure program, drive mode and compression descriptors are recognized. Their actual availability remains camera-dependent.
+- Canon-specific focus, movie control, half-press and Live View remain unavailable until the required EOS vendor operations are validated on the target camera.
 
 ## Evidence
 
@@ -37,6 +41,8 @@ These references establish the transport and standard operation shape. They do n
 - Record VID/PID, interface ID, bulk endpoint addresses and Android permission state.
 - Save the redacted diagnostic report after session open.
 - Confirm manufacturer, model, serial, PTP version and advertised operation codes.
+- Save the advertised property codes and loaded descriptor diagnostics; compare battery, ISO, Tv, Av and WB against the camera display.
+- Change only values advertised by writable descriptors and confirm both the camera state and the next property read.
 - Confirm each storage ID and free-space response with and without a card.
 - Compare a bounded media list against files visible on the camera.
 - Download a JPEG, RAW file and movie; compare byte length and checksum.

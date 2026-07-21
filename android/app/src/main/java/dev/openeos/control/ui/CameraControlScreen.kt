@@ -507,6 +507,7 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "afoperation" -> stringResource(R.string.setting_af_operation)
     "drivemode" -> stringResource(R.string.setting_drive_mode)
     "meteringmode" -> stringResource(R.string.setting_metering_mode)
+    "flashmode" -> stringResource(R.string.setting_flash_mode)
     "picturestyle" -> stringResource(R.string.setting_picture_style)
     "shootingmode" -> stringResource(R.string.setting_shooting_mode)
     "stillimagequality" -> stringResource(R.string.setting_image_quality)

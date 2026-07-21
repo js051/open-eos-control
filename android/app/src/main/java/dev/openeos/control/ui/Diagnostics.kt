@@ -46,6 +46,9 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine("planned=$planned")
         appendLine("battery=${state.status?.rawBatteryJson?.ifBlank { state.status?.batteryStatus } ?: "unknown"}")
         appendLine("storage=${state.status?.rawStorageJson?.ifBlank { state.status?.mediaAvailable?.toString() } ?: "unknown"}")
+        appendLine(
+            "transportDetails=${state.status?.rawTransportJson?.ifBlank { "unknown" }?.let { redactDiagnosticText(it, state) } ?: "unknown"}"
+        )
         appendLine("requestedFps=${state.liveViewFrameRateFps}")
         appendLine("observedFps=${String.format(Locale.US, "%.1f", live.observedFps)}")
         appendLine("frameBytes=${live.frameBytes ?: "unknown"}")

@@ -32,7 +32,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 - `CapabilityMatrix` tells the UI and tests what is supported now versus planned for a backend.
 - `LiveViewRequest` and `LiveViewCapabilities` describe FPS, source, and size without hard-coding CCAPI polling into the UI.
 - `UsbPtpDiagnostics` describes Android USB host devices, Canon vendor IDs, PTP interfaces, permission state, and endpoints before a PTP session is opened.
-- `PtpSession` owns USB PTP transaction IDs, command/data/response validation, standard dataset parsing, and streaming object transfers. `AndroidUsbPtpTransport` is limited to Android USB permission, interface claiming, and bulk endpoint I/O.
+- `PtpSession` owns USB PTP transaction IDs, command/data/response validation, standard dataset/property parsing and writes, and streaming object transfers. `AndroidUsbPtpTransport` is limited to Android USB permission, interface claiming, and bulk endpoint I/O.
 
 ## Platform Strategy
 
@@ -52,7 +52,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 
 1. Keep CCAPI stable for R6 Mark III.
 2. Validate the implemented Android USB/PTP session, DeviceInfo, storage, media and conditional standard capture path on R6 Mark III.
-3. Add PTP property descriptors/values and safe writes.
+3. Validate the implemented PTP property descriptors/values and safe writes on R6 Mark III.
 4. Add only those Canon EOS vendor capture and setting operations proven by R6 Mark III traces or authoritative documentation.
 5. Add USB/PTP live view if R6 Mark III exposes compatible Canon vendor operations.
 6. Add desktop bridge contract tests, then libgphoto2 and optional EDSDK adapters.

@@ -3,7 +3,9 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraNetworkRouting
+import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraTransport
+import dev.openeos.control.data.ExposureState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -62,11 +64,23 @@ class DiagnosticsTest {
             CameraUiState(
                 baseUrl = "http://192.168.1.2:8080",
                 transport = CameraTransport.USB_PTP,
+                status = CameraStatus(
+                    connected = true,
+                    batteryLevel = 82,
+                    batteryStatus = "82%",
+                    recording = null,
+                    mode = "M",
+                    mediaAvailable = true,
+                    remainingMinutes = null,
+                    exposure = ExposureState("400", "1/50", "2.8", "auto"),
+                    rawTransportJson = "{\"kind\":\"ptp-usb\",\"operations\":[\"0x1014\"]}",
+                ),
             )
         )
 
         assertTrue(report.contains("transport=USB_PTP"))
         assertTrue(report.contains("baseUrl=not-applicable"))
+        assertTrue(report.contains("transportDetails={\"kind\":\"ptp-usb\""))
         assertFalse(report.contains("192.168.1.2"))
     }
 

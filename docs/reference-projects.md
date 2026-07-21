@@ -24,18 +24,18 @@ Implemented and test-covered:
 
 - CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling, still/manual shutter control, paged media browsing, and streaming media download.
 - Android USB host diagnostics: enumerate devices, identify Canon vendor ID `0x04A9`, identify PTP still-image interfaces, show endpoints, and request Android USB permission.
-- Android standards-based USB/PTP path: claim the interface, open/close a session, parse DeviceInfo and storage/object datasets, conditionally issue advertised standard still capture, browse media, and stream `GetObject` downloads.
+- Android standards-based USB/PTP path: claim the interface, open/close a session, parse DeviceInfo, property, storage and object datasets, safely write bounded camera-advertised standard properties, conditionally issue advertised standard still capture, browse media, and stream `GetObject` downloads.
 - Multi-backend contract: unsupported operations throw explicit transport/feature errors.
 
 Implemented but requires real-camera verification:
 
 - Real Canon CCAPI endpoint variants for R6 Mark III live view and shooting settings.
 - R6 Mark III still/manual shutter, recording, tap focus, media browsing, and media download.
-- Android USB/PTP diagnostics, session, DeviceInfo, storage/media, download, and advertised standard capture on a physical Android device with the camera connected over OTG/USB-C.
+- Android USB/PTP diagnostics, session, DeviceInfo, standard properties, storage/media, download, and advertised standard capture on a physical Android device with the camera connected over OTG/USB-C.
 
 Planned only, not product-valid yet:
 
-- Android PTP battery/property reads and writes, Canon EOS vendor controls, and USB live view.
+- Canon EOS vendor controls and USB live view.
 - CCAPI RTP live view.
 - Desktop bridge service, libgphoto2 adapter, and optional EDSDK adapter.
 - iOS app/client.

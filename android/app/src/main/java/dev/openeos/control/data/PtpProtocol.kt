@@ -29,7 +29,10 @@ object PtpResponseCode {
     const val OPERATION_NOT_SUPPORTED = 0x2005
     const val INVALID_STORAGE_ID = 0x2008
     const val INVALID_OBJECT_HANDLE = 0x2009
+    const val DEVICE_PROP_NOT_SUPPORTED = 0x200A
     const val DEVICE_BUSY = 0x2019
+    const val INVALID_DEVICE_PROP_FORMAT = 0x201B
+    const val INVALID_DEVICE_PROP_VALUE = 0x201C
     const val INVALID_PARAMETER = 0x201D
     const val SESSION_ALREADY_OPEN = 0x201E
 
@@ -40,7 +43,10 @@ object PtpResponseCode {
         OPERATION_NOT_SUPPORTED -> "OperationNotSupported"
         INVALID_STORAGE_ID -> "InvalidStorageID"
         INVALID_OBJECT_HANDLE -> "InvalidObjectHandle"
+        DEVICE_PROP_NOT_SUPPORTED -> "DevicePropNotSupported"
         DEVICE_BUSY -> "DeviceBusy"
+        INVALID_DEVICE_PROP_FORMAT -> "InvalidDevicePropFormat"
+        INVALID_DEVICE_PROP_VALUE -> "InvalidDevicePropValue"
         INVALID_PARAMETER -> "InvalidParameter"
         SESSION_ALREADY_OPEN -> "SessionAlreadyOpen"
         else -> "UnknownResponse"
@@ -369,6 +375,54 @@ class PtpSession(
             PtpDatasets.objectInfo(handle, payload)
         }
 
+    suspend fun devicePropertyDescriptor(propertyCode: Int): PtpDevicePropertyDescriptor =
+        transaction(PtpOperationCode.GET_DEVICE_PROP_DESC, listOf(propertyCode.toLong())) { payload ->
+            PtpPropertyCodec.decodeDescriptor(payload).also { descriptor ->
+                if (descriptor.code != propertyCode) {
+                    throw PtpProtocolException(
+                        "Requested property 0x${propertyCode.toString(16).uppercase()}, " +
+                            "received descriptor 0x${descriptor.code.toString(16).uppercase()}."
+                    )
+                }
+            }
+        }
+
+    suspend fun devicePropertyValue(
+        propertyCode: Int,
+        dataType: PtpDataType,
+    ): PtpPropertyValue = transaction(
+        PtpOperationCode.GET_DEVICE_PROP_VALUE,
+        listOf(propertyCode.toLong()),
+    ) { payload -> PtpPropertyCodec.decodeValue(dataType, payload) }
+
+    suspend fun setDevicePropertyValue(
+        propertyCode: Int,
+        dataType: PtpDataType,
+        value: PtpPropertyValue,
+    ) {
+        mutex.withLock {
+            requireOpen()
+            val transactionId = takeTransactionId()
+            val payload = PtpPropertyCodec.encodeValue(dataType, value)
+            transport.send(
+                PtpCodec.command(
+                    operationCode = PtpOperationCode.SET_DEVICE_PROP_VALUE,
+                    transactionId = transactionId,
+                    parameters = listOf(propertyCode.toLong()),
+                )
+            )
+            transport.send(
+                PtpContainer(
+                    type = PtpContainerType.DATA,
+                    code = PtpOperationCode.SET_DEVICE_PROP_VALUE,
+                    transactionId = transactionId,
+                    payload = payload,
+                )
+            )
+            receiveResponseLocked(PtpOperationCode.SET_DEVICE_PROP_VALUE, transactionId)
+        }
+    }
+
     suspend fun initiateCapture(storageId: Long = 0L, objectFormat: Long = 0L) {
         mutex.withLock {
             requireOpen()
@@ -504,6 +558,27 @@ class PtpSession(
                     }
                     return data
                 }
+
+                PtpContainerType.COMMAND -> throw PtpProtocolException("Camera returned an unexpected command container.")
+                PtpContainerType.EVENT -> Unit
+            }
+        }
+    }
+
+    private suspend fun receiveResponseLocked(operationCode: Int, transactionId: Long) {
+        while (true) {
+            val container = transport.receive()
+            if (container.type == PtpContainerType.EVENT) continue
+            validateTransaction(container.header, transactionId)
+            when (container.type) {
+                PtpContainerType.RESPONSE -> {
+                    checkResponse(container.code, operationCode)
+                    return
+                }
+
+                PtpContainerType.DATA -> throw PtpProtocolException(
+                    "Operation 0x${operationCode.toHex(4)} returned an unexpected data container."
+                )
 
                 PtpContainerType.COMMAND -> throw PtpProtocolException("Camera returned an unexpected command container.")
                 PtpContainerType.EVENT -> Unit
