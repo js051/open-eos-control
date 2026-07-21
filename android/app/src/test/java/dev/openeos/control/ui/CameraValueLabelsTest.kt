@@ -17,6 +17,8 @@ class CameraValueLabelsTest {
             Triple("drivemode", "Super high speed continuous shooting", R.string.camera_value_super_high_speed_continuous),
             Triple("meteringmode", "Evaluative", R.string.camera_value_evaluative_metering),
             Triple("picturestyle", "Fine detail", R.string.camera_value_fine_detail),
+            Triple("highisonr", "Multi-Shot", R.string.camera_value_multi_shot),
+            Triple("aeb", "off", R.string.camera_value_off),
             Triple("stillimagequalitycf", "cRAW + Large Fine JPEG", R.string.camera_value_craw_large_fine_jpeg),
         )
 

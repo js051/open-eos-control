@@ -113,11 +113,18 @@ class CanonEosPtpTest {
     fun vendorSettingMappingsAndPayloadWidthsMatchPinnedLibgphoto2Tables() {
         assertEquals(
             listOf(
+                "exposurecompensation",
+                "colortemperature",
+                "whitebalanceadjusta",
+                "whitebalanceadjustb",
+                "colorspace",
                 "afoperation",
                 "continuousaf",
                 "afmethod",
                 "drivemode",
                 "meteringmode",
+                "highisonr",
+                "aeb",
                 "picturestyle",
                 "stillimagequality",
                 "stillimagequalitysd",
@@ -153,6 +160,85 @@ class CanonEosPtpTest {
         assertArrayEquals(
             CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.CONTINUOUS_AF_MODE, 1),
             CanonEosPtp.propertyPayload(CanonEosPropertyCode.CONTINUOUS_AF_MODE, 1),
+        )
+    }
+
+    @Test
+    fun r6MarkIIIExposureAndColorMappingsMatchPinnedLibgphoto2Tables() {
+        assertEquals(0xD104, CanonEosPropertyCode.EXPOSURE_COMPENSATION)
+        assertEquals(0xD10A, CanonEosPropertyCode.COLOR_TEMPERATURE)
+        assertEquals(0xD10B, CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A)
+        assertEquals(0xD10C, CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B)
+        assertEquals(0xD10F, CanonEosPropertyCode.COLOR_SPACE)
+        assertEquals(0xD178, CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION)
+        assertEquals(0xD1D9, CanonEosPropertyCode.AEB)
+        assertEquals("-3", CanonEosPtp.propertyLabel(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0xE8))
+        assertEquals("1.3", CanonEosPtp.propertyLabel(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0x0B))
+        assertEquals("5200", CanonEosPtp.propertyLabel(CanonEosPropertyCode.COLOR_TEMPERATURE, 5200))
+        assertEquals("-9", CanonEosPtp.propertyLabel(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A, -9))
+        assertEquals("AdobeRGB", CanonEosPtp.propertyLabel(CanonEosPropertyCode.COLOR_SPACE, 2))
+        assertEquals("High", CanonEosPtp.propertyLabel(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 3))
+        assertEquals("+/- 2", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AEB, 0x10))
+
+        assertArrayEquals(
+            CanonEosPtp.uint8PropertyPayload(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0x0B),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0x0B),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.COLOR_TEMPERATURE, 5600),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.COLOR_TEMPERATURE, 5600),
+        )
+        assertArrayEquals(
+            byteArrayOf(
+                0x0C, 0x00, 0x00, 0x00,
+                0x0B, 0xD1.toByte(), 0x00, 0x00,
+                0xF7.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(),
+            ),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A, -9),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.COLOR_SPACE, 2),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.COLOR_SPACE, 2),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 3),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 3),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.AEB, 0x10),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.AEB, 0x10),
+        )
+    }
+
+    @Test
+    fun signedWhiteBalanceEventsPreserveNegativeCameraValues() {
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A, -2),
+        ) + block(
+            type = CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A, 3, 3, -9, 0, 9),
+        ) + block(type = 0, bytes = byteArrayOf())
+
+        val updates = CanonEosPtp.propertyUpdates(payload)
+        val values = updates.single { it.availableValues != null }.availableValues.orEmpty()
+
+        assertEquals(-2L, updates.single { it.currentValue != null }.currentValue)
+        assertEquals(listOf(-9L, 0L, 9L), values)
+        assertEquals(
+            listOf("-9", "0", "9"),
+            CanonEosPtp.propertyOptions(
+                CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A,
+                values,
+            ).map(CanonEosPropertyOption::label),
+        )
+        assertEquals(
+            -9L,
+            CanonEosPtp.propertyValue(
+                CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A,
+                values,
+                "-9",
+            ),
         )
     }
 

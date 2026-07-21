@@ -637,6 +637,11 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "movieservoaf" -> stringResource(R.string.setting_movie_servo_af)
     "colortemperature" -> stringResource(R.string.setting_color_temperature)
     "exposurecompensation" -> stringResource(R.string.setting_exposure_compensation)
+    "whitebalanceadjusta" -> stringResource(R.string.setting_white_balance_shift_a)
+    "whitebalanceadjustb" -> stringResource(R.string.setting_white_balance_shift_b)
+    "colorspace" -> stringResource(R.string.setting_color_space)
+    "highisonr" -> stringResource(R.string.setting_high_iso_noise_reduction)
+    "aeb" -> stringResource(R.string.setting_aeb)
     "ae" -> stringResource(R.string.setting_ae_mode)
     else -> setting.label
 }

@@ -98,7 +98,7 @@ data class FocusPoint(
 
 fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): List<CameraSettingControl> {
     val videoTokens = listOf("movie", "video", "frame", "codec", "record", "sound")
-    val photoTokens = listOf("still", "photo", "drive", "imagequality")
+    val photoTokens = listOf("still", "photo", "drive", "imagequality", "colorspace", "highisonr", "aeb")
     return settings.filter { setting ->
         val key = setting.key.lowercase()
         val isVideo = videoTokens.any(key::contains)

@@ -162,12 +162,18 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
-        compose.onNodeWithText(resourceText(R.string.camera_value_continuous_high_speed))
+        compose.onNodeWithText(resourceText(R.string.setting_drive_mode))
             .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.setting_metering_mode))
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.camera_value_super_high_speed_continuous))
+            .assertIsDisplayed()
             .performClick()
 
         compose.runOnIdle {
-            assertEquals("drivemode" to "Continuous high speed", request)
+            assertEquals("drivemode" to "Super high speed continuous shooting", request)
         }
     }
 

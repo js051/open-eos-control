@@ -154,6 +154,11 @@
     <string name="setting_movie_servo_af">Movie Servo AF</string>
     <string name="setting_color_temperature">Color temperature</string>
     <string name="setting_exposure_compensation">Exposure compensation</string>
+    <string name="setting_white_balance_shift_a">White balance shift A</string>
+    <string name="setting_white_balance_shift_b">White balance shift B</string>
+    <string name="setting_color_space">Color space</string>
+    <string name="setting_high_iso_noise_reduction">High ISO noise reduction</string>
+    <string name="setting_aeb">Auto exposure bracketing (AEB)</string>
     <string name="setting_ae_mode">AE mode</string>
     <string name="preview_interface">Open offline preview</string>
     <string name="offline_preview">Offline UI preview</string>
@@ -200,6 +205,10 @@
     <string name="camera_value_awb_white">AWB: White priority</string>
     <string name="camera_value_off">Off</string>
     <string name="camera_value_on">On</string>
+    <string name="camera_value_low">Low</string>
+    <string name="camera_value_normal">Normal</string>
+    <string name="camera_value_high">High</string>
+    <string name="camera_value_multi_shot">Multi-shot</string>
     <string name="camera_value_one_shot_af">One-Shot AF</string>
     <string name="camera_value_servo_af">Servo AF</string>
     <string name="camera_value_ai_focus">AI Focus AF</string>

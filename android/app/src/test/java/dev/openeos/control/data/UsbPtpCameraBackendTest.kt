@@ -136,6 +136,13 @@ class UsbPtpCameraBackendTest {
         backend.setSetting("stillimagequalitysd", "Large Normal JPEG")
         backend.setSetting("stillimagequalitycf", "RAW")
         backend.setSetting("movieservoaf", "Off")
+        backend.setSetting("exposurecompensation", "1.3")
+        backend.setSetting("colortemperature", "5600")
+        backend.setSetting("whitebalanceadjusta", "-9")
+        backend.setSetting("whitebalanceadjustb", "9")
+        backend.setSetting("colorspace", "AdobeRGB")
+        backend.setSetting("highisonr", "High")
+        backend.setSetting("aeb", "+/- 2")
         val recordingStatus = backend.startRecording()
         val stoppedRecordingStatus = backend.stopRecording()
         val exposureStatus = backend.setExposure(iso = "800", shutter = "1/50", aperture = "4")
@@ -166,10 +173,17 @@ class UsbPtpCameraBackendTest {
         assertEquals(listOf("Auto", "Daylight", "Shadow"), capabilities.whiteBalance)
         val settings = capabilities.advancedSettings.associateBy(CameraSettingControl::key)
         assertEquals("AI Servo", settings.getValue("afoperation").value)
+        assertEquals("0", settings.getValue("exposurecompensation").value)
+        assertEquals("5200", settings.getValue("colortemperature").value)
+        assertEquals("0", settings.getValue("whitebalanceadjusta").value)
+        assertEquals("-2", settings.getValue("whitebalanceadjustb").value)
+        assertEquals(listOf("sRGB", "AdobeRGB"), settings.getValue("colorspace").values)
         assertEquals(listOf("Off", "On"), settings.getValue("continuousaf").values)
         assertEquals("WholeAreaAF", settings.getValue("afmethod").value)
         assertEquals("Super high speed continuous shooting", settings.getValue("drivemode").value)
         assertEquals("Evaluative", settings.getValue("meteringmode").value)
+        assertEquals(listOf("Off", "Low", "Normal", "High"), settings.getValue("highisonr").values)
+        assertEquals("off", settings.getValue("aeb").value)
         assertEquals("Auto", settings.getValue("picturestyle").value)
         assertEquals("RAW", settings.getValue("stillimagequality").value)
         assertEquals("RAW", settings.getValue("stillimagequalitysd").value)
@@ -305,6 +319,41 @@ class UsbPtpCameraBackendTest {
         assertTrue(
             propertyWrites.any {
                 it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.MOVIE_SERVO_AF, 0))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint8PropertyPayload(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0x0B))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.COLOR_TEMPERATURE, 5600))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.int32PropertyPayload(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A, -9))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.int32PropertyPayload(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B, 9))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.COLOR_SPACE, 2))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 3))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.AEB, 0x10))
             }
         )
         assertTrue(
@@ -751,6 +800,16 @@ class UsbPtpCameraBackendTest {
             eosPropertyValue(CanonEosPropertyCode.WHITE_BALANCE, 0) +
             eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE, 0, 1, 8)
         if (advertiseAdvancedSettings) {
+            payload += eosPropertyValue(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0)
+            payload += eosAvailableValues(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0xE8, 0, 0x0B, 0x18)
+            payload += eosPropertyValue(CanonEosPropertyCode.COLOR_TEMPERATURE, 5200)
+            payload += eosAvailableValues(CanonEosPropertyCode.COLOR_TEMPERATURE, 2500, 5200, 5600, 10000)
+            payload += eosPropertyValue(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A, 0)
+            payload += eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A, -9, 0, 9)
+            payload += eosPropertyValue(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B, -2)
+            payload += eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B, -9, -2, 0, 9)
+            payload += eosPropertyValue(CanonEosPropertyCode.COLOR_SPACE, 1)
+            payload += eosAvailableValues(CanonEosPropertyCode.COLOR_SPACE, 1, 2)
             payload += eosPropertyValue(CanonEosPropertyCode.FOCUS_MODE, 1)
             payload += eosAvailableValues(CanonEosPropertyCode.FOCUS_MODE, 0, 1, 2)
             payload += eosPropertyValue(CanonEosPropertyCode.CONTINUOUS_AF_MODE, 0)
@@ -764,6 +823,13 @@ class UsbPtpCameraBackendTest {
             payload += eosAvailableValues(CanonEosPropertyCode.DRIVE_MODE, 0, 0x12, 4, 5, 0x10, 0x11, 7)
             payload += eosPropertyValue(CanonEosPropertyCode.METERING_MODE, 3)
             payload += eosAvailableValues(CanonEosPropertyCode.METERING_MODE, 3, 4, 1, 5)
+            payload += eosPropertyValue(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 0)
+            payload += eosAvailableValues(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 0, 1, 2, 3)
+            payload += eosPropertyValue(CanonEosPropertyCode.AEB, 0)
+            payload += eosAvailableValues(
+                CanonEosPropertyCode.AEB,
+                0, 0x03, 0x05, 0x08, 0x0B, 0x0D, 0x10, 0x13, 0x15, 0x18,
+            )
             payload += eosPropertyValue(CanonEosPropertyCode.PICTURE_STYLE, 0x87)
             payload += eosAvailableValues(
                 CanonEosPropertyCode.PICTURE_STYLE,

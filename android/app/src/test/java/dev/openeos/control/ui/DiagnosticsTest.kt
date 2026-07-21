@@ -139,16 +139,28 @@ class DiagnosticsTest {
             CameraSettingControl("moviequality", "Movie quality", "4K", listOf("4K")),
             CameraSettingControl("drivemode", "Drive", "single", listOf("single")),
             CameraSettingControl("stillimagequalitycf", "CF quality", "RAW", listOf("RAW")),
+            CameraSettingControl("colorspace", "Color space", "sRGB", listOf("sRGB")),
+            CameraSettingControl("highisonr", "High ISO NR", "Off", listOf("Off")),
+            CameraSettingControl("aeb", "AEB", "off", listOf("off")),
+            CameraSettingControl("exposurecompensation", "Exposure compensation", "0", listOf("0")),
             CameraSettingControl("movieservoaf", "Movie Servo AF", "on", listOf("on")),
             CameraSettingControl("afmethod", "AF", "face", listOf("face")),
         )
 
         assertEquals(
-            listOf("drivemode", "stillimagequalitycf", "afmethod"),
+            listOf(
+                "drivemode",
+                "stillimagequalitycf",
+                "colorspace",
+                "highisonr",
+                "aeb",
+                "exposurecompensation",
+                "afmethod",
+            ),
             settingsForMode(settings, CaptureMode.PHOTO).map { it.key },
         )
         assertEquals(
-            listOf("moviequality", "movieservoaf", "afmethod"),
+            listOf("moviequality", "exposurecompensation", "movieservoaf", "afmethod"),
             settingsForMode(settings, CaptureMode.VIDEO).map { it.key },
         )
     }

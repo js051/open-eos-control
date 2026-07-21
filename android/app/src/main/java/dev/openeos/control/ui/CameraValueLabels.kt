@@ -28,6 +28,8 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "meteringmode" -> meteringModeValueLabels[value]
         "flashmode" -> flashModeValueLabels[value]
         "picturestyle" -> pictureStyleValueLabels[value]
+        "highisonr" -> highIsoNoiseReductionValueLabels[value]
+        "aeb" -> toggleValueLabels[value]
         "stillimagequality", "stillimagequalitysd", "stillimagequalitycf" ->
             imageQualityValueLabels[value]
 
@@ -179,6 +181,14 @@ private val pictureStyleValueLabels = mapOf(
     "user defined 1" to R.string.camera_value_user_defined_1,
     "user defined 2" to R.string.camera_value_user_defined_2,
     "user defined 3" to R.string.camera_value_user_defined_3,
+)
+
+private val highIsoNoiseReductionValueLabels = mapOf(
+    "off" to R.string.camera_value_off,
+    "low" to R.string.camera_value_low,
+    "normal" to R.string.camera_value_normal,
+    "high" to R.string.camera_value_high,
+    "multi shot" to R.string.camera_value_multi_shot,
 )
 
 private val imageQualityValueLabels = mapOf(

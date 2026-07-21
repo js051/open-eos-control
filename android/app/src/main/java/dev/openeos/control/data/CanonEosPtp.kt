@@ -18,20 +18,27 @@ object CanonEosPropertyCode {
     const val APERTURE = 0xD101
     const val SHUTTER_SPEED = 0xD102
     const val ISO_SPEED = 0xD103
+    const val EXPOSURE_COMPENSATION = 0xD104
     const val DRIVE_MODE = 0xD106
     const val METERING_MODE = 0xD107
     const val FOCUS_MODE = 0xD108
     const val WHITE_BALANCE = 0xD109
+    const val COLOR_TEMPERATURE = 0xD10A
+    const val WHITE_BALANCE_ADJUST_A = 0xD10B
+    const val WHITE_BALANCE_ADJUST_B = 0xD10C
+    const val COLOR_SPACE = 0xD10F
     const val PICTURE_STYLE = 0xD110
     const val IMAGE_FORMAT = 0xD120
     const val IMAGE_FORMAT_CF = 0xD121
     const val IMAGE_FORMAT_SD = 0xD122
+    const val HIGH_ISO_NOISE_REDUCTION = 0xD178
     const val MOVIE_SERVO_AF = 0xD179
     const val EVF_OUTPUT_DEVICE = 0xD1B0
     const val EVF_MODE = 0xD1B1
     const val EVF_RECORD_STATUS = 0xD1B8
     const val LIVE_VIEW_AF_SYSTEM = 0xD1BA
     const val CONTINUOUS_AF_MODE = 0xD1C9
+    const val AEB = 0xD1D9
 }
 
 object CanonEosEventCode {
@@ -71,11 +78,34 @@ object CanonEosPtp {
     const val MOVIE_RECORD_TARGET_CARD = 4L
 
     val settingSpecs = listOf(
+        CanonEosSettingSpec(
+            CanonEosPropertyCode.EXPOSURE_COMPENSATION,
+            "exposurecompensation",
+            "Exposure compensation",
+        ),
+        CanonEosSettingSpec(CanonEosPropertyCode.COLOR_TEMPERATURE, "colortemperature", "Color temperature"),
+        CanonEosSettingSpec(
+            CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A,
+            "whitebalanceadjusta",
+            "White balance shift A",
+        ),
+        CanonEosSettingSpec(
+            CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B,
+            "whitebalanceadjustb",
+            "White balance shift B",
+        ),
+        CanonEosSettingSpec(CanonEosPropertyCode.COLOR_SPACE, "colorspace", "Color space"),
         CanonEosSettingSpec(CanonEosPropertyCode.FOCUS_MODE, "afoperation", "AF operation"),
         CanonEosSettingSpec(CanonEosPropertyCode.CONTINUOUS_AF_MODE, "continuousaf", "Continuous AF"),
         CanonEosSettingSpec(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, "afmethod", "AF method"),
         CanonEosSettingSpec(CanonEosPropertyCode.DRIVE_MODE, "drivemode", "Drive mode"),
         CanonEosSettingSpec(CanonEosPropertyCode.METERING_MODE, "meteringmode", "Metering mode"),
+        CanonEosSettingSpec(
+            CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION,
+            "highisonr",
+            "High ISO noise reduction",
+        ),
+        CanonEosSettingSpec(CanonEosPropertyCode.AEB, "aeb", "Auto exposure bracketing"),
         CanonEosSettingSpec(CanonEosPropertyCode.PICTURE_STYLE, "picturestyle", "Picture style"),
         CanonEosSettingSpec(CanonEosPropertyCode.IMAGE_FORMAT, "stillimagequality", "Image quality"),
         CanonEosSettingSpec(CanonEosPropertyCode.IMAGE_FORMAT_SD, "stillimagequalitysd", "SD image quality"),
@@ -164,6 +194,13 @@ object CanonEosPtp {
         return propertyPayload(propertyCode, value, 4)
     }
 
+    fun int32PropertyPayload(propertyCode: Int, value: Long): ByteArray {
+        require(value in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) {
+            "Canon EOS property value $value does not fit INT32."
+        }
+        return propertyPayload(propertyCode, value, 4)
+    }
+
     fun eventCodes(payload: ByteArray): Set<Int> {
         return eventBlocks(payload).mapTo(linkedSetOf(), CanonEosEventBlock::code)
     }
@@ -190,12 +227,16 @@ object CanonEosPtp {
                         )
                         return@forEach
                     }
-                    val valueBytes = propertySpecs[propertyCode]?.valueBytes ?: return@forEach
-                    if (block.length < 12 + valueBytes) malformedPropertyEvent(block, "property value")
+                    val spec = propertySpecs[propertyCode] ?: return@forEach
+                    if (block.length < 12 + spec.valueBytes) malformedPropertyEvent(block, "property value")
                     add(
                         CanonEosPropertyUpdate(
                             propertyCode = propertyCode,
-                            currentValue = payload.unsignedLe(block.offset + 12, valueBytes),
+                            currentValue = payload.numberLe(
+                                offset = block.offset + 12,
+                                size = spec.valueBytes,
+                                signed = spec.signed,
+                            ),
                         )
                     )
                 }
@@ -203,7 +244,8 @@ object CanonEosPtp {
                 CanonEosEventCode.AVAILABLE_LIST_CHANGED -> {
                     if (block.length < 20) malformedPropertyEvent(block, "available-value header")
                     val propertyCode = payload.u32Le(block.offset + 8).toInt()
-                    if (propertyCode !in propertySpecs && propertyCode !in imageFormatPropertyCodes) return@forEach
+                    val spec = propertySpecs[propertyCode]
+                    if (spec == null && propertyCode !in imageFormatPropertyCodes) return@forEach
                     val listType = payload.u32Le(block.offset + 12)
                     if (listType != 3L) return@forEach
                     val count = payload.u32Le(block.offset + 16)
@@ -228,7 +270,11 @@ object CanonEosPtp {
                         CanonEosPropertyUpdate(
                             propertyCode = propertyCode,
                             availableValues = List(count.toInt()) { index ->
-                                payload.u32Le(block.offset + 20 + index * 4)
+                                payload.numberLe(
+                                    offset = block.offset + 20 + index * 4,
+                                    size = 4,
+                                    signed = spec?.signed == true,
+                                )
                             },
                         )
                     )
@@ -258,7 +304,12 @@ object CanonEosPtp {
 
     fun propertyPayload(propertyCode: Int, value: Long): ByteArray {
         if (propertyCode in imageFormatPropertyCodes) return imageFormatPropertyPayload(propertyCode, value)
-        return when (propertySpecs[propertyCode]?.valueBytes) {
+        val spec = propertySpecs[propertyCode]
+        if (spec?.signed == true) {
+            check(spec.valueBytes == 4) { "Only Canon EOS INT32 properties are currently supported." }
+            return int32PropertyPayload(propertyCode, value)
+        }
+        return when (spec?.valueBytes) {
             1 -> uint8PropertyPayload(propertyCode, value.toInt())
             2 -> uint16PropertyPayload(propertyCode, value.toInt())
             4 -> uint32PropertyPayload(propertyCode, value)
@@ -398,6 +449,7 @@ object CanonEosPtp {
     private data class CanonEosPropertySpec(
         val valueBytes: Int,
         val labels: Map<Long, String>,
+        val signed: Boolean = false,
     )
 
     private val isoLabels = mapOf(
@@ -538,6 +590,54 @@ object CanonEosPtp {
 
     private val offOnLabels = mapOf(0L to "Off", 1L to "On")
 
+    private val exposureCompensationLabels = mapOf(
+        0x28L to "5", 0x25L to "4.6", 0x24L to "4.5", 0x23L to "4.3",
+        0x20L to "4", 0x1DL to "3.6", 0x1CL to "3.5", 0x1BL to "3.3",
+        0x18L to "3", 0x15L to "2.6", 0x14L to "2.5", 0x13L to "2.3",
+        0x10L to "2", 0x0DL to "1.6", 0x0CL to "1.5", 0x0BL to "1.3",
+        0x08L to "1", 0x05L to "0.6", 0x04L to "0.5", 0x03L to "0.3",
+        0x00L to "0", 0xFDL to "-0.3", 0xFCL to "-0.5", 0xFBL to "-0.6",
+        0xF8L to "-1", 0xF5L to "-1.3", 0xF4L to "-1.5", 0xF3L to "-1.6",
+        0xF0L to "-2", 0xEDL to "-2.3", 0xECL to "-2.5", 0xEBL to "-2.6",
+        0xE8L to "-3", 0xE5L to "-3.3", 0xE4L to "-3.5", 0xE3L to "-3.6",
+        0xE0L to "-4", 0xDDL to "-4.3", 0xDCL to "-4.5", 0xDBL to "-4.6",
+        0xD8L to "-5",
+    )
+
+    private val colorTemperatureLabels = (2500..10000 step 100).associate { value ->
+        value.toLong() to value.toString()
+    }
+
+    private val whiteBalanceAdjustLabels = (-9..9).associate { value ->
+        value.toLong() to value.toString()
+    }
+
+    private val colorSpaceLabels = mapOf(1L to "sRGB", 2L to "AdobeRGB")
+
+    private val highIsoNoiseReductionLabels = mapOf(
+        0L to "Off",
+        1L to "Low",
+        2L to "Normal",
+        3L to "High",
+        4L to "Multi-Shot",
+    )
+
+    private val aebLabels = mapOf(
+        0x0000L to "off",
+        0x0003L to "+/- 1/3",
+        0x0004L to "+/- 1/2",
+        0x0005L to "+/- 2/3",
+        0x0008L to "+/- 1",
+        0x000BL to "+/- 1 1/3",
+        0x000CL to "+/- 1 1/2",
+        0x000DL to "+/- 1 2/3",
+        0x0010L to "+/- 2",
+        0x0013L to "+/- 2 1/3",
+        0x0014L to "+/- 2 1/2",
+        0x0015L to "+/- 2 2/3",
+        0x0018L to "+/- 3",
+    )
+
     private val singleImageFormatLabels = mapOf(
         0x0C to "RAW",
         0x1C to "mRAW",
@@ -573,15 +673,24 @@ object CanonEosPtp {
         CanonEosPropertyCode.APERTURE to CanonEosPropertySpec(2, apertureLabels),
         CanonEosPropertyCode.SHUTTER_SPEED to CanonEosPropertySpec(2, shutterLabels),
         CanonEosPropertyCode.ISO_SPEED to CanonEosPropertySpec(2, isoLabels),
+        CanonEosPropertyCode.EXPOSURE_COMPENSATION to CanonEosPropertySpec(1, exposureCompensationLabels),
         CanonEosPropertyCode.DRIVE_MODE to CanonEosPropertySpec(2, driveModeLabels),
         CanonEosPropertyCode.METERING_MODE to CanonEosPropertySpec(1, meteringModeLabels),
         CanonEosPropertyCode.FOCUS_MODE to CanonEosPropertySpec(4, focusModeLabels),
         CanonEosPropertyCode.WHITE_BALANCE to CanonEosPropertySpec(1, whiteBalanceLabels),
+        CanonEosPropertyCode.COLOR_TEMPERATURE to CanonEosPropertySpec(4, colorTemperatureLabels),
+        CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A to
+            CanonEosPropertySpec(4, whiteBalanceAdjustLabels, signed = true),
+        CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B to
+            CanonEosPropertySpec(4, whiteBalanceAdjustLabels, signed = true),
+        CanonEosPropertyCode.COLOR_SPACE to CanonEosPropertySpec(2, colorSpaceLabels),
         CanonEosPropertyCode.PICTURE_STYLE to CanonEosPropertySpec(1, pictureStyleLabels),
+        CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION to CanonEosPropertySpec(2, highIsoNoiseReductionLabels),
         CanonEosPropertyCode.MOVIE_SERVO_AF to CanonEosPropertySpec(4, offOnLabels),
         CanonEosPropertyCode.EVF_RECORD_STATUS to CanonEosPropertySpec(2, movieRecordTargetLabels),
         CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM to CanonEosPropertySpec(4, afMethodLabels),
         CanonEosPropertyCode.CONTINUOUS_AF_MODE to CanonEosPropertySpec(4, offOnLabels),
+        CanonEosPropertyCode.AEB to CanonEosPropertySpec(2, aebLabels),
     )
 
     private const val MAX_PROPERTY_OPTIONS = 4_096L
@@ -601,6 +710,14 @@ private fun ByteArray.unsignedLe(offset: Int, size: Int): Long {
     return (0 until size).fold(0L) { value, index ->
         value or (this[offset + index].toUByte().toLong() shl (index * 8))
     }
+}
+
+private fun ByteArray.numberLe(offset: Int, size: Int, signed: Boolean): Long {
+    val value = unsignedLe(offset, size)
+    if (!signed) return value
+    val bits = size * 8
+    val signBit = 1L shl (bits - 1)
+    return if (value and signBit == 0L) value else value - (1L shl bits)
 }
 
 private fun Long.hexLabel(bytes: Int): String =

@@ -30,7 +30,7 @@ The app currently includes:
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
 - Bounded, secret-redacted capability evidence showing the discovery source, protocol versions, advertised commands, and writable settings
-- Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, advertised standard still capture/property control, and capability-gated Canon EOS remote release, half-press, ISO/Tv/Av/WB, movie start/stop, AF operation/method, Continuous AF, drive, metering, Picture Style, per-card RAW/cRAW/JPEG image quality, Movie Servo AF, focus drive, and JPEG Live View
+- Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, advertised standard still capture/property control, and capability-gated Canon EOS remote release, half-press, ISO/Tv/Av/WB, exposure compensation, color temperature, white-balance shifts, color space, High ISO noise reduction, AEB, movie start/stop, AF operation/method, Continuous AF, drive, metering, Picture Style, per-card RAW/cRAW/JPEG image quality, Movie Servo AF, focus drive, and JPEG Live View
 - Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, Live View, focus drive, and media streaming
 - Live view frame display with auto/manual refresh and FPS control
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
@@ -167,7 +167,7 @@ Useful endpoints:
 ## Roadmap
 
 - Keep CCAPI stable for R6 Mark III wireless control.
-- Validate the implemented Android USB/PTP standard and Canon EOS remote-release/exposure/movie/advanced-settings/focus/Live View paths on R6 Mark III, then add only further vendor settings or Touch AF commands backed by reliable evidence.
+- Validate the implemented Android USB/PTP standard and Canon EOS remote-release/exposure/color/bracketing/movie/advanced-settings/focus/Live View paths on R6 Mark III, then add only further vendor settings or Touch AF commands backed by reliable evidence.
 - Validate the implemented PC CCAPI, Android-to-Desktop-Bridge, and USB PC control paths on R6 Mark III, improve libgphoto2 preview throughput with a persistent engine, and retain Canon EDSDK as an optional user-installed adapter.
 - Validate the implemented iOS SwiftUI CCAPI app on an iPhone and R6 Mark III; keep iOS USB/PTP as a research track.
 
