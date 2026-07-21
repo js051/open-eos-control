@@ -315,6 +315,29 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
         assertTrue(!capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
         assertTrue(!capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
+        assertEquals("GET /ccapi", capabilities.evidence.source)
+        assertEquals(listOf("ver110"), capabilities.evidence.protocolVersions)
+        assertTrue("POST /ccapi/ver110/shooting/control/shutterbutton" in capabilities.evidence.advertisedCommands)
+        assertTrue("iso" in capabilities.evidence.writableSettings)
+        assertTrue(!capabilities.evidence.truncated)
+    }
+
+    @Test
+    fun realCapabilityEvidenceIsBoundedAndRemovesQueries() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        val longSegment = "x".repeat(600)
+        val entries = (0 until 300).joinToString(",") { index ->
+            """{"path":"/diagnostics/item$index/$longSegment?token=secret","get":true}"""
+        }
+        server.enqueue(jsonResponse("""{"ver100":[$entries]}"""))
+
+        client.initialize()
+        val evidence = client.capabilities().evidence
+
+        assertEquals(MAX_CAPABILITY_EVIDENCE_ITEMS, evidence.advertisedCommands.size)
+        assertTrue(evidence.truncated)
+        assertTrue(evidence.advertisedCommands.none { "?" in it || "secret" in it })
+        assertTrue(evidence.advertisedCommands.all { it.length <= MAX_CAPABILITY_EVIDENCE_ITEM_CHARS })
     }
 
     @Test

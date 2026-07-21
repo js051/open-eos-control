@@ -25,6 +25,7 @@ from .models import (
     CameraProfile,
     CameraSetting,
     CameraStatus,
+    CapabilityEvidence,
     ExposureState,
     FocusResult,
     LiveViewCapabilities,
@@ -36,6 +37,8 @@ from .models import (
 ENGINE_NAME = "libgphoto2"
 MAX_COMMAND_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_MEDIA_ITEMS = 500
+MAX_CAPABILITY_EVIDENCE_ITEMS = 256
+MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 CONFIG_REFRESH_SECONDS = 1.0
 MAX_BRIDGE_LIVE_VIEW_FPS = 5
 
@@ -678,6 +681,7 @@ class GPhoto2Session:
                     else LiveViewCapabilities()
                 ),
                 settings=settings,
+                evidence=self._capability_evidence(),
             )
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
@@ -955,6 +959,35 @@ class GPhoto2Session:
             return False
         self._set_config_value(config, "1" if enabled else "0", refresh=False)
         return True
+
+    def _capability_evidence(self) -> CapabilityEvidence:
+        commands: list[str] = []
+        if self._abilities.capture_image:
+            commands.append("CAPTURE_IMAGE")
+        if self._abilities.trigger_capture:
+            commands.append("TRIGGER_CAPTURE")
+        if self._abilities.capture_preview:
+            commands.append("CAPTURE_PREVIEW")
+        if self._media_supported:
+            commands.extend(("MEDIA_LIST", "MEDIA_DOWNLOAD"))
+        writable_settings = sorted(
+            {
+                config.path.replace("\r", "").replace("\n", "")[
+                    :MAX_CAPABILITY_EVIDENCE_ITEM_CHARS
+                ]
+                for config in self._configs.values()
+                if not config.readonly and config.selectable_values()
+            }
+        )
+        return CapabilityEvidence(
+            source="gphoto2 --abilities + --list-all-config",
+            protocol_versions=(
+                [self.engine_version[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]] if self.engine_version else []
+            ),
+            advertised_commands=commands,
+            writable_settings=writable_settings[:MAX_CAPABILITY_EVIDENCE_ITEMS],
+            truncated=len(writable_settings) > MAX_CAPABILITY_EVIDENCE_ITEMS,
+        )
 
     def _refresh_configs(self, *, force: bool) -> None:
         now = time.monotonic()

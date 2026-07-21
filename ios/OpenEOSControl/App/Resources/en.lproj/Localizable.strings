@@ -90,6 +90,14 @@
 "base_url" = "Base URL";
 "supported_features" = "Supported features";
 "planned_features" = "Planned features";
+"capability_evidence" = "Capability evidence";
+"capability_source" = "Discovery source";
+"protocol_versions" = "Protocol versions";
+"advertised_commands" = "Advertised commands";
+"writable_settings" = "Writable settings";
+"evidence_truncated" = "Evidence truncated";
+"yes" = "Yes";
+"no" = "No";
 "battery_raw" = "Battery raw JSON";
 "storage_raw" = "Storage raw JSON";
 "requested_fps" = "Requested FPS";

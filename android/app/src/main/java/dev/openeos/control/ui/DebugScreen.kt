@@ -79,6 +79,30 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
                 DebugValue(stringResource(R.string.battery_raw), state.status?.rawBatteryJson?.ifBlank { unavailable } ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.storage_raw), state.status?.rawStorageJson?.ifBlank { unavailable } ?: unavailable, mono = true)
             }
+            DebugSection(stringResource(R.string.capability_evidence)) {
+                val evidence = state.capabilities?.evidence
+                DebugValue(stringResource(R.string.capability_source), evidence?.source ?: unknown, mono = true)
+                DebugValue(
+                    stringResource(R.string.protocol_versions),
+                    evidence?.protocolVersions.orEmpty().joinToString().ifBlank { none },
+                    mono = true,
+                )
+                DebugValue(
+                    stringResource(R.string.advertised_commands),
+                    evidence?.advertisedCommands.orEmpty().joinToString("\n").ifBlank { none },
+                    mono = true,
+                )
+                DebugValue(
+                    stringResource(R.string.writable_settings),
+                    evidence?.writableSettings.orEmpty().joinToString().ifBlank { none },
+                    mono = true,
+                )
+                DebugValue(
+                    stringResource(R.string.evidence_truncated),
+                    yesNoLabel(evidence?.truncated == true),
+                    warning = evidence?.truncated == true,
+                )
+            }
             DebugSection(stringResource(R.string.network)) {
                 val network = state.networkDiagnostics
                 DebugValue(stringResource(R.string.camera_route), networkRoutingLabel(network.routing))

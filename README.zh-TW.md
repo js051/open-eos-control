@@ -29,6 +29,7 @@ open-eos-control/
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
+- 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、協定版本、相機公告命令與可寫設定
 - Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／下載、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon EOS 遠端快門、半按、ISO／Tv／Av／白平衡、焦點移動與 JPEG Live View
 - Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、Live View、焦點移動與媒體串流
 - Live view 畫面，自動/手動更新與 FPS 控制
@@ -84,7 +85,7 @@ GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test 和 debu
 
 ## iOS App 與 CCAPI Core
 
-`ios/OpenEOSCore` 是原生 Swift Package，負責 iOS 的 CCAPI 傳輸與命令層。它會依相機公告的 API 版本與 operation 建立能力，並支援設定控制、JPEG Live View、拍照、保證釋放的定時半按、錄影、點選對焦、媒體瀏覽／下載及已遮蔽敏感資訊的診斷報告。套件包含可重現的 transport 測試，並由 macOS GitHub Actions job 實際編譯：
+`ios/OpenEOSCore` 是原生 Swift Package，負責 iOS 的 CCAPI 傳輸與命令層。它會依相機公告的 API 版本與 operation 建立能力，並支援設定控制、JPEG Live View、拍照、保證釋放的定時半按、錄影、點選對焦、媒體瀏覽／下載，以及包含有界能力證據且已遮蔽敏感資訊的診斷報告。套件包含可重現的 transport 測試，並由 macOS GitHub Actions job 實際編譯：
 
 ```bash
 cd ios/OpenEOSCore
@@ -106,7 +107,7 @@ GitHub Actions 會建置最終 App bundle、確認 ICON／語系／區網／方�
 
 ## Desktop Bridge
 
-Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、半按快門、錄影、焦點前後移動或座標 Tap AF、JPEG Live View、媒體列表、串流下載與不含敏感資料的診斷。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
+Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、半按快門、錄影、焦點前後移動或座標 Tap AF、JPEG Live View、媒體列表、串流下載，以及包含 engine 公告能力證據且不含敏感資料的診斷。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
 
 先建立下列環境；只有使用 USB 相機時才需要在電腦安裝 `gphoto2`：
 

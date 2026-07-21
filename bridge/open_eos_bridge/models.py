@@ -146,6 +146,14 @@ class LiveViewCapabilities(ApiModel):
     max_fps: int = Field(default=5, ge=1)
 
 
+class CapabilityEvidence(ApiModel):
+    source: str = "unknown"
+    protocol_versions: list[str] = Field(default_factory=list, max_length=256)
+    advertised_commands: list[str] = Field(default_factory=list, max_length=256)
+    writable_settings: list[str] = Field(default_factory=list, max_length=256)
+    truncated: bool = False
+
+
 class CameraCapabilities(ApiModel):
     profile: CameraProfile
     supported: list[CameraFeature]
@@ -153,6 +161,7 @@ class CameraCapabilities(ApiModel):
     reasons: dict[str, str] = Field(default_factory=dict)
     live_view: LiveViewCapabilities = Field(default_factory=LiveViewCapabilities)
     settings: list[CameraSetting] = Field(default_factory=list)
+    evidence: CapabilityEvidence = Field(default_factory=CapabilityEvidence)
 
 
 class SettingUpdate(ApiModel):

@@ -33,6 +33,7 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         .joinToString { it.name }
     val live = state.liveViewDiagnostics
     val network = state.networkDiagnostics
+    val evidence = state.capabilities?.evidence
 
     return buildString {
         appendLine("Open EOS Control diagnostic report")
@@ -51,6 +52,14 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine("cellularAvailable=${network.cellularAvailable}")
         appendLine("supported=$supported")
         appendLine("planned=$planned")
+        appendLine("capabilitySource=${evidence?.source?.let { redactDiagnosticText(it, state) } ?: "unknown"}")
+        appendLine("protocolVersions=${evidence?.protocolVersions.orEmpty().joinToString().ifBlank { "none" }}")
+        appendLine("advertisedCommandCount=${evidence?.advertisedCommands?.size ?: 0}")
+        appendLine(
+            "advertisedCommands=${evidence?.advertisedCommands.orEmpty().joinToString(" | ") { redactDiagnosticText(it, state) }.ifBlank { "none" }}"
+        )
+        appendLine("writableSettings=${evidence?.writableSettings.orEmpty().joinToString().ifBlank { "none" }}")
+        appendLine("capabilityEvidenceTruncated=${evidence?.truncated ?: false}")
         appendLine("battery=${state.status?.rawBatteryJson?.ifBlank { state.status?.batteryStatus } ?: "unknown"}")
         appendLine("storage=${state.status?.rawStorageJson?.ifBlank { state.status?.mediaAvailable?.toString() } ?: "unknown"}")
         appendLine(

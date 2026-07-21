@@ -29,6 +29,7 @@ The app currently includes:
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
+- Bounded, secret-redacted capability evidence showing the discovery source, protocol versions, advertised commands, and writable settings
 - Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/download, advertised standard still capture/property control, and capability-gated Canon EOS remote release, half-press, ISO/Tv/Av/WB, focus drive, and JPEG Live View
 - Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, Live View, focus drive, and media streaming
 - Live view frame display with auto/manual refresh and FPS control
@@ -84,7 +85,7 @@ GitHub Actions runs tests and debug builds on pushes to `main` and on pull reque
 
 ## iOS App And CCAPI Core
 
-`ios/OpenEOSCore` is a Swift Package that implements the native iOS CCAPI transport and command layer. It discovers camera-advertised API versions and operations, capability-gates settings and commands, supports JPEG Live View, still capture, timed half-press with guaranteed release, recording, tap focus, media listing/download, and redacted diagnostics. The package includes deterministic transport tests and is compiled by the macOS GitHub Actions job:
+`ios/OpenEOSCore` is a Swift Package that implements the native iOS CCAPI transport and command layer. It discovers camera-advertised API versions and operations, capability-gates settings and commands, supports JPEG Live View, still capture, timed half-press with guaranteed release, recording, tap focus, media listing/download, and redacted diagnostics with bounded capability evidence. The package includes deterministic transport tests and is compiled by the macOS GitHub Actions job:
 
 ```bash
 cd ios/OpenEOSCore
@@ -106,7 +107,7 @@ GitHub Actions builds the final app bundle, verifies icon/localization/network/o
 
 ## Desktop Bridge
 
-The bridge is an executable local service and PC control app. It controls USB cameras through `gphoto2`, or connects directly to a camera's wireless CCAPI endpoint without requiring `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, half-press, recording, focus drive or coordinate Tap AF when supported by the selected engine, JPEG Live View, media listing, streaming downloads, and secret-free diagnostics. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
+The bridge is an executable local service and PC control app. It controls USB cameras through `gphoto2`, or connects directly to a camera's wireless CCAPI endpoint without requiring `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, half-press, recording, focus drive or coordinate Tap AF when supported by the selected engine, JPEG Live View, media listing, streaming downloads, and secret-free diagnostics with the engine's advertised capability evidence. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
 
 Create the environment below. Install `gphoto2` on the host only when using a USB camera:
 

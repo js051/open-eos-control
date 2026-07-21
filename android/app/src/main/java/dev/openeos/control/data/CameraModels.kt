@@ -252,6 +252,17 @@ data class CameraStatus(
     val rawTransportJson: String = "",
 )
 
+data class CameraCapabilityEvidence(
+    val source: String = "unknown",
+    val protocolVersions: List<String> = emptyList(),
+    val advertisedCommands: List<String> = emptyList(),
+    val writableSettings: List<String> = emptyList(),
+    val truncated: Boolean = false,
+)
+
+const val MAX_CAPABILITY_EVIDENCE_ITEMS = 256
+const val MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
+
 data class CameraCapabilities(
     val iso: List<String>,
     val shutter: List<String>,
@@ -261,6 +272,7 @@ data class CameraCapabilities(
     val matrix: CapabilityMatrix = CapabilityMatrix(),
     val liveView: LiveViewCapabilities = LiveViewCapabilities(),
     val profile: CameraProfile = CameraProfile.genericEos(),
+    val evidence: CameraCapabilityEvidence = CameraCapabilityEvidence(),
 )
 
 data class CameraSettingControl(

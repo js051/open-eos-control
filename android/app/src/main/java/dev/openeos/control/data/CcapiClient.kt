@@ -69,6 +69,7 @@ class CcapiClient(
     private val observedFeatures = mutableSetOf<CameraFeature>()
     private var enforceAdvertisedOperations = false
     private var settingsLoaded = false
+    private var discoverySource = "unknown"
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.MEDIUM
 
@@ -90,6 +91,7 @@ class CcapiClient(
 
         if (treatAsSimulator ?: isLocalOrSim) {
             isRealCamera = false
+            discoverySource = "simulator contract"
             return
         }
 
@@ -101,7 +103,7 @@ class CcapiClient(
             withContext(Dispatchers.IO) {
                 httpClient.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
-                        parseDiscoveryResponse(response.body?.string().orEmpty())
+                        parseDiscoveryResponse(response.body?.string().orEmpty(), "GET /ccapi")
                         true
                     } else {
                         errors.add("GET /ccapi: HTTP ${response.code}")
@@ -125,7 +127,7 @@ class CcapiClient(
             withContext(Dispatchers.IO) {
                 httpClient.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
-                        parseDiscoveryResponse(response.body?.string().orEmpty())
+                        parseDiscoveryResponse(response.body?.string().orEmpty(), "GET /ccapi/")
                         true
                     } else {
                         errors.add("GET /ccapi/: HTTP ${response.code}")
@@ -153,6 +155,7 @@ class CcapiClient(
                         if (response.isSuccessful) {
                             apiVersionPrefixes = listOf(prefix)
                             apiVersionPrefix = prefix
+                            discoverySource = "GET $prefix/deviceinformation (identity fallback)"
                             true
                         } else {
                             errors.add("GET $prefix/deviceinformation: HTTP ${response.code}")
@@ -184,11 +187,12 @@ class CcapiClient(
         throw IllegalStateException(errorMessage)
     }
 
-    private fun parseDiscoveryResponse(body: String) {
+    private fun parseDiscoveryResponse(body: String, source: String) {
         val json = JSONObject(body)
         val versions = linkedSetOf<String>()
         apiOperations.clear()
         enforceAdvertisedOperations = true
+        discoverySource = source
         val apiArray = json.optJSONArray("api")
         if (apiArray != null && apiArray.length() > 0) {
             for (index in 0 until apiArray.length()) {
@@ -394,9 +398,12 @@ class CcapiClient(
                 advancedSettings = advancedSettings,
                 matrix = CapabilityMatrix.ccapiNetwork(supportedFeatures),
                 liveView = liveViewCapabilities,
+                evidence = capabilityEvidence(),
             )
         } else {
-            getJson("/ccapi/capabilities").toCameraCapabilities()
+            getJson("/ccapi/capabilities").toCameraCapabilities().copy(
+                evidence = CameraCapabilityEvidence(source = discoverySource),
+            )
         }
     }
 
@@ -676,6 +683,41 @@ class CcapiClient(
 
     private fun supportsApi(method: String, pathSuffix: String): Boolean =
         apiOperations.any { it.method == method && it.path.endsWith(pathSuffix) }
+
+    private fun capabilityEvidence(): CameraCapabilityEvidence {
+        val protocolVersions = apiVersionPrefixes
+            .map { it.substringAfterLast('/').replace("\r", "").replace("\n", "") }
+            .distinct()
+        val commands = apiOperations
+            .asSequence()
+            .map { operation ->
+                val safePath = operation.path
+                    .substringBefore('?')
+                    .replace("\r", "")
+                    .replace("\n", "")
+                    .take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS)
+                "${operation.method} $safePath".take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS)
+            }
+            .distinct()
+            .sorted()
+            .toList()
+        val writableSettings = settingPathsByKey.keys
+            .asSequence()
+            .map { it.replace("\r", "").replace("\n", "").take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS) }
+            .distinct()
+            .sorted()
+            .toList()
+        return CameraCapabilityEvidence(
+            source = discoverySource.replace("\r", "").replace("\n", "")
+                .take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS),
+            protocolVersions = protocolVersions.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
+            advertisedCommands = commands.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
+            writableSettings = writableSettings.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
+            truncated = protocolVersions.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
+                commands.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
+                writableSettings.size > MAX_CAPABILITY_EVIDENCE_ITEMS,
+        )
+    }
 
     private fun advertisedApiPaths(method: String, pathSuffix: String): List<String> =
         apiVersionPrefixes.mapNotNull { prefix ->

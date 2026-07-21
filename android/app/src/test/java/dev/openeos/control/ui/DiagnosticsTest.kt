@@ -1,6 +1,8 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.CameraCapabilities
+import dev.openeos.control.data.CameraCapabilityEvidence
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraNetworkRouting
@@ -41,6 +43,18 @@ class DiagnosticsTest {
     @Test
     fun diagnosticReportIncludesCameraNetworkRouteAndStreamHealth() {
         val state = CameraUiState(
+            capabilities = CameraCapabilities(
+                iso = emptyList(),
+                shutter = emptyList(),
+                aperture = emptyList(),
+                whiteBalance = emptyList(),
+                evidence = CameraCapabilityEvidence(
+                    source = "GET /ccapi",
+                    protocolVersions = listOf("ver100"),
+                    advertisedCommands = listOf("POST /ccapi/ver100/shooting/control/shutterbutton"),
+                    writableSettings = listOf("iso", "tv"),
+                ),
+            ),
             networkDiagnostics = CameraNetworkDiagnostics(
                 routing = CameraNetworkRouting.WIFI_BOUND,
                 targetHost = "192.168.1.2",
@@ -58,6 +72,10 @@ class DiagnosticsTest {
         assertTrue(report.contains("cameraInterface=wlan0"))
         assertTrue(report.contains("cellularAvailable=true"))
         assertTrue(report.contains("liveViewHealthy=true"))
+        assertTrue(report.contains("capabilitySource=GET /ccapi"))
+        assertTrue(report.contains("advertisedCommandCount=1"))
+        assertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
+        assertTrue(report.contains("writableSettings=iso, tv"))
     }
 
     @Test

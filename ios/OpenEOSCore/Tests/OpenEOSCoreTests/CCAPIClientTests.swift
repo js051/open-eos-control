@@ -64,6 +64,15 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.tapFocus))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
+        XCTAssertEqual(snapshot.capabilities.evidence.source, "GET /ccapi")
+        XCTAssertEqual(snapshot.capabilities.evidence.protocolVersions, ["ver100"])
+        XCTAssertTrue(
+            snapshot.capabilities.evidence.advertisedCommands.contains(
+                "POST /ccapi/ver100/shooting/control/shutterbutton"
+            )
+        )
+        XCTAssertTrue(snapshot.capabilities.evidence.writableSettings.contains("iso"))
+        XCTAssertFalse(snapshot.capabilities.evidence.truncated)
         let remainingResponses = await transport.remainingResponses()
         XCTAssertEqual(remainingResponses, 0)
     }
@@ -137,6 +146,26 @@ final class CCAPIClientTests: XCTestCase {
         }
         let finalRequestCount = await transport.requests().count
         XCTAssertEqual(finalRequestCount, requestCount)
+    }
+
+    func testCapabilityEvidenceIsBoundedAndRemovesQueries() async throws {
+        let longSegment = String(repeating: "x", count: 600)
+        let entries = (0..<300).map { index in
+            #"{"path":"/diagnostics/item\#(index)/\#(longSegment)?token=secret","get":true}"#
+        }.joined(separator: ",")
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: "{\"ver100\":[\(entries)]}")
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let capabilities = try await client.capabilities()
+        let evidence = capabilities.evidence
+
+        XCTAssertEqual(evidence.advertisedCommands.count, 256)
+        XCTAssertTrue(evidence.truncated)
+        XCTAssertTrue(evidence.advertisedCommands.allSatisfy { !$0.contains("?") && !$0.contains("secret") })
+        XCTAssertTrue(
+            evidence.advertisedCommands.allSatisfy { $0.count <= 512 }
+        )
     }
 
     func testHalfPressUsesAdvertisedMethodAndAlwaysReleases() async throws {
@@ -307,6 +336,38 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertFalse(report.contains("secret"))
         XCTAssertFalse(report.contains("Basic abc"))
         XCTAssertTrue(report.contains("[redacted]"))
+    }
+
+    func testDiagnosticReportIncludesCapabilityEvidence() throws {
+        let capabilities = CameraCapabilities(
+            settings: [],
+            matrix: CapabilityMatrix(),
+            liveView: LiveViewCapabilities(),
+            profile: CameraProfile.from(modelName: "Canon EOS R6 Mark III"),
+            evidence: CameraCapabilityEvidence(
+                source: "GET /ccapi",
+                protocolVersions: ["ver100"],
+                advertisedCommands: ["POST /ccapi/ver100/shooting/control/shutterbutton"],
+                writableSettings: ["iso", "tv"]
+            )
+        )
+        let snapshot = CameraSnapshot(
+            info: CameraInfo(model: "Canon EOS R6 Mark III", serial: "redacted", api: "ccapi"),
+            status: CameraStatus(),
+            capabilities: capabilities
+        )
+
+        let report = CCAPIDiagnosticReport.make(
+            baseURL: try XCTUnwrap(URL(string: "http://192.168.1.2:8080")),
+            mode: .camera,
+            versions: ["/ccapi/ver100"],
+            snapshot: snapshot
+        )
+
+        XCTAssertTrue(report.contains("capabilitySource=GET /ccapi"))
+        XCTAssertTrue(report.contains("advertisedCommandCount=1"))
+        XCTAssertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
+        XCTAssertTrue(report.contains("writableSettings=iso, tv"))
     }
 
     private func enqueueStatus(on transport: MockCameraHTTPTransport, prefix: String = "/ccapi/ver100") async {

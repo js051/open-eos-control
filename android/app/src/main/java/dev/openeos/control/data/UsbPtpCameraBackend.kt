@@ -189,6 +189,19 @@ class UsbPtpCameraBackend(
             CameraFeature.MEDIA_BROWSER,
             CameraFeature.MEDIA_DOWNLOAD,
         )
+        val writableSettings = buildList {
+            if (iso.isNotEmpty()) add("iso")
+            if (shutter.isNotEmpty()) add("shutter")
+            if (aperture.isNotEmpty()) add("aperture")
+            if (whiteBalance.isNotEmpty()) add("whitebalance")
+            addAll(advancedSettings.map(CameraSettingControl::key))
+        }.distinct().sorted()
+        val advertisedCommands = info.operations
+            .asSequence()
+            .sorted()
+            .map { "0x%04X".format(Locale.US, it) }
+            .take(MAX_CAPABILITY_EVIDENCE_ITEMS)
+            .toList()
         return CameraCapabilities(
             iso = iso,
             shutter = shutter,
@@ -228,6 +241,21 @@ class UsbPtpCameraBackend(
                 LiveViewCapabilities()
             },
             profile = CameraProfile.fromModelName(info.model),
+            evidence = CameraCapabilityEvidence(
+                source = "PTP GetDeviceInfo",
+                protocolVersions = listOf(
+                    "PTP ${formatPtpVersion(info.standardVersion)}",
+                    "vendor 0x%08X/%d".format(
+                        Locale.US,
+                        info.vendorExtensionId,
+                        info.vendorExtensionVersion,
+                    ),
+                ),
+                advertisedCommands = advertisedCommands,
+                writableSettings = writableSettings.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
+                truncated = info.operations.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
+                    writableSettings.size > MAX_CAPABILITY_EVIDENCE_ITEMS,
+            ),
         )
     }
 

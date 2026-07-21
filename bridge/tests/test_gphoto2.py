@@ -79,6 +79,9 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
         "400",
         "800",
     ]
+    assert capabilities.evidence.source == "gphoto2 --abilities + --list-all-config"
+    assert "CAPTURE_PREVIEW" in capabilities.evidence.advertised_commands
+    assert "/main/imgsettings/iso" in capabilities.evidence.writable_settings
 
     status = session.set_setting("iso", "800")
     assert status.exposure.iso == "800"

@@ -228,22 +228,47 @@ public struct LiveViewCapabilities: Equatable, Sendable {
     }
 }
 
+public struct CameraCapabilityEvidence: Equatable, Sendable {
+    public let source: String
+    public let protocolVersions: [String]
+    public let advertisedCommands: [String]
+    public let writableSettings: [String]
+    public let truncated: Bool
+
+    public init(
+        source: String = "unknown",
+        protocolVersions: [String] = [],
+        advertisedCommands: [String] = [],
+        writableSettings: [String] = [],
+        truncated: Bool = false
+    ) {
+        self.source = source
+        self.protocolVersions = protocolVersions
+        self.advertisedCommands = advertisedCommands
+        self.writableSettings = writableSettings
+        self.truncated = truncated
+    }
+}
+
 public struct CameraCapabilities: Equatable, Sendable {
     public let settings: [CameraSetting]
     public let matrix: CapabilityMatrix
     public let liveView: LiveViewCapabilities
     public let profile: CameraProfile
+    public let evidence: CameraCapabilityEvidence
 
     public init(
         settings: [CameraSetting],
         matrix: CapabilityMatrix,
         liveView: LiveViewCapabilities,
-        profile: CameraProfile
+        profile: CameraProfile,
+        evidence: CameraCapabilityEvidence = CameraCapabilityEvidence()
     ) {
         self.settings = settings
         self.matrix = matrix
         self.liveView = liveView
         self.profile = profile
+        self.evidence = evidence
     }
 
     public func setting(_ key: String) -> CameraSetting? {

@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.annotation.StringRes
 import dev.openeos.control.R
+import dev.openeos.control.data.CameraCapabilityEvidence
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaTransferProgress
@@ -219,6 +220,11 @@ class CameraScreensTest {
     fun debugStateShowsDiagnosticSections() {
         compose.setContent { MaterialTheme { DebugScreen(connectedState().copy(uiMode = UiMode.DEBUG), noOpActions()) } }
         compose.onNodeWithText(resourceText(R.string.overview)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.capability_evidence)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("GET /ccapi").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("POST /ccapi/ver100/shooting/control/shutterbutton")
+            .performScrollTo()
+            .assertIsDisplayed()
         compose.onNodeWithText("CCAPI").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("USB / PTP").performScrollTo().assertIsDisplayed()
     }
@@ -337,6 +343,12 @@ class CameraScreensTest {
             aperture = listOf("2.8", "4.0", "5.6"),
             whiteBalance = listOf("auto", "daylight", "cloudy"),
             liveView = LiveViewCapabilities.ccapiNetwork(),
+            evidence = CameraCapabilityEvidence(
+                source = "GET /ccapi",
+                protocolVersions = listOf("ver100"),
+                advertisedCommands = listOf("POST /ccapi/ver100/shooting/control/shutterbutton"),
+                writableSettings = listOf("iso", "tv", "av", "wb"),
+            ),
         ),
     )
 

@@ -77,6 +77,10 @@ class DesktopBridgeClientTest {
         assertEquals(listOf("Auto", "100", "400", "800"), capabilities.iso)
         assertEquals("drivemode", capabilities.advancedSettings.single().key)
         assertEquals(5, capabilities.liveView.maxFps)
+        assertEquals("gphoto2 --abilities + --list-all-config", capabilities.evidence.source)
+        assertEquals(listOf("gphoto2 2.5.33"), capabilities.evidence.protocolVersions)
+        assertTrue("CAPTURE_PREVIEW" in capabilities.evidence.advertisedCommands)
+        assertTrue("/main/imgsettings/iso" in capabilities.evidence.writableSettings)
         assertArrayEquals(JPEG, frame.bytes)
         assertTrue(frame.sourceUrl.endsWith("/liveview/frame?t=9"))
         assertTrue(focus.ok)
@@ -308,7 +312,14 @@ class DesktopBridgeClientTest {
                 {"key":"iso","label":"ISO","value":"400","values":["Auto","100","400","800"]},
                 {"key":"whitebalance","label":"White balance","value":"Auto","values":["Auto","Daylight"]},
                 {"key":"drivemode","label":"Drive mode","value":"Single","values":["Single","Continuous"]}
-              ]
+              ],
+              "evidence": {
+                "source": "gphoto2 --abilities + --list-all-config",
+                "protocolVersions": ["gphoto2 2.5.33"],
+                "advertisedCommands": ["CAPTURE_IMAGE", "CAPTURE_PREVIEW"],
+                "writableSettings": ["/main/imgsettings/iso"],
+                "truncated": false
+              }
             }
         """
 

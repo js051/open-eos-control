@@ -105,9 +105,18 @@ The bridge should mirror the app-side capability model:
       "value": "800",
       "values": ["100", "200", "400", "800", "1600"]
     }
-  ]
+  ],
+  "evidence": {
+    "source": "GET /ccapi",
+    "protocolVersions": ["ver100"],
+    "advertisedCommands": ["POST /ccapi/ver100/shooting/control/shutterbutton"],
+    "writableSettings": ["iso"],
+    "truncated": false
+  }
 }
 ```
+
+`evidence` is immutable diagnostic context for the active engine. CCAPI reports method/path pairs from discovery; libgphoto2 reports abilities and writable configuration paths. It does not enable a capability by itself. Producers de-duplicate and sort evidence, remove URL queries and line breaks, limit each list to 256 items and each item to 512 characters, and set `truncated` when data was omitted. The browser diagnostic report includes this object because it embeds the capability response, while credentials and authorization values remain excluded.
 
 ## Live View
 

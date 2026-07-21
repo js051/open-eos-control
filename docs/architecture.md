@@ -30,6 +30,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 - `CameraConnection` identifies how the app reaches a camera: CCAPI network, Android USB/PTP, or desktop bridge.
 - `CameraProfile` identifies camera-family behavior. `Canon EOS R6 Mark III` is the primary profile and the golden validation target.
 - `CapabilityMatrix` tells the UI and tests what is supported now versus planned for a backend.
+- `CameraCapabilityEvidence` records where discovery came from, protocol/engine versions, advertised commands, and writable settings so physical-camera reports can distinguish missing advertisements from parser defects.
 - `LiveViewRequest` and `LiveViewCapabilities` describe FPS, source, and size without hard-coding CCAPI polling into the UI.
 - `UsbPtpDiagnostics` describes Android USB host devices, Canon vendor IDs, PTP interfaces, permission state, and endpoints before a PTP session is opened.
 - `PtpSession` owns USB PTP transaction IDs, command/data/response validation, standard dataset/property parsing and writes, and streaming object transfers. `AndroidUsbPtpTransport` is limited to Android USB permission, interface claiming, and bulk endpoint I/O.
@@ -48,6 +49,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 - Backend-specific power should appear as capabilities, not UI assumptions.
 - Unsupported operations must fail with explicit transport/feature errors.
 - A CCAPI control is writable only when discovery advertises the exact endpoint and HTTP method; setting values must also come from the camera's current `ability` list. UI gating and backend enforcement must use the same rule so stale or direct calls cannot bypass it.
+- Capability evidence is diagnostic output, not authorization. It never grants a feature independently of `CapabilityMatrix` and backend checks. Lists are de-duplicated, capped at 256 entries, limited to 512 characters per entry, and stripped of query strings and line breaks before crossing a platform boundary or entering a report.
 - JPEG Live View requires an advertised start operation, at least one advertised frame endpoint, and an advertised stop operation. A 2xx text/JSON media response is metadata or an error, never a downloadable camera file.
 - Canon EDSDK must not be committed or redistributed in this open-source repo; keep it as an optional local adapter.
 - Live view sources are interchangeable at the contract level: CCAPI JPEG polling, CCAPI RTP, USB/PTP preview, and bridge streams.

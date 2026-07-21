@@ -137,6 +137,19 @@ class DesktopBridgeClient(
         val minFps = liveView.optInt("minFps", 1).coerceAtLeast(1)
         val maxFps = liveView.optInt("maxFps", minFps).coerceAtLeast(minFps)
         val profile = body.optJSONObject("profile") ?: JSONObject()
+        val evidenceBody = body.optJSONObject("evidence") ?: JSONObject()
+        val evidenceCommands = evidenceBody.optJSONArray("advertisedCommands").strings()
+            .map { it.substringBefore('?').replace("\r", "").replace("\n", "").take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS) }
+            .distinct()
+            .take(MAX_CAPABILITY_EVIDENCE_ITEMS)
+        val evidenceSettings = evidenceBody.optJSONArray("writableSettings").strings()
+            .map { it.replace("\r", "").replace("\n", "").take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS) }
+            .distinct()
+            .take(MAX_CAPABILITY_EVIDENCE_ITEMS)
+        val evidenceVersions = evidenceBody.optJSONArray("protocolVersions").strings()
+            .map { it.replace("\r", "").replace("\n", "").take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS) }
+            .distinct()
+            .take(MAX_CAPABILITY_EVIDENCE_ITEMS)
         return CameraCapabilities(
             iso = settingsByKey["iso"]?.values.orEmpty(),
             shutter = settingsByKey["shutter"]?.values.orEmpty(),
@@ -168,6 +181,19 @@ class DesktopBridgeClient(
                     ?: CameraModelFamily.UNKNOWN,
                 priority = profile.optString("priority").toEnumOrNull<CameraModelPriority>()
                     ?: CameraModelPriority.RESEARCH,
+            ),
+            evidence = CameraCapabilityEvidence(
+                source = evidenceBody.optString("source", "unknown")
+                    .replace("\r", "")
+                    .replace("\n", "")
+                    .take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS),
+                protocolVersions = evidenceVersions,
+                advertisedCommands = evidenceCommands,
+                writableSettings = evidenceSettings,
+                truncated = evidenceBody.optBoolean("truncated") ||
+                    (evidenceBody.optJSONArray("protocolVersions")?.length() ?: 0) > evidenceVersions.size ||
+                    (evidenceBody.optJSONArray("advertisedCommands")?.length() ?: 0) > evidenceCommands.size ||
+                    (evidenceBody.optJSONArray("writableSettings")?.length() ?: 0) > evidenceSettings.size,
             ),
         )
     }

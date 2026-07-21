@@ -30,6 +30,33 @@ struct DebugView: View {
                         value("storage_raw", camera.status?.rawStorageJSON ?? "null", mono: true)
                     }
 
+                    debugSection("capability_evidence") {
+                        value("capability_source", camera.capabilities?.evidence.source ?? "unknown", mono: true)
+                        value(
+                            "protocol_versions",
+                            camera.capabilities?.evidence.protocolVersions.joined(separator: ", ").nilIfBlank
+                                ?? language.string("none"),
+                            mono: true
+                        )
+                        value(
+                            "advertised_commands",
+                            camera.capabilities?.evidence.advertisedCommands.joined(separator: "\n").nilIfBlank
+                                ?? language.string("none"),
+                            mono: true
+                        )
+                        value(
+                            "writable_settings",
+                            camera.capabilities?.evidence.writableSettings.joined(separator: ", ").nilIfBlank
+                                ?? language.string("none"),
+                            mono: true
+                        )
+                        value(
+                            "evidence_truncated",
+                            language.string(camera.capabilities?.evidence.truncated == true ? "yes" : "no"),
+                            warning: camera.capabilities?.evidence.truncated == true
+                        )
+                    }
+
                     debugSection("live_view") {
                         value("requested_fps", "\(camera.requestedFPS)")
                         value("observed_fps", String(format: "%.1f", camera.observedFPS))

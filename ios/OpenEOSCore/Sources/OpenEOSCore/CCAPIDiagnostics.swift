@@ -36,6 +36,7 @@ public enum CCAPIDiagnosticReport {
     ) -> String {
         let supported = snapshot?.capabilities.matrix.supported.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
         let planned = snapshot?.capabilities.matrix.planned.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
+        let evidence = snapshot?.capabilities.evidence
         let date = ISO8601DateFormatter().string(from: liveView.lastFrameAt ?? Date(timeIntervalSince1970: 0))
         let source = sanitized(liveView.sourceURL)?.absoluteString ?? "none"
         return [
@@ -48,6 +49,12 @@ public enum CCAPIDiagnosticReport {
             "apiVersions=\(versions.joined(separator: ", "))",
             "supported=\(supported)",
             "planned=\(planned)",
+            "capabilitySource=\(redact(evidence?.source ?? "unknown"))",
+            "protocolVersions=\(evidence?.protocolVersions.joined(separator: ", ") ?? "none")",
+            "advertisedCommandCount=\(evidence?.advertisedCommands.count ?? 0)",
+            "advertisedCommands=\(redact(evidence?.advertisedCommands.joined(separator: " | ") ?? "none"))",
+            "writableSettings=\(evidence?.writableSettings.joined(separator: ", ") ?? "none")",
+            "capabilityEvidenceTruncated=\(evidence?.truncated ?? false)",
             "battery=\(snapshot?.status.rawBatteryJSON ?? "null")",
             "storage=\(snapshot?.status.rawStorageJSON ?? "null")",
             "requestedFps=\(liveView.requestedFPS)",

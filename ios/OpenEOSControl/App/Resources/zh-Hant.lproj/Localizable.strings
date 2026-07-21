@@ -90,6 +90,14 @@
 "base_url" = "Base URL";
 "supported_features" = "已支援功能";
 "planned_features" = "規劃功能";
+"capability_evidence" = "能力證據";
+"capability_source" = "探索來源";
+"protocol_versions" = "協定版本";
+"advertised_commands" = "相機公告命令";
+"writable_settings" = "可寫設定";
+"evidence_truncated" = "證據清單已截短";
+"yes" = "是";
+"no" = "否";
 "battery_raw" = "電池原始 JSON";
 "storage_raw" = "儲存卡原始 JSON";
 "requested_fps" = "要求 FPS";

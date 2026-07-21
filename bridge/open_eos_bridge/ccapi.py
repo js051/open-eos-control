@@ -24,6 +24,7 @@ from .models import (
     CameraProfile,
     CameraSetting,
     CameraStatus,
+    CapabilityEvidence,
     ExposureState,
     FocusResult,
     LiveViewCapabilities,
@@ -41,6 +42,8 @@ MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024
 MAX_MEDIA_ITEMS = 500
 MAX_MEDIA_PAGES = 100
 MAX_MEDIA_TREE_DEPTH = 4
+MAX_CAPABILITY_EVIDENCE_ITEMS = 256
+MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 TRANSFER_CHUNK_BYTES = 64 * 1024
 HALF_PRESS_SECONDS = 0.35
 HTTP_METHODS = ("GET", "PUT", "POST", "DELETE")
@@ -278,6 +281,7 @@ class CcapiSession:
         self._cached_info: CameraInfo | None = None
         self._settings_cache: dict[str, object] | None = None
         self._setting_paths: dict[str, str] = {}
+        self._discovery_source = "unknown"
         self._recording: bool | None = None
         self._live_view_active = False
         self._live_view_size_control = True
@@ -303,7 +307,7 @@ class CcapiSession:
                             status_code=502,
                             engine=self.engine_name,
                         )
-                    self._parse_discovery(value)
+                    self._parse_discovery(value, source=f"GET {path}")
                     self._initialized = True
                     return
                 except BridgeError as error:
@@ -322,6 +326,7 @@ class CcapiSession:
                         )
                     self._api_prefixes = [prefix]
                     self._preferred_prefix = prefix
+                    self._discovery_source = f"GET {path} (identity fallback)"
                     self._cached_info = self._camera_info(value)
                     self._observed.add(CameraFeature.CAMERA_IDENTITY)
                     self._initialized = True
@@ -491,6 +496,7 @@ class CcapiSession:
                     else LiveViewCapabilities()
                 ),
                 settings=controls,
+                evidence=self._capability_evidence(),
             )
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
@@ -874,9 +880,10 @@ class CcapiSession:
             key=lambda item: (item.key not in PRIMARY_SETTING_KEYS, item.label.casefold(), item.key),
         )
 
-    def _parse_discovery(self, value: dict[str, object]) -> None:
+    def _parse_discovery(self, value: dict[str, object], *, source: str) -> None:
         versions: set[str] = set()
         self._operations.clear()
+        self._discovery_source = source
         api = value.get("api")
         if isinstance(api, list):
             for item in api:
@@ -906,6 +913,32 @@ class CcapiSession:
         self._preferred_prefix = (
             "/ccapi/ver100" if "/ccapi/ver100" in self._api_prefixes else self._api_prefixes[0]
         )
+
+    def _capability_evidence(self) -> CapabilityEvidence:
+        protocol_versions = [prefix.rsplit("/", 1)[-1] for prefix in self._api_prefixes]
+        commands = sorted({self._evidence_command(operation) for operation in self._operations})
+        writable_settings = sorted(
+            {
+                key.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
+                for key in self._setting_paths
+            }
+        )
+        return CapabilityEvidence(
+            source=self._discovery_source[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS],
+            protocol_versions=protocol_versions[:MAX_CAPABILITY_EVIDENCE_ITEMS],
+            advertised_commands=commands[:MAX_CAPABILITY_EVIDENCE_ITEMS],
+            writable_settings=writable_settings[:MAX_CAPABILITY_EVIDENCE_ITEMS],
+            truncated=(
+                len(protocol_versions) > MAX_CAPABILITY_EVIDENCE_ITEMS
+                or len(commands) > MAX_CAPABILITY_EVIDENCE_ITEMS
+                or len(writable_settings) > MAX_CAPABILITY_EVIDENCE_ITEMS
+            ),
+        )
+
+    @staticmethod
+    def _evidence_command(operation: CcapiOperation) -> str:
+        path = operation.path.split("?", 1)[0].replace("\r", "").replace("\n", "")
+        return f"{operation.method} {path}"[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
 
     def _first_json(self, paths: list[str], required: bool = False) -> object | None:
         errors: list[str] = []

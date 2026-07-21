@@ -186,6 +186,11 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         capabilities.supported
     )
     assert next(item for item in capabilities.settings if item.key == "shutter").values == ["1/50", "1/100"]
+    assert capabilities.evidence.source == "GET /ccapi"
+    assert capabilities.evidence.protocol_versions == ["ver100"]
+    assert "POST /ccapi/ver100/shooting/control/shutterbutton" in capabilities.evidence.advertised_commands
+    assert "iso" in capabilities.evidence.writable_settings
+    assert capabilities.evidence.truncated is False
 
     assert session.set_setting("iso", "1600").exposure.iso == "1600"
     with pytest.raises(BridgeError, match="not advertised"):
@@ -238,6 +243,24 @@ def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
     assert capabilities.settings == []
     assert failure.value.code == "UNSUPPORTED_FEATURE"
     assert len(transport.requests) == before
+
+
+def test_ccapi_capability_evidence_is_bounded_and_removes_queries() -> None:
+    discovery = {
+        "ver100": [
+            {"path": f"/diagnostics/item{index}/{'x' * 600}?token=secret", "get": True}
+            for index in range(300)
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    evidence = session.capabilities().evidence
+
+    assert len(evidence.advertised_commands) == 256
+    assert evidence.truncated is True
+    assert all("?" not in command and "secret" not in command for command in evidence.advertised_commands)
+    assert all(len(command) <= 512 for command in evidence.advertised_commands)
 
 
 def test_ccapi_does_not_enable_wrong_method_shutter_or_incomplete_live_view() -> None:

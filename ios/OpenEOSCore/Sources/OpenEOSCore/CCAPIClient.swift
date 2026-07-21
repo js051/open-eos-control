@@ -28,6 +28,8 @@ public actor CCAPIClient {
     private static let maximumMediaItems = 500
     private static let maximumMediaPages = 100
     private static let maximumMediaTreeDepth = 4
+    private static let maximumCapabilityEvidenceItems = 256
+    private static let maximumCapabilityEvidenceItemCharacters = 512
     private static let halfPressNanoseconds: UInt64 = 350_000_000
 
     private let baseURL: URL
@@ -45,6 +47,7 @@ public actor CCAPIClient {
     private var cachedSettings: JSONDictionary?
     private var enforceAdvertisedOperations = false
     private var settingsLoaded = false
+    private var discoverySource = "unknown"
     private var cachedModel = "Canon Camera"
     private var recording: Bool?
     private var liveViewSizeControlSupported = true
@@ -96,6 +99,7 @@ public actor CCAPIClient {
         guard !initialized else { return }
         resolvedMode = resolveMode(requestedMode)
         if resolvedMode == .simulator {
+            discoverySource = "simulator contract"
             initialized = true
             return
         }
@@ -104,7 +108,7 @@ public actor CCAPIClient {
         for path in ["/ccapi", "/ccapi/"] {
             do {
                 let discovery = try await requestJSON(path: path)
-                parseDiscovery(discovery)
+                parseDiscovery(discovery, source: "GET \(path)")
                 initialized = true
                 return
             } catch {
@@ -118,6 +122,7 @@ public actor CCAPIClient {
                 let value = try await requestJSON(path: "\(prefix)/deviceinformation")
                 apiVersionPrefixes = [prefix]
                 preferredVersionPrefix = prefix
+                discoverySource = "GET \(prefix)/deviceinformation (identity fallback)"
                 cachedModel = value.string("productname", default: cachedModel)
                 observedFeatures.insert(.cameraIdentity)
                 enforceAdvertisedOperations = true
@@ -250,7 +255,8 @@ public actor CCAPIClient {
                 defaultSize: liveSizes.contains(.medium) ? .medium : activeLiveViewSize,
                 maximumFPS: 30
             ),
-            profile: CameraProfile.from(modelName: cachedModel)
+            profile: CameraProfile.from(modelName: cachedModel),
+            evidence: capabilityEvidence()
         )
     }
 
@@ -541,10 +547,11 @@ public actor CCAPIClient {
         return .camera
     }
 
-    private func parseDiscovery(_ value: JSONDictionary) {
+    private func parseDiscovery(_ value: JSONDictionary, source: String) {
         var versions = Set<String>()
         enforceAdvertisedOperations = true
         operations.removeAll()
+        discoverySource = source
         value.array("api")?.strings.forEach {
             if let version = Self.extractVersion(from: $0) { versions.insert(version) }
         }
@@ -637,6 +644,44 @@ public actor CCAPIClient {
                 $0.method == method && $0.path.hasPrefix(prefix) && $0.path.hasSuffix(suffix)
             }?.path
         }.removingDuplicates()
+    }
+
+    private func capabilityEvidence() -> CameraCapabilityEvidence {
+        let protocolVersions = apiVersionPrefixes.map {
+            ($0 as NSString).lastPathComponent
+                .replacingOccurrences(of: "\r", with: "")
+                .replacingOccurrences(of: "\n", with: "")
+        }.removingDuplicates()
+        let commands = operations.map { operation in
+            let path = operation.path
+                .components(separatedBy: "?")[0]
+                .replacingOccurrences(of: "\r", with: "")
+                .replacingOccurrences(of: "\n", with: "")
+            return String(
+                "\(operation.method.rawValue) \(path)".prefix(Self.maximumCapabilityEvidenceItemCharacters)
+            )
+        }.removingDuplicates().sorted()
+        let writableSettings = settingPaths.keys.map {
+            String(
+                $0.replacingOccurrences(of: "\r", with: "")
+                    .replacingOccurrences(of: "\n", with: "")
+                    .prefix(Self.maximumCapabilityEvidenceItemCharacters)
+            )
+        }.removingDuplicates().sorted()
+        return CameraCapabilityEvidence(
+            source: String(
+                discoverySource
+                    .replacingOccurrences(of: "\r", with: "")
+                    .replacingOccurrences(of: "\n", with: "")
+                    .prefix(Self.maximumCapabilityEvidenceItemCharacters)
+            ),
+            protocolVersions: Array(protocolVersions.prefix(Self.maximumCapabilityEvidenceItems)),
+            advertisedCommands: Array(commands.prefix(Self.maximumCapabilityEvidenceItems)),
+            writableSettings: Array(writableSettings.prefix(Self.maximumCapabilityEvidenceItems)),
+            truncated: protocolVersions.count > Self.maximumCapabilityEvidenceItems ||
+                commands.count > Self.maximumCapabilityEvidenceItems ||
+                writableSettings.count > Self.maximumCapabilityEvidenceItems
+        )
     }
 
     private func apiPath(_ method: HTTPMethod, suffix: String) -> String {
@@ -812,7 +857,8 @@ public actor CCAPIClient {
                 defaultSize: .medium,
                 maximumFPS: 2
             ),
-            profile: CameraProfile.from(modelName: cachedModel)
+            profile: CameraProfile.from(modelName: cachedModel),
+            evidence: CameraCapabilityEvidence(source: discoverySource)
         )
     }
 

@@ -78,6 +78,8 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert info.json()["serial"] == "TEST-SERIAL-0001"
     assert status.json()["battery"]["level"] == 82
     assert "LIVE_VIEW" in capabilities.json()["supported"]
+    assert capabilities.json()["evidence"]["source"] == "gphoto2 --abilities + --list-all-config"
+    assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert setting.json()["exposure"]["iso"] == "800"
     assert live_start.json() == {"active": True, "requestedFps": 5}
     assert live_frame.content == JPEG

@@ -21,7 +21,7 @@ This record captures physical-camera evidence reported from the Android app. Ide
 | Exposure capability discovery | Passed | ISO, Tv, Av, WB and advanced settings were advertised by the camera |
 | JPEG Live View | Passed | Requested 15 FPS, rolling observed 15.1 FPS, JPEG content type, 66,086-byte recorded frame |
 | Live View size compatibility fallback | Passed | Initial POST with `liveviewsize` returned HTTP 400 `Invalid parameter`; retrying the camera-display-only payload restored Live View |
-| Still capture and half-press | Pending | Camera did not advertise these capabilities in the captured report; no physical shutter result is claimed |
+| Still capture and half-press | Pending | The client did not expose these capabilities in this older report. Because it predates raw capability evidence, it cannot yet distinguish a camera omission from a discovery-parser omission |
 | Movie start/stop and Tap AF | Pending | No recorded physical result yet |
 | Storage, media browser and download | Pending | Storage was `null` in the captured report |
 | Camera Wi-Fi plus cellular internet | Pending re-test | Android now binds camera HTTP sockets to the Wi-Fi route without process-wide binding; a post-change physical result is still required |
@@ -47,8 +47,10 @@ lastError=HTTP 400 Invalid parameter from the original Live View start payload
 
 The later successful frame report confirms the compatibility retry fixed the Live View failure. It does not prove operations absent from the camera's advertised capability set.
 
+This report predates `capabilitySource`, `protocolVersions`, `advertisedCommands`, and `writableSettings`. A fresh report is required before concluding that the camera itself omitted shutter, recording, focus, storage, or media operations.
+
 ## Next Physical Pass
 
 1. Keep cellular data enabled while connected to the camera Wi-Fi and confirm Debug reports `cameraRoute=WIFI_BOUND` plus `cellularAvailable=true`.
-2. Capture a fresh diagnostic report after exercising each camera-advertised still, half-press, movie, Tap AF, storage, browse and download control.
+2. Capture a fresh diagnostic report and retain `capabilitySource`, `protocolVersions`, `advertisedCommandCount`, `advertisedCommands`, `writableSettings`, and `capabilityEvidenceTruncated` after exercising each available still, half-press, movie, Tap AF, storage, browse and download control.
 3. Connect over USB-C/OTG and complete the checklist in [Android USB/PTP](../android-usb-ptp.md).
