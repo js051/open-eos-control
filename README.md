@@ -103,19 +103,20 @@ GitHub Actions builds the final app bundle, verifies icon/localization/network/o
 
 ## Desktop Bridge
 
-The bridge is an executable local service and PC control app for USB cameras managed by `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, half-press, recording, focus drive, JPEG Live View, media listing, streaming downloads, and token-free diagnostics. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
+The bridge is an executable local service and PC control app. It controls USB cameras through `gphoto2`, or connects directly to a camera's wireless CCAPI endpoint without requiring `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, half-press, recording, focus drive or coordinate Tap AF when supported by the selected engine, JPEG Live View, media listing, streaming downloads, and secret-free diagnostics. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
 
-Install `gphoto2` for the host platform first, then:
+Create the environment below. Install `gphoto2` on the host only when using a USB camera:
 
 ```powershell
 cd bridge
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-gphoto2 --auto-detect
 .\.venv\Scripts\open-eos-bridge.exe
 ```
 
-Open [http://127.0.0.1:18181/](http://127.0.0.1:18181/) for the PC control UI. It only enables controls advertised by the connected camera. The Bearer token is kept in page memory and is excluded from diagnostics; only the language choice is persisted locally.
+For USB discovery, verify the optional host dependency separately with `gphoto2 --auto-detect`.
+
+Open [http://127.0.0.1:18181/](http://127.0.0.1:18181/) for the PC control UI. Choose **USB camera** to scan with `gphoto2`, or **Wireless CCAPI** and enter the camera origin such as `http://192.168.1.2:8080`. Optional camera Basic Auth credentials are supported. The UI only enables advertised controls; Bridge tokens and camera passwords stay in memory and are excluded from diagnostics. Language, camera URL, and username may be remembered locally.
 
 The default service listens only on `127.0.0.1:18181`. The Android connection screen can use `http://10.0.2.2:18181` from an emulator. A physical phone requires an explicit LAN bind and Bearer token:
 
@@ -127,7 +128,7 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "replace-with-a-long-random-token"
 
 Choose **Desktop bridge** on the Android connection screen, enter the URL and the same token, then scan and select the camera. The token is kept only in process memory and is never persisted or included in diagnostics.
 
-The current CLI adapter deliberately advertises at most 5 FPS because each JPEG is a separate `gphoto2 --capture-preview` transaction. A persistent native libgphoto2 stream is a later performance path. The service and Android contract paths are automated-test covered, and the browser UI has been exercised end to end against the deterministic test engine at desktop and narrow sizes. This repository does not yet claim a physical R6 Mark III bridge pass, and this Windows development host currently has no `gphoto2` executable installed.
+The current CLI adapter deliberately advertises at most 5 FPS because each JPEG is a separate `gphoto2 --capture-preview` transaction. The CCAPI engine advertises 1-30 FPS client polling, defaults to 15 FPS, retries the R6 Mark III-compatible Live View start payload after an `Invalid parameter` response, and reports observed FPS separately. Its discovery, settings, capture, guaranteed shutter release, recording, Tap AF, bounded JPEG extraction, same-origin media traversal, streaming downloads, auth handling, and capability gates are automated-test covered. The browser workflow has also exercised CCAPI connection, valid JPEG display, 15 FPS selection, Tap AF, English/Traditional Chinese, and desktop/narrow layouts. Physical PC/R6 Mark III validation is still required.
 
 ## Fake Camera Simulator
 
@@ -162,7 +163,7 @@ Useful endpoints:
 
 - Keep CCAPI stable for R6 Mark III wireless control.
 - Validate the implemented Android USB/PTP standard and Canon EOS remote-release/exposure/focus/Live View paths on R6 Mark III, then add only further vendor settings, Touch AF, or movie commands backed by reliable evidence.
-- Validate the implemented Android-to-Desktop-Bridge and PC control UI paths on R6 Mark III, improve preview throughput with a persistent engine, and retain Canon EDSDK as an optional user-installed adapter.
+- Validate the implemented PC CCAPI, Android-to-Desktop-Bridge, and USB PC control paths on R6 Mark III, improve libgphoto2 preview throughput with a persistent engine, and retain Canon EDSDK as an optional user-installed adapter.
 - Validate the implemented iOS SwiftUI CCAPI app on an iPhone and R6 Mark III; keep iOS USB/PTP as a research track.
 
 See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/android-usb-ptp.md](docs/android-usb-ptp.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), [docs/ios-ccapi.md](docs/ios-ccapi.md), and [docs/reference-projects.md](docs/reference-projects.md).

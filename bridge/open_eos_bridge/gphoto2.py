@@ -756,6 +756,14 @@ class GPhoto2Session:
             self._set_config_value(config, value, refresh=False)
             return FocusResult(accepted=True, direction=normalized_direction, step=normalized_step)
 
+    def tap_focus(self, x: float, y: float) -> FocusResult:
+        del x, y
+        raise unsupported(
+            CameraFeature.TAP_FOCUS.value,
+            self.engine_name,
+            "The libgphoto2 CLI engine has no verified normalized image-coordinate AF point command.",
+        )
+
     def start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._lock:
             if not self._abilities.capture_preview:

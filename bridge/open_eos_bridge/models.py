@@ -18,6 +18,7 @@ class ApiModel(BaseModel):
 class EngineName(StrEnum):
     AUTO = "auto"
     LIBGPHOTO2 = "libgphoto2"
+    CCAPI = "ccapi"
     EDSDK = "edsdk"
 
 
@@ -72,6 +73,9 @@ class SessionCreateRequest(ApiModel):
     engine: EngineName = EngineName.AUTO
     camera_id: str | None = None
     profile_hint: str | None = None
+    ccapi_url: str | None = Field(default=None, max_length=2048)
+    ccapi_username: str | None = Field(default=None, max_length=256)
+    ccapi_password: str | None = Field(default=None, max_length=1024, repr=False)
 
 
 class SessionCreated(ApiModel):
@@ -180,6 +184,8 @@ class FocusResult(ApiModel):
     accepted: bool
     direction: str | None = None
     step: str | None = None
+    x: float | None = Field(default=None, ge=0.0, le=1.0)
+    y: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class MediaItem(ApiModel):

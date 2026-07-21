@@ -45,10 +45,14 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "connection-view",
         "control-view",
         "camera-select",
+        "ccapi-url-input",
+        "ccapi-username-input",
+        "ccapi-password-input",
         "connect-button",
         "live-image",
         "exposure-strip",
         "shutter-button",
+        "focus-reticle",
         "focus-section",
         "media-list",
         "diagnostics-output",
@@ -82,6 +86,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "/shutter/half-press",
         "/recording/",
         "/focus/drive",
+        "/focus/tap",
         "/liveview/start",
         "/liveview/frame",
         "/media",
@@ -90,8 +95,13 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert all(path in script for path in required_paths)
     assert "featureSupported(FEATURES." in script
     assert "Bearer ${state.token}" in script
-    storage_lines = [line for line in script.splitlines() if "localStorage." in line]
+    assert "writeLanguagePreference(state.language)" in script
+    assert "writeCameraPreference(CCAPI_URL_KEY" in script
+    assert "writeCameraPreference(CCAPI_USERNAME_KEY" in script
+    storage_lines = [line.casefold() for line in script.splitlines() if "localstorage." in line.casefold()]
     assert storage_lines
-    assert all("LANGUAGE_KEY" in line for line in storage_lines)
+    assert all("password" not in line and "token" not in line for line in storage_lines)
+    assert "ccapi_password_key" not in script.casefold()
+    assert "Math.min(15, state.capabilities.liveView?.maxFps || 1)" in script
     report_source = script.split("function diagnosticReport()", 1)[1].split("\n  function ", 1)[0]
     assert "token" not in report_source.casefold()

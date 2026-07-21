@@ -1,6 +1,6 @@
 # Architecture
 
-Open EOS Control is an Android-first project with a multi-platform camera core. The first real-camera target is Canon EOS R6 Mark III, but model-specific behavior must be expressed as profiles and capabilities so the same structure can grow across EOS bodies.
+Open EOS Control is a multi-platform camera-control project for Android, iOS, and PC. The first real-camera target is Canon EOS R6 Mark III, but model-specific behavior must be expressed as profiles and capabilities so the same structure can grow across EOS bodies.
 
 ## Runtime Shape
 
@@ -38,8 +38,8 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 
 - Android keeps the first complete app UI and owns direct phone-to-camera workflows.
 - iOS uses the native `OpenEOSCore` Swift package and `OpenEOSControl` SwiftUI app over CCAPI/Wi-Fi with the same command and capability vocabulary; iOS USB/PTP remains research until platform constraints are proven.
-- PC starts as a desktop bridge service with a built-in browser control UI. The bridge exposes the shared open protocol while internally using libgphoto2 or an optional user-installed Canon EDSDK adapter.
-- The first bridge implementation is executable under `bridge/`: FastAPI owns auth/session/HTTP concerns, while `GPhoto2Engine` maps only camera-advertised CLI abilities and configuration values into the shared contract.
+- PC uses a desktop bridge service with a built-in browser control UI. The bridge exposes the shared open protocol while internally using libgphoto2 for USB, a native HTTP CCAPI engine for wireless control, or a future optional user-installed Canon EDSDK adapter.
+- The bridge implementation is executable under `bridge/`: FastAPI owns auth/session/HTTP concerns, `GPhoto2Engine` maps only camera-advertised CLI abilities and configuration values, and `CcapiEngine` maps only camera-advertised HTTP operations and setting values into the shared contract.
 - The same FastAPI process serves the PC UI at `/`; it calls only the public bridge contract, keeps authentication in page memory, and renders controls from the advertised capability/settings response.
 - Android's `DesktopBridgeClient` maps that HTTP contract back into `CameraControlBackend`, including memory-only Bearer auth, bridge camera discovery/selection, binary Live View, and streaming media transfers.
 
@@ -57,5 +57,5 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 2. Validate the implemented Android USB/PTP session, DeviceInfo, storage, media, conditional standard capture and property paths on R6 Mark III.
 3. Validate the capability-gated Canon EOS remote release, half-press, ISO/Tv/Av/WB, focus drive and JPEG Live View paths on R6 Mark III.
 4. Record remaining real vendor properties/events and add only setting, movie or Touch AF mappings supported by reliable evidence.
-5. Validate the tested Android-to-libgphoto2 desktop bridge and PC UI on R6 Mark III, then pursue persistent native streaming and an optional EDSDK adapter.
+5. Validate the tested PC CCAPI, Android-to-libgphoto2 desktop bridge, and PC UI paths on R6 Mark III, then pursue persistent native streaming and an optional EDSDK adapter.
 6. Validate the simulator-tested iOS CCAPI app on a physical iPhone and R6 Mark III.

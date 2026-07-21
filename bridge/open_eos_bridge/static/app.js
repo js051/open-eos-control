@@ -6,12 +6,15 @@
     STILL_CAPTURE: "STILL_CAPTURE",
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
     VIDEO_RECORDING: "VIDEO_RECORDING",
+    TAP_FOCUS: "TAP_FOCUS",
     FOCUS_DRIVE: "FOCUS_DRIVE",
     MEDIA_BROWSER: "MEDIA_BROWSER",
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
   };
   const CORE_SETTINGS = ["iso", "shutter", "aperture", "whitebalance"];
   const LANGUAGE_KEY = "open-eos-control-language";
+  const CCAPI_URL_KEY = "open-eos-control-ccapi-url";
+  const CCAPI_USERNAME_KEY = "open-eos-control-ccapi-username";
 
   const messages = {
     en: {
@@ -20,8 +23,16 @@
       auto: "Auto",
       connectCamera: "Connect camera",
       checkingBridge: "Checking bridge",
-      bearerToken: "Bearer token",
+      bearerToken: "Bridge Bearer token",
       tokenOptional: "Optional on loopback",
+      connectionType: "Connection type",
+      usbCamera: "USB camera",
+      wirelessCcapi: "Wireless CCAPI",
+      cameraUrl: "Camera URL",
+      cameraUrlPlaceholder: "http://192.168.1.2:8080",
+      cameraCredentials: "Camera credentials",
+      username: "Username",
+      password: "Password",
       camera: "Camera",
       scanFirst: "Scan for a camera first",
       scan: "Scan",
@@ -77,6 +88,8 @@
       liveViewStarted: "Live View started",
       liveViewStopped: "Live View stopped",
       focusMoved: "Focus moved {direction}",
+      focusAccepted: "Focus point accepted",
+      tapToFocus: "Select a point to focus",
       settingUpdated: "{label} set to {value}",
       exposure: "Exposure",
       cameraSetting: "Camera setting",
@@ -120,8 +133,16 @@
       auto: "自動",
       connectCamera: "連接相機",
       checkingBridge: "正在檢查 Bridge",
-      bearerToken: "Bearer token",
+      bearerToken: "Bridge Bearer token",
       tokenOptional: "本機連線可留空",
+      connectionType: "連線方式",
+      usbCamera: "USB 相機",
+      wirelessCcapi: "無線 CCAPI",
+      cameraUrl: "相機網址",
+      cameraUrlPlaceholder: "http://192.168.1.2:8080",
+      cameraCredentials: "相機帳號",
+      username: "使用者名稱",
+      password: "密碼",
       camera: "相機",
       scanFirst: "請先掃描相機",
       scan: "掃描",
@@ -177,6 +198,8 @@
       liveViewStarted: "即時預覽已啟動",
       liveViewStopped: "即時預覽已停止",
       focusMoved: "焦點已向{direction}移動",
+      focusAccepted: "已設定對焦點",
+      tapToFocus: "點選畫面設定對焦點",
       settingUpdated: "{label} 已設為 {value}",
       exposure: "曝光",
       cameraSetting: "相機設定",
@@ -233,8 +256,26 @@
     }
   }
 
+  function readCameraPreference(key, fallback = "") {
+    try {
+      return localStorage.getItem(key) || fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function writeCameraPreference(key, value) {
+    try {
+      if (value) localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+    } catch (_) {
+      // Connection still works when browser storage is unavailable.
+    }
+  }
+
   const state = {
     language: readLanguagePreference(),
+    connectionMode: "usb",
     token: "",
     health: null,
     cameras: [],
@@ -268,6 +309,14 @@
     engineState: byId("engine-state"),
     healthDot: byId("health-dot"),
     tokenInput: byId("token-input"),
+    connectionMode: byId("connection-mode"),
+    usbModeButton: byId("usb-mode-button"),
+    ccapiModeButton: byId("ccapi-mode-button"),
+    usbConnectionFields: byId("usb-connection-fields"),
+    ccapiConnectionFields: byId("ccapi-connection-fields"),
+    ccapiUrlInput: byId("ccapi-url-input"),
+    ccapiUsernameInput: byId("ccapi-username-input"),
+    ccapiPasswordInput: byId("ccapi-password-input"),
     cameraSelect: byId("camera-select"),
     scanButton: byId("scan-button"),
     connectButton: byId("connect-button"),
@@ -288,6 +337,7 @@
     modeIndicator: byId("mode-indicator"),
     frameIndicator: byId("frame-indicator"),
     recordIndicator: byId("record-indicator"),
+    focusReticle: byId("focus-reticle"),
     captureFlash: byId("capture-flash"),
     exposureStrip: byId("exposure-strip"),
     photoModeButton: byId("photo-mode-button"),
@@ -364,9 +414,11 @@
     ui.liveImage.alt = t("liveViewImage");
     document.querySelector(".camera-metrics > span:first-child")?.setAttribute("title", t("battery"));
     document.querySelector(".camera-metrics > span:last-child")?.setAttribute("title", t("storage"));
+    renderConnectionMode();
     renderHealth();
     renderCameras();
     renderSession();
+    renderLiveState();
     renderMedia();
     renderDiagnostics();
   }
@@ -451,15 +503,49 @@
       ui.healthDot.className = "status-dot warning";
       return;
     }
-    const [engineName, engine] = Object.entries(state.health.engines || {})[0] || ["gphoto2", null];
+    const engineName = state.connectionMode === "ccapi" ? "ccapi" : "libgphoto2";
+    const engine = state.health.engines?.[engineName] || null;
     if (engine?.available) {
       const display = engine.version || engineName;
       ui.engineState.textContent = t("bridgeReady", { engine: display });
       ui.healthDot.className = "status-dot success";
     } else {
-      ui.engineState.textContent = engine?.detail || t("bridgeUnavailable");
+      ui.engineState.textContent = t("bridgeUnavailable");
       ui.healthDot.className = "status-dot warning";
     }
+  }
+
+  function validCcapiUrl() {
+    try {
+      const value = new URL(ui.ccapiUrlInput.value.trim());
+      return (
+        ["http:", "https:"].includes(value.protocol) && Boolean(value.hostname) &&
+        !value.username && !value.password && value.pathname === "/" && !value.search && !value.hash
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function renderConnectionMode() {
+    const network = state.connectionMode === "ccapi";
+    ui.usbModeButton.classList.toggle("active", !network);
+    ui.ccapiModeButton.classList.toggle("active", network);
+    ui.usbModeButton.setAttribute("aria-pressed", String(!network));
+    ui.ccapiModeButton.setAttribute("aria-pressed", String(network));
+    ui.usbConnectionFields.hidden = network;
+    ui.ccapiConnectionFields.hidden = !network;
+    ui.scanButton.hidden = network;
+    renderAvailability();
+  }
+
+  function selectConnectionMode(mode) {
+    if (!["usb", "ccapi"].includes(mode) || state.busy) return;
+    state.connectionMode = mode;
+    clearConnectionError();
+    renderConnectionMode();
+    renderHealth();
+    if (mode === "usb" && !state.cameras.length && !state.health?.authRequired) scanCameras();
   }
 
   function renderCameras() {
@@ -471,7 +557,7 @@
       placeholder.textContent = t("scanFirst");
       ui.cameraSelect.append(placeholder);
       ui.cameraSelect.disabled = true;
-      ui.connectButton.disabled = true;
+      renderAvailability();
       return;
     }
     placeholder.textContent = t("selectCamera");
@@ -485,7 +571,7 @@
     ui.cameraSelect.disabled = false;
     const fallback = state.cameras.length === 1 ? state.cameras[0].id : "";
     ui.cameraSelect.value = state.cameras.some((camera) => camera.id === selected) ? selected : fallback;
-    ui.connectButton.disabled = !ui.cameraSelect.value || state.busy;
+    renderAvailability();
   }
 
   async function refreshHealth() {
@@ -502,6 +588,7 @@
   }
 
   async function scanCameras() {
+    if (state.connectionMode !== "usb") return;
     clearConnectionError();
     state.token = ui.tokenInput.value.trim();
     ui.scanButton.disabled = true;
@@ -525,17 +612,27 @@
   }
 
   async function connectCamera() {
+    const network = state.connectionMode === "ccapi";
     const cameraId = ui.cameraSelect.value;
-    if (!cameraId) return;
+    const ccapiUrl = ui.ccapiUrlInput.value.trim();
+    if ((!network && !cameraId) || (network && !validCcapiUrl())) return;
     clearConnectionError();
     state.token = ui.tokenInput.value.trim();
     state.busy = true;
     ui.engineState.textContent = t("connecting");
     renderAvailability();
     try {
+      const sessionPayload = network
+        ? {
+            engine: "ccapi",
+            ccapiUrl,
+            ccapiUsername: ui.ccapiUsernameInput.value.trim(),
+            ccapiPassword: ui.ccapiPasswordInput.value,
+          }
+        : { engine: "auto", cameraId };
       state.session = await api("/v1/session", {
         method: "POST",
-        json: { engine: "auto", cameraId },
+        json: sessionPayload,
       });
       const sessionId = encodeURIComponent(state.session.id);
       [state.info, state.status, state.capabilities] = await Promise.all([
@@ -543,10 +640,16 @@
         api(`/v1/session/${sessionId}/status`),
         api(`/v1/session/${sessionId}/capabilities`),
       ]);
-      state.requestedFps = clampFps(state.capabilities.liveView?.maxFps || 1);
+      state.requestedFps = clampFps(Math.min(15, state.capabilities.liveView?.maxFps || 1));
       state.captureMode = state.status.recording ? "video" : "photo";
       state.lastError = null;
+      setOperationState(t("ready"));
+      if (network) {
+        writeCameraPreference(CCAPI_URL_KEY, ccapiUrl);
+        writeCameraPreference(CCAPI_USERNAME_KEY, ui.ccapiUsernameInput.value.trim());
+      }
       ui.tokenInput.value = "";
+      ui.ccapiPasswordInput.value = "";
       ui.connectionView.hidden = true;
       ui.controlView.hidden = false;
       renderSession();
@@ -620,6 +723,7 @@
     ui.connectionView.hidden = false;
     ui.controlView.hidden = true;
     ui.tokenInput.value = "";
+    ui.ccapiPasswordInput.value = "";
     renderAvailability();
     renderHealth();
   }
@@ -1031,6 +1135,7 @@
       button.setAttribute("aria-label", t(labelKey));
       replaceButtonIcon(button, state.liveActive ? "square" : "play");
     });
+    if (!state.liveActive) ui.focusReticle.hidden = true;
     renderFrameIndicator();
   }
 
@@ -1066,11 +1171,70 @@
     }
   }
 
+  function focusPointFromClient(clientX, clientY) {
+    const bounds = ui.viewfinder.getBoundingClientRect();
+    const naturalWidth = ui.liveImage.naturalWidth || bounds.width;
+    const naturalHeight = ui.liveImage.naturalHeight || bounds.height;
+    const scale = Math.min(bounds.width / naturalWidth, bounds.height / naturalHeight);
+    const imageWidth = naturalWidth * scale;
+    const imageHeight = naturalHeight * scale;
+    const imageLeft = bounds.left + (bounds.width - imageWidth) / 2;
+    const imageTop = bounds.top + (bounds.height - imageHeight) / 2;
+    if (
+      clientX < imageLeft || clientX > imageLeft + imageWidth ||
+      clientY < imageTop || clientY > imageTop + imageHeight
+    ) return null;
+    return {
+      x: (clientX - imageLeft) / imageWidth,
+      y: (clientY - imageTop) / imageHeight,
+      displayX: clientX - bounds.left,
+      displayY: clientY - bounds.top,
+    };
+  }
+
+  async function tapFocus(point) {
+    if (
+      !point || !state.session || state.busy || !state.liveActive ||
+      !featureSupported(FEATURES.TAP_FOCUS)
+    ) return;
+    state.busy = true;
+    ui.focusReticle.style.left = `${point.displayX}px`;
+    ui.focusReticle.style.top = `${point.displayY}px`;
+    ui.focusReticle.className = "focus-reticle focusing";
+    ui.focusReticle.hidden = false;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      await api(`/v1/session/${encodeURIComponent(state.session.id)}/focus/tap`, {
+        method: "POST",
+        json: { x: point.x, y: point.y },
+      });
+      ui.focusReticle.className = "focus-reticle success";
+      setOperationState(t("focusAccepted"));
+      window.setTimeout(() => { ui.focusReticle.hidden = true; }, 900);
+    } catch (error) {
+      const normalized = captureError(error);
+      ui.focusReticle.className = "focus-reticle failure";
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+      window.setTimeout(() => { ui.focusReticle.hidden = true; }, 1300);
+    } finally {
+      state.busy = false;
+      renderAvailability();
+    }
+  }
+
+  function tapFocusFromPointer(event) {
+    if (event.target.closest?.("button")) return;
+    tapFocus(focusPointFromClient(event.clientX, event.clientY));
+  }
+
   function renderAvailability() {
     const connected = Boolean(state.session);
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
     ui.scanButton.disabled = state.busy;
-    ui.connectButton.disabled = state.busy || !ui.cameraSelect.value;
+    const connectionReady = state.connectionMode === "ccapi" ? validCcapiUrl() : Boolean(ui.cameraSelect.value);
+    ui.connectButton.disabled = state.busy || !connectionReady;
     ui.refreshButton.disabled = !connected || state.busy;
     ui.disconnectButton.disabled = !connected || state.busy;
     ui.photoModeButton.disabled = state.busy || Boolean(state.status?.recording);
@@ -1106,6 +1270,18 @@
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
       button.disabled = state.busy || !state.liveActive;
     });
+    const tapFocusEnabled = featureSupported(FEATURES.TAP_FOCUS) && state.liveActive && !state.busy;
+    ui.viewfinder.classList.toggle("tap-focus-enabled", tapFocusEnabled);
+    ui.viewfinder.title = tapFocusEnabled ? t("tapToFocus") : "";
+    if (tapFocusEnabled) {
+      ui.viewfinder.setAttribute("role", "button");
+      ui.viewfinder.setAttribute("aria-label", t("tapToFocus"));
+      ui.viewfinder.tabIndex = 0;
+    } else {
+      ui.viewfinder.removeAttribute("role");
+      ui.viewfinder.removeAttribute("aria-label");
+      ui.viewfinder.removeAttribute("tabindex");
+    }
     const mediaTab = document.querySelector('.tab[data-view="media"]');
     mediaTab.hidden = !featureSupported(FEATURES.MEDIA_BROWSER);
   }
@@ -1310,9 +1486,20 @@
     });
     ui.scanButton.addEventListener("click", scanCameras);
     ui.connectButton.addEventListener("click", connectCamera);
+    ui.usbModeButton.addEventListener("click", () => selectConnectionMode("usb"));
+    ui.ccapiModeButton.addEventListener("click", () => selectConnectionMode("ccapi"));
     ui.cameraSelect.addEventListener("change", renderAvailability);
+    ui.ccapiUrlInput.addEventListener("input", renderAvailability);
     ui.tokenInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") scanCameras();
+      if (event.key === "Enter") {
+        if (state.connectionMode === "ccapi") connectCamera();
+        else scanCameras();
+      }
+    });
+    [ui.ccapiUrlInput, ui.ccapiUsernameInput, ui.ccapiPasswordInput].forEach((input) => {
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") connectCamera();
+      });
     });
     ui.refreshButton.addEventListener("click", () => refreshSession());
     ui.disconnectButton.addEventListener("click", disconnectCamera);
@@ -1328,6 +1515,13 @@
     ui.fpsSelect.addEventListener("change", changeFps);
     ui.focusNearButton.addEventListener("click", () => driveFocus("NEAR"));
     ui.focusFarButton.addEventListener("click", () => driveFocus("FAR"));
+    ui.viewfinder.addEventListener("click", tapFocusFromPointer);
+    ui.viewfinder.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key) || !ui.viewfinder.classList.contains("tap-focus-enabled")) return;
+      event.preventDefault();
+      const bounds = ui.viewfinder.getBoundingClientRect();
+      tapFocus(focusPointFromClient(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2));
+    });
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
       button.addEventListener("click", () => {
         state.focusStep = button.dataset.step;
@@ -1352,12 +1546,14 @@
 
   async function initialize() {
     window.OpenEosIcons?.render();
+    ui.ccapiUrlInput.value = readCameraPreference(CCAPI_URL_KEY, "http://192.168.1.2:8080");
+    ui.ccapiUsernameInput.value = readCameraPreference(CCAPI_USERNAME_KEY);
     bindEvents();
     applyLanguage();
     renderLiveState();
     renderAvailability();
     await refreshHealth();
-    const engine = Object.values(state.health?.engines || {})[0];
+    const engine = state.health?.engines?.libgphoto2;
     if (engine?.available && !state.health.authRequired) await scanCameras();
   }
 

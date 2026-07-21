@@ -12,12 +12,12 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .engine import CameraEngine
-from .errors import BridgeError, unsupported
+from .ccapi import CcapiEngine
+from .engine import CameraEngine, NetworkCameraEngine
+from .errors import BridgeError
 from .gphoto2 import GPhoto2Engine
 from .models import (
     CameraCapabilities,
-    CameraFeature,
     CameraInfo,
     CameraList,
     CameraStatus,
@@ -51,10 +51,16 @@ UI_HEADERS = {
 }
 
 
-def create_app(*, engine: CameraEngine | None = None, token: str | None = None) -> FastAPI:
+def create_app(
+    *,
+    engine: CameraEngine | None = None,
+    ccapi_engine: NetworkCameraEngine | None = None,
+    token: str | None = None,
+) -> FastAPI:
     camera_engine = engine or GPhoto2Engine()
+    network_engine = ccapi_engine or CcapiEngine()
     configured_token = token if token is not None else os.environ.get("OPEN_EOS_BRIDGE_TOKEN")
-    manager = SessionManager(camera_engine)
+    manager = SessionManager(camera_engine, network_engine)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -134,6 +140,7 @@ def create_app(*, engine: CameraEngine | None = None, token: str | None = None) 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         available, engine_version, detail = camera_engine.health()
+        network_available, network_version, network_detail = network_engine.health()
         return HealthResponse(
             version=__version__,
             auth_required=bool(configured_token),
@@ -143,7 +150,12 @@ def create_app(*, engine: CameraEngine | None = None, token: str | None = None) 
                     available=available,
                     version=engine_version,
                     detail=detail,
-                )
+                ),
+                network_engine.name: EngineHealth(
+                    available=network_available,
+                    version=network_version,
+                    detail=network_detail,
+                ),
             },
         )
 
@@ -189,17 +201,11 @@ def create_app(*, engine: CameraEngine | None = None, token: str | None = None) 
     def stop_recording(session_id: str) -> CameraStatus:
         return manager.get(session_id).stop_recording()
 
-    @router.post("/session/{session_id}/focus/tap", response_model=FocusResult)
+    @router.post("/session/{session_id}/focus/tap", response_model=FocusResult, response_model_exclude_none=True)
     def tap_focus(session_id: str, payload: TapFocusRequest) -> FocusResult:
-        del payload
-        session = manager.get(session_id)
-        raise unsupported(
-            CameraFeature.TAP_FOCUS.value,
-            session.engine_name,
-            "The bridge does not expose coordinate tap focus until a camera engine provides a verified mapping.",
-        )
+        return manager.get(session_id).tap_focus(payload.x, payload.y)
 
-    @router.post("/session/{session_id}/focus/drive", response_model=FocusResult)
+    @router.post("/session/{session_id}/focus/drive", response_model=FocusResult, response_model_exclude_none=True)
     def drive_focus(session_id: str, payload: FocusDriveRequest) -> FocusResult:
         return manager.get(session_id).drive_focus(payload.direction, payload.step)
 

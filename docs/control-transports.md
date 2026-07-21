@@ -30,14 +30,14 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Research track: USB movie control, Touch AF and Canon vendor settings beyond core exposure. No active controls are exposed without proven state and value semantics.
 - Tradeoffs: best pure phone-to-camera wired path, but it requires a real PTP engine plus Canon vendor-extension testing.
 
-### Desktop bridge
+### Desktop bridge and PC control
 
-- Status: HTTP service, built-in PC control UI, libgphoto2 CLI engine, and Android client are implemented and tested; EOS R6 Mark III device validation remains.
-- Connection: app talks to a local desktop service; desktop service controls the camera over USB.
-- Engines: the executable open-source path currently uses the `gphoto2` CLI; the Canon EDSDK adapter remains optional research and no Canon binary is redistributed.
-- Current implementation: camera discovery and sessions, capability-driven settings, status, still capture, half-press, movie target control, relative focus drive, JPEG preview, media listing and streamed downloads. The built-in responsive PC UI exposes those same advertised operations, English/Traditional Chinese, authenticated binary transfer and redacted diagnostics. Android provides URL/token input, scanning and multi-camera selection, applies camera-advertised Live View limits, and never persists the token. Both clients keep the token in memory. Loopback is the secure service default; LAN use requires a Bearer token.
+- Status: HTTP service, built-in PC control UI, libgphoto2 CLI engine, direct CCAPI engine, and Android client are implemented and tested; EOS R6 Mark III device validation remains.
+- Connection: the PC UI can control a USB camera through libgphoto2 or connect directly to the camera's wireless CCAPI origin. Android can use the same bridge for a computer-attached USB camera.
+- Engines: `libgphoto2` is the executable open-source USB path; `ccapi` is the executable HTTP(S) wireless path. The Canon EDSDK adapter remains optional research and no Canon binary is redistributed.
+- Current implementation: both engines map into the same session/capability API. libgphoto2 provides camera discovery, dynamic settings, capture, half-press, movie target control, relative focus drive, JPEG preview and media transfer. CCAPI provides advertised-operation discovery, dynamic settings, capture with guaranteed manual release, half-press, recording, normalized Tap AF, bounded JPEG polling, same-origin media traversal and streamed downloads. The built-in responsive PC UI offers USB/CCAPI mode selection, English/Traditional Chinese, authenticated binary transfer and redacted diagnostics. Bridge Bearer tokens and camera passwords are memory-only; camera URL and username may be remembered. Loopback is the secure service default; LAN use requires a Bearer token.
 - Strengths: immediate access to mature libgphoto2 Canon mappings, including the checked-in upstream R6 Mark III capability snapshot.
-- Tradeoffs: requires a computer in the loop. The CLI preview launches one process per JPEG and is truthfully capped at 5 FPS; persistent native libgphoto2 and physical-camera validation are later milestones.
+- Tradeoffs: Android Bridge use requires a computer in the loop. The USB CLI preview launches one process per JPEG and is truthfully capped at 5 FPS; persistent native libgphoto2 and physical-camera validation are later milestones. Direct PC CCAPI uses camera Wi-Fi and client polling, defaults to 15 FPS, and allows up to 30 FPS without claiming the camera will sustain it.
 
 ### iOS CCAPI
 
@@ -68,6 +68,6 @@ Each backend should map into this surface:
 3. Validate the implemented Canon EOS remote release, half-press, ISO/Tv/Av/WB, manual focus drive, and JPEG Live View paths.
 4. Record the remaining R6 Mark III vendor property/event gaps and add only mappings supported by reliable evidence.
 5. Prove USB movie and Touch AF semantics before exposing those controls.
-6. Validate the implemented Android-to-desktop bridge path with EOS R6 Mark III.
+6. Validate the implemented PC direct CCAPI and Android-to-desktop bridge paths with EOS R6 Mark III.
 7. Replace one-shot CLI preview with a persistent native libgphoto2 stream where it materially improves measured performance.
 8. Add an optional local EDSDK bridge adapter after SDK access, licensing, and supported host platforms are verified.

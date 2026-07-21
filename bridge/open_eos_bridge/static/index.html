@@ -44,12 +44,44 @@
                    data-i18n-placeholder="tokenOptional" placeholder="Optional on loopback">
           </label>
 
-          <label class="field">
-            <span data-i18n="camera">Camera</span>
-            <select id="camera-select" disabled>
-              <option value="" data-i18n="scanFirst">Scan for a camera first</option>
-            </select>
-          </label>
+          <div id="connection-mode" class="connection-mode" role="group" aria-label="Connection type" data-i18n-aria="connectionType">
+            <button id="usb-mode-button" class="active" type="button" data-connection-mode="usb">
+              <span class="icon" data-icon="usb" aria-hidden="true"></span>
+              <span data-i18n="usbCamera">USB camera</span>
+            </button>
+            <button id="ccapi-mode-button" type="button" data-connection-mode="ccapi">
+              <span class="icon" data-icon="wifi" aria-hidden="true"></span>
+              <span data-i18n="wirelessCcapi">Wireless CCAPI</span>
+            </button>
+          </div>
+
+          <div id="usb-connection-fields">
+            <label class="field">
+              <span data-i18n="camera">Camera</span>
+              <select id="camera-select" disabled>
+                <option value="" data-i18n="scanFirst">Scan for a camera first</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="ccapi-connection-fields" hidden>
+            <label class="field">
+              <span data-i18n="cameraUrl">Camera URL</span>
+              <input id="ccapi-url-input" type="url" inputmode="url" autocomplete="url" spellcheck="false"
+                     data-i18n-placeholder="cameraUrlPlaceholder" placeholder="http://192.168.1.2:8080">
+            </label>
+            <details class="credential-fields">
+              <summary data-i18n="cameraCredentials">Camera credentials</summary>
+              <label class="field">
+                <span data-i18n="username">Username</span>
+                <input id="ccapi-username-input" type="text" autocomplete="username" spellcheck="false">
+              </label>
+              <label class="field">
+                <span data-i18n="password">Password</span>
+                <input id="ccapi-password-input" type="password" autocomplete="current-password" spellcheck="false">
+              </label>
+            </details>
+          </div>
 
           <div class="connection-actions">
             <button id="scan-button" class="button secondary" type="button">
@@ -129,6 +161,7 @@
             <div id="record-indicator" class="record-indicator" hidden>
               <span aria-hidden="true"></span> REC
             </div>
+            <div id="focus-reticle" class="focus-reticle" aria-hidden="true" hidden></div>
             <div id="capture-flash" class="capture-flash" aria-hidden="true"></div>
           </div>
 

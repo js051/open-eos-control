@@ -4,13 +4,14 @@ The desktop bridge is a local service that exposes the same camera-control conce
 
 ## Implementation Status
 
-`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and invokes `gphoto2` with argument arrays, never through a shell. Android's `DesktopBridgeClient` implements this protocol behind the shared camera backend, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, and streamed media. Both sides are covered by deterministic tests shaped from the public libgphoto2 EOS R6 Mark III configuration snapshot. Physical R6 Mark III validation is still required and must not be inferred from those tests.
+`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and provides two open engines: `libgphoto2` for USB cameras and a native Python HTTP `ccapi` engine for direct wireless camera control. The gPhoto adapter invokes argument arrays, never a shell. Android's `DesktopBridgeClient` implements the bridge protocol behind the shared camera backend, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, and streamed media. Deterministic tests cover both PC engines and the Android contract. Physical R6 Mark III validation is still required and must not be inferred from those tests.
 
 ## Goals
 
 - Keep the bridge protocol open and testable.
 - Keep Canon EDSDK optional and user-installed; do not redistribute it in this repo.
 - Support libgphoto2 as the default open-source USB engine.
+- Support direct PC-to-camera CCAPI without requiring a phone or `gphoto2`.
 - Keep transport-specific details behind capabilities.
 
 ## HTTP Endpoints
@@ -39,7 +40,7 @@ GET  /v1/session/{id}/media/{itemId}
 DELETE /v1/session/{id}
 ```
 
-Only `/health` is public. All `/v1` routes require either a loopback client or `Authorization: Bearer <OPEN_EOS_BRIDGE_TOKEN>`. The executable refuses a non-loopback bind when no token is configured.
+`/health` and the browser UI assets are public. All `/v1` routes require either a loopback client or `Authorization: Bearer <OPEN_EOS_BRIDGE_TOKEN>`. The executable refuses a non-loopback bind when no token is configured.
 
 ## Session Request
 
@@ -55,7 +56,21 @@ Engines:
 
 - `auto`
 - `libgphoto2`
+- `ccapi`
 - `edsdk`
+
+For direct wireless CCAPI, the session request is:
+
+```json
+{
+  "engine": "ccapi",
+  "ccapiUrl": "http://192.168.1.2:8080",
+  "ccapiUsername": "optional-camera-user",
+  "ccapiPassword": "optional-memory-only-password"
+}
+```
+
+The URL must be an HTTP(S) origin without credentials, path, query, or fragment. The password is accepted only in the session body, kept in memory for the session, and never returned by the API or included in diagnostics. Camera-provided media URLs are restricted to the active camera origin.
 
 ## Capability Response
 
@@ -108,6 +123,23 @@ The bridge should mirror the app-side capability model:
 
 The current CLI adapter serves `GET /liveview/frame` as JPEG polling. Each frame is one bounded `gphoto2 --capture-preview --stdout` process, so it advertises at most 5 FPS. The client controls polling at or below `requestedFps`; the server does not claim the camera delivered that rate. A later native libgphoto2 adapter can keep a persistent stream while preserving the endpoint and capability vocabulary.
 
+The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. Requested FPS controls client polling; observed FPS remains a separate UI metric.
+
+## CCAPI Mapping
+
+The network engine discovers versions and HTTP methods from `GET /ccapi`; a fallback identity probe establishes connectivity but does not invent unsupported command capabilities. It maps only advertised operations:
+
+- identity, battery, storage, and merged versioned shooting settings
+- camera-advertised setting values and their discovered `PUT` paths
+- direct shutter or manual full press with guaranteed release
+- timed half-press with guaranteed release
+- movie start/stop through `recbutton`
+- normalized coordinate Tap AF through `afpoint`
+- bounded JPEG Live View lifecycle and frame extraction
+- bounded/paged storage traversal plus opaque same-origin media IDs and streamed downloads
+
+Basic Auth is sent preemptively when a username is supplied. The Authorization value, username, and password are never exposed in status, diagnostics, media URLs, or API responses. Focus drive and RTP remain unavailable unless a documented and camera-advertised implementation is added.
+
 ## libgphoto2 Mapping
 
 The adapter derives capabilities from `--abilities` and `--list-all-config` instead of assuming every EOS body supports every command:
@@ -133,9 +165,9 @@ python -m venv .venv
 .\.venv\Scripts\open-eos-bridge.exe
 ```
 
-The defaults are `127.0.0.1:18181`, the `libgphoto2` engine, and loopback-only access. Set `OPEN_EOS_GPHOTO2` when the executable is not named `gphoto2`. For a LAN bind, set both `OPEN_EOS_BRIDGE_HOST` and a strong `OPEN_EOS_BRIDGE_TOKEN`.
+The defaults are `127.0.0.1:18181` and loopback-only access. The UI offers `libgphoto2` USB and direct `ccapi` connections; set `OPEN_EOS_GPHOTO2` when the executable is not named `gphoto2`. For a LAN bind, set both `OPEN_EOS_BRIDGE_HOST` and a strong `OPEN_EOS_BRIDGE_TOKEN`.
 
-The same process serves the responsive PC control UI at `http://127.0.0.1:18181/`. It discovers cameras, opens one selected session, and renders only camera-advertised controls for Live View, exposure, capture, recording, focus, media, and diagnostics. English and Traditional Chinese are selectable; the token remains in page memory and is never included in diagnostics or media URLs.
+The same process serves the responsive PC control UI at `http://127.0.0.1:18181/`. It scans USB cameras or accepts a manual CCAPI origin, opens one selected session, and renders only camera-advertised controls for Live View, exposure, capture, recording, focus, media, and diagnostics. English and Traditional Chinese are selectable. Bridge tokens and camera passwords stay in page memory; only language, camera URL, and username may be persisted.
 
 ## Error Shape
 
