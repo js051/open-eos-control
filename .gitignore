@@ -12,6 +12,12 @@ android/local.properties
 android/**/build/
 *.apk
 
+# Apple / Swift
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
 node_modules/
 dist/
 .vite/

@@ -48,7 +48,8 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | PC control UI | Implemented; device validation required | Built into the bridge root URL; capability-gated controls, authenticated binary Live View/downloads, memory-only token, redacted diagnostics, English/Traditional Chinese, desktop/narrow browser interaction and overflow checks pass |
 | Android Desktop Bridge client | Implemented; device validation required | Bearer token is memory-only; discovery, camera selection, session lifecycle, capability parsing, controls, JPEG frames, media streaming, diagnostics redaction and Live View request clamping are test-covered |
 | Optional Canon EDSDK adapter | Research | User-installed SDK works without redistributing Canon binaries |
-| iOS CCAPI app | Planned | Native client connects, controls, renders Live View and passes shared fixtures |
+| iOS CCAPI core | Implemented; device validation required | Native Swift package discovers operations, capability-gates commands, controls settings/capture/record/focus, renders bounded JPEG data, browses/downloads media, redacts diagnostics, and passes macOS Swift tests |
+| iOS CCAPI app | Planned | SwiftUI client connects, controls, renders Live View, supports English/Traditional Chinese and passes orientation/accessibility UI tests |
 | iOS USB/PTP | Research | Public Apple API and a working physical-device path are demonstrated |
 
 ## Release Gate

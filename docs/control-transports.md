@@ -41,9 +41,10 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 ### iOS CCAPI
 
-- Status: planned platform client, not in this Android module.
+- Status: native Swift command/transport core and deterministic tests are implemented; SwiftUI product UI and physical-camera validation remain.
 - Connection: iPhone/iPad to camera CCAPI over Wi-Fi.
-- First milestone: reuse the CCAPI command model, capability matrix, and live view contract.
+- Current implementation: discovery, capability-gated settings and commands, JPEG Live View, still capture, half-press with guaranteed release, recording, tap focus, bounded media traversal/download, and redacted diagnostics in `ios/OpenEOSCore`.
+- Next milestone: ship the SwiftUI connection/control app with English and Traditional Chinese resources, stable orientation behavior, offline preview, and on-device R6 Mark III validation.
 - USB/PTP stance: research track only until Apple platform constraints and public APIs are validated against Canon EOS bodies.
 
 ## Shared Backend Surface

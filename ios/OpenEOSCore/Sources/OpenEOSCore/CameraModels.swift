@@ -1,0 +1,318 @@
+import Foundation
+
+public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
+    case cameraIdentity = "CAMERA_IDENTITY"
+    case batteryStatus = "BATTERY_STATUS"
+    case storageStatus = "STORAGE_STATUS"
+    case liveView = "LIVE_VIEW"
+    case liveViewJPEGPolling = "LIVE_VIEW_JPEG_POLLING"
+    case liveViewRTP = "LIVE_VIEW_RTP"
+    case stillCapture = "STILL_CAPTURE"
+    case shutterHalfPress = "SHUTTER_HALF_PRESS"
+    case videoRecording = "VIDEO_RECORDING"
+    case tapFocus = "TAP_FOCUS"
+    case focusDrive = "FOCUS_DRIVE"
+    case exposureControl = "EXPOSURE_CONTROL"
+    case whiteBalanceControl = "WHITE_BALANCE_CONTROL"
+    case advancedSettings = "ADVANCED_SETTINGS"
+    case mediaBrowser = "MEDIA_BROWSER"
+    case mediaDownload = "MEDIA_DOWNLOAD"
+}
+
+public struct CapabilityMatrix: Equatable, Sendable {
+    public var supported: Set<CameraFeature>
+    public var planned: Set<CameraFeature>
+    public var reasons: [CameraFeature: String]
+
+    public init(
+        supported: Set<CameraFeature> = [],
+        planned: Set<CameraFeature> = [],
+        reasons: [CameraFeature: String] = [:]
+    ) {
+        self.supported = supported
+        self.planned = planned
+        self.reasons = reasons
+    }
+
+    public func supports(_ feature: CameraFeature) -> Bool {
+        supported.contains(feature)
+    }
+}
+
+public enum CameraModelFamily: String, Codable, Sendable {
+    case eosR
+    case eosDSLR
+    case eosM
+    case powerShot
+    case unknown
+}
+
+public enum CameraModelPriority: String, Codable, Sendable {
+    case primary
+    case supported
+    case research
+}
+
+public struct CameraProfile: Equatable, Codable, Sendable {
+    public let modelName: String
+    public let family: CameraModelFamily
+    public let priority: CameraModelPriority
+
+    public init(modelName: String, family: CameraModelFamily, priority: CameraModelPriority) {
+        self.modelName = modelName
+        self.family = family
+        self.priority = priority
+    }
+
+    public static func from(modelName: String) -> CameraProfile {
+        let normalized = modelName.lowercased()
+        if normalized.contains("eos r6 mark iii") || normalized.contains("r6m3") || normalized.contains("r63") {
+            return CameraProfile(modelName: modelName, family: .eosR, priority: .primary)
+        }
+        if normalized.contains("eos r") {
+            return CameraProfile(modelName: modelName, family: .eosR, priority: .supported)
+        }
+        if normalized.contains("eos m") {
+            return CameraProfile(modelName: modelName, family: .eosM, priority: .supported)
+        }
+        if normalized.contains("eos") {
+            return CameraProfile(modelName: modelName, family: .eosDSLR, priority: .supported)
+        }
+        if normalized.contains("powershot") {
+            return CameraProfile(modelName: modelName, family: .powerShot, priority: .research)
+        }
+        return CameraProfile(
+            modelName: modelName.isEmpty ? "Canon Camera" : modelName,
+            family: .unknown,
+            priority: .research
+        )
+    }
+}
+
+public struct CameraInfo: Equatable, Codable, Sendable {
+    public let connected: Bool
+    public let model: String
+    public let serial: String
+    public let api: String
+
+    public init(connected: Bool = true, model: String, serial: String, api: String) {
+        self.connected = connected
+        self.model = model
+        self.serial = serial
+        self.api = api
+    }
+}
+
+public struct ExposureState: Equatable, Codable, Sendable {
+    public let iso: String
+    public let shutter: String
+    public let aperture: String
+    public let whiteBalance: String
+
+    public init(iso: String = "-", shutter: String = "-", aperture: String = "-", whiteBalance: String = "-") {
+        self.iso = iso
+        self.shutter = shutter
+        self.aperture = aperture
+        self.whiteBalance = whiteBalance
+    }
+}
+
+public struct CameraStatus: Equatable, Sendable {
+    public let connected: Bool
+    public let batteryLevel: Int?
+    public let batteryStatus: String
+    public let recording: Bool?
+    public let mode: String
+    public let mediaAvailable: Bool?
+    public let remainingMinutes: Int?
+    public let exposure: ExposureState
+    public let rawBatteryJSON: String
+    public let rawStorageJSON: String
+
+    public init(
+        connected: Bool = true,
+        batteryLevel: Int? = nil,
+        batteryStatus: String = "unknown",
+        recording: Bool? = nil,
+        mode: String = "unknown",
+        mediaAvailable: Bool? = nil,
+        remainingMinutes: Int? = nil,
+        exposure: ExposureState = ExposureState(),
+        rawBatteryJSON: String = "null",
+        rawStorageJSON: String = "null"
+    ) {
+        self.connected = connected
+        self.batteryLevel = batteryLevel
+        self.batteryStatus = batteryStatus
+        self.recording = recording
+        self.mode = mode
+        self.mediaAvailable = mediaAvailable
+        self.remainingMinutes = remainingMinutes
+        self.exposure = exposure
+        self.rawBatteryJSON = rawBatteryJSON
+        self.rawStorageJSON = rawStorageJSON
+    }
+}
+
+public struct CameraSetting: Identifiable, Equatable, Sendable {
+    public let key: String
+    public let label: String
+    public var value: String
+    public let values: [String]
+
+    public var id: String { key }
+
+    public init(key: String, label: String, value: String, values: [String]) {
+        self.key = key
+        self.label = label
+        self.value = value
+        self.values = values
+    }
+}
+
+public enum LiveViewSource: String, Codable, Sendable {
+    case auto
+    case ccapiJPEGPolling
+    case ccapiRTP
+    case simulatorFrame
+}
+
+public enum LiveViewSize: String, CaseIterable, Codable, Sendable {
+    case small
+    case medium
+    case large
+}
+
+public struct LiveViewRequest: Equatable, Codable, Sendable {
+    public var fps: Int
+    public var size: LiveViewSize
+    public var source: LiveViewSource
+
+    public init(fps: Int = 6, size: LiveViewSize = .medium, source: LiveViewSource = .auto) {
+        self.fps = fps
+        self.size = size
+        self.source = source
+    }
+
+    public func clamped(to capabilities: LiveViewCapabilities) -> LiveViewRequest {
+        LiveViewRequest(
+            fps: min(max(fps, capabilities.minimumFPS), capabilities.maximumFPS),
+            size: capabilities.sizes.contains(size) ? size : capabilities.defaultSize,
+            source: source == .auto || capabilities.sources.contains(source) ? source : capabilities.defaultSource
+        )
+    }
+}
+
+public struct LiveViewCapabilities: Equatable, Sendable {
+    public let sources: [LiveViewSource]
+    public let defaultSource: LiveViewSource
+    public let sizes: [LiveViewSize]
+    public let defaultSize: LiveViewSize
+    public let minimumFPS: Int
+    public let maximumFPS: Int
+
+    public init(
+        sources: [LiveViewSource] = [],
+        defaultSource: LiveViewSource = .auto,
+        sizes: [LiveViewSize] = [],
+        defaultSize: LiveViewSize = .medium,
+        minimumFPS: Int = 1,
+        maximumFPS: Int = 30
+    ) {
+        self.sources = sources
+        self.defaultSource = defaultSource
+        self.sizes = sizes
+        self.defaultSize = defaultSize
+        self.minimumFPS = minimumFPS
+        self.maximumFPS = maximumFPS
+    }
+}
+
+public struct CameraCapabilities: Equatable, Sendable {
+    public let settings: [CameraSetting]
+    public let matrix: CapabilityMatrix
+    public let liveView: LiveViewCapabilities
+    public let profile: CameraProfile
+
+    public init(
+        settings: [CameraSetting],
+        matrix: CapabilityMatrix,
+        liveView: LiveViewCapabilities,
+        profile: CameraProfile
+    ) {
+        self.settings = settings
+        self.matrix = matrix
+        self.liveView = liveView
+        self.profile = profile
+    }
+
+    public func setting(_ key: String) -> CameraSetting? {
+        settings.first { $0.key == key }
+    }
+}
+
+public struct LiveViewFrame: Equatable, Sendable {
+    public let data: Data
+    public let contentType: String?
+    public let sourceURL: URL
+
+    public init(data: Data, contentType: String?, sourceURL: URL) {
+        self.data = data
+        self.contentType = contentType
+        self.sourceURL = sourceURL
+    }
+}
+
+public struct FocusResult: Equatable, Sendable {
+    public let accepted: Bool
+    public let x: Double
+    public let y: Double
+
+    public init(accepted: Bool, x: Double, y: Double) {
+        self.accepted = accepted
+        self.x = x
+        self.y = y
+    }
+}
+
+public struct CameraMediaItem: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let kind: String
+    public let sizeBytes: Int64?
+    public let captureTime: String?
+
+    public init(id: String, name: String, kind: String, sizeBytes: Int64? = nil, captureTime: String? = nil) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+        self.sizeBytes = sizeBytes
+        self.captureTime = captureTime
+    }
+}
+
+public struct CameraMediaDownload: Equatable, Sendable {
+    public let item: CameraMediaItem
+    public let fileURL: URL
+    public let bytesTransferred: Int64
+    public let contentType: String?
+
+    public init(item: CameraMediaItem, fileURL: URL, bytesTransferred: Int64, contentType: String?) {
+        self.item = item
+        self.fileURL = fileURL
+        self.bytesTransferred = bytesTransferred
+        self.contentType = contentType
+    }
+}
+
+public struct CameraSnapshot: Equatable, Sendable {
+    public let info: CameraInfo
+    public let status: CameraStatus
+    public let capabilities: CameraCapabilities
+
+    public init(info: CameraInfo, status: CameraStatus, capabilities: CameraCapabilities) {
+        self.info = info
+        self.status = status
+        self.capabilities = capabilities
+    }
+}
