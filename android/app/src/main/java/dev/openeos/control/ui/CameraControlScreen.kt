@@ -592,6 +592,7 @@ private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraAct
 private fun cameraSettingLabel(setting: CameraSettingControl): String = when (setting.key.lowercase()) {
     "afmethod" -> stringResource(R.string.setting_af_method)
     "afoperation" -> stringResource(R.string.setting_af_operation)
+    "continuousaf" -> stringResource(R.string.setting_continuous_af)
     "drivemode" -> stringResource(R.string.setting_drive_mode)
     "meteringmode" -> stringResource(R.string.setting_metering_mode)
     "flashmode" -> stringResource(R.string.setting_flash_mode)
@@ -599,6 +600,7 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "shootingmode" -> stringResource(R.string.setting_shooting_mode)
     "stillimagequality" -> stringResource(R.string.setting_image_quality)
     "moviequality" -> stringResource(R.string.setting_movie_quality)
+    "movieservoaf" -> stringResource(R.string.setting_movie_servo_af)
     "colortemperature" -> stringResource(R.string.setting_color_temperature)
     "exposurecompensation" -> stringResource(R.string.setting_exposure_compensation)
     "ae" -> stringResource(R.string.setting_ae_mode)

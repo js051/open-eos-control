@@ -18,10 +18,17 @@ object CanonEosPropertyCode {
     const val APERTURE = 0xD101
     const val SHUTTER_SPEED = 0xD102
     const val ISO_SPEED = 0xD103
+    const val DRIVE_MODE = 0xD106
+    const val METERING_MODE = 0xD107
+    const val FOCUS_MODE = 0xD108
     const val WHITE_BALANCE = 0xD109
+    const val PICTURE_STYLE = 0xD110
+    const val MOVIE_SERVO_AF = 0xD179
     const val EVF_OUTPUT_DEVICE = 0xD1B0
     const val EVF_MODE = 0xD1B1
     const val EVF_RECORD_STATUS = 0xD1B8
+    const val LIVE_VIEW_AF_SYSTEM = 0xD1BA
+    const val CONTINUOUS_AF_MODE = 0xD1C9
 }
 
 object CanonEosEventCode {
@@ -46,6 +53,12 @@ data class CanonEosPropertyOption(
     val label: String,
 )
 
+data class CanonEosSettingSpec(
+    val propertyCode: Int,
+    val key: String,
+    val fallbackLabel: String,
+)
+
 object CanonEosPtp {
     const val VENDOR_EXTENSION_ID = 0x0000000BL
     const val VIEWFINDER_REQUEST_BYTES = 0x00200000L
@@ -53,6 +66,16 @@ object CanonEosPtp {
     const val MOVIE_RECORD_TARGET_NONE = 0L
     const val MOVIE_RECORD_TARGET_SDRAM = 3L
     const val MOVIE_RECORD_TARGET_CARD = 4L
+
+    val settingSpecs = listOf(
+        CanonEosSettingSpec(CanonEosPropertyCode.FOCUS_MODE, "afoperation", "AF operation"),
+        CanonEosSettingSpec(CanonEosPropertyCode.CONTINUOUS_AF_MODE, "continuousaf", "Continuous AF"),
+        CanonEosSettingSpec(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, "afmethod", "AF method"),
+        CanonEosSettingSpec(CanonEosPropertyCode.DRIVE_MODE, "drivemode", "Drive mode"),
+        CanonEosSettingSpec(CanonEosPropertyCode.METERING_MODE, "meteringmode", "Metering mode"),
+        CanonEosSettingSpec(CanonEosPropertyCode.PICTURE_STYLE, "picturestyle", "Picture style"),
+        CanonEosSettingSpec(CanonEosPropertyCode.MOVIE_SERVO_AF, "movieservoaf", "Movie Servo AF"),
+    )
 
     private val remotePreparationOperations = setOf(
         CanonEosOperationCode.SET_REMOTE_MODE,
@@ -182,6 +205,11 @@ object CanonEosPtp {
 
     fun propertyValue(propertyCode: Int, values: List<Long>, label: String): Long? =
         propertyOptions(propertyCode, values).firstOrNull { it.label == label }?.value
+
+    fun settingKey(propertyCode: Int): String? =
+        settingSpecs.firstOrNull { it.propertyCode == propertyCode }?.key
+
+    fun propertyValueBytes(propertyCode: Int): Int? = propertySpecs[propertyCode]?.valueBytes
 
     fun propertyPayload(propertyCode: Int, value: Long): ByteArray = when (propertySpecs[propertyCode]?.valueBytes) {
         1 -> uint8PropertyPayload(propertyCode, value.toInt())
@@ -323,12 +351,88 @@ object CanonEosPtp {
         MOVIE_RECORD_TARGET_CARD to "Card",
     )
 
+    private val driveModeLabels = mapOf(
+        0x0000L to "Single",
+        0x0001L to "Continuous",
+        0x0002L to "Video",
+        0x0004L to "Continuous high speed",
+        0x0005L to "Continuous low speed",
+        0x0006L to "Single: Silent shooting",
+        0x0007L to "Continuous timer",
+        0x0010L to "Timer 10 sec",
+        0x0011L to "Timer 2 sec",
+        0x0012L to "Super high speed continuous shooting",
+        0x0013L to "Single silent",
+        0x0014L to "Continuous silent",
+        0x0015L to "Silent HS continuous",
+        0x0016L to "Silent LS continuous",
+    )
+
+    private val meteringModeLabels = mapOf(
+        0L to "Center-weighted",
+        1L to "Spot",
+        2L to "Average",
+        3L to "Evaluative",
+        4L to "Partial",
+        5L to "Center-weighted average",
+        6L to "Spot metering interlocked with AF frame",
+        7L to "Multi spot",
+    )
+
+    private val focusModeLabels = mapOf(
+        0L to "One Shot",
+        1L to "AI Servo",
+        2L to "AI Focus",
+        3L to "Manual",
+    )
+
+    private val pictureStyleLabels = mapOf(
+        0x81L to "Standard",
+        0x82L to "Portrait",
+        0x83L to "Landscape",
+        0x84L to "Neutral",
+        0x85L to "Faithful",
+        0x86L to "Monochrome",
+        0x87L to "Auto",
+        0x88L to "Fine detail",
+        0x21L to "User defined 1",
+        0x22L to "User defined 2",
+        0x23L to "User defined 3",
+    )
+
+    private val afMethodLabels = mapOf(
+        0L to "Quick",
+        1L to "Live",
+        2L to "LiveFace",
+        3L to "LiveMulti",
+        4L to "LiveZone",
+        5L to "LiveSingleExpandCross",
+        6L to "LiveSingleExpandSurround",
+        7L to "LiveZoneLargeH",
+        8L to "LiveZoneLargeV",
+        9L to "LiveCatchAF",
+        10L to "LiveSpotAF",
+        11L to "FlexibleZoneAF1",
+        12L to "FlexibleZoneAF2",
+        13L to "FlexibleZoneAF3",
+        14L to "WholeAreaAF",
+    )
+
+    private val offOnLabels = mapOf(0L to "Off", 1L to "On")
+
     private val propertySpecs = mapOf(
         CanonEosPropertyCode.APERTURE to CanonEosPropertySpec(2, apertureLabels),
         CanonEosPropertyCode.SHUTTER_SPEED to CanonEosPropertySpec(2, shutterLabels),
         CanonEosPropertyCode.ISO_SPEED to CanonEosPropertySpec(2, isoLabels),
+        CanonEosPropertyCode.DRIVE_MODE to CanonEosPropertySpec(2, driveModeLabels),
+        CanonEosPropertyCode.METERING_MODE to CanonEosPropertySpec(1, meteringModeLabels),
+        CanonEosPropertyCode.FOCUS_MODE to CanonEosPropertySpec(4, focusModeLabels),
         CanonEosPropertyCode.WHITE_BALANCE to CanonEosPropertySpec(1, whiteBalanceLabels),
+        CanonEosPropertyCode.PICTURE_STYLE to CanonEosPropertySpec(1, pictureStyleLabels),
+        CanonEosPropertyCode.MOVIE_SERVO_AF to CanonEosPropertySpec(4, offOnLabels),
         CanonEosPropertyCode.EVF_RECORD_STATUS to CanonEosPropertySpec(2, movieRecordTargetLabels),
+        CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM to CanonEosPropertySpec(4, afMethodLabels),
+        CanonEosPropertyCode.CONTINUOUS_AF_MODE to CanonEosPropertySpec(4, offOnLabels),
     )
 
     private const val MAX_PROPERTY_OPTIONS = 4_096L

@@ -141,6 +141,7 @@
     <string name="language_traditional_chinese">Traditional Chinese</string>
     <string name="setting_af_method">AF method</string>
     <string name="setting_af_operation">AF operation</string>
+    <string name="setting_continuous_af">Continuous AF</string>
     <string name="setting_drive_mode">Drive mode</string>
     <string name="setting_metering_mode">Metering</string>
     <string name="setting_flash_mode">Flash mode</string>
@@ -148,6 +149,7 @@
     <string name="setting_shooting_mode">Shooting mode</string>
     <string name="setting_image_quality">Image quality</string>
     <string name="setting_movie_quality">Movie quality</string>
+    <string name="setting_movie_servo_af">Movie Servo AF</string>
     <string name="setting_color_temperature">Color temperature</string>
     <string name="setting_exposure_compensation">Exposure compensation</string>
     <string name="setting_ae_mode">AE mode</string>

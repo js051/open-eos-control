@@ -110,6 +110,70 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun vendorSettingMappingsAndPayloadWidthsMatchPinnedLibgphoto2Tables() {
+        assertEquals(
+            listOf(
+                "afoperation",
+                "continuousaf",
+                "afmethod",
+                "drivemode",
+                "meteringmode",
+                "picturestyle",
+                "movieservoaf",
+            ),
+            CanonEosPtp.settingSpecs.map(CanonEosSettingSpec::key),
+        )
+        assertEquals("AI Servo", CanonEosPtp.propertyLabel(CanonEosPropertyCode.FOCUS_MODE, 1))
+        assertEquals("WholeAreaAF", CanonEosPtp.propertyLabel(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, 14))
+        assertEquals("Continuous high speed", CanonEosPtp.propertyLabel(CanonEosPropertyCode.DRIVE_MODE, 4))
+        assertEquals("Evaluative", CanonEosPtp.propertyLabel(CanonEosPropertyCode.METERING_MODE, 3))
+        assertEquals("Fine detail", CanonEosPtp.propertyLabel(CanonEosPropertyCode.PICTURE_STYLE, 0x88))
+        assertEquals("On", CanonEosPtp.propertyLabel(CanonEosPropertyCode.MOVIE_SERVO_AF, 1))
+        assertEquals("0x00000012", CanonEosPtp.propertyLabel(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, 0x12))
+
+        assertArrayEquals(
+            CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.DRIVE_MODE, 4),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.DRIVE_MODE, 4),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint8PropertyPayload(CanonEosPropertyCode.METERING_MODE, 1),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.METERING_MODE, 1),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.FOCUS_MODE, 2),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.FOCUS_MODE, 2),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint8PropertyPayload(CanonEosPropertyCode.PICTURE_STYLE, 0x87),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.PICTURE_STYLE, 0x87),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.CONTINUOUS_AF_MODE, 1),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.CONTINUOUS_AF_MODE, 1),
+        )
+    }
+
+    @Test
+    fun vendorSettingEventsExposeOnlyTheCameraAdvertisedChoicesInOrder() {
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, 14),
+        ) + block(
+            type = CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, 3, 4, 10, 1, 14, 0x12),
+        ) + block(type = 0, bytes = byteArrayOf())
+
+        val updates = CanonEosPtp.propertyUpdates(payload)
+        val options = CanonEosPtp.propertyOptions(
+            CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM,
+            updates.single { it.availableValues != null }.availableValues.orEmpty(),
+        )
+
+        assertEquals(14L, updates.single { it.currentValue != null }.currentValue)
+        assertEquals(listOf("LiveSpotAF", "Live", "WholeAreaAF", "0x00000012"), options.map { it.label })
+    }
+
+    @Test
     fun movieRecordingRequiresCameraAdvertisedCardAndNoneTargets() {
         val info = deviceInfo(
             setOf(

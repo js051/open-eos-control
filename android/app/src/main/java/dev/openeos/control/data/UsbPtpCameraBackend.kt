@@ -149,7 +149,10 @@ class UsbPtpCameraBackend(
             PtpDevicePropertyCode.WHITE_BALANCE,
             canSetProperties,
         )
-        val advancedSettings = if (canSetProperties) advancedPropertyControls() else emptyList()
+        val advancedSettings = advancedPropertyControls(
+            canSetStandardProperties = canSetProperties,
+            canSetCanonProperties = CanonEosPtp.supportsPropertyControl(info),
+        )
         val supportsCanonRelease = CanonEosPtp.supportsRemoteRelease(info)
         val supportsCanonLiveView = CanonEosPtp.supportsLiveView(info)
         val supportsCanonFocusDrive = CanonEosPtp.supportsFocusDrive(info)
@@ -365,6 +368,12 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun setSetting(key: String, value: String): CameraStatus {
+        val info = requireDeviceInfo()
+        refreshCanonPropertyState(info)
+        val canonSpec = CanonEosPtp.settingSpecs.firstOrNull { it.key == key }
+        if (canonSpec != null && setAdvertisedCanonProperty(canonSpec.propertyCode, value)) {
+            return status()
+        }
         val spec = PtpStandardProperties.advancedProperties.firstOrNull { it.key == key }
             ?: throw UnsupportedOperationException("USB PTP setting $key is not implemented.")
         setProperty(spec.propertyCode, value, CameraFeature.ADVANCED_SETTINGS)
@@ -649,24 +658,28 @@ class UsbPtpCameraBackend(
         label: String,
         feature: CameraFeature,
     ) {
-        val canonState = canonPropertyState(canonPropertyCode)
-        if (CanonEosPtp.supportsPropertyControl(requireDeviceInfo()) && canonState.availableValues.isNotEmpty()) {
-            val value = CanonEosPtp.propertyValue(canonPropertyCode, canonState.availableValues, label)
-                ?: throw PtpProtocolException(
-                    "Value '$label' is not advertised for Canon EOS USB property " +
-                        "0x${canonPropertyCode.toString(16).uppercase().padStart(4, '0')}."
-                )
-            ensureCanonRemoteMode()
-            requireSession().executeDataOutOperation(
-                operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
-                payload = CanonEosPtp.propertyPayload(canonPropertyCode, value),
-            )
-            synchronized(canonProperties) {
-                canonProperties[canonPropertyCode] = canonState.copy(currentValue = value)
-            }
-            return
-        }
+        if (setAdvertisedCanonProperty(canonPropertyCode, label)) return
         setProperty(standardPropertyCode, label, feature)
+    }
+
+    private suspend fun setAdvertisedCanonProperty(propertyCode: Int, label: String): Boolean {
+        if (!CanonEosPtp.supportsPropertyControl(requireDeviceInfo())) return false
+        val state = canonPropertyState(propertyCode)
+        if (state.availableValues.isEmpty()) return false
+        val value = CanonEosPtp.propertyValue(propertyCode, state.availableValues, label)
+            ?: throw PtpProtocolException(
+                "Value '$label' is not advertised for Canon EOS USB property " +
+                    "0x${propertyCode.toString(16).uppercase().padStart(4, '0')}."
+            )
+        ensureCanonRemoteMode()
+        requireSession().executeDataOutOperation(
+            operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+            payload = CanonEosPtp.propertyPayload(propertyCode, value),
+        )
+        synchronized(canonProperties) {
+            canonProperties[propertyCode] = state.copy(currentValue = value)
+        }
+        return true
     }
 
     private suspend fun setProperty(propertyCode: Int, label: String, feature: CameraFeature) {
@@ -704,18 +717,40 @@ class UsbPtpCameraBackend(
         }
     }
 
-    private fun advancedPropertyControls(): List<CameraSettingControl> =
-        PtpStandardProperties.advancedProperties.mapNotNull { spec ->
-            val descriptor = propertyDescriptors[spec.propertyCode]?.takeIf { it.writable } ?: return@mapNotNull null
-            val options = PtpStandardProperties.options(descriptor)
-            if (options.isEmpty()) return@mapNotNull null
-            CameraSettingControl(
-                key = spec.key,
-                label = spec.fallbackLabel,
-                value = propertyDisplay(spec.propertyCode),
-                values = options.map(PtpPropertyOption::label),
-            )
+    private fun advancedPropertyControls(
+        canSetStandardProperties: Boolean,
+        canSetCanonProperties: Boolean,
+    ): List<CameraSettingControl> {
+        val controls = linkedMapOf<String, CameraSettingControl>()
+        if (canSetCanonProperties) {
+            CanonEosPtp.settingSpecs.forEach { spec ->
+                val state = canonPropertyState(spec.propertyCode)
+                val options = CanonEosPtp.propertyOptions(spec.propertyCode, state.availableValues)
+                if (options.isNotEmpty()) {
+                    controls[spec.key] = CameraSettingControl(
+                        key = spec.key,
+                        label = spec.fallbackLabel,
+                        value = state.currentValue?.let { CanonEosPtp.propertyLabel(spec.propertyCode, it) } ?: "-",
+                        values = options.map(CanonEosPropertyOption::label),
+                    )
+                }
+            }
         }
+        if (!canSetStandardProperties) return controls.values.toList()
+        PtpStandardProperties.advancedProperties.forEach { spec ->
+            val descriptor = propertyDescriptors[spec.propertyCode]?.takeIf { it.writable } ?: return@forEach
+            val options = PtpStandardProperties.options(descriptor)
+            if (options.isNotEmpty() && spec.key !in controls) {
+                controls[spec.key] = CameraSettingControl(
+                    key = spec.key,
+                    label = spec.fallbackLabel,
+                    value = propertyDisplay(spec.propertyCode),
+                    values = options.map(PtpPropertyOption::label),
+                )
+            }
+        }
+        return controls.values.toList()
+    }
 
     private fun propertyDisplay(propertyCode: Int): String = propertyValues[propertyCode]
         ?.let { PtpStandardProperties.format(propertyCode, it) }
@@ -768,6 +803,8 @@ class UsbPtpCameraBackend(
             canonVendorProperties.put(
                 JSONObject()
                     .put("code", propertyCode.ptpHexCode())
+                    .put("setting", CanonEosPtp.settingKey(propertyCode) ?: JSONObject.NULL)
+                    .put("valueBytes", CanonEosPtp.propertyValueBytes(propertyCode) ?: JSONObject.NULL)
                     .put(
                         "rawValue",
                         state.currentValue?.let { "0x${it.toString(16).uppercase().padStart(8, '0')}" }
