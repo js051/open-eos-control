@@ -13,12 +13,11 @@ targets:
     platform: iOS
     sources:
       - path: App
-    info:
-      path: App/Info.plist
     dependencies:
       - package: OpenEOSCore
     settings:
       base:
+        INFOPLIST_FILE: App/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: dev.openeos.control
         PRODUCT_NAME: OpenEOSControl
         MARKETING_VERSION: 0.1.0

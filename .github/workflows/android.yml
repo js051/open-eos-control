@@ -144,6 +144,17 @@ jobs:
           test -f "$APP_PATH/Assets.car"
           test -f "$APP_PATH/en.lproj/Localizable.strings"
           test -f "$APP_PATH/zh-Hant.lproj/Localizable.strings"
+          plutil -extract UILaunchScreen xml1 -o /dev/null "$APP_PATH/Info.plist"
+          test -n "$(plutil -extract NSLocalNetworkUsageDescription raw -o - "$APP_PATH/Info.plist")"
+          test "$(plutil -extract NSAppTransportSecurity.NSAllowsLocalNetworking raw -o - "$APP_PATH/Info.plist")" = "true"
+          ORIENTATIONS=$(plutil -extract UISupportedInterfaceOrientations xml1 -o - "$APP_PATH/Info.plist")
+          grep -q UIInterfaceOrientationPortrait <<< "$ORIENTATIONS"
+          grep -q UIInterfaceOrientationLandscapeLeft <<< "$ORIENTATIONS"
+          grep -q UIInterfaceOrientationLandscapeRight <<< "$ORIENTATIONS"
+          if grep -q UIInterfaceOrientationPortraitUpsideDown <<< "$ORIENTATIONS"; then
+            echo "Whole-window upside-down orientation must remain disabled"
+            exit 1
+          fi
 
       - name: Select iPhone simulator
         id: simulator

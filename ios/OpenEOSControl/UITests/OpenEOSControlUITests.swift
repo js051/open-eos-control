@@ -11,17 +11,20 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(preview.waitForExistence(timeout: 8))
         preview.tap()
 
-        XCTAssertTrue(element(in: app, identifier: "camera-control-view").waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["shutter-button"].exists)
+        let shutter = app.buttons["shutter-button"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 5))
         addScreenshot(name: "control-portrait")
 
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(element(in: app, identifier: "live-view-surface").waitForExistence(timeout: 3))
+        let moreActions = app.buttons["more-actions-button"]
+        XCTAssertTrue(moreActions.waitForExistence(timeout: 5))
         addScreenshot(name: "control-landscape")
 
-        app.buttons["more-actions-button"].tap()
-        app.buttons["Debug"].tap()
-        XCTAssertTrue(element(in: app, identifier: "debug-view").waitForExistence(timeout: 3))
+        moreActions.tap()
+        let debug = app.buttons["Debug"]
+        XCTAssertTrue(debug.waitForExistence(timeout: 3))
+        debug.tap()
+        XCTAssertTrue(app.buttons["copy-diagnostic-button"].waitForExistence(timeout: 5))
         addScreenshot(name: "debug-landscape")
     }
 
@@ -48,10 +51,6 @@ final class OpenEOSControlUITests: XCTestCase {
         ]
         app.launch()
         return app
-    }
-
-    private func element(in app: XCUIApplication, identifier: String) -> XCUIElement {
-        app.descendants(matching: .any)[identifier]
     }
 
     private func addScreenshot(name: String) {
