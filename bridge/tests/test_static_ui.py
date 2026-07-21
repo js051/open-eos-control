@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+import re
+from html.parser import HTMLParser
+from pathlib import Path
+
+STATIC = Path(__file__).parents[1] / "open_eos_bridge" / "static"
+
+
+class UiDocumentParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: list[str] = []
+        self.assets: list[str] = []
+        self.inline_script_text: list[str] = []
+        self._inside_inline_script = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        element_id = values.get("id")
+        if element_id:
+            self.ids.append(element_id)
+        if tag in {"script", "img"} and values.get("src"):
+            self.assets.append(values["src"] or "")
+        if tag == "link" and values.get("href"):
+            self.assets.append(values["href"] or "")
+        if tag == "script" and not values.get("src"):
+            self._inside_inline_script = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._inside_inline_script = False
+
+    def handle_data(self, data: str) -> None:
+        if self._inside_inline_script and data.strip():
+            self.inline_script_text.append(data)
+
+
+def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> None:
+    markup = (STATIC / "index.html").read_text(encoding="utf-8")
+    parser = UiDocumentParser()
+    parser.feed(markup)
+
+    required_ids = {
+        "connection-view",
+        "control-view",
+        "camera-select",
+        "connect-button",
+        "live-image",
+        "exposure-strip",
+        "shutter-button",
+        "focus-section",
+        "media-list",
+        "diagnostics-output",
+    }
+    assert required_ids <= set(parser.ids)
+    assert len(parser.ids) == len(set(parser.ids))
+    assert parser.inline_script_text == []
+    assert parser.assets
+    assert all(asset.startswith("/app/") for asset in parser.assets)
+
+
+def test_static_labels_exist_in_both_supported_languages() -> None:
+    markup = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+    keys = set(re.findall(r'data-i18n(?:-placeholder|-aria)?="([A-Za-z0-9]+)"', markup))
+
+    assert 'option value="auto"' in markup
+    assert 'option value="en"' in markup
+    assert 'option value="zh-TW"' in markup
+    for key in keys:
+        declarations = re.findall(rf"^\s+{re.escape(key)}:\s+\"", script, flags=re.MULTILINE)
+        assert len(declarations) >= 2, f"{key} must be declared in English and Traditional Chinese"
+
+
+def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -> None:
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+    required_paths = {
+        "/v1/cameras",
+        "/v1/session",
+        "/capture/still",
+        "/shutter/half-press",
+        "/recording/",
+        "/focus/drive",
+        "/liveview/start",
+        "/liveview/frame",
+        "/media",
+    }
+
+    assert all(path in script for path in required_paths)
+    assert "featureSupported(FEATURES." in script
+    assert "Bearer ${state.token}" in script
+    storage_lines = [line for line in script.splitlines() if "localStorage." in line]
+    assert storage_lines
+    assert all("LANGUAGE_KEY" in line for line in storage_lines)
+    report_source = script.split("function diagnosticReport()", 1)[1].split("\n  function ", 1)[0]
+    assert "token" not in report_source.casefold()

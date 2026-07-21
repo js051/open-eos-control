@@ -8,6 +8,28 @@ from open_eos_bridge.gphoto2 import GPhoto2Engine, SubprocessGPhotoRunner
 from .fakes import JPEG, MEDIA_BYTES, FakeRunner
 
 
+def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> None:
+    with TestClient(create_app(engine=GPhoto2Engine(FakeRunner()), token="test-token")) as client:
+        page = client.get("/")
+        script = client.get("/app/app.js")
+        styles = client.get("/app/styles.css")
+        icon = client.get("/app/app-icon.png")
+        protected_api = client.get("/v1/cameras")
+
+    assert page.status_code == 200
+    assert "Open EOS Control" in page.text
+    assert 'src="/app/app.js"' in page.text
+    assert "default-src 'self'" in page.headers["content-security-policy"]
+    assert script.status_code == 200
+    assert script.headers["content-type"].startswith(("text/javascript", "application/javascript"))
+    assert "Bearer ${state.token}" in script.text
+    assert styles.status_code == 200
+    assert styles.headers["content-type"].startswith("text/css")
+    assert icon.status_code == 200
+    assert icon.headers["content-type"].startswith("image/png")
+    assert protected_api.status_code == 401
+
+
 def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     runner = FakeRunner()
     headers = {"Authorization": "Bearer test-token"}

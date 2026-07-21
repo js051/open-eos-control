@@ -50,6 +50,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install simulator and test dependencies
         run: python -m pip install -e ".[dev]"
 
@@ -79,6 +84,11 @@ jobs:
 
       - name: Lint desktop bridge
         run: ruff check --no-cache .
+
+      - name: Check desktop control scripts
+        run: |
+          node --check open_eos_bridge/static/icons.js
+          node --check open_eos_bridge/static/app.js
 
       - name: Test desktop bridge contract
         run: pytest -q -p no:cacheprovider

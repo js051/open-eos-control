@@ -3,11 +3,13 @@ from __future__ import annotations
 import hmac
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .engine import CameraEngine
@@ -36,6 +38,17 @@ from .models import (
 from .sessions import SessionManager
 
 LOOPBACK_CLIENTS = {"127.0.0.1", "::1", "testclient"}
+STATIC_DIRECTORY = Path(__file__).with_name("static")
+UI_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Content-Security-Policy": (
+        "default-src 'self'; img-src 'self' blob:; connect-src 'self'; "
+        "style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+}
 
 
 def create_app(*, engine: CameraEngine | None = None, token: str | None = None) -> FastAPI:
@@ -54,6 +67,18 @@ def create_app(*, engine: CameraEngine | None = None, token: str | None = None) 
         lifespan=lifespan,
     )
     application.state.session_manager = manager
+
+    @application.get("/", include_in_schema=False, response_class=FileResponse)
+    def desktop_control() -> FileResponse:
+        return FileResponse(STATIC_DIRECTORY / "index.html", headers=UI_HEADERS)
+
+    @application.get("/favicon.ico", include_in_schema=False, response_class=FileResponse)
+    def favicon() -> FileResponse:
+        return FileResponse(
+            STATIC_DIRECTORY / "app-icon.png",
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     @application.exception_handler(BridgeError)
     async def bridge_error_handler(_: Request, error: BridgeError) -> JSONResponse:
@@ -220,6 +245,7 @@ def create_app(*, engine: CameraEngine | None = None, token: str | None = None) 
         return Response(status_code=204)
 
     application.include_router(router)
+    application.mount("/app", StaticFiles(directory=STATIC_DIRECTORY), name="desktop-control-assets")
     return application
 
 

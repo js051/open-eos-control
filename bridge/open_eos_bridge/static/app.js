@@ -1,0 +1,1365 @@
+(() => {
+  "use strict";
+
+  const FEATURES = {
+    LIVE_VIEW: "LIVE_VIEW",
+    STILL_CAPTURE: "STILL_CAPTURE",
+    SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
+    VIDEO_RECORDING: "VIDEO_RECORDING",
+    FOCUS_DRIVE: "FOCUS_DRIVE",
+    MEDIA_BROWSER: "MEDIA_BROWSER",
+    MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
+  };
+  const CORE_SETTINGS = ["iso", "shutter", "aperture", "whitebalance"];
+  const LANGUAGE_KEY = "open-eos-control-language";
+
+  const messages = {
+    en: {
+      desktopControl: "Desktop control",
+      language: "Language",
+      auto: "Auto",
+      connectCamera: "Connect camera",
+      checkingBridge: "Checking bridge",
+      bearerToken: "Bearer token",
+      tokenOptional: "Optional on loopback",
+      camera: "Camera",
+      scanFirst: "Scan for a camera first",
+      scan: "Scan",
+      connect: "Connect",
+      connected: "Connected",
+      control: "Control",
+      views: "Views",
+      cameraStatus: "Camera status",
+      exposureControls: "Exposure controls",
+      captureMode: "Capture mode",
+      focusStep: "Focus step",
+      focusStepSmall: "Small focus step",
+      focusStepMedium: "Medium focus step",
+      focusStepLarge: "Large focus step",
+      media: "Media",
+      diagnostics: "Diagnostics",
+      refresh: "Refresh",
+      disconnect: "Disconnect",
+      startLiveView: "Start Live View",
+      stopLiveView: "Stop Live View",
+      photo: "Photo",
+      video: "Video",
+      capture: "Capture",
+      record: "Record",
+      stopRecording: "Stop recording",
+      ready: "Ready",
+      busy: "Working",
+      halfPress: "Half press",
+      liveView: "Live View",
+      manualFocus: "Manual focus",
+      near: "Near",
+      far: "Far",
+      liveViewSettings: "Live View",
+      frameRate: "Frame rate",
+      moreSettings: "More settings",
+      diagnosticSafe: "Authentication token is excluded",
+      copy: "Copy",
+      close: "Close",
+      bridgeReady: "{engine} ready",
+      bridgeUnavailable: "Camera engine unavailable",
+      bridgeError: "Bridge is unavailable",
+      camerasFound: "{count} camera(s) found",
+      noCameras: "No camera detected",
+      selectCamera: "Select a camera",
+      scanning: "Scanning for cameras",
+      connecting: "Connecting to camera",
+      refreshing: "Refreshing camera state",
+      disconnected: "Camera disconnected",
+      captureComplete: "Photo captured",
+      halfPressComplete: "Half press complete",
+      recordingStarted: "Recording started",
+      recordingStopped: "Recording stopped",
+      liveViewStarted: "Live View started",
+      liveViewStopped: "Live View stopped",
+      focusMoved: "Focus moved {direction}",
+      settingUpdated: "{label} set to {value}",
+      exposure: "Exposure",
+      cameraSetting: "Camera setting",
+      unsupported: "Not supported by this camera",
+      liveViewRequired: "Start Live View to move focus",
+      iso: "ISO",
+      shutter: "Tv",
+      aperture: "Av",
+      whitebalance: "WB",
+      exposurecompensation: "Exposure compensation",
+      afoperation: "Focus mode",
+      afmethod: "AF method",
+      drivemode: "Drive mode",
+      meteringmode: "Metering mode",
+      picturestyle: "Picture style",
+      stillimagequality: "Image quality",
+      shootingmode: "Shooting mode",
+      colortemperature: "Color temperature",
+      colorspace: "Color space",
+      highisonr: "High ISO noise reduction",
+      continuousaf: "Continuous AF",
+      movieservoaf: "Movie Servo AF",
+      aeb: "Auto exposure bracketing",
+      mediaCount: "{count} media item(s)",
+      mediaEmpty: "No media was reported by the camera",
+      download: "Download",
+      downloaded: "Downloaded {name}",
+      copied: "Diagnostic report copied",
+      copyFailed: "Could not copy the diagnostic report",
+      operationFailed: "Operation failed",
+      battery: "Battery",
+      storage: "Storage",
+      freeImages: "{count} shots",
+      notAvailable: "Not available",
+      liveViewImage: "Camera Live View",
+      authRequired: "This bridge requires a Bearer token",
+    },
+    "zh-TW": {
+      desktopControl: "電腦相機控制",
+      language: "語言",
+      auto: "自動",
+      connectCamera: "連接相機",
+      checkingBridge: "正在檢查 Bridge",
+      bearerToken: "Bearer token",
+      tokenOptional: "本機連線可留空",
+      camera: "相機",
+      scanFirst: "請先掃描相機",
+      scan: "掃描",
+      connect: "連線",
+      connected: "已連線",
+      control: "控制",
+      views: "檢視頁面",
+      cameraStatus: "相機狀態",
+      exposureControls: "曝光控制",
+      captureMode: "拍攝類型",
+      focusStep: "對焦移動幅度",
+      focusStepSmall: "小幅移動焦點",
+      focusStepMedium: "中幅移動焦點",
+      focusStepLarge: "大幅移動焦點",
+      media: "媒體",
+      diagnostics: "診斷",
+      refresh: "重新整理",
+      disconnect: "中斷連線",
+      startLiveView: "啟動即時預覽",
+      stopLiveView: "停止即時預覽",
+      photo: "拍照",
+      video: "錄影",
+      capture: "拍攝",
+      record: "開始錄影",
+      stopRecording: "停止錄影",
+      ready: "就緒",
+      busy: "處理中",
+      halfPress: "半按快門",
+      liveView: "即時預覽",
+      manualFocus: "手動對焦",
+      near: "近",
+      far: "遠",
+      liveViewSettings: "即時預覽",
+      frameRate: "影格率",
+      moreSettings: "更多設定",
+      diagnosticSafe: "診斷內容不包含驗證 token",
+      copy: "複製",
+      close: "關閉",
+      bridgeReady: "{engine} 已就緒",
+      bridgeUnavailable: "相機引擎無法使用",
+      bridgeError: "無法連接 Bridge",
+      camerasFound: "找到 {count} 台相機",
+      noCameras: "未偵測到相機",
+      selectCamera: "選擇相機",
+      scanning: "正在掃描相機",
+      connecting: "正在連接相機",
+      refreshing: "正在更新相機狀態",
+      disconnected: "相機已中斷連線",
+      captureComplete: "拍攝完成",
+      halfPressComplete: "半按快門完成",
+      recordingStarted: "已開始錄影",
+      recordingStopped: "已停止錄影",
+      liveViewStarted: "即時預覽已啟動",
+      liveViewStopped: "即時預覽已停止",
+      focusMoved: "焦點已向{direction}移動",
+      settingUpdated: "{label} 已設為 {value}",
+      exposure: "曝光",
+      cameraSetting: "相機設定",
+      unsupported: "此相機不支援",
+      liveViewRequired: "請先啟動即時預覽再移動焦點",
+      iso: "ISO",
+      shutter: "快門",
+      aperture: "光圈",
+      whitebalance: "白平衡",
+      exposurecompensation: "曝光補償",
+      afoperation: "對焦模式",
+      afmethod: "自動對焦方式",
+      drivemode: "驅動模式",
+      meteringmode: "測光模式",
+      picturestyle: "相片風格",
+      stillimagequality: "影像品質",
+      shootingmode: "拍攝模式",
+      colortemperature: "色溫",
+      colorspace: "色彩空間",
+      highisonr: "高 ISO 降噪",
+      continuousaf: "連續自動對焦",
+      movieservoaf: "短片伺服自動對焦",
+      aeb: "自動包圍曝光",
+      mediaCount: "共 {count} 個媒體檔案",
+      mediaEmpty: "相機未回報任何媒體檔案",
+      download: "下載",
+      downloaded: "已下載 {name}",
+      copied: "已複製診斷報告",
+      copyFailed: "無法複製診斷報告",
+      operationFailed: "操作失敗",
+      battery: "電池",
+      storage: "儲存空間",
+      freeImages: "可拍 {count} 張",
+      notAvailable: "無資料",
+      liveViewImage: "相機即時預覽",
+      authRequired: "此 Bridge 需要 Bearer token",
+    },
+  };
+
+  function readLanguagePreference() {
+    try {
+      const stored = localStorage.getItem(LANGUAGE_KEY);
+      return ["auto", "en", "zh-TW"].includes(stored) ? stored : "auto";
+    } catch (_) {
+      return "auto";
+    }
+  }
+
+  function writeLanguagePreference(language) {
+    try {
+      localStorage.setItem(LANGUAGE_KEY, language);
+    } catch (_) {
+      // The selected language still applies for this page when storage is blocked.
+    }
+  }
+
+  const state = {
+    language: readLanguagePreference(),
+    token: "",
+    health: null,
+    cameras: [],
+    session: null,
+    info: null,
+    status: null,
+    capabilities: null,
+    activeView: "live",
+    captureMode: "photo",
+    liveActive: false,
+    liveGeneration: 0,
+    requestedFps: 1,
+    frameTimes: [],
+    observedFps: 0,
+    frameBytes: 0,
+    frameContentType: null,
+    lastFrameAt: null,
+    liveObjectUrl: null,
+    focusStep: "MEDIUM",
+    media: [],
+    mediaLoaded: false,
+    busy: false,
+    lastError: null,
+    toastTimer: null,
+  };
+
+  const byId = (id) => document.getElementById(id);
+  const ui = {
+    connectionView: byId("connection-view"),
+    controlView: byId("control-view"),
+    engineState: byId("engine-state"),
+    healthDot: byId("health-dot"),
+    tokenInput: byId("token-input"),
+    cameraSelect: byId("camera-select"),
+    scanButton: byId("scan-button"),
+    connectButton: byId("connect-button"),
+    connectionError: byId("connection-error"),
+    cameraName: byId("camera-name"),
+    batteryValue: byId("battery-value"),
+    storageValue: byId("storage-value"),
+    refreshButton: byId("refresh-button"),
+    disconnectButton: byId("disconnect-button"),
+    livePanel: byId("live-panel"),
+    mediaPanel: byId("media-panel"),
+    diagnosticsPanel: byId("diagnostics-panel"),
+    viewfinder: byId("viewfinder"),
+    liveImage: byId("live-image"),
+    viewfinderPlaceholder: byId("viewfinder-placeholder"),
+    liveToggleButton: byId("live-toggle-button"),
+    railLiveButton: byId("rail-live-button"),
+    modeIndicator: byId("mode-indicator"),
+    frameIndicator: byId("frame-indicator"),
+    recordIndicator: byId("record-indicator"),
+    captureFlash: byId("capture-flash"),
+    exposureStrip: byId("exposure-strip"),
+    photoModeButton: byId("photo-mode-button"),
+    videoModeButton: byId("video-mode-button"),
+    shutterButton: byId("shutter-button"),
+    shutterLabel: byId("shutter-label"),
+    operationState: byId("operation-state"),
+    halfPressButton: byId("half-press-button"),
+    focusSection: byId("focus-section"),
+    focusNearButton: byId("focus-near-button"),
+    focusFarButton: byId("focus-far-button"),
+    fpsSelect: byId("fps-select"),
+    advancedSettings: byId("advanced-settings"),
+    mediaRefreshButton: byId("media-refresh-button"),
+    mediaSummary: byId("media-summary"),
+    mediaList: byId("media-list"),
+    diagnosticsRefreshButton: byId("diagnostics-refresh-button"),
+    copyDiagnosticsButton: byId("copy-diagnostics-button"),
+    diagnosticsOutput: byId("diagnostics-output"),
+    settingDialog: byId("setting-dialog"),
+    settingDialogGroup: byId("setting-dialog-group"),
+    settingDialogTitle: byId("setting-dialog-title"),
+    settingDialogClose: byId("setting-dialog-close"),
+    settingOptions: byId("setting-options"),
+    toast: byId("toast"),
+  };
+
+  class ApiError extends Error {
+    constructor(message, { code = "HTTP_ERROR", status = 0, feature = null, engine = null } = {}) {
+      super(message);
+      this.name = "ApiError";
+      this.code = code;
+      this.status = status;
+      this.feature = feature;
+      this.engine = engine;
+    }
+  }
+
+  function resolvedLanguage() {
+    if (state.language !== "auto") return state.language;
+    const preferred = navigator.languages || [navigator.language || "en"];
+    return preferred.some((language) => language.toLowerCase().startsWith("zh")) ? "zh-TW" : "en";
+  }
+
+  function t(key, values = {}) {
+    const language = resolvedLanguage();
+    let value = messages[language][key] || messages.en[key] || key;
+    Object.entries(values).forEach(([name, replacement]) => {
+      value = value.replaceAll(`{${name}}`, String(replacement));
+    });
+    return value;
+  }
+
+  function applyLanguage() {
+    const language = resolvedLanguage();
+    document.documentElement.lang = language === "zh-TW" ? "zh-Hant-TW" : "en";
+    document.querySelectorAll(".language-select").forEach((select) => {
+      select.value = state.language;
+      select.setAttribute("aria-label", t("language"));
+      const automatic = select.querySelector('option[value="auto"]');
+      if (automatic) automatic.textContent = t("auto");
+    });
+    document.querySelectorAll("[data-i18n]").forEach((element) => {
+      element.textContent = t(element.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
+      element.placeholder = t(element.dataset.i18nPlaceholder);
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach((element) => {
+      const label = t(element.dataset.i18nAria);
+      element.setAttribute("aria-label", label);
+      if (element.hasAttribute("data-tooltip")) element.dataset.tooltip = label;
+    });
+    ui.liveImage.alt = t("liveViewImage");
+    document.querySelector(".camera-metrics > span:first-child")?.setAttribute("title", t("battery"));
+    document.querySelector(".camera-metrics > span:last-child")?.setAttribute("title", t("storage"));
+    renderHealth();
+    renderCameras();
+    renderSession();
+    renderMedia();
+    renderDiagnostics();
+  }
+
+  async function api(path, { method = "GET", json, responseType = "json", keepalive = false } = {}) {
+    const headers = new Headers();
+    if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+    if (json !== undefined) headers.set("Content-Type", "application/json");
+    let response;
+    try {
+      response = await fetch(path, {
+        method,
+        headers,
+        body: json === undefined ? undefined : JSON.stringify(json),
+        cache: "no-store",
+        keepalive,
+      });
+    } catch (error) {
+      throw new ApiError(error instanceof Error ? error.message : t("bridgeError"), { code: "NETWORK_ERROR" });
+    }
+    if (!response.ok) {
+      let detail = null;
+      try {
+        detail = await response.json();
+      } catch (_) {
+        // Keep the stable fallback when an intermediary returns non-JSON content.
+      }
+      const error = detail?.error || {};
+      throw new ApiError(error.message || `${response.status} ${response.statusText}`, {
+        code: error.code || "HTTP_ERROR",
+        status: response.status,
+        feature: error.feature,
+        engine: error.engine,
+      });
+    }
+    if (response.status === 204) return null;
+    if (responseType === "blob") return response.blob();
+    if (responseType === "text") return response.text();
+    return response.json();
+  }
+
+  function captureError(error) {
+    const normalized = error instanceof ApiError
+      ? error
+      : new ApiError(error instanceof Error ? error.message : String(error));
+    state.lastError = {
+      at: new Date().toISOString(),
+      code: normalized.code,
+      status: normalized.status,
+      message: normalized.message,
+      feature: normalized.feature,
+      engine: normalized.engine,
+    };
+    renderDiagnostics();
+    return normalized;
+  }
+
+  function showConnectionError(error) {
+    const normalized = captureError(error);
+    ui.connectionError.textContent = normalized.message;
+    ui.connectionError.hidden = false;
+  }
+
+  function clearConnectionError() {
+    ui.connectionError.textContent = "";
+    ui.connectionError.hidden = true;
+  }
+
+  function showToast(message, error = false) {
+    clearTimeout(state.toastTimer);
+    ui.toast.textContent = message;
+    ui.toast.classList.toggle("error", error);
+    ui.toast.hidden = false;
+    state.toastTimer = window.setTimeout(() => {
+      ui.toast.hidden = true;
+    }, error ? 6000 : 3200);
+  }
+
+  function renderHealth() {
+    if (!state.health) {
+      ui.engineState.textContent = t("checkingBridge");
+      ui.healthDot.className = "status-dot warning";
+      return;
+    }
+    const [engineName, engine] = Object.entries(state.health.engines || {})[0] || ["gphoto2", null];
+    if (engine?.available) {
+      const display = engine.version || engineName;
+      ui.engineState.textContent = t("bridgeReady", { engine: display });
+      ui.healthDot.className = "status-dot success";
+    } else {
+      ui.engineState.textContent = engine?.detail || t("bridgeUnavailable");
+      ui.healthDot.className = "status-dot warning";
+    }
+  }
+
+  function renderCameras() {
+    const selected = ui.cameraSelect.value;
+    ui.cameraSelect.replaceChildren();
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    if (!state.cameras.length) {
+      placeholder.textContent = t("scanFirst");
+      ui.cameraSelect.append(placeholder);
+      ui.cameraSelect.disabled = true;
+      ui.connectButton.disabled = true;
+      return;
+    }
+    placeholder.textContent = t("selectCamera");
+    ui.cameraSelect.append(placeholder);
+    state.cameras.forEach((camera) => {
+      const option = document.createElement("option");
+      option.value = camera.id;
+      option.textContent = `${camera.model} (${camera.port})`;
+      ui.cameraSelect.append(option);
+    });
+    ui.cameraSelect.disabled = false;
+    const fallback = state.cameras.length === 1 ? state.cameras[0].id : "";
+    ui.cameraSelect.value = state.cameras.some((camera) => camera.id === selected) ? selected : fallback;
+    ui.connectButton.disabled = !ui.cameraSelect.value || state.busy;
+  }
+
+  async function refreshHealth() {
+    try {
+      state.health = await api("/health");
+      renderHealth();
+      if (state.health.authRequired) ui.tokenInput.placeholder = t("authRequired");
+    } catch (error) {
+      state.health = null;
+      captureError(error);
+      ui.engineState.textContent = t("bridgeError");
+      ui.healthDot.className = "status-dot warning";
+    }
+  }
+
+  async function scanCameras() {
+    clearConnectionError();
+    state.token = ui.tokenInput.value.trim();
+    ui.scanButton.disabled = true;
+    ui.connectButton.disabled = true;
+    ui.engineState.textContent = t("scanning");
+    try {
+      const response = await api("/v1/cameras");
+      state.cameras = response.cameras || [];
+      renderCameras();
+      ui.engineState.textContent = state.cameras.length
+        ? t("camerasFound", { count: state.cameras.length })
+        : t("noCameras");
+    } catch (error) {
+      state.cameras = [];
+      renderCameras();
+      showConnectionError(error);
+      renderHealth();
+    } finally {
+      ui.scanButton.disabled = false;
+    }
+  }
+
+  async function connectCamera() {
+    const cameraId = ui.cameraSelect.value;
+    if (!cameraId) return;
+    clearConnectionError();
+    state.token = ui.tokenInput.value.trim();
+    state.busy = true;
+    ui.engineState.textContent = t("connecting");
+    renderAvailability();
+    try {
+      state.session = await api("/v1/session", {
+        method: "POST",
+        json: { engine: "auto", cameraId },
+      });
+      const sessionId = encodeURIComponent(state.session.id);
+      [state.info, state.status, state.capabilities] = await Promise.all([
+        api(`/v1/session/${sessionId}/info`),
+        api(`/v1/session/${sessionId}/status`),
+        api(`/v1/session/${sessionId}/capabilities`),
+      ]);
+      state.requestedFps = clampFps(state.capabilities.liveView?.maxFps || 1);
+      state.captureMode = state.status.recording ? "video" : "photo";
+      state.lastError = null;
+      ui.tokenInput.value = "";
+      ui.connectionView.hidden = true;
+      ui.controlView.hidden = false;
+      renderSession();
+      showToast(t("connected"));
+    } catch (error) {
+      if (state.session?.id) {
+        try {
+          await api(`/v1/session/${encodeURIComponent(state.session.id)}`, { method: "DELETE" });
+        } catch (_) {
+          // The original connection error is more useful than cleanup failure.
+        }
+      }
+      state.session = null;
+      showConnectionError(error);
+      renderHealth();
+    } finally {
+      state.busy = false;
+      renderAvailability();
+    }
+  }
+
+  async function refreshSession({ quiet = false } = {}) {
+    if (!state.session) return;
+    if (!quiet) setOperationState(t("refreshing"));
+    const sessionId = encodeURIComponent(state.session.id);
+    try {
+      [state.info, state.status, state.capabilities] = await Promise.all([
+        api(`/v1/session/${sessionId}/info`),
+        api(`/v1/session/${sessionId}/status`),
+        api(`/v1/session/${sessionId}/capabilities`),
+      ]);
+      state.requestedFps = clampFps(state.requestedFps);
+      state.lastError = null;
+      renderSession();
+      if (!quiet) setOperationState(t("ready"));
+    } catch (error) {
+      const normalized = captureError(error);
+      if (!quiet) {
+        setOperationState(normalized.message, true);
+        showToast(normalized.message, true);
+      }
+    }
+  }
+
+  async function disconnectCamera() {
+    if (!state.session) return;
+    const sessionId = state.session.id;
+    state.busy = true;
+    renderAvailability();
+    stopLiveLoop();
+    try {
+      await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    } catch (error) {
+      captureError(error);
+    }
+    resetSession();
+    showToast(t("disconnected"));
+  }
+
+  function resetSession() {
+    stopLiveLoop();
+    state.session = null;
+    state.info = null;
+    state.status = null;
+    state.capabilities = null;
+    state.media = [];
+    state.mediaLoaded = false;
+    state.captureMode = "photo";
+    state.busy = false;
+    state.token = "";
+    ui.connectionView.hidden = false;
+    ui.controlView.hidden = true;
+    ui.tokenInput.value = "";
+    renderAvailability();
+    renderHealth();
+  }
+
+  function featureSupported(feature) {
+    return Boolean(state.capabilities?.supported?.includes(feature));
+  }
+
+  function settingByKey(key) {
+    return state.capabilities?.settings?.find((setting) => setting.key === key) || null;
+  }
+
+  function settingLabel(settingOrKey) {
+    const key = typeof settingOrKey === "string" ? settingOrKey : settingOrKey.key;
+    return messages[resolvedLanguage()][key] || messages.en[key] || settingOrKey.label || key;
+  }
+
+  function currentSettingValue(setting) {
+    const exposureKey = {
+      iso: "iso",
+      shutter: "shutter",
+      aperture: "aperture",
+      whitebalance: "whiteBalance",
+    }[setting.key];
+    return state.status?.exposure?.[exposureKey] || setting.value || "-";
+  }
+
+  function renderSession() {
+    if (!state.session || !state.capabilities || !state.status) return;
+    ui.cameraName.textContent = state.info?.model || state.session.camera?.model || "Canon EOS";
+    const battery = state.status.battery || {};
+    ui.batteryValue.textContent = battery.level == null ? (battery.status || "-") : `${battery.level}%`;
+    const storage = state.status.media || {};
+    ui.storageValue.textContent = storage.freeImages != null
+      ? t("freeImages", { count: storage.freeImages })
+      : storage.freeBytes != null
+        ? formatBytes(storage.freeBytes)
+        : "-";
+    ui.modeIndicator.textContent = state.status.mode && state.status.mode !== "unknown" ? state.status.mode : "-";
+    renderExposure();
+    renderAdvancedSettings();
+    renderFps();
+    renderCaptureMode();
+    renderAvailability();
+    renderDiagnostics();
+  }
+
+  function renderExposure() {
+    ui.exposureStrip.replaceChildren();
+    CORE_SETTINGS.forEach((key) => {
+      const setting = settingByKey(key);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "exposure-control";
+      button.dataset.settingKey = key;
+      button.disabled = !setting || state.busy;
+      button.title = setting ? settingLabel(setting) : t("unsupported");
+      const label = document.createElement("span");
+      label.textContent = settingLabel(setting || key);
+      const value = document.createElement("strong");
+      value.textContent = setting ? currentSettingValue(setting) : "-";
+      button.append(label, value);
+      if (setting) button.addEventListener("click", () => openSettingDialog(setting));
+      ui.exposureStrip.append(button);
+    });
+  }
+
+  function renderAdvancedSettings() {
+    ui.advancedSettings.replaceChildren();
+    const settings = (state.capabilities?.settings || []).filter((setting) => !CORE_SETTINGS.includes(setting.key));
+    if (!settings.length) {
+      const empty = document.createElement("p");
+      empty.className = "supporting";
+      empty.textContent = t("notAvailable");
+      ui.advancedSettings.append(empty);
+      return;
+    }
+    settings.forEach((setting) => {
+      const label = document.createElement("label");
+      const text = document.createElement("span");
+      text.textContent = settingLabel(setting);
+      const select = document.createElement("select");
+      select.disabled = state.busy;
+      setting.values.forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.append(option);
+      });
+      select.value = setting.value;
+      select.addEventListener("change", () => updateSetting(setting, select.value, select));
+      label.append(text, select);
+      ui.advancedSettings.append(label);
+    });
+  }
+
+  function openSettingDialog(setting) {
+    ui.settingDialogGroup.textContent = CORE_SETTINGS.includes(setting.key) ? t("exposure") : t("cameraSetting");
+    ui.settingDialogTitle.textContent = settingLabel(setting);
+    ui.settingOptions.replaceChildren();
+    const current = currentSettingValue(setting);
+    setting.values.forEach((value) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "setting-option";
+      button.textContent = value;
+      button.classList.toggle("active", value === current);
+      button.setAttribute("aria-pressed", String(value === current));
+      button.addEventListener("click", async () => {
+        await updateSetting(setting, value, button);
+        if (!state.lastError) ui.settingDialog.close();
+      });
+      ui.settingOptions.append(button);
+    });
+    ui.settingDialog.showModal();
+    requestAnimationFrame(() => ui.settingOptions.querySelector(".active")?.scrollIntoView({ block: "center" }));
+  }
+
+  async function updateSetting(setting, value, source) {
+    if (!state.session || state.busy) return;
+    state.busy = true;
+    state.lastError = null;
+    source.disabled = true;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      state.status = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/settings/${encodeURIComponent(setting.key)}`,
+        { method: "POST", json: { value } },
+      );
+      setting.value = value;
+      setOperationState(t("ready"));
+      showToast(t("settingUpdated", { label: settingLabel(setting), value }));
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      source.disabled = false;
+      renderSession();
+    }
+  }
+
+  function renderCaptureMode() {
+    const recording = Boolean(state.status?.recording);
+    if (!featureSupported(FEATURES.VIDEO_RECORDING) && state.captureMode === "video") state.captureMode = "photo";
+    ui.photoModeButton.classList.toggle("active", state.captureMode === "photo");
+    ui.videoModeButton.classList.toggle("active", state.captureMode === "video");
+    ui.photoModeButton.setAttribute("aria-pressed", String(state.captureMode === "photo"));
+    ui.videoModeButton.setAttribute("aria-pressed", String(state.captureMode === "video"));
+    ui.shutterButton.classList.toggle("video", state.captureMode === "video");
+    ui.shutterButton.classList.toggle("recording", state.captureMode === "video" && recording);
+    ui.recordIndicator.hidden = !recording;
+    const labelKey = state.captureMode === "photo" ? "capture" : recording ? "stopRecording" : "record";
+    ui.shutterLabel.textContent = t(labelKey);
+    ui.shutterButton.setAttribute("aria-label", t(labelKey));
+    replaceButtonIcon(ui.shutterButton, state.captureMode === "video" ? (recording ? "square" : "circle") : "camera");
+  }
+
+  function selectCaptureMode(mode) {
+    if (mode === "video" && !featureSupported(FEATURES.VIDEO_RECORDING)) return;
+    if (state.status?.recording && mode !== "video") return;
+    state.captureMode = mode;
+    renderCaptureMode();
+    renderAvailability();
+  }
+
+  async function operateShutter() {
+    if (!state.session || state.busy) return;
+    const isPhoto = state.captureMode === "photo";
+    const supported = isPhoto
+      ? featureSupported(FEATURES.STILL_CAPTURE)
+      : featureSupported(FEATURES.VIDEO_RECORDING);
+    if (!supported) return;
+    state.busy = true;
+    state.lastError = null;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      if (isPhoto) {
+        state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/capture/still`, {
+          method: "POST",
+        });
+        flashCapture();
+        setOperationState(t("captureComplete"));
+        showToast(t("captureComplete"));
+      } else {
+        const wasRecording = Boolean(state.status?.recording);
+        state.status = await api(
+          `/v1/session/${encodeURIComponent(state.session.id)}/recording/${wasRecording ? "stop" : "start"}`,
+          { method: "POST" },
+        );
+        const result = wasRecording ? t("recordingStopped") : t("recordingStarted");
+        setOperationState(result);
+        showToast(result);
+      }
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderSession();
+    }
+  }
+
+  async function halfPress() {
+    if (!state.session || state.busy || !featureSupported(FEATURES.SHUTTER_HALF_PRESS)) return;
+    state.busy = true;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/shutter/half-press`, {
+        method: "POST",
+      });
+      setOperationState(t("halfPressComplete"));
+      showToast(t("halfPressComplete"));
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderSession();
+    }
+  }
+
+  function flashCapture() {
+    ui.captureFlash.classList.remove("active");
+    void ui.captureFlash.offsetWidth;
+    ui.captureFlash.classList.add("active");
+  }
+
+  function liveCapabilities() {
+    return state.capabilities?.liveView || {};
+  }
+
+  function clampFps(value) {
+    const minimum = liveCapabilities().minFps || 1;
+    const maximum = liveCapabilities().maxFps || 1;
+    return Math.max(minimum, Math.min(maximum, Number(value) || minimum));
+  }
+
+  function renderFps() {
+    const capabilities = liveCapabilities();
+    const minimum = capabilities.minFps || 1;
+    const maximum = capabilities.maxFps || 1;
+    state.requestedFps = clampFps(state.requestedFps);
+    ui.fpsSelect.replaceChildren();
+    const preferred = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 24, 25, 30];
+    const values = preferred.filter((fps) => fps >= minimum && fps <= maximum);
+    if (!values.includes(minimum)) values.push(minimum);
+    if (!values.includes(maximum)) values.push(maximum);
+    values.sort((left, right) => left - right).forEach((fps) => {
+      const option = document.createElement("option");
+      option.value = String(fps);
+      option.textContent = `${fps} FPS`;
+      ui.fpsSelect.append(option);
+    });
+    ui.fpsSelect.value = String(state.requestedFps);
+    ui.fpsSelect.disabled = state.busy || !featureSupported(FEATURES.LIVE_VIEW);
+  }
+
+  async function toggleLiveView() {
+    if (state.liveActive) await stopLiveView();
+    else await startLiveView();
+  }
+
+  async function startLiveView({ announce = true } = {}) {
+    if (!state.session || state.busy || !featureSupported(FEATURES.LIVE_VIEW)) return;
+    state.busy = true;
+    state.lastError = null;
+    setOperationState(t("busy"));
+    renderAvailability();
+    const capabilities = liveCapabilities();
+    try {
+      const response = await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/start`, {
+        method: "POST",
+        json: {
+          fps: clampFps(state.requestedFps),
+          size: capabilities.defaultSize || capabilities.sizes?.[0] || "MEDIUM",
+          source: capabilities.defaultSource || capabilities.sources?.[0] || "DESKTOP_BRIDGE_STREAM",
+        },
+      });
+      state.requestedFps = response.requestedFps || clampFps(state.requestedFps);
+      state.liveActive = true;
+      state.frameTimes = [];
+      state.observedFps = 0;
+      state.liveGeneration += 1;
+      pollLiveView(state.liveGeneration);
+      setOperationState(t("liveViewStarted"));
+      if (announce) showToast(t("liveViewStarted"));
+    } catch (error) {
+      const normalized = captureError(error);
+      state.liveActive = false;
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderLiveState();
+      renderAvailability();
+      renderFps();
+    }
+  }
+
+  async function stopLiveView({ announce = true, remote = true } = {}) {
+    if (!state.session) return;
+    stopLiveLoop();
+    if (remote) {
+      state.busy = true;
+      renderAvailability();
+      try {
+        await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/stop`, { method: "POST" });
+        setOperationState(t("liveViewStopped"));
+        if (announce) showToast(t("liveViewStopped"));
+      } catch (error) {
+        const normalized = captureError(error);
+        setOperationState(normalized.message, true);
+        if (announce) showToast(normalized.message, true);
+      } finally {
+        state.busy = false;
+      }
+    }
+    renderLiveState();
+    renderAvailability();
+  }
+
+  function stopLiveLoop() {
+    state.liveActive = false;
+    state.liveGeneration += 1;
+    state.frameTimes = [];
+    state.observedFps = 0;
+    state.frameBytes = 0;
+    state.frameContentType = null;
+    state.lastFrameAt = null;
+    if (state.liveObjectUrl) URL.revokeObjectURL(state.liveObjectUrl);
+    state.liveObjectUrl = null;
+    ui.liveImage.removeAttribute("src");
+    renderLiveState();
+  }
+
+  async function pollLiveView(generation) {
+    while (state.liveActive && generation === state.liveGeneration && state.session) {
+      const started = performance.now();
+      try {
+        const blob = await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/frame`, {
+          responseType: "blob",
+        });
+        if (!state.liveActive || generation !== state.liveGeneration) return;
+        const url = URL.createObjectURL(blob);
+        const previous = state.liveObjectUrl;
+        state.liveObjectUrl = url;
+        ui.liveImage.src = url;
+        ui.liveImage.hidden = false;
+        ui.viewfinderPlaceholder.hidden = true;
+        if (previous) window.setTimeout(() => URL.revokeObjectURL(previous), 1000);
+        const now = performance.now();
+        state.frameTimes.push(now);
+        state.frameTimes = state.frameTimes.filter((time) => now - time <= 2000);
+        if (state.frameTimes.length > 1) {
+          const duration = state.frameTimes.at(-1) - state.frameTimes[0];
+          state.observedFps = duration > 0 ? ((state.frameTimes.length - 1) * 1000) / duration : 0;
+        }
+        state.frameBytes = blob.size;
+        state.frameContentType = blob.type || "image/jpeg";
+        state.lastFrameAt = new Date().toISOString();
+        renderFrameIndicator();
+      } catch (error) {
+        if (!state.liveActive || generation !== state.liveGeneration) return;
+        const normalized = captureError(error);
+        stopLiveLoop();
+        setOperationState(normalized.message, true);
+        showToast(normalized.message, true);
+        try {
+          await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/stop`, { method: "POST" });
+        } catch (_) {
+          // The frame error remains the primary diagnostic.
+        }
+        return;
+      }
+      const elapsed = performance.now() - started;
+      const delay = Math.max(0, 1000 / state.requestedFps - elapsed);
+      if (delay > 0) await sleep(delay);
+    }
+  }
+
+  async function changeFps() {
+    state.requestedFps = clampFps(ui.fpsSelect.value);
+    if (!state.liveActive) {
+      renderFrameIndicator();
+      return;
+    }
+    await stopLiveView({ announce: false });
+    await startLiveView({ announce: false });
+    showToast(`${state.requestedFps} FPS`);
+  }
+
+  function renderLiveState() {
+    ui.liveImage.hidden = !state.liveActive || !state.liveObjectUrl;
+    ui.viewfinderPlaceholder.hidden = state.liveActive && Boolean(state.liveObjectUrl);
+    const labelKey = state.liveActive ? "stopLiveView" : "startLiveView";
+    [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
+      const label = button.querySelector("span[data-i18n]");
+      if (label) {
+        label.dataset.i18n = labelKey;
+        label.textContent = t(labelKey);
+      }
+      button.setAttribute("aria-label", t(labelKey));
+      replaceButtonIcon(button, state.liveActive ? "square" : "play");
+    });
+    renderFrameIndicator();
+  }
+
+  function renderFrameIndicator() {
+    const fps = state.observedFps ? state.observedFps.toFixed(1) : "0";
+    ui.frameIndicator.textContent = `${fps} / ${state.requestedFps} FPS`;
+    renderDiagnostics();
+  }
+
+  async function driveFocus(direction) {
+    if (!state.session || state.busy || !featureSupported(FEATURES.FOCUS_DRIVE)) return;
+    if (!state.liveActive) {
+      showToast(t("liveViewRequired"), true);
+      return;
+    }
+    state.busy = true;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      await api(`/v1/session/${encodeURIComponent(state.session.id)}/focus/drive`, {
+        method: "POST",
+        json: { direction, step: state.focusStep },
+      });
+      const localizedDirection = direction === "NEAR" ? t("near") : t("far");
+      setOperationState(t("focusMoved", { direction: localizedDirection }));
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderAvailability();
+    }
+  }
+
+  function renderAvailability() {
+    const connected = Boolean(state.session);
+    const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
+    ui.scanButton.disabled = state.busy;
+    ui.connectButton.disabled = state.busy || !ui.cameraSelect.value;
+    ui.refreshButton.disabled = !connected || state.busy;
+    ui.disconnectButton.disabled = !connected || state.busy;
+    ui.photoModeButton.disabled = state.busy || Boolean(state.status?.recording);
+    ui.videoModeButton.disabled = state.busy || !videoSupported;
+    ui.videoModeButton.hidden = !videoSupported;
+    ui.videoModeButton.parentElement.classList.toggle("single", !videoSupported);
+    const shutterSupported = state.captureMode === "photo"
+      ? featureSupported(FEATURES.STILL_CAPTURE)
+      : videoSupported;
+    ui.shutterButton.disabled = state.busy || !shutterSupported;
+    ui.shutterButton.title = shutterSupported ? ui.shutterLabel.textContent : t("unsupported");
+    const halfPressSupported = featureSupported(FEATURES.SHUTTER_HALF_PRESS);
+    ui.halfPressButton.hidden = !halfPressSupported;
+    ui.halfPressButton.disabled = state.busy || !halfPressSupported;
+    const liveSupported = featureSupported(FEATURES.LIVE_VIEW);
+    [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
+      button.hidden = !liveSupported;
+      button.disabled = state.busy || !liveSupported;
+    });
+    ui.railLiveButton.parentElement.classList.toggle("single", halfPressSupported !== liveSupported);
+    document.querySelector(".live-settings").hidden = !liveSupported;
+    const focusSupported = featureSupported(FEATURES.FOCUS_DRIVE);
+    ui.focusSection.hidden = !focusSupported;
+    ui.focusNearButton.disabled = state.busy || !state.liveActive;
+    ui.focusFarButton.disabled = state.busy || !state.liveActive;
+    ui.fpsSelect.disabled = state.busy || !liveSupported;
+    document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
+      button.disabled = state.busy || !settingByKey(button.dataset.settingKey);
+    });
+    document.querySelectorAll("#advanced-settings select").forEach((select) => {
+      select.disabled = state.busy;
+    });
+    document.querySelectorAll("#focus-step-control button").forEach((button) => {
+      button.disabled = state.busy || !state.liveActive;
+    });
+    const mediaTab = document.querySelector('.tab[data-view="media"]');
+    mediaTab.hidden = !featureSupported(FEATURES.MEDIA_BROWSER);
+  }
+
+  function setOperationState(message, error = false) {
+    ui.operationState.textContent = message;
+    ui.operationState.classList.toggle("error-text", error);
+  }
+
+  function selectView(view) {
+    if (view === "media" && !featureSupported(FEATURES.MEDIA_BROWSER)) return;
+    state.activeView = view;
+    document.querySelectorAll(".view-panel").forEach((panel) => {
+      panel.hidden = panel.id !== `${view}-panel`;
+    });
+    document.querySelectorAll(".tab").forEach((button) => {
+      const active = button.dataset.view === view;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-current", active ? "page" : "false");
+    });
+    if (view === "media" && !state.mediaLoaded) refreshMedia();
+    if (view === "diagnostics") renderDiagnostics();
+  }
+
+  async function refreshMedia() {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return;
+    ui.mediaRefreshButton.disabled = true;
+    try {
+      const response = await api(`/v1/session/${encodeURIComponent(state.session.id)}/media`);
+      state.media = response.items || [];
+      state.mediaLoaded = true;
+      renderMedia();
+    } catch (error) {
+      const normalized = captureError(error);
+      showToast(normalized.message, true);
+    } finally {
+      ui.mediaRefreshButton.disabled = false;
+    }
+  }
+
+  function renderMedia() {
+    if (!ui.mediaList) return;
+    ui.mediaSummary.textContent = t("mediaCount", { count: state.media.length });
+    ui.mediaList.replaceChildren();
+    if (!state.media.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = t("mediaEmpty");
+      ui.mediaList.append(empty);
+      return;
+    }
+    state.media.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "media-row";
+      const kind = document.createElement("span");
+      kind.className = "media-kind";
+      kind.dataset.icon = item.kind === "video" ? "video" : "images";
+      const copy = document.createElement("div");
+      copy.className = "media-copy";
+      const name = document.createElement("strong");
+      name.textContent = item.name;
+      const time = document.createElement("span");
+      time.textContent = formatDate(item.captureTime) || item.contentType;
+      copy.append(name, time);
+      const size = document.createElement("span");
+      size.className = "media-size";
+      size.textContent = formatBytes(item.sizeBytes);
+      const download = document.createElement("button");
+      download.type = "button";
+      download.className = "icon-button";
+      download.dataset.tooltip = t("download");
+      download.setAttribute("aria-label", `${t("download")} ${item.name}`);
+      const downloadIcon = document.createElement("span");
+      downloadIcon.className = "icon";
+      downloadIcon.dataset.icon = "download";
+      download.append(downloadIcon);
+      download.disabled = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+      download.addEventListener("click", () => downloadMedia(item, download));
+      row.append(kind, copy, size, download);
+      ui.mediaList.append(row);
+    });
+    window.OpenEosIcons?.render(ui.mediaList);
+  }
+
+  async function downloadMedia(item, button) {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD)) return;
+    button.disabled = true;
+    try {
+      const blob = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}`,
+        { responseType: "blob" },
+      );
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = item.name;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast(t("downloaded", { name: item.name }));
+    } catch (error) {
+      const normalized = captureError(error);
+      showToast(normalized.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function diagnosticReport() {
+    return {
+      product: "Open EOS Control Desktop",
+      generatedAt: new Date().toISOString(),
+      bridge: state.health,
+      camera: state.session?.camera || null,
+      info: state.info,
+      status: state.status,
+      capabilities: state.capabilities,
+      liveView: {
+        active: state.liveActive,
+        requestedFps: state.requestedFps,
+        observedFps: Number(state.observedFps.toFixed(1)),
+        frameBytes: state.frameBytes,
+        contentType: state.frameContentType,
+        lastFrameAt: state.lastFrameAt,
+      },
+      lastError: state.lastError,
+    };
+  }
+
+  function renderDiagnostics() {
+    if (!ui.diagnosticsOutput) return;
+    ui.diagnosticsOutput.textContent = JSON.stringify(diagnosticReport(), null, 2);
+  }
+
+  async function copyDiagnostics() {
+    const report = ui.diagnosticsOutput.textContent;
+    try {
+      await navigator.clipboard.writeText(report);
+      showToast(t("copied"));
+    } catch (_) {
+      try {
+        const area = document.createElement("textarea");
+        area.value = report;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.append(area);
+        area.select();
+        const copied = document.execCommand("copy");
+        area.remove();
+        if (!copied) throw new Error("copy failed");
+        showToast(t("copied"));
+      } catch (error) {
+        captureError(error);
+        showToast(t("copyFailed"), true);
+      }
+    }
+  }
+
+  function replaceButtonIcon(button, iconName) {
+    const current = button.querySelector("svg.icon, span.icon");
+    if (!current || current.dataset.renderedIcon === iconName) return;
+    const placeholder = document.createElement("span");
+    placeholder.className = current.getAttribute("class") || "icon";
+    placeholder.dataset.icon = iconName;
+    placeholder.dataset.renderedIcon = iconName;
+    current.replaceWith(placeholder);
+    window.OpenEosIcons?.render(button);
+    const rendered = button.querySelector("svg.icon");
+    if (rendered) rendered.dataset.renderedIcon = iconName;
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes <= 0) return bytes === 0 ? "0 B" : "-";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const amount = bytes / 1024 ** index;
+    return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
+  }
+
+  function formatDate(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat(resolvedLanguage(), { dateStyle: "medium", timeStyle: "short" }).format(date);
+  }
+
+  function sleep(milliseconds) {
+    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  }
+
+  function bindEvents() {
+    document.querySelectorAll(".language-select").forEach((select) => {
+      select.addEventListener("change", () => {
+        state.language = select.value;
+        writeLanguagePreference(state.language);
+        clearTimeout(state.toastTimer);
+        ui.toast.hidden = true;
+        applyLanguage();
+      });
+    });
+    ui.scanButton.addEventListener("click", scanCameras);
+    ui.connectButton.addEventListener("click", connectCamera);
+    ui.cameraSelect.addEventListener("change", renderAvailability);
+    ui.tokenInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") scanCameras();
+    });
+    ui.refreshButton.addEventListener("click", () => refreshSession());
+    ui.disconnectButton.addEventListener("click", disconnectCamera);
+    document.querySelectorAll(".tab").forEach((button) => {
+      button.addEventListener("click", () => selectView(button.dataset.view));
+    });
+    ui.photoModeButton.addEventListener("click", () => selectCaptureMode("photo"));
+    ui.videoModeButton.addEventListener("click", () => selectCaptureMode("video"));
+    ui.shutterButton.addEventListener("click", operateShutter);
+    ui.halfPressButton.addEventListener("click", halfPress);
+    ui.liveToggleButton.addEventListener("click", toggleLiveView);
+    ui.railLiveButton.addEventListener("click", toggleLiveView);
+    ui.fpsSelect.addEventListener("change", changeFps);
+    ui.focusNearButton.addEventListener("click", () => driveFocus("NEAR"));
+    ui.focusFarButton.addEventListener("click", () => driveFocus("FAR"));
+    document.querySelectorAll("#focus-step-control button").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.focusStep = button.dataset.step;
+        document.querySelectorAll("#focus-step-control button").forEach((candidate) => {
+          candidate.classList.toggle("active", candidate === button);
+          candidate.setAttribute("aria-pressed", String(candidate === button));
+        });
+      });
+    });
+    ui.mediaRefreshButton.addEventListener("click", refreshMedia);
+    ui.diagnosticsRefreshButton.addEventListener("click", () => refreshSession({ quiet: true }));
+    ui.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
+    ui.settingDialogClose.addEventListener("click", () => ui.settingDialog.close());
+    ui.settingDialog.addEventListener("click", (event) => {
+      if (event.target === ui.settingDialog) ui.settingDialog.close();
+    });
+    window.addEventListener("beforeunload", () => {
+      if (!state.session) return;
+      api(`/v1/session/${encodeURIComponent(state.session.id)}`, { method: "DELETE", keepalive: true }).catch(() => {});
+    });
+  }
+
+  async function initialize() {
+    window.OpenEosIcons?.render();
+    bindEvents();
+    applyLanguage();
+    renderLiveState();
+    renderAvailability();
+    await refreshHealth();
+    const engine = Object.values(state.health?.engines || {})[0];
+    if (engine?.available && !state.health.authRequired) await scanCameras();
+  }
+
+  initialize();
+})();

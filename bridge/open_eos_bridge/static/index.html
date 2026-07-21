@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d0e">
+  <title>Open EOS Control</title>
+  <link rel="icon" href="/app/app-icon.png">
+  <link rel="stylesheet" href="/app/styles.css">
+</head>
+<body>
+  <div id="app">
+    <section id="connection-view" class="connection-shell">
+      <header class="connection-brand">
+        <img src="/app/app-icon.png" alt="" width="64" height="64">
+        <div>
+          <h1>Open EOS Control</h1>
+          <p data-i18n="desktopControl">Desktop control</p>
+        </div>
+        <label class="compact-field language-field">
+          <span class="sr-only" data-i18n="language">Language</span>
+          <span class="icon" data-icon="languages" aria-hidden="true"></span>
+          <select class="language-select" aria-label="Language">
+            <option value="auto">Auto</option>
+            <option value="en">English</option>
+            <option value="zh-TW">繁體中文</option>
+          </select>
+        </label>
+      </header>
+
+      <main class="connection-main">
+        <div class="connection-tool">
+          <div class="section-heading">
+            <div>
+              <h2 data-i18n="connectCamera">Connect camera</h2>
+              <p id="engine-state" class="supporting" data-i18n="checkingBridge">Checking bridge</p>
+            </div>
+            <span id="health-dot" class="status-dot warning" aria-hidden="true"></span>
+          </div>
+
+          <label class="field">
+            <span data-i18n="bearerToken">Bearer token</span>
+            <input id="token-input" type="password" autocomplete="off" spellcheck="false"
+                   data-i18n-placeholder="tokenOptional" placeholder="Optional on loopback">
+          </label>
+
+          <label class="field">
+            <span data-i18n="camera">Camera</span>
+            <select id="camera-select" disabled>
+              <option value="" data-i18n="scanFirst">Scan for a camera first</option>
+            </select>
+          </label>
+
+          <div class="connection-actions">
+            <button id="scan-button" class="button secondary" type="button">
+              <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span>
+              <span data-i18n="scan">Scan</span>
+            </button>
+            <button id="connect-button" class="button primary" type="button" disabled>
+              <span class="icon" data-icon="plug" aria-hidden="true"></span>
+              <span data-i18n="connect">Connect</span>
+            </button>
+          </div>
+          <p id="connection-error" class="inline-error" role="alert" hidden></p>
+        </div>
+      </main>
+    </section>
+
+    <section id="control-view" class="control-shell" hidden>
+      <header class="topbar">
+        <div class="camera-identity">
+          <img src="/app/app-icon.png" alt="" width="36" height="36">
+          <div class="identity-copy">
+            <strong id="camera-name">Canon EOS</strong>
+            <span><span class="status-dot success" aria-hidden="true"></span><span data-i18n="connected">Connected</span></span>
+          </div>
+        </div>
+
+        <nav class="view-tabs" aria-label="Views" data-i18n-aria="views">
+          <button class="tab active" type="button" data-view="live" aria-current="page">
+            <span class="icon" data-icon="camera" aria-hidden="true"></span><span data-i18n="control">Control</span>
+          </button>
+          <button class="tab" type="button" data-view="media">
+            <span class="icon" data-icon="images" aria-hidden="true"></span><span data-i18n="media">Media</span>
+          </button>
+          <button class="tab" type="button" data-view="diagnostics">
+            <span class="icon" data-icon="bug" aria-hidden="true"></span><span data-i18n="diagnostics">Diagnostics</span>
+          </button>
+        </nav>
+
+        <div class="topbar-actions">
+          <div class="camera-metrics" aria-label="Camera status" data-i18n-aria="cameraStatus">
+            <span title="Battery"><span class="icon" data-icon="battery" aria-hidden="true"></span><span id="battery-value">-</span></span>
+            <span title="Storage"><span class="icon" data-icon="hard-drive" aria-hidden="true"></span><span id="storage-value">-</span></span>
+          </div>
+          <label class="compact-field">
+            <span class="sr-only" data-i18n="language">Language</span>
+            <span class="icon" data-icon="languages" aria-hidden="true"></span>
+            <select class="language-select" aria-label="Language">
+              <option value="auto">Auto</option>
+              <option value="en">English</option>
+              <option value="zh-TW">繁體中文</option>
+            </select>
+          </label>
+          <button id="refresh-button" class="icon-button" type="button" data-tooltip="Refresh" data-i18n-aria="refresh">
+            <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span>
+          </button>
+          <button id="disconnect-button" class="icon-button danger" type="button" data-tooltip="Disconnect" data-i18n-aria="disconnect">
+            <span class="icon" data-icon="power" aria-hidden="true"></span>
+          </button>
+        </div>
+      </header>
+
+      <main id="live-panel" class="live-workspace view-panel">
+        <section class="viewfinder-column">
+          <div id="viewfinder" class="viewfinder">
+            <img id="live-image" alt="Camera Live View" hidden>
+            <div id="viewfinder-placeholder" class="viewfinder-placeholder">
+              <span class="icon large" data-icon="camera" aria-hidden="true"></span>
+              <button id="live-toggle-button" class="button primary" type="button">
+                <span class="icon" data-icon="play" aria-hidden="true"></span>
+                <span data-i18n="startLiveView">Start Live View</span>
+              </button>
+            </div>
+            <div class="viewfinder-overlay top-left">
+              <span id="mode-indicator" class="overlay-label">M</span>
+              <span id="frame-indicator" class="overlay-label">0 FPS</span>
+            </div>
+            <div id="record-indicator" class="record-indicator" hidden>
+              <span aria-hidden="true"></span> REC
+            </div>
+            <div id="capture-flash" class="capture-flash" aria-hidden="true"></div>
+          </div>
+
+          <div id="exposure-strip" class="exposure-strip" aria-label="Exposure controls" data-i18n-aria="exposureControls"></div>
+        </section>
+
+        <aside class="control-rail">
+          <div class="capture-mode" role="group" aria-label="Capture mode" data-i18n-aria="captureMode">
+            <button id="photo-mode-button" class="active" type="button" data-mode="photo" data-i18n="photo">Photo</button>
+            <button id="video-mode-button" type="button" data-mode="video" data-i18n="video">Video</button>
+          </div>
+
+          <div class="shutter-zone">
+            <button id="shutter-button" class="shutter-button" type="button" data-i18n-aria="capture">
+              <span class="shutter-inner"><span class="icon" data-icon="camera" aria-hidden="true"></span></span>
+            </button>
+            <strong id="shutter-label" data-i18n="capture">Capture</strong>
+            <span id="operation-state" class="supporting" data-i18n="ready">Ready</span>
+          </div>
+
+          <div class="quick-actions">
+            <button id="half-press-button" class="button secondary" type="button">
+              <span class="icon" data-icon="focus" aria-hidden="true"></span><span data-i18n="halfPress">Half press</span>
+            </button>
+            <button id="rail-live-button" class="button secondary" type="button">
+              <span class="icon" data-icon="play" aria-hidden="true"></span><span data-i18n="liveView">Live View</span>
+            </button>
+          </div>
+
+          <section id="focus-section" class="rail-section">
+            <div class="rail-heading">
+              <h2 data-i18n="manualFocus">Manual focus</h2>
+              <div id="focus-step-control" class="step-control" role="group" aria-label="Focus step" data-i18n-aria="focusStep">
+                <button type="button" data-step="SMALL" data-i18n-aria="focusStepSmall">1</button>
+                <button type="button" data-step="MEDIUM" data-i18n-aria="focusStepMedium" class="active">2</button>
+                <button type="button" data-step="LARGE" data-i18n-aria="focusStepLarge">3</button>
+              </div>
+            </div>
+            <div class="focus-actions">
+              <button id="focus-near-button" class="button secondary" type="button">
+                <span class="icon" data-icon="chevron-left" aria-hidden="true"></span><span data-i18n="near">Near</span>
+              </button>
+              <button id="focus-far-button" class="button secondary" type="button">
+                <span data-i18n="far">Far</span><span class="icon" data-icon="chevron-right" aria-hidden="true"></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="rail-section live-settings">
+            <div class="rail-heading"><h2 data-i18n="liveViewSettings">Live View</h2></div>
+            <label class="setting-row">
+              <span data-i18n="frameRate">Frame rate</span>
+              <select id="fps-select"></select>
+            </label>
+          </section>
+
+          <section class="rail-section">
+            <div class="rail-heading"><h2 data-i18n="moreSettings">More settings</h2></div>
+            <div id="advanced-settings" class="settings-list"></div>
+          </section>
+        </aside>
+      </main>
+
+      <main id="media-panel" class="content-panel view-panel" hidden>
+        <div class="content-heading">
+          <div><h2 data-i18n="media">Media</h2><p id="media-summary" class="supporting"></p></div>
+          <button id="media-refresh-button" class="button secondary" type="button">
+            <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span><span data-i18n="refresh">Refresh</span>
+          </button>
+        </div>
+        <div id="media-list" class="media-list"></div>
+      </main>
+
+      <main id="diagnostics-panel" class="content-panel view-panel" hidden>
+        <div class="content-heading">
+          <div><h2 data-i18n="diagnostics">Diagnostics</h2><p class="supporting" data-i18n="diagnosticSafe">Authentication token is excluded</p></div>
+          <div class="content-actions">
+            <button id="diagnostics-refresh-button" class="button secondary" type="button">
+              <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span><span data-i18n="refresh">Refresh</span>
+            </button>
+            <button id="copy-diagnostics-button" class="button secondary" type="button">
+              <span class="icon" data-icon="copy" aria-hidden="true"></span><span data-i18n="copy">Copy</span>
+            </button>
+          </div>
+        </div>
+        <pre id="diagnostics-output" tabindex="0"></pre>
+      </main>
+    </section>
+  </div>
+
+  <dialog id="setting-dialog" class="setting-dialog">
+    <div class="dialog-heading">
+      <div><span id="setting-dialog-group" class="eyebrow"></span><h2 id="setting-dialog-title"></h2></div>
+      <button id="setting-dialog-close" class="icon-button" type="button" data-i18n-aria="close">
+        <span class="icon" data-icon="x" aria-hidden="true"></span>
+      </button>
+    </div>
+    <div id="setting-options" class="setting-options"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/app/icons.js"></script>
+  <script src="/app/app.js"></script>
+</body>
+</html>

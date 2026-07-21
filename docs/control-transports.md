@@ -32,10 +32,10 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 ### Desktop bridge
 
-- Status: HTTP service, libgphoto2 CLI engine, and Android client are implemented and contract-tested; EOS R6 Mark III device validation remains.
+- Status: HTTP service, built-in PC control UI, libgphoto2 CLI engine, and Android client are implemented and tested; EOS R6 Mark III device validation remains.
 - Connection: app talks to a local desktop service; desktop service controls the camera over USB.
 - Engines: the executable open-source path currently uses the `gphoto2` CLI; the Canon EDSDK adapter remains optional research and no Canon binary is redistributed.
-- Current implementation: camera discovery and sessions, capability-driven settings, status, still capture, half-press, movie target control, relative focus drive, JPEG preview, media listing and streamed downloads. Android provides URL/token input, scanning and multi-camera selection, applies camera-advertised Live View limits, and never persists the token. Loopback is the secure service default; LAN use requires a Bearer token.
+- Current implementation: camera discovery and sessions, capability-driven settings, status, still capture, half-press, movie target control, relative focus drive, JPEG preview, media listing and streamed downloads. The built-in responsive PC UI exposes those same advertised operations, English/Traditional Chinese, authenticated binary transfer and redacted diagnostics. Android provides URL/token input, scanning and multi-camera selection, applies camera-advertised Live View limits, and never persists the token. Both clients keep the token in memory. Loopback is the secure service default; LAN use requires a Bearer token.
 - Strengths: immediate access to mature libgphoto2 Canon mappings, including the checked-in upstream R6 Mark III capability snapshot.
 - Tradeoffs: requires a computer in the loop. The CLI preview launches one process per JPEG and is truthfully capped at 5 FPS; persistent native libgphoto2 and physical-camera validation are later milestones.
 

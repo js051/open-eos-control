@@ -26,6 +26,9 @@ open-eos-bridge = "open_eos_bridge.main:run"
 [tool.setuptools.packages.find]
 include = ["open_eos_bridge*"]
 
+[tool.setuptools.package-data]
+open_eos_bridge = ["static/*"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]

@@ -4,14 +4,14 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。目前先以 Android App 為主，第一個真機優先目標是 Canon EOS R6 Mark III，架構上會保留 PC、iOS、Android 三端共用同一套相機控制概念的空間。
 
-這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已經有走同一個 camera core contract 的標準 USB/PTP backend、依能力開放的 Canon EOS 遠端快門、曝光／白平衡、焦點移動、JPEG Live View，以及可執行的 Desktop Bridge client。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 透過開源 `gphoto2` CLI 提供經測試的 HTTP API；Bridge 真機驗證與 iOS 仍在開發中。
+這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已經有走同一個 camera core contract 的標準 USB/PTP backend、依能力開放的 Canon EOS 遠端快門、曝光／白平衡、焦點移動、JPEG Live View，以及可執行的 Desktop Bridge client。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 透過開源 `gphoto2` CLI 同時提供經測試的 HTTP API 與內建響應式控制介面；Bridge 真機驗證與 iOS 仍在開發中。
 
 ## 專案結構
 
 ```text
 open-eos-control/
   android/       Android App，Kotlin + Jetpack Compose
-  bridge/        PC 端 HTTP 相機橋接服務，Python + FastAPI + gphoto2
+  bridge/        PC 相機橋接服務與控制介面，Python + FastAPI + gphoto2
   simulator/     假的 Canon CCAPI 相機伺服器
   docs/          架構、傳輸層與 bridge 設計文件
 ```
@@ -80,7 +80,7 @@ GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test 和 debu
 
 ## Desktop Bridge
 
-Desktop Bridge 是可執行的本機服務，用來控制由 `gphoto2` 管理的 USB 相機。API 會依相機實際公告的能力開放身分、狀態、設定、拍照、半按快門、錄影、焦點前後移動、JPEG Live View、媒體列表與串流下載。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
+Desktop Bridge 是可執行的本機服務，也是 PC 控制 App，用來操作由 `gphoto2` 管理的 USB 相機。API 與內建介面都會依相機實際公告的能力開放身分、狀態、設定、拍照、半按快門、錄影、焦點前後移動、JPEG Live View、媒體列表、串流下載與不含 token 的診斷資料。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
 
 請先在電腦安裝 `gphoto2`，再執行：
 
@@ -92,6 +92,8 @@ gphoto2 --auto-detect
 .\.venv\Scripts\open-eos-bridge.exe
 ```
 
+在電腦瀏覽器開啟 [http://127.0.0.1:18181/](http://127.0.0.1:18181/) 即可使用 PC 控制介面。介面只會啟用相機有公告的操作；Bearer token 只留在頁面記憶體且不會寫入診斷，只有語言選擇會保存在本機。
+
 服務預設只監聽 `127.0.0.1:18181`。Android 模擬器可在連線頁使用 `http://10.0.2.2:18181`；實體手機若要從區網連入，必須明確綁定 LAN 並設定 Bearer token：
 
 ```powershell
@@ -102,7 +104,7 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "請替換成足夠長的隨機字串"
 
 在 Android 連線頁選擇「桌面橋接」，輸入 URL 與相同 token，再掃描並選擇相機。token 只保留在 App 程序記憶體中，不會持久化，也不會出現在診斷報告。
 
-目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS；之後可由 persistent native libgphoto2 stream 提升。服務與 Android contract 路徑都有自動測試，但目前還不能宣稱 R6 Mark III Bridge 真機驗證通過，而且這台 Windows 開發電腦目前沒有安裝 `gphoto2` executable。
+目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS；之後可由 persistent native libgphoto2 stream 提升。服務與 Android contract 路徑都有自動測試，瀏覽器介面也已透過可重現測試 engine 在桌面與窄版尺寸跑過端到端操作；但目前仍不能宣稱 R6 Mark III Bridge 真機驗證通過，而且這台 Windows 開發電腦目前沒有安裝 `gphoto2` executable。
 
 ## Fake Camera Simulator
 
@@ -137,7 +139,7 @@ http://localhost:18080
 
 - 先把 R6 Mark III 的 CCAPI 無線控制維持穩定。
 - 在 R6 Mark III 真機驗證已實作的 Android USB/PTP 標準路徑，以及 Canon EOS 遠端快門、曝光、焦點移動與 Live View；後續只加入有可靠依據的其他專有設定、Touch AF 或錄影命令。
-- 在 R6 Mark III 完成已實作 Android-to-Desktop-Bridge libgphoto2 路徑的真機驗證，加入未來 PC UI，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
+- 在 R6 Mark III 完成已實作 Android-to-Desktop-Bridge 與 PC 控制介面的真機驗證，以 persistent engine 改善預覽效能，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
 - iOS 先走 CCAPI/Wi-Fi；iOS USB/PTP 先列為研究線。
 
 功能是否真正完成以 [docs/feature-status.md](docs/feature-status.md) 為準；架構與後續路線請看 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/android-usb-ptp.md](docs/android-usb-ptp.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。

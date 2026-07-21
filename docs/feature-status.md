@@ -1,6 +1,6 @@
 # Feature Status And Acceptance
 
-Last audited: 2026-07-21.
+Last audited: 2026-07-22.
 
 This is the canonical completeness ledger for Open EOS Control. A UI control, interface method, or simulator response alone does not make a feature complete.
 
@@ -45,6 +45,7 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | Android Canon EOS Touch AF and movie control | Research | Coordinate/record-state semantics and operation sequences are proven before an active UI control is exposed |
 | Desktop Bridge HTTP service | Implemented; device validation required | FastAPI service, loopback/Bearer security, stable errors, sessions, streaming responses and contract tests pass |
 | libgphoto2 desktop adapter | Implemented; device validation required | Discovery, dynamic capabilities/settings, capture, half-press, recording, focus drive, bounded JPEG preview, media listing/download and subprocess timeout are test-covered; validate on R6 Mark III |
+| PC control UI | Implemented; device validation required | Built into the bridge root URL; capability-gated controls, authenticated binary Live View/downloads, memory-only token, redacted diagnostics, English/Traditional Chinese, desktop/narrow browser interaction and overflow checks pass |
 | Android Desktop Bridge client | Implemented; device validation required | Bearer token is memory-only; discovery, camera selection, session lifecycle, capability parsing, controls, JPEG frames, media streaming, diagnostics redaction and Live View request clamping are test-covered |
 | Optional Canon EDSDK adapter | Research | User-installed SDK works without redistributing Canon binaries |
 | iOS CCAPI app | Planned | Native client connects, controls, renders Live View and passes shared fixtures |

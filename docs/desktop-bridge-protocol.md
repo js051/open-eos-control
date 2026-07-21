@@ -135,6 +135,8 @@ python -m venv .venv
 
 The defaults are `127.0.0.1:18181`, the `libgphoto2` engine, and loopback-only access. Set `OPEN_EOS_GPHOTO2` when the executable is not named `gphoto2`. For a LAN bind, set both `OPEN_EOS_BRIDGE_HOST` and a strong `OPEN_EOS_BRIDGE_TOKEN`.
 
+The same process serves the responsive PC control UI at `http://127.0.0.1:18181/`. It discovers cameras, opens one selected session, and renders only camera-advertised controls for Live View, exposure, capture, recording, focus, media, and diagnostics. English and Traditional Chinese are selectable; the token remains in page memory and is never included in diagnostics or media URLs.
+
 ## Error Shape
 
 ```json

@@ -38,8 +38,9 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 
 - Android keeps the first complete app UI and owns direct phone-to-camera workflows.
 - iOS should start with CCAPI/Wi-Fi using the same command and capability vocabulary; iOS USB/PTP remains research until platform constraints are proven.
-- PC should start as a desktop bridge service. The bridge exposes the shared open protocol while internally using libgphoto2 or an optional user-installed Canon EDSDK adapter.
+- PC starts as a desktop bridge service with a built-in browser control UI. The bridge exposes the shared open protocol while internally using libgphoto2 or an optional user-installed Canon EDSDK adapter.
 - The first bridge implementation is executable under `bridge/`: FastAPI owns auth/session/HTTP concerns, while `GPhoto2Engine` maps only camera-advertised CLI abilities and configuration values into the shared contract.
+- The same FastAPI process serves the PC UI at `/`; it calls only the public bridge contract, keeps authentication in page memory, and renders controls from the advertised capability/settings response.
 - Android's `DesktopBridgeClient` maps that HTTP contract back into `CameraControlBackend`, including memory-only Bearer auth, bridge camera discovery/selection, binary Live View, and streaming media transfers.
 
 ## Backend Rules
@@ -56,4 +57,4 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 2. Validate the implemented Android USB/PTP session, DeviceInfo, storage, media, conditional standard capture and property paths on R6 Mark III.
 3. Validate the capability-gated Canon EOS remote release, half-press, ISO/Tv/Av/WB, focus drive and JPEG Live View paths on R6 Mark III.
 4. Record remaining real vendor properties/events and add only setting, movie or Touch AF mappings supported by reliable evidence.
-6. Validate the tested Android-to-libgphoto2 desktop bridge on R6 Mark III, then pursue persistent native streaming and an optional EDSDK adapter.
+5. Validate the tested Android-to-libgphoto2 desktop bridge and PC UI on R6 Mark III, then pursue persistent native streaming and an optional EDSDK adapter.
