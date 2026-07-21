@@ -138,11 +138,15 @@ class DiagnosticsTest {
         val settings = listOf(
             CameraSettingControl("moviequality", "Movie quality", "4K", listOf("4K")),
             CameraSettingControl("drivemode", "Drive", "single", listOf("single")),
+            CameraSettingControl("stillimagequalitycf", "CF quality", "RAW", listOf("RAW")),
             CameraSettingControl("movieservoaf", "Movie Servo AF", "on", listOf("on")),
             CameraSettingControl("afmethod", "AF", "face", listOf("face")),
         )
 
-        assertEquals(listOf("drivemode", "afmethod"), settingsForMode(settings, CaptureMode.PHOTO).map { it.key })
+        assertEquals(
+            listOf("drivemode", "stillimagequalitycf", "afmethod"),
+            settingsForMode(settings, CaptureMode.PHOTO).map { it.key },
+        )
         assertEquals(
             listOf("moviequality", "movieservoaf", "afmethod"),
             settingsForMode(settings, CaptureMode.VIDEO).map { it.key },

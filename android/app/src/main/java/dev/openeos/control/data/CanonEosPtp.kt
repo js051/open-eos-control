@@ -23,6 +23,9 @@ object CanonEosPropertyCode {
     const val FOCUS_MODE = 0xD108
     const val WHITE_BALANCE = 0xD109
     const val PICTURE_STYLE = 0xD110
+    const val IMAGE_FORMAT = 0xD120
+    const val IMAGE_FORMAT_CF = 0xD121
+    const val IMAGE_FORMAT_SD = 0xD122
     const val MOVIE_SERVO_AF = 0xD179
     const val EVF_OUTPUT_DEVICE = 0xD1B0
     const val EVF_MODE = 0xD1B1
@@ -74,7 +77,20 @@ object CanonEosPtp {
         CanonEosSettingSpec(CanonEosPropertyCode.DRIVE_MODE, "drivemode", "Drive mode"),
         CanonEosSettingSpec(CanonEosPropertyCode.METERING_MODE, "meteringmode", "Metering mode"),
         CanonEosSettingSpec(CanonEosPropertyCode.PICTURE_STYLE, "picturestyle", "Picture style"),
+        CanonEosSettingSpec(CanonEosPropertyCode.IMAGE_FORMAT, "stillimagequality", "Image quality"),
+        CanonEosSettingSpec(CanonEosPropertyCode.IMAGE_FORMAT_SD, "stillimagequalitysd", "SD image quality"),
+        CanonEosSettingSpec(
+            CanonEosPropertyCode.IMAGE_FORMAT_CF,
+            "stillimagequalitycf",
+            "CF/CFexpress image quality",
+        ),
         CanonEosSettingSpec(CanonEosPropertyCode.MOVIE_SERVO_AF, "movieservoaf", "Movie Servo AF"),
+    )
+
+    private val imageFormatPropertyCodes = setOf(
+        CanonEosPropertyCode.IMAGE_FORMAT,
+        CanonEosPropertyCode.IMAGE_FORMAT_CF,
+        CanonEosPropertyCode.IMAGE_FORMAT_SD,
     )
 
     private val remotePreparationOperations = setOf(
@@ -161,6 +177,19 @@ object CanonEosPtp {
                 CanonEosEventCode.PROPERTY_VALUE_CHANGED -> {
                     if (block.length < 12) malformedPropertyEvent(block, "property code")
                     val propertyCode = payload.u32Le(block.offset + 8).toInt()
+                    if (propertyCode in imageFormatPropertyCodes) {
+                        add(
+                            CanonEosPropertyUpdate(
+                                propertyCode = propertyCode,
+                                currentValue = unpackImageFormat(
+                                    payload,
+                                    offset = block.offset + 12,
+                                    limit = block.offset + block.length,
+                                ).value,
+                            )
+                        )
+                        return@forEach
+                    }
                     val valueBytes = propertySpecs[propertyCode]?.valueBytes ?: return@forEach
                     if (block.length < 12 + valueBytes) malformedPropertyEvent(block, "property value")
                     add(
@@ -174,12 +203,25 @@ object CanonEosPtp {
                 CanonEosEventCode.AVAILABLE_LIST_CHANGED -> {
                     if (block.length < 20) malformedPropertyEvent(block, "available-value header")
                     val propertyCode = payload.u32Le(block.offset + 8).toInt()
-                    if (propertyCode !in propertySpecs) return@forEach
+                    if (propertyCode !in propertySpecs && propertyCode !in imageFormatPropertyCodes) return@forEach
                     val listType = payload.u32Le(block.offset + 12)
                     if (listType != 3L) return@forEach
                     val count = payload.u32Le(block.offset + 16)
+                    if (count > MAX_PROPERTY_OPTIONS) malformedPropertyEvent(block, "available-value list")
+                    if (propertyCode in imageFormatPropertyCodes) {
+                        var valueOffset = block.offset + 20
+                        val values = List(count.toInt()) {
+                            unpackImageFormat(
+                                payload,
+                                offset = valueOffset,
+                                limit = block.offset + block.length,
+                            ).also { valueOffset += it.bytesRead }.value
+                        }
+                        add(CanonEosPropertyUpdate(propertyCode = propertyCode, availableValues = values))
+                        return@forEach
+                    }
                     val requiredBytes = 20L + count * 4L
-                    if (count > MAX_PROPERTY_OPTIONS || requiredBytes > block.length.toLong()) {
+                    if (requiredBytes > block.length.toLong()) {
                         malformedPropertyEvent(block, "available-value list")
                     }
                     add(
@@ -200,8 +242,11 @@ object CanonEosPtp {
             CanonEosPropertyOption(value = value, label = propertyLabel(propertyCode, value))
         }.distinctBy(CanonEosPropertyOption::label)
 
-    fun propertyLabel(propertyCode: Int, value: Long): String =
-        propertySpecs[propertyCode]?.labels?.get(value) ?: value.hexLabel(propertySpecs[propertyCode]?.valueBytes ?: 4)
+    fun propertyLabel(propertyCode: Int, value: Long): String = when {
+        propertyCode in imageFormatPropertyCodes -> imageFormatLabel(value)
+        else -> propertySpecs[propertyCode]?.labels?.get(value)
+            ?: value.hexLabel(propertySpecs[propertyCode]?.valueBytes ?: 4)
+    }
 
     fun propertyValue(propertyCode: Int, values: List<Long>, label: String): Long? =
         propertyOptions(propertyCode, values).firstOrNull { it.label == label }?.value
@@ -211,12 +256,85 @@ object CanonEosPtp {
 
     fun propertyValueBytes(propertyCode: Int): Int? = propertySpecs[propertyCode]?.valueBytes
 
-    fun propertyPayload(propertyCode: Int, value: Long): ByteArray = when (propertySpecs[propertyCode]?.valueBytes) {
-        1 -> uint8PropertyPayload(propertyCode, value.toInt())
-        2 -> uint16PropertyPayload(propertyCode, value.toInt())
-        4 -> uint32PropertyPayload(propertyCode, value)
-        else -> throw IllegalArgumentException("Canon EOS property 0x${propertyCode.toString(16)} is not writable.")
+    fun propertyPayload(propertyCode: Int, value: Long): ByteArray {
+        if (propertyCode in imageFormatPropertyCodes) return imageFormatPropertyPayload(propertyCode, value)
+        return when (propertySpecs[propertyCode]?.valueBytes) {
+            1 -> uint8PropertyPayload(propertyCode, value.toInt())
+            2 -> uint16PropertyPayload(propertyCode, value.toInt())
+            4 -> uint32PropertyPayload(propertyCode, value)
+            else -> throw IllegalArgumentException(
+                "Canon EOS property 0x${propertyCode.toString(16)} is not writable."
+            )
+        }
     }
+
+    private fun unpackImageFormat(payload: ByteArray, offset: Int, limit: Int): CanonEosImageFormatValue {
+        if (offset < 0 || limit > payload.size || limit - offset < 4) {
+            malformedImageFormat(offset, "missing entry count")
+        }
+        val entryCount = payload.u32Le(offset).toInt()
+        if (entryCount !in 1..2) malformedImageFormat(offset, "entry count $entryCount is not 1 or 2")
+        val bytesRead = 4 + entryCount * IMAGE_FORMAT_ENTRY_BYTES
+        if (limit - offset < bytesRead) malformedImageFormat(offset, "truncated $entryCount-entry value")
+
+        fun entryByte(entryOffset: Int): Int {
+            val entryLength = payload.u32Le(entryOffset)
+            if (entryLength != IMAGE_FORMAT_ENTRY_BYTES.toLong()) {
+                malformedImageFormat(entryOffset, "entry length $entryLength is not $IMAGE_FORMAT_ENTRY_BYTES")
+            }
+            val type = payload.u32Le(entryOffset + 4)
+            var size = payload.u32Le(entryOffset + 8).toInt()
+            val compression = payload.u32Le(entryOffset + 12).toInt()
+            if (size >= 0x0E) size--
+            val typeAndCompression =
+                (compression and 0x07) or (if (type == IMAGE_FORMAT_TYPE_RAW) 0x08 else 0)
+            return ((size and 0x0F) shl 4) or typeAndCompression
+        }
+
+        val first = entryByte(offset + 4)
+        var second = if (entryCount == 2) entryByte(offset + 4 + IMAGE_FORMAT_ENTRY_BYTES) else 0xFF
+        if (entryCount == 2 && second == 0) second = 0xFF
+        return CanonEosImageFormatValue(value = ((first shl 8) or second).toLong(), bytesRead = bytesRead)
+    }
+
+    private fun imageFormatPropertyPayload(propertyCode: Int, value: Long): ByteArray {
+        require(value in 0..0xFFFF) { "Canon EOS image format value $value does not fit UINT16." }
+        val packedValue = value.toInt()
+        val entryCount = if ((packedValue and 0xFF) == 0xFF) 1 else 2
+        val payload = ByteArray(8 + 4 + entryCount * IMAGE_FORMAT_ENTRY_BYTES)
+        payload.putU32Le(0, payload.size.toLong())
+        payload.putU32Le(4, propertyCode.toLong())
+        payload.putU32Le(8, entryCount.toLong())
+
+        fun writeEntry(offset: Int, formatByte: Int) {
+            val condensedSize = (formatByte ushr 4) and 0x0F
+            val wireSize = if (condensedSize >= 0x0D) condensedSize + 1 else condensedSize
+            payload.putU32Le(offset, IMAGE_FORMAT_ENTRY_BYTES.toLong())
+            payload.putU32Le(
+                offset + 4,
+                if ((formatByte and 0x08) != 0) IMAGE_FORMAT_TYPE_RAW else IMAGE_FORMAT_TYPE_JPEG,
+            )
+            payload.putU32Le(offset + 8, wireSize.toLong())
+            payload.putU32Le(offset + 12, (formatByte and 0x07).toLong())
+        }
+
+        writeEntry(12, (packedValue ushr 8) and 0xFF)
+        if (entryCount == 2) writeEntry(12 + IMAGE_FORMAT_ENTRY_BYTES, packedValue and 0xFF)
+        return payload
+    }
+
+    private fun imageFormatLabel(value: Long): String {
+        if (value !in 0..0xFFFF) return value.hexLabel(2)
+        val first = ((value.toInt() ushr 8) and 0xFF).imageFormatEntryLabel()
+        val secondValue = value.toInt() and 0xFF
+        return if (secondValue == 0xFF) first else "$first + ${secondValue.imageFormatEntryLabel()}"
+    }
+
+    private fun Int.imageFormatEntryLabel(): String = singleImageFormatLabels[this]
+        ?: "0x${toString(16).uppercase().padStart(2, '0')}"
+
+    private fun malformedImageFormat(offset: Int, reason: String): Nothing =
+        throw PtpProtocolException("Canon EOS image format at byte $offset is malformed: $reason.")
 
     fun liveViewJpeg(payload: ByteArray): ByteArray {
         var offset = 0
@@ -420,6 +538,37 @@ object CanonEosPtp {
 
     private val offOnLabels = mapOf(0L to "Off", 1L to "On")
 
+    private val singleImageFormatLabels = mapOf(
+        0x0C to "RAW",
+        0x1C to "mRAW",
+        0x2C to "sRAW",
+        0x0B to "cRAW",
+        0x03 to "Large Fine JPEG",
+        0x13 to "Medium Fine JPEG",
+        0x23 to "Small Fine JPEG",
+        0x02 to "Large Normal JPEG",
+        0x12 to "Medium Normal JPEG",
+        0x22 to "Small Normal JPEG",
+        0xD3 to "Small 1 Fine JPEG",
+        0xE3 to "Small 2 Fine JPEG",
+        0xF3 to "Small 3 Fine JPEG",
+        0xD2 to "Small 1 Normal JPEG",
+        0xE2 to "Small 2 Normal JPEG",
+        0xF2 to "Small 3 Normal JPEG",
+        0x53 to "Medium 1 Fine JPEG",
+        0x63 to "Medium 2 Fine JPEG",
+        0x52 to "Medium 1 Normal JPEG",
+        0x62 to "Medium 2 Normal JPEG",
+        0x01 to "Large JPEG",
+        0x51 to "Medium 1 JPEG",
+        0x61 to "Medium 2 JPEG",
+        0x21 to "Small JPEG",
+        0x00 to "Large JPEG (custom)",
+        0x10 to "Medium JPEG (custom)",
+        0xE0 to "Smaller JPEG",
+        0xD0 to "Small 2 JPEG",
+    )
+
     private val propertySpecs = mapOf(
         CanonEosPropertyCode.APERTURE to CanonEosPropertySpec(2, apertureLabels),
         CanonEosPropertyCode.SHUTTER_SPEED to CanonEosPropertySpec(2, shutterLabels),
@@ -436,6 +585,9 @@ object CanonEosPtp {
     )
 
     private const val MAX_PROPERTY_OPTIONS = 4_096L
+    private const val IMAGE_FORMAT_ENTRY_BYTES = 0x10
+    private const val IMAGE_FORMAT_TYPE_JPEG = 1L
+    private const val IMAGE_FORMAT_TYPE_RAW = 6L
 }
 
 private fun ByteArray.u32Le(offset: Int): Long =
@@ -458,3 +610,8 @@ private fun ByteArray.putU32Le(offset: Int, value: Long) {
     require(value in 0..UINT32_MAX) { "Value $value does not fit in an unsigned 32-bit field." }
     repeat(4) { index -> this[offset + index] = (value ushr (index * 8)).toByte() }
 }
+
+private data class CanonEosImageFormatValue(
+    val value: Long,
+    val bytesRead: Int,
+)

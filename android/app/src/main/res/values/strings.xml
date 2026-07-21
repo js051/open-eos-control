@@ -148,6 +148,8 @@
     <string name="setting_picture_style">Picture style</string>
     <string name="setting_shooting_mode">Shooting mode</string>
     <string name="setting_image_quality">Image quality</string>
+    <string name="setting_image_quality_sd">SD image quality</string>
+    <string name="setting_image_quality_cf">CF/CFexpress image quality</string>
     <string name="setting_movie_quality">Movie quality</string>
     <string name="setting_movie_servo_af">Movie Servo AF</string>
     <string name="setting_color_temperature">Color temperature</string>

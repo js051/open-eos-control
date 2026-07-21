@@ -119,6 +119,9 @@ class CanonEosPtpTest {
                 "drivemode",
                 "meteringmode",
                 "picturestyle",
+                "stillimagequality",
+                "stillimagequalitysd",
+                "stillimagequalitycf",
                 "movieservoaf",
             ),
             CanonEosPtp.settingSpecs.map(CanonEosSettingSpec::key),
@@ -171,6 +174,68 @@ class CanonEosPtpTest {
 
         assertEquals(14L, updates.single { it.currentValue != null }.currentValue)
         assertEquals(listOf("LiveSpotAF", "Live", "WholeAreaAF", "0x00000012"), options.map { it.label })
+    }
+
+    @Test
+    fun imageFormatEventsAndWriterMatchThePinnedVariableLengthLayout() {
+        val current = imageFormatData(CanonEosPropertyCode.IMAGE_FORMAT, 0x0CFF)
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.IMAGE_FORMAT) + current,
+        ) + block(
+            type = CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.IMAGE_FORMAT, 3, 3) +
+                imageFormatData(CanonEosPropertyCode.IMAGE_FORMAT, 0x03FF) +
+                imageFormatData(CanonEosPropertyCode.IMAGE_FORMAT, 0x0B03) +
+                imageFormatData(CanonEosPropertyCode.IMAGE_FORMAT, 0x0CFF),
+        ) + block(type = 0, bytes = byteArrayOf())
+
+        val updates = CanonEosPtp.propertyUpdates(payload)
+        val values = updates.single { it.availableValues != null }.availableValues.orEmpty()
+
+        assertEquals(0x0CFFL, updates.single { it.currentValue != null }.currentValue)
+        assertEquals(listOf(0x03FFL, 0x0B03L, 0x0CFFL), values)
+        assertEquals(
+            listOf("Large Fine JPEG", "cRAW + Large Fine JPEG", "RAW"),
+            CanonEosPtp.propertyOptions(CanonEosPropertyCode.IMAGE_FORMAT, values).map { it.label },
+        )
+        assertArrayEquals(
+            byteArrayOf(
+                0x2C, 0x00, 0x00, 0x00,
+                0x20, 0xD1.toByte(), 0x00, 0x00,
+                0x02, 0x00, 0x00, 0x00,
+                0x10, 0x00, 0x00, 0x00,
+                0x06, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x03, 0x00, 0x00, 0x00,
+                0x10, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x03, 0x00, 0x00, 0x00,
+            ),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.IMAGE_FORMAT, 0x0B03),
+        )
+        assertEquals(28, CanonEosPtp.propertyPayload(CanonEosPropertyCode.IMAGE_FORMAT, 0x0CFF).size)
+    }
+
+    @Test(expected = PtpProtocolException::class)
+    fun imageFormatEventRejectsATruncatedEntry() {
+        CanonEosPtp.propertyUpdates(
+            block(
+                type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+                bytes = u32Fields(CanonEosPropertyCode.IMAGE_FORMAT, 2, 0x10, 6),
+            )
+        )
+    }
+
+    @Test(expected = PtpProtocolException::class)
+    fun imageFormatEventRejectsAnInvalidEntryLength() {
+        CanonEosPtp.propertyUpdates(
+            block(
+                type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+                bytes = u32Fields(CanonEosPropertyCode.IMAGE_FORMAT, 1, 12, 6, 0, 4),
+            )
+        )
     }
 
     @Test
@@ -248,6 +313,9 @@ class CanonEosPtpTest {
     private fun u32Fields(vararg values: Int): ByteArray = ByteArray(values.size * 4).also { bytes ->
         values.forEachIndexed { index, value -> putU32(bytes, index * 4, value) }
     }
+
+    private fun imageFormatData(propertyCode: Int, value: Int): ByteArray =
+        CanonEosPtp.propertyPayload(propertyCode, value.toLong()).let { it.copyOfRange(8, it.size) }
 
     private fun putU32(destination: ByteArray, offset: Int, value: Int) {
         repeat(4) { index -> destination[offset + index] = (value ushr (index * 8)).toByte() }

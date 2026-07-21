@@ -132,6 +132,9 @@ class UsbPtpCameraBackendTest {
         backend.setSetting("drivemode", "Continuous high speed")
         backend.setSetting("meteringmode", "Spot")
         backend.setSetting("picturestyle", "Fine detail")
+        backend.setSetting("stillimagequality", "cRAW + Large Fine JPEG")
+        backend.setSetting("stillimagequalitysd", "Large Normal JPEG")
+        backend.setSetting("stillimagequalitycf", "RAW")
         backend.setSetting("movieservoaf", "Off")
         val recordingStatus = backend.startRecording()
         val stoppedRecordingStatus = backend.stopRecording()
@@ -168,6 +171,25 @@ class UsbPtpCameraBackendTest {
         assertEquals("Super high speed continuous shooting", settings.getValue("drivemode").value)
         assertEquals("Evaluative", settings.getValue("meteringmode").value)
         assertEquals("Auto", settings.getValue("picturestyle").value)
+        assertEquals("RAW", settings.getValue("stillimagequality").value)
+        assertEquals("RAW", settings.getValue("stillimagequalitysd").value)
+        assertEquals("RAW", settings.getValue("stillimagequalitycf").value)
+        assertEquals(
+            listOf(
+                "Large Fine JPEG",
+                "Large Normal JPEG",
+                "Smaller JPEG",
+                "cRAW + Large Fine JPEG",
+                "cRAW + Large Normal JPEG",
+                "RAW + Large Fine JPEG",
+                "RAW + Large Normal JPEG",
+                "cRAW + Smaller JPEG",
+                "RAW + Smaller JPEG",
+                "RAW",
+                "cRAW",
+            ),
+            settings.getValue("stillimagequality").values,
+        )
         assertEquals("On", settings.getValue("movieservoaf").value)
         assertEquals("800", exposureStatus.exposure.iso)
         assertEquals("1/50", exposureStatus.exposure.shutter)
@@ -287,6 +309,21 @@ class UsbPtpCameraBackendTest {
         )
         assertTrue(
             propertyWrites.any {
+                it.contentEquals(CanonEosPtp.propertyPayload(CanonEosPropertyCode.IMAGE_FORMAT, 0x0B03))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.propertyPayload(CanonEosPropertyCode.IMAGE_FORMAT_SD, 0x02FF))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.propertyPayload(CanonEosPropertyCode.IMAGE_FORMAT_CF, 0x0CFF))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
                 it.contentEquals(
                     CanonEosPtp.uint16PropertyPayload(
                         CanonEosPropertyCode.EVF_RECORD_STATUS,
@@ -397,6 +434,30 @@ class UsbPtpCameraBackendTest {
             rejectedBackend.capabilities().advancedSettings.first { it.key == "drivemode" }.value,
         )
         rejectedBackend.close()
+
+        val rejectedImageTransport = CanonEosScriptedTransport(
+            rejectPropertyCode = CanonEosPropertyCode.IMAGE_FORMAT,
+        )
+        val rejectedImageBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { rejectedImageTransport },
+        )
+        rejectedImageBackend.initialize()
+        assertEquals(
+            "RAW",
+            rejectedImageBackend.capabilities().advancedSettings.first { it.key == "stillimagequality" }.value,
+        )
+
+        val rejectedImageFailure = runCatching {
+            rejectedImageBackend.setSetting("stillimagequality", "cRAW + Large Fine JPEG")
+        }.exceptionOrNull()
+
+        assertTrue(rejectedImageFailure is PtpResponseException)
+        assertEquals(
+            "RAW",
+            rejectedImageBackend.capabilities().advancedSettings.first { it.key == "stillimagequality" }.value,
+        )
+        rejectedImageBackend.close()
     }
 
     @Test
@@ -708,6 +769,25 @@ class UsbPtpCameraBackendTest {
                 CanonEosPropertyCode.PICTURE_STYLE,
                 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x21, 0x22, 0x23,
             )
+            val imageFormats = intArrayOf(
+                0x03FF,
+                0x02FF,
+                0xE0FF,
+                0x0B03,
+                0x0B02,
+                0x0C03,
+                0x0C02,
+                0x0BE0,
+                0x0CE0,
+                0x0CFF,
+                0x0BFF,
+            )
+            payload += eosImageFormatPropertyValue(CanonEosPropertyCode.IMAGE_FORMAT, 0x0CFF)
+            payload += eosImageFormatAvailableValues(CanonEosPropertyCode.IMAGE_FORMAT, *imageFormats)
+            payload += eosImageFormatPropertyValue(CanonEosPropertyCode.IMAGE_FORMAT_SD, 0x0CFF)
+            payload += eosImageFormatAvailableValues(CanonEosPropertyCode.IMAGE_FORMAT_SD, *imageFormats)
+            payload += eosImageFormatPropertyValue(CanonEosPropertyCode.IMAGE_FORMAT_CF, 0x0CFF)
+            payload += eosImageFormatAvailableValues(CanonEosPropertyCode.IMAGE_FORMAT_CF, *imageFormats)
             payload += eosPropertyValue(CanonEosPropertyCode.MOVIE_SERVO_AF, 1)
             payload += eosAvailableValues(CanonEosPropertyCode.MOVIE_SERVO_AF, 0, 1)
         }
@@ -743,6 +823,24 @@ class UsbPtpCameraBackendTest {
             values.forEach(::u32)
         }.bytes(),
     )
+
+    private fun eosImageFormatPropertyValue(propertyCode: Int, value: Int): ByteArray = eosBlock(
+        CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+        u32Fields(propertyCode) + imageFormatData(propertyCode, value),
+    )
+
+    private fun eosImageFormatAvailableValues(propertyCode: Int, vararg values: Int): ByteArray {
+        var data = u32Fields(propertyCode, 3, values.size)
+        values.forEach { value -> data += imageFormatData(propertyCode, value) }
+        return eosBlock(CanonEosEventCode.AVAILABLE_LIST_CHANGED, data)
+    }
+
+    private fun imageFormatData(propertyCode: Int, value: Int): ByteArray =
+        CanonEosPtp.propertyPayload(propertyCode, value.toLong()).let { it.copyOfRange(8, it.size) }
+
+    private fun u32Fields(vararg values: Int): ByteArray = Writer().apply {
+        values.forEach(::u32)
+    }.bytes()
 
     private class Writer {
         private val output = ByteArrayOutputStream()

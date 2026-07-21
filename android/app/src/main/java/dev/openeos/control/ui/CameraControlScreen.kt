@@ -599,6 +599,8 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "picturestyle" -> stringResource(R.string.setting_picture_style)
     "shootingmode" -> stringResource(R.string.setting_shooting_mode)
     "stillimagequality" -> stringResource(R.string.setting_image_quality)
+    "stillimagequalitysd" -> stringResource(R.string.setting_image_quality_sd)
+    "stillimagequalitycf" -> stringResource(R.string.setting_image_quality_cf)
     "moviequality" -> stringResource(R.string.setting_movie_quality)
     "movieservoaf" -> stringResource(R.string.setting_movie_servo_af)
     "colortemperature" -> stringResource(R.string.setting_color_temperature)
