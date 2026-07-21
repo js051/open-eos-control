@@ -138,6 +138,8 @@
     <string name="media_item_count">%1$d items</string>
     <string name="refresh_media">Refresh camera media</string>
     <string name="media_downloaded">Saved %1$s</string>
+    <string name="downloading_media">Downloading %1$s</string>
+    <string name="cancel_media_download">Cancel download</string>
     <string name="media_not_supported">This camera connection does not provide media access.</string>
     <string name="no_media">No media files were found on the camera.</string>
     <string name="download_media">Download %1$s</string>

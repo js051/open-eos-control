@@ -25,7 +25,7 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | Movie start/stop | Implemented | Device validation required | Control is enabled only when `recbutton` is advertised |
 | Tap focus | Implemented when advertised | Device validation required | `afpoint` must be advertised; failures are not reported as success |
 | Media browser | Implemented | Device validation required | Bounded storage-tree and page traversal; same-origin path validation; unit tests |
-| Media download | Implemented with 256 MiB Android limit | Device validation required | SAF destination, same-origin download, bounded response, unit tests |
+| Media download | Implemented as a streaming transfer | Device validation required | SAF destination, same-origin stream, progress/cancel, best-effort incomplete-file cleanup, unit tests |
 | CCAPI RTP Live View | Planned | Not valid | No decoder/session implementation |
 
 ## Wired And Other Platforms

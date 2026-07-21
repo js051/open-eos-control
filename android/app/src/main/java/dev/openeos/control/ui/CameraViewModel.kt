@@ -8,10 +8,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.LiveViewRequest
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.BufferedOutputStream
 
 class CameraViewModel(
     private val repository: CameraRepository = CameraRepository(),
@@ -30,6 +33,7 @@ class CameraViewModel(
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
     private var liveViewJob: Job? = null
+    private var mediaDownloadJob: Job? = null
     private val frameTimesMillis = ArrayDeque<Long>()
     private var preferencesLoaded = false
     private var networkRoutingConfigured = false
@@ -172,6 +176,7 @@ class CameraViewModel(
 
     fun disconnect() {
         stopLiveViewLoop()
+        cancelMediaDownload()
         resetFrameMetrics()
         if (_uiState.value.previewMode) {
             _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
@@ -347,16 +352,50 @@ class CameraViewModel(
     }
 
     fun downloadMedia(context: Context, item: CameraMediaItem, destination: Uri) {
-        if (_uiState.value.previewMode) return
-        runCamera(CameraOperation.MEDIA) {
-            val file = repository.downloadMedia(item)
-            withContext(Dispatchers.IO) {
-                context.applicationContext.contentResolver.openOutputStream(destination, "w")?.use { output ->
-                    output.write(file.bytes)
-                } ?: error("Android could not open the selected download destination.")
-            }
-            _uiState.update { it.copy(lastDownloadedMediaName = file.item.name) }
+        if (
+            _uiState.value.previewMode ||
+            _uiState.value.isBusy(CameraOperation.MEDIA) ||
+            mediaDownloadJob != null
+        ) return
+        val resolver = context.applicationContext.contentResolver
+        _uiState.update {
+            it.copy(
+                activeMediaDownloadName = item.name,
+                mediaDownloadProgress = CameraMediaTransferProgress(0L, item.sizeBytes),
+                lastDownloadedMediaName = null,
+            )
         }
+        val job = launchCameraOperation(CameraOperation.MEDIA) {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val rawOutput = resolver.openOutputStream(destination, "w")
+                        ?: error("Android could not open the selected download destination.")
+                    BufferedOutputStream(rawOutput).use { output ->
+                        repository.downloadMedia(item, output) { progress ->
+                            _uiState.update { state -> state.copy(mediaDownloadProgress = progress) }
+                        }
+                    }
+                }
+                _uiState.update { it.copy(lastDownloadedMediaName = result.item.name) }
+            } catch (exception: Exception) {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    runCatching { resolver.delete(destination, null, null) }
+                }
+                throw exception
+            } finally {
+                _uiState.update {
+                    it.copy(activeMediaDownloadName = null, mediaDownloadProgress = null)
+                }
+            }
+        }
+        mediaDownloadJob = job
+        job?.invokeOnCompletion {
+            if (mediaDownloadJob === job) mediaDownloadJob = null
+        }
+    }
+
+    fun cancelMediaDownload() {
+        mediaDownloadJob?.cancel()
     }
 
     fun tapFocus(x: Double, y: Double) {
@@ -432,7 +471,15 @@ class CameraViewModel(
         onError: (Exception) -> Unit = {},
         block: suspend () -> Unit,
     ) {
-        if (_uiState.value.isBusy(operation)) return
+        launchCameraOperation(operation, onError, block)
+    }
+
+    private fun launchCameraOperation(
+        operation: CameraOperation,
+        onError: (Exception) -> Unit = {},
+        block: suspend () -> Unit,
+    ): Job? {
+        if (_uiState.value.isBusy(operation)) return null
         _uiState.update {
             it.copy(
                 pendingOperations = it.pendingOperations + operation,
@@ -440,9 +487,11 @@ class CameraViewModel(
                 errorOperation = null,
             )
         }
-        viewModelScope.launch {
+        return viewModelScope.launch {
             try {
                 block()
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: Exception) {
                 exception.printStackTrace()
                 onError(exception)
@@ -601,6 +650,7 @@ class CameraViewModel(
 
     override fun onCleared() {
         stopLiveViewLoop()
+        cancelMediaDownload()
         viewModelScope.launch(NonCancellable + Dispatchers.IO) {
             repository.disconnect()
         }
@@ -618,6 +668,8 @@ class CameraViewModel(
         status = null,
         capabilities = null,
         mediaItems = emptyList(),
+        activeMediaDownloadName = null,
+        mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
         liveViewFrameUrl = null,
         liveViewBitmap = null,

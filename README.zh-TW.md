@@ -32,7 +32,7 @@ open-eos-control/
 - REC 開始/停止
 - Tap focus，已經走共用 backend layer
 - 依相機公告能力執行手動快門半按，並保證送出釋放命令
-- 支援分頁的相機媒體瀏覽，以及透過 Android 文件選擇器下載檔案
+- 支援分頁的相機媒體瀏覽，以及透過 Android 文件選擇器串流下載大型檔案
 
 預設直連相機 URL：
 

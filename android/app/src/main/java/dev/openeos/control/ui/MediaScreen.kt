@@ -37,6 +37,7 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraMediaTransferProgress
 import java.util.Locale
 
 @Composable
@@ -82,7 +83,41 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         }
 
         if (state.isBusy(CameraOperation.MEDIA)) {
-            LinearProgressIndicator(Modifier.fillMaxWidth(), color = AppAccent)
+            val progress = state.mediaDownloadProgress
+            val totalBytes = progress?.totalBytes
+            if (progress != null && totalBytes != null && totalBytes > 0L) {
+                LinearProgressIndicator(
+                    progress = { (progress.bytesTransferred.toDouble() / totalBytes).coerceIn(0.0, 1.0).toFloat() },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = AppAccent,
+                )
+            } else {
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = AppAccent)
+            }
+        }
+
+        state.activeMediaDownloadName?.let { name ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.downloading_media, name),
+                        color = AppText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    state.mediaDownloadProgress?.let { progress ->
+                        Text(formatMediaProgress(progress), color = AppSubtleText, maxLines = 1)
+                    }
+                }
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_x,
+                    stringResource(R.string.cancel_media_download),
+                    actions.cancelMediaDownload,
+                )
+            }
         }
 
         state.lastDownloadedMediaName?.let { name ->
@@ -178,6 +213,13 @@ private fun formatMediaSize(bytes: Long): String = when {
     bytes >= 1024L * 1024L -> String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0))
     bytes >= 1024L -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
     else -> "$bytes B"
+}
+
+private fun formatMediaProgress(progress: CameraMediaTransferProgress): String {
+    val transferred = formatMediaSize(progress.bytesTransferred)
+    val total = progress.totalBytes?.takeIf { it > 0L } ?: return transferred
+    val percent = ((progress.bytesTransferred.toDouble() / total) * 100.0).coerceIn(0.0, 100.0).toInt()
+    return "$transferred / ${formatMediaSize(total)} ($percent%)"
 }
 
 private fun formatMediaCaptureTime(value: String): String =

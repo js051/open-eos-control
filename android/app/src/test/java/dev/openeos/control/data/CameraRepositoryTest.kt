@@ -4,10 +4,12 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 
 class CameraRepositoryTest {
     private lateinit var server: MockWebServer
@@ -75,6 +77,29 @@ class CameraRepositoryTest {
         repeat(3) { server.takeRequest() }
         assertEquals("/ccapi/capture/still", server.takeRequest().path)
         assertEquals("/ccapi/status", server.takeRequest().path)
+    }
+
+    @Test
+    fun mediaDownloadStreamsThroughRepositoryBackendBoundary() = runTest {
+        server.enqueue(jsonResponse(INFO_JSON))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        repository.connect(server.url("/").toString())
+        val bytes = byteArrayOf(4, 3, 2, 1)
+        server.enqueue(
+            MockResponse()
+                .setHeader("content-type", "image/jpeg")
+                .setBody(okio.Buffer().write(bytes)),
+        )
+        val output = ByteArrayOutputStream()
+        val item = CameraMediaItem("IMG_0001.JPG", "IMG_0001.JPG", "image")
+
+        val result = repository.downloadMedia(item, output)
+
+        repeat(3) { server.takeRequest() }
+        assertEquals("/ccapi/media/IMG_0001.JPG", server.takeRequest().path)
+        assertArrayEquals(bytes, output.toByteArray())
+        assertEquals(bytes.size.toLong(), result.bytesTransferred)
     }
 
     @Test

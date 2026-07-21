@@ -1,6 +1,7 @@
 package dev.openeos.control.data
 
 import android.content.Context
+import java.io.OutputStream
 
 class CameraRepository(
     backendFactory: CameraBackendFactory = CameraBackendFactory(),
@@ -104,7 +105,11 @@ class CameraRepository(
 
     suspend fun listMedia(): List<CameraMediaItem> = backend.listMedia()
 
-    suspend fun downloadMedia(item: CameraMediaItem): CameraMediaFile = backend.downloadMedia(item)
+    suspend fun downloadMedia(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaDownloadResult = backend.downloadMedia(item, destination, onProgress)
 
     suspend fun restartLiveView() {
         backend.stopLiveView()

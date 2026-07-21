@@ -21,7 +21,7 @@ This project should stay grounded in public specifications, official platform AP
 
 Implemented and test-covered:
 
-- CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling, still/manual shutter control, paged media browsing, and bounded media download.
+- CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling, still/manual shutter control, paged media browsing, and streaming media download.
 - Android USB host diagnostics: enumerate devices, identify Canon vendor ID `0x04A9`, identify PTP still-image interfaces, show endpoints, and request Android USB permission.
 - Multi-backend contract: unsupported operations throw explicit transport/feature errors.
 

@@ -32,7 +32,7 @@ The app currently includes:
 - REC start/stop
 - Tap focus hook through the shared backend layer
 - Advertised manual shutter half-press with guaranteed release
-- Paged camera media browser and bounded download through Android's document picker
+- Paged camera media browser and streaming download through Android's document picker
 
 Default direct camera presets:
 

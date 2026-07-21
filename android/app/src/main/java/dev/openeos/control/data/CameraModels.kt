@@ -286,9 +286,14 @@ data class CameraMediaItem(
     val captureTime: String? = null,
 )
 
-data class CameraMediaFile(
+data class CameraMediaTransferProgress(
+    val bytesTransferred: Long,
+    val totalBytes: Long?,
+)
+
+data class CameraMediaDownloadResult(
     val item: CameraMediaItem,
-    val bytes: ByteArray,
+    val bytesTransferred: Long,
     val contentType: String?,
 )
 

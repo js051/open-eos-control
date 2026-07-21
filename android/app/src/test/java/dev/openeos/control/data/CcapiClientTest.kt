@@ -1,10 +1,12 @@
 package dev.openeos.control.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.Credentials
@@ -18,6 +20,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class CcapiClientTest {
@@ -562,14 +568,131 @@ class CcapiClientTest {
         )
         val bytes = byteArrayOf(1, 2, 3, 4, 5, 6)
         server.enqueue(binaryResponse(bytes, "image/png"))
+        val output = ByteArrayOutputStream()
+        val progress = mutableListOf<CameraMediaTransferProgress>()
 
         val item = client.listMedia().single()
-        val file = client.downloadMedia(item)
+        val result = client.downloadMedia(item, output, progress::add)
 
         assertEquals("/ccapi/media", server.takeRequest().path)
         assertEquals("/ccapi/media/SIM_0001.PNG", server.takeRequest().path)
-        assertArrayEquals(bytes, file.bytes)
-        assertEquals("image/png", file.contentType)
+        assertArrayEquals(bytes, output.toByteArray())
+        assertEquals(bytes.size.toLong(), result.bytesTransferred)
+        assertEquals("image/png", result.contentType)
+        assertEquals(0L, progress.first().bytesTransferred)
+        assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
+        assertEquals(bytes.size.toLong(), progress.last().totalBytes)
+    }
+
+    @Test
+    fun mediaDownloadStreamsInBoundedChunksAndReportsProgress() = runTest {
+        val bytes = ByteArray(2 * 1024 * 1024 + 123) { (it % 251).toByte() }
+        server.enqueue(binaryResponse(bytes, "video/mp4"))
+        val output = CountingOutputStream()
+        val progress = mutableListOf<CameraMediaTransferProgress>()
+        val item = CameraMediaItem("BIG.MP4", "BIG.MP4", "video")
+
+        val result = client.downloadMedia(item, output, progress::add)
+
+        assertEquals(bytes.size.toLong(), result.bytesTransferred)
+        assertEquals(bytes.size.toLong(), output.bytesWritten)
+        assertTrue(output.writeCalls > 1)
+        assertTrue(output.largestWrite <= 64 * 1024)
+        assertEquals(0L, progress.first().bytesTransferred)
+        assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
+        assertEquals(bytes.size.toLong(), progress.last().totalBytes)
+    }
+
+    @Test
+    fun realMediaDownloadRetriesHttpVariantsBeforeWriting() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver110")
+        val item = CameraMediaItem(
+            id = "/ccapi/ver110/contents/card1/100CANON/IMG_0001.CR3",
+            name = "IMG_0001.CR3",
+            kind = "raw",
+        )
+        val bytes = byteArrayOf(9, 8, 7, 6)
+        server.enqueue(MockResponse().setResponseCode(400).setBody("kind required"))
+        server.enqueue(binaryResponse(bytes, "image/x-canon-cr3"))
+        val output = ByteArrayOutputStream()
+
+        client.downloadMedia(item, output)
+
+        assertEquals(item.id, server.takeRequest().path)
+        assertEquals("${item.id}?kind=main", server.takeRequest().path)
+        assertArrayEquals(bytes, output.toByteArray())
+    }
+
+    @Test
+    fun mediaDownloadDoesNotRetryAfterDestinationWriteFails() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver110")
+        val item = CameraMediaItem(
+            id = "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG",
+            name = "IMG_0001.JPG",
+            kind = "image",
+        )
+        server.enqueue(binaryResponse(ByteArray(128 * 1024) { 1 }, "image/jpeg"))
+        val destination = object : OutputStream() {
+            override fun write(value: Int) = throw IOException("destination full")
+        }
+
+        val failure = runCatching { client.downloadMedia(item, destination) }.exceptionOrNull()
+
+        assertTrue(failure is IOException)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun mediaDownloadPropagatesCancellationWithoutTryingAnotherVariant() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver110")
+        val item = CameraMediaItem(
+            id = "/ccapi/ver110/contents/card1/100CANON/CLIP_0001.MP4",
+            name = "CLIP_0001.MP4",
+            kind = "video",
+        )
+        server.enqueue(binaryResponse(ByteArray(1024 * 1024) { 2 }, "video/mp4"))
+
+        val failure = runCatching {
+            client.downloadMedia(item, CountingOutputStream()) { progress ->
+                if (progress.bytesTransferred > 0L) throw CancellationException("user cancelled")
+            }
+        }.exceptionOrNull()
+
+        assertTrue(failure is CancellationException)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun cancellingMediaDownloadInterruptsAnActiveHttpRead() = runBlocking {
+        client.forceRealCamera(prefix = "/ccapi/ver110")
+        val item = CameraMediaItem(
+            id = "/ccapi/ver110/contents/card1/100CANON/CLIP_0002.MP4",
+            name = "CLIP_0002.MP4",
+            kind = "video",
+        )
+        server.enqueue(
+            binaryResponse(ByteArray(1024 * 1024) { 3 }, "video/mp4")
+                .throttleBody(1024, 5, TimeUnit.SECONDS),
+        )
+        val firstWrite = CountDownLatch(1)
+        val destination = object : OutputStream() {
+            override fun write(value: Int) {
+                firstWrite.countDown()
+            }
+
+            override fun write(buffer: ByteArray, offset: Int, length: Int) {
+                firstWrite.countDown()
+            }
+        }
+        val job = launch(Dispatchers.Default) { client.downloadMedia(item, destination) }
+
+        requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertTrue(firstWrite.await(2, TimeUnit.SECONDS))
+        job.cancel()
+        withTimeout(2_000) { job.join() }
+
+        assertTrue(job.isCancelled)
+        assertEquals(1, server.requestCount)
     }
 
     @Test
@@ -649,6 +772,27 @@ class CcapiClientTest {
         javaClass.getDeclaredField("apiVersionPrefixes").apply {
             isAccessible = true
             set(this@forceRealCamera, prefixes)
+        }
+    }
+
+    private class CountingOutputStream : OutputStream() {
+        var bytesWritten = 0L
+            private set
+        var writeCalls = 0
+            private set
+        var largestWrite = 0
+            private set
+
+        override fun write(value: Int) {
+            bytesWritten += 1
+            writeCalls += 1
+            largestWrite = maxOf(largestWrite, 1)
+        }
+
+        override fun write(buffer: ByteArray, offset: Int, length: Int) {
+            bytesWritten += length
+            writeCalls += 1
+            largestWrite = maxOf(largestWrite, length)
         }
     }
 

@@ -18,6 +18,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.LiveViewCapabilities
@@ -62,6 +63,29 @@ class CameraScreensTest {
         compose.onNodeWithText("R6M3_0001.CR3").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.download_media, "R6M3_0001.CR3"))
             .assertIsNotEnabled()
+    }
+
+    @Test
+    fun mediaDownloadShowsProgressAndCancelAction() {
+        val name = "R6M3_0002.MP4"
+        val state = CameraUiState().withOfflinePreview().copy(
+            uiMode = UiMode.MEDIA,
+            activeMediaDownloadName = name,
+            mediaDownloadProgress = CameraMediaTransferProgress(
+                bytesTransferred = 32L * 1024L * 1024L,
+                totalBytes = 128L * 1024L * 1024L,
+            ),
+            pendingOperations = setOf(CameraOperation.MEDIA),
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state, noOpActions())
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.downloading_media, name)).assertIsDisplayed()
+        compose.onNodeWithText("32.0 MB / 128.0 MB (25%)").assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.cancel_media_download)).assertIsDisplayed()
     }
 
     @Test
@@ -203,7 +227,8 @@ class CameraScreensTest {
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
         captureStill = {}, focusWithShutter = {}, toggleRecording = {}, tapFocus = { _, _ -> },
-        refreshMedia = {}, downloadMedia = { _, _ -> }, refreshLiveView = {}, restartLiveView = {},
+        refreshMedia = {}, downloadMedia = { _, _ -> }, cancelMediaDownload = {},
+        refreshLiveView = {}, restartLiveView = {},
         setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setAppLanguage = {}, clearError = {},
     )
 

@@ -1,5 +1,7 @@
 package dev.openeos.control.data
 
+import java.io.OutputStream
+
 enum class CameraTransport(
     val label: String,
 ) {
@@ -69,7 +71,11 @@ interface CameraControlBackend {
     suspend fun halfPressShutter(): CameraStatus = unsupported(CameraFeature.SHUTTER_HALF_PRESS)
     suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusResult = unsupported(CameraFeature.FOCUS_DRIVE)
     suspend fun listMedia(): List<CameraMediaItem> = unsupported(CameraFeature.MEDIA_BROWSER)
-    suspend fun downloadMedia(item: CameraMediaItem): CameraMediaFile = unsupported(CameraFeature.MEDIA_DOWNLOAD)
+    suspend fun downloadMedia(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaDownloadResult = unsupported(CameraFeature.MEDIA_DOWNLOAD)
     fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame
 }
@@ -124,7 +130,11 @@ class CcapiCameraBackend(
 
     override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
 
-    override suspend fun downloadMedia(item: CameraMediaItem): CameraMediaFile = client.downloadMedia(item)
+    override suspend fun downloadMedia(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
 

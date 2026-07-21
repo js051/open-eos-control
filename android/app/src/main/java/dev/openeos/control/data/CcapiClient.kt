@@ -1,9 +1,14 @@
 package dev.openeos.control.data
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
@@ -13,9 +18,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.URI
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicBoolean
 
 private data class CcapiApiOperation(
     val method: String,
@@ -522,7 +529,11 @@ class CcapiClient(
     suspend fun listMedia(): List<CameraMediaItem> =
         if (isRealCamera) listRealMedia() else listSimulatorMedia()
 
-    suspend fun downloadMedia(item: CameraMediaItem): CameraMediaFile {
+    suspend fun downloadMedia(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaDownloadResult {
         val paths = if (isRealCamera) {
             val path = normalizeCameraResource(item.id).substringBefore('?')
             listOf(path, "$path?kind=main", "$path?type=main")
@@ -530,20 +541,9 @@ class CcapiClient(
             val encodedId = URLEncoder.encode(item.id, StandardCharsets.UTF_8.name()).replace("+", "%20")
             listOf("/ccapi/media/$encodedId")
         }
-        val errors = mutableListOf<String>()
-        paths.forEach { path ->
-            try {
-                return requestMediaFile(path, item)
-            } catch (exception: CancellationException) {
-                throw exception
-            } catch (exception: Exception) {
-                errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
-            }
-        }
-        error(
-            "Media download failed for '${item.name}'. Tried:\n" +
-                errors.joinToString(separator = "\n") { "  - $it" },
-        )
+        val result = requestMediaFile(paths, item, destination, onProgress)
+        observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
+        return result
     }
 
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
@@ -805,47 +805,92 @@ class CcapiClient(
         return normalized
     }
 
-    private suspend fun requestMediaFile(path: String, item: CameraMediaItem): CameraMediaFile =
+    private suspend fun requestMediaFile(
+        paths: List<String>,
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): CameraMediaDownloadResult =
         withContext(Dispatchers.IO) {
-            val request = Request.Builder().url("$baseUrl$path").get().build()
-            httpClient.newCall(request).execute().use { response ->
-                val body = response.body
-                if (!response.isSuccessful) {
-                    val preview = body?.string().orEmpty().take(MAX_ERROR_BODY_CHARS)
-                    throw CcapiHttpException(
-                        statusCode = response.code,
-                        message = "Camera request failed: GET ${request.url} returned HTTP ${response.code}\nBody: $preview",
-                    )
+            val errors = mutableListOf<String>()
+            for (path in paths) {
+                currentCoroutineContext().ensureActive()
+                val request = Request.Builder().url("$baseUrl$path").get().build()
+                val call = httpClient.newCall(request)
+                val cancelCall = AtomicBoolean(true)
+                val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        if (cancelCall.get()) call.cancel()
+                    }
                 }
-                requireNotNull(body) { "Camera returned an empty media response." }
-                val declaredLength = body.contentLength()
-                require(declaredLength <= MAX_MEDIA_DOWNLOAD_BYTES || declaredLength < 0) {
-                    "Media file is too large for this Android build (${declaredLength} bytes)."
-                }
-                val bytes = readBoundedBytes(body.byteStream(), MAX_MEDIA_DOWNLOAD_BYTES)
-                CameraMediaFile(
-                    item = item.copy(sizeBytes = item.sizeBytes ?: bytes.size.toLong()),
-                    bytes = bytes,
-                    contentType = response.header("content-type"),
-                )
-            }
-        }
+                try {
+                    val response = try {
+                        call.execute()
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (exception: Exception) {
+                        currentCoroutineContext().ensureActive()
+                        errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
+                        continue
+                    }
 
-    private fun readBoundedBytes(input: InputStream, maxBytes: Int): ByteArray {
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(DEFAULT_MEDIA_BUFFER_BYTES)
-        input.use { stream ->
-            while (true) {
-                val count = stream.read(buffer)
-                if (count < 0) break
-                require(output.size() + count <= maxBytes) {
-                    "Media file exceeded the $maxBytes byte Android download limit."
+                    if (!response.isSuccessful) {
+                        response.use {
+                            val preview = response.body?.string().orEmpty().take(MAX_ERROR_BODY_CHARS)
+                            errors.add("$path: HTTP ${response.code}: $preview")
+                        }
+                        continue
+                    }
+
+                    try {
+                        return@withContext response.use {
+                            val body = requireNotNull(response.body) { "Camera returned an empty media response." }
+                            val totalBytes = body.contentLength().takeIf { it >= 0L }
+                            var bytesTransferred = 0L
+                            var lastReportedBytes = 0L
+                            onProgress(CameraMediaTransferProgress(0L, totalBytes))
+
+                            val buffer = ByteArray(MEDIA_TRANSFER_BUFFER_BYTES)
+                            body.byteStream().use { input ->
+                                while (true) {
+                                    currentCoroutineContext().ensureActive()
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    currentCoroutineContext().ensureActive()
+                                    destination.write(buffer, 0, count)
+                                    bytesTransferred += count
+                                    if (bytesTransferred - lastReportedBytes >= MEDIA_PROGRESS_INTERVAL_BYTES) {
+                                        lastReportedBytes = bytesTransferred
+                                        onProgress(CameraMediaTransferProgress(bytesTransferred, totalBytes))
+                                    }
+                                }
+                            }
+                            destination.flush()
+                            if (bytesTransferred != lastReportedBytes || bytesTransferred == 0L) {
+                                onProgress(CameraMediaTransferProgress(bytesTransferred, totalBytes))
+                            }
+                            CameraMediaDownloadResult(
+                                item = item.copy(sizeBytes = item.sizeBytes ?: bytesTransferred),
+                                bytesTransferred = bytesTransferred,
+                                contentType = response.header("content-type"),
+                            )
+                        }
+                    } catch (exception: Exception) {
+                        currentCoroutineContext().ensureActive()
+                        throw exception
+                    }
+                } finally {
+                    cancelCall.set(false)
+                    cancellationWatcher.cancel()
                 }
-                output.write(buffer, 0, count)
             }
+            error(
+                "Media download failed for '${item.name}'. Tried:\n" +
+                    errors.joinToString(separator = "\n") { "  - $it" },
+            )
         }
-        return output.toByteArray()
-    }
 
     private suspend fun getFirstJson(paths: List<String>): JSONObject? {
         paths.forEach { path ->
@@ -1105,8 +1150,8 @@ class CcapiClient(
         const val MAX_MEDIA_ITEMS = 500
         const val MAX_MEDIA_PAGES = 100
         const val MAX_MEDIA_TREE_DEPTH = 4
-        const val MAX_MEDIA_DOWNLOAD_BYTES = 256 * 1024 * 1024
-        const val DEFAULT_MEDIA_BUFFER_BYTES = 64 * 1024
+        const val MEDIA_TRANSFER_BUFFER_BYTES = 64 * 1024
+        const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
     }
 }
 
