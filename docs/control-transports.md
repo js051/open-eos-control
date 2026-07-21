@@ -7,7 +7,7 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 ### CCAPI network
 
 - Status: implemented.
-- Platforms: Android now; iOS and PC can reuse the same protocol model later.
+- Platforms: direct Android and iOS clients; PC uses the separate desktop bridge path today.
 - Connection: Wi-Fi or wired network when the camera exposes CCAPI over HTTP/HTTPS.
 - Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III, advertised still/manual shutter commands, and paged media retrieval.
 - Current tradeoffs: live view is JPEG polling today, so smoothness and latency depend on Wi-Fi, camera response time, and device JPEG decode cost.
@@ -41,10 +41,11 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 ### iOS CCAPI
 
-- Status: native Swift command/transport core and deterministic tests are implemented; SwiftUI product UI and physical-camera validation remain.
+- Status: native Swift command/transport core and iOS 17 SwiftUI product UI are implemented and simulator-tested; physical iPhone and camera validation remain.
 - Connection: iPhone/iPad to camera CCAPI over Wi-Fi.
-- Current implementation: discovery, capability-gated settings and commands, JPEG Live View, still capture, half-press with guaranteed release, recording, tap focus, bounded media traversal/download, and redacted diagnostics in `ios/OpenEOSCore`.
-- Next milestone: ship the SwiftUI connection/control app with English and Traditional Chinese resources, stable orientation behavior, offline preview, and on-device R6 Mark III validation.
+- Current implementation: `ios/OpenEOSCore` provides discovery, capability-gated settings and commands, JPEG Live View, still capture, half-press with guaranteed release, recording, tap focus, bounded media traversal/download, and redacted diagnostics. `ios/OpenEOSControl` adds direct connection, Photo/Video control, adjustable Live View, media and Debug views, offline preview, English/Traditional Chinese selection, and safe portrait/landscape behavior.
+- Automated evidence: macOS CI builds the final app bundle, verifies resources and network/orientation metadata, runs five app unit tests, and completes English control/debug plus Traditional Chinese connection UI workflows on an iPhone Simulator.
+- Next milestone: validate the same paths on a physical iPhone and EOS R6 Mark III.
 - USB/PTP stance: research track only until Apple platform constraints and public APIs are validated against Canon EOS bodies.
 
 ## Shared Backend Surface

@@ -1,6 +1,6 @@
 # iOS CCAPI
 
-`ios/OpenEOSCore` is the native Swift transport and command foundation for the Open EOS Control iOS app. It communicates directly with a Canon camera or the development simulator over HTTP/HTTPS and does not depend on the Android implementation.
+`ios/OpenEOSCore` is the native Swift transport and command foundation, and `ios/OpenEOSControl` is the iOS 17 SwiftUI app. They communicate directly with a Canon camera or the development simulator over HTTP/HTTPS and do not depend on the Android implementation.
 
 ## Implemented Core
 
@@ -12,11 +12,21 @@
 - Basic Authentication held by the client instance and redacted diagnostic output
 - Simulator mode and injectable HTTP transport for deterministic tests
 
-CCAPI RTP, focus drive without a camera-advertised operation, the SwiftUI product UI, and iOS USB/PTP are not presented as implemented features.
+CCAPI RTP, focus drive without a camera-advertised operation, and iOS USB/PTP are not presented as implemented features.
+
+## Implemented App
+
+- Direct HTTP/HTTPS/Simulator presets, optional in-memory password, remembered URL/username, and offline UI preview
+- Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, half-press, recording, tap focus, and adjustable JPEG Live View
+- Live View FPS from 1-30, clamped to the camera-advertised range, plus size, automatic refresh, grid, rolling FPS, frame bytes, and source diagnostics
+- Media listing, file-backed download/share, redacted diagnostic report, and no fake USB/PTP action
+- English, Traditional Chinese, and system language selection
+- Portrait and landscape layouts that respect system safe areas; whole-window upside-down rotation is disabled while key control content can rotate
+- App icon and localization resources verified in the built bundle
 
 ## Host App Requirements
 
-The future iOS app target must include a user-facing `NSLocalNetworkUsageDescription` because it connects directly to devices on the local network. Its App Transport Security configuration should use `NSAllowsLocalNetworking` for camera-local resources instead of broadly disabling ATS. `URLSessionCameraHTTPTransport` uses an ephemeral configuration, normal certificate validation, bounded timeouts, no cookies or credential storage, and `waitsForConnectivity` so the request can resume after the camera Wi-Fi route becomes available.
+The iOS app includes a user-facing `NSLocalNetworkUsageDescription` because it connects directly to devices on the local network. Its App Transport Security configuration uses `NSAllowsLocalNetworking` for camera-local resources instead of broadly disabling ATS. `URLSessionCameraHTTPTransport` uses an ephemeral configuration, normal certificate validation, bounded timeouts, no cookies or credential storage, and `waitsForConnectivity` so the request can resume after the camera Wi-Fi route becomes available.
 
 Official Apple references:
 
@@ -36,3 +46,14 @@ swift test
 ```
 
 GitHub Actions runs the same command on macOS. Passing package tests proves the Swift command and parsing paths compile and behave against deterministic fixtures; it does not replace an iPhone and EOS R6 Mark III validation record.
+
+To generate and open the app project on macOS:
+
+```bash
+brew install xcodegen
+cd ios/OpenEOSControl
+xcodegen generate
+open OpenEOSControl.xcodeproj
+```
+
+The macOS CI job builds the app for iOS Simulator, verifies the compiled asset catalog, English/Traditional Chinese resources, launch screen, local-network metadata, and supported orientations, then runs five app unit tests and two UI workflows on an iPhone Simulator. The retained screenshots cover portrait control, landscape control, landscape Debug, and Traditional Chinese connection states. Physical iPhone and R6 Mark III validation is still required.

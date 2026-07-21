@@ -37,7 +37,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 ## Platform Strategy
 
 - Android keeps the first complete app UI and owns direct phone-to-camera workflows.
-- iOS starts with the native `OpenEOSCore` Swift package over CCAPI/Wi-Fi, using the same command and capability vocabulary; iOS USB/PTP remains research until platform constraints are proven.
+- iOS uses the native `OpenEOSCore` Swift package and `OpenEOSControl` SwiftUI app over CCAPI/Wi-Fi with the same command and capability vocabulary; iOS USB/PTP remains research until platform constraints are proven.
 - PC starts as a desktop bridge service with a built-in browser control UI. The bridge exposes the shared open protocol while internally using libgphoto2 or an optional user-installed Canon EDSDK adapter.
 - The first bridge implementation is executable under `bridge/`: FastAPI owns auth/session/HTTP concerns, while `GPhoto2Engine` maps only camera-advertised CLI abilities and configuration values into the shared contract.
 - The same FastAPI process serves the PC UI at `/`; it calls only the public bridge contract, keeps authentication in page memory, and renders controls from the advertised capability/settings response.
@@ -58,3 +58,4 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 3. Validate the capability-gated Canon EOS remote release, half-press, ISO/Tv/Av/WB, focus drive and JPEG Live View paths on R6 Mark III.
 4. Record remaining real vendor properties/events and add only setting, movie or Touch AF mappings supported by reliable evidence.
 5. Validate the tested Android-to-libgphoto2 desktop bridge and PC UI on R6 Mark III, then pursue persistent native streaming and an optional EDSDK adapter.
+6. Validate the simulator-tested iOS CCAPI app on a physical iPhone and R6 Mark III.

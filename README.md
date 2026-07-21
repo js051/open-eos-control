@@ -4,7 +4,7 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It targets Canon EOS R6 Mark III first and is structured around PC, iOS, and Android clients that share the same camera-control concepts.
 
-The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend, capability-gated Canon EOS remote release, exposure/white-balance control, focus drive and JPEG Live View, plus an executable Desktop Bridge client behind the same camera core contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge exposes both a tested HTTP API and a built-in responsive control UI over the open-source `gphoto2` CLI. A native Swift CCAPI core now provides the tested foundation for the iOS app; the iOS UI and physical-camera validation remain in development.
+The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend, capability-gated Canon EOS remote release, exposure/white-balance control, focus drive and JPEG Live View, plus an executable Desktop Bridge client behind the same camera core contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge exposes both a tested HTTP API and a built-in responsive control UI over the open-source `gphoto2` CLI. A native Swift CCAPI core and iOS 17 SwiftUI app are implemented with English/Traditional Chinese UI and iPhone Simulator coverage; physical iPhone and camera validation remains.
 
 ## Project Shape
 
@@ -79,7 +79,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 GitHub Actions runs tests and debug builds on pushes to `main` and on pull requests.
 
-## iOS CCAPI Core
+## iOS App And CCAPI Core
 
 `ios/OpenEOSCore` is a Swift Package that implements the native iOS CCAPI transport and command layer. It discovers camera-advertised API versions and operations, capability-gates settings and commands, supports JPEG Live View, still capture, timed half-press with guaranteed release, recording, tap focus, media listing/download, and redacted diagnostics. The package includes deterministic transport tests and is compiled by the macOS GitHub Actions job:
 
@@ -88,7 +88,18 @@ cd ios/OpenEOSCore
 swift test
 ```
 
-The package is not the finished iOS app. The SwiftUI connection/control interface, English and Traditional Chinese resources, orientation behavior, and on-device R6 Mark III validation are separate acceptance gates. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for the network permission and security requirements.
+`ios/OpenEOSControl` is the iOS 17 SwiftUI app. It provides direct CCAPI connection, offline UI preview, capability-gated Photo/Video controls, JPEG Live View with 1-30 FPS requests clamped to camera-advertised limits, exposure sheets, media transfer, redacted diagnostics, manual language selection, and safe portrait/landscape layouts. Whole-window upside-down rotation stays disabled while key controls can rotate with physical device orientation.
+
+On a macOS host with Xcode and XcodeGen:
+
+```bash
+brew install xcodegen
+cd ios/OpenEOSControl
+xcodegen generate
+open OpenEOSControl.xcodeproj
+```
+
+GitHub Actions builds the final app bundle, verifies icon/localization/network/orientation metadata, runs five app unit tests, and exercises English portrait/landscape control plus Traditional Chinese connection flows on an iPhone Simulator. This does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
 
 ## Desktop Bridge
 
@@ -152,7 +163,7 @@ Useful endpoints:
 - Keep CCAPI stable for R6 Mark III wireless control.
 - Validate the implemented Android USB/PTP standard and Canon EOS remote-release/exposure/focus/Live View paths on R6 Mark III, then add only further vendor settings, Touch AF, or movie commands backed by reliable evidence.
 - Validate the implemented Android-to-Desktop-Bridge and PC control UI paths on R6 Mark III, improve preview throughput with a persistent engine, and retain Canon EDSDK as an optional user-installed adapter.
-- Build the iOS SwiftUI app on the tested native CCAPI core; keep iOS USB/PTP as a research track.
+- Validate the implemented iOS SwiftUI CCAPI app on an iPhone and R6 Mark III; keep iOS USB/PTP as a research track.
 
 See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/android-usb-ptp.md](docs/android-usb-ptp.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), [docs/ios-ccapi.md](docs/ios-ccapi.md), and [docs/reference-projects.md](docs/reference-projects.md).
 

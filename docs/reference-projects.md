@@ -37,13 +37,13 @@ Implemented but requires real-camera verification:
 - R6 Mark III still/manual shutter, recording, tap focus, media browsing, and media download.
 - Android USB/PTP diagnostics, session, DeviceInfo, standard properties, storage/media, download, advertised standard capture, and the implemented Canon remote/exposure/focus/Live View paths on a physical Android device with the camera connected over OTG/USB-C.
 - Desktop Bridge and Android bridge client with a physical R6 Mark III.
+- iOS CCAPI app with a physical iPhone and R6 Mark III.
 
 Planned only, not product-valid yet:
 
 - Canon EOS USB movie control, Touch AF, and vendor settings beyond the implemented ISO/Tv/Av/WB mappings.
 - CCAPI RTP live view.
 - Optional EDSDK adapter.
-- iOS app/client.
 
 ## Development Rule
 
