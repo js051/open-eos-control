@@ -11,9 +11,13 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(preview.waitForExistence(timeout: 8))
         preview.tap()
 
+        XCTAssertTrue(app.staticTexts["Offline UI preview"].waitForExistence(timeout: 5))
+        addScreenshot(name: "control-portrait")
+
         let shutter = app.buttons["shutter-button"]
         XCTAssertTrue(shutter.waitForExistence(timeout: 5))
-        addScreenshot(name: "control-portrait")
+        XCTAssertTrue(shutter.isHittable)
+        XCTAssertLessThanOrEqual(shutter.frame.maxY, app.windows.firstMatch.frame.maxY - 8)
 
         XCUIDevice.shared.orientation = .landscapeLeft
         let moreActions = app.buttons["more-actions-button"]

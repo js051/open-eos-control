@@ -70,7 +70,6 @@ struct DebugView: View {
         }
         .safeAreaPadding(.top, 2)
         .background(Color.cameraBackground)
-        .accessibilityIdentifier("debug-view")
     }
 
     private var header: some View {

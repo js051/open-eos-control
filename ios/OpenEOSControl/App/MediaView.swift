@@ -35,7 +35,6 @@ struct MediaView: View {
         .task {
             if camera.mediaItems.isEmpty { await camera.loadMedia() }
         }
-        .accessibilityIdentifier("media-view")
     }
 
     private var header: some View {

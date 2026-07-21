@@ -13,8 +13,7 @@ struct CameraControlView: View {
                 portraitLayout(proxy)
             }
         }
-        .background(Color.black)
-        .ignoresSafeArea()
+        .background(Color.black.ignoresSafeArea())
         .simultaneousGesture(
             DragGesture(minimumDistance: 40).onEnded { gesture in
                 if abs(gesture.translation.height) > abs(gesture.translation.width) {
@@ -22,7 +21,6 @@ struct CameraControlView: View {
                 }
             }
         )
-        .accessibilityIdentifier("camera-control-view")
     }
 
     private func portraitLayout(_ proxy: GeometryProxy) -> some View {

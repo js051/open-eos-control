@@ -68,7 +68,6 @@ struct LiveViewSurface: View {
                     Task { await camera.tapFocus(x: x, y: y) }
                 }
             )
-            .accessibilityIdentifier("live-view-surface")
         }
     }
 
