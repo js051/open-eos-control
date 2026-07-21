@@ -1,5 +1,9 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -14,6 +18,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.TimeUnit
 
 class CcapiClientTest {
     private lateinit var server: MockWebServer
@@ -173,6 +178,25 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realTapFocusUsesAdvertisedPutMethod() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/shooting/control/afpoint","put":true}]}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        client.tapFocus(0.25, 0.75)
+
+        server.takeRequest()
+        val focus = server.takeRequest()
+        assertEquals("PUT", focus.method)
+        assertEquals("/ccapi/ver110/shooting/control/afpoint", focus.path)
+    }
+
+    @Test
     fun liveViewFrameUrlBuildsCacheBustedFrameUrl() {
         val url = client.liveViewFrameUrl(cacheKey = 42)
 
@@ -278,6 +302,9 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
         assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(!capabilities.matrix.isPlanned(CameraFeature.STILL_CAPTURE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DOWNLOAD))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
         assertTrue(!capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
         assertTrue(!capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
@@ -424,6 +451,128 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realStillCaptureUsesAdvertisedManualPutAndAlwaysReleasesShutter() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/shooting/control/shutterbutton/manual","put":true}]}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
+        enqueueRealStatus()
+
+        client.initialize()
+        client.captureStill()
+
+        assertEquals("/ccapi", server.takeRequest().path)
+        val press = server.takeRequest()
+        val release = server.takeRequest()
+        assertEquals("PUT", press.method)
+        assertEquals("full_press", JSONObject(press.body.readUtf8()).getString("action"))
+        assertEquals("PUT", release.method)
+        assertEquals("release", JSONObject(release.body.readUtf8()).getString("action"))
+    }
+
+    @Test
+    fun halfPressUsesManualCommandThenReleasesShutter() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/shooting/control/shutterbutton/manual","post":true}]}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
+        enqueueRealStatus()
+
+        client.initialize()
+        client.halfPressShutter()
+
+        server.takeRequest()
+        val press = server.takeRequest()
+        val release = server.takeRequest()
+        val pressBody = JSONObject(press.body.readUtf8())
+        assertEquals("half_press", pressBody.getString("action"))
+        assertTrue(pressBody.getBoolean("af"))
+        assertEquals("release", JSONObject(release.body.readUtf8()).getString("action"))
+    }
+
+    @Test
+    fun cancellingHalfPressStillReleasesShutter() = runBlocking {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/shooting/control/shutterbutton/manual","put":true}]}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        server.takeRequest()
+        val job = launch(Dispatchers.Default) { client.halfPressShutter() }
+        val press = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        job.cancelAndJoin()
+        val release = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+
+        assertEquals("half_press", JSONObject(press.body.readUtf8()).getString("action"))
+        assertEquals("release", JSONObject(release.body.readUtf8()).getString("action"))
+    }
+
+    @Test
+    fun realMediaListTraversesStorageDirectoriesAndAllPages() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver110")
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse("""{"path":["/ccapi/ver110/contents/card1"]}"""))
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse("""{"path":["/ccapi/ver110/contents/card1/100CANON"]}"""))
+        server.enqueue(jsonResponse("""{"pagenumber":2}"""))
+        server.enqueue(jsonResponse("""{"path":["/ccapi/ver110/contents/card1/100CANON/IMG_0002.JPG"]}"""))
+        server.enqueue(jsonResponse("""{"path":["/ccapi/ver110/contents/card1/100CANON/IMG_0001.CR3"]}"""))
+
+        val items = client.listMedia()
+
+        assertEquals(listOf("IMG_0002.JPG", "IMG_0001.CR3"), items.map { it.name })
+        assertEquals(listOf("image", "raw"), items.map { it.kind })
+        assertEquals("/ccapi/ver110/contents?kind=number", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/contents?page=1&order=desc", server.takeRequest().path)
+    }
+
+    @Test
+    fun realMediaListReportsCameraErrorsInsteadOfReturningAnEmptyLibrary() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver110")
+        server.enqueue(MockResponse().setResponseCode(404).setBody("unsupported query"))
+        server.enqueue(MockResponse().setResponseCode(404).setBody("unsupported query"))
+        server.enqueue(MockResponse().setResponseCode(503).setBody("storage busy"))
+
+        val failure = runCatching { client.listMedia() }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("Reading camera media page failed"))
+        assertTrue(failure?.message.orEmpty().contains("HTTP 503"))
+    }
+
+    @Test
+    fun simulatorMediaCanBeListedAndDownloaded() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"items":[{"id":"SIM_0001.PNG","name":"SIM_0001.PNG","kind":"image","size_bytes":6}]}""",
+            ),
+        )
+        val bytes = byteArrayOf(1, 2, 3, 4, 5, 6)
+        server.enqueue(binaryResponse(bytes, "image/png"))
+
+        val item = client.listMedia().single()
+        val file = client.downloadMedia(item)
+
+        assertEquals("/ccapi/media", server.takeRequest().path)
+        assertEquals("/ccapi/media/SIM_0001.PNG", server.takeRequest().path)
+        assertArrayEquals(bytes, file.bytes)
+        assertEquals("image/png", file.contentType)
+    }
+
+    @Test
     fun liveViewFrameExtractsSingleJpegFrame() = runTest {
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x01, 0x02, 0xFF.toByte(), 0xD9.toByte())
         server.enqueue(binaryResponse(jpeg, "image/jpeg"))
@@ -478,6 +627,12 @@ class CcapiClientTest {
         MockResponse()
             .setHeader("content-type", contentType)
             .setBody(Buffer().write(body))
+
+    private fun enqueueRealStatus() {
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+    }
 
     private fun CcapiClient.forceRealCamera(
         prefix: String = "/ccapi/ver100",
@@ -551,6 +706,8 @@ class CcapiClientTest {
                 {"path":"/shooting/liveview/flip","get":true},
                 {"path":"/shooting/control/recbutton","post":true},
                 {"path":"/shooting/control/shutterbutton","post":true},
+                {"path":"/shooting/control/shutterbutton/manual","put":true},
+                {"path":"/contents","get":true},
                 {"path":"/shooting/settings","get":true}
               ]
             }

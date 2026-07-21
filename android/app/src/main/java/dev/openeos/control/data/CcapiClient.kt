@@ -1,6 +1,9 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
@@ -10,6 +13,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.net.URI
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 private data class CcapiApiOperation(
     val method: String,
@@ -336,14 +342,24 @@ class CcapiClient(
                 supportedFeatures.add(CameraFeature.LIVE_VIEW)
                 supportedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
             }
-            if (supportsApi("POST", "/shooting/control/recbutton")) {
+            if (supportsCommandApi("/shooting/control/recbutton")) {
                 supportedFeatures.add(CameraFeature.VIDEO_RECORDING)
             }
-            if (supportsApi("POST", "/shooting/control/shutterbutton")) {
+            if (
+                supportsCommandApi("/shooting/control/shutterbutton") ||
+                supportsCommandApi("/shooting/control/shutterbutton/manual")
+            ) {
                 supportedFeatures.add(CameraFeature.STILL_CAPTURE)
             }
-            if (supportsApi("POST", "/shooting/control/afpoint")) {
+            if (supportsCommandApi("/shooting/control/shutterbutton/manual")) {
+                supportedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
+            }
+            if (supportsCommandApi("/shooting/control/afpoint")) {
                 supportedFeatures.add(CameraFeature.TAP_FOCUS)
+            }
+            if (supportsApi("GET", "/contents")) {
+                supportedFeatures.add(CameraFeature.MEDIA_BROWSER)
+                supportedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
             }
 
             val liveViewCapabilities = LiveViewCapabilities.ccapiNetwork().let { capabilities ->
@@ -413,7 +429,10 @@ class CcapiClient(
 
     suspend fun startRecording(): CameraStatus {
         if (isRealCamera) {
-            postOk(apiPath("POST", "/shooting/control/recbutton"), JSONObject().put("action", "start"))
+            commandOk(
+                pathSuffix = "/shooting/control/recbutton",
+                payload = JSONObject().put("action", "start"),
+            )
             isRecording = true
         } else {
             postJson("/ccapi/record/start", JSONObject())
@@ -423,7 +442,10 @@ class CcapiClient(
 
     suspend fun stopRecording(): CameraStatus {
         if (isRealCamera) {
-            postOk(apiPath("POST", "/shooting/control/recbutton"), JSONObject().put("action", "stop"))
+            commandOk(
+                pathSuffix = "/shooting/control/recbutton",
+                payload = JSONObject().put("action", "stop"),
+            )
             isRecording = false
         } else {
             postJson("/ccapi/record/stop", JSONObject())
@@ -433,15 +455,95 @@ class CcapiClient(
 
     suspend fun captureStill(): CameraStatus {
         if (isRealCamera) {
-            postOk(
-                apiPath("POST", "/shooting/control/shutterbutton"),
-                JSONObject().put("af", true),
-            )
+            val directOperation = commandOperation("/shooting/control/shutterbutton")
+            val manualOperation = commandOperation("/shooting/control/shutterbutton/manual")
+            if (directOperation != null || manualOperation == null) {
+                commandOk(
+                    pathSuffix = "/shooting/control/shutterbutton",
+                    payload = JSONObject().put("af", true),
+                    operation = directOperation,
+                )
+            } else {
+                withGuaranteedRelease(
+                    press = {
+                        commandOk(
+                            pathSuffix = "/shooting/control/shutterbutton/manual",
+                            payload = JSONObject().put("af", true).put("action", "full_press"),
+                            operation = manualOperation,
+                        )
+                    },
+                    release = {
+                        commandOk(
+                            pathSuffix = "/shooting/control/shutterbutton/manual",
+                            payload = JSONObject().put("af", false).put("action", "release"),
+                            operation = manualOperation,
+                        )
+                    },
+                )
+            }
             observedFeatures.add(CameraFeature.STILL_CAPTURE)
         } else {
             postJson("/ccapi/capture/still", JSONObject().put("af", true))
         }
         return status()
+    }
+
+    suspend fun halfPressShutter(): CameraStatus {
+        if (isRealCamera) {
+            val operation = commandOperation("/shooting/control/shutterbutton/manual")
+            withGuaranteedRelease(
+                press = {
+                    commandOk(
+                        pathSuffix = "/shooting/control/shutterbutton/manual",
+                        payload = JSONObject().put("af", true).put("action", "half_press"),
+                        operation = operation,
+                    )
+                },
+                release = {
+                    commandOk(
+                        pathSuffix = "/shooting/control/shutterbutton/manual",
+                        payload = JSONObject().put("af", false).put("action", "release"),
+                        operation = operation,
+                    )
+                },
+                afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
+            )
+            observedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
+        } else {
+            withGuaranteedRelease(
+                press = { postJson("/ccapi/shutter/half-press", JSONObject()) },
+                release = { postJson("/ccapi/shutter/release", JSONObject()) },
+                afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
+            )
+        }
+        return status()
+    }
+
+    suspend fun listMedia(): List<CameraMediaItem> =
+        if (isRealCamera) listRealMedia() else listSimulatorMedia()
+
+    suspend fun downloadMedia(item: CameraMediaItem): CameraMediaFile {
+        val paths = if (isRealCamera) {
+            val path = normalizeCameraResource(item.id).substringBefore('?')
+            listOf(path, "$path?kind=main", "$path?type=main")
+        } else {
+            val encodedId = URLEncoder.encode(item.id, StandardCharsets.UTF_8.name()).replace("+", "%20")
+            listOf("/ccapi/media/$encodedId")
+        }
+        val errors = mutableListOf<String>()
+        paths.forEach { path ->
+            try {
+                return requestMediaFile(path, item)
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
+            }
+        }
+        error(
+            "Media download failed for '${item.name}'. Tried:\n" +
+                errors.joinToString(separator = "\n") { "  - $it" },
+        )
     }
 
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
@@ -477,7 +579,7 @@ class CcapiClient(
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
         return if (isRealCamera) {
             val payload = JSONObject().put("x", x).put("y", y)
-            postOk(apiPath("POST", "/shooting/control/afpoint"), payload)
+            commandOk("/shooting/control/afpoint", payload)
             FocusResult(ok = true, x = x, y = y)
         } else {
             val payload = JSONObject().put("x", x).put("y", y)
@@ -548,6 +650,57 @@ class CcapiClient(
     private fun supportsApi(method: String, pathSuffix: String): Boolean =
         apiOperations.any { it.method == method && it.path.endsWith(pathSuffix) }
 
+    private fun supportsCommandApi(pathSuffix: String): Boolean =
+        commandOperation(pathSuffix) != null
+
+    private fun commandOperation(pathSuffix: String): CcapiApiOperation? {
+        val matching = apiOperations.filter {
+            it.method in CCAPI_COMMAND_METHODS && it.path.endsWith(pathSuffix)
+        }
+        return matching.firstOrNull { it.path.startsWith(apiVersionPrefix) }
+            ?: matching.maxByOrNull { it.path.substringBefore(pathSuffix).apiVersionNumber() }
+    }
+
+    private suspend fun commandOk(
+        pathSuffix: String,
+        payload: JSONObject,
+        operation: CcapiApiOperation? = commandOperation(pathSuffix),
+    ) {
+        val selected = operation ?: CcapiApiOperation(
+            method = "POST",
+            path = "$apiVersionPrefix$pathSuffix",
+        )
+        val requestBody = payload.toString().toRequestBody(jsonMediaType)
+        val builder = Request.Builder().url("$baseUrl${selected.path}")
+        val request = when (selected.method) {
+            "PUT" -> builder.put(requestBody).build()
+            "POST" -> builder.post(requestBody).build()
+            else -> error("Unsupported CCAPI command method ${selected.method} for ${selected.path}")
+        }
+        requestOk(request)
+    }
+
+    private suspend fun withGuaranteedRelease(
+        press: suspend () -> Unit,
+        release: suspend () -> Unit,
+        afterPress: suspend () -> Unit = {},
+    ) {
+        var primaryFailure: Throwable? = null
+        try {
+            press()
+            afterPress()
+        } catch (exception: Throwable) {
+            primaryFailure = exception
+            throw exception
+        } finally {
+            try {
+                withContext(NonCancellable) { release() }
+            } catch (releaseFailure: Throwable) {
+                primaryFailure?.addSuppressed(releaseFailure) ?: throw releaseFailure
+            }
+        }
+    }
+
     private fun apiPath(method: String, pathSuffix: String): String {
         val matching = apiOperations.filter { it.method == method && it.path.endsWith(pathSuffix) }
         return matching.firstOrNull { it.path.startsWith(apiVersionPrefix) }?.path
@@ -555,15 +708,173 @@ class CcapiClient(
             ?: "$apiVersionPrefix$pathSuffix"
     }
 
+    private suspend fun listSimulatorMedia(): List<CameraMediaItem> {
+        val items = getJson("/ccapi/media").optJSONArray("items") ?: return emptyList()
+        return List(items.length()) { index ->
+            val item = items.getJSONObject(index)
+            CameraMediaItem(
+                id = item.getString("id"),
+                name = item.getString("name"),
+                kind = item.optString("kind", "other"),
+                sizeBytes = item.optLong("size_bytes").takeIf { item.has("size_bytes") },
+                captureTime = item.optString("capture_time").takeIf { it.isNotBlank() },
+            )
+        }
+    }
+
+    private suspend fun listRealMedia(): List<CameraMediaItem> {
+        val rootPath = apiPath("GET", "/contents")
+        val pending = ArrayDeque<Pair<String, Int>>()
+        val visited = mutableSetOf<String>()
+        val mediaPaths = linkedSetOf<String>()
+        pending.add(rootPath to 0)
+
+        while (pending.isNotEmpty() && mediaPaths.size < MAX_MEDIA_ITEMS) {
+            val (container, depth) = pending.removeFirst()
+            val normalizedContainer = normalizeCameraResource(container).substringBefore('?')
+            if (!visited.add(normalizedContainer) || depth > MAX_MEDIA_TREE_DEPTH) continue
+
+            listContentPaths(normalizedContainer).forEach { rawPath ->
+                val path = normalizeCameraResource(rawPath).substringBefore('?')
+                if (path.isMediaFilePath()) {
+                    mediaPaths.add(path)
+                } else if (path !in visited) {
+                    pending.add(path to depth + 1)
+                }
+            }
+        }
+
+        if (mediaPaths.isNotEmpty()) {
+            observedFeatures.add(CameraFeature.MEDIA_BROWSER)
+            observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
+        }
+        return mediaPaths.take(MAX_MEDIA_ITEMS).map { path ->
+            CameraMediaItem(
+                id = path,
+                name = path.substringAfterLast('/'),
+                kind = path.mediaKind(),
+            )
+        }
+    }
+
+    private suspend fun listContentPaths(containerPath: String): List<String> {
+        val pageInfo = getFirstJson(
+            listOf(
+                "$containerPath?kind=number",
+                "$containerPath?type=all,kind=number",
+            ),
+        )
+        val pageCount = pageInfo?.optInt("pagenumber", 0)?.coerceAtMost(MAX_MEDIA_PAGES) ?: 0
+        val pages = if (pageCount > 0) 1..pageCount else 0..0
+        val paths = mutableListOf<String>()
+        pages.forEach { page ->
+            val candidates = if (page == 0) {
+                listOf(containerPath)
+            } else {
+                listOf(
+                    "$containerPath?page=$page&order=desc",
+                    "$containerPath?page=$page",
+                )
+            }
+            val response = getFirstJsonRequired(candidates, "Reading camera media page")
+            response.optJSONArray("path")?.let { array ->
+                repeat(array.length()) { index ->
+                    array.optString(index).takeIf { it.isNotBlank() }?.let(paths::add)
+                }
+            }
+        }
+        return paths.distinct()
+    }
+
+    private fun normalizeCameraResource(value: String): String {
+        val parsed = URI(value)
+        val normalized = if (parsed.isAbsolute) {
+            val camera = URI(baseUrl)
+            require(
+                parsed.scheme.equals(camera.scheme, ignoreCase = true) &&
+                    parsed.host.equals(camera.host, ignoreCase = true) &&
+                    parsed.effectivePort() == camera.effectivePort(),
+            ) { "Camera returned a media URL outside the active camera origin." }
+            parsed.rawPath + parsed.rawQuery?.let { "?$it" }.orEmpty()
+        } else {
+            value
+        }
+        require(normalized.startsWith("/ccapi/")) {
+            "Camera returned an invalid media path: $value"
+        }
+        return normalized
+    }
+
+    private suspend fun requestMediaFile(path: String, item: CameraMediaItem): CameraMediaFile =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder().url("$baseUrl$path").get().build()
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body
+                if (!response.isSuccessful) {
+                    val preview = body?.string().orEmpty().take(MAX_ERROR_BODY_CHARS)
+                    throw CcapiHttpException(
+                        statusCode = response.code,
+                        message = "Camera request failed: GET ${request.url} returned HTTP ${response.code}\nBody: $preview",
+                    )
+                }
+                requireNotNull(body) { "Camera returned an empty media response." }
+                val declaredLength = body.contentLength()
+                require(declaredLength <= MAX_MEDIA_DOWNLOAD_BYTES || declaredLength < 0) {
+                    "Media file is too large for this Android build (${declaredLength} bytes)."
+                }
+                val bytes = readBoundedBytes(body.byteStream(), MAX_MEDIA_DOWNLOAD_BYTES)
+                CameraMediaFile(
+                    item = item.copy(sizeBytes = item.sizeBytes ?: bytes.size.toLong()),
+                    bytes = bytes,
+                    contentType = response.header("content-type"),
+                )
+            }
+        }
+
+    private fun readBoundedBytes(input: InputStream, maxBytes: Int): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_MEDIA_BUFFER_BYTES)
+        input.use { stream ->
+            while (true) {
+                val count = stream.read(buffer)
+                if (count < 0) break
+                require(output.size() + count <= maxBytes) {
+                    "Media file exceeded the $maxBytes byte Android download limit."
+                }
+                output.write(buffer, 0, count)
+            }
+        }
+        return output.toByteArray()
+    }
+
     private suspend fun getFirstJson(paths: List<String>): JSONObject? {
         paths.forEach { path ->
             try {
                 return getJson(path)
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (e: Exception) {
                 // Try the next API version or endpoint variant.
             }
         }
         return null
+    }
+
+    private suspend fun getFirstJsonRequired(paths: List<String>, operation: String): JSONObject {
+        val errors = mutableListOf<String>()
+        paths.forEach { path ->
+            try {
+                return getJson(path)
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
+            }
+        }
+        error(
+            "$operation failed. Tried:\n" +
+                errors.joinToString(separator = "\n") { "  - $it" },
+        )
     }
 
     private suspend fun loadShootingSettings(): JSONObject? {
@@ -783,13 +1094,38 @@ class CcapiClient(
 
     private companion object {
         val CCAPI_HTTP_METHODS = listOf("GET", "PUT", "POST", "DELETE")
+        val CCAPI_COMMAND_METHODS = setOf("POST", "PUT")
         const val JPEG_MARKER_PREFIX = 0xFF
         const val JPEG_START_MARKER = 0xD8
         const val JPEG_END_MARKER = 0xD9
         const val MAX_LIVE_VIEW_SCAN_BYTES = 16 * 1024 * 1024
         const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024
         const val MAX_ERROR_BODY_CHARS = 2_000
+        const val HALF_PRESS_DURATION_MILLIS = 350L
+        const val MAX_MEDIA_ITEMS = 500
+        const val MAX_MEDIA_PAGES = 100
+        const val MAX_MEDIA_TREE_DEPTH = 4
+        const val MAX_MEDIA_DOWNLOAD_BYTES = 256 * 1024 * 1024
+        const val DEFAULT_MEDIA_BUFFER_BYTES = 64 * 1024
     }
+}
+
+private fun URI.effectivePort(): Int = when {
+    port >= 0 -> port
+    scheme.equals("https", ignoreCase = true) -> 443
+    else -> 80
+}
+
+private fun String.isMediaFilePath(): Boolean {
+    val name = substringAfterLast('/')
+    return name.contains('.') && !name.endsWith('.')
+}
+
+private fun String.mediaKind(): String = when (substringAfterLast('.', "").lowercase()) {
+    "jpg", "jpeg", "hif", "heif", "png" -> "image"
+    "cr2", "cr3", "raw" -> "raw"
+    "mp4", "mov" -> "video"
+    else -> "other"
 }
 
 private fun JSONObject.toCameraInfo(): CameraInfo = CameraInfo(
@@ -826,7 +1162,12 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
     aperture = getJSONArray("aperture").toStringList(),
     whiteBalance = getJSONArray("white_balance").toStringList(),
     matrix = CapabilityMatrix.ccapiNetwork(
-        CapabilityMatrix.ccapiNetwork().supported + CameraFeature.STILL_CAPTURE,
+        CapabilityMatrix.ccapiNetwork().supported + setOf(
+            CameraFeature.STILL_CAPTURE,
+            CameraFeature.SHUTTER_HALF_PRESS,
+            CameraFeature.MEDIA_BROWSER,
+            CameraFeature.MEDIA_DOWNLOAD,
+        ),
     ),
     liveView = LiveViewCapabilities.simulator(),
 )

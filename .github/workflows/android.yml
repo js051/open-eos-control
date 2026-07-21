@@ -34,3 +34,27 @@ jobs:
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
+
+  simulator:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: simulator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install simulator and test dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint simulator
+        run: ruff check --no-cache .
+
+      - name: Test simulator contract
+        run: pytest -q

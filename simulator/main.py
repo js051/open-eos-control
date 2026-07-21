@@ -32,6 +32,7 @@ capabilities = {
 state = {
     "recording": False,
     "capture_count": 0,
+    "half_pressed": False,
     "focus_x": 0.5,
     "focus_y": 0.5,
     "exposure": {
@@ -40,6 +41,10 @@ state = {
         "aperture": "2.8",
         "white_balance": "auto",
     },
+    "media": [
+        {"id": "SIM_0002.PNG", "name": "SIM_0002.PNG", "kind": "image", "capture_time": "2026-07-21T10:00:02+08:00"},
+        {"id": "SIM_0001.PNG", "name": "SIM_0001.PNG", "kind": "image", "capture_time": "2026-07-21T10:00:01+08:00"},
+    ],
 }
 
 
@@ -115,7 +120,21 @@ async def record_stop() -> dict[str, bool]:
 @app.post("/ccapi/capture/still")
 async def capture_still() -> dict[str, bool | int]:
     state["capture_count"] += 1
+    name = f"SIM_{state['capture_count'] + 2:04d}.PNG"
+    state["media"].insert(0, {"id": name, "name": name, "kind": "image", "capture_time": None})
     return {"ok": True, "capture_count": state["capture_count"]}
+
+
+@app.post("/ccapi/shutter/half-press")
+async def shutter_half_press() -> dict[str, bool]:
+    state["half_pressed"] = True
+    return {"ok": True, "half_pressed": True}
+
+
+@app.post("/ccapi/shutter/release")
+async def shutter_release() -> dict[str, bool]:
+    state["half_pressed"] = False
+    return {"ok": True, "half_pressed": False}
 
 
 @app.post("/ccapi/focus/tap")
@@ -123,6 +142,21 @@ async def tap_focus(payload: FocusRequest) -> dict[str, float | bool]:
     state["focus_x"] = payload.x
     state["focus_y"] = payload.y
     return {"ok": True, "x": payload.x, "y": payload.y}
+
+
+@app.get("/ccapi/media")
+async def media_list() -> dict[str, list[dict[str, object]]]:
+    frame_size = len(camera_frame_png())
+    return {
+        "items": [dict(item, size_bytes=frame_size) for item in state["media"]],
+    }
+
+
+@app.get("/ccapi/media/{item_id}")
+async def media_download(item_id: str) -> Response:
+    if not any(item["id"] == item_id for item in state["media"]):
+        raise HTTPException(status_code=404, detail="Media item not found")
+    return Response(content=camera_frame_png(), media_type="image/png")
 
 
 @app.get("/ccapi/liveview/frame")

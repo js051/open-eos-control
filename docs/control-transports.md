@@ -9,9 +9,10 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Status: implemented.
 - Platforms: Android now; iOS and PC can reuse the same protocol model later.
 - Connection: Wi-Fi or wired network when the camera exposes CCAPI over HTTP/HTTPS.
-- Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III.
+- Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III, advertised still/manual shutter commands, and paged media retrieval.
 - Current tradeoffs: live view is JPEG polling today, so smoothness and latency depend on Wi-Fi, camera response time, and device JPEG decode cost.
-- Planned upgrades: capability diagnostics, media browser/download, still capture, shutter half-press, RTP live view experiments.
+- Device-validation queue: still capture, shutter half-press, movie recording, tap focus, media browser, and media download on EOS R6 Mark III.
+- Planned upgrades: focus drive where a documented endpoint is advertised and RTP live view experiments.
 
 ## Planned Wired Backends
 

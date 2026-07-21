@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
@@ -16,13 +17,13 @@ const val MIN_LIVE_VIEW_FPS = 1
 const val MAX_LIVE_VIEW_FPS = 30
 const val DEFAULT_LIVE_VIEW_FPS = 6
 
-enum class UiMode { CONTROL, DEBUG }
+enum class UiMode { CONTROL, MEDIA, DEBUG }
 
 enum class CaptureMode { PHOTO, VIDEO }
 
 enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MORE, LANGUAGE }
 
-enum class CameraOperation { CONNECT, STATUS, SETTING, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, USB }
+enum class CameraOperation { CONNECT, STATUS, SETTING, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB }
 
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,
@@ -45,6 +46,8 @@ data class CameraUiState(
     val info: CameraInfo? = null,
     val status: CameraStatus? = null,
     val capabilities: CameraCapabilities? = null,
+    val mediaItems: List<CameraMediaItem> = emptyList(),
+    val lastDownloadedMediaName: String? = null,
     val liveViewFrameUrl: String? = null,
     val liveViewBitmap: Bitmap? = null,
     val usbDiagnostics: UsbPtpDiagnostics = UsbPtpDiagnostics.Empty,

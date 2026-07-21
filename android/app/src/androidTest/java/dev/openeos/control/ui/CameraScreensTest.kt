@@ -2,6 +2,7 @@ package dev.openeos.control.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -46,6 +47,21 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
+    }
+
+    @Test
+    fun offlinePreviewIncludesMediaBrowserWithoutEnablingFakeDownloads() {
+        val state = CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state, noOpActions())
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.camera_media)).assertIsDisplayed()
+        compose.onNodeWithText("R6M3_0001.CR3").assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.download_media, "R6M3_0001.CR3"))
+            .assertIsNotEnabled()
     }
 
     @Test
@@ -186,7 +202,8 @@ class CameraScreensTest {
         connect = {}, disconnect = {}, refresh = {}, refreshUsb = {}, requestUsbPermission = {},
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
-        captureStill = {}, toggleRecording = {}, tapFocus = { _, _ -> }, refreshLiveView = {}, restartLiveView = {},
+        captureStill = {}, focusWithShutter = {}, toggleRecording = {}, tapFocus = { _, _ -> },
+        refreshMedia = {}, downloadMedia = { _, _ -> }, refreshLiveView = {}, restartLiveView = {},
         setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setAppLanguage = {}, clearError = {},
     )
 

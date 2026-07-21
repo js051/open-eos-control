@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import android.app.Activity
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +20,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.openeos.control.data.LiveViewSize
+import dev.openeos.control.data.CameraMediaItem
 
 @Composable
 fun OpenEosControlApp(
@@ -57,8 +59,11 @@ fun OpenEosControlApp(
         setWhiteBalance = viewModel::setWhiteBalance,
         setCameraSetting = viewModel::setCameraSetting,
         captureStill = viewModel::captureStill,
+        focusWithShutter = viewModel::focusWithShutter,
         toggleRecording = viewModel::toggleRecording,
         tapFocus = viewModel::tapFocus,
+        refreshMedia = viewModel::refreshMedia,
+        downloadMedia = { item, destination -> viewModel.downloadMedia(context, item, destination) },
         refreshLiveView = viewModel::refreshLiveViewFrame,
         restartLiveView = viewModel::restartLiveView,
         setAutoRefresh = viewModel::setLiveViewAutoRefresh,
@@ -77,6 +82,8 @@ fun OpenEosControlApp(
             Box(Modifier.fillMaxSize().background(AppBackground)) {
                 if (!state.connected) {
                     ConnectionScreen(state, actions)
+                } else if (state.uiMode == UiMode.MEDIA) {
+                    MediaScreen(state, actions)
                 } else if (state.uiMode == UiMode.DEBUG) {
                     DebugScreen(state, actions)
                 } else {
@@ -146,8 +153,11 @@ data class CameraActions(
     val setWhiteBalance: (String) -> Unit,
     val setCameraSetting: (String, String) -> Unit,
     val captureStill: () -> Unit,
+    val focusWithShutter: () -> Unit,
     val toggleRecording: () -> Unit,
     val tapFocus: (Double, Double) -> Unit,
+    val refreshMedia: () -> Unit,
+    val downloadMedia: (CameraMediaItem, Uri) -> Unit,
     val refreshLiveView: () -> Unit,
     val restartLiveView: () -> Unit,
     val setAutoRefresh: (Boolean) -> Unit,

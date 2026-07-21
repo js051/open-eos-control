@@ -254,6 +254,16 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
                 { menuExpanded = true },
             )
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                if (state.supports(CameraFeature.MEDIA_BROWSER)) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.camera_media)) },
+                        leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_images), null) },
+                        onClick = {
+                            menuExpanded = false
+                            actions.setUiMode(UiMode.MEDIA)
+                        },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.language)) },
                     leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_languages), null) },

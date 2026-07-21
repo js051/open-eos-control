@@ -31,6 +31,8 @@ open-eos-control/
 - ISO、shutter、aperture、white balance 與動態 advanced settings
 - REC 開始/停止
 - Tap focus，已經走共用 backend layer
+- 依相機公告能力執行手動快門半按，並保證送出釋放命令
+- 支援分頁的相機媒體瀏覽，以及透過 Android 文件選擇器下載檔案
 
 預設直連相機 URL：
 
@@ -97,6 +99,10 @@ http://localhost:18080
 - `POST /ccapi/record/start`
 - `POST /ccapi/record/stop`
 - `POST /ccapi/focus/tap`
+- `POST /ccapi/shutter/half-press`
+- `POST /ccapi/shutter/release`
+- `GET /ccapi/media`
+- `GET /ccapi/media/{itemId}`
 - `GET /ccapi/liveview/frame`
 
 ## Roadmap
@@ -106,7 +112,7 @@ http://localhost:18080
 - 加入 desktop bridge，對外使用同一套 camera core contract，內部可接 libgphoto2 或使用者自行安裝的 Canon EDSDK adapter。
 - iOS 先走 CCAPI/Wi-Fi；iOS USB/PTP 先列為研究線。
 
-可參考 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
+功能是否真正完成以 [docs/feature-status.md](docs/feature-status.md) 為準；架構與後續路線請看 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
 
 ## 授權
 

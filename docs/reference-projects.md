@@ -21,13 +21,14 @@ This project should stay grounded in public specifications, official platform AP
 
 Implemented and test-covered:
 
-- CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling.
+- CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling, still/manual shutter control, paged media browsing, and bounded media download.
 - Android USB host diagnostics: enumerate devices, identify Canon vendor ID `0x04A9`, identify PTP still-image interfaces, show endpoints, and request Android USB permission.
 - Multi-backend contract: unsupported operations throw explicit transport/feature errors.
 
 Implemented but requires real-camera verification:
 
 - Real Canon CCAPI endpoint variants for R6 Mark III live view and shooting settings.
+- R6 Mark III still/manual shutter, recording, tap focus, media browsing, and media download.
 - Android USB/PTP diagnostics on a physical Android device with the camera connected over OTG/USB-C.
 
 Planned only, not product-valid yet:

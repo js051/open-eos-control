@@ -100,6 +100,12 @@ class CameraRepository(
 
     suspend fun captureStill(): CameraStatus = backend.captureStill()
 
+    suspend fun halfPressShutter(): CameraStatus = backend.halfPressShutter()
+
+    suspend fun listMedia(): List<CameraMediaItem> = backend.listMedia()
+
+    suspend fun downloadMedia(item: CameraMediaItem): CameraMediaFile = backend.downloadMedia(item)
+
     suspend fun restartLiveView() {
         backend.stopLiveView()
         backend.startLiveView(liveViewRequest)

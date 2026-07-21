@@ -2,10 +2,12 @@ package dev.openeos.control.ui
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraNetworkDiagnostics
+import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.LiveViewRequest
 import dev.openeos.control.data.LiveViewSize
@@ -48,7 +50,10 @@ class CameraViewModel(
         }
     }
 
-    fun setUiMode(mode: UiMode) = _uiState.update { it.copy(uiMode = mode, activeSettingPicker = null) }
+    fun setUiMode(mode: UiMode) {
+        _uiState.update { it.copy(uiMode = mode, activeSettingPicker = null) }
+        if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
+    }
 
     fun setCaptureMode(mode: CaptureMode) = _uiState.update { it.copy(captureMode = mode, activeSettingPicker = null) }
 
@@ -311,6 +316,49 @@ class CameraViewModel(
         startLiveViewLoopIfNeeded()
     }
 
+    fun focusWithShutter() {
+        _uiState.update { it.copy(focusFeedback = FocusFeedback.FOCUSING) }
+        if (_uiState.value.previewMode) {
+            _uiState.update { it.copy(focusFeedback = FocusFeedback.SUCCESS) }
+            clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
+            return
+        }
+        runCamera(
+            operation = CameraOperation.FOCUS,
+            onError = {
+                _uiState.update { state -> state.copy(focusFeedback = FocusFeedback.FAILURE) }
+                clearFocusFeedbackAfter(FocusFeedback.FAILURE)
+            },
+        ) {
+            val status = repository.halfPressShutter()
+            _uiState.update { it.copy(status = status, focusFeedback = FocusFeedback.SUCCESS) }
+            clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
+            refreshLiveViewFrameInternal(reportErrors = false)
+            startLiveViewLoopIfNeeded()
+        }
+    }
+
+    fun refreshMedia() {
+        if (!_uiState.value.connected || _uiState.value.previewMode) return
+        runCamera(CameraOperation.MEDIA) {
+            val items = repository.listMedia()
+            _uiState.update { it.copy(mediaItems = items, lastDownloadedMediaName = null) }
+        }
+    }
+
+    fun downloadMedia(context: Context, item: CameraMediaItem, destination: Uri) {
+        if (_uiState.value.previewMode) return
+        runCamera(CameraOperation.MEDIA) {
+            val file = repository.downloadMedia(item)
+            withContext(Dispatchers.IO) {
+                context.applicationContext.contentResolver.openOutputStream(destination, "w")?.use { output ->
+                    output.write(file.bytes)
+                } ?: error("Android could not open the selected download destination.")
+            }
+            _uiState.update { it.copy(lastDownloadedMediaName = file.item.name) }
+        }
+    }
+
     fun tapFocus(x: Double, y: Double) {
         _uiState.update {
             it.copy(
@@ -569,6 +617,8 @@ class CameraViewModel(
         info = null,
         status = null,
         capabilities = null,
+        mediaItems = emptyList(),
+        lastDownloadedMediaName = null,
         liveViewFrameUrl = null,
         liveViewBitmap = null,
         liveViewDiagnostics = LiveViewDiagnostics(),

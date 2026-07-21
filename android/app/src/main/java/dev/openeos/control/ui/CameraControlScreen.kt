@@ -29,6 +29,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
@@ -49,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -457,6 +461,25 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     ModalBottomSheet(onDismissRequest = actions.closePicker, containerColor = AppSurface) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(stringResource(R.string.more_settings), color = AppText, fontWeight = FontWeight.Bold)
+            if (state.supports(CameraFeature.SHUTTER_HALF_PRESS)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.focus_with_shutter), color = AppText, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.focus_with_shutter_hint), color = AppSubtleText)
+                    }
+                    Button(
+                        onClick = actions.focusWithShutter,
+                        enabled = !state.isBusy(CameraOperation.FOCUS),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.height(48.dp),
+                    ) {
+                        Icon(painterResource(LucideR.drawable.lucide_ic_focus), null, Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.af_on))
+                    }
+                }
+            }
             if (settings.isEmpty()) Text(stringResource(R.string.no_settings), color = AppSubtleText)
             settings.forEach { setting -> AdvancedSettingRow(setting, actions) }
         }

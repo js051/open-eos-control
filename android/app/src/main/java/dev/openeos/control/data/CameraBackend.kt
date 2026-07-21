@@ -120,6 +120,12 @@ class CcapiCameraBackend(
 
     override suspend fun captureStill(): CameraStatus = client.captureStill()
 
+    override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
+
+    override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
+
+    override suspend fun downloadMedia(item: CameraMediaItem): CameraMediaFile = client.downloadMedia(item)
+
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
 
     override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame = client.liveViewFrame(cacheKey, request)

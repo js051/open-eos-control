@@ -31,6 +31,8 @@ The app currently includes:
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
 - REC start/stop
 - Tap focus hook through the shared backend layer
+- Advertised manual shutter half-press with guaranteed release
+- Paged camera media browser and bounded download through Android's document picker
 
 Default direct camera presets:
 
@@ -97,6 +99,10 @@ Useful endpoints:
 - `POST /ccapi/record/start`
 - `POST /ccapi/record/stop`
 - `POST /ccapi/focus/tap`
+- `POST /ccapi/shutter/half-press`
+- `POST /ccapi/shutter/release`
+- `GET /ccapi/media`
+- `GET /ccapi/media/{itemId}`
 - `GET /ccapi/liveview/frame`
 
 ## Roadmap
@@ -106,7 +112,7 @@ Useful endpoints:
 - Add a desktop bridge that exposes the same camera core contract while using libgphoto2 or a user-installed Canon EDSDK adapter.
 - Bring iOS online through CCAPI/Wi-Fi first; keep iOS USB/PTP as a research track.
 
-See [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), and [docs/reference-projects.md](docs/reference-projects.md).
+See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), and [docs/reference-projects.md](docs/reference-projects.md).
 
 ## License
 

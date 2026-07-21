@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraProfile
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraStatus
@@ -56,15 +57,23 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
                 CameraFeature.LIVE_VIEW,
                 CameraFeature.LIVE_VIEW_JPEG_POLLING,
                 CameraFeature.STILL_CAPTURE,
+                CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.VIDEO_RECORDING,
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.EXPOSURE_CONTROL,
                 CameraFeature.WHITE_BALANCE_CONTROL,
                 CameraFeature.ADVANCED_SETTINGS,
+                CameraFeature.MEDIA_BROWSER,
+                CameraFeature.MEDIA_DOWNLOAD,
             ),
         ),
         liveView = LiveViewCapabilities.ccapiNetwork(),
         profile = CameraProfile.R6_MARK_III,
+    ),
+    mediaItems = listOf(
+        CameraMediaItem("preview-001", "R6M3_0001.CR3", "raw", 31_457_280, "2026-07-21T10:08:24+08:00"),
+        CameraMediaItem("preview-002", "R6M3_0001.JPG", "image", 8_912_384, "2026-07-21T10:08:24+08:00"),
+        CameraMediaItem("preview-003", "R6M3_0002.MP4", "video", 128_450_560, "2026-07-21T10:10:02+08:00"),
     ),
     liveViewFrameUrl = null,
     liveViewBitmap = null,
