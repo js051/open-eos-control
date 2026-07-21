@@ -108,3 +108,68 @@ jobs:
 
       - name: Test iOS CCAPI core
         run: swift test
+
+  ios-app:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios/OpenEOSControl
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+
+      - name: Validate app metadata
+        run: |
+          plutil -lint App/Info.plist
+          xcodegen generate
+          xcodebuild -project OpenEOSControl.xcodeproj -scheme OpenEOSControl -list
+
+      - name: Build iOS app
+        run: |
+          xcodebuild \
+            -project OpenEOSControl.xcodeproj \
+            -scheme OpenEOSControl \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .derived-data \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Select iPhone simulator
+        id: simulator
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          devices = [device for runtime, values in data["devices"].items() if ".iOS-" in runtime for device in values if device["name"].startswith("iPhone") and device.get("isAvailable", False)]
+          if not devices:
+              raise SystemExit("No available iPhone simulator")
+          print(devices[0]["udid"])
+          ')
+          echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+
+      - name: Test iOS app and UI
+        run: |
+          rm -rf TestResults.xcresult
+          xcodebuild \
+            -project OpenEOSControl.xcodeproj \
+            -scheme OpenEOSControl \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.device_id }}' \
+            -derivedDataPath .derived-data \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Upload iOS test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: ios/OpenEOSControl/TestResults.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

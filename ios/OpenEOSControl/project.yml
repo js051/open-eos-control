@@ -1,0 +1,70 @@
+name: OpenEOSControl
+options:
+  bundleIdPrefix: dev.openeos
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  OpenEOSCore:
+    path: ../OpenEOSCore
+targets:
+  OpenEOSControl:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - Resources
+    resources:
+      - path: App/Resources
+    info:
+      path: App/Info.plist
+    dependencies:
+      - package: OpenEOSCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.openeos.control
+        PRODUCT_NAME: Open EOS Control
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: 5.10
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+  OpenEOSControlTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: OpenEOSControl
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.openeos.control.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.10
+  OpenEOSControlUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: OpenEOSControl
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.openeos.control.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.10
+schemes:
+  OpenEOSControl:
+    build:
+      targets:
+        OpenEOSControl: all
+        OpenEOSControlTests: [test]
+        OpenEOSControlUITests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - OpenEOSControlTests
+        - OpenEOSControlUITests
