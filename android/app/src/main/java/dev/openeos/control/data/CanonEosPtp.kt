@@ -21,6 +21,7 @@ object CanonEosPropertyCode {
     const val WHITE_BALANCE = 0xD109
     const val EVF_OUTPUT_DEVICE = 0xD1B0
     const val EVF_MODE = 0xD1B1
+    const val EVF_RECORD_STATUS = 0xD1B8
 }
 
 object CanonEosEventCode {
@@ -49,6 +50,9 @@ object CanonEosPtp {
     const val VENDOR_EXTENSION_ID = 0x0000000BL
     const val VIEWFINDER_REQUEST_BYTES = 0x00200000L
     const val VIEWFINDER_NOT_READY_RESPONSE = 0xA102
+    const val MOVIE_RECORD_TARGET_NONE = 0L
+    const val MOVIE_RECORD_TARGET_SDRAM = 3L
+    const val MOVIE_RECORD_TARGET_CARD = 4L
 
     private val remotePreparationOperations = setOf(
         CanonEosOperationCode.SET_REMOTE_MODE,
@@ -85,6 +89,17 @@ object CanonEosPtp {
 
     fun supportsPropertyControl(info: PtpDeviceInfo): Boolean =
         supportsRemotePreparation(info) && info.supports(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX)
+
+    fun supportsMovieRecording(info: PtpDeviceInfo, availableValues: List<Long>): Boolean =
+        supportsPropertyControl(info) &&
+            MOVIE_RECORD_TARGET_NONE in availableValues &&
+            MOVIE_RECORD_TARGET_CARD in availableValues
+
+    fun movieRecording(value: Long?): Boolean? = when (value) {
+        MOVIE_RECORD_TARGET_CARD -> true
+        MOVIE_RECORD_TARGET_NONE, MOVIE_RECORD_TARGET_SDRAM -> false
+        else -> null
+    }
 
     fun focusDriveAmount(direction: FocusDriveDirection, step: FocusDriveStep): Long {
         val magnitude = when (step) {
@@ -302,11 +317,18 @@ object CanonEosPtp {
         20L to "Custom WB 4", 21L to "Custom WB 5", 23L to "AWB White",
     )
 
+    private val movieRecordTargetLabels = mapOf(
+        MOVIE_RECORD_TARGET_NONE to "None",
+        MOVIE_RECORD_TARGET_SDRAM to "SDRAM",
+        MOVIE_RECORD_TARGET_CARD to "Card",
+    )
+
     private val propertySpecs = mapOf(
         CanonEosPropertyCode.APERTURE to CanonEosPropertySpec(2, apertureLabels),
         CanonEosPropertyCode.SHUTTER_SPEED to CanonEosPropertySpec(2, shutterLabels),
         CanonEosPropertyCode.ISO_SPEED to CanonEosPropertySpec(2, isoLabels),
         CanonEosPropertyCode.WHITE_BALANCE to CanonEosPropertySpec(1, whiteBalanceLabels),
+        CanonEosPropertyCode.EVF_RECORD_STATUS to CanonEosPropertySpec(2, movieRecordTargetLabels),
     )
 
     private const val MAX_PROPERTY_OPTIONS = 4_096L

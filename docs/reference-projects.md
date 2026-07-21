@@ -11,7 +11,7 @@ This project should stay grounded in public specifications, official platform AP
 - USB still image class: USB-IF publishes the Still Image Capture Device Class specification used by USB PTP devices. Reference: [USB-IF Still Image Capture Device Definition](https://www.usb.org/document-library/still-image-capture-device-definition-10-and-errata-16-mar-2007).
 - libgphoto2 / gPhoto: libgphoto2 is the main open-source reference for camera access/control and PTP-backed Canon EOS tethering. Reference: [libgphoto2 GitHub](https://github.com/gphoto/libgphoto2), [gPhoto remote control docs](https://gphoto.sourceforge.io/doc/remote/), [supported cameras](https://gphoto.sourceforge.io/proj/libgphoto2/support.php).
 - EOS R6 Mark III libgphoto2 evidence: upstream includes a generated R6 Mark III configuration snapshot with Canon EOS capture abilities, storage, battery, exposure, remote release, movie target, and manual focus-drive values. It is concrete adapter evidence, but it does not replace this project's physical-device acceptance record. Reference: [pinned R6 Mark III snapshot](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/cameras/canon-eos-r6-markIII.txt), [gphoto2 CLI manual](https://www.gphoto.org/doc/manual/ref-gphoto2-cli.html).
-- Canon EOS PTP behavior reference: pinned libgphoto2 source defines the remote/event operations, property-event layouts and value tables, balanced release sequence, `DriveLens` values, EVF properties, `GetViewFinderData` request and block format mirrored by the Android backend. References: [operation/property definitions](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp.h), [Canon event parser](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp-pack.c), [capture and Live View behavior](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/library.c), [settings, focus and remote controls](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/config.c).
+- Canon EOS PTP behavior reference: pinned libgphoto2 source defines the remote/event operations, property-event layouts and value tables, balanced release sequence, `DriveLens` values, movie target, EVF properties, `GetViewFinderData` request and block format mirrored by the Android backend. References: [operation/property definitions](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp.h), [Canon property packet writer](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp.c), [Canon event parser](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp-pack.c), [capture and Live View behavior](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/library.c), [settings, focus and remote controls](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/config.c).
 - PTP packet and dataset implementation reference: libgphoto2's maintained PTP engine corroborates the USB command/data/response container layout and standard operation codes used by this project. Reference: [pinned libgphoto2 PTP source](https://github.com/gphoto/libgphoto2/tree/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2).
 
 ## Open-Source Behavior To Mirror
@@ -27,7 +27,7 @@ Implemented and test-covered:
 - CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling, still/manual shutter control, paged media browsing, and streaming media download.
 - Android USB host diagnostics: enumerate devices, identify Canon vendor ID `0x04A9`, identify PTP still-image interfaces, show endpoints, and request Android USB permission.
 - Android standards-based USB/PTP path: claim the interface, open/close a session, parse DeviceInfo, property, storage and object datasets, safely write bounded camera-advertised standard properties, conditionally issue advertised standard still capture, browse media, and stream `GetObject` downloads.
-- Android Canon EOS USB path: capability-gated remote/event setup, ISO/Tv/Av/WB event state and writes, still capture with balanced release and event confirmation, timed half-press, Near/Far focus drive, EVF start/stop, and in-memory JPEG Live View parsing.
+- Android Canon EOS USB path: capability-gated remote/event setup, ISO/Tv/Av/WB event state and writes, still capture with balanced release and event confirmation, timed half-press, Card/None movie control, Near/Far focus drive, EVF start/stop, and in-memory JPEG Live View parsing.
 - Desktop Bridge service, libgphoto2 CLI adapter, direct PC CCAPI engine, and Android bridge client: authenticated sessions, dynamic settings/capabilities, capture, focus, JPEG preview, media streaming and deterministic contract tests.
 - Multi-backend contract: unsupported operations throw explicit transport/feature errors.
 
@@ -35,7 +35,7 @@ Implemented but requires real-camera verification:
 
 - Real Canon CCAPI endpoint variants for R6 Mark III live view and shooting settings.
 - R6 Mark III still/manual shutter, recording, tap focus, media browsing, and media download.
-- Android USB/PTP diagnostics, session, DeviceInfo, standard properties, storage/media, download, advertised standard capture, and the implemented Canon remote/exposure/focus/Live View paths on a physical Android device with the camera connected over OTG/USB-C.
+- Android USB/PTP diagnostics, session, DeviceInfo, standard properties, storage/media, download, advertised standard capture, and the implemented Canon remote/exposure/movie/focus/Live View paths on a physical Android device with the camera connected over OTG/USB-C.
 - PC direct CCAPI, Desktop Bridge USB, and Android bridge client with a physical R6 Mark III.
 - iOS CCAPI app with a physical iPhone and R6 Mark III.
 
@@ -45,7 +45,7 @@ Recorded physical evidence:
 
 Planned only, not product-valid yet:
 
-- Canon EOS USB movie control, Touch AF, and vendor settings beyond the implemented ISO/Tv/Av/WB mappings.
+- Canon EOS USB Touch AF and vendor settings beyond the implemented ISO/Tv/Av/WB/movie mappings.
 - CCAPI RTP live view.
 - Optional EDSDK adapter.
 

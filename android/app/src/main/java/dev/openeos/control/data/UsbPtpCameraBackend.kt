@@ -101,7 +101,9 @@ class UsbPtpCameraBackend(
             connected = true,
             batteryLevel = batteryLevel,
             batteryStatus = batteryStatus(batteryLevel),
-            recording = null,
+            recording = CanonEosPtp.movieRecording(
+                canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).currentValue,
+            ),
             mode = propertyDisplay(PtpDevicePropertyCode.EXPOSURE_PROGRAM_MODE).takeUnless { it == "-" } ?: "PTP",
             mediaAvailable = storageSnapshot.isNotEmpty(),
             remainingMinutes = null,
@@ -151,6 +153,10 @@ class UsbPtpCameraBackend(
         val supportsCanonRelease = CanonEosPtp.supportsRemoteRelease(info)
         val supportsCanonLiveView = CanonEosPtp.supportsLiveView(info)
         val supportsCanonFocusDrive = CanonEosPtp.supportsFocusDrive(info)
+        val supportsCanonMovieRecording = CanonEosPtp.supportsMovieRecording(
+            info,
+            canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).availableValues,
+        )
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
             add(CameraFeature.CAMERA_IDENTITY)
@@ -167,6 +173,7 @@ class UsbPtpCameraBackend(
                 add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
             }
             if (supportsCanonFocusDrive) add(CameraFeature.FOCUS_DRIVE)
+            if (supportsCanonMovieRecording) add(CameraFeature.VIDEO_RECORDING)
             if (iso.isNotEmpty() || shutter.isNotEmpty() || aperture.isNotEmpty()) {
                 add(CameraFeature.EXPOSURE_CONTROL)
             }
@@ -194,6 +201,7 @@ class UsbPtpCameraBackend(
             if (shutter.isNotEmpty()) add("shutter")
             if (aperture.isNotEmpty()) add("aperture")
             if (whiteBalance.isNotEmpty()) add("whitebalance")
+            if (supportsCanonMovieRecording) add("movierecordtarget")
             addAll(advancedSettings.map(CameraSettingControl::key))
         }.distinct().sorted()
         val advertisedCommands = info.operations
@@ -218,6 +226,8 @@ class UsbPtpCameraBackend(
                         "Uses Canon EOS RemoteReleaseOn/Off only when the camera advertises the full remote event sequence.",
                     CameraFeature.FOCUS_DRIVE to
                         "Uses Canon EOS DriveLens with the Near/Far 1-3 values documented by libgphoto2.",
+                    CameraFeature.VIDEO_RECORDING to
+                        "Uses Canon EOS EVFRecordStatus only when camera events advertise both Card and None values.",
                     CameraFeature.MEDIA_BROWSER to
                         "Uses standard GetStorageIDs, GetObjectHandles, and GetObjectInfo operations.",
                     CameraFeature.MEDIA_DOWNLOAD to
@@ -441,9 +451,9 @@ class UsbPtpCameraBackend(
         }
     }
 
-    override suspend fun startRecording(): CameraStatus = unsupported(CameraFeature.VIDEO_RECORDING)
+    override suspend fun startRecording(): CameraStatus = setCanonMovieRecording(recording = true)
 
-    override suspend fun stopRecording(): CameraStatus = unsupported(CameraFeature.VIDEO_RECORDING)
+    override suspend fun stopRecording(): CameraStatus = setCanonMovieRecording(recording = false)
 
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = unsupported(CameraFeature.TAP_FOCUS)
 
@@ -506,7 +516,7 @@ class UsbPtpCameraBackend(
             canonPropertyError = if (hasCanonCorePropertyOptions()) {
                 null
             } else {
-                "Canon EOS remote mode returned no supported exposure property events."
+                "Canon EOS remote mode returned no supported writable property events."
             }
         } catch (exception: Exception) {
             canonPropertyError = exception.message ?: exception.javaClass.simpleName
@@ -541,6 +551,35 @@ class UsbPtpCameraBackend(
             "Canon EOS shutter commands completed, but the camera did not report a captured object " +
                 "within ${CANON_CAPTURE_EVENT_TIMEOUT_MILLIS / 1_000} seconds."
         )
+    }
+
+    private suspend fun setCanonMovieRecording(recording: Boolean): CameraStatus {
+        val info = requireDeviceInfo()
+        refreshCanonPropertyState(info)
+        val state = canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS)
+        if (!CanonEosPtp.supportsMovieRecording(info, state.availableValues)) {
+            unsupported<Unit>(CameraFeature.VIDEO_RECORDING)
+        }
+
+        val target = if (recording) {
+            CanonEosPtp.MOVIE_RECORD_TARGET_CARD
+        } else {
+            CanonEosPtp.MOVIE_RECORD_TARGET_NONE
+        }
+        if (state.currentValue != target) {
+            ensureCanonRemoteMode()
+            requireSession().executeDataOutOperation(
+                operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                payload = CanonEosPtp.uint16PropertyPayload(
+                    CanonEosPropertyCode.EVF_RECORD_STATUS,
+                    target.toInt(),
+                ),
+            )
+            synchronized(canonProperties) {
+                canonProperties[CanonEosPropertyCode.EVF_RECORD_STATUS] = state.copy(currentValue = target)
+            }
+        }
+        return status()
     }
 
     private suspend fun readCanonViewfinderData(): ByteArray {

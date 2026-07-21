@@ -25,6 +25,17 @@ class CanonEosPtpTest {
             ),
             CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 2),
         )
+        assertArrayEquals(
+            byteArrayOf(
+                0x0C, 0x00, 0x00, 0x00,
+                0xB8.toByte(), 0xD1.toByte(), 0x00, 0x00,
+                0x04, 0x00, 0x00, 0x00,
+            ),
+            CanonEosPtp.uint16PropertyPayload(
+                CanonEosPropertyCode.EVF_RECORD_STATUS,
+                CanonEosPtp.MOVIE_RECORD_TARGET_CARD.toInt(),
+            ),
+        )
     }
 
     @Test
@@ -96,6 +107,39 @@ class CanonEosPtpTest {
             ),
             CanonEosPtp.propertyPayload(CanonEosPropertyCode.WHITE_BALANCE, 1),
         )
+    }
+
+    @Test
+    fun movieRecordingRequiresCameraAdvertisedCardAndNoneTargets() {
+        val info = deviceInfo(
+            setOf(
+                CanonEosOperationCode.SET_REMOTE_MODE,
+                CanonEosOperationCode.SET_EVENT_MODE,
+                CanonEosOperationCode.GET_EVENT,
+                CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+            )
+        )
+
+        assertTrue(
+            CanonEosPtp.supportsMovieRecording(
+                info,
+                listOf(
+                    CanonEosPtp.MOVIE_RECORD_TARGET_CARD,
+                    CanonEosPtp.MOVIE_RECORD_TARGET_NONE,
+                    CanonEosPtp.MOVIE_RECORD_TARGET_SDRAM,
+                ),
+            )
+        )
+        assertFalse(
+            CanonEosPtp.supportsMovieRecording(
+                info,
+                listOf(CanonEosPtp.MOVIE_RECORD_TARGET_CARD),
+            )
+        )
+        assertEquals(true, CanonEosPtp.movieRecording(CanonEosPtp.MOVIE_RECORD_TARGET_CARD))
+        assertEquals(false, CanonEosPtp.movieRecording(CanonEosPtp.MOVIE_RECORD_TARGET_NONE))
+        assertEquals(false, CanonEosPtp.movieRecording(CanonEosPtp.MOVIE_RECORD_TARGET_SDRAM))
+        assertEquals(null, CanonEosPtp.movieRecording(9L))
     }
 
     @Test

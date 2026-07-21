@@ -15,7 +15,8 @@ The Android wired backend is split into a standards-based core, a small Android 
 9. Canon ISO, Tv, Av and white balance state comes from `PropValueChanged (0xC189)` and `AvailListChanged (0xC18A)` event blocks. Writes use the exact advertised raw choice with `SetDevicePropValueEx (0x9110)`.
 10. Canon capture sends half/full press and balanced release operations, then waits for a captured-object event instead of treating command acceptance as a completed exposure. Manual half-press and Near/Far focus-drive commands use the same prepared session.
 11. Canon Live View writes EVF mode/output, requests `GetViewFinderData`, retries documented busy/not-ready responses, validates each response block, and returns only JPEG block types 1 or 11 as in-memory frames.
-12. Disconnect stops EVF output, restores Canon remote/event state on a best-effort basis, sends `CloseSession`, and always releases the USB interface and device connection.
+12. Canon movie control writes the camera-advertised `EVFRecordStatus (0xD1B8)` value through `SetDevicePropValueEx`: Card (`4`) starts recording, None (`0`) stops, and SDRAM (`3`) represents preview output.
+13. Disconnect stops EVF output, restores Canon remote/event state on a best-effort basis, sends `CloseSession`, and always releases the USB interface and device connection.
 
 The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PTP header. This supports Android 8.x transfer limits while preserving payload bytes that arrive in the same USB transfer as the header.
 
@@ -31,10 +32,11 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 - Canon manual focus requires `DriveLens (0x9155)` and exposes only the libgphoto2 Near/Far values 1-3.
 - Canon JPEG Live View requires remote/event preparation, `SetDevicePropValueEx (0x9110)`, and `GetViewFinderData (0x9153)`. The backend exposes the feature only when the full set is advertised.
 - Canon vendor exposure control requires remote/event preparation and `SetDevicePropValueEx`. Each individual control remains hidden until the camera returns a non-empty available-value list; a current-value event alone is not treated as write permission.
+- Canon movie control requires the same remote/event and property-write operations plus an `EVFRecordStatus` available-value event containing both Card and None. A successful data-phase response updates state; a rejected response leaves recording unchanged and propagates the PTP error.
 - A property is read only when DeviceInfo advertises its code and the descriptor operation. One broken descriptor does not disable the rest of the session.
 - A property control is enabled only when the camera advertises the set operation, marks that descriptor writable, and supplies a bounded enumeration or range. UI labels map back to the exact advertised raw value.
 - Standard battery, ISO/exposure index, exposure time, f-number, white balance, exposure compensation, focus mode, metering, flash, exposure program, drive mode and compression descriptors are recognized. Their actual availability remains camera-dependent.
-- Canon Touch AF, movie control, and vendor settings beyond the implemented core exposure properties remain unavailable until their coordinate, state, type, and value semantics are adequately proven.
+- Canon Touch AF and vendor settings beyond the implemented core exposure and movie target remain unavailable until their coordinate, state, type, and value semantics are adequately proven.
 
 ## Evidence
 
@@ -62,5 +64,6 @@ The pinned open-source implementation provides reproducible operation codes, pac
 - Verify half-press always releases after success, focus failure, cancellation, and transport errors.
 - Run each Near/Far focus step with an MF-compatible lens/camera state and record direction and distance.
 - Record the Canon property events in multiple exposure modes, verify the displayed ISO/Tv/Av/WB choices exactly match the camera, write representative values, and confirm both camera state and returned events change.
+- Confirm `0xD1B8` advertises Card/None/SDRAM, start and stop a short card recording, verify the on-camera REC state and resulting movie file, then capture the redacted diagnostic report.
 - Start/stop USB Live View repeatedly, record frame type/size/FPS, and confirm the camera display and controls recover after disconnect.
 - Record any PTP response code without converting it into a false success state.
