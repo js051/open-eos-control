@@ -198,7 +198,7 @@ public actor CCAPIClient {
         if resolvedMode == .simulator {
             return try await simulatorCapabilities()
         }
-        let settings = cachedSettings ?? (try await loadShootingSettings())
+        let settings = try await cachedOrLoadShootingSettings()
         let controls = cameraSettings(settings)
         var supported = observedFeatures
         if controls.contains(where: { ["iso", "shutter", "aperture"].contains($0.key) }) {
@@ -270,7 +270,7 @@ public actor CCAPIClient {
             return try await status()
         }
 
-        let settings = cachedSettings ?? (try await loadShootingSettings())
+        let settings = try await cachedOrLoadShootingSettings()
         guard let control = cameraSettings(settings).first(where: { $0.key == key }),
               control.values.contains(value) else {
             throw CCAPIError.invalidSetting(key: key, value: value)
@@ -601,6 +601,11 @@ public actor CCAPIClient {
         }
         cachedSettings = merged.isEmpty ? nil : merged
         return cachedSettings
+    }
+
+    private func cachedOrLoadShootingSettings() async throws -> JSONDictionary? {
+        if let cachedSettings { return cachedSettings }
+        return try await loadShootingSettings()
     }
 
     private func cameraSettings(_ value: JSONDictionary?) -> [CameraSetting] {
