@@ -15,12 +15,12 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 
 | Capability | Code status | EOS R6 Mark III | Acceptance evidence |
 | --- | --- | --- | --- |
-| Discovery and API versions | Implemented | Device validation passed | `CcapiClientTest`; diagnostic reports from the physical camera |
+| Discovery and API versions | Implemented | Device validation passed | `CcapiClientTest`; [sanitized physical-camera record](validation/eos-r6-mark-iii-android-ccapi.md) |
 | Identity, battery, storage | Implemented | Identity and battery passed; storage pending | Unit tests plus diagnostic raw JSON |
 | ISO, Tv, Av, WB | Implemented | Device validation passed | Advertised setting paths, unit tests, physical camera control |
-| Dynamic camera settings | Implemented | Device validation in progress | Values come from camera `ability`; writes use discovered versioned paths |
-| JPEG Live View | Implemented | Device validation passed at requested 15 FPS | Frame parser tests and physical rolling-FPS report |
-| Still capture | Implemented | Device validation required | Basic and manual shutter paths support advertised POST or PUT; manual flow always releases |
+| Dynamic camera settings | Implemented | Device validation in progress | Values come from camera `ability`; controls require an advertised setting-specific `PUT` path |
+| JPEG Live View | Implemented | Device validation passed at requested 15 FPS | Frame parser tests and [physical rolling-FPS record](validation/eos-r6-mark-iii-android-ccapi.md) |
+| Still capture | Implemented | Device validation required | Direct shutter requires advertised POST; manual PUT/POST flow always releases |
 | Shutter half-press | Implemented | Device validation required | Advertised manual shutter endpoint, timed half-press, guaranteed release, unit tests |
 | Movie start/stop | Implemented | Device validation required | Control is enabled only when `recbutton` is advertised |
 | Tap focus | Implemented when advertised | Device validation required | `afpoint` must be advertised; failures are not reported as success |
@@ -32,6 +32,7 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 
 | Capability | Status | Completion gate |
 | --- | --- | --- |
+| Android camera Wi-Fi routing | Implemented; device validation required | Camera HTTP sockets use the reachable Wi-Fi `Network` while cellular stays available; record `WIFI_BOUND` plus a successful internet check on a physical phone |
 | Android USB device and PTP-interface diagnostics | Implemented; device validation required | Canon device, permission, interface and endpoints recorded on Android |
 | Android PTP container transport, session and DeviceInfo | Implemented; device validation required | Exact USB packet, buffered reads, transaction sequencing and dataset parsing are unit-tested; record a real R6 Mark III response |
 | Android PTP storage and media | Implemented; device validation required | Standard storage/object operations, bounded listing and streaming `GetObject` are test-covered; validate card behavior and downloads on R6 Mark III |
@@ -49,7 +50,7 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | PC control UI | Implemented; device validation required | Built into the bridge root URL; USB/CCAPI mode selection, capability-gated controls, authenticated binary Live View/downloads, memory-only secrets, redacted diagnostics, English/Traditional Chinese, desktop/narrow browser interaction and overflow checks pass |
 | Android Desktop Bridge client | Implemented; device validation required | Bearer token is memory-only; discovery, camera selection, session lifecycle, capability parsing, controls, JPEG frames, media streaming, diagnostics redaction and Live View request clamping are test-covered |
 | Optional Canon EDSDK adapter | Research | User-installed SDK works without redistributing Canon binaries |
-| iOS CCAPI core | Implemented; device validation required | Native Swift package discovers operations, capability-gates commands, controls settings/capture/record/focus, renders bounded JPEG data, browses/downloads media, redacts diagnostics, and passes macOS Swift tests |
+| iOS CCAPI core | Implemented; device validation required | Native Swift package requires advertised writable settings and complete Live View lifecycle, capability-gates commands, controls capture/record/focus, rejects text metadata downloads, redacts diagnostics, and passes macOS Swift tests |
 | iOS CCAPI app | Implemented; device validation required | iOS 17 SwiftUI app reaches the native core for connection, capability-gated controls, JPEG Live View, capture/record/focus, media, and diagnostics; English/Traditional Chinese, offline preview, safe orientation behavior, five unit tests, and two iPhone Simulator UI workflows pass; record a physical iPhone/R6 Mark III result |
 | iOS USB/PTP | Research | Public Apple API and a working physical-device path are demonstrated |
 

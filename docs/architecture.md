@@ -47,6 +47,8 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 
 - Backend-specific power should appear as capabilities, not UI assumptions.
 - Unsupported operations must fail with explicit transport/feature errors.
+- A CCAPI control is writable only when discovery advertises the exact endpoint and HTTP method; setting values must also come from the camera's current `ability` list. UI gating and backend enforcement must use the same rule so stale or direct calls cannot bypass it.
+- JPEG Live View requires an advertised start operation, at least one advertised frame endpoint, and an advertised stop operation. A 2xx text/JSON media response is metadata or an error, never a downloadable camera file.
 - Canon EDSDK must not be committed or redistributed in this open-source repo; keep it as an optional local adapter.
 - Live view sources are interchangeable at the contract level: CCAPI JPEG polling, CCAPI RTP, USB/PTP preview, and bridge streams.
 - Public references and validity status live in [reference-projects.md](reference-projects.md). Features should remain `planned` or `unsupported` until the repo has an executable path and test or real-device evidence.

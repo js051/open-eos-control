@@ -63,10 +63,12 @@ class CcapiClient(
 
     private var apiVersionPrefixes = listOf("/ccapi/ver100")
     private var isRecording: Boolean? = null
-    private val supportedSettingKeys = mutableSetOf<String>()
     private val settingPathsByKey = mutableMapOf<String, String>()
+    private val settingValuesByKey = mutableMapOf<String, Set<String>>()
     private val apiOperations = linkedSetOf<CcapiApiOperation>()
     private val observedFeatures = mutableSetOf<CameraFeature>()
+    private var enforceAdvertisedOperations = false
+    private var settingsLoaded = false
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.MEDIUM
 
@@ -166,6 +168,7 @@ class CcapiClient(
 
         if (success3) {
             isRealCamera = true
+            enforceAdvertisedOperations = true
             return
         }
 
@@ -185,6 +188,7 @@ class CcapiClient(
         val json = JSONObject(body)
         val versions = linkedSetOf<String>()
         apiOperations.clear()
+        enforceAdvertisedOperations = true
         val apiArray = json.optJSONArray("api")
         if (apiArray != null && apiArray.length() > 0) {
             for (index in 0 until apiArray.length()) {
@@ -329,39 +333,42 @@ class CcapiClient(
         return if (isRealCamera) {
             val settings = loadShootingSettings()
 
-            val isoList = settings?.optJSONObject("iso")?.optJSONArray("ability")?.toStringList() ?: emptyList()
-            val shutterList = (settings?.optJSONObject("shutter") ?: settings?.optJSONObject("shutterspeed") ?: settings?.optJSONObject("tv"))
-                ?.optJSONArray("ability")?.toStringList() ?: emptyList()
-            val apertureList = (settings?.optJSONObject("aperture") ?: settings?.optJSONObject("av"))
-                ?.optJSONArray("ability")?.toStringList() ?: emptyList()
-            val wbList = (settings?.optJSONObject("whitebalance") ?: settings?.optJSONObject("wb") ?: settings?.optJSONObject("white_balance"))
-                ?.optJSONArray("ability")?.toStringList() ?: emptyList()
-            val advancedSettings = settings?.toAdvancedSettingControls().orEmpty()
+            val isoList = writableSetting(settings, listOf("iso"))
+                ?.optJSONArray("ability")?.toStringList().orEmpty()
+            val shutterList = writableSetting(settings, listOf("tv", "shutterspeed", "shutter"))
+                ?.optJSONArray("ability")?.toStringList().orEmpty()
+            val apertureList = writableSetting(settings, listOf("av", "aperture"))
+                ?.optJSONArray("ability")?.toStringList().orEmpty()
+            val wbList = writableSetting(settings, listOf("wb", "whitebalance", "white_balance"))
+                ?.optJSONArray("ability")?.toStringList().orEmpty()
+            val advancedSettings = settings
+                ?.toAdvancedSettingControls(settingPathsByKey.keys)
+                .orEmpty()
             val supportedFeatures = observedFeatures.toMutableSet()
-            if (settings.hasAnySetting("iso", "tv", "shutterspeed", "shutter", "av", "aperture")) {
+            if (isoList.isNotEmpty() || shutterList.isNotEmpty() || apertureList.isNotEmpty()) {
                 supportedFeatures.add(CameraFeature.EXPOSURE_CONTROL)
             }
-            if (settings.hasAnySetting("wb", "whitebalance", "white_balance")) {
+            if (wbList.isNotEmpty()) {
                 supportedFeatures.add(CameraFeature.WHITE_BALANCE_CONTROL)
             }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
-            if (supportsApi("POST", "/shooting/liveview") || CameraFeature.LIVE_VIEW in observedFeatures) {
+            if (supportsCompleteLiveView() || CameraFeature.LIVE_VIEW in observedFeatures) {
                 supportedFeatures.add(CameraFeature.LIVE_VIEW)
                 supportedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
             }
-            if (supportsCommandApi("/shooting/control/recbutton")) {
+            if (recordingOperation() != null) {
                 supportedFeatures.add(CameraFeature.VIDEO_RECORDING)
             }
             if (
-                supportsCommandApi("/shooting/control/shutterbutton") ||
-                supportsCommandApi("/shooting/control/shutterbutton/manual")
+                directShutterOperation() != null ||
+                manualShutterOperation() != null
             ) {
                 supportedFeatures.add(CameraFeature.STILL_CAPTURE)
             }
-            if (supportsCommandApi("/shooting/control/shutterbutton/manual")) {
+            if (manualShutterOperation() != null) {
                 supportedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
             }
-            if (supportsCommandApi("/shooting/control/afpoint")) {
+            if (tapFocusOperation() != null) {
                 supportedFeatures.add(CameraFeature.TAP_FOCUS)
             }
             if (supportsApi("GET", "/contents")) {
@@ -436,9 +443,14 @@ class CcapiClient(
 
     suspend fun startRecording(): CameraStatus {
         if (isRealCamera) {
+            val operation = recordingOperation()
+            if (enforceAdvertisedOperations && operation == null) {
+                error("Camera did not advertise movie recording control.")
+            }
             commandOk(
                 pathSuffix = "/shooting/control/recbutton",
                 payload = JSONObject().put("action", "start"),
+                operation = operation,
             )
             isRecording = true
         } else {
@@ -449,9 +461,14 @@ class CcapiClient(
 
     suspend fun stopRecording(): CameraStatus {
         if (isRealCamera) {
+            val operation = recordingOperation()
+            if (enforceAdvertisedOperations && operation == null) {
+                error("Camera did not advertise movie recording control.")
+            }
             commandOk(
                 pathSuffix = "/shooting/control/recbutton",
                 payload = JSONObject().put("action", "stop"),
+                operation = operation,
             )
             isRecording = false
         } else {
@@ -462,8 +479,11 @@ class CcapiClient(
 
     suspend fun captureStill(): CameraStatus {
         if (isRealCamera) {
-            val directOperation = commandOperation("/shooting/control/shutterbutton")
-            val manualOperation = commandOperation("/shooting/control/shutterbutton/manual")
+            val directOperation = directShutterOperation()
+            val manualOperation = manualShutterOperation()
+            if (enforceAdvertisedOperations && directOperation == null && manualOperation == null) {
+                error("Camera did not advertise a supported still-capture operation.")
+            }
             if (directOperation != null || manualOperation == null) {
                 commandOk(
                     pathSuffix = "/shooting/control/shutterbutton",
@@ -497,7 +517,10 @@ class CcapiClient(
 
     suspend fun halfPressShutter(): CameraStatus {
         if (isRealCamera) {
-            val operation = commandOperation("/shooting/control/shutterbutton/manual")
+            val operation = manualShutterOperation()
+            if (enforceAdvertisedOperations && operation == null) {
+                error("Camera did not advertise manual shutter control.")
+            }
             withGuaranteedRelease(
                 press = {
                     commandOk(
@@ -548,6 +571,9 @@ class CcapiClient(
 
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
         if (isRealCamera) {
+            if (enforceAdvertisedOperations && !supportsCompleteLiveView()) {
+                error("Camera did not advertise a complete Live View start, frame, and stop lifecycle.")
+            }
             val path = apiPath("POST", "/shooting/liveview")
             val requestedPayload = JSONObject()
                 .put("cameradisplay", "on")
@@ -568,6 +594,7 @@ class CcapiClient(
 
     suspend fun stopLiveView() {
         if (isRealCamera) {
+            if (enforceAdvertisedOperations && !supportsApi("DELETE", "/shooting/liveview")) return
             try {
                 deleteOk(apiPath("DELETE", "/shooting/liveview"))
             } catch (e: Exception) {
@@ -578,8 +605,12 @@ class CcapiClient(
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
         return if (isRealCamera) {
+            val operation = tapFocusOperation()
+            if (enforceAdvertisedOperations && operation == null) {
+                error("Camera did not advertise coordinate Tap AF control.")
+            }
             val payload = JSONObject().put("x", x).put("y", y)
-            commandOk("/shooting/control/afpoint", payload)
+            commandOk("/shooting/control/afpoint", payload, operation)
             FocusResult(ok = true, x = x, y = y)
         } else {
             val payload = JSONObject().put("x", x).put("y", y)
@@ -625,11 +656,7 @@ class CcapiClient(
         if (isRealCamera) {
             when (request.source) {
                 LiveViewSource.AUTO,
-                LiveViewSource.CCAPI_JPEG_POLLING -> listOf(
-                    "$baseUrl${apiPath("GET", "/shooting/liveview/flip")}",
-                    "$baseUrl${apiPath("GET", "/shooting/liveview/flipdetail")}?kind=image",
-                    "$baseUrl${apiPath("GET", "/shooting/liveview")}",
-                )
+                LiveViewSource.CCAPI_JPEG_POLLING -> liveViewFramePaths().map { "$baseUrl$it" }
 
                 LiveViewSource.CCAPI_RTP -> error("CCAPI RTP live view is planned but not implemented by the JPEG frame reader yet.")
 
@@ -650,26 +677,64 @@ class CcapiClient(
     private fun supportsApi(method: String, pathSuffix: String): Boolean =
         apiOperations.any { it.method == method && it.path.endsWith(pathSuffix) }
 
-    private fun supportsCommandApi(pathSuffix: String): Boolean =
-        commandOperation(pathSuffix) != null
+    private fun advertisedApiPaths(method: String, pathSuffix: String): List<String> =
+        apiVersionPrefixes.mapNotNull { prefix ->
+            apiOperations.firstOrNull {
+                it.method == method && it.path.startsWith(prefix) && it.path.endsWith(pathSuffix)
+            }?.path
+        }.distinct()
 
-    private fun commandOperation(pathSuffix: String): CcapiApiOperation? {
-        val matching = apiOperations.filter {
-            it.method in CCAPI_COMMAND_METHODS && it.path.endsWith(pathSuffix)
-        }
+    private fun apiOperation(method: String, pathSuffix: String): CcapiApiOperation? {
+        val matching = apiOperations.filter { it.method == method && it.path.endsWith(pathSuffix) }
         return matching.firstOrNull { it.path.startsWith(apiVersionPrefix) }
             ?: matching.maxByOrNull { it.path.substringBefore(pathSuffix).apiVersionNumber() }
     }
 
+    private fun directShutterOperation(): CcapiApiOperation? =
+        apiOperation("POST", "/shooting/control/shutterbutton")
+
+    private fun manualShutterOperation(): CcapiApiOperation? =
+        apiOperation("PUT", "/shooting/control/shutterbutton/manual")
+            ?: apiOperation("POST", "/shooting/control/shutterbutton/manual")
+
+    private fun recordingOperation(): CcapiApiOperation? =
+        apiOperation("POST", "/shooting/control/recbutton")
+            ?: apiOperation("PUT", "/shooting/control/recbutton")
+
+    private fun tapFocusOperation(): CcapiApiOperation? =
+        apiOperation("PUT", "/shooting/control/afpoint")
+            ?: apiOperation("POST", "/shooting/control/afpoint")
+
+    private fun liveViewFramePaths(): List<String> {
+        if (!enforceAdvertisedOperations) {
+            return listOf(
+                apiPath("GET", "/shooting/liveview/flip"),
+                "${apiPath("GET", "/shooting/liveview/flipdetail")}?kind=image",
+                apiPath("GET", "/shooting/liveview"),
+            )
+        }
+        return buildList {
+            apiOperation("GET", "/shooting/liveview/flip")?.let { add(it.path) }
+            apiOperation("GET", "/shooting/liveview/flipdetail")?.let { add("${it.path}?kind=image") }
+            apiOperation("GET", "/shooting/liveview")?.let { add(it.path) }
+        }
+    }
+
+    private fun supportsCompleteLiveView(): Boolean =
+        supportsApi("POST", "/shooting/liveview") &&
+            supportsApi("DELETE", "/shooting/liveview") &&
+            liveViewFramePaths().isNotEmpty()
+
     private suspend fun commandOk(
         pathSuffix: String,
         payload: JSONObject,
-        operation: CcapiApiOperation? = commandOperation(pathSuffix),
+        operation: CcapiApiOperation? = null,
     ) {
-        val selected = operation ?: CcapiApiOperation(
-            method = "POST",
-            path = "$apiVersionPrefix$pathSuffix",
-        )
+        val selected = operation ?: if (!enforceAdvertisedOperations) {
+            CcapiApiOperation(method = "POST", path = "$apiVersionPrefix$pathSuffix")
+        } else {
+            error("Camera did not advertise a supported command for $pathSuffix.")
+        }
         val requestBody = payload.toString().toRequestBody(jsonMediaType)
         val builder = Request.Builder().url("$baseUrl${selected.path}")
         val request = when (selected.method) {
@@ -844,6 +909,16 @@ class CcapiClient(
                         continue
                     }
 
+                    val contentType = response.header("content-type")
+                    val previewBytes = response.peekBody(MEDIA_SNIFF_BYTES).bytes()
+                    if (contentType.isTextLikeContentType() || previewBytes.looksLikeTextPayload()) {
+                        response.use {
+                            val preview = previewBytes.toString(StandardCharsets.UTF_8).take(MAX_ERROR_BODY_CHARS)
+                            errors.add("$path: HTTP ${response.code}: $preview")
+                        }
+                        continue
+                    }
+
                     try {
                         return@withContext response.use {
                             val body = requireNotNull(response.body) { "Camera returned an empty media response." }
@@ -874,7 +949,7 @@ class CcapiClient(
                             CameraMediaDownloadResult(
                                 item = item.copy(sizeBytes = item.sizeBytes ?: bytesTransferred),
                                 bytesTransferred = bytesTransferred,
-                                contentType = response.header("content-type"),
+                                contentType = contentType,
                             )
                         }
                     } catch (exception: Exception) {
@@ -923,14 +998,22 @@ class CcapiClient(
     }
 
     private suspend fun loadShootingSettings(): JSONObject? {
-        supportedSettingKeys.clear()
         settingPathsByKey.clear()
+        settingValuesByKey.clear()
+        settingsLoaded = false
         val merged = JSONObject()
 
-        versionedPaths("/shooting/settings").forEach { path ->
+        val paths = if (enforceAdvertisedOperations) {
+            advertisedApiPaths("GET", "/shooting/settings")
+        } else {
+            versionedPaths("/shooting/settings")
+        }
+        paths.forEach { path ->
             val settings = try {
                 getJson(path)
-            } catch (e: Exception) {
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
                 null
             } ?: return@forEach
 
@@ -938,31 +1021,42 @@ class CcapiClient(
             val keys = settings.keys()
             while (keys.hasNext()) {
                 val key = keys.next()
-                supportedSettingKeys.add(key)
-                settingPathsByKey.putIfAbsent(key, "$prefix/shooting/settings/$key")
+                val settingPath = "$prefix/shooting/settings/$key"
+                if (!enforceAdvertisedOperations || apiOperations.contains(CcapiApiOperation("PUT", settingPath))) {
+                    settingPathsByKey.putIfAbsent(key, settingPath)
+                    val values = settings.optJSONObject(key)
+                        ?.optJSONArray("ability")
+                        ?.toStringList()
+                        .orEmpty()
+                        .filter { it.isNotBlank() }
+                        .toSet()
+                    if (values.isNotEmpty()) settingValuesByKey.putIfAbsent(key, values)
+                }
                 if (!merged.has(key)) {
                     merged.put(key, settings.get(key))
                 }
             }
         }
 
+        settingsLoaded = true
         return if (merged.length() > 0) merged else null
     }
 
     private suspend fun putSettingValue(candidateKeys: List<String>, value: String) {
-        if (settingPathsByKey.isEmpty()) {
+        if (!settingsLoaded) {
             loadShootingSettings()
         }
 
-        val supportedCandidates = candidateKeys
-            .filter { supportedSettingKeys.isEmpty() || supportedSettingKeys.contains(it) || settingPathsByKey.containsKey(it) }
-            .ifEmpty { candidateKeys }
-
+        val supportedCandidates = candidateKeys.filter(settingPathsByKey::containsKey)
+        if (supportedCandidates.isEmpty()) {
+            error("Camera did not advertise a writable setting for ${candidateKeys.joinToString()}.")
+        }
+        val advertisedValues = supportedCandidates.flatMap { settingValuesByKey[it].orEmpty() }.toSet()
+        if (value !in advertisedValues) {
+            error("Value '$value' is not advertised for ${supportedCandidates.first()}.")
+        }
         val paths = supportedCandidates
-            .flatMap { key ->
-                settingPathsByKey[key]?.let { listOf(it) }
-                    ?: versionedPaths("/shooting/settings/$key")
-            }
+            .mapNotNull(settingPathsByKey::get)
             .distinct()
 
         val errors = mutableListOf<String>()
@@ -979,6 +1073,12 @@ class CcapiClient(
             "Failed to set shooting setting to '$value'. Tried:\n" +
                 errors.joinToString(separator = "\n") { "  - $it" }
         )
+    }
+
+    private fun writableSetting(settings: JSONObject?, candidateKeys: List<String>): JSONObject? {
+        if (settings == null) return null
+        val key = candidateKeys.firstOrNull(settingPathsByKey::containsKey) ?: return null
+        return settings.optJSONObject(key)
     }
 
     private suspend fun getJson(path: String): JSONObject = requestJson(
@@ -1137,9 +1237,13 @@ class CcapiClient(
                 contains("html", ignoreCase = true)
             )
 
+    private fun ByteArray.looksLikeTextPayload(): Boolean {
+        val first = firstOrNull { it.toInt().toChar() !in " \t\r\n" }?.toInt()?.toChar() ?: return false
+        return first == '{' || first == '[' || first == '<'
+    }
+
     private companion object {
         val CCAPI_HTTP_METHODS = listOf("GET", "PUT", "POST", "DELETE")
-        val CCAPI_COMMAND_METHODS = setOf("POST", "PUT")
         const val JPEG_MARKER_PREFIX = 0xFF
         const val JPEG_START_MARKER = 0xD8
         const val JPEG_END_MARKER = 0xD9
@@ -1152,6 +1256,7 @@ class CcapiClient(
         const val MAX_MEDIA_TREE_DEPTH = 4
         const val MEDIA_TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
+        const val MEDIA_SNIFF_BYTES = 64L
     }
 }
 
@@ -1217,12 +1322,12 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
     liveView = LiveViewCapabilities.simulator(),
 )
 
-private fun JSONObject.toAdvancedSettingControls(): List<CameraSettingControl> {
+private fun JSONObject.toAdvancedSettingControls(writableKeys: Set<String>): List<CameraSettingControl> {
     val controls = mutableListOf<CameraSettingControl>()
     val keys = keys()
     while (keys.hasNext()) {
         val key = keys.next()
-        if (key in PRIMARY_SETTING_KEYS) continue
+        if (key in PRIMARY_SETTING_KEYS || key !in writableKeys) continue
 
         val setting = optJSONObject(key) ?: continue
         val values = setting.optJSONArray("ability")?.toStringList().orEmpty()
@@ -1280,9 +1385,6 @@ private fun String.splitCamelCaseWords(): List<String> =
 
 private fun org.json.JSONArray.toStringList(): List<String> =
     List(length()) { index -> getString(index) }
-
-private fun JSONObject?.hasAnySetting(vararg keys: String): Boolean =
-    this != null && keys.any { has(it) && optJSONObject(it) != null }
 
 private fun JSONObject.optNullableInt(key: String): Int? =
     if (has(key) && !isNull(key)) optInt(key) else null

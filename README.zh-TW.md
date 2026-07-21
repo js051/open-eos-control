@@ -4,7 +4,7 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已經有走同一個 camera core contract 的標準 USB/PTP backend、依能力開放的 Canon EOS 遠端快門、曝光／白平衡、焦點移動、JPEG Live View，以及可執行的 Desktop Bridge client。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 透過開源 `gphoto2` CLI 同時提供經測試的 HTTP API 與內建響應式控制介面。原生 Swift CCAPI core 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
+這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已經有走同一個 camera core contract 的標準 USB/PTP backend、依能力開放的 Canon EOS 遠端快門、曝光／白平衡、焦點移動、JPEG Live View，以及可執行的 Desktop Bridge client。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI core 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
 
 ## 專案結構
 
@@ -25,6 +25,7 @@ open-eos-control/
 
 - 直接輸入 CCAPI 相機 URL，並提供 HTTP/HTTPS preset
 - 可選填 CCAPI Basic Authentication 帳號與密碼
+- 相機 HTTP socket 綁定可達相機的 Wi-Fi route，行動網路可保持開啟
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
@@ -45,6 +46,8 @@ https://192.168.1.2:443
 ```
 
 真機測試時，請以相機 CCAPI 設定畫面顯示的 IP 與 port 為準。
+
+Android 直連相機時，只會把相機 HTTP 流量綁定到可達相機的 Wi-Fi `Network`，不會綁定整個 App process，因此行動數據可繼續提供一般網路。Debug 診斷會顯示選到的 route、介面、Wi-Fi 與行動網路狀態；若沒有任何 Wi-Fi route 能到達相機，連線會顯示明確錯誤。
 
 HTTPS 會使用 Android 正常的憑證驗證，不再接受任意自簽憑證。若相機無法提供系統信任的 HTTPS 憑證，請在隔離的相機網路使用 HTTP，或先安裝可信憑證。
 

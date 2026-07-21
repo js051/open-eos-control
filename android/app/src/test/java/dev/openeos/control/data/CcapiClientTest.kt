@@ -278,15 +278,16 @@ class CcapiClientTest {
         server.enqueue(MockResponse().setResponseCode(404))
         server.enqueue(MockResponse().setResponseCode(404))
         server.enqueue(jsonResponse("""{"productname":"Canon EOS R6 Mark III"}"""))
-        server.enqueue(MockResponse().setResponseCode(204))
 
         client.initialize()
-        client.startLiveView()
+        val failure = runCatching { client.startLiveView() }.exceptionOrNull()
 
         assertEquals("/ccapi", server.takeRequest().path)
         assertEquals("/ccapi/", server.takeRequest().path)
         assertEquals("/ccapi/ver110/deviceinformation", server.takeRequest().path)
-        assertEquals("/ccapi/ver110/shooting/liveview", server.takeRequest().path)
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("complete Live View"))
+        assertEquals(3, server.requestCount)
     }
 
     @Test
@@ -314,6 +315,43 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
         assertTrue(!capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
         assertTrue(!capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
+    }
+
+    @Test
+    fun realCapabilitiesRejectReadOnlySettingsWrongShutterMethodAndIncompleteLiveView() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """
+                {
+                  "ver100": [
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/control/shutterbutton","put":true},
+                    {"path":"/shooting/liveview","post":true},
+                    {"path":"/shooting/liveview/flip","get":true}
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val requestCount = server.requestCount
+        val captureFailure = runCatching { client.captureStill() }.exceptionOrNull()
+        val settingFailure = runCatching { client.setExposure(iso = "1600") }.exceptionOrNull()
+        val liveViewFailure = runCatching { client.startLiveView() }.exceptionOrNull()
+
+        assertTrue(!capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
+        assertTrue(!capabilities.matrix.supports(CameraFeature.ADVANCED_SETTINGS))
+        assertTrue(!capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
+        assertTrue(!capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
+        assertEquals(emptyList<CameraSettingControl>(), capabilities.advancedSettings)
+        assertTrue(captureFailure is IllegalStateException)
+        assertTrue(settingFailure is IllegalStateException)
+        assertTrue(liveViewFailure is IllegalStateException)
+        assertEquals(requestCount, server.requestCount)
     }
 
     @Test
@@ -394,6 +432,22 @@ class CcapiClientTest {
         assertEquals("1/100", JSONObject(putRequest.body.readUtf8()).getString("value"))
         repeat(4) { server.takeRequest() }
         assertEquals("1/100", status.exposure.shutter)
+    }
+
+    @Test
+    fun realSetExposureRejectsValueOutsideCameraAbilityWithoutPut() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse(DISCOVERY_JSON))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+
+        client.initialize()
+        client.capabilities()
+        val requestCount = server.requestCount
+        val failure = runCatching { client.setExposure(iso = "51200") }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("not advertised"))
+        assertEquals(requestCount, server.requestCount)
     }
 
     @Test
@@ -612,7 +666,11 @@ class CcapiClientTest {
             kind = "raw",
         )
         val bytes = byteArrayOf(9, 8, 7, 6)
-        server.enqueue(MockResponse().setResponseCode(400).setBody("kind required"))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"kind":"metadata"}"""),
+        )
         server.enqueue(binaryResponse(bytes, "image/x-canon-cr3"))
         val output = ByteArrayOutputStream()
 
@@ -852,7 +910,14 @@ class CcapiClientTest {
                 {"path":"/shooting/control/shutterbutton","post":true},
                 {"path":"/shooting/control/shutterbutton/manual","put":true},
                 {"path":"/contents","get":true},
-                {"path":"/shooting/settings","get":true}
+                {"path":"/shooting/settings","get":true},
+                {"path":"/shooting/settings/iso","put":true},
+                {"path":"/shooting/settings/tv","put":true},
+                {"path":"/shooting/settings/av","put":true},
+                {"path":"/shooting/settings/wb","put":true},
+                {"path":"/shooting/settings/meteringmode","put":true},
+                {"path":"/shooting/settings/afmethod","put":true},
+                {"path":"/shooting/settings/shootingmode","put":true}
               ]
             }
         """

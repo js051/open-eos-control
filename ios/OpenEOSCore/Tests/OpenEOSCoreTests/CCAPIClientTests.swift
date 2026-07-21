@@ -15,6 +15,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/settings/tv","put":true},
         {"path":"/shooting/settings/av","put":true},
         {"path":"/shooting/settings/wb","put":true},
+        {"path":"/shooting/settings/meteringmode","put":true},
         {"path":"/shooting/control/shutterbutton","post":true},
         {"path":"/shooting/control/shutterbutton/manual","put":true},
         {"path":"/shooting/control/recbutton","post":true},
@@ -56,6 +57,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(snapshot.capabilities.profile.priority, .primary)
         XCTAssertEqual(snapshot.capabilities.setting("iso")?.values, ["100", "800", "1600"])
         XCTAssertEqual(snapshot.capabilities.setting("meteringmode")?.values, ["evaluative", "spot"])
+        XCTAssertNil(snapshot.capabilities.setting("readonly"))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.stillCapture))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.shutterHalfPress))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.videoRecording))
@@ -95,6 +97,46 @@ final class CCAPIClientTests: XCTestCase {
         }
         let requestCount = await transport.requests().count
         XCTAssertEqual(requestCount, 1)
+    }
+
+    func testReadOnlySettingsWrongShutterMethodAndIncompleteLiveViewStayUnavailable() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/control/shutterbutton","put":true},{"path":"/shooting/liveview","post":true},{"path":"/shooting/liveview/flip","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let capabilities = try await client.capabilities()
+        let requestCount = await transport.requests().count
+
+        XCTAssertFalse(capabilities.matrix.supports(.exposureControl))
+        XCTAssertFalse(capabilities.matrix.supports(.advancedSettings))
+        XCTAssertFalse(capabilities.matrix.supports(.stillCapture))
+        XCTAssertFalse(capabilities.matrix.supports(.liveView))
+        XCTAssertTrue(capabilities.settings.isEmpty)
+
+        do {
+            _ = try await client.captureStill()
+            XCTFail("Expected unsupported capture")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.stillCapture))
+        }
+        do {
+            _ = try await client.setSetting(key: "iso", value: "1600")
+            XCTFail("Expected read-only setting rejection")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .invalidSetting(key: "iso", value: "1600"))
+        }
+        do {
+            try await client.startLiveView()
+            XCTFail("Expected incomplete Live View rejection")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.liveView))
+        }
+        let finalRequestCount = await transport.requests().count
+        XCTAssertEqual(finalRequestCount, requestCount)
     }
 
     func testHalfPressUsesAdvertisedMethodAndAlwaysReleases() async throws {
@@ -215,7 +257,11 @@ final class CCAPIClientTests: XCTestCase {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
         let path = "/ccapi/ver100/contents/card1/100CANON/IMG_0001.CR3"
-        await transport.enqueueDownload(path: path, status: 400, body: Data("kind required".utf8))
+        await transport.enqueueDownload(
+            path: path,
+            status: 200,
+            body: Data(#"{"kind":"metadata"}"#.utf8)
+        )
         let media = Data([9, 8, 7, 6])
         await transport.enqueueDownload(
             path: "\(path)?kind=main",

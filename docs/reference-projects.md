@@ -39,6 +39,10 @@ Implemented but requires real-camera verification:
 - PC direct CCAPI, Desktop Bridge USB, and Android bridge client with a physical R6 Mark III.
 - iOS CCAPI app with a physical iPhone and R6 Mark III.
 
+Recorded physical evidence:
+
+- [Sanitized Android/R6 Mark III CCAPI validation](validation/eos-r6-mark-iii-android-ccapi.md): discovery, identity, battery, advertised exposure controls, the Live View parameter fallback, and requested/observed 15 FPS are recorded; shutter, movie, Tap AF, media, Wi-Fi/cellular coexistence, and USB remain explicitly pending.
+
 Planned only, not product-valid yet:
 
 - Canon EOS USB movie control, Touch AF, and vendor settings beyond the implemented ISO/Tv/Av/WB mappings.

@@ -5,10 +5,10 @@
 ## Implemented Core
 
 - CCAPI discovery through `/ccapi`, versioned operation parsing, and `ver110`/`ver100` fallback
-- Camera identity, battery, storage, exposure, white balance, and dynamic camera-advertised settings
+- Camera identity, battery, storage, exposure, white balance, and dynamic settings; writable controls require the exact setting-specific `PUT` operation and a value from camera `ability`
 - Still capture, timed half-press with guaranteed release, recording, and tap focus only when advertised
-- JPEG Live View with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
-- Bounded, same-origin media traversal and file-backed downloads with Canon main-file query fallbacks
+- JPEG Live View only when discovery advertises a complete start/frame/stop lifecycle, with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
+- Bounded, same-origin media traversal and file-backed downloads with Canon main-file query fallbacks; text/JSON metadata is rejected even when returned with HTTP 2xx
 - Basic Authentication held by the client instance and redacted diagnostic output
 - Simulator mode and injectable HTTP transport for deterministic tests
 

@@ -7,9 +7,10 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 ### CCAPI network
 
 - Status: implemented.
-- Platforms: direct Android and iOS clients; PC uses the separate desktop bridge path today.
+- Platforms: direct Android and iOS clients; PC uses the native CCAPI engine inside Desktop Bridge.
 - Connection: Wi-Fi or wired network when the camera exposes CCAPI over HTTP/HTTPS.
-- Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III, advertised still/manual shutter commands, and paged media retrieval.
+- Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III, strictly advertised writable settings and shutter commands, complete start/frame/stop Live View gating, and paged media retrieval.
+- Android routes only camera HTTP sockets through the Wi-Fi network that reaches the camera, allowing cellular internet to remain available without process-wide network binding. A physical coexistence result is still required.
 - Current tradeoffs: live view is JPEG polling today, so smoothness and latency depend on Wi-Fi, camera response time, and device JPEG decode cost.
 - Device-validation queue: still capture, shutter half-press, movie recording, tap focus, media browser, and media download on EOS R6 Mark III.
 - Planned upgrades: focus drive where a documented endpoint is advertised and RTP live view experiments.

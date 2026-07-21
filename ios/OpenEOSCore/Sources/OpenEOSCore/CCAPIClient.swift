@@ -43,6 +43,8 @@ public actor CCAPIClient {
     private var observedFeatures = Set<CameraFeature>()
     private var settingPaths: [String: String] = [:]
     private var cachedSettings: JSONDictionary?
+    private var enforceAdvertisedOperations = false
+    private var settingsLoaded = false
     private var cachedModel = "Canon Camera"
     private var recording: Bool?
     private var liveViewSizeControlSupported = true
@@ -118,6 +120,7 @@ public actor CCAPIClient {
                 preferredVersionPrefix = prefix
                 cachedModel = value.string("productname", default: cachedModel)
                 observedFeatures.insert(.cameraIdentity)
+                enforceAdvertisedOperations = true
                 initialized = true
                 return
             } catch {
@@ -210,18 +213,17 @@ public actor CCAPIClient {
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
-        if supports(.post, suffix: "/shooting/liveview") || observedFeatures.contains(.liveView) {
+        if supportsCompleteLiveView() || observedFeatures.contains(.liveView) {
             supported.formUnion([.liveView, .liveViewJPEGPolling])
         }
-        if commandOperation(suffix: "/shooting/control/recbutton") != nil { supported.insert(.videoRecording) }
-        if commandOperation(suffix: "/shooting/control/shutterbutton") != nil ||
-            commandOperation(suffix: "/shooting/control/shutterbutton/manual") != nil {
+        if recordingOperation() != nil { supported.insert(.videoRecording) }
+        if directShutterOperation() != nil || manualShutterOperation() != nil {
             supported.insert(.stillCapture)
         }
-        if commandOperation(suffix: "/shooting/control/shutterbutton/manual") != nil {
+        if manualShutterOperation() != nil {
             supported.insert(.shutterHalfPress)
         }
-        if commandOperation(suffix: "/shooting/control/afpoint") != nil { supported.insert(.tapFocus) }
+        if tapFocusOperation() != nil { supported.insert(.tapFocus) }
         if supports(.get, suffix: "/contents") {
             supported.formUnion([.mediaBrowser, .mediaDownload])
         }
@@ -286,8 +288,8 @@ public actor CCAPIClient {
             return try await status()
         }
 
-        let direct = commandOperation(suffix: "/shooting/control/shutterbutton")
-        let manual = commandOperation(suffix: "/shooting/control/shutterbutton/manual")
+        let direct = directShutterOperation()
+        let manual = manualShutterOperation()
         guard direct != nil || manual != nil else { throw CCAPIError.unsupported(.stillCapture) }
         if let direct {
             try await commandOK(operation: direct, json: ["af": true])
@@ -311,7 +313,7 @@ public actor CCAPIClient {
             )
             return try await status()
         }
-        guard let manual = commandOperation(suffix: "/shooting/control/shutterbutton/manual") else {
+        guard let manual = manualShutterOperation() else {
             throw CCAPIError.unsupported(.shutterHalfPress)
         }
         try await performGuaranteedRelease(
@@ -344,7 +346,7 @@ public actor CCAPIClient {
                 y: (value["y"] as? NSNumber)?.doubleValue ?? y
             )
         }
-        guard let operation = commandOperation(suffix: "/shooting/control/afpoint") else {
+        guard let operation = tapFocusOperation() else {
             throw CCAPIError.unsupported(.tapFocus)
         }
         try await commandOK(operation: operation, json: ["x": x, "y": y])
@@ -354,7 +356,7 @@ public actor CCAPIClient {
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
         try await ensureInitialized()
         if resolvedMode == .simulator { return }
-        guard supports(.post, suffix: "/shooting/liveview") else {
+        guard supportsCompleteLiveView() else {
             throw CCAPIError.unsupported(.liveView)
         }
         let path = apiPath(.post, suffix: "/shooting/liveview")
@@ -376,6 +378,7 @@ public actor CCAPIClient {
 
     public func stopLiveView() async {
         guard initialized, resolvedMode != .simulator else { return }
+        guard !enforceAdvertisedOperations || supports(.delete, suffix: "/shooting/liveview") else { return }
         try? await requestOK(path: apiPath(.delete, suffix: "/shooting/liveview"), method: .delete)
     }
 
@@ -385,11 +388,8 @@ public actor CCAPIClient {
         if resolvedMode == .simulator {
             paths = ["/ccapi/liveview/frame"]
         } else {
-            paths = [
-                apiPath(.get, suffix: "/shooting/liveview/flip"),
-                apiPath(.get, suffix: "/shooting/liveview/flipdetail") + "?kind=image",
-                apiPath(.get, suffix: "/shooting/liveview"),
-            ]
+            paths = liveViewFramePaths()
+            guard !paths.isEmpty else { throw CCAPIError.unsupported(.liveView) }
         }
 
         var failures: [String] = []
@@ -479,6 +479,14 @@ public actor CCAPIClient {
             try Task.checkCancellation()
             let download = try await transport.download(request(path: path, method: .get))
             if (200..<300).contains(download.statusCode) {
+                let contentType = download.header("content-type")
+                let prefix = (try? Data(contentsOf: download.temporaryFileURL).prefix(2_000)).map { Data($0) } ?? Data()
+                if Self.isTextContentType(contentType) || Self.looksLikeTextPayload(prefix) {
+                    let preview = String(data: prefix, encoding: .utf8) ?? ""
+                    try? FileManager.default.removeItem(at: download.temporaryFileURL)
+                    failures.append("\(path): HTTP \(download.statusCode): \(preview)")
+                    continue
+                }
                 do {
                     try FileManager.default.moveItem(at: download.temporaryFileURL, to: destination)
                 } catch {
@@ -492,7 +500,7 @@ public actor CCAPIClient {
                     item: item,
                     fileURL: destination,
                     bytesTransferred: size,
-                    contentType: download.header("content-type")
+                    contentType: contentType
                 )
             }
             let preview = (try? Data(contentsOf: download.temporaryFileURL).prefix(2_000))
@@ -535,6 +543,8 @@ public actor CCAPIClient {
 
     private func parseDiscovery(_ value: JSONDictionary) {
         var versions = Set<String>()
+        enforceAdvertisedOperations = true
+        operations.removeAll()
         value.array("api")?.strings.forEach {
             if let version = Self.extractVersion(from: $0) { versions.insert(version) }
         }
@@ -575,10 +585,58 @@ public actor CCAPIClient {
         operations.contains { $0.method == method && $0.path.hasSuffix(suffix) }
     }
 
-    private func commandOperation(suffix: String) -> CCAPIOperation? {
-        let matching = operations.filter { [.post, .put].contains($0.method) && $0.path.hasSuffix(suffix) }
+    private func operation(_ method: HTTPMethod, suffix: String) -> CCAPIOperation? {
+        let matching = operations.filter { $0.method == method && $0.path.hasSuffix(suffix) }
         return matching.first { $0.path.hasPrefix(preferredVersionPrefix) }
             ?? matching.max { Self.pathVersion($0.path) < Self.pathVersion($1.path) }
+    }
+
+    private func directShutterOperation() -> CCAPIOperation? {
+        operation(.post, suffix: "/shooting/control/shutterbutton")
+    }
+
+    private func manualShutterOperation() -> CCAPIOperation? {
+        operation(.put, suffix: "/shooting/control/shutterbutton/manual")
+            ?? operation(.post, suffix: "/shooting/control/shutterbutton/manual")
+    }
+
+    private func recordingOperation() -> CCAPIOperation? {
+        operation(.post, suffix: "/shooting/control/recbutton")
+            ?? operation(.put, suffix: "/shooting/control/recbutton")
+    }
+
+    private func tapFocusOperation() -> CCAPIOperation? {
+        operation(.put, suffix: "/shooting/control/afpoint")
+            ?? operation(.post, suffix: "/shooting/control/afpoint")
+    }
+
+    private func liveViewFramePaths() -> [String] {
+        guard enforceAdvertisedOperations else {
+            return [
+                apiPath(.get, suffix: "/shooting/liveview/flip"),
+                apiPath(.get, suffix: "/shooting/liveview/flipdetail") + "?kind=image",
+                apiPath(.get, suffix: "/shooting/liveview"),
+            ]
+        }
+        return [
+            operation(.get, suffix: "/shooting/liveview/flip")?.path,
+            operation(.get, suffix: "/shooting/liveview/flipdetail").map { "\($0.path)?kind=image" },
+            operation(.get, suffix: "/shooting/liveview")?.path,
+        ].compactMap { $0 }
+    }
+
+    private func supportsCompleteLiveView() -> Bool {
+        supports(.post, suffix: "/shooting/liveview") &&
+            supports(.delete, suffix: "/shooting/liveview") &&
+            !liveViewFramePaths().isEmpty
+    }
+
+    private func advertisedPaths(_ method: HTTPMethod, suffix: String) -> [String] {
+        apiVersionPrefixes.compactMap { prefix in
+            operations.first {
+                $0.method == method && $0.path.hasPrefix(prefix) && $0.path.hasSuffix(suffix)
+            }?.path
+        }.removingDuplicates()
     }
 
     private func apiPath(_ method: HTTPMethod, suffix: String) -> String {
@@ -590,15 +648,23 @@ public actor CCAPIClient {
 
     private func loadShootingSettings() async throws -> JSONDictionary? {
         settingPaths.removeAll()
+        settingsLoaded = false
         var merged: JSONDictionary = [:]
-        for path in versionedPaths("/shooting/settings") {
+        let paths = enforceAdvertisedOperations
+            ? advertisedPaths(.get, suffix: "/shooting/settings")
+            : versionedPaths("/shooting/settings")
+        for path in paths {
             guard let value = try await firstJSON(paths: [path], required: false) else { continue }
             let prefix = String(path.dropLast("/shooting/settings".count))
             for (key, setting) in value {
-                settingPaths[key] = settingPaths[key] ?? "\(prefix)/shooting/settings/\(key)"
+                let settingPath = "\(prefix)/shooting/settings/\(key)"
+                if !enforceAdvertisedOperations || operations.contains(CCAPIOperation(method: .put, path: settingPath)) {
+                    settingPaths[key] = settingPaths[key] ?? settingPath
+                }
                 if merged[key] == nil { merged[key] = setting }
             }
         }
+        settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
         return cachedSettings
     }
@@ -618,11 +684,12 @@ public actor CCAPIClient {
             ("whitebalance", ["whitebalance", "white_balance", "wb"], "White balance"),
         ]
         for (key, aliases, label) in canonical {
-            if let setting = settingObject(in: value, aliases: aliases), let control = control(key, label, setting) {
+            guard let writableAlias = aliases.first(where: { settingPaths[$0] != nil }) else { continue }
+            if let setting = value.object(writableAlias), let control = control(key, label, setting) {
                 controls.append(control)
             }
         }
-        for key in value.keys.sorted() where !Self.allPrimaryAliases.contains(key) {
+        for key in value.keys.sorted() where !Self.allPrimaryAliases.contains(key) && settingPaths[key] != nil {
             guard let setting = value.object(key), let settingControl = control(key, Self.settingLabel(key), setting) else {
                 continue
             }
@@ -639,11 +706,13 @@ public actor CCAPIClient {
     }
 
     private func putSettingValue(candidateKeys: [String], value: String) async throws {
-        if settingPaths.isEmpty { _ = try await loadShootingSettings() }
-        let paths = candidateKeys.flatMap { key -> [String] in
-            if let path = settingPaths[key] { return [path] }
-            return versionedPaths("/shooting/settings/\(key)")
-        }.removingDuplicates()
+        if !settingsLoaded { _ = try await loadShootingSettings() }
+        let paths = candidateKeys.compactMap { settingPaths[$0] }.removingDuplicates()
+        guard !paths.isEmpty else {
+            throw CCAPIError.invalidResponse(
+                "Camera did not advertise a writable setting for \(candidateKeys.joined(separator: ", "))."
+            )
+        }
         var failures: [String] = []
         for path in paths {
             do {
@@ -673,7 +742,7 @@ public actor CCAPIClient {
         if resolvedMode == .simulator {
             _ = try await requestJSON(path: "/ccapi/record/\(enabled ? "start" : "stop")", method: .post, json: [:])
         } else {
-            guard let operation = commandOperation(suffix: "/shooting/control/recbutton") else {
+            guard let operation = recordingOperation() else {
                 throw CCAPIError.unsupported(.videoRecording)
             }
             try await commandOK(operation: operation, json: ["action": enabled ? "start" : "stop"])
@@ -982,6 +1051,12 @@ public actor CCAPIClient {
     private static func isTextContentType(_ value: String?) -> Bool {
         guard let normalized = value?.lowercased() else { return false }
         return normalized.hasPrefix("text/") || normalized.contains("json") || normalized.contains("html")
+    }
+
+    private static func looksLikeTextPayload(_ data: Data) -> Bool {
+        guard let text = String(data: data, encoding: .utf8) else { return false }
+        guard let first = text.first(where: { !$0.isWhitespace }) else { return false }
+        return first == "{" || first == "[" || first == "<"
     }
 
     private static func isMediaPath(_ value: String) -> Bool {

@@ -4,7 +4,7 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It targets Canon EOS R6 Mark III first and is structured around PC, iOS, and Android clients that share the same camera-control concepts.
 
-The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend, capability-gated Canon EOS remote release, exposure/white-balance control, focus drive and JPEG Live View, plus an executable Desktop Bridge client behind the same camera core contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge exposes both a tested HTTP API and a built-in responsive control UI over the open-source `gphoto2` CLI. A native Swift CCAPI core and iOS 17 SwiftUI app are implemented with English/Traditional Chinese UI and iPhone Simulator coverage; physical iPhone and camera validation remains.
+The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend, capability-gated Canon EOS remote release, exposure/white-balance control, focus drive and JPEG Live View, plus an executable Desktop Bridge client behind the same camera core contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge provides a tested API and responsive control UI through either open-source `gphoto2` USB or native HTTP CCAPI. A native Swift CCAPI core and iOS 17 SwiftUI app are implemented with English/Traditional Chinese UI and iPhone Simulator coverage; physical iPhone and camera validation remains.
 
 ## Project Shape
 
@@ -25,6 +25,7 @@ The app currently includes:
 
 - Direct CCAPI camera URL input with HTTP/HTTPS presets
 - Optional CCAPI Basic Authentication credentials
+- Camera HTTP sockets bound to the Wi-Fi route so cellular internet can remain enabled
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
@@ -45,6 +46,8 @@ https://192.168.1.2:443
 ```
 
 Use the IP and port shown by the camera CCAPI setup screen when testing with a real camera.
+
+On Android, direct-camera HTTP uses the Wi-Fi `Network` that can route to the camera instead of binding the whole app process. Mobile data can stay enabled for internet traffic. Debug diagnostics report the selected route, interface, Wi-Fi availability, and cellular availability; connection fails clearly when no Wi-Fi route reaches the camera.
 
 HTTPS uses Android's normal certificate validation. The app no longer accepts arbitrary self-signed certificates. Use HTTP on the isolated camera network or install a trusted certificate when the camera cannot present a system-trusted HTTPS certificate.
 
