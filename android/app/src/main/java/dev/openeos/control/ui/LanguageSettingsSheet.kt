@@ -4,10 +4,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
@@ -28,7 +30,9 @@ fun LanguageSettingsSheet(state: CameraUiState, actions: CameraActions) {
     ModalBottomSheet(
         onDismissRequest = actions.closePicker,
         containerColor = AppSurface,
+        contentWindowInsets = { WindowInsets.safeDrawing },
     ) {
+        DarkSheetSystemBarsEffect()
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),

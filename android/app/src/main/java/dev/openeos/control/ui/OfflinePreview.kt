@@ -41,13 +41,15 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
         aperture = listOf("1.8", "2.0", "2.8", "4.0", "5.6", "8.0", "11"),
         whiteBalance = listOf("auto", "daylight", "shade", "cloudy", "tungsten", "fluorescent", "flash"),
         advancedSettings = listOf(
-            CameraSettingControl("afmethod", "AF method", "face+tracking", listOf("face+tracking", "1-point", "zone")),
-            CameraSettingControl("afoperation", "AF operation", "servo", listOf("one-shot", "servo")),
-            CameraSettingControl("drivemode", "Drive mode", "single", listOf("single", "high-speed", "timer")),
-            CameraSettingControl("meteringmode", "Metering", "evaluative", listOf("evaluative", "partial", "spot")),
-            CameraSettingControl("picturestyle", "Picture style", "standard", listOf("standard", "portrait", "landscape", "neutral")),
-            CameraSettingControl("stillimagequality", "Image quality", "RAW+L", listOf("RAW+L", "RAW", "C-RAW", "L")),
+            CameraSettingControl("afmethod", "AF method", "WholeAreaAF", listOf("LiveSpotAF", "FlexibleZoneAF1", "WholeAreaAF")),
+            CameraSettingControl("afoperation", "AF operation", "AI Servo", listOf("One Shot", "AI Servo", "AI Focus")),
+            CameraSettingControl("continuousaf", "Continuous AF", "On", listOf("Off", "On")),
+            CameraSettingControl("drivemode", "Drive mode", "Super high speed continuous shooting", listOf("Single", "Continuous high speed", "Super high speed continuous shooting")),
+            CameraSettingControl("meteringmode", "Metering", "Evaluative", listOf("Evaluative", "Partial", "Spot", "Center-weighted average")),
+            CameraSettingControl("picturestyle", "Picture style", "Auto", listOf("Auto", "Standard", "Portrait", "Fine detail")),
+            CameraSettingControl("stillimagequality", "Image quality", "RAW", listOf("Large Fine JPEG", "cRAW + Large Fine JPEG", "RAW")),
             CameraSettingControl("moviequality", "Movie quality", "4K", listOf("4K", "FHD")),
+            CameraSettingControl("movieservoaf", "Movie Servo AF", "On", listOf("Off", "On")),
         ),
         matrix = CapabilityMatrix.ccapiNetwork(
             supported = setOf(

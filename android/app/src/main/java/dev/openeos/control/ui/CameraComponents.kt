@@ -439,7 +439,7 @@ fun ExposureStrip(state: CameraUiState, actions: CameraActions, modifier: Modifi
         ExposureCell(stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
         ExposureCell(stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
         ExposureCell(stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
-        ExposureCell(stringResource(R.string.white_balance), exposure?.whiteBalance ?: "-", available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+        ExposureCell(stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
     }
 }
 
@@ -454,7 +454,7 @@ fun LandscapeExposureGrid(state: CameraUiState, actions: CameraActions, modifier
         }
         Row(Modifier.fillMaxWidth().weight(1f)) {
             ExposureCell(stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
-            ExposureCell(stringResource(R.string.white_balance), exposure?.whiteBalance ?: "-", available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+            ExposureCell(stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
         }
     }
 }

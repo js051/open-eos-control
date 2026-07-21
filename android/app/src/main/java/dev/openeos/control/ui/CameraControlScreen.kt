@@ -61,6 +61,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.openeos.control.R
@@ -212,40 +213,50 @@ private fun SettingSheets(state: CameraUiState, actions: CameraActions) {
 private fun ExposureSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val picker = state.activeSettingPicker ?: return
     val title: String
+    val valueKey: String
     val values: List<String>
     val current: String?
     val onSelect: (String) -> Unit
     when (picker) {
         SettingPicker.ISO -> {
             title = stringResource(R.string.iso)
+            valueKey = "iso"
             values = state.capabilities?.iso.orEmpty()
             current = state.status?.exposure?.iso
             onSelect = actions.setIso
         }
         SettingPicker.SHUTTER -> {
             title = stringResource(R.string.shutter)
+            valueKey = "shutter"
             values = state.capabilities?.shutter.orEmpty()
             current = state.status?.exposure?.shutter
             onSelect = actions.setShutter
         }
         SettingPicker.APERTURE -> {
             title = stringResource(R.string.aperture)
+            valueKey = "aperture"
             values = state.capabilities?.aperture.orEmpty()
             current = state.status?.exposure?.aperture
             onSelect = actions.setAperture
         }
         SettingPicker.WHITE_BALANCE -> {
             title = stringResource(R.string.white_balance)
+            valueKey = "whitebalance"
             values = state.capabilities?.whiteBalance.orEmpty()
             current = state.status?.exposure?.whiteBalance
             onSelect = actions.setWhiteBalance
         }
         else -> return
     }
-    ModalBottomSheet(onDismissRequest = actions.closePicker, containerColor = AppSurface) {
+    ModalBottomSheet(
+        onDismissRequest = actions.closePicker,
+        containerColor = AppSurface,
+        contentWindowInsets = { WindowInsets.safeDrawing },
+    ) {
+        DarkSheetSystemBarsEffect()
         ExposurePickerTabs(state, picker, actions)
         key(picker) {
-            ExposureDial(title, values, current, state.isBusy(CameraOperation.SETTING), onSelect)
+            ExposureDial(title, valueKey, values, current, state.isBusy(CameraOperation.SETTING), onSelect)
         }
     }
 }
@@ -289,6 +300,7 @@ private fun androidx.compose.foundation.layout.RowScope.ExposurePickerTab(
 @Composable
 private fun ExposureDial(
     title: String,
+    valueKey: String,
     values: List<String>,
     current: String?,
     isApplying: Boolean,
@@ -332,12 +344,12 @@ private fun ExposureDial(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(title, color = AppMutedText)
-                Text(values[selectedIndex], color = AppText, fontWeight = FontWeight.Bold)
+                Text(localizedCameraValue(valueKey, values[selectedIndex]), color = AppText, fontWeight = FontWeight.Bold)
             }
             if (isApplying) CircularProgressIndicator(Modifier.size(24.dp), color = AppAccent, strokeWidth = 2.dp)
         }
         BoxWithConstraints(Modifier.fillMaxWidth().height(104.dp)) {
-            val itemWidth = 88.dp
+            val itemWidth = 112.dp
             val edgePadding = ((maxWidth - itemWidth) / 2).coerceAtLeast(0.dp)
             LazyRow(
                 state = listState,
@@ -358,10 +370,11 @@ private fun ExposureDial(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            values[index],
+                            localizedCameraValue(valueKey, values[index]),
                             color = if (selected) AppText else AppMutedText,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 1,
+                            maxLines = 2,
+                            textAlign = TextAlign.Center,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -387,7 +400,12 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
         mutableFloatStateOf(state.liveViewFrameRateFps.toFloat())
     }
     val displayedFps = pendingFps.roundToInt().coerceIn(minFps, maxFps)
-    ModalBottomSheet(onDismissRequest = actions.closePicker, containerColor = AppSurface) {
+    ModalBottomSheet(
+        onDismissRequest = actions.closePicker,
+        containerColor = AppSurface,
+        contentWindowInsets = { WindowInsets.safeDrawing },
+    ) {
+        DarkSheetSystemBarsEffect()
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp)) {
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -473,7 +491,9 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
         onDismissRequest = actions.closePicker,
         sheetState = sheetState,
         containerColor = AppSurface,
+        contentWindowInsets = { WindowInsets.safeDrawing },
     ) {
+        DarkSheetSystemBarsEffect()
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp)) {
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -575,14 +595,26 @@ private fun FocusDriveDirectionRow(
 
 @Composable
 private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraActions) {
+    val selectedIndex = setting.values.indexOf(setting.value).coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
+    LaunchedEffect(setting.key, setting.value, setting.values) {
+        listState.scrollToItem(selectedIndex)
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(cameraSettingLabel(setting), color = AppText, fontWeight = FontWeight.SemiBold)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(setting.values) { value ->
                 Box(
                     Modifier.height(48.dp).background(if (value == setting.value) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { actions.setCameraSetting(setting.key, value) }.padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text(value, color = if (value == setting.value) AppBackground else AppText, maxLines = 1) }
+                ) {
+                    Text(
+                        localizedCameraValue(setting.key, value),
+                        color = if (value == setting.value) AppBackground else AppText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

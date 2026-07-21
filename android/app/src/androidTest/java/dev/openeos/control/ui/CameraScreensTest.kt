@@ -144,6 +144,34 @@ class CameraScreensTest {
     }
 
     @Test
+    fun localizedAdvancedSettingStillSendsCameraRawValue() {
+        val picker = mutableStateOf<SettingPicker?>(null)
+        var request: Pair<String, String>? = null
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+            setCameraSetting = { key, value -> request = key to value },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    CameraUiState().withOfflinePreview().copy(activeSettingPicker = picker.value),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithText(resourceText(R.string.camera_value_continuous_high_speed))
+            .performScrollTo()
+            .performClick()
+
+        compose.runOnIdle {
+            assertEquals("drivemode" to "Continuous high speed", request)
+        }
+    }
+
+    @Test
     fun offlinePreviewExposesCanonManualFocusDriveControls() {
         val picker = mutableStateOf<SettingPicker?>(null)
         var requestedFocusDrive: Pair<FocusDriveDirection, FocusDriveStep>? = null
