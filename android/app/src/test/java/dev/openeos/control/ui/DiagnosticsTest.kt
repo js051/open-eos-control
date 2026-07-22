@@ -136,6 +136,7 @@ class DiagnosticsTest {
     @Test
     fun advancedSettingsAreFilteredByCaptureMode() {
         val settings = listOf(
+            CameraSettingControl("shootingmode", "Shooting mode", "Manual", listOf("P", "Manual", "Movie")),
             CameraSettingControl("moviequality", "Movie quality", "4K", listOf("4K", "FHD")),
             CameraSettingControl("drivemode", "Drive", "single", listOf("single", "continuous")),
             CameraSettingControl("stillimagequalitycf", "CF quality", "RAW", listOf("RAW", "JPEG")),
@@ -152,6 +153,7 @@ class DiagnosticsTest {
 
         assertEquals(
             listOf(
+                "shootingmode",
                 "drivemode",
                 "stillimagequalitycf",
                 "colorspace",
@@ -165,7 +167,7 @@ class DiagnosticsTest {
             settingsForMode(settings, CaptureMode.PHOTO).map { it.key },
         )
         assertEquals(
-            listOf("moviequality", "zoomspeed", "exposurecompensation", "movieservoaf", "afmethod"),
+            listOf("shootingmode", "moviequality", "zoomspeed", "exposurecompensation", "movieservoaf", "afmethod"),
             settingsForMode(settings, CaptureMode.VIDEO).map { it.key },
         )
     }

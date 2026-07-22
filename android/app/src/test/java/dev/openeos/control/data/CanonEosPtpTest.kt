@@ -113,6 +113,7 @@ class CanonEosPtpTest {
     fun vendorSettingMappingsAndPayloadWidthsMatchPinnedLibgphoto2Tables() {
         assertEquals(
             listOf(
+                "shootingmode",
                 "exposurecompensation",
                 "colortemperature",
                 "whitebalanceadjusta",
@@ -228,6 +229,21 @@ class CanonEosPtpTest {
         assertArrayEquals(
             CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.POWER_ZOOM_SPEED, 12),
             CanonEosPtp.propertyPayload(CanonEosPropertyCode.POWER_ZOOM_SPEED, 12),
+        )
+    }
+
+    @Test
+    fun r6MarkIIIAutoExposureModeMappingMatchesPinnedLibgphoto2Table() {
+        assertEquals(0xD105, CanonEosPropertyCode.AUTO_EXPOSURE_MODE)
+        assertEquals("P", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0000))
+        assertEquals("TV", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0001))
+        assertEquals("AV", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0002))
+        assertEquals("Manual", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0003))
+        assertEquals("Movie", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0014))
+        assertEquals("Fv", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0037))
+        assertArrayEquals(
+            CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0002),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0002),
         )
     }
 

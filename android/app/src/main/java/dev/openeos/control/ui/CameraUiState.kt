@@ -14,6 +14,7 @@ import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.UsbPtpDiagnostics
+import java.util.Locale
 
 const val MIN_LIVE_VIEW_FPS = 1
 const val MAX_LIVE_VIEW_FPS = 30
@@ -95,6 +96,39 @@ data class FocusPoint(
     val x: Double,
     val y: Double,
 )
+
+internal fun CameraCapabilities.shootingModeSetting(): CameraSettingControl? =
+    advancedSettings.firstOrNull { it.key.isShootingModeKey() }
+
+internal fun CameraSettingControl.currentCaptureMode(): CaptureMode? {
+    val current = values.firstOrNull { it.cameraModeToken() == value.cameraModeToken() } ?: return null
+    return captureModeForShootingValue(current)
+}
+
+internal fun CameraSettingControl.valueForCaptureMode(
+    mode: CaptureMode,
+    preferredPhotoValue: String?,
+): String? = when (mode) {
+    CaptureMode.VIDEO -> values.firstOrNull { captureModeForShootingValue(it) == CaptureMode.VIDEO }
+    CaptureMode.PHOTO -> sequenceOf(preferredPhotoValue, value)
+        .filterNotNull()
+        .mapNotNull { candidate ->
+            values.firstOrNull { it.cameraModeToken() == candidate.cameraModeToken() }
+        }
+        .firstOrNull { captureModeForShootingValue(it) == CaptureMode.PHOTO }
+}
+
+internal fun captureModeForShootingValue(value: String): CaptureMode? {
+    val token = value.cameraModeToken()
+    if (token.isBlank() || token.startsWith("unknown") || token.startsWith("0x")) return null
+    return if ("movie" in token || "video" in token) CaptureMode.VIDEO else CaptureMode.PHOTO
+}
+
+internal fun String.isShootingModeKey(): Boolean =
+    cameraModeToken() in setOf("shootingmode", "autoexposuremode", "ae")
+
+private fun String.cameraModeToken(): String =
+    lowercase(Locale.ROOT).filter(Char::isLetterOrDigit)
 
 fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): List<CameraSettingControl> {
     val videoTokens = listOf("movie", "video", "frame", "codec", "record", "sound")

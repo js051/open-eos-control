@@ -240,6 +240,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
                     if (state.captureMode == CaptureMode.PHOTO) CaptureMode.VIDEO else CaptureMode.PHOTO,
                 )
             },
+            enabled = !state.isBusy(CameraOperation.SETTING),
             tint = if (state.captureMode == CaptureMode.VIDEO) AppRecord else AppText,
         )
         ToolIconButton(

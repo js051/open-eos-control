@@ -6,10 +6,11 @@ import android.net.Uri
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.openeos.control.data.CameraNetworkDiagnostics
+import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
+import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraSession
 import dev.openeos.control.data.FocusDriveDirection
@@ -41,6 +42,7 @@ class CameraViewModel(
     private val frameTimesMillis = ArrayDeque<Long>()
     private var preferencesLoaded = false
     private var networkRoutingConfigured = false
+    private var lastPhotoShootingMode: String? = null
 
     fun initialize(context: Context) {
         if (!networkRoutingConfigured) {
@@ -70,7 +72,15 @@ class CameraViewModel(
         if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
     }
 
-    fun setCaptureMode(mode: CaptureMode) = _uiState.update { it.copy(captureMode = mode, activeSettingPicker = null) }
+    fun setCaptureMode(mode: CaptureMode) {
+        val setting = _uiState.value.capabilities?.shootingModeSetting()
+        if (setting?.currentCaptureMode() == CaptureMode.PHOTO) {
+            lastPhotoShootingMode = setting.value
+        }
+        _uiState.update { it.copy(captureMode = mode, activeSettingPicker = null) }
+        val target = setting?.valueForCaptureMode(mode, lastPhotoShootingMode)
+        if (target != null && target != setting.value) setCameraSetting(setting.key, target)
+    }
 
     fun setHudVisible(visible: Boolean) = _uiState.update { it.copy(hudVisible = visible) }
 
@@ -164,6 +174,7 @@ class CameraViewModel(
     fun enterOfflinePreview() {
         stopLiveViewLoop()
         resetFrameMetrics()
+        lastPhotoShootingMode = null
         _uiState.update { it.withOfflinePreview() }
     }
 
@@ -186,6 +197,7 @@ class CameraViewModel(
     fun connect() = runCamera(CameraOperation.CONNECT) {
         stopLiveViewLoop()
         resetFrameMetrics()
+        lastPhotoShootingMode = null
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val session = repository.connect(
             baseUrl = _uiState.value.baseUrl,
@@ -202,6 +214,7 @@ class CameraViewModel(
     fun connectUsb(deviceName: String, vendorId: Int, productId: Int) = runCamera(CameraOperation.CONNECT) {
         stopLiveViewLoop()
         resetFrameMetrics()
+        lastPhotoShootingMode = null
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val session = repository.connectUsb(
             deviceName = deviceName,
@@ -235,6 +248,7 @@ class CameraViewModel(
     fun connectBridge() = runCamera(CameraOperation.CONNECT) {
         stopLiveViewLoop()
         resetFrameMetrics()
+        lastPhotoShootingMode = null
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val state = _uiState.value
         val session = repository.connectBridge(
@@ -255,6 +269,7 @@ class CameraViewModel(
             session.capabilities.liveView.maxFps,
         )
         repository.updateLiveViewRequest(fps = supportedFps)
+        val captureMode = captureModeFrom(session.capabilities)
         _uiState.update {
             it.copy(
                 transport = session.transport,
@@ -266,6 +281,7 @@ class CameraViewModel(
                 liveViewBitmap = null,
                 liveViewFrameRateFps = supportedFps,
                 liveViewSize = session.liveViewRequest.size,
+                captureMode = captureMode ?: it.captureMode,
             )
         }
         if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
@@ -289,6 +305,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         cancelMediaDownload()
         resetFrameMetrics()
+        lastPhotoShootingMode = null
         if (_uiState.value.previewMode) {
             _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
             return
@@ -306,9 +323,13 @@ class CameraViewModel(
     fun refresh() = runCamera(CameraOperation.STATUS) {
         if (_uiState.value.previewMode) return@runCamera
         val status = repository.refreshStatus()
+        val capabilities = repository.refreshCapabilities()
+        val captureMode = captureModeFrom(capabilities)
         _uiState.update {
             it.copy(
                 status = status,
+                capabilities = capabilities,
+                captureMode = captureMode ?: it.captureMode,
             )
         }
         refreshLiveViewFrameInternal(reportErrors = true)
@@ -386,29 +407,38 @@ class CameraViewModel(
         updateStatus(CameraOperation.SETTING) { repository.setWhiteBalance(value) }
     }
 
-    fun setCameraSetting(key: String, value: String) = runCamera(CameraOperation.SETTING) {
-        if (_uiState.value.previewMode) {
-            _uiState.update { state ->
-                state.copy(
-                    capabilities = state.capabilities?.copy(
-                        advancedSettings = state.capabilities.advancedSettings.map { setting ->
-                            if (setting.key == key) setting.copy(value = value) else setting
-                        },
-                    ),
+    fun setCameraSetting(key: String, value: String) {
+        if (_uiState.value.isBusy(CameraOperation.SETTING)) return
+        val selectedCaptureMode = if (key.isShootingModeKey()) captureModeForShootingValue(value) else null
+        runCamera(CameraOperation.SETTING) {
+            if (_uiState.value.previewMode) {
+                if (selectedCaptureMode == CaptureMode.PHOTO) lastPhotoShootingMode = value
+                _uiState.update { state ->
+                    state.copy(
+                        captureMode = selectedCaptureMode ?: state.captureMode,
+                        capabilities = state.capabilities?.copy(
+                            advancedSettings = state.capabilities.advancedSettings.map { setting ->
+                                if (setting.key == key) setting.copy(value = value) else setting
+                            },
+                        ),
+                    )
+                }
+                return@runCamera
+            }
+            val status = repository.setCameraSetting(key, value)
+            val capabilities = repository.refreshCapabilities()
+            val captureMode = selectedCaptureMode ?: captureModeFrom(capabilities)
+            if (selectedCaptureMode == CaptureMode.PHOTO) lastPhotoShootingMode = value
+            _uiState.update {
+                it.copy(
+                    status = status,
+                    capabilities = capabilities,
+                    captureMode = captureMode ?: it.captureMode,
                 )
             }
-            return@runCamera
+            refreshLiveViewFrameInternal(reportErrors = false)
+            startLiveViewLoopIfNeeded()
         }
-        val status = repository.setCameraSetting(key, value)
-        val capabilities = repository.refreshCapabilities()
-        _uiState.update {
-            it.copy(
-                status = status,
-                capabilities = capabilities,
-            )
-        }
-        refreshLiveViewFrameInternal(reportErrors = false)
-        startLiveViewLoopIfNeeded()
     }
 
     fun toggleRecording() = updateStatus(CameraOperation.RECORDING) {
@@ -589,6 +619,13 @@ class CameraViewModel(
             state.copy(status = state.status?.copy(exposure = update(state.status.exposure)))
         }
         return true
+    }
+
+    private fun captureModeFrom(capabilities: CameraCapabilities): CaptureMode? {
+        val setting = capabilities.shootingModeSetting() ?: return null
+        return setting.currentCaptureMode()?.also { mode ->
+            if (mode == CaptureMode.PHOTO) lastPhotoShootingMode = setting.value
+        }
     }
 
     private fun showCaptureSuccess() {

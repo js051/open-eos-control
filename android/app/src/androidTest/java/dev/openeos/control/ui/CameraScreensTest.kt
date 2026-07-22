@@ -163,6 +163,16 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("advanced-setting-shootingmode")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-values-shootingmode").performScrollToIndex(2)
+        compose.onNodeWithText(resourceText(R.string.camera_value_aperture_priority_ae))
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle {
+            assertEquals("shootingmode" to "AV", request)
+        }
         compose.onNodeWithTag("advanced-setting-aspectratio")
             .performScrollTo()
             .assertIsDisplayed()

@@ -49,4 +49,28 @@ class CameraViewModelPreviewTest {
         assertFalse(viewModel.uiState.value.connected)
         assertFalse(viewModel.uiState.value.previewMode)
     }
+
+    @Test
+    fun captureModeSwitchWritesAdvertisedPreviewModeAndRestoresPreviousPhotoMode() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+
+        viewModel.setCaptureMode(CaptureMode.VIDEO)
+        advanceUntilIdle()
+
+        assertEquals(CaptureMode.VIDEO, viewModel.uiState.value.captureMode)
+        assertEquals(
+            "Movie",
+            viewModel.uiState.value.capabilities?.shootingModeSetting()?.value,
+        )
+
+        viewModel.setCaptureMode(CaptureMode.PHOTO)
+        advanceUntilIdle()
+
+        assertEquals(CaptureMode.PHOTO, viewModel.uiState.value.captureMode)
+        assertEquals(
+            "Manual",
+            viewModel.uiState.value.capabilities?.shootingModeSetting()?.value,
+        )
+    }
 }

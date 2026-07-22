@@ -33,7 +33,7 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "stillimagequality", "stillimagequalitysd", "stillimagequalitycf" ->
             imageQualityValueLabels[value]
 
-        "shootingmode", "ae" -> shootingModeValueLabels[value]
+        "shootingmode", "autoexposuremode", "ae" -> shootingModeValueLabels[value]
         else -> null
     }
 }
@@ -209,7 +209,46 @@ private val imageQualityValueLabels = mapOf(
 
 private val shootingModeValueLabels = mapOf(
     "auto" to R.string.camera_value_auto,
+    "p" to R.string.camera_value_program_ae,
+    "tv" to R.string.camera_value_shutter_priority_ae,
+    "av" to R.string.camera_value_aperture_priority_ae,
+    "manual" to R.string.camera_value_manual_exposure,
+    "bulb" to R.string.camera_value_bulb,
+    "a dep" to R.string.camera_value_auto_depth_of_field_ae,
+    "dep" to R.string.camera_value_depth_of_field_ae,
+    "custom" to R.string.camera_value_custom_shooting,
+    "lock" to R.string.camera_value_mode_lock,
+    "green" to R.string.camera_value_full_auto,
+    "night portrait" to R.string.camera_value_night_portrait,
+    "sports" to R.string.camera_value_sports,
     "creative" to R.string.camera_value_creative,
+    "landscape" to R.string.camera_value_landscape,
+    "closeup" to R.string.camera_value_close_up,
+    "flash off" to R.string.camera_value_flash_off,
+    "c2" to R.string.camera_value_custom_mode_2,
+    "c3" to R.string.camera_value_custom_mode_3,
+    "creative auto" to R.string.camera_value_creative_auto,
+    "movie" to R.string.camera_value_movie,
+    "handheld night scene" to R.string.camera_value_handheld_night_scene,
+    "hdr backlight control" to R.string.camera_value_hdr_backlight_control,
+    "scn" to R.string.camera_value_special_scene,
+    "food" to R.string.camera_value_food,
+    "grainy b/w" to R.string.camera_value_grainy_black_white,
+    "soft focus" to R.string.camera_value_soft_focus,
+    "toy camera effect" to R.string.camera_value_toy_camera_effect,
+    "fish eye effect" to R.string.camera_value_fish_eye_effect,
+    "water painting effect" to R.string.camera_value_water_painting_effect,
+    "miniature effect" to R.string.camera_value_miniature_effect,
+    "hdr art standard" to R.string.camera_value_hdr_art_standard,
+    "hdr art vivid" to R.string.camera_value_hdr_art_vivid,
+    "hdr art bold" to R.string.camera_value_hdr_art_bold,
+    "hdr art embossed" to R.string.camera_value_hdr_art_embossed,
+    "panning" to R.string.camera_value_panning,
+    "hdr" to R.string.camera_value_hdr,
+    "self portrait" to R.string.camera_value_self_portrait,
+    "hybrid auto" to R.string.camera_value_hybrid_auto,
+    "smooth skin" to R.string.camera_value_smooth_skin,
+    "fv" to R.string.camera_value_flexible_priority_ae,
     "action" to R.string.camera_value_action,
     "portrait" to R.string.camera_value_portrait,
 )

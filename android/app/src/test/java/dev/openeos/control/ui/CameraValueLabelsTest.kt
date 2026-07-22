@@ -20,6 +20,8 @@ class CameraValueLabelsTest {
             Triple("highisonr", "Multi-Shot", R.string.camera_value_multi_shot),
             Triple("aeb", "off", R.string.camera_value_off),
             Triple("stillimagequalitycf", "cRAW + Large Fine JPEG", R.string.camera_value_craw_large_fine_jpeg),
+            Triple("shootingmode", "TV", R.string.camera_value_shutter_priority_ae),
+            Triple("autoexposuremode", "Fv", R.string.camera_value_flexible_priority_ae),
         )
 
         cases.forEach { (key, value, expectedResource) ->

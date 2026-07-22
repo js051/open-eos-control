@@ -19,6 +19,7 @@ object CanonEosPropertyCode {
     const val SHUTTER_SPEED = 0xD102
     const val ISO_SPEED = 0xD103
     const val EXPOSURE_COMPENSATION = 0xD104
+    const val AUTO_EXPOSURE_MODE = 0xD105
     const val DRIVE_MODE = 0xD106
     const val METERING_MODE = 0xD107
     const val FOCUS_MODE = 0xD108
@@ -80,6 +81,7 @@ object CanonEosPtp {
     const val MOVIE_RECORD_TARGET_CARD = 4L
 
     val settingSpecs = listOf(
+        CanonEosSettingSpec(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, "shootingmode", "Shooting mode"),
         CanonEosSettingSpec(
             CanonEosPropertyCode.EXPOSURE_COMPENSATION,
             "exposurecompensation",
@@ -594,6 +596,50 @@ object CanonEosPtp {
 
     private val offOnLabels = mapOf(0L to "Off", 1L to "On")
 
+    private val autoExposureModeLabels = mapOf(
+        0x0000L to "P",
+        0x0001L to "TV",
+        0x0002L to "AV",
+        0x0003L to "Manual",
+        0x0004L to "Bulb",
+        0x0005L to "A_DEP",
+        0x0006L to "DEP",
+        0x0007L to "Custom",
+        0x0008L to "Lock",
+        0x0009L to "Green",
+        0x000AL to "Night Portrait",
+        0x000BL to "Sports",
+        0x000CL to "Portrait",
+        0x000DL to "Landscape",
+        0x000EL to "Closeup",
+        0x000FL to "Flash Off",
+        0x0010L to "C2",
+        0x0011L to "C3",
+        0x0013L to "Creative Auto",
+        0x0014L to "Movie",
+        0x0016L to "Auto",
+        0x0017L to "Handheld Night Scene",
+        0x0018L to "HDR Backlight Control",
+        0x0019L to "SCN",
+        0x001BL to "Food",
+        0x001EL to "Grainy B/W",
+        0x001FL to "Soft focus",
+        0x0020L to "Toy camera effect",
+        0x0021L to "Fish-eye effect",
+        0x0022L to "Water painting effect",
+        0x0023L to "Miniature effect",
+        0x0024L to "HDR art standard",
+        0x0025L to "HDR art vivid",
+        0x0026L to "HDR art bold",
+        0x0027L to "HDR art embossed",
+        0x002DL to "Panning",
+        0x0031L to "HDR",
+        0x0032L to "Self Portrait",
+        0x0033L to "Hybrid Auto",
+        0x0034L to "Smooth skin",
+        0x0037L to "Fv",
+    )
+
     private val exposureCompensationLabels = mapOf(
         0x28L to "5", 0x25L to "4.6", 0x24L to "4.5", 0x23L to "4.3",
         0x20L to "4", 0x1DL to "3.6", 0x1CL to "3.5", 0x1BL to "3.3",
@@ -690,6 +736,7 @@ object CanonEosPtp {
         CanonEosPropertyCode.SHUTTER_SPEED to CanonEosPropertySpec(2, shutterLabels),
         CanonEosPropertyCode.ISO_SPEED to CanonEosPropertySpec(2, isoLabels),
         CanonEosPropertyCode.EXPOSURE_COMPENSATION to CanonEosPropertySpec(1, exposureCompensationLabels),
+        CanonEosPropertyCode.AUTO_EXPOSURE_MODE to CanonEosPropertySpec(2, autoExposureModeLabels),
         CanonEosPropertyCode.DRIVE_MODE to CanonEosPropertySpec(2, driveModeLabels),
         CanonEosPropertyCode.METERING_MODE to CanonEosPropertySpec(1, meteringModeLabels),
         CanonEosPropertyCode.FOCUS_MODE to CanonEosPropertySpec(4, focusModeLabels),

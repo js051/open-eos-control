@@ -27,9 +27,10 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Canon still capture and half-press require the full remote/event operation set. Capture is not reported as success until a captured-object event arrives; press/release commands are balanced on failure paths.
 - Canon manual focus uses the advertised `DriveLens` operation with Near/Far steps 1-3. Canon JPEG Live View enables EVF mode/output, polls `GetViewFinderData`, and parses only validated JPEG block types.
 - Canon movie control writes `EVFRecordStatus (0xD1B8)` through `SetDevicePropValueEx`: Card (`4`) starts card recording and None (`0`) stops it. The capability is exposed only after camera events advertise both values; SDRAM (`3`) is treated as preview rather than recording.
+- Canon shooting-mode control writes camera-advertised `AutoExposureMode (0xD105)` UINT16 values through `SetDevicePropValueEx`. The app's Photo/Video context synchronizes only when the writable `shootingmode` list proves a target value, and restores only a previously observed photo mode.
 - The Canon mappings follow a pinned libgphoto2 revision and are test-covered. They remain in device-validation status until exercised and recorded on the physical R6 Mark III.
 - Next milestone: validate the standard and Canon paths, including movie start/stop, on the camera, then map only measured property gaps.
-- Research track: Touch AF and Canon vendor settings beyond the implemented exposure, aspect-ratio, power-zoom and movie paths. No active controls are exposed without proven state and value semantics.
+- Research track: Touch AF and Canon vendor settings beyond the implemented shooting-mode, exposure, aspect-ratio, power-zoom and movie paths. No active controls are exposed without proven state and value semantics.
 - Tradeoffs: best pure phone-to-camera wired path, but it requires a real PTP engine plus Canon vendor-extension testing.
 
 ### Desktop bridge and PC control

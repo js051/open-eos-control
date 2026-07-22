@@ -104,7 +104,10 @@ class UsbPtpCameraBackend(
             recording = CanonEosPtp.movieRecording(
                 canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).currentValue,
             ),
-            mode = propertyDisplay(PtpDevicePropertyCode.EXPOSURE_PROGRAM_MODE).takeUnless { it == "-" } ?: "PTP",
+            mode = corePropertyDisplay(
+                CanonEosPropertyCode.AUTO_EXPOSURE_MODE,
+                PtpDevicePropertyCode.EXPOSURE_PROGRAM_MODE,
+            ).takeUnless { it == "-" } ?: "PTP",
             mediaAvailable = storageSnapshot.isNotEmpty(),
             remainingMinutes = null,
             exposure = ExposureState(

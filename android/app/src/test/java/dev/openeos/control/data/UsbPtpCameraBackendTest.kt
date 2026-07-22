@@ -126,6 +126,8 @@ class UsbPtpCameraBackendTest {
 
         backend.initialize()
         val capabilities = backend.capabilities()
+        val initialStatus = backend.status()
+        backend.setSetting("shootingmode", "AV")
         backend.setSetting("afoperation", "One Shot")
         backend.setSetting("continuousaf", "On")
         backend.setSetting("afmethod", "LiveSpotAF")
@@ -169,11 +171,14 @@ class UsbPtpCameraBackendTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.ADVANCED_SETTINGS))
         assertTrue("movierecordtarget" in capabilities.evidence.writableSettings)
         assertTrue(CanonEosPtp.settingSpecs.all { it.key in capabilities.evidence.writableSettings })
+        assertEquals("Manual", initialStatus.mode)
         assertEquals(listOf("100", "400", "800"), capabilities.iso)
         assertEquals(listOf("1/30", "1/50"), capabilities.shutter)
         assertEquals(listOf("2.8", "4"), capabilities.aperture)
         assertEquals(listOf("Auto", "Daylight", "Shadow"), capabilities.whiteBalance)
         val settings = capabilities.advancedSettings.associateBy(CameraSettingControl::key)
+        assertEquals("Manual", settings.getValue("shootingmode").value)
+        assertTrue("Movie" in settings.getValue("shootingmode").values)
         assertEquals("AI Servo", settings.getValue("afoperation").value)
         assertEquals("0", settings.getValue("exposurecompensation").value)
         assertEquals("5200", settings.getValue("colortemperature").value)
@@ -349,6 +354,11 @@ class UsbPtpCameraBackendTest {
         assertTrue(
             propertyWrites.any {
                 it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.COLOR_SPACE, 2))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0002))
             }
         )
         assertTrue(
@@ -823,6 +833,17 @@ class UsbPtpCameraBackendTest {
             payload += eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_A, -9, 0, 9)
             payload += eosPropertyValue(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B, -2)
             payload += eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B, -9, -2, 0, 9)
+            payload += eosPropertyValue(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, 0x0003)
+            payload += eosAvailableValues(
+                CanonEosPropertyCode.AUTO_EXPOSURE_MODE,
+                0x0000,
+                0x0001,
+                0x0002,
+                0x0003,
+                0x0004,
+                0x0014,
+                0x0037,
+            )
             payload += eosPropertyValue(CanonEosPropertyCode.COLOR_SPACE, 1)
             payload += eosAvailableValues(CanonEosPropertyCode.COLOR_SPACE, 1, 2)
             payload += eosPropertyValue(CanonEosPropertyCode.MULTI_ASPECT, 0x0D)
