@@ -1,4 +1,5 @@
 "app_name" = "Open EOS Control";
+"media_thumbnail" = "%@ 的縮圖";
 "connect_title" = "連接你的 EOS";
 "direct_camera" = "直接連相機";
 "connection_method" = "連線方式";

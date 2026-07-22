@@ -51,6 +51,7 @@ There are 2 files in folder '/store_00010001/DCIM/100CANON'.
 """
 
 JPEG = b"\xff\xd8open-eos-control\xff\xd9"
+THUMBNAIL = b"\xff\xd8open-eos-thumbnail\xff\xd9"
 MEDIA_BYTES = b"jpeg!!"
 
 
@@ -99,6 +100,14 @@ class FakeRunner:
             return CommandOutput(MEDIA.encode())
         if command == ["--capture-preview", "--stdout"]:
             return CommandOutput(JPEG)
+        if command == [
+            "--folder",
+            "/store_00010001/DCIM/100CANON",
+            "--get-thumbnail",
+            "IMG_0001.JPG",
+            "--stdout",
+        ]:
+            return CommandOutput(THUMBNAIL)
         if command in (["--trigger-capture"], ["--capture-image"]):
             return CommandOutput(b"New file is in location /store_00010001/DCIM/100CANON/IMG_0002.JPG\n")
         if command == [

@@ -18,7 +18,7 @@ from open_eos_bridge.gphoto2 import (
 )
 from open_eos_bridge.models import CameraFeature, LiveViewStartRequest
 
-from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, FakeRunner
+from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, THUMBNAIL, FakeRunner
 
 
 def test_gphoto2_output_parsers_preserve_camera_advertised_values() -> None:
@@ -40,6 +40,7 @@ def test_gphoto2_output_parsers_preserve_camera_advertised_values() -> None:
     assert abilities.capture_preview is True
     assert abilities.trigger_capture is True
     assert abilities.delete_files is True
+    assert abilities.file_preview is True
     assert configs["/main/imgsettings/iso"].choices == ["Auto", "100", "400"]
     assert configs["/main/capturesettings/exposurecompensation"].selectable_values() == [
         "-1",
@@ -75,6 +76,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert CameraFeature.VIDEO_RECORDING in capabilities.supported
     assert CameraFeature.FOCUS_DRIVE in capabilities.supported
     assert CameraFeature.MEDIA_DELETE in capabilities.supported
+    assert CameraFeature.MEDIA_THUMBNAIL in capabilities.supported
     assert CameraFeature.TAP_FOCUS in capabilities.planned
     assert next(setting for setting in capabilities.settings if setting.key == "iso").values == [
         "Auto",
@@ -110,13 +112,39 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert runner.values["/main/actions/viewfinder"] == "0"
 
     media = session.list_media()
+    thumbnail, thumbnail_type = session.media_thumbnail(media[0].id)
     item, chunks = session.download_media(media[0].id)
+    assert thumbnail == THUMBNAIL
+    assert thumbnail_type == "image/jpeg"
     assert item.name == "IMG_0001.JPG"
     assert b"".join(chunks) == MEDIA_BYTES
     session.delete_media(media[0].id)
     assert any("/main/imgsettings/iso=800" in command for command in runner.commands)
     assert any("--trigger-capture" in command for command in runner.commands)
     assert any("--delete-file" in command for command in runner.commands)
+
+
+def test_media_thumbnail_requires_gphoto2_advertised_ability() -> None:
+    class NoThumbnailRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            if arguments[-1:] == ["--abilities"]:
+                output = ABILITIES.replace(
+                    "File preview (thumbnail) support : yes",
+                    "File preview (thumbnail) support : no",
+                )
+                return CommandOutput(output.encode())
+            return super().run(arguments, timeout=timeout)
+
+    runner = NoThumbnailRunner()
+    session = GPhoto2Engine(runner).open()
+    item = session.list_media()[0]
+
+    with pytest.raises(BridgeError) as failure:
+        session.media_thumbnail(item.id)
+
+    assert CameraFeature.MEDIA_THUMBNAIL not in session.capabilities().supported
+    assert failure.value.code == "UNSUPPORTED_FEATURE"
+    assert not any("--get-thumbnail" in command for command in runner.commands)
 
 
 def test_media_delete_requires_gphoto2_advertised_ability() -> None:

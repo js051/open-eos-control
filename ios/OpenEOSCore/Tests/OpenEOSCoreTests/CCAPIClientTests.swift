@@ -64,6 +64,8 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.tapFocus))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
+        XCTAssertFalse(snapshot.capabilities.matrix.supports(.mediaThumbnail))
+        XCTAssertTrue(snapshot.capabilities.matrix.planned.contains(.mediaThumbnail))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.evidence.source, "GET /ccapi")
         XCTAssertEqual(snapshot.capabilities.evidence.protocolVersions, ["ver100"])
@@ -76,6 +78,21 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertFalse(snapshot.capabilities.evidence.truncated)
         let remainingResponses = await transport.remainingResponses()
         XCTAssertEqual(remainingResponses, 0)
+    }
+
+    func testDirectCCAPIThumbnailIsExplicitlyUnsupportedWithoutARequest() async throws {
+        let transport = MockCameraHTTPTransport()
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+        let item = CameraMediaItem(id: "ccapi:invalid", name: "IMG_0001.JPG", kind: "image")
+
+        do {
+            _ = try await client.mediaThumbnail(item)
+            XCTFail("Expected unsupported media thumbnail")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.mediaThumbnail))
+        }
+        let requestCount = await transport.requests().count
+        XCTAssertEqual(requestCount, 0)
     }
 
     func testStillCaptureUsesAdvertisedPostAndAutofocusPayload() async throws {

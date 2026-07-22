@@ -178,4 +178,5 @@
     <string name="camera_value_flexible_priority_ae">Fv：靈活先決自動曝光</string>
     <string name="camera_value_creative">創意</string>
     <string name="camera_value_action">動態</string>
+    <string name="media_thumbnail">%1$s 的縮圖</string>
 </resources>

@@ -311,6 +311,8 @@ class CcapiClientTest {
         assertTrue(!capabilities.matrix.isPlanned(CameraFeature.STILL_CAPTURE))
         assertTrue(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
+        assertTrue(!capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.MEDIA_THUMBNAIL))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DOWNLOAD))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))

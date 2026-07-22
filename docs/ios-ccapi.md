@@ -12,7 +12,7 @@
 - Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
 - Basic Authentication held by the client instance and redacted diagnostic output
 - Simulator mode and injectable HTTP transport for deterministic tests
-- Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, settings, capture, half-press, recording, tap/drive focus when advertised, bounded JPEG frames, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
+- Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, settings, capture, half-press, recording, tap/drive focus when advertised, bounded JPEG frames and media thumbnails, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
 
 CCAPI RTP, focus drive without a camera/engine-advertised operation, and direct iOS USB/PTP are not presented as implemented features. Desktop Bridge is the implemented iPhone/iPad route to a camera attached to a PC by USB.
 

@@ -78,6 +78,8 @@ interface CameraControlBackend {
         step: FocusDriveStep,
     ): FocusDriveResult = unsupported(CameraFeature.FOCUS_DRIVE)
     suspend fun listMedia(): List<CameraMediaItem> = unsupported(CameraFeature.MEDIA_BROWSER)
+    suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail =
+        unsupported(CameraFeature.MEDIA_THUMBNAIL)
     suspend fun downloadMedia(
         item: CameraMediaItem,
         destination: OutputStream,
@@ -205,6 +207,8 @@ class DesktopBridgeCameraBackend(
         client.driveFocus(direction, step)
 
     override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
+
+    override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
 
     override suspend fun downloadMedia(
         item: CameraMediaItem,

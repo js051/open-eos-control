@@ -55,6 +55,7 @@ class DesktopBridgeClientTest {
         val frame = client.liveViewFrame(9)
         val focus = client.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.LARGE)
         val media = client.listMedia()
+        val thumbnail = client.mediaThumbnail(media.single())
         val destination = ByteArrayOutputStream()
         val progress = mutableListOf<CameraMediaTransferProgress>()
         val download = client.downloadMedia(media.single(), destination, progress::add)
@@ -74,6 +75,7 @@ class DesktopBridgeClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.DESKTOP_BRIDGE))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
         assertFalse(capabilities.matrix.supports(CameraFeature.USB_DIAGNOSTICS))
         assertEquals(listOf("Auto", "100", "400", "800"), capabilities.iso)
@@ -87,6 +89,8 @@ class DesktopBridgeClientTest {
         assertTrue(frame.sourceUrl.endsWith("/liveview/frame?t=9"))
         assertTrue(focus.ok)
         assertEquals("IMG_0001.JPG", media.single().name)
+        assertArrayEquals(THUMBNAIL, thumbnail.bytes)
+        assertEquals("image/jpeg", thumbnail.contentType)
         assertArrayEquals(MEDIA_BYTES, destination.toByteArray())
         assertEquals(MEDIA_BYTES.size.toLong(), download.bytesTransferred)
         assertEquals(0L, progress.first().bytesTransferred)
@@ -206,6 +210,9 @@ class DesktopBridgeClientTest {
                     .setBody(okio.Buffer().write(JPEG))
                 path.endsWith("/focus/drive") -> json("""{"accepted":true,"direction":"FAR","step":"LARGE"}""")
                 path.endsWith("/media") -> json(MEDIA_JSON)
+                path.endsWith("/thumbnail") -> MockResponse()
+                    .setHeader("content-type", "image/jpeg")
+                    .setBody(okio.Buffer().write(THUMBNAIL))
                 path.contains("/media/") && request.method == "DELETE" -> MockResponse().setResponseCode(204)
                 path.contains("/media/") -> MockResponse()
                     .setHeader("content-type", "image/jpeg")
@@ -242,6 +249,7 @@ class DesktopBridgeClientTest {
 
     private companion object {
         val JPEG = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2, 3, 0xFF.toByte(), 0xD9.toByte())
+        val THUMBNAIL = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 4, 2, 0xFF.toByte(), 0xD9.toByte())
         val MEDIA_BYTES = byteArrayOf(9, 8, 7, 6, 5)
 
         const val HEALTH_JSON = """
@@ -300,7 +308,7 @@ class DesktopBridgeClientTest {
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
                 "STILL_CAPTURE", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "ADVANCED_SETTINGS",
-                "MEDIA_BROWSER", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
+                "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
               ],
               "planned": ["TAP_FOCUS", "LIVE_VIEW_RTP"],
               "reasons": {"LIVE_VIEW_RTP": "Persistent stream is not implemented."},

@@ -1,5 +1,6 @@
 package dev.openeos.control.ui
 
+import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
@@ -19,7 +20,9 @@ import androidx.annotation.StringRes
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilityEvidence
 import dev.openeos.control.data.CameraCapabilities
+import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.DesktopBridgeCamera
@@ -248,6 +251,42 @@ class CameraScreensTest {
     }
 
     @Test
+    fun mediaThumbnailLoadsWhenAdvertisedAndExposesAnAccessibleDescription() {
+        val item = CameraMediaItem("ptp:00000042", "IMG_0042.JPG", "image")
+        val preview = CameraUiState().withOfflinePreview()
+        val capabilities = requireNotNull(preview.capabilities)
+        val state = mutableStateOf(
+            preview.copy(
+                previewMode = false,
+                mediaItems = listOf(item),
+                capabilities = capabilities.copy(
+                    matrix = capabilities.matrix.copy(
+                        supported = capabilities.matrix.supported + CameraFeature.MEDIA_THUMBNAIL,
+                    ),
+                ),
+            ),
+        )
+        var requestedItem: CameraMediaItem? = null
+        val actions = noOpActions().copy(loadMediaThumbnail = { requestedItem = it })
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state.value, actions)
+            }
+        }
+
+        compose.runOnIdle {
+            assertEquals(item, requestedItem)
+            state.value = state.value.copy(
+                mediaThumbnails = mapOf(
+                    item.id to Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888),
+                ),
+            )
+        }
+        compose.onNodeWithContentDescription(resourceText(R.string.media_thumbnail, item.name))
+            .assertIsDisplayed()
+    }
+
+    @Test
     fun mediaDeleteRequiresConfirmationBeforeDispatchingCameraAction() {
         var deletedName: String? = null
         val state = CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA)
@@ -443,7 +482,8 @@ class CameraScreensTest {
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
         captureStill = {}, focusWithShutter = {}, driveFocus = { _, _ -> }, toggleRecording = {}, tapFocus = { _, _ -> },
-        refreshMedia = {}, downloadMedia = { _, _ -> }, deleteMedia = {}, cancelMediaDownload = {},
+        refreshMedia = {}, loadMediaThumbnail = {}, downloadMedia = { _, _ -> }, deleteMedia = {},
+        cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {},
         setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setAppLanguage = {}, clearError = {},
     )

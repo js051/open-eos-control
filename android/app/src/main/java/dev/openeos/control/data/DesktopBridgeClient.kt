@@ -332,6 +332,41 @@ class DesktopBridgeClient(
             }
         }
 
+    suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(sessionEndpoint("media", item.id, "thumbnail"))
+            .header("Accept", "image/*")
+            .get()
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body ?: error("Desktop Bridge returned an empty thumbnail response.")
+            if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media thumbnail")
+            val contentLength = body.contentLength()
+            check(contentLength <= MAX_MEDIA_THUMBNAIL_BYTES || contentLength < 0L) {
+                "Desktop Bridge thumbnail exceeded $MAX_MEDIA_THUMBNAIL_BYTES bytes."
+            }
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
+            body.byteStream().use { input ->
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                    check(output.size().toLong() <= MAX_MEDIA_THUMBNAIL_BYTES) {
+                        "Desktop Bridge thumbnail exceeded $MAX_MEDIA_THUMBNAIL_BYTES bytes."
+                    }
+                }
+            }
+            val bytes = output.toByteArray()
+            val contentType = response.header("content-type")?.substringBefore(';')?.trim()
+            check(bytes.isNotEmpty() && contentType?.startsWith("image/") == true) {
+                "Desktop Bridge did not return an image thumbnail."
+            }
+            CameraMediaThumbnail(item = item, bytes = bytes, contentType = contentType)
+        }
+    }
+
     suspend fun downloadMedia(
         item: CameraMediaItem,
         destination: OutputStream,
@@ -507,6 +542,7 @@ class DesktopBridgeClient(
         const val BRIDGE_SERVICE_NAME = "open-eos-control-bridge"
         const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024L
         const val MAX_ERROR_BODY_CHARS = 2_000
+        const val MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024L
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
     }

@@ -1,6 +1,7 @@
 import Foundation
 import OpenEOSCore
 import SwiftUI
+import UIKit
 
 struct MediaView: View {
     @EnvironmentObject private var camera: CameraAppState
@@ -24,6 +25,7 @@ struct MediaView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(camera.mediaItems) { item in
                             mediaRow(item)
+                                .task(id: item.id) { await camera.loadMediaThumbnail(item) }
                             Divider().overlay(Color.cameraBorder)
                         }
                     }
@@ -99,10 +101,7 @@ struct MediaView: View {
 
     private func mediaRow(_ item: CameraMediaItem) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: mediaIcon(item.kind))
-                .font(.title3)
-                .foregroundStyle(Color.cameraAccent)
-                .frame(width: 40, height: 48)
+            mediaThumbnail(item)
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name)
                     .font(.callout.weight(.semibold))
@@ -121,6 +120,27 @@ struct MediaView: View {
             mediaActions(item)
         }
         .frame(minHeight: 76)
+    }
+
+    @ViewBuilder
+    private func mediaThumbnail(_ item: CameraMediaItem) -> some View {
+        ZStack {
+            Color.cameraSurfaceRaised
+            if let data = camera.mediaThumbnails[item.id], let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .accessibilityLabel(Text(language.format("media_thumbnail", item.name)))
+            } else if camera.loadingMediaThumbnailIDs.contains(item.id) {
+                ProgressView().tint(Color.cameraAccent).controlSize(.small)
+            } else {
+                Image(systemName: mediaIcon(item.kind))
+                    .font(.title3)
+                    .foregroundStyle(Color.cameraAccent)
+            }
+        }
+        .frame(width: 56, height: 56)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     @ViewBuilder

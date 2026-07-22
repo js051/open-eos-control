@@ -465,6 +465,7 @@ class CcapiSession:
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.MEDIA_BROWSER,
+                CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
             }
@@ -484,6 +485,9 @@ class CcapiSession:
                     ),
                     CameraFeature.FOCUS_DRIVE.value: (
                         "CCAPI focus drive is not exposed without a camera-advertised, verified operation."
+                    ),
+                    CameraFeature.MEDIA_THUMBNAIL.value: (
+                        "No verified Canon CCAPI thumbnail resource is advertised by this camera."
                     ),
                 },
                 live_view=(
@@ -760,6 +764,14 @@ class CcapiSession:
                 feature=CameraFeature.MEDIA_DOWNLOAD.value,
                 engine=self.engine_name,
             )
+
+    def media_thumbnail(self, media_id: str) -> tuple[bytes, str]:
+        del media_id
+        raise unsupported(
+            CameraFeature.MEDIA_THUMBNAIL.value,
+            self.engine_name,
+            "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
+        )
 
     def delete_media(self, media_id: str) -> None:
         with self._lock:

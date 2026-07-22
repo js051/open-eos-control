@@ -44,6 +44,8 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var shutterFlash = false
     @Published private(set) var focusMarker: FocusMarker?
     @Published private(set) var mediaItems: [CameraMediaItem] = []
+    @Published private(set) var mediaThumbnails: [String: Data] = [:]
+    @Published private(set) var loadingMediaThumbnailIDs = Set<String>()
     @Published private(set) var downloadedFileURL: URL?
     @Published private(set) var downloadedFileName: String?
     @Published private(set) var deletedMediaName: String?
@@ -55,6 +57,8 @@ final class CameraAppState: ObservableObject {
     private var liveViewTask: Task<Void, Never>?
     private var rateTracker = LiveViewRateTracker()
     private var downloadedMediaID: String?
+    private var unavailableMediaThumbnailIDs = Set<String>()
+    private var mediaThumbnailGeneration = 0
 
     var connected: Bool { snapshot?.status.connected == true }
     var recording: Bool { snapshot?.status.recording == true }
@@ -207,6 +211,7 @@ final class CameraAppState: ObservableObject {
             isPreview = false
             screen = .control
             mediaItems = []
+            resetMediaThumbnails()
             removeDownloadedFile()
             deletedMediaName = nil
             lastError = nil
@@ -226,6 +231,7 @@ final class CameraAppState: ObservableObject {
         isPreview = true
         screen = .control
         mediaItems = Self.previewMedia
+        resetMediaThumbnails()
         removeDownloadedFile()
         deletedMediaName = nil
         lastError = nil
@@ -244,6 +250,7 @@ final class CameraAppState: ObservableObject {
         password = ""
         bridgeToken = ""
         mediaItems = []
+        resetMediaThumbnails()
         removeDownloadedFile()
         deletedMediaName = nil
         liveViewData = nil
@@ -425,6 +432,7 @@ final class CameraAppState: ObservableObject {
         guard supports(.mediaBrowser), begin(.media) else { return }
         defer { end(.media) }
         deletedMediaName = nil
+        resetMediaThumbnails()
         if isPreview {
             mediaItems = Self.previewMedia
             return
@@ -435,6 +443,43 @@ final class CameraAppState: ObservableObject {
             lastError = nil
         } catch {
             record(error)
+        }
+    }
+
+    func loadMediaThumbnail(_ item: CameraMediaItem) async {
+        guard
+            !isPreview,
+            supports(.mediaThumbnail),
+            mediaThumbnails[item.id] == nil,
+            !loadingMediaThumbnailIDs.contains(item.id),
+            !unavailableMediaThumbnailIDs.contains(item.id),
+            let session
+        else { return }
+
+        let generation = mediaThumbnailGeneration
+        loadingMediaThumbnailIDs.insert(item.id)
+        defer {
+            if generation == mediaThumbnailGeneration {
+                loadingMediaThumbnailIDs.remove(item.id)
+            }
+        }
+        do {
+            let thumbnail = try await session.mediaThumbnail(item)
+            guard
+                generation == mediaThumbnailGeneration,
+                mediaItems.contains(where: { $0.id == item.id })
+            else { return }
+            guard !thumbnail.data.isEmpty else {
+                unavailableMediaThumbnailIDs.insert(item.id)
+                return
+            }
+            mediaThumbnails[item.id] = thumbnail.data
+        } catch is CancellationError {
+            return
+        } catch {
+            if generation == mediaThumbnailGeneration {
+                unavailableMediaThumbnailIDs.insert(item.id)
+            }
         }
     }
 
@@ -626,7 +671,17 @@ final class CameraAppState: ObservableObject {
             removeDownloadedFile()
         }
         mediaItems.removeAll { $0.id == item.id }
+        mediaThumbnails.removeValue(forKey: item.id)
+        loadingMediaThumbnailIDs.remove(item.id)
+        unavailableMediaThumbnailIDs.remove(item.id)
         deletedMediaName = item.name
+    }
+
+    private func resetMediaThumbnails() {
+        mediaThumbnailGeneration &+= 1
+        mediaThumbnails = [:]
+        loadingMediaThumbnailIDs = []
+        unavailableMediaThumbnailIDs = []
     }
 
     static func makeOfflinePreviewSnapshot() -> CameraSnapshot {

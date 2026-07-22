@@ -375,6 +375,16 @@ class PtpSession(
             PtpDatasets.objectInfo(handle, payload)
         }
 
+    suspend fun objectThumbnail(handle: Long): ByteArray =
+        transaction(
+            operationCode = PtpOperationCode.GET_THUMB,
+            parameters = listOf(handle),
+            maxPayloadBytes = MAX_PTP_THUMBNAIL_BYTES,
+        ) { payload ->
+            if (payload.isEmpty()) throw PtpProtocolException("GetThumb returned an empty thumbnail.")
+            payload
+        }
+
     suspend fun devicePropertyDescriptor(propertyCode: Int): PtpDevicePropertyDescriptor =
         transaction(PtpOperationCode.GET_DEVICE_PROP_DESC, listOf(propertyCode.toLong())) { payload ->
             PtpPropertyCodec.decodeDescriptor(payload).also { descriptor ->
@@ -549,6 +559,7 @@ class PtpSession(
     private suspend fun <T> transaction(
         operationCode: Int,
         parameters: List<Long> = emptyList(),
+        maxPayloadBytes: Int = DEFAULT_PTP_METADATA_BYTES,
         parser: (ByteArray) -> T,
     ): T = mutex.withLock {
         requireOpen()
@@ -557,6 +568,7 @@ class PtpSession(
             parameters = parameters,
             transactionId = takeTransactionId(),
             expectData = true,
+            maxPayloadBytes = maxPayloadBytes,
         ) ?: throw PtpProtocolException(
             "Operation 0x${operationCode.toHex(4)} completed without a data container."
         )
@@ -568,11 +580,12 @@ class PtpSession(
         parameters: List<Long> = emptyList(),
         transactionId: Long,
         expectData: Boolean,
+        maxPayloadBytes: Int = DEFAULT_PTP_METADATA_BYTES,
     ): ByteArray? {
         transport.send(PtpCodec.command(operationCode, transactionId, parameters))
         var data: ByteArray? = null
         while (true) {
-            val container = transport.receive()
+            val container = transport.receive(maxPayloadBytes)
             if (container.type == PtpContainerType.EVENT) continue
             validateTransaction(container.header, transactionId)
             when (container.type) {
@@ -759,4 +772,5 @@ private fun Number.toHex(width: Int): String = toLong().toString(16).uppercase()
 
 const val PTP_USB_CONTAINER_HEADER_BYTES = 12
 const val DEFAULT_PTP_METADATA_BYTES = 16 * 1024 * 1024
+const val MAX_PTP_THUMBNAIL_BYTES = 8 * 1024 * 1024
 const val UINT32_MAX = 0xFFFF_FFFFL

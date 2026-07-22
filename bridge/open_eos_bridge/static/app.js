@@ -9,6 +9,7 @@
     TAP_FOCUS: "TAP_FOCUS",
     FOCUS_DRIVE: "FOCUS_DRIVE",
     MEDIA_BROWSER: "MEDIA_BROWSER",
+    MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL",
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
     MEDIA_DELETE: "MEDIA_DELETE",
   };
@@ -16,6 +17,7 @@
   const LANGUAGE_KEY = "open-eos-control-language";
   const CCAPI_URL_KEY = "open-eos-control-ccapi-url";
   const CCAPI_USERNAME_KEY = "open-eos-control-ccapi-username";
+  const MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024;
 
   const messages = {
     en: {
@@ -116,6 +118,7 @@
       aeb: "Auto exposure bracketing",
       mediaCount: "{count} media item(s)",
       mediaEmpty: "No media was reported by the camera",
+      mediaThumbnail: "Thumbnail for {name}",
       download: "Download",
       downloaded: "Downloaded {name}",
       delete: "Delete",
@@ -229,6 +232,7 @@
       aeb: "自動包圍曝光",
       mediaCount: "共 {count} 個媒體檔案",
       mediaEmpty: "相機未回報任何媒體檔案",
+      mediaThumbnail: "{name} 的縮圖",
       download: "下載",
       downloaded: "已下載 {name}",
       delete: "刪除",
@@ -304,10 +308,15 @@
     focusStep: "MEDIUM",
     media: [],
     mediaLoaded: false,
+    mediaThumbnailUrls: new Map(),
+    mediaThumbnailLoads: new Set(),
+    mediaThumbnailFailures: new Set(),
+    mediaGeneration: 0,
     busy: false,
     lastError: null,
     toastTimer: null,
   };
+  let mediaThumbnailObserver = null;
 
   const byId = (id) => document.getElementById(id);
   const ui = {
@@ -718,6 +727,7 @@
 
   function resetSession() {
     stopLiveLoop();
+    clearMediaThumbnails();
     state.session = null;
     state.info = null;
     state.status = null;
@@ -1318,6 +1328,7 @@
     ui.mediaRefreshButton.disabled = true;
     try {
       const response = await api(`/v1/session/${encodeURIComponent(state.session.id)}/media`);
+      clearMediaThumbnails();
       state.media = response.items || [];
       state.mediaLoaded = true;
       renderMedia();
@@ -1331,6 +1342,7 @@
 
   function renderMedia() {
     if (!ui.mediaList) return;
+    mediaThumbnailObserver?.disconnect();
     ui.mediaSummary.textContent = t("mediaCount", { count: state.media.length });
     ui.mediaList.replaceChildren();
     if (!state.media.length) {
@@ -1343,9 +1355,10 @@
     state.media.forEach((item) => {
       const row = document.createElement("div");
       row.className = "media-row";
-      const kind = document.createElement("span");
-      kind.className = "media-kind";
-      kind.dataset.icon = item.kind === "video" ? "video" : "images";
+      const thumbnail = document.createElement("span");
+      thumbnail.className = "media-thumbnail";
+      thumbnail.dataset.mediaId = item.id;
+      renderMediaThumbnail(thumbnail, item, state.mediaThumbnailUrls.get(item.id));
       const copy = document.createElement("div");
       copy.className = "media-copy";
       const name = document.createElement("strong");
@@ -1383,10 +1396,101 @@
       download.disabled = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
       download.addEventListener("click", () => downloadMedia(item, download));
       actions.append(download);
-      row.append(kind, copy, size, actions);
+      row.append(thumbnail, copy, size, actions);
       ui.mediaList.append(row);
+      if (featureSupported(FEATURES.MEDIA_THUMBNAIL) && !state.mediaThumbnailUrls.has(item.id)) {
+        observeMediaThumbnail(thumbnail);
+      }
     });
     window.OpenEosIcons?.render(ui.mediaList);
+  }
+
+  function renderMediaThumbnail(container, item, url = null) {
+    container.replaceChildren();
+    container.classList.toggle("loading", state.mediaThumbnailLoads.has(item.id));
+    if (url) {
+      const image = document.createElement("img");
+      image.src = url;
+      image.alt = t("mediaThumbnail", { name: item.name });
+      container.append(image);
+      return;
+    }
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    icon.dataset.icon = item.kind === "video" ? "video" : "images";
+    container.append(icon);
+    window.OpenEosIcons?.render(container);
+  }
+
+  async function loadMediaThumbnail(item) {
+    if (
+      !state.session ||
+      !featureSupported(FEATURES.MEDIA_THUMBNAIL) ||
+      state.mediaThumbnailUrls.has(item.id) ||
+      state.mediaThumbnailLoads.has(item.id) ||
+      state.mediaThumbnailFailures.has(item.id)
+    ) return;
+    const generation = state.mediaGeneration;
+    state.mediaThumbnailLoads.add(item.id);
+    updateVisibleMediaThumbnail(item);
+    try {
+      const blob = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/thumbnail`,
+        { responseType: "blob" },
+      );
+      if (!blob.type.startsWith("image/") || blob.size <= 0 || blob.size > MAX_MEDIA_THUMBNAIL_BYTES) {
+        throw new ApiError("Invalid media thumbnail", { code: "INVALID_MEDIA_THUMBNAIL" });
+      }
+      if (generation !== state.mediaGeneration || !state.media.some((candidate) => candidate.id === item.id)) return;
+      const url = URL.createObjectURL(blob);
+      const previous = state.mediaThumbnailUrls.get(item.id);
+      if (previous) URL.revokeObjectURL(previous);
+      state.mediaThumbnailUrls.set(item.id, url);
+    } catch (_) {
+      if (generation === state.mediaGeneration) state.mediaThumbnailFailures.add(item.id);
+    } finally {
+      if (generation === state.mediaGeneration) {
+        state.mediaThumbnailLoads.delete(item.id);
+        updateVisibleMediaThumbnail(item);
+      }
+    }
+  }
+
+  function observeMediaThumbnail(container) {
+    if (!("IntersectionObserver" in window)) {
+      const item = state.media.find((candidate) => candidate.id === container.dataset.mediaId);
+      if (item) loadMediaThumbnail(item);
+      return;
+    }
+    if (!mediaThumbnailObserver) {
+      mediaThumbnailObserver = new IntersectionObserver(
+        (entries, observer) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            observer.unobserve(entry.target);
+            const item = state.media.find((candidate) => candidate.id === entry.target.dataset.mediaId);
+            if (item) loadMediaThumbnail(item);
+          });
+        },
+        { rootMargin: "160px 0px" },
+      );
+    }
+    mediaThumbnailObserver.observe(container);
+  }
+
+  function updateVisibleMediaThumbnail(item) {
+    const container = Array.from(ui.mediaList.querySelectorAll(".media-thumbnail"))
+      .find((candidate) => candidate.dataset.mediaId === item.id);
+    if (container) renderMediaThumbnail(container, item, state.mediaThumbnailUrls.get(item.id));
+  }
+
+  function clearMediaThumbnails() {
+    mediaThumbnailObserver?.disconnect();
+    state.mediaThumbnailUrls.forEach((url) => URL.revokeObjectURL(url));
+    state.mediaThumbnailUrls.clear();
+    state.mediaThumbnailLoads.clear();
+    state.mediaThumbnailFailures.clear();
+    state.mediaGeneration += 1;
   }
 
   async function downloadMedia(item, button) {
@@ -1424,6 +1528,11 @@
         { method: "DELETE" },
       );
       state.media = state.media.filter((candidate) => candidate.id !== item.id);
+      const thumbnailUrl = state.mediaThumbnailUrls.get(item.id);
+      if (thumbnailUrl) URL.revokeObjectURL(thumbnailUrl);
+      state.mediaThumbnailUrls.delete(item.id);
+      state.mediaThumbnailLoads.delete(item.id);
+      state.mediaThumbnailFailures.delete(item.id);
       renderMedia();
       showToast(t("deleted", { name: item.name }));
     } catch (error) {
@@ -1581,6 +1690,7 @@
       if (event.target === ui.settingDialog) ui.settingDialog.close();
     });
     window.addEventListener("beforeunload", () => {
+      clearMediaThumbnails();
       if (!state.session) return;
       api(`/v1/session/${encodeURIComponent(state.session.id)}`, { method: "DELETE", keepalive: true }).catch(() => {});
     });

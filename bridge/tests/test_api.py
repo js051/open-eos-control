@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from open_eos_bridge.app import create_app
 from open_eos_bridge.gphoto2 import GPhoto2Engine, SubprocessGPhotoRunner
 
-from .fakes import JPEG, MEDIA_BYTES, FakeRunner
+from .fakes import JPEG, MEDIA_BYTES, THUMBNAIL, FakeRunner
 
 
 def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> None:
@@ -67,6 +67,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
         )
         media = client.get(f"/v1/session/{session_id}/media", headers=headers)
         media_id = media.json()["items"][0]["id"]
+        thumbnail = client.get(f"/v1/session/{session_id}/media/{media_id}/thumbnail", headers=headers)
         download = client.get(f"/v1/session/{session_id}/media/{media_id}", headers=headers)
         media_deleted = client.delete(f"/v1/session/{session_id}/media/{media_id}", headers=headers)
         deleted = client.delete(f"/v1/session/{session_id}", headers=headers)
@@ -80,6 +81,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert status.json()["battery"]["level"] == 82
     assert "LIVE_VIEW" in capabilities.json()["supported"]
     assert "MEDIA_DELETE" in capabilities.json()["supported"]
+    assert "MEDIA_THUMBNAIL" in capabilities.json()["supported"]
     assert capabilities.json()["evidence"]["source"] == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert setting.json()["exposure"]["iso"] == "800"
@@ -88,6 +90,9 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert focus.json()["accepted"] is True
     assert unsupported_tap.status_code == 409
     assert unsupported_tap.json()["error"]["code"] == "UNSUPPORTED_FEATURE"
+    assert thumbnail.content == THUMBNAIL
+    assert thumbnail.headers["content-type"].startswith("image/jpeg")
+    assert thumbnail.headers["cache-control"] == "private, no-store, max-age=0"
     assert download.content == MEDIA_BYTES
     assert download.headers["content-type"].startswith("image/jpeg")
     assert media_deleted.status_code == 204

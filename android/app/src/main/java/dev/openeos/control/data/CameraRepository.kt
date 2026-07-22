@@ -168,6 +168,8 @@ class CameraRepository(
 
     suspend fun listMedia(): List<CameraMediaItem> = backend.listMedia()
 
+    suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = backend.mediaThumbnail(item)
+
     suspend fun downloadMedia(
         item: CameraMediaItem,
         destination: OutputStream,

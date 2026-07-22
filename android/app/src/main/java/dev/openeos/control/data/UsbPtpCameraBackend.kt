@@ -18,6 +18,7 @@ class UsbPtpCameraBackend(
     private var deviceInfo: PtpDeviceInfo? = null
     private var storageSnapshot: List<PtpStorageInfo> = emptyList()
     private var storageError: String? = null
+    private val mediaInfo = mutableMapOf<Long, PtpObjectInfo>()
     private var propertyDescriptors: Map<Int, PtpDevicePropertyDescriptor> = emptyMap()
     private val propertyValues = mutableMapOf<Int, PtpPropertyValue>()
     private val propertyErrors = mutableMapOf<Int, String>()
@@ -59,6 +60,7 @@ class UsbPtpCameraBackend(
         deviceInfo = null
         storageSnapshot = emptyList()
         storageError = null
+        mediaInfo.clear()
         propertyDescriptors = emptyMap()
         propertyValues.clear()
         propertyErrors.clear()
@@ -169,6 +171,9 @@ class UsbPtpCameraBackend(
             if (PtpDevicePropertyCode.BATTERY_LEVEL in propertyDescriptors) add(CameraFeature.BATTERY_STATUS)
             if (supportsStorage(info)) add(CameraFeature.STORAGE_STATUS)
             if (supportsMediaBrowser(info)) add(CameraFeature.MEDIA_BROWSER)
+            if (supportsMediaBrowser(info) && info.supports(PtpOperationCode.GET_THUMB)) {
+                add(CameraFeature.MEDIA_THUMBNAIL)
+            }
             if (info.supports(PtpOperationCode.GET_OBJECT)) add(CameraFeature.MEDIA_DOWNLOAD)
             if (info.supports(PtpOperationCode.DELETE_OBJECT)) add(CameraFeature.MEDIA_DELETE)
             if (info.supports(PtpOperationCode.INITIATE_CAPTURE) || supportsCanonRelease) {
@@ -201,6 +206,7 @@ class UsbPtpCameraBackend(
             CameraFeature.WHITE_BALANCE_CONTROL,
             CameraFeature.ADVANCED_SETTINGS,
             CameraFeature.MEDIA_BROWSER,
+            CameraFeature.MEDIA_THUMBNAIL,
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
         )
@@ -238,6 +244,8 @@ class UsbPtpCameraBackend(
                         "Uses Canon EOS EVFRecordStatus only when camera events advertise both Card and None values.",
                     CameraFeature.MEDIA_BROWSER to
                         "Uses standard GetStorageIDs, GetObjectHandles, and GetObjectInfo operations.",
+                    CameraFeature.MEDIA_THUMBNAIL to
+                        "Uses standard PTP GetThumb only when operation 0x100A is advertised by DeviceInfo.",
                     CameraFeature.MEDIA_DOWNLOAD to
                         "Uses standard GetObject with bounded USB reads and streaming output.",
                     CameraFeature.MEDIA_DELETE to
@@ -397,10 +405,12 @@ class UsbPtpCameraBackend(
             .reversed()
 
         var firstFailure: Exception? = null
+        mediaInfo.clear()
         val items = handles.mapNotNull { handle ->
             try {
                 ptp.objectInfo(handle)
                     .takeUnless { it.objectFormat == PtpObjectFormat.ASSOCIATION || it.filename.isBlank() }
+                    ?.also { mediaInfo[handle] = it }
                     ?.toMediaItem()
             } catch (exception: Exception) {
                 if (firstFailure == null) firstFailure = exception
@@ -409,6 +419,32 @@ class UsbPtpCameraBackend(
         }
         if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null) throw firstFailure!!
         return items
+    }
+
+    override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        requireOperation(PtpOperationCode.GET_THUMB, CameraFeature.MEDIA_THUMBNAIL)
+        val handle = item.ptpHandle()
+        val objectInfo = mediaInfo[handle] ?: requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
+        if (objectInfo.thumbnailSizeBytes <= 0L || objectInfo.thumbnailFormat == 0) {
+            throw PtpProtocolException("${item.name} does not advertise an embedded PTP thumbnail.")
+        }
+        if (objectInfo.thumbnailSizeBytes > MAX_PTP_THUMBNAIL_BYTES) {
+            throw PtpProtocolException(
+                "${item.name} advertises a ${objectInfo.thumbnailSizeBytes}-byte thumbnail; " +
+                    "limit is $MAX_PTP_THUMBNAIL_BYTES bytes."
+            )
+        }
+        val bytes = requireSession().objectThumbnail(handle)
+        if (bytes.size > MAX_PTP_THUMBNAIL_BYTES) {
+            throw PtpProtocolException(
+                "${item.name} thumbnail is ${bytes.size} bytes; limit is $MAX_PTP_THUMBNAIL_BYTES bytes."
+            )
+        }
+        return CameraMediaThumbnail(
+            item = item,
+            bytes = bytes,
+            contentType = thumbnailContentType(objectInfo.thumbnailFormat, bytes),
+        )
     }
 
     override suspend fun downloadMedia(
@@ -888,6 +924,23 @@ private fun CameraMediaItem.ptpHandle(): Long {
     return encoded.toLongOrNull(16)
         ?: throw PtpProtocolException("Media item $id is not a USB PTP object handle.")
 }
+
+private fun thumbnailContentType(format: Int, bytes: ByteArray): String? = when {
+    format == PtpObjectFormat.EXIF_JPEG || bytes.hasJpegMarkers() -> "image/jpeg"
+    format == PtpObjectFormat.PNG || bytes.hasPngSignature() -> "image/png"
+    else -> null
+}
+
+private fun ByteArray.hasJpegMarkers(): Boolean =
+    size >= 4 &&
+        this[0] == 0xFF.toByte() && this[1] == 0xD8.toByte() &&
+        this[lastIndex - 1] == 0xFF.toByte() && this[lastIndex] == 0xD9.toByte()
+
+private fun ByteArray.hasPngSignature(): Boolean =
+    size >= 8 &&
+        this[0] == 0x89.toByte() && this[1] == 0x50.toByte() && this[2] == 0x4E.toByte() &&
+        this[3] == 0x47.toByte() && this[4] == 0x0D.toByte() && this[5] == 0x0A.toByte() &&
+        this[6] == 0x1A.toByte() && this[7] == 0x0A.toByte()
 
 private fun List<PtpStorageInfo>.toStorageJson(): String {
     val array = JSONArray()

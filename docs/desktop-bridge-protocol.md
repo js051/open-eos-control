@@ -4,7 +4,7 @@ The desktop bridge is a local service that exposes the same camera-control conce
 
 ## Implementation Status
 
-`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and provides two open engines: `libgphoto2` for USB cameras and a native Python HTTP `ccapi` engine for direct wireless camera control. The gPhoto adapter invokes argument arrays, never a shell. Android's `DesktopBridgeClient` implements the bridge protocol behind the shared camera backend, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, and streamed media. Deterministic tests cover both PC engines and the Android contract. Physical R6 Mark III validation is still required and must not be inferred from those tests.
+`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and provides two open engines: `libgphoto2` for USB cameras and a native Python HTTP `ccapi` engine for direct wireless camera control. The gPhoto adapter invokes argument arrays, never a shell. Android and iOS implement the bridge protocol behind their shared camera sessions, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, bounded media thumbnails, and streamed media. Deterministic tests cover both PC engines and the mobile contracts. Physical R6 Mark III validation is still required and must not be inferred from those tests.
 
 ## Goals
 
@@ -36,6 +36,7 @@ POST /v1/session/{id}/recording/stop
 POST /v1/session/{id}/focus/tap
 POST /v1/session/{id}/focus/drive
 GET  /v1/session/{id}/media
+GET  /v1/session/{id}/media/{itemId}/thumbnail
 GET  /v1/session/{id}/media/{itemId}
 DELETE /v1/session/{id}/media/{itemId}
 DELETE /v1/session/{id}
@@ -132,6 +133,8 @@ The bridge should mirror the app-side capability model:
 ```
 
 The current CLI adapter serves `GET /liveview/frame` as JPEG polling. Each frame is one bounded `gphoto2 --capture-preview --stdout` process, so it advertises at most 5 FPS. The client controls polling at or below `requestedFps`; the server does not claim the camera delivered that rate. A later native libgphoto2 adapter can keep a persistent stream while preserving the endpoint and capability vocabulary.
+
+`GET /v1/session/{id}/media/{itemId}/thumbnail` returns a bounded JPEG or PNG with `Cache-Control: private, no-store`. The libgphoto2 engine advertises `MEDIA_THUMBNAIL` only when `gphoto2 --abilities` reports file-preview support and then executes the documented `--folder ... --get-thumbnail ... --stdout` command. The direct CCAPI engine does not advertise this capability because no verified camera-advertised thumbnail resource is available; clients keep their file-type fallback.
 
 The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. Requested FPS controls client polling; observed FPS remains a separate UI metric.
 

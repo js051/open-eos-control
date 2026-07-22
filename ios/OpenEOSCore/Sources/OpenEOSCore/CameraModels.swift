@@ -16,6 +16,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case whiteBalanceControl = "WHITE_BALANCE_CONTROL"
     case advancedSettings = "ADVANCED_SETTINGS"
     case mediaBrowser = "MEDIA_BROWSER"
+    case mediaThumbnail = "MEDIA_THUMBNAIL"
     case mediaDownload = "MEDIA_DOWNLOAD"
     case mediaDelete = "MEDIA_DELETE"
     case desktopBridge = "DESKTOP_BRIDGE"
@@ -352,6 +353,18 @@ public struct CameraMediaDownload: Equatable, Sendable {
         self.item = item
         self.fileURL = fileURL
         self.bytesTransferred = bytesTransferred
+        self.contentType = contentType
+    }
+}
+
+public struct CameraMediaThumbnail: Equatable, Sendable {
+    public let item: CameraMediaItem
+    public let data: Data
+    public let contentType: String?
+
+    public init(item: CameraMediaItem, data: Data, contentType: String?) {
+        self.item = item
+        self.data = data
         self.contentType = contentType
     }
 }

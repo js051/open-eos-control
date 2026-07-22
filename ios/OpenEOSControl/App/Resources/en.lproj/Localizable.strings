@@ -1,4 +1,5 @@
 "app_name" = "Open EOS Control";
+"media_thumbnail" = "Thumbnail for %@";
 "connect_title" = "Connect your EOS";
 "direct_camera" = "Direct camera";
 "connection_method" = "Connection method";

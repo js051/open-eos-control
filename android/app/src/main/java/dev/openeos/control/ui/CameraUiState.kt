@@ -57,6 +57,8 @@ data class CameraUiState(
     val status: CameraStatus? = null,
     val capabilities: CameraCapabilities? = null,
     val mediaItems: List<CameraMediaItem> = emptyList(),
+    val mediaThumbnails: Map<String, Bitmap> = emptyMap(),
+    val mediaThumbnailLoadingIds: Set<String> = emptySet(),
     val activeMediaDownloadName: String? = null,
     val mediaDownloadProgress: CameraMediaTransferProgress? = null,
     val lastDownloadedMediaName: String? = null,

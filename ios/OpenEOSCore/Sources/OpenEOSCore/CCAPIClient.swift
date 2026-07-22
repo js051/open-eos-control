@@ -236,7 +236,7 @@ public actor CCAPIClient {
 
         let allPlanned: Set<CameraFeature> = [
             .liveViewRTP, .stillCapture, .shutterHalfPress, .videoRecording, .tapFocus,
-            .focusDrive, .mediaBrowser, .mediaDownload,
+            .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaDownload,
             .mediaDelete,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
@@ -248,6 +248,7 @@ public actor CCAPIClient {
                 reasons: [
                     .liveViewRTP: "RTP decoding is not implemented; this client uses bounded JPEG polling.",
                     .focusDrive: "CCAPI focus drive is not exposed without a camera-advertised operation.",
+                    .mediaThumbnail: "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
                 ]
             ),
             liveView: LiveViewCapabilities(
@@ -519,6 +520,11 @@ public actor CCAPIClient {
         throw CCAPIError.invalidResponse(
             "Media download failed for '\(item.name)'.\n" + failures.map { "- \($0)" }.joined(separator: "\n")
         )
+    }
+
+    public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
+        _ = item
+        throw CCAPIError.unsupported(.mediaThumbnail)
     }
 
     public func deleteMedia(_ item: CameraMediaItem) async throws {

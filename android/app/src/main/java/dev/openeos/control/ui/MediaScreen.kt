@@ -1,8 +1,10 @@
 package dev.openeos.control.ui
 
+import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,21 +22,27 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraFeature
@@ -167,8 +175,14 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             state.mediaItems.isEmpty() && !state.isBusy(CameraOperation.MEDIA) -> MediaMessage(R.string.no_media)
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(state.mediaItems, key = { it.id }) { item ->
+                    val thumbnailSupported = state.supports(CameraFeature.MEDIA_THUMBNAIL)
+                    LaunchedEffect(item.id, thumbnailSupported) {
+                        if (thumbnailSupported) actions.loadMediaThumbnail(item)
+                    }
                     MediaRow(
                         item = item,
+                        thumbnail = state.mediaThumbnails[item.id],
+                        thumbnailLoading = item.id in state.mediaThumbnailLoadingIds,
                         deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
                         deleteEnabled = !state.isBusy(CameraOperation.MEDIA),
                         downloadEnabled = !state.previewMode &&
@@ -198,6 +212,8 @@ private fun MediaMessage(message: Int) {
 @Composable
 private fun MediaRow(
     item: CameraMediaItem,
+    thumbnail: Bitmap?,
+    thumbnailLoading: Boolean,
     deleteSupported: Boolean,
     deleteEnabled: Boolean,
     downloadSupported: Boolean,
@@ -206,22 +222,45 @@ private fun MediaRow(
     onDownload: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 16.dp),
+        Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(
-            painterResource(
-                if (item.kind.equals("video", ignoreCase = true)) {
-                    LucideR.drawable.lucide_ic_file_video_camera
-                } else {
-                    LucideR.drawable.lucide_ic_image
-                },
-            ),
-            contentDescription = null,
-            tint = if (item.kind.equals("raw", ignoreCase = true)) AppWarning else AppAccent,
-            modifier = Modifier.size(28.dp),
-        )
+        Box(
+            Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(AppSurfaceHigh),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (thumbnail != null) {
+                Image(
+                    bitmap = thumbnail.asImageBitmap(),
+                    contentDescription = stringResource(R.string.media_thumbnail, item.name),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (thumbnailLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = AppAccent,
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Icon(
+                    painterResource(
+                        if (item.kind.equals("video", ignoreCase = true)) {
+                            LucideR.drawable.lucide_ic_file_video_camera
+                        } else {
+                            LucideR.drawable.lucide_ic_image
+                        },
+                    ),
+                    contentDescription = null,
+                    tint = if (item.kind.equals("raw", ignoreCase = true)) AppWarning else AppAccent,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 item.name,

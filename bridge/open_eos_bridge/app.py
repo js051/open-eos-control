@@ -234,6 +234,15 @@ def create_app(
     def media(session_id: str) -> MediaList:
         return MediaList(items=manager.get(session_id).list_media())
 
+    @router.get("/session/{session_id}/media/{media_id}/thumbnail")
+    def media_thumbnail(session_id: str, media_id: str) -> Response:
+        content, content_type = manager.get(session_id).media_thumbnail(media_id)
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Cache-Control": "private, no-store, max-age=0"},
+        )
+
     @router.get("/session/{session_id}/media/{media_id}")
     def download_media(session_id: str, media_id: str) -> StreamingResponse:
         item, chunks = manager.get(session_id).download_media(media_id)

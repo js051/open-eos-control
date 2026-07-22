@@ -61,6 +61,7 @@ extension DesktopBridgeError: LocalizedError {
 public actor DesktopBridgeClient {
     private static let serviceName = "open-eos-control-bridge"
     private static let maximumLiveViewFrameBytes = 12 * 1024 * 1024
+    private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
     private static let maximumErrorBodyBytes = 2_000
     private static let maximumEvidenceItems = 256
     private static let maximumEvidenceItemCharacters = 512
@@ -347,6 +348,25 @@ public actor DesktopBridgeClient {
         }
     }
 
+    public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
+        let url = try sessionEndpoint(["media", item.id, "thumbnail"])
+        let response = try await transport.send(makeRequest(url: url, method: "GET", accept: "image/*"))
+        guard (200..<300).contains(response.statusCode) else {
+            throw Self.httpError(response: response, method: "GET", url: url)
+        }
+        guard response.body.count <= Self.maximumMediaThumbnailBytes else {
+            throw DesktopBridgeError.invalidResponse(
+                "Desktop Bridge thumbnail exceeded \(Self.maximumMediaThumbnailBytes) bytes."
+            )
+        }
+        let contentType = response.header("content-type")?.components(separatedBy: ";").first
+        let supportedImage = Self.isCompleteJPEG(response.body) || response.body.starts(with: Self.pngSignature)
+        guard !response.body.isEmpty, contentType?.hasPrefix("image/") == true, supportedImage else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge did not return a supported image thumbnail.")
+        }
+        return CameraMediaThumbnail(item: item, data: response.body, contentType: contentType)
+    }
+
     public func downloadMedia(_ item: CameraMediaItem, to destination: URL) async throws -> CameraMediaDownload {
         guard !FileManager.default.fileExists(atPath: destination.path) else {
             throw DesktopBridgeError.destinationExists(destination.path)
@@ -616,6 +636,8 @@ public actor DesktopBridgeClient {
             && data[penultimate] == 0xFF
             && data[last] == 0xD9
     }
+
+    private static let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 
     private static func jsonString(_ value: BridgeJSON) -> String {
         guard

@@ -190,6 +190,8 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= set(capabilities.supported)
+    assert CameraFeature.MEDIA_THUMBNAIL not in capabilities.supported
+    assert CameraFeature.MEDIA_THUMBNAIL in capabilities.planned
     assert next(item for item in capabilities.settings if item.key == "shutter").values == ["1/50", "1/100"]
     assert capabilities.evidence.source == "GET /ccapi"
     assert capabilities.evidence.protocol_versions == ["ver100"]
@@ -250,12 +252,15 @@ def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
         session.capture_still()
     with pytest.raises(BridgeError) as delete_failure:
         session.delete_media("ccapi:invalid")
+    with pytest.raises(BridgeError) as thumbnail_failure:
+        session.media_thumbnail("ccapi:invalid")
 
     assert CameraFeature.STILL_CAPTURE not in capabilities.supported
     assert CameraFeature.EXPOSURE_CONTROL not in capabilities.supported
     assert capabilities.settings == []
     assert failure.value.code == "UNSUPPORTED_FEATURE"
     assert delete_failure.value.code == "UNSUPPORTED_FEATURE"
+    assert thumbnail_failure.value.code == "UNSUPPORTED_FEATURE"
     assert len(transport.requests) == before
 
 

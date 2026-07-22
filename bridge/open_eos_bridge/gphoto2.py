@@ -36,6 +36,7 @@ from .models import (
 
 ENGINE_NAME = "libgphoto2"
 MAX_COMMAND_OUTPUT_BYTES = 32 * 1024 * 1024
+MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_ITEMS = 500
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
@@ -266,6 +267,7 @@ class GPhotoAbilities:
     trigger_capture: bool = False
     configuration: bool = False
     delete_files: bool = False
+    file_preview: bool = False
 
 
 @dataclass(frozen=True)
@@ -348,6 +350,11 @@ def parse_abilities(output: str) -> GPhotoAbilities:
     }
     configuration_match = re.search(r"^Configuration support\s*:\s*(yes|no)\s*$", output, re.M | re.I)
     delete_match = re.search(r"^Delete selected files on camera\s*:\s*(yes|no)\s*$", output, re.M | re.I)
+    file_preview_match = re.search(
+        r"^File preview(?:\s*\(thumbnail\))? support\s*:\s*(yes|no)\s*$",
+        output,
+        re.M | re.I,
+    )
     return GPhotoAbilities(
         model=model_match.group(1).strip() if model_match else "",
         capture_image="image" in capture_lines,
@@ -355,6 +362,7 @@ def parse_abilities(output: str) -> GPhotoAbilities:
         trigger_capture="trigger capture" in capture_lines,
         configuration=bool(configuration_match and configuration_match.group(1).lower() == "yes"),
         delete_files=bool(delete_match and delete_match.group(1).lower() == "yes"),
+        file_preview=bool(file_preview_match and file_preview_match.group(1).lower() == "yes"),
     )
 
 
@@ -639,6 +647,8 @@ class GPhoto2Session:
                 supported.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
             if self._media_supported:
                 supported.update({CameraFeature.MEDIA_BROWSER, CameraFeature.MEDIA_DOWNLOAD})
+                if self._abilities.file_preview:
+                    supported.add(CameraFeature.MEDIA_THUMBNAIL)
                 if self._abilities.delete_files:
                     supported.add(CameraFeature.MEDIA_DELETE)
             if any(key in settings_by_key for key in ("iso", "shutter", "aperture")):
@@ -858,6 +868,19 @@ class GPhoto2Session:
 
         return item, stream()
 
+    def media_thumbnail(self, media_id: str) -> tuple[bytes, str]:
+        folder, name = _decode_media_id(media_id)
+        with self._lock:
+            self._require_open()
+            if not self._media_supported or not self._abilities.file_preview:
+                raise unsupported(CameraFeature.MEDIA_THUMBNAIL.value, self.engine_name)
+            output = self._run(
+                ["--folder", folder, "--get-thumbnail", name, "--stdout"],
+                timeout=60.0,
+            ).stdout
+            thumbnail, content_type = _validated_thumbnail(output)
+            return thumbnail, content_type
+
     def delete_media(self, media_id: str) -> None:
         folder, name = _decode_media_id(media_id)
         with self._lock:
@@ -984,6 +1007,8 @@ class GPhoto2Session:
             commands.append("CAPTURE_PREVIEW")
         if self._media_supported:
             commands.extend(("MEDIA_LIST", "MEDIA_DOWNLOAD"))
+            if self._abilities.file_preview:
+                commands.append("MEDIA_THUMBNAIL")
             if self._abilities.delete_files:
                 commands.append("MEDIA_DELETE")
         writable_settings = sorted(
@@ -1133,6 +1158,30 @@ def _size_multiplier(unit: str) -> int:
         "GB": 1024**3,
         "TB": 1024**4,
     }.get(unit.upper(), 1)
+
+
+def _validated_thumbnail(output: bytes) -> tuple[bytes, str]:
+    if len(output) > MAX_MEDIA_THUMBNAIL_BYTES:
+        raise BridgeError(
+            "MEDIA_THUMBNAIL_LIMIT",
+            f"gphoto2 returned a thumbnail larger than {MAX_MEDIA_THUMBNAIL_BYTES} bytes.",
+            status_code=502,
+            feature=CameraFeature.MEDIA_THUMBNAIL.value,
+            engine=ENGINE_NAME,
+        )
+    jpeg_start = output.find(b"\xff\xd8")
+    jpeg_end = output.rfind(b"\xff\xd9")
+    if jpeg_start >= 0 and jpeg_end >= jpeg_start:
+        return output[jpeg_start : jpeg_end + 2], "image/jpeg"
+    if output.startswith(b"\x89PNG\r\n\x1a\n"):
+        return output, "image/png"
+    raise BridgeError(
+        "INVALID_MEDIA_THUMBNAIL",
+        "gphoto2 did not return a supported JPEG or PNG thumbnail.",
+        status_code=502,
+        feature=CameraFeature.MEDIA_THUMBNAIL.value,
+        engine=ENGINE_NAME,
+    )
 
 
 def _media_kind(name: str, content_type: str) -> str:
