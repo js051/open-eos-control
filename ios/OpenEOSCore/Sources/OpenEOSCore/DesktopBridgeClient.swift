@@ -170,7 +170,7 @@ public actor DesktopBridgeClient {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge camera model is missing.")
         }
         return CameraInfo(
-            connected: body.bool("connected") ?? true,
+            connected: body.optionalBool("connected") ?? true,
             model: model,
             serial: body.string("serial") ?? "unknown",
             api: body.string("api") ?? "desktop-bridge/v1"
@@ -219,7 +219,7 @@ public actor DesktopBridgeClient {
             protocolVersions: versions.values,
             advertisedCommands: commands.values,
             writableSettings: writableSettings.values,
-            truncated: (evidenceBody.bool("truncated") ?? false)
+            truncated: (evidenceBody.optionalBool("truncated") ?? false)
                 || versions.truncated
                 || commands.truncated
                 || writableSettings.truncated
@@ -273,7 +273,7 @@ public actor DesktopBridgeClient {
     public func tapFocus(x: Double, y: Double) async throws -> FocusResult {
         let body = try await postJSON(sessionEndpoint(["focus", "tap"]), payload: ["x": x, "y": y])
         return FocusResult(
-            accepted: body.bool("accepted") ?? false,
+            accepted: body.optionalBool("accepted") ?? false,
             x: body.double("x") ?? x,
             y: body.double("y") ?? y
         )
@@ -288,7 +288,7 @@ public actor DesktopBridgeClient {
             payload: ["direction": direction.rawValue.uppercased(), "step": step.rawValue.uppercased()]
         )
         return FocusDriveResult(
-            accepted: body.bool("accepted") ?? false,
+            accepted: body.optionalBool("accepted") ?? false,
             direction: body.string("direction").flatMap(Self.parseFocusDirection) ?? direction,
             step: body.string("step").flatMap(Self.parseFocusStep) ?? step
         )
@@ -307,7 +307,7 @@ public actor DesktopBridgeClient {
 
     public func stopLiveView() async {
         guard sessionID != nil else { return }
-        try? await postJSON(sessionEndpoint(["liveview", "stop"]), payload: [:])
+        _ = try? await postJSON(sessionEndpoint(["liveview", "stop"]), payload: [:])
     }
 
     public func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
@@ -399,7 +399,7 @@ public actor DesktopBridgeClient {
 
     private func validateService() async throws {
         let body = try await getJSON(endpoint(["health"]))
-        guard body.string("service") == Self.serviceName, body.bool("ok") != false else {
+        guard body.string("service") == Self.serviceName, body.optionalBool("ok") != false else {
             throw DesktopBridgeError.invalidResponse("The URL is not an Open EOS Control Desktop Bridge.")
         }
         bridgeVersion = body.nonEmptyString("version")
@@ -410,12 +410,12 @@ public actor DesktopBridgeClient {
         let media = body.dictionary("media")
         let exposure = body.dictionary("exposure")
         return CameraStatus(
-            connected: body.bool("connected") ?? true,
+            connected: body.optionalBool("connected") ?? true,
             batteryLevel: battery.int("level"),
             batteryStatus: battery.string("status") ?? "unknown",
-            recording: body.bool("recording"),
+            recording: body.optionalBool("recording"),
             mode: body.string("mode") ?? "unknown",
-            mediaAvailable: media.bool("available"),
+            mediaAvailable: media.optionalBool("available"),
             remainingMinutes: nil,
             exposure: ExposureState(
                 iso: exposure.string("iso") ?? "-",
@@ -478,7 +478,8 @@ public actor DesktopBridgeClient {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw DesktopBridgeError.invalidBaseURL(baseURL.absoluteString)
         }
-        components.percentEncodedPath = "/" + try segments.map(Self.encodePathSegment).joined(separator: "/")
+        let encodedPath = try segments.map(Self.encodePathSegment).joined(separator: "/")
+        components.percentEncodedPath = "/" + encodedPath
         components.queryItems = queryItems.isEmpty ? nil : queryItems
         guard let url = components.url else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge endpoint could not be constructed.")
@@ -531,22 +532,22 @@ public actor DesktopBridgeClient {
     private static func parseFamily(_ value: String?) -> CameraModelFamily? {
         guard let value else { return nil }
         switch normalizedEnumValue(value) {
-        case "EOSR", "EOS_R": .eosR
-        case "EOSDSLR", "EOS_DSLR": .eosDSLR
-        case "EOSM", "EOS_M": .eosM
-        case "POWERSHOT": .powerShot
-        case "UNKNOWN": .unknown
-        default: nil
+        case "EOSR", "EOS_R": return .eosR
+        case "EOSDSLR", "EOS_DSLR": return .eosDSLR
+        case "EOSM", "EOS_M": return .eosM
+        case "POWERSHOT": return .powerShot
+        case "UNKNOWN": return .unknown
+        default: return nil
         }
     }
 
     private static func parsePriority(_ value: String?) -> CameraModelPriority? {
         guard let value else { return nil }
         switch normalizedEnumValue(value) {
-        case "PRIMARY": .primary
-        case "SUPPORTED": .supported
-        case "RESEARCH": .research
-        default: nil
+        case "PRIMARY": return .primary
+        case "SUPPORTED": return .supported
+        case "RESEARCH": return .research
+        default: return nil
         }
     }
 
@@ -742,7 +743,7 @@ private extension Dictionary where Key == String, Value == Any {
         string(key)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
-    func bool(_ key: String) -> Bool? {
+    func optionalBool(_ key: String) -> Bool? {
         if let value = self[key] as? Bool { return value }
         return (self[key] as? NSNumber)?.boolValue
     }
