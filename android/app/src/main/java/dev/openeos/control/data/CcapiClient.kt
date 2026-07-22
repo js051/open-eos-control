@@ -227,19 +227,39 @@ class CcapiClient(
         if (entries == null) return
         for (index in 0 until entries.length()) {
             val entry = entries.optJSONObject(index) ?: continue
-            val path = entry.optString("path", "").trim()
-            if (path.isBlank()) continue
-            val fullPath = if (path.startsWith("/ccapi/")) {
-                path
-            } else {
-                "/ccapi/$version/${path.trimStart('/')}"
-            }
+            val fullPath = advertisedOperationPath(version, entry) ?: continue
             CCAPI_HTTP_METHODS.forEach { method ->
                 if (entry.has(method.lowercase()) && entry.methodIsSupported(method.lowercase())) {
                     apiOperations.add(CcapiApiOperation(method, fullPath))
                 }
             }
         }
+    }
+
+    private fun advertisedOperationPath(version: String, entry: JSONObject): String? {
+        listOf("path", "url").forEach { key ->
+            val value = entry.opt(key) as? String ?: return@forEach
+            val parsed = runCatching { URI(value.trim()) }.getOrNull() ?: return@forEach
+            if (parsed.rawFragment != null || parsed.rawUserInfo != null) return@forEach
+            val rawPath = if (parsed.isAbsolute) {
+                val camera = runCatching { URI(baseUrl) }.getOrNull() ?: return null
+                if (!parsed.hasSameOriginAs(camera)) return@forEach
+                parsed.rawPath
+            } else {
+                if (parsed.rawAuthority != null) return@forEach
+                parsed.rawPath
+            }
+            if (rawPath.isNullOrBlank() || rawPath.hasTraversalSegment()) return@forEach
+            val normalized = if (rawPath.startsWith("/ccapi/")) {
+                rawPath
+            } else {
+                "/ccapi/$version/${rawPath.trimStart('/')}"
+            }
+            if (normalized.startsWith("/ccapi/") && '\r' !in normalized && '\n' !in normalized) {
+                return normalized
+            }
+        }
+        return null
     }
 
     private fun JSONObject.methodIsSupported(key: String): Boolean {
@@ -917,11 +937,9 @@ class CcapiClient(
         val parsed = URI(value)
         val normalized = if (parsed.isAbsolute) {
             val camera = URI(baseUrl)
-            require(
-                parsed.scheme.equals(camera.scheme, ignoreCase = true) &&
-                    parsed.host.equals(camera.host, ignoreCase = true) &&
-                    parsed.effectivePort() == camera.effectivePort(),
-            ) { "Camera returned a media URL outside the active camera origin." }
+            require(parsed.hasSameOriginAs(camera)) {
+                "Camera returned a media URL outside the active camera origin."
+            }
             parsed.rawPath + parsed.rawQuery?.let { "?$it" }.orEmpty()
         } else {
             value
@@ -1327,6 +1345,14 @@ private fun URI.effectivePort(): Int = when {
     scheme.equals("https", ignoreCase = true) -> 443
     else -> 80
 }
+
+private fun URI.hasSameOriginAs(other: URI): Boolean =
+    scheme.equals(other.scheme, ignoreCase = true) &&
+        host.equals(other.host, ignoreCase = true) &&
+        effectivePort() == other.effectivePort()
+
+private fun String.hasTraversalSegment(): Boolean =
+    split('/').any { it == "." || it == ".." }
 
 private fun String.isMediaFilePath(): Boolean {
     val name = substringAfterLast('/')

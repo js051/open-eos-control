@@ -86,7 +86,7 @@ GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test 和 debu
 
 ## iOS App 與相機 Core
 
-`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會依相機公告的 API 版本與 operation 建立能力；Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、JPEG Live View、拍照、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及包含有界能力證據且已遮蔽敏感資訊的診斷報告。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
+`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、JPEG Live View、拍照、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及包含有界能力證據且已遮蔽敏感資訊的診斷報告。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
 
 ```bash
 cd ios/OpenEOSCore
@@ -133,7 +133,7 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "請替換成足夠長的隨機字串"
 
 在 Android 或 iOS 連線頁選擇「Desktop Bridge」，輸入電腦的區網 URL 與相同 token，再掃描並選擇相機。token 只保留在 App 程序記憶體中，不會持久化，也不會出現在診斷報告。iOS 直接 USB/PTP 仍屬研究項目；目前這條 Bridge 路徑才是 iPhone／iPad 控制電腦 USB 相機的已實作方案。
 
-目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS。CCAPI engine 提供 1-30 FPS 的 client polling，初始預設 15 FPS；若 R6 Mark III 對含尺寸的 Live View 啟動 payload 回覆 `Invalid parameter`，會自動改用相容 payload 重試，並把要求與實測 FPS 分開顯示。Discovery、設定、拍照、保證釋放快門、錄影、Tap AF、有界 JPEG 擷取、同源媒體遍歷、串流下載、驗證與能力閘門都有自動測試；瀏覽器也實際跑過 CCAPI 連線、有效 JPEG、15 FPS 切換、Tap AF、英／繁中及桌面／窄版流程。PC 與 R6 Mark III 的實體真機驗證仍待完成。
+目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS。CCAPI engine 提供 1-30 FPS 的 client polling，初始預設 15 FPS；若 R6 Mark III 對含尺寸的 Live View 啟動 payload 回覆 `Invalid parameter`，會自動改用相容 payload 重試，並把要求與實測 FPS 分開顯示。同源完整 URL／相對 path discovery、設定、拍照、保證釋放快門、錄影、Tap AF、有界 JPEG 擷取、同源媒體遍歷、串流下載、驗證與能力閘門都有自動測試；瀏覽器也實際跑過 CCAPI 連線、有效 JPEG、15 FPS 切換、Tap AF、英／繁中及桌面／窄版流程。PC 與 R6 Mark III 的實體真機驗證仍待完成。
 
 ## Fake Camera Simulator
 

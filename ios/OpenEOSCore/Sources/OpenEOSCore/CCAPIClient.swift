@@ -592,17 +592,46 @@ public actor CCAPIClient {
 
     private func recordOperations(version: String, entries: [JSONDictionary]) {
         for entry in entries {
-            let rawPath = entry.string("path").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !rawPath.isEmpty else { continue }
-            let path = rawPath.hasPrefix("/ccapi/")
-                ? rawPath
-                : "/ccapi/\(version)/\(rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/")))"
+            guard let path = advertisedOperationPath(version: version, entry: entry) else { continue }
             for method in [HTTPMethod.get, .put, .post, .delete] {
                 if Self.methodSupported(entry[method.rawValue.lowercased()]) {
                     operations.insert(CCAPIOperation(method: method, path: path))
                 }
             }
         }
+    }
+
+    private func advertisedOperationPath(version: String, entry: JSONDictionary) -> String? {
+        for value in [entry.string("path"), entry.string("url")] {
+            let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty,
+                  let components = URLComponents(string: raw),
+                  components.fragment == nil,
+                  components.user == nil,
+                  components.password == nil else { continue }
+
+            let path: String
+            if components.scheme != nil || components.host != nil {
+                guard components.scheme != nil,
+                      let absolute = components.url,
+                      Self.sameOrigin(absolute, baseURL) else { continue }
+                path = components.percentEncodedPath
+            } else {
+                path = components.percentEncodedPath
+            }
+            guard !path.isEmpty,
+                  !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: {
+                      $0 == "." || $0 == ".."
+                  }) else { continue }
+            let normalized = path.hasPrefix("/ccapi/")
+                ? path
+                : "/ccapi/\(version)/\(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))"
+            guard normalized.hasPrefix("/ccapi/"),
+                  !normalized.contains("\r"),
+                  !normalized.contains("\n") else { continue }
+            return normalized
+        }
+        return nil
     }
 
     private func versionedPaths(_ suffix: String) -> [String] {

@@ -80,6 +80,59 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(remainingResponses, 0)
     }
 
+    func testDiscoveryAcceptsSameOriginURLEntriesAndRejectsUnsafeOperations() async throws {
+        let transport = MockCameraHTTPTransport()
+        let fullURLDiscovery = """
+        {
+          "ver100": [
+            {"url":"http://192.168.1.2:8080/ccapi/ver100/deviceinformation","get":true},
+            {"url":"http://192.168.1.2:8080/ccapi/ver100/devicestatus/storage?token=secret","get":true},
+            {"url":"http://192.168.1.2:8080/ccapi/ver100/shooting/settings","get":true},
+            {"url":"http://192.168.1.2:8080/ccapi/ver100/shooting/settings/iso","put":true},
+            {"url":"http://192.168.1.2:8080/ccapi/ver100/shooting/control/shutterbutton","post":true},
+            {"url":"http://attacker.invalid/ccapi/ver100/shooting/control/recbutton","post":true},
+            {"url":"http://192.168.1.2:8080/ccapi/ver100/ignored/../shooting/control/recbutton","post":true}
+          ]
+        }
+        """
+        await transport.enqueueJSON(path: "/ccapi", body: fullURLDiscovery)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/deviceinformation",
+            body: #"{"productname":"Canon EOS R6 Mark III","serialnumber":"redacted","version":"1.4.0"}"#
+        )
+        await enqueueStatus(on: transport)
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let snapshot = try await client.connectSnapshot()
+
+        XCTAssertEqual(snapshot.status.mediaAvailable, true)
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.storageStatus))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.exposureControl))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.stillCapture))
+        XCTAssertFalse(snapshot.capabilities.matrix.supports(.videoRecording))
+        XCTAssertTrue(
+            snapshot.capabilities.evidence.advertisedCommands.contains(
+                "GET /ccapi/ver100/devicestatus/storage"
+            )
+        )
+        XCTAssertTrue(
+            snapshot.capabilities.evidence.advertisedCommands.contains(
+                "POST /ccapi/ver100/shooting/control/shutterbutton"
+            )
+        )
+        XCTAssertTrue(
+            snapshot.capabilities.evidence.advertisedCommands.allSatisfy {
+                !$0.contains("secret") && !$0.contains("attacker")
+            }
+        )
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
     func testDirectCCAPIThumbnailIsExplicitlyUnsupportedWithoutARequest() async throws {
         let transport = MockCameraHTTPTransport()
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)

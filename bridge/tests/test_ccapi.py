@@ -241,6 +241,43 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     ]
 
 
+def test_ccapi_discovery_accepts_same_origin_url_entries_and_rejects_unsafe_operations() -> None:
+    origin = "http://192.168.1.2:8080"
+    discovery = {
+        "ver100": [
+            {"url": f"{origin}/ccapi/ver100/deviceinformation", "get": True},
+            {"url": f"{origin}/ccapi/ver100/devicestatus/storage?token=secret", "get": True},
+            {"url": f"{origin}/ccapi/ver100/shooting/settings", "get": True},
+            {"url": f"{origin}/ccapi/ver100/shooting/settings/iso", "put": True},
+            {"url": f"{origin}/ccapi/ver100/shooting/control/shutterbutton", "post": True},
+            {
+                "url": "http://attacker.invalid/ccapi/ver100/shooting/control/recbutton",
+                "post": True,
+            },
+            {
+                "url": f"{origin}/ccapi/ver100/ignored/../shooting/control/recbutton",
+                "post": True,
+            },
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(origin)
+
+    status = session.status()
+    capabilities = session.capabilities()
+
+    assert status.media.available is True
+    assert CameraFeature.STORAGE_STATUS in capabilities.supported
+    assert CameraFeature.EXPOSURE_CONTROL in capabilities.supported
+    assert CameraFeature.STILL_CAPTURE in capabilities.supported
+    assert CameraFeature.VIDEO_RECORDING not in capabilities.supported
+    assert "GET /ccapi/ver100/devicestatus/storage" in capabilities.evidence.advertised_commands
+    assert "POST /ccapi/ver100/shooting/control/shutterbutton" in capabilities.evidence.advertised_commands
+    assert all(
+        "secret" not in command and "attacker" not in command for command in capabilities.evidence.advertised_commands
+    )
+
+
 def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
     discovery = {"ver100": [{"path": "/deviceinformation", "get": True}]}
     transport = FakeCcapiTransport(discovery=discovery)

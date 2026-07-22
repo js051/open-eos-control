@@ -326,6 +326,41 @@ class CcapiClientTest {
     }
 
     @Test
+    fun discoveryAcceptsSameOriginUrlEntriesAndRejectsUnsafeOperations() = runTest {
+        val cameraOrigin = server.url("/").toString().trimEnd('/')
+        client = CcapiClient(cameraOrigin, treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """
+                {
+                  "ver100": [
+                    {"url":"$cameraOrigin/ccapi/ver100/devicestatus/storage?token=secret","get":true},
+                    {"url":"$cameraOrigin/ccapi/ver100/shooting/settings","get":true},
+                    {"url":"$cameraOrigin/ccapi/ver100/shooting/settings/iso","put":true},
+                    {"url":"$cameraOrigin/ccapi/ver100/shooting/control/shutterbutton","post":true},
+                    {"url":"http://attacker.invalid/ccapi/ver100/shooting/control/recbutton","post":true},
+                    {"url":"$cameraOrigin/ccapi/ver100/ignored/../shooting/control/recbutton","post":true}
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
+        assertTrue(!capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
+        assertTrue("GET /ccapi/ver100/devicestatus/storage" in capabilities.evidence.advertisedCommands)
+        assertTrue("POST /ccapi/ver100/shooting/control/shutterbutton" in capabilities.evidence.advertisedCommands)
+        assertTrue(capabilities.evidence.advertisedCommands.none { "secret" in it || "attacker" in it })
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+    }
+
+    @Test
     fun realCapabilityEvidenceIsBoundedAndRemovesQueries() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         val longSegment = "x".repeat(600)

@@ -919,12 +919,11 @@ class CcapiSession:
                 continue
             versions.add(key)
             for entry in entries:
-                if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+                if not isinstance(entry, dict):
                     continue
-                raw_path = entry["path"].strip()
-                if not raw_path:
+                path = self._advertised_operation_path(key, entry)
+                if path is None:
                     continue
-                path = raw_path if raw_path.startswith("/ccapi/") else f"/ccapi/{key}/{raw_path.lstrip('/')}"
                 for method in HTTP_METHODS:
                     if _method_supported(entry.get(method.casefold())):
                         self._operations.add(CcapiOperation(method, path))
@@ -938,6 +937,35 @@ class CcapiSession:
         self._preferred_prefix = (
             "/ccapi/ver100" if "/ccapi/ver100" in self._api_prefixes else self._api_prefixes[0]
         )
+
+    def _advertised_operation_path(
+        self,
+        version: str,
+        entry: dict[str, object],
+    ) -> str | None:
+        for key in ("path", "url"):
+            value = entry.get(key)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            try:
+                parsed = urlsplit(value.strip())
+            except ValueError:
+                continue
+            if parsed.fragment or parsed.username is not None or parsed.password is not None:
+                continue
+            if parsed.scheme or parsed.netloc:
+                try:
+                    path = self._normalize_resource(value.strip()).split("?", 1)[0]
+                except (BridgeError, ValueError):
+                    continue
+            else:
+                path = parsed.path
+            if not path or any(segment in {".", ".."} for segment in path.split("/")):
+                continue
+            normalized = path if path.startswith("/ccapi/") else f"/ccapi/{version}/{path.lstrip('/')}"
+            if normalized.startswith("/ccapi/") and "\r" not in normalized and "\n" not in normalized:
+                return normalized
+        return None
 
     def _capability_evidence(self) -> CapabilityEvidence:
         protocol_versions = [prefix.rsplit("/", 1)[-1] for prefix in self._api_prefixes]
