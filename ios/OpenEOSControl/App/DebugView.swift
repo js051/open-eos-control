@@ -16,14 +16,14 @@ struct DebugView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     debugSection("overview") {
                         value("camera_profile", camera.capabilities?.profile.modelName ?? "unknown")
-                        value("transport", camera.isPreview ? language.string("offline_preview") : "CCAPI_NETWORK")
+                        value("transport", camera.transportIdentifier)
                         value("api_version", camera.info?.api ?? "unknown")
                         value("serial_number", camera.info?.serial ?? "unknown", mono: true)
                         value("last_error", camera.lastError ?? language.string("none"), warning: camera.lastError != nil)
                     }
 
-                    debugSection("ccapi") {
-                        value("base_url", camera.baseURL, mono: true)
+                    debugSection("connection_details") {
+                        value("base_url", camera.connectionEndpoint, mono: true)
                         value("supported_features", featureList(camera.capabilities?.matrix.supported))
                         value("planned_features", featureList(camera.capabilities?.matrix.planned))
                         value("battery_raw", camera.status?.rawBatteryJSON ?? "null", mono: true)
@@ -69,7 +69,11 @@ struct DebugView: View {
                     debugSection("platform") {
                         value("operating_system", "iOS")
                         value("local_network", language.string("local_network_permission_managed_by_ios"))
-                        value("ios_usb_ptp", language.string("research_only"), warning: true)
+                        value(
+                            "ios_usb_ptp",
+                            language.string(camera.connectionMode == .desktopBridge ? "usb_via_desktop_bridge" : "research_only"),
+                            warning: camera.connectionMode != .desktopBridge
+                        )
                     }
 
                     Button {

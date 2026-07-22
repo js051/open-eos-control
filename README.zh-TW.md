@@ -4,7 +4,7 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已經有走同一個 camera core contract 的標準 USB/PTP backend、依能力開放的 Canon EOS 遠端快門、曝光／白平衡、錄影與進階拍攝設定控制、焦點移動、JPEG Live View，以及可執行的 Desktop Bridge client。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI core 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
+這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已有標準 USB/PTP backend 與依能力開放的 Canon EOS 控制。Android 與 iOS 現在都能透過同一套 camera contract 使用可執行的 Desktop Bridge，控制以 USB 接在電腦上的相機。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI／Desktop Bridge client 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
 
 ## 專案結構
 
@@ -12,7 +12,7 @@ Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一�
 open-eos-control/
   android/       Android App，Kotlin + Jetpack Compose
   bridge/        PC 相機橋接服務與控制介面，Python + FastAPI + gphoto2
-  ios/           原生 Swift CCAPI core 與 iOS App workspace
+  ios/           原生 Swift 相機 core 與 iOS App workspace
   simulator/     假的 Canon CCAPI 相機伺服器
   docs/          架構、傳輸層與 bridge 設計文件
 ```
@@ -84,16 +84,16 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test 和 debug build。
 
-## iOS App 與 CCAPI Core
+## iOS App 與相機 Core
 
-`ios/OpenEOSCore` 是原生 Swift Package，負責 iOS 的 CCAPI 傳輸與命令層。它會依相機公告的 API 版本與 operation 建立能力，並支援設定控制、JPEG Live View、拍照、保證釋放的定時半按、錄影、點選對焦、媒體瀏覽／下載／刪除，以及包含有界能力證據且已遮蔽敏感資訊的診斷報告。套件包含可重現的 transport 測試，並由 macOS GitHub Actions job 實際編譯：
+`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會依相機公告的 API 版本與 operation 建立能力；Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、JPEG Live View、拍照、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及包含有界能力證據且已遮蔽敏感資訊的診斷報告。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
 
 ```bash
 cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線、離線 UI 預覽、依能力開放的拍照／錄影控制、JPEG Live View、依相機公告限制調整的 1-30 FPS、曝光設定 sheet、媒體傳輸與需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
+`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG Live View、依相機公告限制調整的 FPS、曝光設定 sheet、媒體傳輸與需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
 
 在具備 Xcode 與 XcodeGen 的 macOS 主機執行：
 
@@ -104,7 +104,7 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions 會建置最終 App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 實際跑過英文直向／橫向控制、確認式媒體刪除與繁中連線流程。這些證據不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄；細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
+GitHub Actions 會建置最終 App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 實際跑過英文直向／橫向控制、確認式媒體刪除、繁中連線與 Desktop Bridge 連線表單流程。這些證據不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄；細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
 
 ## Desktop Bridge
 
@@ -131,7 +131,7 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "請替換成足夠長的隨機字串"
 .\.venv\Scripts\open-eos-bridge.exe
 ```
 
-在 Android 連線頁選擇「桌面橋接」，輸入 URL 與相同 token，再掃描並選擇相機。token 只保留在 App 程序記憶體中，不會持久化，也不會出現在診斷報告。
+在 Android 或 iOS 連線頁選擇「Desktop Bridge」，輸入電腦的區網 URL 與相同 token，再掃描並選擇相機。token 只保留在 App 程序記憶體中，不會持久化，也不會出現在診斷報告。iOS 直接 USB/PTP 仍屬研究項目；目前這條 Bridge 路徑才是 iPhone／iPad 控制電腦 USB 相機的已實作方案。
 
 目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS。CCAPI engine 提供 1-30 FPS 的 client polling，初始預設 15 FPS；若 R6 Mark III 對含尺寸的 Live View 啟動 payload 回覆 `Invalid parameter`，會自動改用相容 payload 重試，並把要求與實測 FPS 分開顯示。Discovery、設定、拍照、保證釋放快門、錄影、Tap AF、有界 JPEG 擷取、同源媒體遍歷、串流下載、驗證與能力閘門都有自動測試；瀏覽器也實際跑過 CCAPI 連線、有效 JPEG、15 FPS 切換、Tap AF、英／繁中及桌面／窄版流程。PC 與 R6 Mark III 的實體真機驗證仍待完成。
 

@@ -44,6 +44,20 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "connection-zh-Hant")
     }
 
+    func testDesktopBridgeConnectionFormRequiresScannedCamera() throws {
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        let modePicker = app.segmentedControls["connection-mode-picker"]
+        XCTAssertTrue(modePicker.waitForExistence(timeout: 8))
+
+        modePicker.buttons["Desktop Bridge"].tap()
+
+        XCTAssertTrue(app.textFields["bridge-url-field"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.secureTextFields["bridge-token-field"].exists)
+        XCTAssertTrue(app.buttons["bridge-scan-button"].exists)
+        XCTAssertFalse(app.buttons["connect-button"].isEnabled)
+        addScreenshot(name: "connection-desktop-bridge")
+    }
+
     func testOfflineMediaDeletionRequiresConfirmation() throws {
         let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
         let preview = app.buttons["offline-preview-button"]

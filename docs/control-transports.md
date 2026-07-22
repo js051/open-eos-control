@@ -35,20 +35,20 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 ### Desktop bridge and PC control
 
-- Status: HTTP service, built-in PC control UI, libgphoto2 CLI engine, direct CCAPI engine, and Android client are implemented and tested; EOS R6 Mark III device validation remains.
-- Connection: the PC UI can control a USB camera through libgphoto2 or connect directly to the camera's wireless CCAPI origin. Android can use the same bridge for a computer-attached USB camera.
+- Status: HTTP service, built-in PC control UI, libgphoto2 CLI engine, direct CCAPI engine, and Android/iOS clients are implemented and tested; EOS R6 Mark III device validation remains.
+- Connection: the PC UI can control a USB camera through libgphoto2 or connect directly to the camera's wireless CCAPI origin. Android and iOS can use the same authenticated bridge for a computer-attached USB camera.
 - Engines: `libgphoto2` is the executable open-source USB path; `ccapi` is the executable HTTP(S) wireless path. The Canon EDSDK adapter remains optional research and no Canon binary is redistributed.
 - Current implementation: both engines map into the same session/capability API. libgphoto2 provides camera discovery, dynamic settings, capture, half-press, movie target control, relative focus drive, JPEG preview, media transfer and ability-gated deletion. CCAPI provides advertised-operation discovery, dynamic settings, capture with guaranteed manual release, half-press, recording, normalized Tap AF, bounded JPEG polling, same-origin media traversal, streamed downloads and advertised deletion. The built-in responsive PC UI offers USB/CCAPI mode selection, English/Traditional Chinese, authenticated binary transfer, confirmed deletion and redacted diagnostics. Bridge Bearer tokens and camera passwords are memory-only; camera URL and username may be remembered. Loopback is the secure service default; LAN use requires a Bearer token.
 - Strengths: immediate access to mature libgphoto2 Canon mappings, including the checked-in upstream R6 Mark III capability snapshot.
 - Tradeoffs: Android Bridge use requires a computer in the loop. The USB CLI preview launches one process per JPEG and is truthfully capped at 5 FPS; persistent native libgphoto2 and physical-camera validation are later milestones. Direct PC CCAPI uses camera Wi-Fi and client polling, defaults to 15 FPS, and allows up to 30 FPS without claiming the camera will sustain it.
 
-### iOS CCAPI
+### iOS CCAPI and Desktop Bridge
 
 - Status: native Swift command/transport core and iOS 17 SwiftUI product UI are implemented and simulator-tested; physical iPhone and camera validation remain.
-- Connection: iPhone/iPad to camera CCAPI over Wi-Fi.
-- Current implementation: `ios/OpenEOSCore` provides discovery, capability-gated settings and commands, JPEG Live View, still capture, half-press with guaranteed release, recording, tap focus, bounded media traversal/download, advertised exact-path deletion, and redacted diagnostics. `ios/OpenEOSControl` adds direct connection, Photo/Video control, adjustable Live View, confirmation-gated media and Debug views, offline preview, English/Traditional Chinese selection, and safe portrait/landscape behavior.
-- Automated evidence: macOS CI builds the final app bundle, verifies resources and network/orientation metadata, runs app unit tests, and completes English control/debug, media-deletion confirmation, and Traditional Chinese connection UI workflows on an iPhone Simulator.
-- Next milestone: validate the same paths on a physical iPhone and EOS R6 Mark III.
+- Connection: iPhone/iPad can connect directly to camera CCAPI over Wi-Fi, or reach a PC over LAN and control its USB camera through Desktop Bridge.
+- Current implementation: `ios/OpenEOSCore` provides direct CCAPI discovery plus a native authenticated Bridge client with service validation, USB discovery, camera selection and session cleanup. Both map capability-gated settings and commands, JPEG Live View, still capture, half-press, recording, available focus operations, media download/deletion and redacted diagnostics into one app session. `ios/OpenEOSControl` adds mode-specific connection forms, Photo/Video control, manual focus drive when advertised, adjustable Live View, confirmation-gated media and Debug views, offline preview, English/Traditional Chinese selection, and safe portrait/landscape behavior.
+- Automated evidence: macOS CI builds the final app bundle, verifies resources and network/orientation metadata, runs core/app unit tests, and completes English control/debug, media-deletion confirmation, Traditional Chinese connection, and offline Desktop Bridge form workflows on an iPhone Simulator.
+- Next milestone: validate direct CCAPI and PC-attached USB Bridge paths on a physical iPhone and EOS R6 Mark III.
 - USB/PTP stance: research track only until Apple platform constraints and public APIs are validated against Canon EOS bodies.
 
 ## Shared Backend Surface

@@ -18,6 +18,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case mediaBrowser = "MEDIA_BROWSER"
     case mediaDownload = "MEDIA_DOWNLOAD"
     case mediaDelete = "MEDIA_DELETE"
+    case desktopBridge = "DESKTOP_BRIDGE"
 }
 
 public struct CapabilityMatrix: Equatable, Sendable {
@@ -175,6 +176,7 @@ public enum LiveViewSource: String, Codable, Sendable {
     case auto
     case ccapiJPEGPolling
     case ccapiRTP
+    case desktopBridgeStream
     case simulatorFrame
 }
 
@@ -298,6 +300,29 @@ public struct FocusResult: Equatable, Sendable {
         self.accepted = accepted
         self.x = x
         self.y = y
+    }
+}
+
+public enum FocusDriveDirection: String, CaseIterable, Codable, Sendable {
+    case near
+    case far
+}
+
+public enum FocusDriveStep: String, CaseIterable, Codable, Sendable {
+    case small
+    case medium
+    case large
+}
+
+public struct FocusDriveResult: Equatable, Sendable {
+    public let accepted: Bool
+    public let direction: FocusDriveDirection
+    public let step: FocusDriveStep
+
+    public init(accepted: Bool, direction: FocusDriveDirection, step: FocusDriveStep) {
+        self.accepted = accepted
+        self.direction = direction
+        self.step = step
     }
 }
 

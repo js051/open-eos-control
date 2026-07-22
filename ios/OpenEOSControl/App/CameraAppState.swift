@@ -6,17 +6,25 @@ final class CameraAppState: ObservableObject {
     static let defaultCameraURL = "http://192.168.1.2:8080"
     static let defaultSecureCameraURL = "https://192.168.1.2:443"
     static let simulatorURL = "http://127.0.0.1:18080"
+    static let defaultBridgeURL = "http://192.168.1.100:18181"
 
     private enum DefaultsKey {
         static let baseURL = "camera-base-url"
         static let username = "camera-username"
+        static let connectionMode = "camera-connection-mode"
+        static let bridgeURL = "desktop-bridge-url"
         static let requestedFPS = "live-view-requested-fps"
         static let liveViewSize = "live-view-size"
     }
 
+    @Published var connectionMode: AppConnectionMode
     @Published var baseURL: String
     @Published var username: String
     @Published var password = ""
+    @Published var bridgeURL: String
+    @Published var bridgeToken = ""
+    @Published private(set) var bridgeCameras: [DesktopBridgeCamera] = []
+    @Published var selectedBridgeCameraID: String?
     @Published private(set) var snapshot: CameraSnapshot?
     @Published private(set) var isPreview = false
     @Published var screen = AppScreen.control
@@ -43,7 +51,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var busyOperations = Set<CameraOperation>()
 
     private let defaults: UserDefaults
-    private var client: CCAPIClient?
+    private var session: CameraSession?
     private var liveViewTask: Task<Void, Never>?
     private var rateTracker = LiveViewRateTracker()
     private var downloadedMediaID: String?
@@ -53,15 +61,39 @@ final class CameraAppState: ObservableObject {
     var capabilities: CameraCapabilities? { snapshot?.capabilities }
     var status: CameraStatus? { snapshot?.status }
     var info: CameraInfo? { snapshot?.info }
+    var connectionEndpoint: String { connectionMode == .ccapi ? baseURL : bridgeURL }
+    var transportIdentifier: String {
+        if isPreview { return "OFFLINE_PREVIEW" }
+        return connectionMode == .ccapi ? "CCAPI_NETWORK" : "DESKTOP_BRIDGE"
+    }
+    var canConnect: Bool {
+        switch connectionMode {
+        case .ccapi:
+            !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .desktopBridge:
+            !bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && selectedBridgeCameraID != nil
+        }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         if CommandLine.arguments.contains("-resetState") {
-            [DefaultsKey.baseURL, DefaultsKey.username, DefaultsKey.requestedFPS, DefaultsKey.liveViewSize]
+            [
+                DefaultsKey.baseURL,
+                DefaultsKey.username,
+                DefaultsKey.connectionMode,
+                DefaultsKey.bridgeURL,
+                DefaultsKey.requestedFPS,
+                DefaultsKey.liveViewSize,
+            ]
                 .forEach { defaults.removeObject(forKey: $0) }
         }
+        connectionMode = defaults.string(forKey: DefaultsKey.connectionMode)
+            .flatMap(AppConnectionMode.init(rawValue:)) ?? .ccapi
         baseURL = defaults.string(forKey: DefaultsKey.baseURL) ?? Self.defaultCameraURL
         username = defaults.string(forKey: DefaultsKey.username) ?? ""
+        bridgeURL = defaults.string(forKey: DefaultsKey.bridgeURL) ?? Self.defaultBridgeURL
         let storedFPS = defaults.integer(forKey: DefaultsKey.requestedFPS)
         requestedFPS = storedFPS == 0 ? 6 : min(max(storedFPS, 1), 30)
         liveViewSize = defaults.string(forKey: DefaultsKey.liveViewSize).flatMap(LiveViewSize.init(rawValue:)) ?? .medium
@@ -78,6 +110,21 @@ final class CameraAppState: ObservableObject {
     func setBaseURL(_ value: String) {
         baseURL = value
         defaults.set(value, forKey: DefaultsKey.baseURL)
+    }
+
+    func setConnectionMode(_ value: AppConnectionMode) {
+        connectionMode = value
+        defaults.set(value.rawValue, forKey: DefaultsKey.connectionMode)
+        lastError = nil
+    }
+
+    func setBridgeURL(_ value: String) {
+        if bridgeURL != value {
+            bridgeCameras = []
+            selectedBridgeCameraID = nil
+        }
+        bridgeURL = value
+        defaults.set(value, forKey: DefaultsKey.bridgeURL)
     }
 
     func setUsername(_ value: String) {
@@ -97,18 +144,65 @@ final class CameraAppState: ObservableObject {
         setBaseURL(Self.simulatorURL)
     }
 
+    func scanBridgeCameras() async {
+        guard begin(.scan) else { return }
+        defer { end(.scan) }
+        do {
+            let probe = try DesktopBridgeClient(baseURL: bridgeURL, token: bridgeToken)
+            let cameras = try await probe.discoverCameras()
+            bridgeCameras = cameras
+            if let selectedBridgeCameraID, cameras.contains(where: { $0.id == selectedBridgeCameraID }) {
+                self.selectedBridgeCameraID = selectedBridgeCameraID
+            } else {
+                selectedBridgeCameraID = cameras.first?.id
+            }
+            lastError = nil
+        } catch {
+            bridgeCameras = []
+            selectedBridgeCameraID = nil
+            record(error)
+        }
+    }
+
     func connect() async {
         guard begin(.connect) else { return }
         defer { end(.connect) }
         do {
-            let newClient = try CCAPIClient(
-                baseURL: baseURL,
-                mode: .automatic,
-                username: username,
-                password: password
-            )
-            let newSnapshot = try await newClient.connectSnapshot()
-            client = newClient
+            let newSession: CameraSession
+            switch connectionMode {
+            case .ccapi:
+                newSession = .ccapi(
+                    try CCAPIClient(
+                        baseURL: baseURL,
+                        mode: .automatic,
+                        username: username,
+                        password: password
+                    )
+                )
+            case .desktopBridge:
+                guard
+                    let selectedBridgeCameraID,
+                    let camera = bridgeCameras.first(where: { $0.id == selectedBridgeCameraID })
+                else {
+                    throw DesktopBridgeError.invalidResponse("Select a scanned Desktop Bridge camera before connecting.")
+                }
+                newSession = .desktopBridge(
+                    try DesktopBridgeClient(
+                        baseURL: bridgeURL,
+                        token: bridgeToken,
+                        cameraID: selectedBridgeCameraID,
+                        profileHint: camera.model
+                    )
+                )
+            }
+            let newSnapshot: CameraSnapshot
+            do {
+                newSnapshot = try await newSession.connectSnapshot()
+            } catch {
+                await newSession.close()
+                throw error
+            }
+            session = newSession
             snapshot = newSnapshot
             isPreview = false
             screen = .control
@@ -127,7 +221,7 @@ final class CameraAppState: ObservableObject {
 
     func openOfflinePreview() {
         stopLiveViewLoop()
-        client = nil
+        session = nil
         snapshot = Self.makeOfflinePreviewSnapshot()
         isPreview = true
         screen = .control
@@ -141,13 +235,14 @@ final class CameraAppState: ObservableObject {
 
     func disconnect() async {
         stopLiveViewLoop()
-        if let client { await client.stopLiveView() }
-        client = nil
+        if let session { await session.close() }
+        session = nil
         snapshot = nil
         isPreview = false
         screen = .control
         activeSheet = nil
         password = ""
+        bridgeToken = ""
         mediaItems = []
         removeDownloadedFile()
         deletedMediaName = nil
@@ -159,10 +254,10 @@ final class CameraAppState: ObservableObject {
     }
 
     func refresh() async {
-        guard let client, begin(.refresh) else { return }
+        guard let session, begin(.refresh) else { return }
         defer { end(.refresh) }
         do {
-            snapshot = try await client.connectSnapshot()
+            snapshot = try await session.connectSnapshot()
             lastError = nil
             clampLiveViewRequest()
         } catch {
@@ -182,7 +277,7 @@ final class CameraAppState: ObservableObject {
         guard capabilities?.liveView.sizes.contains(value) == true else { return }
         liveViewSize = value
         defaults.set(value.rawValue, forKey: DefaultsKey.liveViewSize)
-        if client != nil, autoRefresh { await restartLiveView() }
+        if session != nil, autoRefresh { await restartLiveView() }
     }
 
     func setAutoRefresh(_ enabled: Bool) async {
@@ -195,14 +290,14 @@ final class CameraAppState: ObservableObject {
     }
 
     func startLiveView() async {
-        guard let client, supports(.liveView), begin(.liveView) else { return }
+        guard let session, supports(.liveView), begin(.liveView) else { return }
         defer { end(.liveView) }
         do {
-            try await client.startLiveView(
+            try await session.startLiveView(
                 LiveViewRequest(fps: requestedFPS, size: liveViewSize, source: .auto)
             )
             lastError = nil
-            if autoRefresh { beginLiveViewLoop(client: client) }
+            if autoRefresh { beginLiveViewLoop(session: session) }
         } catch {
             record(error)
         }
@@ -210,7 +305,7 @@ final class CameraAppState: ObservableObject {
 
     func restartLiveView() async {
         stopLiveViewLoop()
-        if let client { await client.stopLiveView() }
+        if let session { await session.stopLiveView() }
         await startLiveView()
     }
 
@@ -221,9 +316,9 @@ final class CameraAppState: ObservableObject {
             showShutterFlash()
             return
         }
-        guard let client else { return }
+        guard let session else { return }
         do {
-            updateStatus(try await client.captureStill())
+            updateStatus(try await session.captureStill())
             showShutterFlash()
             lastError = nil
         } catch {
@@ -238,9 +333,9 @@ final class CameraAppState: ObservableObject {
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
             return
         }
-        guard let client else { return }
+        guard let session else { return }
         do {
-            updateStatus(try await client.halfPressShutter())
+            updateStatus(try await session.halfPressShutter())
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
             lastError = nil
         } catch {
@@ -257,9 +352,9 @@ final class CameraAppState: ObservableObject {
             self.snapshot = snapshot.replacing(status: snapshot.status.replacing(recording: !recording))
             return
         }
-        guard let client else { return }
+        guard let session else { return }
         do {
-            let newStatus = recording ? try await client.stopRecording() : try await client.startRecording()
+            let newStatus = recording ? try await session.stopRecording() : try await session.startRecording()
             updateStatus(newStatus)
             lastError = nil
         } catch {
@@ -276,14 +371,31 @@ final class CameraAppState: ObservableObject {
             showFocusMarker(x: normalizedX, y: normalizedY, accepted: true)
             return
         }
-        guard let client else { return }
+        guard let session else { return }
         do {
-            let result = try await client.tapFocus(x: normalizedX, y: normalizedY)
+            let result = try await session.tapFocus(x: normalizedX, y: normalizedY)
             showFocusMarker(x: result.x, y: result.y, accepted: result.accepted)
             lastError = nil
         } catch {
             record(error)
             showFocusMarker(x: normalizedX, y: normalizedY, accepted: false)
+        }
+    }
+
+    func driveFocus(direction: FocusDriveDirection, step: FocusDriveStep) async {
+        guard supports(.focusDrive), begin(.focus) else { return }
+        defer { end(.focus) }
+        if isPreview {
+            showFocusMarker(x: direction == .near ? 0.4 : 0.6, y: 0.5, accepted: true)
+            return
+        }
+        guard let session else { return }
+        do {
+            let result = try await session.driveFocus(direction: direction, step: step)
+            showFocusMarker(x: result.direction == .near ? 0.4 : 0.6, y: 0.5, accepted: result.accepted)
+            lastError = nil
+        } catch {
+            record(error)
         }
     }
 
@@ -296,10 +408,10 @@ final class CameraAppState: ObservableObject {
             self.snapshot = snapshot.replacing(status: snapshot.status.replacing(exposure: exposure))
             return
         }
-        guard let client else { return }
+        guard let session else { return }
         do {
-            let status = try await client.setSetting(key: key, value: value)
-            let capabilities = try await client.capabilities()
+            let status = try await session.setSetting(key: key, value: value)
+            let capabilities = try await session.capabilities()
             if let snapshot {
                 self.snapshot = CameraSnapshot(info: snapshot.info, status: status, capabilities: capabilities)
             }
@@ -317,9 +429,9 @@ final class CameraAppState: ObservableObject {
             mediaItems = Self.previewMedia
             return
         }
-        guard let client else { return }
+        guard let session else { return }
         do {
-            mediaItems = try await client.listMedia()
+            mediaItems = try await session.listMedia()
             lastError = nil
         } catch {
             record(error)
@@ -335,7 +447,7 @@ final class CameraAppState: ObservableObject {
             downloadedFileName = item.name
             return
         }
-        guard let client else { return }
+        guard let session else { return }
         do {
             removeDownloadedFile()
             let directory = FileManager.default.temporaryDirectory
@@ -343,7 +455,7 @@ final class CameraAppState: ObservableObject {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let destination = directory.appendingPathComponent(item.name)
-            let result = try await client.downloadMedia(item, to: destination)
+            let result = try await session.downloadMedia(item, to: destination)
             downloadedFileURL = result.fileURL
             downloadedMediaID = result.item.id
             downloadedFileName = result.item.name
@@ -361,9 +473,9 @@ final class CameraAppState: ObservableObject {
             lastError = nil
             return
         }
-        guard let client else { return }
+        guard let session else { return }
         do {
-            try await client.deleteMedia(item)
+            try await session.deleteMedia(item)
             applyDeletedMedia(item)
             lastError = nil
         } catch {
@@ -380,8 +492,16 @@ final class CameraAppState: ObservableObject {
             sourceURL: frameSourceURL,
             lastFrameAt: lastFrameAt
         )
-        if let client {
-            return await client.diagnosticReport(snapshot: snapshot, liveView: metrics, lastError: lastError)
+        if let session {
+            return await session.diagnosticReport(snapshot: snapshot, liveView: metrics, lastError: lastError)
+        }
+        if connectionMode == .desktopBridge, let url = URL(string: bridgeURL) {
+            return DesktopBridgeDiagnosticReport.make(
+                baseURL: url,
+                snapshot: snapshot,
+                liveView: metrics,
+                lastError: lastError
+            )
         }
         let url = URL(string: baseURL) ?? URL(string: Self.defaultCameraURL)!
         return CCAPIDiagnosticReport.make(
@@ -417,7 +537,7 @@ final class CameraAppState: ObservableObject {
         if !liveView.sizes.contains(liveViewSize) { liveViewSize = liveView.defaultSize }
     }
 
-    private func beginLiveViewLoop(client: CCAPIClient) {
+    private func beginLiveViewLoop(session: CameraSession) {
         stopLiveViewLoop()
         resetLiveViewMetrics()
         liveViewTask = Task { [weak self] in
@@ -426,7 +546,7 @@ final class CameraAppState: ObservableObject {
             while !Task.isCancelled {
                 let started = Date().timeIntervalSinceReferenceDate
                 do {
-                    let frame = try await client.liveViewFrame(cacheKey: cacheKey)
+                    let frame = try await session.liveViewFrame(cacheKey: cacheKey)
                     cacheKey &+= 1
                     liveViewData = frame.data
                     frameBytes = frame.data.count

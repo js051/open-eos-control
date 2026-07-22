@@ -12,6 +12,8 @@ struct CameraSheetHost: View {
             LiveViewSettingsView()
         case .more:
             MoreSettingsView()
+        case .focusDrive:
+            FocusDriveView()
         case .language:
             LanguageSettingsView()
         }
@@ -144,6 +146,74 @@ private struct ExposureSettingsView: View {
         case .whiteBalance: camera.status?.exposure.whiteBalance
         default: nil
         }
+    }
+}
+
+private struct FocusDriveView: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                if !camera.autoRefresh {
+                    Label("focus_drive_live_view_required", systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(Color.cameraWarning)
+                }
+                directionRow(.near, title: "focus_near", systemImage: "arrow.left")
+                Divider().overlay(Color.cameraBorder)
+                directionRow(.far, title: "focus_far", systemImage: "arrow.right")
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(Color.cameraSurface)
+            .navigationTitle(Text("focus_drive"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.height(310), .medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func directionRow(
+        _ direction: FocusDriveDirection,
+        title: LocalizedStringKey,
+        systemImage: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+                .foregroundStyle(Color.cameraText)
+            HStack(spacing: 8) {
+                focusButton(direction: direction, step: .small, title: "step_small")
+                focusButton(direction: direction, step: .medium, title: "step_medium")
+                focusButton(direction: direction, step: .large, title: "step_large")
+            }
+        }
+    }
+
+    private func focusButton(
+        direction: FocusDriveDirection,
+        step: FocusDriveStep,
+        title: LocalizedStringKey
+    ) -> some View {
+        Button {
+            Task { await camera.driveFocus(direction: direction, step: step) }
+        } label: {
+            Text(title)
+                .font(.callout.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 50)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 5))
+        .tint(Color.cameraAccent)
+        .disabled(camera.isBusy(.focus) || !camera.autoRefresh)
+        .accessibilityIdentifier("focus-drive-\(direction.rawValue)-\(step.rawValue)")
     }
 }
 

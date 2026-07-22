@@ -1,6 +1,6 @@
-# iOS CCAPI
+# iOS Camera Transports
 
-`ios/OpenEOSCore` is the native Swift transport and command foundation, and `ios/OpenEOSControl` is the iOS 17 SwiftUI app. They communicate directly with a Canon camera or the development simulator over HTTP/HTTPS and do not depend on the Android implementation.
+`ios/OpenEOSCore` is the native Swift transport and command foundation, and `ios/OpenEOSControl` is the iOS 17 SwiftUI app. They can communicate directly with a Canon camera/simulator over CCAPI HTTP(S), or with Open EOS Control Desktop Bridge over an authenticated LAN connection. They do not depend on the Android implementation.
 
 ## Implemented Core
 
@@ -12,13 +12,14 @@
 - Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
 - Basic Authentication held by the client instance and redacted diagnostic output
 - Simulator mode and injectable HTTP transport for deterministic tests
+- Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, settings, capture, half-press, recording, tap/drive focus when advertised, bounded JPEG frames, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
 
-CCAPI RTP, focus drive without a camera-advertised operation, and iOS USB/PTP are not presented as implemented features.
+CCAPI RTP, focus drive without a camera/engine-advertised operation, and direct iOS USB/PTP are not presented as implemented features. Desktop Bridge is the implemented iPhone/iPad route to a camera attached to a PC by USB.
 
 ## Implemented App
 
-- Direct HTTP/HTTPS/Simulator presets, optional in-memory password, remembered URL/username, and offline UI preview
-- Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, half-press, recording, tap focus, and adjustable JPEG Live View
+- Direct HTTP/HTTPS/Simulator presets or Desktop Bridge URL/token with USB scan and camera selection; passwords/tokens stay in memory while non-secret URLs and usernames may be remembered
+- Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, half-press, recording, tap focus or manual focus drive when advertised, and adjustable JPEG Live View
 - Live View FPS from 1-30, clamped to the camera-advertised range, plus size, automatic refresh, grid, rolling FPS, frame bytes, and source diagnostics
 - Media listing, file-backed download/share, capability-gated confirmation deletion, redacted diagnostic report, and no fake USB/PTP action
 - English, Traditional Chinese, and system language selection
@@ -35,7 +36,7 @@ Official Apple references:
 - [App Transport Security local networking](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking)
 - [`URLSessionConfiguration.waitsForConnectivity`](https://developer.apple.com/documentation/foundation/urlsessionconfiguration/waitsforconnectivity)
 
-The app must not persist a CCAPI password or print an `Authorization` header. HTTP should only be used on the isolated camera network; HTTPS keeps normal platform trust validation.
+The app must not persist a CCAPI password or Desktop Bridge token, or print an `Authorization` header. HTTP should only be used on the isolated camera/LAN network; HTTPS keeps normal platform trust validation. A physical iPhone cannot use the Bridge loopback default: run the Bridge with an explicit LAN host and a strong `OPEN_EOS_BRIDGE_TOKEN`, then enter the computer's LAN URL in the App.
 
 ## Test
 
@@ -57,4 +58,4 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-The macOS CI job builds the app for iOS Simulator, verifies the compiled asset catalog, English/Traditional Chinese resources, launch screen, local-network metadata, and supported orientations, then runs the app unit tests and three UI workflows on an iPhone Simulator. The retained screenshots cover portrait control, landscape control, landscape Debug, confirmation-gated media deletion, and Traditional Chinese connection states. Physical iPhone and R6 Mark III validation is still required.
+The macOS CI job builds the app for iOS Simulator, verifies the compiled asset catalog, English/Traditional Chinese resources, launch screen, local-network metadata, and supported orientations, then runs the app unit tests and four UI workflows on an iPhone Simulator. The retained screenshots cover portrait control, landscape control, landscape Debug, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection states. Physical iPhone and R6 Mark III validation is still required.

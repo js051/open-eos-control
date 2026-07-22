@@ -30,47 +30,18 @@ struct ConnectionView: View {
                     Text("connect_title")
                         .font(.system(size: 30, weight: .bold))
                         .foregroundStyle(Color.cameraText)
-                    Text("direct_camera")
+                    Text(LocalizedStringKey(camera.connectionMode == .ccapi ? "direct_camera" : "usb_via_desktop_bridge"))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color.cameraAccent)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                presetControl
+                connectionModePicker
 
-                VStack(spacing: 14) {
-                    TextField(
-                        "camera_url",
-                        text: Binding(get: { camera.baseURL }, set: camera.setBaseURL)
-                    )
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    .autocorrectionDisabled()
-                    .textContentType(.URL)
-                    .cameraFieldStyle()
-                    .accessibilityIdentifier("camera-url-field")
-
-                    DisclosureGroup(isExpanded: $showAuthentication) {
-                        VStack(spacing: 12) {
-                            TextField(
-                                "username",
-                                text: Binding(get: { camera.username }, set: camera.setUsername)
-                            )
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .textContentType(.username)
-                            .cameraFieldStyle()
-
-                            SecureField("password", text: $camera.password)
-                                .textContentType(.password)
-                                .cameraFieldStyle()
-                        }
-                        .padding(.top, 12)
-                    } label: {
-                        Label("authentication", systemImage: "person.badge.key")
-                            .foregroundStyle(Color.cameraText)
-                    }
-                    .tint(Color.cameraSecondaryText)
+                if camera.connectionMode == .ccapi {
+                    ccapiFields
+                } else {
+                    bridgeFields
                 }
 
                 Button {
@@ -80,7 +51,7 @@ struct ConnectionView: View {
                         if camera.isBusy(.connect) {
                             ProgressView().tint(Color.cameraBackground)
                         } else {
-                            Image(systemName: "wifi")
+                            Image(systemName: camera.connectionMode == .ccapi ? "wifi" : "desktopcomputer")
                         }
                         Text(LocalizedStringKey(camera.isBusy(.connect) ? "connecting" : "connect"))
                             .fontWeight(.bold)
@@ -91,7 +62,7 @@ struct ConnectionView: View {
                 .buttonBorderShape(.roundedRectangle(radius: 6))
                 .tint(Color.cameraAccent)
                 .foregroundStyle(Color.cameraBackground)
-                .disabled(camera.isBusy(.connect) || camera.baseURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(camera.isBusy(.connect) || camera.isBusy(.scan) || !camera.canConnect)
                 .accessibilityIdentifier("connect-button")
 
                 HStack(spacing: 12) {
@@ -120,6 +91,128 @@ struct ConnectionView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Color.cameraBackground)
+    }
+
+    private var connectionModePicker: some View {
+        Picker(
+            "connection_method",
+            selection: Binding(get: { camera.connectionMode }, set: camera.setConnectionMode)
+        ) {
+            Text("direct_camera").tag(AppConnectionMode.ccapi)
+            Text("desktop_bridge").tag(AppConnectionMode.desktopBridge)
+        }
+        .pickerStyle(.segmented)
+        .frame(minHeight: 44)
+        .accessibilityIdentifier("connection-mode-picker")
+    }
+
+    private var ccapiFields: some View {
+        VStack(spacing: 14) {
+            presetControl
+
+            TextField(
+                "camera_url",
+                text: Binding(get: { camera.baseURL }, set: camera.setBaseURL)
+            )
+            .textInputAutocapitalization(.never)
+            .keyboardType(.URL)
+            .autocorrectionDisabled()
+            .textContentType(.URL)
+            .cameraFieldStyle()
+            .accessibilityIdentifier("camera-url-field")
+
+            DisclosureGroup(isExpanded: $showAuthentication) {
+                VStack(spacing: 12) {
+                    TextField(
+                        "username",
+                        text: Binding(get: { camera.username }, set: camera.setUsername)
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.username)
+                    .cameraFieldStyle()
+
+                    SecureField("password", text: $camera.password)
+                        .textContentType(.password)
+                        .cameraFieldStyle()
+                }
+                .padding(.top, 12)
+            } label: {
+                Label("authentication", systemImage: "person.badge.key")
+                    .foregroundStyle(Color.cameraText)
+            }
+            .tint(Color.cameraSecondaryText)
+        }
+    }
+
+    private var bridgeFields: some View {
+        VStack(spacing: 14) {
+            TextField(
+                "desktop_bridge_url",
+                text: Binding(get: { camera.bridgeURL }, set: camera.setBridgeURL)
+            )
+            .textInputAutocapitalization(.never)
+            .keyboardType(.URL)
+            .autocorrectionDisabled()
+            .textContentType(.URL)
+            .cameraFieldStyle()
+            .accessibilityIdentifier("bridge-url-field")
+
+            SecureField("bearer_token", text: $camera.bridgeToken)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textContentType(.password)
+                .cameraFieldStyle()
+                .accessibilityIdentifier("bridge-token-field")
+
+            Button {
+                Task { await camera.scanBridgeCameras() }
+            } label: {
+                HStack(spacing: 9) {
+                    if camera.isBusy(.scan) {
+                        ProgressView().tint(Color.cameraText)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    Text(LocalizedStringKey(camera.isBusy(.scan) ? "scanning_cameras" : "scan_cameras"))
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity, minHeight: 50)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.roundedRectangle(radius: 6))
+            .tint(Color.cameraText)
+            .disabled(
+                camera.isBusy(.scan)
+                    || camera.isBusy(.connect)
+                    || camera.bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
+            .accessibilityIdentifier("bridge-scan-button")
+
+            if camera.bridgeCameras.isEmpty {
+                Label("no_bridge_cameras", systemImage: "camera")
+                    .font(.callout)
+                    .foregroundStyle(Color.cameraSecondaryText)
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            } else {
+                Picker("bridge_camera", selection: $camera.selectedBridgeCameraID) {
+                    Text("select_camera").tag(Optional<String>.none)
+                    ForEach(camera.bridgeCameras) { bridgeCamera in
+                        Text("\(bridgeCamera.model) | \(bridgeCamera.port)")
+                            .lineLimit(1)
+                            .tag(Optional(bridgeCamera.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                .foregroundStyle(Color.cameraText)
+                .background(Color.cameraSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.cameraBorder))
+                .accessibilityIdentifier("bridge-camera-picker")
+            }
+        }
     }
 
     private var presetControl: some View {

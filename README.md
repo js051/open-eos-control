@@ -4,7 +4,7 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It targets Canon EOS R6 Mark III first and is structured around PC, iOS, and Android clients that share the same camera-control concepts.
 
-The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend, capability-gated Canon EOS remote release, exposure/white-balance, movie and advanced shooting-setting control, focus drive and JPEG Live View, plus an executable Desktop Bridge client behind the same camera core contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge provides a tested API and responsive control UI through either open-source `gphoto2` USB or native HTTP CCAPI. A native Swift CCAPI core and iOS 17 SwiftUI app are implemented with English/Traditional Chinese UI and iPhone Simulator coverage; physical iPhone and camera validation remains.
+The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend and capability-gated Canon EOS controls. Android and iOS can both use the executable Desktop Bridge to control a camera connected to a PC by USB through the same camera contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge provides a tested API and responsive control UI through either open-source `gphoto2` USB or native HTTP CCAPI. Native Swift CCAPI and Desktop Bridge clients plus an iOS 17 SwiftUI app are implemented with English/Traditional Chinese UI and iPhone Simulator coverage; physical iPhone and camera validation remains.
 
 ## Project Shape
 
@@ -12,7 +12,7 @@ The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. A
 open-eos-control/
   android/       Android app, Kotlin + Jetpack Compose
   bridge/        PC camera bridge and control UI, Python + FastAPI + gphoto2
-  ios/           Native Swift CCAPI core and iOS app workspace
+  ios/           Native Swift camera core and iOS app workspace
   simulator/     Fake Canon CCAPI-compatible camera server
   docs/          Architecture, transport, and bridge notes
 ```
@@ -84,16 +84,16 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 GitHub Actions runs tests and debug builds on pushes to `main` and on pull requests.
 
-## iOS App And CCAPI Core
+## iOS App And Camera Core
 
-`ios/OpenEOSCore` is a Swift Package that implements the native iOS CCAPI transport and command layer. It discovers camera-advertised API versions and operations, capability-gates settings and commands, supports JPEG Live View, still capture, timed half-press with guaranteed release, recording, tap focus, media listing/download/deletion, and redacted diagnostics with bounded capability evidence. The package includes deterministic transport tests and is compiled by the macOS GitHub Actions job:
+`ios/OpenEOSCore` is a Swift Package that implements native CCAPI and authenticated Desktop Bridge clients. The CCAPI path discovers camera-advertised API versions and operations. The Bridge path validates the service, scans USB cameras, owns session lifecycle, and maps dynamic capabilities into the same models. Both paths capability-gate settings and commands and support the advertised subset of JPEG Live View, still capture, half-press, recording, focus, media listing/download/deletion, and redacted diagnostics with bounded capability evidence. The package includes deterministic HTTP contract tests and is compiled by the macOS GitHub Actions job:
 
 ```bash
 cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` is the iOS 17 SwiftUI app. It provides direct CCAPI connection, offline UI preview, capability-gated Photo/Video controls, JPEG Live View with 1-30 FPS requests clamped to camera-advertised limits, exposure sheets, media transfer and confirmation-gated deletion, redacted diagnostics, manual language selection, and safe portrait/landscape layouts. Whole-window upside-down rotation stays disabled while key controls can rotate with physical device orientation.
+`ios/OpenEOSControl` is the iOS 17 SwiftUI app. It provides direct CCAPI connection or Desktop Bridge URL/token, USB camera scanning and selection, offline UI preview, capability-gated Photo/Video controls, manual focus drive when advertised, JPEG Live View with requests clamped to camera-advertised limits, exposure sheets, media transfer and confirmation-gated deletion, redacted diagnostics, manual language selection, and safe portrait/landscape layouts. Bridge tokens and CCAPI passwords remain in memory. Whole-window upside-down rotation stays disabled while key controls can rotate with physical device orientation.
 
 On a macOS host with Xcode and XcodeGen:
 
@@ -104,7 +104,7 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions builds the final app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises English portrait/landscape control, confirmation-gated media deletion, and Traditional Chinese connection flows on an iPhone Simulator. This does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
+GitHub Actions builds the final app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises English portrait/landscape control, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection-form flows on an iPhone Simulator. This does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
 
 ## Desktop Bridge
 
@@ -131,7 +131,7 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "replace-with-a-long-random-token"
 .\.venv\Scripts\open-eos-bridge.exe
 ```
 
-Choose **Desktop bridge** on the Android connection screen, enter the URL and the same token, then scan and select the camera. The token is kept only in process memory and is never persisted or included in diagnostics.
+Choose **Desktop Bridge** on the Android or iOS connection screen, enter the computer LAN URL and the same token, then scan and select the camera. The token is kept only in process memory and is never persisted or included in diagnostics. Direct iOS USB/PTP remains a research item; this Bridge path is the implemented iPhone/iPad route to a PC-attached USB camera.
 
 The current CLI adapter deliberately advertises at most 5 FPS because each JPEG is a separate `gphoto2 --capture-preview` transaction. The CCAPI engine advertises 1-30 FPS client polling, defaults to 15 FPS, retries the R6 Mark III-compatible Live View start payload after an `Invalid parameter` response, and reports observed FPS separately. Its discovery, settings, capture, guaranteed shutter release, recording, Tap AF, bounded JPEG extraction, same-origin media traversal, streaming downloads, auth handling, and capability gates are automated-test covered. The browser workflow has also exercised CCAPI connection, valid JPEG display, 15 FPS selection, Tap AF, English/Traditional Chinese, and desktop/narrow layouts. Physical PC/R6 Mark III validation is still required.
 

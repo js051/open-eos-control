@@ -1,6 +1,16 @@
 "app_name" = "Open EOS Control";
 "connect_title" = "連接你的 EOS";
 "direct_camera" = "直接連相機";
+"connection_method" = "連線方式";
+"desktop_bridge" = "Desktop Bridge";
+"usb_via_desktop_bridge" = "透過 Desktop Bridge 使用 USB";
+"desktop_bridge_url" = "Desktop Bridge URL";
+"bearer_token" = "Bearer 權杖";
+"scan_cameras" = "掃描 USB 相機";
+"scanning_cameras" = "正在掃描相機…";
+"no_bridge_cameras" = "請先掃描並選擇 USB 相機。";
+"bridge_camera" = "USB 相機";
+"select_camera" = "選擇相機";
 "preset_http" = "HTTP";
 "preset_https" = "HTTPS";
 "preset_simulator" = "模擬器";
@@ -44,6 +54,13 @@
 "capture_not_supported" = "相機未公告支援拍照快門。";
 "recording_not_supported" = "相機未公告支援錄影控制。";
 "focus_with_shutter" = "快門自動對焦";
+"focus_drive" = "手動驅動對焦";
+"focus_near" = "近";
+"focus_far" = "遠";
+"step_small" = "小步";
+"step_medium" = "中步";
+"step_large" = "大步";
+"focus_drive_live_view_required" = "請先啟用 Live View 自動更新再驅動對焦。";
 "more_settings" = "更多設定";
 "live_view_settings" = "Live View 設定";
 
@@ -93,6 +110,7 @@
 "serial_number" = "序號";
 "last_error" = "最後錯誤";
 "ccapi" = "CCAPI";
+"connection_details" = "連線資訊";
 "base_url" = "Base URL";
 "supported_features" = "已支援功能";
 "planned_features" = "規劃功能";

@@ -119,6 +119,12 @@ private struct CameraOverlayHeader: View {
                 }
                 .disabled(!camera.supports(.mediaBrowser))
                 Button {
+                    camera.activeSheet = .focusDrive
+                } label: {
+                    Label("focus_drive", systemImage: "arrow.left.and.right")
+                }
+                .disabled(!camera.supports(.focusDrive))
+                Button {
                     camera.screen = .debug
                 } label: {
                     Label("debug", systemImage: "ladybug")

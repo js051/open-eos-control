@@ -16,6 +16,13 @@ enum AppCaptureMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum AppConnectionMode: String, CaseIterable, Identifiable {
+    case ccapi
+    case desktopBridge
+
+    var id: String { rawValue }
+}
+
 enum CameraSheet: String, Identifiable {
     case iso
     case shutter
@@ -23,6 +30,7 @@ enum CameraSheet: String, Identifiable {
     case whiteBalance
     case liveView
     case more
+    case focusDrive
     case language
 
     var id: String { rawValue }
@@ -30,6 +38,7 @@ enum CameraSheet: String, Identifiable {
 
 enum CameraOperation: Hashable {
     case connect
+    case scan
     case refresh
     case setting
     case capture

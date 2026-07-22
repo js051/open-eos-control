@@ -79,4 +79,21 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: AppLanguageStore.defaultsKey), AppLanguage.traditionalChinese.rawValue)
         XCTAssertTrue(store.locale.identifier.lowercased().contains("zh"))
     }
+
+    func testBridgePreferencesPersistWithoutPersistingBearerToken() {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+
+        state.setConnectionMode(.desktopBridge)
+        state.setBridgeURL("http://192.168.1.20:18181")
+        state.bridgeToken = "memory-only-secret"
+
+        let restored = CameraAppState(defaults: defaults)
+        XCTAssertEqual(restored.connectionMode, .desktopBridge)
+        XCTAssertEqual(restored.bridgeURL, "http://192.168.1.20:18181")
+        XCTAssertTrue(restored.bridgeToken.isEmpty)
+        XCTAssertFalse(restored.canConnect)
+    }
 }

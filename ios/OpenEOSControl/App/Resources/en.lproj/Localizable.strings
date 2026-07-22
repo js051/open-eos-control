@@ -1,6 +1,16 @@
 "app_name" = "Open EOS Control";
 "connect_title" = "Connect your EOS";
 "direct_camera" = "Direct camera";
+"connection_method" = "Connection method";
+"desktop_bridge" = "Desktop Bridge";
+"usb_via_desktop_bridge" = "USB via Desktop Bridge";
+"desktop_bridge_url" = "Desktop Bridge URL";
+"bearer_token" = "Bearer token";
+"scan_cameras" = "Scan USB cameras";
+"scanning_cameras" = "Scanning cameras…";
+"no_bridge_cameras" = "Scan to select a USB camera.";
+"bridge_camera" = "USB camera";
+"select_camera" = "Select camera";
 "preset_http" = "HTTP";
 "preset_https" = "HTTPS";
 "preset_simulator" = "Simulator";
@@ -44,6 +54,13 @@
 "capture_not_supported" = "Still capture is not advertised by this camera.";
 "recording_not_supported" = "Video recording is not advertised by this camera.";
 "focus_with_shutter" = "Shutter autofocus";
+"focus_drive" = "Manual focus drive";
+"focus_near" = "Near";
+"focus_far" = "Far";
+"step_small" = "Small";
+"step_medium" = "Medium";
+"step_large" = "Large";
+"focus_drive_live_view_required" = "Enable Live View auto refresh before driving focus.";
 "more_settings" = "More settings";
 "live_view_settings" = "Live View settings";
 
@@ -93,6 +110,7 @@
 "serial_number" = "Serial number";
 "last_error" = "Last error";
 "ccapi" = "CCAPI";
+"connection_details" = "Connection";
 "base_url" = "Base URL";
 "supported_features" = "Supported features";
 "planned_features" = "Planned features";
