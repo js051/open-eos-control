@@ -101,6 +101,13 @@ class FakeRunner:
             return CommandOutput(JPEG)
         if command in (["--trigger-capture"], ["--capture-image"]):
             return CommandOutput(b"New file is in location /store_00010001/DCIM/100CANON/IMG_0002.JPG\n")
+        if command == [
+            "--folder",
+            "/store_00010001/DCIM/100CANON",
+            "--delete-file",
+            "IMG_0001.JPG",
+        ]:
+            return CommandOutput(b"")
         if command and command[0] == "--set-config-value":
             path, value = command[1].split("=", 1)
             if path not in self.values:

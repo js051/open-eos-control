@@ -58,6 +58,7 @@ class DesktopBridgeClientTest {
         val destination = ByteArrayOutputStream()
         val progress = mutableListOf<CameraMediaTransferProgress>()
         val download = client.downloadMedia(media.single(), destination, progress::add)
+        client.deleteMedia(media.single())
         client.stopLiveView()
         client.close()
 
@@ -72,6 +73,7 @@ class DesktopBridgeClientTest {
         assertFalse(stopped.recording == true)
         assertTrue(capabilities.matrix.supports(CameraFeature.DESKTOP_BRIDGE))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
         assertFalse(capabilities.matrix.supports(CameraFeature.USB_DIAGNOSTICS))
         assertEquals(listOf("Auto", "100", "400", "800"), capabilities.iso)
@@ -101,6 +103,7 @@ class DesktopBridgeClientTest {
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/capture/still") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/shutter/half-press") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/drive") == true })
+        assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath?.contains("/media/") == true })
         assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath == "/v1/session/session-1" })
     }
 
@@ -203,6 +206,7 @@ class DesktopBridgeClientTest {
                     .setBody(okio.Buffer().write(JPEG))
                 path.endsWith("/focus/drive") -> json("""{"accepted":true,"direction":"FAR","step":"LARGE"}""")
                 path.endsWith("/media") -> json(MEDIA_JSON)
+                path.contains("/media/") && request.method == "DELETE" -> MockResponse().setResponseCode(204)
                 path.contains("/media/") -> MockResponse()
                     .setHeader("content-type", "image/jpeg")
                     .setHeader("content-length", MEDIA_BYTES.size)
@@ -296,7 +300,7 @@ class DesktopBridgeClientTest {
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
                 "STILL_CAPTURE", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "ADVANCED_SETTINGS",
-                "MEDIA_BROWSER", "MEDIA_DOWNLOAD", "A_FUTURE_FEATURE"
+                "MEDIA_BROWSER", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
               ],
               "planned": ["TAP_FOCUS", "LIVE_VIEW_RTP"],
               "reasons": {"LIVE_VIEW_RTP": "Persistent stream is not implemented."},

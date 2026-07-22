@@ -55,3 +55,12 @@ def test_unknown_media_returns_not_found() -> None:
     response = client.get("/ccapi/media/DOES_NOT_EXIST.PNG")
 
     assert response.status_code == 404
+
+
+def test_media_delete_removes_only_the_requested_item() -> None:
+    response = client.delete("/ccapi/media/SIM_0002.PNG")
+    media = client.get("/ccapi/media")
+
+    assert response.status_code == 204
+    assert [item["id"] for item in media.json()["items"]] == ["SIM_0001.PNG"]
+    assert client.delete("/ccapi/media/SIM_0002.PNG").status_code == 404

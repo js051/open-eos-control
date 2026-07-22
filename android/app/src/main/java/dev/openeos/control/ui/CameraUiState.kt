@@ -60,6 +60,7 @@ data class CameraUiState(
     val activeMediaDownloadName: String? = null,
     val mediaDownloadProgress: CameraMediaTransferProgress? = null,
     val lastDownloadedMediaName: String? = null,
+    val lastDeletedMediaName: String? = null,
     val liveViewFrameUrl: String? = null,
     val liveViewBitmap: Bitmap? = null,
     val usbDiagnostics: UsbPtpDiagnostics = UsbPtpDiagnostics.Empty,

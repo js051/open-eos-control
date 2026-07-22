@@ -510,7 +510,13 @@ class CameraViewModel(
         if (!_uiState.value.connected || _uiState.value.previewMode) return
         runCamera(CameraOperation.MEDIA) {
             val items = repository.listMedia()
-            _uiState.update { it.copy(mediaItems = items, lastDownloadedMediaName = null) }
+            _uiState.update {
+                it.copy(
+                    mediaItems = items,
+                    lastDownloadedMediaName = null,
+                    lastDeletedMediaName = null,
+                )
+            }
         }
     }
 
@@ -559,6 +565,19 @@ class CameraViewModel(
 
     fun cancelMediaDownload() {
         mediaDownloadJob?.cancel()
+    }
+
+    fun deleteMedia(item: CameraMediaItem) {
+        val state = _uiState.value
+        if (state.isBusy(CameraOperation.MEDIA) || !state.supports(CameraFeature.MEDIA_DELETE)) return
+        if (state.previewMode) {
+            _uiState.update { current -> current.withDeletedMedia(item) }
+            return
+        }
+        runCamera(CameraOperation.MEDIA) {
+            repository.deleteMedia(item)
+            _uiState.update { current -> current.withDeletedMedia(item) }
+        }
     }
 
     fun tapFocus(x: Double, y: Double) {
@@ -850,6 +869,7 @@ class CameraViewModel(
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
+        lastDeletedMediaName = null,
         liveViewFrameUrl = null,
         liveViewBitmap = null,
         liveViewDiagnostics = LiveViewDiagnostics(),
@@ -862,6 +882,12 @@ class CameraViewModel(
 
     private fun fpsToFrameIntervalMillis(fps: Int): Long =
         (1_000L / fps.coerceIn(MIN_LIVE_VIEW_FPS, MAX_LIVE_VIEW_FPS)).coerceAtLeast(1L)
+
+    private fun CameraUiState.withDeletedMedia(item: CameraMediaItem): CameraUiState = copy(
+        mediaItems = mediaItems.filterNot { it.id == item.id },
+        lastDownloadedMediaName = lastDownloadedMediaName.takeUnless { it == item.name },
+        lastDeletedMediaName = item.name,
+    )
 
     private fun recordFrame(
         current: LiveViewDiagnostics,

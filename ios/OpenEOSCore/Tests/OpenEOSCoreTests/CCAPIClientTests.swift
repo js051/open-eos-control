@@ -23,7 +23,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/liveview","get":true,"post":true,"delete":true},
         {"path":"/shooting/liveview/flip","get":true},
         {"path":"/shooting/liveview/flipdetail","get":true},
-        {"path":"/contents","get":true}
+        {"path":"/contents","get":true,"delete":true}
       ]
     }
     """
@@ -63,6 +63,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.videoRecording))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.tapFocus))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.evidence.source, "GET /ccapi")
         XCTAssertEqual(snapshot.capabilities.evidence.protocolVersions, ["ver100"])
@@ -311,6 +312,42 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(result.contentType, "image/x-canon-cr3")
         let downloadPaths = (await transport.requests()).map(\.path).filter { $0.contains("IMG_0001.CR3") }
         XCTAssertEqual(downloadPaths, [path, "\(path)?kind=main"])
+    }
+
+    func testMediaDeleteUsesAdvertisedDeleteOnExactCameraPath() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let path = "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG"
+        await transport.enqueue(method: "DELETE", path: path, status: 204, body: Data())
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        try await client.deleteMedia(
+            CameraMediaItem(id: "http://192.168.1.2:8080\(path)?kind=main", name: "IMG_0001.JPG", kind: "image")
+        )
+
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.method), ["GET", "DELETE"])
+        XCTAssertEqual(requests.last?.path, path)
+    }
+
+    func testMediaDeleteRequiresAdvertisedDeleteWithoutSendingCommand() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        do {
+            try await client.deleteMedia(
+                CameraMediaItem(id: "/ccapi/ver100/contents/card1/IMG_0001.JPG", name: "IMG_0001.JPG", kind: "image")
+            )
+            XCTFail("Expected unsupported media deletion")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.mediaDelete))
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.method), ["GET"])
     }
 
     func testBasicAuthenticationIsSentButDiagnosticReportRedactsSecrets() async throws {

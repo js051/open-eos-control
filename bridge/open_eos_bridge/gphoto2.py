@@ -265,6 +265,7 @@ class GPhotoAbilities:
     capture_preview: bool = False
     trigger_capture: bool = False
     configuration: bool = False
+    delete_files: bool = False
 
 
 @dataclass(frozen=True)
@@ -346,12 +347,14 @@ def parse_abilities(output: str) -> GPhotoAbilities:
         for match in re.finditer(r"^\s*:\s*(Image|Preview|Trigger Capture)\s*$", output, re.M | re.I)
     }
     configuration_match = re.search(r"^Configuration support\s*:\s*(yes|no)\s*$", output, re.M | re.I)
+    delete_match = re.search(r"^Delete selected files on camera\s*:\s*(yes|no)\s*$", output, re.M | re.I)
     return GPhotoAbilities(
         model=model_match.group(1).strip() if model_match else "",
         capture_image="image" in capture_lines,
         capture_preview="preview" in capture_lines,
         trigger_capture="trigger capture" in capture_lines,
         configuration=bool(configuration_match and configuration_match.group(1).lower() == "yes"),
+        delete_files=bool(delete_match and delete_match.group(1).lower() == "yes"),
     )
 
 
@@ -636,6 +639,8 @@ class GPhoto2Session:
                 supported.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
             if self._media_supported:
                 supported.update({CameraFeature.MEDIA_BROWSER, CameraFeature.MEDIA_DOWNLOAD})
+                if self._abilities.delete_files:
+                    supported.add(CameraFeature.MEDIA_DELETE)
             if any(key in settings_by_key for key in ("iso", "shutter", "aperture")):
                 supported.add(CameraFeature.EXPOSURE_CONTROL)
             if "whitebalance" in settings_by_key:
@@ -853,6 +858,15 @@ class GPhoto2Session:
 
         return item, stream()
 
+    def delete_media(self, media_id: str) -> None:
+        folder, name = _decode_media_id(media_id)
+        with self._lock:
+            self._require_open()
+            if not self._media_supported or not self._abilities.delete_files:
+                raise unsupported(CameraFeature.MEDIA_DELETE.value, self.engine_name)
+            self._run(["--folder", folder, "--delete-file", name], timeout=60.0)
+            self._media_cache.pop(media_id, None)
+
     @property
     def requested_fps(self) -> int:
         return self._requested_fps
@@ -970,6 +984,8 @@ class GPhoto2Session:
             commands.append("CAPTURE_PREVIEW")
         if self._media_supported:
             commands.extend(("MEDIA_LIST", "MEDIA_DOWNLOAD"))
+            if self._abilities.delete_files:
+                commands.append("MEDIA_DELETE")
         writable_settings = sorted(
             {
                 config.path.replace("\r", "").replace("\n", "")[

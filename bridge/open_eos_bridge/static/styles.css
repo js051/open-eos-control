@@ -917,6 +917,11 @@ input:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+.media-actions {
+  display: flex;
+  gap: 4px;
+}
+
 .media-kind {
   display: grid;
   width: 44px;

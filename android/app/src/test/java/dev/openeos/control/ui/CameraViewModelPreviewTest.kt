@@ -73,4 +73,17 @@ class CameraViewModelPreviewTest {
             viewModel.uiState.value.capabilities?.shootingModeSetting()?.value,
         )
     }
+
+    @Test
+    fun previewMediaDeleteRemovesOnlyConfirmedItemLocally() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+        val item = viewModel.uiState.value.mediaItems.first()
+
+        viewModel.deleteMedia(item)
+
+        assertFalse(viewModel.uiState.value.mediaItems.any { it.id == item.id })
+        assertEquals(item.name, viewModel.uiState.value.lastDeletedMediaName)
+        assertEquals(2, viewModel.uiState.value.mediaItems.size)
+    }
 }

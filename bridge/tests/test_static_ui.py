@@ -94,6 +94,9 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
 
     assert all(path in script for path in required_paths)
     assert "featureSupported(FEATURES." in script
+    assert 'MEDIA_DELETE: "MEDIA_DELETE"' in script
+    assert script.count("deleteConfirm:") == 2
+    assert '{ method: "DELETE" }' in script
     assert "Bearer ${state.token}" in script
     assert "writeLanguagePreference(state.language)" in script
     assert "writeCameraPreference(CCAPI_URL_KEY" in script

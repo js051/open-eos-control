@@ -159,6 +159,15 @@ async def media_download(item_id: str) -> Response:
     return Response(content=camera_frame_png(), media_type="image/png")
 
 
+@app.delete("/ccapi/media/{item_id}", status_code=204)
+async def media_delete(item_id: str) -> Response:
+    item = next((candidate for candidate in state["media"] if candidate["id"] == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    state["media"].remove(item)
+    return Response(status_code=204)
+
+
 @app.get("/ccapi/liveview/frame")
 async def liveview_frame() -> Response:
     return Response(content=camera_frame_png(), media_type="image/png")

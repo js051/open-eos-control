@@ -395,6 +395,15 @@ class DesktopBridgeClient(
         }
     }
 
+    suspend fun deleteMedia(item: CameraMediaItem) {
+        requestOk(
+            Request.Builder()
+                .url(sessionEndpoint("media", item.id))
+                .delete()
+                .build(),
+        )
+    }
+
     private suspend fun validateService() {
         val health = getJson(endpoint("health"))
         check(health.optString("service") == BRIDGE_SERVICE_NAME) {

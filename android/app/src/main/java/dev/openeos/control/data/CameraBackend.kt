@@ -83,6 +83,7 @@ interface CameraControlBackend {
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = unsupported(CameraFeature.MEDIA_DOWNLOAD)
+    suspend fun deleteMedia(item: CameraMediaItem) = unsupported<Unit>(CameraFeature.MEDIA_DELETE)
     fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame
 }
@@ -142,6 +143,8 @@ class CcapiCameraBackend(
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
+
+    override suspend fun deleteMedia(item: CameraMediaItem) = client.deleteMedia(item)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
 
@@ -208,6 +211,8 @@ class DesktopBridgeCameraBackend(
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
+
+    override suspend fun deleteMedia(item: CameraMediaItem) = client.deleteMedia(item)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey)
 

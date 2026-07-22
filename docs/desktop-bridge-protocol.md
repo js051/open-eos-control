@@ -37,6 +37,7 @@ POST /v1/session/{id}/focus/tap
 POST /v1/session/{id}/focus/drive
 GET  /v1/session/{id}/media
 GET  /v1/session/{id}/media/{itemId}
+DELETE /v1/session/{id}/media/{itemId}
 DELETE /v1/session/{id}
 ```
 
@@ -145,7 +146,7 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - movie start/stop through `recbutton`
 - normalized coordinate Tap AF through `afpoint`
 - bounded JPEG Live View lifecycle and frame extraction
-- bounded/paged storage traversal plus opaque same-origin media IDs and streamed downloads
+- bounded/paged storage traversal plus opaque same-origin media IDs, streamed downloads, and deletion only when the camera advertises a matching `DELETE` operation
 
 Basic Auth is sent preemptively when a username is supplied. The Authorization value, username, and password are never exposed in status, diagnostics, media URLs, or API responses. Focus drive and RTP remain unavailable unless a documented and camera-advertised implementation is added.
 
@@ -161,7 +162,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - recording: advertised `movierecordtarget` Card/None values
 - focus drive: advertised `manualfocusdrive` Near/Far values while Live View is active
 - Live View: advertised `viewfinder` lifecycle plus `--capture-preview --stdout`, with cleanup on stop, failed start, and session close
-- media: recursive `--list-files` and streamed `--get-file ... --stdout`
+- media: recursive `--list-files`, streamed `--get-file ... --stdout`, and exact `--folder ... --delete-file ...` only when `--abilities` reports file deletion
 
 Coordinate tap focus remains unavailable because the public CLI surface does not provide a verified normalized image-coordinate mapping for this camera. Unsupported controls return an error and are never reported as accepted.
 
@@ -176,7 +177,7 @@ python -m venv .venv
 
 The defaults are `127.0.0.1:18181` and loopback-only access. The UI offers `libgphoto2` USB and direct `ccapi` connections; set `OPEN_EOS_GPHOTO2` when the executable is not named `gphoto2`. For a LAN bind, set both `OPEN_EOS_BRIDGE_HOST` and a strong `OPEN_EOS_BRIDGE_TOKEN`.
 
-The same process serves the responsive PC control UI at `http://127.0.0.1:18181/`. It scans USB cameras or accepts a manual CCAPI origin, opens one selected session, and renders only camera-advertised controls for Live View, exposure, capture, recording, focus, media, and diagnostics. English and Traditional Chinese are selectable. Bridge tokens and camera passwords stay in page memory; only language, camera URL, and username may be persisted.
+The same process serves the responsive PC control UI at `http://127.0.0.1:18181/`. It scans USB cameras or accepts a manual CCAPI origin, opens one selected session, and renders only camera-advertised controls for Live View, exposure, capture, recording, focus, media, and diagnostics. Destructive media deletion has a filename-specific confirmation and removes a row only after the bridge returns success. English and Traditional Chinese are selectable. Bridge tokens and camera passwords stay in page memory; only language, camera URL, and username may be persisted.
 
 ## Error Shape
 

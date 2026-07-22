@@ -41,7 +41,7 @@ DISCOVERY = {
         {"path": "/shooting/control/afpoint", "put": True},
         {"path": "/shooting/liveview", "get": True, "post": True, "delete": True},
         {"path": "/shooting/liveview/flip", "get": True},
-        {"path": "/contents", "get": True},
+        {"path": "/contents", "get": True, "delete": True},
     ]
 }
 
@@ -120,6 +120,8 @@ class FakeCcapiTransport:
                 else "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG"
             )
             return _json_response({"path": [media_path]})
+        if method == "DELETE" and path.startswith("/ccapi/ver100/contents/"):
+            return CcapiResponse(204, {}, b"")
         if path in {
             "/ccapi/ver100/shooting/control/shutterbutton",
             "/ccapi/ver100/shooting/control/shutterbutton/manual",
@@ -182,9 +184,12 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert status.exposure.shutter == "1/50"
     assert capabilities.profile.priority == "primary"
     assert capabilities.live_view.max_fps == 30
-    assert {CameraFeature.STILL_CAPTURE, CameraFeature.TAP_FOCUS, CameraFeature.MEDIA_DOWNLOAD} <= set(
-        capabilities.supported
-    )
+    assert {
+        CameraFeature.STILL_CAPTURE,
+        CameraFeature.TAP_FOCUS,
+        CameraFeature.MEDIA_DOWNLOAD,
+        CameraFeature.MEDIA_DELETE,
+    } <= set(capabilities.supported)
     assert next(item for item in capabilities.settings if item.key == "shutter").values == ["1/50", "1/100"]
     assert capabilities.evidence.source == "GET /ccapi"
     assert capabilities.evidence.protocol_versions == ["ver100"]
@@ -211,12 +216,18 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     item, chunks = session.download_media(media[0].id)
     assert item.size_bytes == len(MEDIA)
     assert b"".join(chunks) == MEDIA
+    session.delete_media(media[0].id)
     session.stop_live_view()
     session.close()
     assert transport.closed is True
 
     command_paths = [request.path for request in transport.requests]
     assert command_paths.count("/ccapi/ver100/shooting/control/shutterbutton/manual") == 2
+    assert RecordedRequest(
+        "DELETE",
+        "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
+        None,
+    ) in transport.requests
     live_starts = [
         request.body
         for request in transport.requests
@@ -237,11 +248,14 @@ def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
     before = len(transport.requests)
     with pytest.raises(BridgeError) as failure:
         session.capture_still()
+    with pytest.raises(BridgeError) as delete_failure:
+        session.delete_media("ccapi:invalid")
 
     assert CameraFeature.STILL_CAPTURE not in capabilities.supported
     assert CameraFeature.EXPOSURE_CONTROL not in capabilities.supported
     assert capabilities.settings == []
     assert failure.value.code == "UNSUPPORTED_FEATURE"
+    assert delete_failure.value.code == "UNSUPPORTED_FEATURE"
     assert len(transport.requests) == before
 
 

@@ -232,10 +232,12 @@ public actor CCAPIClient {
         if supports(.get, suffix: "/contents") {
             supported.formUnion([.mediaBrowser, .mediaDownload])
         }
+        if supportsMediaDelete() { supported.insert(.mediaDelete) }
 
         let allPlanned: Set<CameraFeature> = [
             .liveViewRTP, .stillCapture, .shutterHalfPress, .videoRecording, .tapFocus,
             .focusDrive, .mediaBrowser, .mediaDownload,
+            .mediaDelete,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
         return CameraCapabilities(
@@ -519,6 +521,19 @@ public actor CCAPIClient {
         )
     }
 
+    public func deleteMedia(_ item: CameraMediaItem) async throws {
+        try await ensureInitialized()
+        let path: String
+        if resolvedMode == .simulator {
+            path = "/ccapi/media/\(Self.encodePathComponent(item.id))"
+        } else {
+            guard supportsMediaDelete() else { throw CCAPIError.unsupported(.mediaDelete) }
+            path = try normalizeCameraResource(item.id).components(separatedBy: "?")[0]
+        }
+        try await requestOK(path: path, method: .delete)
+        observedFeatures.insert(.mediaDelete)
+    }
+
     public func diagnosticReport(
         snapshot: CameraSnapshot?,
         liveView: CCAPILiveViewMetrics = CCAPILiveViewMetrics(),
@@ -636,6 +651,12 @@ public actor CCAPIClient {
         supports(.post, suffix: "/shooting/liveview") &&
             supports(.delete, suffix: "/shooting/liveview") &&
             !liveViewFramePaths().isEmpty
+    }
+
+    private func supportsMediaDelete() -> Bool {
+        operations.contains {
+            $0.method == .delete && ($0.path.hasSuffix("/contents") || $0.path.contains("/contents/"))
+        }
     }
 
     private func advertisedPaths(_ method: HTTPMethod, suffix: String) -> [String] {
@@ -846,6 +867,7 @@ public actor CCAPIClient {
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
             .stillCapture, .shutterHalfPress, .videoRecording, .tapFocus,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaDownload,
+            .mediaDelete,
         ]
         return CameraCapabilities(
             settings: controls,

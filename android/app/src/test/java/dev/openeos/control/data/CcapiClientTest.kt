@@ -312,6 +312,7 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DOWNLOAD))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
         assertTrue(!capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
         assertTrue(!capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
@@ -662,6 +663,48 @@ class CcapiClientTest {
     }
 
     @Test
+    fun mediaDeletionUsesEncodedSimulatorIdAndAdvertisedRealCameraPath() = runTest {
+        server.enqueue(MockResponse().setResponseCode(204))
+        client.deleteMedia(CameraMediaItem("SIM FILE.PNG", "SIM FILE.PNG", "image"))
+
+        val simulatorRequest = server.takeRequest()
+        assertEquals("DELETE", simulatorRequest.method)
+        assertEquals("/ccapi/media/SIM%20FILE.PNG", simulatorRequest.path)
+
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true,"delete":true}]}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        client.initialize()
+        server.takeRequest()
+        val path = "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG"
+
+        client.deleteMedia(CameraMediaItem(path, "IMG_0001.JPG", "image"))
+
+        val cameraRequest = server.takeRequest()
+        assertEquals("DELETE", cameraRequest.method)
+        assertEquals(path, cameraRequest.path)
+    }
+
+    @Test
+    fun realMediaDeletionDoesNotRunWithoutAdvertisedDeleteMethod() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
+        client.initialize()
+        server.takeRequest()
+        val item = CameraMediaItem(
+            "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG",
+            "IMG_0001.JPG",
+            "image",
+        )
+
+        val failure = runCatching { client.deleteMedia(item) }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("did not advertise media deletion"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun mediaDownloadStreamsInBoundedChunksAndReportsProgress() = runTest {
         val bytes = ByteArray(2 * 1024 * 1024 + 123) { (it % 251).toByte() }
         server.enqueue(binaryResponse(bytes, "video/mp4"))
@@ -932,7 +975,7 @@ class CcapiClientTest {
                 {"path":"/shooting/control/recbutton","post":true},
                 {"path":"/shooting/control/shutterbutton","post":true},
                 {"path":"/shooting/control/shutterbutton/manual","put":true},
-                {"path":"/contents","get":true},
+                {"path":"/contents","get":true,"delete":true},
                 {"path":"/shooting/settings","get":true},
                 {"path":"/shooting/settings/iso","put":true},
                 {"path":"/shooting/settings/tv","put":true},

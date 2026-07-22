@@ -50,6 +50,8 @@ class CameraEngineSession(Protocol):
 
     def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]: ...
 
+    def delete_media(self, media_id: str) -> None: ...
+
 
 class CameraEngine(Protocol):
     name: str

@@ -46,8 +46,25 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveView))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.stillCapture))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
+    }
+
+    func testOfflinePreviewDeletionRemovesOnlyConfirmedItem() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+        let item = state.mediaItems[1]
+
+        await state.deleteMedia(item)
+
+        XCTAssertEqual(state.mediaItems.count, 2)
+        XCTAssertFalse(state.mediaItems.contains { $0.id == item.id })
+        XCTAssertEqual(state.deletedMediaName, item.name)
+        XCTAssertNil(state.lastError)
     }
 
     func testLanguageSelectionPersistsWithoutChangingPasswordState() {

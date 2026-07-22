@@ -79,6 +79,12 @@
 "download_media" = "Download media";
 "download_complete" = "Download complete";
 "save_media" = "Save or share media";
+"delete_media" = "Delete media";
+"delete_media_title" = "Delete from camera?";
+"delete_media_confirmation" = "Delete %@ permanently? This cannot be undone.";
+"delete" = "Delete";
+"cancel" = "Cancel";
+"media_deleted" = "Deleted %@";
 
 "overview" = "Overview";
 "camera_profile" = "Camera profile";

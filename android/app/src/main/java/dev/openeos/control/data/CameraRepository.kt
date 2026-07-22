@@ -174,6 +174,8 @@ class CameraRepository(
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = backend.downloadMedia(item, destination, onProgress)
 
+    suspend fun deleteMedia(item: CameraMediaItem) = backend.deleteMedia(item)
+
     suspend fun restartLiveView() {
         backend.stopLiveView()
         backend.startLiveView(liveViewRequest)

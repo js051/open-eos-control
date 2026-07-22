@@ -9,7 +9,7 @@ The Android wired backend is split into a standards-based core, a small Android 
 3. `PtpSession` sends `GetDeviceInfo`, opens session ID 1, and assigns monotonically increasing transaction IDs to subsequent operations.
 4. The backend maps standard DeviceInfo, storage and object datasets into the shared camera models.
 5. Advertised standard device properties are decoded from `GetDevicePropDesc (0x1014)`, refreshed with `GetDevicePropValue (0x1015)`, and written through the command/data/response form of `SetDevicePropValue (0x1016)`.
-6. Media downloads use `GetObject` and stream each USB chunk directly to the caller's `OutputStream`.
+6. Media downloads use `GetObject` and stream each USB chunk directly to the caller's `OutputStream`; deletion uses the standard `DeleteObject` command only when DeviceInfo advertises it.
 7. Generic no-data, data-in, and data-out operation helpers preserve the same mutex, transaction-ID and response validation rules for vendor operations.
 8. Canon remote control enters remote/event mode only when `SetRemoteMode`, `SetEventMode`, and `GetEvent` are all advertised.
 9. Canon ISO, Tv, Av and white balance state comes from `PropValueChanged (0xC189)` and `AvailListChanged (0xC18A)` event blocks. Writes use the exact advertised raw choice with `SetDevicePropValueEx (0x9110)`.
@@ -28,6 +28,7 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 - Storage requires both `GetStorageIDs (0x1004)` and `GetStorageInfo (0x1005)`.
 - Media browsing requires `GetStorageIDs`, `GetObjectHandles (0x1007)`, and `GetObjectInfo (0x1008)`.
 - Media download requires `GetObject (0x1009)`.
+- Media deletion requires `DeleteObject (0x100B)` and a user confirmation; the list changes only after the exact object handle succeeds.
 - Standard still capture requires the camera to advertise `InitiateCapture (0x100E)`.
 - Canon still capture and half-press require vendor extension ID `0x0000000B`, remote/event preparation, and both `RemoteReleaseOn (0x9128)` and `RemoteReleaseOff (0x9129)`.
 - Canon still capture succeeds only after an object-added or object-transfer event is observed. A malformed event or 90-second timeout is an error, not a synthetic success.
@@ -67,6 +68,7 @@ The pinned open-source implementation provides reproducible operation codes, pac
 - Confirm each storage ID and free-space response with and without a card.
 - Compare a bounded media list against files visible on the camera.
 - Download a JPEG, RAW file and movie; compare byte length and checksum.
+- Delete a disposable test image only when `0x100B` is advertised; confirm the exact object disappears while adjacent handles remain.
 - Run still capture only if `0x100E` is advertised and verify that a new object appears.
 - Record whether the complete Canon remote/event operation set is advertised; run vendor capture and verify the object event and card result.
 - Verify half-press always releases after success, focus failure, cancellation, and transport errors.

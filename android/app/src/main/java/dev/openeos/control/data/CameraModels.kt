@@ -79,6 +79,7 @@ enum class CameraFeature(
     ADVANCED_SETTINGS("Advanced camera settings"),
     MEDIA_BROWSER("Media browser"),
     MEDIA_DOWNLOAD("Media download"),
+    MEDIA_DELETE("Media deletion"),
     USB_DIAGNOSTICS("USB/PTP diagnostics"),
     DESKTOP_BRIDGE("Desktop bridge"),
 }
@@ -115,6 +116,7 @@ data class CapabilityMatrix(
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_DELETE,
             ) - supported,
         )
 
@@ -132,6 +134,7 @@ data class CapabilityMatrix(
                 CameraFeature.EXPOSURE_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_DELETE,
             ),
             reasons = mapOf(
                 CameraFeature.USB_DIAGNOSTICS to "First wired milestone: enumerate Canon USB device and open a PTP session.",
@@ -154,6 +157,7 @@ data class CapabilityMatrix(
                 CameraFeature.EXPOSURE_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_DELETE,
             ),
             reasons = mapOf(
                 CameraFeature.DESKTOP_BRIDGE to "Bridge protocol is open; engines are libgphoto2 and optional user-installed Canon EDSDK.",

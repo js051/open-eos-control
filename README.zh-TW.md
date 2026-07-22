@@ -30,15 +30,15 @@ open-eos-control/
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
 - 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、協定版本、相機公告命令與可寫設定
-- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／下載、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon EOS 遠端快門、半按、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
-- Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、Live View、焦點移動與媒體串流
+- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon EOS 遠端快門、半按、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
+- Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、Live View、焦點移動與媒體傳輸／刪除
 - Live view 畫面，自動/手動更新與 FPS 控制
 - ISO、shutter、aperture、white balance 與動態 advanced settings
 - 可選跟隨系統、英文或繁體中文；相機公告的設定值會本地化顯示，寫入時仍保留精確的協定原值
 - REC 開始/停止
 - Tap focus，已經走共用 backend layer
 - 依相機公告能力執行手動快門半按，並保證送出釋放命令
-- 支援分頁的相機媒體瀏覽，以及透過 Android 文件選擇器串流下載大型檔案
+- 支援分頁的相機媒體瀏覽、透過 Android 文件選擇器串流下載大型檔案，以及需確認後才執行的刪除
 
 預設直連相機 URL：
 
@@ -86,14 +86,14 @@ GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test 和 debu
 
 ## iOS App 與 CCAPI Core
 
-`ios/OpenEOSCore` 是原生 Swift Package，負責 iOS 的 CCAPI 傳輸與命令層。它會依相機公告的 API 版本與 operation 建立能力，並支援設定控制、JPEG Live View、拍照、保證釋放的定時半按、錄影、點選對焦、媒體瀏覽／下載，以及包含有界能力證據且已遮蔽敏感資訊的診斷報告。套件包含可重現的 transport 測試，並由 macOS GitHub Actions job 實際編譯：
+`ios/OpenEOSCore` 是原生 Swift Package，負責 iOS 的 CCAPI 傳輸與命令層。它會依相機公告的 API 版本與 operation 建立能力，並支援設定控制、JPEG Live View、拍照、保證釋放的定時半按、錄影、點選對焦、媒體瀏覽／下載／刪除，以及包含有界能力證據且已遮蔽敏感資訊的診斷報告。套件包含可重現的 transport 測試，並由 macOS GitHub Actions job 實際編譯：
 
 ```bash
 cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線、離線 UI 預覽、依能力開放的拍照／錄影控制、JPEG Live View、依相機公告限制調整的 1-30 FPS、曝光設定 sheet、媒體傳輸、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
+`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線、離線 UI 預覽、依能力開放的拍照／錄影控制、JPEG Live View、依相機公告限制調整的 1-30 FPS、曝光設定 sheet、媒體傳輸與需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
 
 在具備 Xcode 與 XcodeGen 的 macOS 主機執行：
 
@@ -104,11 +104,11 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions 會建置最終 App bundle、確認 ICON／語系／區網／方向 metadata，執行五個 App unit tests，並在 iPhone Simulator 實際跑過英文直向／橫向控制與繁中連線流程。這些證據不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄；細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
+GitHub Actions 會建置最終 App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 實際跑過英文直向／橫向控制、確認式媒體刪除與繁中連線流程。這些證據不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄；細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
 
 ## Desktop Bridge
 
-Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、半按快門、錄影、焦點前後移動或座標 Tap AF、JPEG Live View、媒體列表、串流下載，以及包含 engine 公告能力證據且不含敏感資料的診斷。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
+Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、半按快門、錄影、焦點前後移動或座標 Tap AF、JPEG Live View、媒體列表、串流下載、需確認後執行的刪除，以及包含 engine 公告能力證據且不含敏感資料的診斷。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
 
 先建立下列環境；只有使用 USB 相機時才需要在電腦安裝 `gphoto2`：
 
@@ -162,6 +162,7 @@ http://localhost:18080
 - `POST /ccapi/shutter/release`
 - `GET /ccapi/media`
 - `GET /ccapi/media/{itemId}`
+- `DELETE /ccapi/media/{itemId}`
 - `GET /ccapi/liveview/frame`
 
 ## Roadmap

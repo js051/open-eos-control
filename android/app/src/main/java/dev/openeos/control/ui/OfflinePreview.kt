@@ -78,6 +78,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
                 CameraFeature.ADVANCED_SETTINGS,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_DELETE,
             ),
         ),
         liveView = LiveViewCapabilities.ccapiNetwork(),

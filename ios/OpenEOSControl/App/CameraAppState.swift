@@ -38,6 +38,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaItems: [CameraMediaItem] = []
     @Published private(set) var downloadedFileURL: URL?
     @Published private(set) var downloadedFileName: String?
+    @Published private(set) var deletedMediaName: String?
     @Published private(set) var lastError: String?
     @Published private(set) var busyOperations = Set<CameraOperation>()
 
@@ -45,6 +46,7 @@ final class CameraAppState: ObservableObject {
     private var client: CCAPIClient?
     private var liveViewTask: Task<Void, Never>?
     private var rateTracker = LiveViewRateTracker()
+    private var downloadedMediaID: String?
 
     var connected: Bool { snapshot?.status.connected == true }
     var recording: Bool { snapshot?.status.recording == true }
@@ -110,6 +112,9 @@ final class CameraAppState: ObservableObject {
             snapshot = newSnapshot
             isPreview = false
             screen = .control
+            mediaItems = []
+            removeDownloadedFile()
+            deletedMediaName = nil
             lastError = nil
             clampLiveViewRequest()
             if newSnapshot.capabilities.matrix.supports(.liveView), autoRefresh {
@@ -127,6 +132,8 @@ final class CameraAppState: ObservableObject {
         isPreview = true
         screen = .control
         mediaItems = Self.previewMedia
+        removeDownloadedFile()
+        deletedMediaName = nil
         lastError = nil
         liveViewData = nil
         resetLiveViewMetrics()
@@ -143,6 +150,7 @@ final class CameraAppState: ObservableObject {
         password = ""
         mediaItems = []
         removeDownloadedFile()
+        deletedMediaName = nil
         liveViewData = nil
         focusMarker = nil
         lastError = nil
@@ -304,6 +312,7 @@ final class CameraAppState: ObservableObject {
     func loadMedia() async {
         guard supports(.mediaBrowser), begin(.media) else { return }
         defer { end(.media) }
+        deletedMediaName = nil
         if isPreview {
             mediaItems = Self.previewMedia
             return
@@ -320,7 +329,9 @@ final class CameraAppState: ObservableObject {
     func downloadMedia(_ item: CameraMediaItem) async {
         guard supports(.mediaDownload), begin(.media) else { return }
         defer { end(.media) }
+        deletedMediaName = nil
         if isPreview {
+            downloadedMediaID = item.id
             downloadedFileName = item.name
             return
         }
@@ -334,7 +345,26 @@ final class CameraAppState: ObservableObject {
             let destination = directory.appendingPathComponent(item.name)
             let result = try await client.downloadMedia(item, to: destination)
             downloadedFileURL = result.fileURL
+            downloadedMediaID = result.item.id
             downloadedFileName = result.item.name
+            lastError = nil
+        } catch {
+            record(error)
+        }
+    }
+
+    func deleteMedia(_ item: CameraMediaItem) async {
+        guard supports(.mediaDelete), begin(.media) else { return }
+        defer { end(.media) }
+        if isPreview {
+            applyDeletedMedia(item)
+            lastError = nil
+            return
+        }
+        guard let client else { return }
+        do {
+            try await client.deleteMedia(item)
+            applyDeletedMedia(item)
             lastError = nil
         } catch {
             record(error)
@@ -461,12 +491,22 @@ final class CameraAppState: ObservableObject {
 
     private func removeDownloadedFile() {
         guard let file = downloadedFileURL else {
+            downloadedMediaID = nil
             downloadedFileName = nil
             return
         }
         try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
         downloadedFileURL = nil
+        downloadedMediaID = nil
         downloadedFileName = nil
+    }
+
+    private func applyDeletedMedia(_ item: CameraMediaItem) {
+        if downloadedMediaID == item.id {
+            removeDownloadedFile()
+        }
+        mediaItems.removeAll { $0.id == item.id }
+        deletedMediaName = item.name
     }
 
     static func makeOfflinePreviewSnapshot() -> CameraSnapshot {
@@ -488,6 +528,7 @@ final class CameraAppState: ObservableObject {
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
             .stillCapture, .shutterHalfPress, .videoRecording, .tapFocus,
             .exposureControl, .whiteBalanceControl, .advancedSettings, .mediaBrowser, .mediaDownload,
+            .mediaDelete,
         ]
         let capabilities = CameraCapabilities(
             settings: settings,

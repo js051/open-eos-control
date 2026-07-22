@@ -68,6 +68,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
         media = client.get(f"/v1/session/{session_id}/media", headers=headers)
         media_id = media.json()["items"][0]["id"]
         download = client.get(f"/v1/session/{session_id}/media/{media_id}", headers=headers)
+        media_deleted = client.delete(f"/v1/session/{session_id}/media/{media_id}", headers=headers)
         deleted = client.delete(f"/v1/session/{session_id}", headers=headers)
 
     assert health.status_code == 200
@@ -78,6 +79,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert info.json()["serial"] == "TEST-SERIAL-0001"
     assert status.json()["battery"]["level"] == 82
     assert "LIVE_VIEW" in capabilities.json()["supported"]
+    assert "MEDIA_DELETE" in capabilities.json()["supported"]
     assert capabilities.json()["evidence"]["source"] == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert setting.json()["exposure"]["iso"] == "800"
@@ -88,6 +90,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert unsupported_tap.json()["error"]["code"] == "UNSUPPORTED_FEATURE"
     assert download.content == MEDIA_BYTES
     assert download.headers["content-type"].startswith("image/jpeg")
+    assert media_deleted.status_code == 204
     assert deleted.status_code == 204
 
 

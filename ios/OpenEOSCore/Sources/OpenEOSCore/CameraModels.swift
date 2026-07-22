@@ -17,6 +17,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case advancedSettings = "ADVANCED_SETTINGS"
     case mediaBrowser = "MEDIA_BROWSER"
     case mediaDownload = "MEDIA_DOWNLOAD"
+    case mediaDelete = "MEDIA_DELETE"
 }
 
 public struct CapabilityMatrix: Equatable, Sendable {

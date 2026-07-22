@@ -28,6 +28,7 @@ class UsbPtpCameraBackendTest {
         val output = ByteArrayOutputStream()
         val progress = mutableListOf<CameraMediaTransferProgress>()
         val download = backend.downloadMedia(media.single(), output, progress::add)
+        backend.deleteMedia(media.single())
         backend.captureStill()
         backend.close()
 
@@ -44,6 +45,7 @@ class UsbPtpCameraBackendTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.STORAGE_STATUS))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DOWNLOAD))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
@@ -62,6 +64,12 @@ class UsbPtpCameraBackendTest {
         assertArrayEquals(OBJECT_BYTES, output.toByteArray())
         assertEquals(OBJECT_BYTES.size.toLong(), download.bytesTransferred)
         assertEquals(OBJECT_BYTES.size.toLong(), progress.last().bytesTransferred)
+        assertArrayEquals(
+            byteArrayOf(0x42, 0, 0, 0, 0, 0, 0, 0),
+            transport.sentContainers.single {
+                it.type == PtpContainerType.COMMAND && it.code == PtpOperationCode.DELETE_OBJECT
+            }.payload,
+        )
         assertTrue(PtpOperationCode.INITIATE_CAPTURE in transport.sentOperations)
         assertArrayEquals(
             ByteArray(8),
@@ -90,6 +98,27 @@ class UsbPtpCameraBackendTest {
 
         assertFalse(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.STILL_CAPTURE))
+        backend.close()
+    }
+
+    @Test
+    fun mediaDeletionRemainsUnavailableWithoutAdvertisedDeleteObject() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false, advertiseDelete = false)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        val failure = runCatching {
+            backend.deleteMedia(CameraMediaItem("ptp:00000042", "IMG_0042.JPG", "image"))
+        }.exceptionOrNull()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.MEDIA_DELETE))
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(PtpOperationCode.DELETE_OBJECT in transport.sentOperations)
         backend.close()
     }
 
@@ -552,6 +581,7 @@ class UsbPtpCameraBackendTest {
 
     private class ScriptedTransport(
         private val advertiseCapture: Boolean,
+        private val advertiseDelete: Boolean = true,
         private val descriptorFailureCode: Int? = null,
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
@@ -567,13 +597,18 @@ class UsbPtpCameraBackendTest {
             val transaction = container.transactionId
             when (container.code) {
                 PtpOperationCode.GET_DEVICE_INFO -> {
-                    incoming += data(container.code, transaction, deviceInfoPayload(advertiseCapture, advertiseProperties = true))
+                    incoming += data(
+                        container.code,
+                        transaction,
+                        deviceInfoPayload(advertiseCapture, advertiseDelete, advertiseProperties = true),
+                    )
                     incoming += ok(transaction)
                 }
 
                 PtpOperationCode.OPEN_SESSION,
                 PtpOperationCode.CLOSE_SESSION,
                 PtpOperationCode.INITIATE_CAPTURE,
+                PtpOperationCode.DELETE_OBJECT,
                 -> incoming += ok(transaction)
 
                 PtpOperationCode.GET_STORAGE_IDS -> {
@@ -1036,7 +1071,11 @@ class UsbPtpCameraBackendTest {
             string("TEST-SERIAL-0001")
         }.bytes()
 
-        private fun deviceInfoPayload(advertiseCapture: Boolean, advertiseProperties: Boolean): ByteArray = Writer().apply {
+        private fun deviceInfoPayload(
+            advertiseCapture: Boolean,
+            advertiseDelete: Boolean,
+            advertiseProperties: Boolean,
+        ): ByteArray = Writer().apply {
             u16(100)
             u32(0x0000000B)
             u16(100)
@@ -1052,6 +1091,7 @@ class UsbPtpCameraBackendTest {
                     add(PtpOperationCode.GET_OBJECT_HANDLES)
                     add(PtpOperationCode.GET_OBJECT_INFO)
                     add(PtpOperationCode.GET_OBJECT)
+                    if (advertiseDelete) add(PtpOperationCode.DELETE_OBJECT)
                     if (advertiseCapture) add(PtpOperationCode.INITIATE_CAPTURE)
                     if (advertiseProperties) {
                         add(PtpOperationCode.GET_DEVICE_PROP_DESC)

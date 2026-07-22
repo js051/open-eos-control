@@ -10,6 +10,7 @@
     FOCUS_DRIVE: "FOCUS_DRIVE",
     MEDIA_BROWSER: "MEDIA_BROWSER",
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
+    MEDIA_DELETE: "MEDIA_DELETE",
   };
   const CORE_SETTINGS = ["iso", "shutter", "aperture", "whitebalance"];
   const LANGUAGE_KEY = "open-eos-control-language";
@@ -117,6 +118,9 @@
       mediaEmpty: "No media was reported by the camera",
       download: "Download",
       downloaded: "Downloaded {name}",
+      delete: "Delete",
+      deleteConfirm: "Permanently delete {name} from the camera card? This cannot be undone.",
+      deleted: "Deleted {name}",
       copied: "Diagnostic report copied",
       copyFailed: "Could not copy the diagnostic report",
       operationFailed: "Operation failed",
@@ -227,6 +231,9 @@
       mediaEmpty: "相機未回報任何媒體檔案",
       download: "下載",
       downloaded: "已下載 {name}",
+      delete: "刪除",
+      deleteConfirm: "確定要從相機儲存卡永久刪除「{name}」嗎？此操作無法復原。",
+      deleted: "已刪除 {name}",
       copied: "已複製診斷報告",
       copyFailed: "無法複製診斷報告",
       operationFailed: "操作失敗",
@@ -1349,6 +1356,21 @@
       const size = document.createElement("span");
       size.className = "media-size";
       size.textContent = formatBytes(item.sizeBytes);
+      const actions = document.createElement("div");
+      actions.className = "media-actions";
+      if (featureSupported(FEATURES.MEDIA_DELETE)) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "icon-button danger";
+        remove.dataset.tooltip = t("delete");
+        remove.setAttribute("aria-label", `${t("delete")} ${item.name}`);
+        const removeIcon = document.createElement("span");
+        removeIcon.className = "icon";
+        removeIcon.dataset.icon = "trash-2";
+        remove.append(removeIcon);
+        remove.addEventListener("click", () => deleteMedia(item, remove));
+        actions.append(remove);
+      }
       const download = document.createElement("button");
       download.type = "button";
       download.className = "icon-button";
@@ -1360,7 +1382,8 @@
       download.append(downloadIcon);
       download.disabled = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
       download.addEventListener("click", () => downloadMedia(item, download));
-      row.append(kind, copy, size, download);
+      actions.append(download);
+      row.append(kind, copy, size, actions);
       ui.mediaList.append(row);
     });
     window.OpenEosIcons?.render(ui.mediaList);
@@ -1387,6 +1410,25 @@
       const normalized = captureError(error);
       showToast(normalized.message, true);
     } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function deleteMedia(item, button) {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_DELETE)) return;
+    if (!window.confirm(t("deleteConfirm", { name: item.name }))) return;
+    button.disabled = true;
+    try {
+      await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}`,
+        { method: "DELETE" },
+      );
+      state.media = state.media.filter((candidate) => candidate.id !== item.id);
+      renderMedia();
+      showToast(t("deleted", { name: item.name }));
+    } catch (error) {
+      const normalized = captureError(error);
+      showToast(normalized.message, true);
       button.disabled = false;
     }
   }

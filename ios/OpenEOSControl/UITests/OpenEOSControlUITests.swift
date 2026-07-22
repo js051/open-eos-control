@@ -44,6 +44,33 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "connection-zh-Hant")
     }
 
+    func testOfflineMediaDeletionRequiresConfirmation() throws {
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        let preview = app.buttons["offline-preview-button"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 8))
+        preview.tap()
+
+        let moreActions = app.buttons["more-actions-button"]
+        XCTAssertTrue(moreActions.waitForExistence(timeout: 5))
+        moreActions.tap()
+        let media = app.buttons["Camera media"]
+        XCTAssertTrue(media.waitForExistence(timeout: 3))
+        media.tap()
+
+        let item = app.staticTexts["R6M3_0001.JPG"]
+        let delete = app.buttons["delete-media-preview-002"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+
+        let alert = app.alerts["Delete from camera?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 3))
+        XCTAssertTrue(item.exists)
+        alert.buttons["Delete"].tap()
+        XCTAssertTrue(item.waitForNonExistence(timeout: 3))
+        addScreenshot(name: "media-delete-confirmed")
+    }
+
     private func launch(appLanguage: String, appleLanguage: String, locale: String) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()

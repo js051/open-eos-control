@@ -245,6 +245,11 @@ def create_app(
             headers["Content-Length"] = str(item.size_bytes)
         return StreamingResponse(chunks, media_type=item.content_type, headers=headers)
 
+    @router.delete("/session/{session_id}/media/{media_id}", status_code=204)
+    def delete_media(session_id: str, media_id: str) -> Response:
+        manager.get(session_id).delete_media(media_id)
+        return Response(status_code=204)
+
     @router.delete("/session/{session_id}", status_code=204)
     def delete_session(session_id: str) -> Response:
         manager.delete(session_id)

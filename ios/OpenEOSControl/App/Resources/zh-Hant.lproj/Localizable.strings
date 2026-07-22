@@ -79,6 +79,12 @@
 "download_media" = "下載媒體";
 "download_complete" = "下載完成";
 "save_media" = "儲存或分享媒體";
+"delete_media" = "刪除媒體";
+"delete_media_title" = "要從相機刪除嗎？";
+"delete_media_confirmation" = "要永久刪除 %@ 嗎？此操作無法復原。";
+"delete" = "刪除";
+"cancel" = "取消";
+"media_deleted" = "已刪除 %@";
 
 "overview" = "總覽";
 "camera_profile" = "相機 Profile";

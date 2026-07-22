@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,12 +45,36 @@ import java.util.Locale
 @Composable
 fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     var pendingDownload by remember { mutableStateOf<CameraMediaItem?>(null) }
+    var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
     val createDocument = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { destination ->
         val item = pendingDownload
         pendingDownload = null
         if (destination != null && item != null) actions.downloadMedia(item, destination)
+    }
+
+    pendingDelete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(R.string.delete_media_title)) },
+            text = { Text(stringResource(R.string.delete_media_confirmation, item.name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        actions.deleteMedia(item)
+                    },
+                ) {
+                    Text(stringResource(R.string.delete), color = AppRecord)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 
     Column(
@@ -128,6 +154,14 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             )
         }
 
+        state.lastDeletedMediaName?.let { name ->
+            Text(
+                stringResource(R.string.media_deleted, name),
+                color = AppSuccess,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         when {
             !state.supports(CameraFeature.MEDIA_BROWSER) -> MediaMessage(R.string.media_not_supported)
             state.mediaItems.isEmpty() && !state.isBusy(CameraOperation.MEDIA) -> MediaMessage(R.string.no_media)
@@ -135,9 +169,13 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 items(state.mediaItems, key = { it.id }) { item ->
                     MediaRow(
                         item = item,
+                        deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
+                        deleteEnabled = !state.isBusy(CameraOperation.MEDIA),
                         downloadEnabled = !state.previewMode &&
                             state.supports(CameraFeature.MEDIA_DOWNLOAD) &&
                             !state.isBusy(CameraOperation.MEDIA),
+                        downloadSupported = state.supports(CameraFeature.MEDIA_DOWNLOAD),
+                        onDelete = { pendingDelete = item },
                         onDownload = {
                             pendingDownload = item
                             createDocument.launch(item.name)
@@ -160,7 +198,11 @@ private fun MediaMessage(message: Int) {
 @Composable
 private fun MediaRow(
     item: CameraMediaItem,
+    deleteSupported: Boolean,
+    deleteEnabled: Boolean,
+    downloadSupported: Boolean,
     downloadEnabled: Boolean,
+    onDelete: () -> Unit,
     onDownload: () -> Unit,
 ) {
     Row(
@@ -199,12 +241,23 @@ private fun MediaRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        ToolIconButton(
-            LucideR.drawable.lucide_ic_download,
-            stringResource(R.string.download_media, item.name),
-            onDownload,
-            enabled = downloadEnabled,
-        )
+        if (deleteSupported) {
+            ToolIconButton(
+                LucideR.drawable.lucide_ic_trash_2,
+                stringResource(R.string.delete_media, item.name),
+                onDelete,
+                enabled = deleteEnabled,
+                tint = AppRecord,
+            )
+        }
+        if (downloadSupported) {
+            ToolIconButton(
+                LucideR.drawable.lucide_ic_download,
+                stringResource(R.string.download_media, item.name),
+                onDownload,
+                enabled = downloadEnabled,
+            )
+        }
     }
 }
 

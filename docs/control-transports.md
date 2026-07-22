@@ -9,10 +9,10 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Status: implemented.
 - Platforms: direct Android and iOS clients; PC uses the native CCAPI engine inside Desktop Bridge.
 - Connection: Wi-Fi or wired network when the camera exposes CCAPI over HTTP/HTTPS.
-- Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III, strictly advertised writable settings and shutter commands, complete start/frame/stop Live View gating, and paged media retrieval.
+- Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III, strictly advertised writable settings and shutter commands, complete start/frame/stop Live View gating, and paged media retrieval with capability-gated deletion.
 - Android routes only camera HTTP sockets through the Wi-Fi network that reaches the camera, allowing cellular internet to remain available without process-wide network binding. A physical coexistence result is still required.
 - Current tradeoffs: live view is JPEG polling today, so smoothness and latency depend on Wi-Fi, camera response time, and device JPEG decode cost.
-- Device-validation queue: still capture, shutter half-press, movie recording, tap focus, media browser, and media download on EOS R6 Mark III.
+- Device-validation queue: still capture, shutter half-press, movie recording, tap focus, media browser, media download, and media deletion on EOS R6 Mark III.
 - Planned upgrades: focus drive where a documented endpoint is advertised and RTP live view experiments.
 
 ## Wired Backends
@@ -21,7 +21,7 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 - Status: standards-based backend and a focused Canon EOS vendor layer are implemented; EOS R6 Mark III device validation is required.
 - Connection: Android USB host/OTG to camera USB.
-- Current implementation: enumerate Android USB devices, request permission, claim a `06/01/01` Still Image interface, use buffered bulk transfers, open/close a PTP session, read DeviceInfo/storage/property descriptors and values, perform safe advertised standard property writes, list object metadata, and stream object downloads to Android SAF destinations.
+- Current implementation: enumerate Android USB devices, request permission, claim a `06/01/01` Still Image interface, use buffered bulk transfers, open/close a PTP session, read DeviceInfo/storage/property descriptors and values, perform safe advertised standard property writes, list object metadata, stream object downloads to Android SAF destinations, and delete exact object handles only when `DeleteObject (0x100B)` is advertised.
 - Standard still capture is enabled only when DeviceInfo advertises `InitiateCapture (0x100E)`. A successful response is reported as command acceptance; the physical result still needs an R6 Mark III validation record.
 - Standard property controls are enabled only for writable camera-advertised descriptors with bounded options. Canon ISO/Tv/Av/WB controls separately require `0xC189/0xC18A` event state and use only camera-advertised choices with `SetDevicePropValueEx`; both paths still need an R6 Mark III validation record.
 - Canon still capture and half-press require the full remote/event operation set. Capture is not reported as success until a captured-object event arrives; press/release commands are balanced on failure paths.
@@ -38,7 +38,7 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Status: HTTP service, built-in PC control UI, libgphoto2 CLI engine, direct CCAPI engine, and Android client are implemented and tested; EOS R6 Mark III device validation remains.
 - Connection: the PC UI can control a USB camera through libgphoto2 or connect directly to the camera's wireless CCAPI origin. Android can use the same bridge for a computer-attached USB camera.
 - Engines: `libgphoto2` is the executable open-source USB path; `ccapi` is the executable HTTP(S) wireless path. The Canon EDSDK adapter remains optional research and no Canon binary is redistributed.
-- Current implementation: both engines map into the same session/capability API. libgphoto2 provides camera discovery, dynamic settings, capture, half-press, movie target control, relative focus drive, JPEG preview and media transfer. CCAPI provides advertised-operation discovery, dynamic settings, capture with guaranteed manual release, half-press, recording, normalized Tap AF, bounded JPEG polling, same-origin media traversal and streamed downloads. The built-in responsive PC UI offers USB/CCAPI mode selection, English/Traditional Chinese, authenticated binary transfer and redacted diagnostics. Bridge Bearer tokens and camera passwords are memory-only; camera URL and username may be remembered. Loopback is the secure service default; LAN use requires a Bearer token.
+- Current implementation: both engines map into the same session/capability API. libgphoto2 provides camera discovery, dynamic settings, capture, half-press, movie target control, relative focus drive, JPEG preview, media transfer and ability-gated deletion. CCAPI provides advertised-operation discovery, dynamic settings, capture with guaranteed manual release, half-press, recording, normalized Tap AF, bounded JPEG polling, same-origin media traversal, streamed downloads and advertised deletion. The built-in responsive PC UI offers USB/CCAPI mode selection, English/Traditional Chinese, authenticated binary transfer, confirmed deletion and redacted diagnostics. Bridge Bearer tokens and camera passwords are memory-only; camera URL and username may be remembered. Loopback is the secure service default; LAN use requires a Bearer token.
 - Strengths: immediate access to mature libgphoto2 Canon mappings, including the checked-in upstream R6 Mark III capability snapshot.
 - Tradeoffs: Android Bridge use requires a computer in the loop. The USB CLI preview launches one process per JPEG and is truthfully capped at 5 FPS; persistent native libgphoto2 and physical-camera validation are later milestones. Direct PC CCAPI uses camera Wi-Fi and client polling, defaults to 15 FPS, and allows up to 30 FPS without claiming the camera will sustain it.
 
@@ -46,8 +46,8 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 
 - Status: native Swift command/transport core and iOS 17 SwiftUI product UI are implemented and simulator-tested; physical iPhone and camera validation remain.
 - Connection: iPhone/iPad to camera CCAPI over Wi-Fi.
-- Current implementation: `ios/OpenEOSCore` provides discovery, capability-gated settings and commands, JPEG Live View, still capture, half-press with guaranteed release, recording, tap focus, bounded media traversal/download, and redacted diagnostics. `ios/OpenEOSControl` adds direct connection, Photo/Video control, adjustable Live View, media and Debug views, offline preview, English/Traditional Chinese selection, and safe portrait/landscape behavior.
-- Automated evidence: macOS CI builds the final app bundle, verifies resources and network/orientation metadata, runs five app unit tests, and completes English control/debug plus Traditional Chinese connection UI workflows on an iPhone Simulator.
+- Current implementation: `ios/OpenEOSCore` provides discovery, capability-gated settings and commands, JPEG Live View, still capture, half-press with guaranteed release, recording, tap focus, bounded media traversal/download, advertised exact-path deletion, and redacted diagnostics. `ios/OpenEOSControl` adds direct connection, Photo/Video control, adjustable Live View, confirmation-gated media and Debug views, offline preview, English/Traditional Chinese selection, and safe portrait/landscape behavior.
+- Automated evidence: macOS CI builds the final app bundle, verifies resources and network/orientation metadata, runs app unit tests, and completes English control/debug, media-deletion confirmation, and Traditional Chinese connection UI workflows on an iPhone Simulator.
 - Next milestone: validate the same paths on a physical iPhone and EOS R6 Mark III.
 - USB/PTP stance: research track only until Apple platform constraints and public APIs are validated against Canon EOS bodies.
 
@@ -61,7 +61,7 @@ Each backend should map into this surface:
 - capability matrix and dynamic settings
 - exposure, white balance, and generic setting writes
 - still capture, half-press, recording, tap focus, and focus drive where available
-- media list/download where available
+- media list/download/delete where available
 - live view source, size, and FPS request
 
 ## Implementation Order

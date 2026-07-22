@@ -454,6 +454,8 @@ class CcapiSession:
                 supported.add(CameraFeature.TAP_FOCUS)
             if self._supports("GET", "/contents"):
                 supported.update({CameraFeature.MEDIA_BROWSER, CameraFeature.MEDIA_DOWNLOAD})
+            if self._supports_media_delete():
+                supported.add(CameraFeature.MEDIA_DELETE)
 
             candidates = {
                 CameraFeature.LIVE_VIEW_RTP,
@@ -464,6 +466,7 @@ class CcapiSession:
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_DELETE,
             }
             live_sizes = (
                 [self._active_live_view_size]
@@ -758,6 +761,16 @@ class CcapiSession:
                 engine=self.engine_name,
             )
 
+    def delete_media(self, media_id: str) -> None:
+        with self._lock:
+            self._ensure_initialized()
+            if not self._supports_media_delete():
+                raise unsupported(CameraFeature.MEDIA_DELETE.value, self.engine_name)
+            path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+            self._request_ok("DELETE", path)
+            self._media_cache.pop(media_id, None)
+            self._observed.add(CameraFeature.MEDIA_DELETE)
+
     @property
     def requested_fps(self) -> int:
         return self._requested_fps
@@ -1023,6 +1036,12 @@ class CcapiSession:
 
     def _supports(self, method: str, suffix: str) -> bool:
         return any(item.method == method and item.path.endswith(suffix) for item in self._operations)
+
+    def _supports_media_delete(self) -> bool:
+        return any(
+            item.method == "DELETE" and (item.path.endswith("/contents") or "/contents/" in item.path)
+            for item in self._operations
+        )
 
     def _api_path(self, method: str, suffix: str) -> str:
         matches = [item for item in self._operations if item.method == method and item.path.endswith(suffix)]

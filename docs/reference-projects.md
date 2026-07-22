@@ -5,7 +5,7 @@ This project should stay grounded in public specifications, official platform AP
 ## Primary References
 
 - Canon CCAPI: Canon documents CCAPI as an HTTP-based API for controlling Canon cameras over a network, usable from a smartphone, tablet, or computer. Reference: [Canon CCAPI product manual](https://cam.start.canon/en/C017/manual/html/UG-06_Network_0130.html).
-- Canon CAP release status: Canon's public release notes list CameraControlAPI Reference v1.4.0 Rev.1.4 as of March 31, 2026. The API specification and official Android sample are distributed through Canon's CAP program and remain the conformance source for endpoint payloads. References: [Canon CAP overview](https://asia.canon/en/campaign/developerresources/camera/cap/cap), [CCAPI release notes](https://asia.canon/en/campaign/developerresources/camera/cap/camera-control-api-release-note).
+- Canon CAP release status: Canon's public release notes list CameraControlAPI Reference v1.4.0 Rev.1.4 as of March 31, 2026. Canon's public Camera API page lists deletion of images on storage media as a CCAPI/EDSDK capability; the API specification and official Android sample distributed through CAP remain the conformance source for endpoint payloads. References: [Canon Camera API Package](https://asia.canon/en/campaign/developerresources/cap), [Canon CAP overview](https://asia.canon/en/campaign/developerresources/camera/cap/cap), [CCAPI release notes](https://asia.canon/en/campaign/developerresources/camera/cap/camera-control-api-release-note).
 - Android USB host: Android documents `UsbManager`, `UsbDevice`, `UsbInterface`, `UsbEndpoint`, explicit permission requests, and endpoint communication. Reference: [Android USB host overview](https://developer.android.com/develop/connectivity/usb/host).
 - PTP: PTP is ISO 15740:2013 and is defined as a transport- and platform-independent protocol for digital still photography devices. Reference: [ISO 15740:2013](https://www.iso.org/standard/63602.html).
 - USB still image class: USB-IF publishes the Still Image Capture Device Class specification used by USB PTP devices. Reference: [USB-IF Still Image Capture Device Definition](https://www.usb.org/document-library/still-image-capture-device-definition-10-and-errata-16-mar-2007).
@@ -25,17 +25,17 @@ This project should stay grounded in public specifications, official platform AP
 
 Implemented and test-covered:
 
-- CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling, still/manual shutter control, paged media browsing, and streaming media download.
+- CCAPI network backend shape, simulator contract, dynamic settings, recording, tap focus, JPEG live view polling, still/manual shutter control, paged media browsing, streaming media download, and deletion gated by an advertised `DELETE` operation.
 - Android USB host diagnostics: enumerate devices, identify Canon vendor ID `0x04A9`, identify PTP still-image interfaces, show endpoints, and request Android USB permission.
-- Android standards-based USB/PTP path: claim the interface, open/close a session, parse DeviceInfo, property, storage and object datasets, safely write bounded camera-advertised standard properties, conditionally issue advertised standard still capture, browse media, and stream `GetObject` downloads.
+- Android standards-based USB/PTP path: claim the interface, open/close a session, parse DeviceInfo, property, storage and object datasets, safely write bounded camera-advertised standard properties, conditionally issue advertised standard still capture, browse media, stream `GetObject` downloads, and issue exact-handle `DeleteObject` only when advertised.
 - Android Canon EOS USB path: capability-gated remote/event setup, shooting mode, ISO/Tv/Av/WB, exposure compensation, color temperature, signed WB shifts, color space, aspect ratio, power-zoom speed, High ISO noise reduction and AEB event state/writes, still capture with balanced release and event confirmation, timed half-press, Card/None movie control, Near/Far focus drive, EVF start/stop, and in-memory JPEG Live View parsing.
-- Desktop Bridge service, libgphoto2 CLI adapter, direct PC CCAPI engine, and Android bridge client: authenticated sessions, dynamic settings/capabilities, capture, focus, JPEG preview, media streaming and deterministic contract tests.
+- Desktop Bridge service, libgphoto2 CLI adapter, direct PC CCAPI engine, and Android bridge client: authenticated sessions, dynamic settings/capabilities, capture, focus, JPEG preview, media streaming/deletion and deterministic contract tests. The pinned R6 Mark III abilities snapshot reports file deletion, while the gPhoto2 CLI manual defines the exact folder/name deletion command.
 - Multi-backend contract: unsupported operations throw explicit transport/feature errors.
 
 Implemented but requires real-camera verification:
 
 - Real Canon CCAPI endpoint variants for R6 Mark III live view and shooting settings.
-- R6 Mark III still/manual shutter, recording, tap focus, media browsing, and media download.
+- R6 Mark III still/manual shutter, recording, tap focus, media browsing, media download, and media deletion.
 - Android USB/PTP diagnostics, session, DeviceInfo, standard properties, storage/media, download, advertised standard capture, and the implemented Canon remote/exposure/movie/focus/Live View paths on a physical Android device with the camera connected over OTG/USB-C.
 - PC direct CCAPI, Desktop Bridge USB, and Android bridge client with a physical R6 Mark III.
 - iOS CCAPI app with a physical iPhone and R6 Mark III.

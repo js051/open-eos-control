@@ -170,6 +170,7 @@ class UsbPtpCameraBackend(
             if (supportsStorage(info)) add(CameraFeature.STORAGE_STATUS)
             if (supportsMediaBrowser(info)) add(CameraFeature.MEDIA_BROWSER)
             if (info.supports(PtpOperationCode.GET_OBJECT)) add(CameraFeature.MEDIA_DOWNLOAD)
+            if (info.supports(PtpOperationCode.DELETE_OBJECT)) add(CameraFeature.MEDIA_DELETE)
             if (info.supports(PtpOperationCode.INITIATE_CAPTURE) || supportsCanonRelease) {
                 add(CameraFeature.STILL_CAPTURE)
             }
@@ -201,6 +202,7 @@ class UsbPtpCameraBackend(
             CameraFeature.ADVANCED_SETTINGS,
             CameraFeature.MEDIA_BROWSER,
             CameraFeature.MEDIA_DOWNLOAD,
+            CameraFeature.MEDIA_DELETE,
         )
         val writableSettings = buildList {
             if (iso.isNotEmpty()) add("iso")
@@ -238,6 +240,8 @@ class UsbPtpCameraBackend(
                         "Uses standard GetStorageIDs, GetObjectHandles, and GetObjectInfo operations.",
                     CameraFeature.MEDIA_DOWNLOAD to
                         "Uses standard GetObject with bounded USB reads and streaming output.",
+                    CameraFeature.MEDIA_DELETE to
+                        "Uses standard DeleteObject only when the camera advertises operation 0x100B.",
                     CameraFeature.EXPOSURE_CONTROL to
                         "Uses writable standard PTP descriptors or Canon EOS PropValueChanged/AvailListChanged events with SetDevicePropValueEx.",
                     CameraFeature.LIVE_VIEW to
@@ -422,6 +426,11 @@ class UsbPtpCameraBackend(
             bytesTransferred = bytesTransferred,
             contentType = contentTypeFor(item.name, item.kind),
         )
+    }
+
+    override suspend fun deleteMedia(item: CameraMediaItem) {
+        requireOperation(PtpOperationCode.DELETE_OBJECT, CameraFeature.MEDIA_DELETE)
+        requireSession().deleteObject(item.ptpHandle())
     }
 
     override suspend fun startLiveView(request: LiveViewRequest) {

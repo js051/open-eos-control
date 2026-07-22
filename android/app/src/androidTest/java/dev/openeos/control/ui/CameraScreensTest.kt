@@ -248,6 +248,27 @@ class CameraScreensTest {
     }
 
     @Test
+    fun mediaDeleteRequiresConfirmationBeforeDispatchingCameraAction() {
+        var deletedName: String? = null
+        val state = CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA)
+        val actions = noOpActions().copy(deleteMedia = { deletedName = it.name })
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state, actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_media, "R6M3_0001.CR3"))
+            .performClick()
+        compose.runOnIdle { assertEquals(null, deletedName) }
+        compose.onNodeWithText(
+            resourceText(R.string.delete_media_confirmation, "R6M3_0001.CR3"),
+        ).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.delete)).performClick()
+        compose.runOnIdle { assertEquals("R6M3_0001.CR3", deletedName) }
+    }
+
+    @Test
     fun mediaDownloadShowsProgressAndCancelAction() {
         val name = "R6M3_0002.MP4"
         val state = CameraUiState().withOfflinePreview().copy(
@@ -422,7 +443,7 @@ class CameraScreensTest {
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
         captureStill = {}, focusWithShutter = {}, driveFocus = { _, _ -> }, toggleRecording = {}, tapFocus = { _, _ -> },
-        refreshMedia = {}, downloadMedia = { _, _ -> }, cancelMediaDownload = {},
+        refreshMedia = {}, downloadMedia = { _, _ -> }, deleteMedia = {}, cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {},
         setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setAppLanguage = {}, clearError = {},
     )

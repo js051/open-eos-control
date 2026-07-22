@@ -427,6 +427,10 @@ class PtpSession(
         executeOperation(PtpOperationCode.INITIATE_CAPTURE, listOf(storageId, objectFormat))
     }
 
+    suspend fun deleteObject(handle: Long, objectFormat: Long = 0L) {
+        executeOperation(PtpOperationCode.DELETE_OBJECT, listOf(handle, objectFormat))
+    }
+
     suspend fun executeOperation(
         operationCode: Int,
         parameters: List<Long> = emptyList(),

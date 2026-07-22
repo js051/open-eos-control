@@ -6,6 +6,7 @@ struct MediaView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     let controlRotation: Double
+    @State private var pendingDeletion: CameraMediaItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,6 +36,24 @@ struct MediaView: View {
         .task {
             if camera.mediaItems.isEmpty { await camera.loadMedia() }
         }
+        .alert(
+            language.string("delete_media_title"),
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            presenting: pendingDeletion
+        ) { item in
+            Button(language.string("cancel"), role: .cancel) {
+                pendingDeletion = nil
+            }
+            Button(language.string("delete"), role: .destructive) {
+                pendingDeletion = nil
+                Task { await camera.deleteMedia(item) }
+            }
+        } message: { item in
+            Text(language.format("delete_media_confirmation", item.name))
+        }
     }
 
     private var header: some View {
@@ -47,12 +66,19 @@ struct MediaView: View {
                 }
             }
             .buttonStyle(CameraIconButtonStyle())
+            .accessibilityIdentifier("media-back-button")
             RotatingControl(degrees: controlRotation) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("camera_media").font(.headline)
                     Text(language.format("media_count_format", camera.mediaItems.count))
                         .font(.caption)
                         .foregroundStyle(Color.cameraSecondaryText)
+                    if let name = camera.deletedMediaName {
+                        Text(language.format("media_deleted", name))
+                            .font(.caption)
+                            .foregroundStyle(Color.cameraStatus)
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer()
@@ -92,6 +118,35 @@ struct MediaView: View {
                 .foregroundStyle(Color.cameraSecondaryText)
             }
             Spacer(minLength: 4)
+            mediaActions(item)
+        }
+        .frame(minHeight: 76)
+    }
+
+    @ViewBuilder
+    private func mediaActions(_ item: CameraMediaItem) -> some View {
+        HStack(spacing: 2) {
+            if camera.supports(.mediaDownload) {
+                downloadAction(item)
+            }
+            if camera.supports(.mediaDelete) {
+                Button {
+                    pendingDeletion = item
+                } label: {
+                    Image(systemName: "trash")
+                        .frame(width: 48, height: 48)
+                        .accessibilityLabel(Text("delete_media"))
+                }
+                .foregroundStyle(Color.cameraRecording)
+                .disabled(camera.isBusy(.media))
+                .accessibilityIdentifier("delete-media-\(item.id)")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func downloadAction(_ item: CameraMediaItem) -> some View {
+        Group {
             if camera.downloadedFileName == item.name, let url = camera.downloadedFileURL {
                 ShareLink(item: url) {
                     Image(systemName: "square.and.arrow.up")
@@ -120,7 +175,6 @@ struct MediaView: View {
                 .disabled(camera.isBusy(.media))
             }
         }
-        .frame(minHeight: 76)
     }
 
     private func mediaIcon(_ kind: String) -> String {

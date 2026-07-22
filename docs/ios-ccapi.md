@@ -9,6 +9,7 @@
 - Still capture, timed half-press with guaranteed release, recording, and tap focus only when advertised
 - JPEG Live View only when discovery advertises a complete start/frame/stop lifecycle, with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
 - Bounded, same-origin media traversal and file-backed downloads with Canon main-file query fallbacks; text/JSON metadata is rejected even when returned with HTTP 2xx
+- Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
 - Basic Authentication held by the client instance and redacted diagnostic output
 - Simulator mode and injectable HTTP transport for deterministic tests
 
@@ -19,7 +20,7 @@ CCAPI RTP, focus drive without a camera-advertised operation, and iOS USB/PTP ar
 - Direct HTTP/HTTPS/Simulator presets, optional in-memory password, remembered URL/username, and offline UI preview
 - Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, half-press, recording, tap focus, and adjustable JPEG Live View
 - Live View FPS from 1-30, clamped to the camera-advertised range, plus size, automatic refresh, grid, rolling FPS, frame bytes, and source diagnostics
-- Media listing, file-backed download/share, redacted diagnostic report, and no fake USB/PTP action
+- Media listing, file-backed download/share, capability-gated confirmation deletion, redacted diagnostic report, and no fake USB/PTP action
 - English, Traditional Chinese, and system language selection
 - Portrait and landscape layouts that respect system safe areas; whole-window upside-down rotation is disabled while key control content can rotate
 - App icon and localization resources verified in the built bundle
@@ -56,4 +57,4 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-The macOS CI job builds the app for iOS Simulator, verifies the compiled asset catalog, English/Traditional Chinese resources, launch screen, local-network metadata, and supported orientations, then runs five app unit tests and two UI workflows on an iPhone Simulator. The retained screenshots cover portrait control, landscape control, landscape Debug, and Traditional Chinese connection states. Physical iPhone and R6 Mark III validation is still required.
+The macOS CI job builds the app for iOS Simulator, verifies the compiled asset catalog, English/Traditional Chinese resources, launch screen, local-network metadata, and supported orientations, then runs the app unit tests and three UI workflows on an iPhone Simulator. The retained screenshots cover portrait control, landscape control, landscape Debug, confirmation-gated media deletion, and Traditional Chinese connection states. Physical iPhone and R6 Mark III validation is still required.

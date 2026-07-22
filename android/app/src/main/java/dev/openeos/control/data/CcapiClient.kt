@@ -379,6 +379,7 @@ class CcapiClient(
                 supportedFeatures.add(CameraFeature.MEDIA_BROWSER)
                 supportedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
             }
+            if (supportsMediaDelete()) supportedFeatures.add(CameraFeature.MEDIA_DELETE)
 
             val liveViewCapabilities = LiveViewCapabilities.ccapiNetwork().let { capabilities ->
                 if (liveViewSizeControlSupported) {
@@ -576,6 +577,20 @@ class CcapiClient(
         return result
     }
 
+    suspend fun deleteMedia(item: CameraMediaItem) {
+        val path = if (isRealCamera) {
+            if (enforceAdvertisedOperations && !supportsMediaDelete()) {
+                error("Camera did not advertise media deletion.")
+            }
+            normalizeCameraResource(item.id).substringBefore('?')
+        } else {
+            val encodedId = URLEncoder.encode(item.id, StandardCharsets.UTF_8.name()).replace("+", "%20")
+            "/ccapi/media/$encodedId"
+        }
+        deleteOk(path)
+        observedFeatures.add(CameraFeature.MEDIA_DELETE)
+    }
+
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
         if (isRealCamera) {
             if (enforceAdvertisedOperations && !supportsCompleteLiveView()) {
@@ -766,6 +781,11 @@ class CcapiClient(
         supportsApi("POST", "/shooting/liveview") &&
             supportsApi("DELETE", "/shooting/liveview") &&
             liveViewFramePaths().isNotEmpty()
+
+    private fun supportsMediaDelete(): Boolean = apiOperations.any { operation ->
+        operation.method == "DELETE" &&
+            (operation.path.endsWith("/contents") || "/contents/" in operation.path)
+    }
 
     private suspend fun commandOk(
         pathSuffix: String,
@@ -1359,6 +1379,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
             CameraFeature.SHUTTER_HALF_PRESS,
             CameraFeature.MEDIA_BROWSER,
             CameraFeature.MEDIA_DOWNLOAD,
+            CameraFeature.MEDIA_DELETE,
         ),
     ),
     liveView = LiveViewCapabilities.simulator(),

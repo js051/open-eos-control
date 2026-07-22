@@ -175,6 +175,12 @@
     <string name="media_not_supported">This camera connection does not provide media access.</string>
     <string name="no_media">No media files were found on the camera.</string>
     <string name="download_media">Download %1$s</string>
+    <string name="delete_media">Delete %1$s</string>
+    <string name="delete_media_title">Permanently delete?</string>
+    <string name="delete_media_confirmation">Permanently delete %1$s from the camera card? This cannot be undone.</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="media_deleted">Deleted %1$s</string>
     <string name="focus_with_shutter">Shutter autofocus</string>
     <string name="focus_with_shutter_hint">Momentarily half-press and safely release the camera shutter.</string>
     <string name="af_on">AF</string>
