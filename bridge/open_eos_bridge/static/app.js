@@ -8,6 +8,7 @@
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
     VIDEO_RECORDING: "VIDEO_RECORDING",
     TAP_FOCUS: "TAP_FOCUS",
+    CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE",
     FOCUS_DRIVE: "FOCUS_DRIVE",
     MEDIA_BROWSER: "MEDIA_BROWSER",
     MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL",
@@ -94,6 +95,11 @@
       focusMoved: "Focus moved {direction}",
       focusAccepted: "Focus point accepted",
       tapToFocus: "Select a point to focus",
+      clickWhiteBalanceAccepted: "White balance sampled",
+      tapToWhiteBalance: "Select a neutral point for white balance",
+      tapAction: "Viewfinder tap",
+      tapActionFocus: "Focus",
+      tapActionWhiteBalance: "White balance",
       settingUpdated: "{label} set to {value}",
       exposure: "Exposure",
       cameraSetting: "Camera setting",
@@ -208,6 +214,11 @@
       focusMoved: "焦點已向{direction}移動",
       focusAccepted: "已設定對焦點",
       tapToFocus: "點選畫面設定對焦點",
+      clickWhiteBalanceAccepted: "已取樣白平衡",
+      tapToWhiteBalance: "點選中性色彩位置設定白平衡",
+      tapAction: "取景畫面點按",
+      tapActionFocus: "對焦",
+      tapActionWhiteBalance: "白平衡",
       settingUpdated: "{label} 已設為 {value}",
       exposure: "曝光",
       cameraSetting: "相機設定",
@@ -307,6 +318,7 @@
     lastFrameAt: null,
     liveObjectUrl: null,
     focusStep: "MEDIUM",
+    tapAction: "focus",
     media: [],
     mediaLoaded: false,
     mediaThumbnailUrls: new Map(),
@@ -367,6 +379,8 @@
     focusNearButton: byId("focus-near-button"),
     focusFarButton: byId("focus-far-button"),
     fpsSelect: byId("fps-select"),
+    tapActionRow: byId("tap-action-row"),
+    tapActionSelect: byId("tap-action-select"),
     advancedSettings: byId("advanced-settings"),
     mediaRefreshButton: byId("media-refresh-button"),
     mediaSummary: byId("media-summary"),
@@ -784,6 +798,7 @@
     renderExposure();
     renderAdvancedSettings();
     renderFps();
+    renderTapAction();
     renderCaptureMode();
     renderAvailability();
     renderDiagnostics();
@@ -1006,6 +1021,26 @@
     ui.fpsSelect.disabled = state.busy || !featureSupported(FEATURES.LIVE_VIEW);
   }
 
+  function effectiveTapAction() {
+    if (state.tapAction === "whiteBalance" && featureSupported(FEATURES.CLICK_WHITE_BALANCE)) {
+      return "whiteBalance";
+    }
+    if (featureSupported(FEATURES.TAP_FOCUS)) return "focus";
+    if (featureSupported(FEATURES.CLICK_WHITE_BALANCE)) return "whiteBalance";
+    return null;
+  }
+
+  function renderTapAction() {
+    const clickWhiteBalanceSupported = featureSupported(FEATURES.CLICK_WHITE_BALANCE);
+    ui.tapActionRow.hidden = !clickWhiteBalanceSupported;
+    const focusOption = ui.tapActionSelect.querySelector('option[value="focus"]');
+    focusOption.hidden = !featureSupported(FEATURES.TAP_FOCUS);
+    const effective = effectiveTapAction();
+    if (effective) state.tapAction = effective;
+    ui.tapActionSelect.value = state.tapAction;
+    ui.tapActionSelect.disabled = state.busy || !state.liveActive;
+  }
+
   async function toggleLiveView() {
     if (state.liveActive) await stopLiveView();
     else await startLiveView();
@@ -1211,9 +1246,10 @@
   }
 
   async function tapFocus(point) {
+    const action = effectiveTapAction();
     if (
       !point || !state.session || state.busy || !state.liveActive ||
-      !featureSupported(FEATURES.TAP_FOCUS)
+      !action
     ) return;
     state.busy = true;
     ui.focusReticle.style.left = `${point.displayX}px`;
@@ -1223,12 +1259,19 @@
     setOperationState(t("busy"));
     renderAvailability();
     try {
-      await api(`/v1/session/${encodeURIComponent(state.session.id)}/focus/tap`, {
-        method: "POST",
-        json: { x: point.x, y: point.y },
-      });
+      if (action === "whiteBalance") {
+        state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/whitebalance/click`, {
+          method: "POST",
+          json: { x: point.x, y: point.y },
+        });
+      } else {
+        await api(`/v1/session/${encodeURIComponent(state.session.id)}/focus/tap`, {
+          method: "POST",
+          json: { x: point.x, y: point.y },
+        });
+      }
       ui.focusReticle.className = "focus-reticle success";
-      setOperationState(t("focusAccepted"));
+      setOperationState(t(action === "whiteBalance" ? "clickWhiteBalanceAccepted" : "focusAccepted"));
       window.setTimeout(() => { ui.focusReticle.hidden = true; }, 900);
     } catch (error) {
       const normalized = captureError(error);
@@ -1238,7 +1281,7 @@
       window.setTimeout(() => { ui.focusReticle.hidden = true; }, 1300);
     } finally {
       state.busy = false;
-      renderAvailability();
+      renderSession();
     }
   }
 
@@ -1279,6 +1322,7 @@
     ui.focusNearButton.disabled = state.busy || !state.liveActive;
     ui.focusFarButton.disabled = state.busy || !state.liveActive;
     ui.fpsSelect.disabled = state.busy || !liveSupported;
+    ui.tapActionSelect.disabled = state.busy || !state.liveActive;
     document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
       button.disabled = state.busy || !settingByKey(button.dataset.settingKey);
     });
@@ -1288,12 +1332,14 @@
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
       button.disabled = state.busy || !state.liveActive;
     });
-    const tapFocusEnabled = featureSupported(FEATURES.TAP_FOCUS) && state.liveActive && !state.busy;
+    const tapAction = effectiveTapAction();
+    const tapFocusEnabled = Boolean(tapAction) && state.liveActive && !state.busy;
     ui.viewfinder.classList.toggle("tap-focus-enabled", tapFocusEnabled);
-    ui.viewfinder.title = tapFocusEnabled ? t("tapToFocus") : "";
+    const tapDescription = tapAction === "whiteBalance" ? t("tapToWhiteBalance") : t("tapToFocus");
+    ui.viewfinder.title = tapFocusEnabled ? tapDescription : "";
     if (tapFocusEnabled) {
       ui.viewfinder.setAttribute("role", "button");
-      ui.viewfinder.setAttribute("aria-label", t("tapToFocus"));
+      ui.viewfinder.setAttribute("aria-label", tapDescription);
       ui.viewfinder.tabIndex = 0;
     } else {
       ui.viewfinder.removeAttribute("role");
@@ -1665,6 +1711,10 @@
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
     ui.railLiveButton.addEventListener("click", toggleLiveView);
     ui.fpsSelect.addEventListener("change", changeFps);
+    ui.tapActionSelect.addEventListener("change", () => {
+      state.tapAction = ui.tapActionSelect.value;
+      renderAvailability();
+    });
     ui.focusNearButton.addEventListener("click", () => driveFocus("NEAR"));
     ui.focusFarButton.addEventListener("click", () => driveFocus("FAR"));
     ui.viewfinder.addEventListener("click", tapFocusFromPointer);

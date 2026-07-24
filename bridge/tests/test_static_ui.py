@@ -54,6 +54,8 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "shutter-button",
         "focus-reticle",
         "focus-section",
+        "tap-action-row",
+        "tap-action-select",
         "media-list",
         "diagnostics-output",
     }
@@ -87,6 +89,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "/recording/",
         "/focus/drive",
         "/focus/tap",
+        "/whitebalance/click",
         "/liveview/start",
         "/liveview/frame",
         "/media",
@@ -97,6 +100,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "featureSupported(FEATURES." in script
     assert 'MEDIA_DELETE: "MEDIA_DELETE"' in script
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
+    assert 'CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE"' in script
     assert "URL.revokeObjectURL" in script
     assert script.count("deleteConfirm:") == 2
     assert '{ method: "DELETE" }' in script

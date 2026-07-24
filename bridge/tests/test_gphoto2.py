@@ -79,6 +79,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert CameraFeature.MEDIA_DELETE in capabilities.supported
     assert CameraFeature.MEDIA_THUMBNAIL in capabilities.supported
     assert CameraFeature.TAP_FOCUS in capabilities.planned
+    assert CameraFeature.CLICK_WHITE_BALANCE in capabilities.planned
     assert next(setting for setting in capabilities.settings if setting.key == "iso").values == [
         "Auto",
         "100",

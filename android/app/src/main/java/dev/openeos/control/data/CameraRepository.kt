@@ -157,6 +157,8 @@ class CameraRepository(
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult = backend.tapFocus(x, y)
 
+    suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus = backend.clickWhiteBalance(x, y)
+
     suspend fun captureStill(): CameraStatus = backend.captureStill()
 
     suspend fun autofocus(): CameraStatus = backend.autofocus()

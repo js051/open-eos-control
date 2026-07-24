@@ -35,6 +35,7 @@ POST /v1/session/{id}/focus/auto
 POST /v1/session/{id}/recording/start
 POST /v1/session/{id}/recording/stop
 POST /v1/session/{id}/focus/tap
+POST /v1/session/{id}/whitebalance/click
 POST /v1/session/{id}/focus/drive
 GET  /v1/session/{id}/media
 GET  /v1/session/{id}/media/{itemId}/thumbnail
@@ -137,7 +138,7 @@ The current CLI adapter serves `GET /liveview/frame` as JPEG polling. Each frame
 
 `GET /v1/session/{id}/media/{itemId}/thumbnail` returns a bounded JPEG or PNG with `Cache-Control: private, no-store`. The libgphoto2 engine advertises `MEDIA_THUMBNAIL` only when `gphoto2 --abilities` reports file-preview support and then executes the documented `--folder ... --get-thumbnail ... --stdout` command. The direct CCAPI engine does not advertise this capability because no verified camera-advertised thumbnail resource is available; clients keep their file-type fallback.
 
-The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. When coordinate Tap AF is advertised, `flipdetail?kind=both` is preferred so the same bounded response supplies the JPEG and Canon image-position metadata. Requested FPS controls client polling; observed FPS remains a separate UI metric.
+The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. When coordinate Tap AF or Click White Balance is advertised, `flipdetail?kind=both` is preferred so the same bounded response supplies the JPEG and Canon image-position metadata. Requested FPS controls client polling; observed FPS remains a separate UI metric.
 
 ## CCAPI Mapping
 
@@ -150,6 +151,7 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - independent autofocus through advertised `POST /shooting/control/af` start/stop, falling back to the advertised balanced half-press operation
 - movie start/stop through `recbutton`
 - normalized UI Tap AF mapped through detailed Live View `image` geometry to integer `positionx`/`positiony`, then sent only through advertised `PUT /shooting/liveview/afframeposition`
+- normalized UI Click White Balance mapped through the same geometry, then sent only through advertised `POST /shooting/liveview/clickwb`
 - bounded JPEG Live View lifecycle and frame extraction
 - bounded/paged storage traversal plus opaque same-origin media IDs, streamed downloads, and deletion only when the camera advertises a matching `DELETE` operation
 
@@ -170,7 +172,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - Live View: advertised `viewfinder` lifecycle plus `--capture-preview --stdout`, with cleanup on stop, failed start, and session close
 - media: recursive `--list-files`, streamed `--get-file ... --stdout`, and exact `--folder ... --delete-file ...` only when `--abilities` reports file deletion
 
-Coordinate tap focus remains unavailable because the public CLI surface does not provide a verified normalized image-coordinate mapping for this camera. Unsupported controls return an error and are never reported as accepted.
+Coordinate tap focus and Click White Balance remain unavailable because the public CLI surface does not provide verified normalized image-coordinate commands for this camera. Unsupported controls return an error and are never reported as accepted.
 
 ## Run Locally
 

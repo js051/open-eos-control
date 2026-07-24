@@ -37,6 +37,7 @@ The app currently includes:
 - System, English, or Traditional Chinese language selection, including localized camera-advertised setting values while preserving exact protocol values for writes
 - REC start/stop
 - Canon coordinate Tap AF through advertised `PUT afframeposition`, using detailed Live View image geometry instead of guessed normalized camera coordinates
+- Canon Click White Balance through advertised `POST clickwb`, using the same detailed Live View geometry and a Focus/White Balance tap-action selector
 - Independent AF-ON through camera-advertised CCAPI autofocus, with a balanced half-press fallback on USB-capable transports
 - Advertised manual shutter half-press with guaranteed release
 - Paged camera media browser with lazy thumbnails where advertised, streaming download through Android's document picker, and confirmation-gated deletion
@@ -109,7 +110,7 @@ GitHub Actions builds the final app bundle, verifies icon/localization/network/o
 
 ## Desktop Bridge
 
-The bridge is an executable local service and PC control app. It controls USB cameras through `gphoto2`, or connects directly to a camera's wireless CCAPI endpoint without requiring `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, AF-ON, half-press, recording, focus drive or coordinate Tap AF when supported by the selected engine, JPEG Live View, lazy authenticated media thumbnails, streaming downloads, confirmation-gated deletion, and secret-free diagnostics with the engine's advertised capability evidence. Direct CCAPI AF-ON uses the advertised `POST /shooting/control/af` start/stop contract; coordinate Tap AF maps normalized UI input through Canon `flipdetail` image geometry before sending advertised integer `PUT afframeposition`; USB engines use their verified balanced half-press path. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
+The bridge is an executable local service and PC control app. It controls USB cameras through `gphoto2`, or connects directly to a camera's wireless CCAPI endpoint without requiring `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, AF-ON, half-press, recording, focus drive, coordinate Tap AF or Click White Balance when supported by the selected engine, JPEG Live View, lazy authenticated media thumbnails, streaming downloads, confirmation-gated deletion, and secret-free diagnostics with the engine's advertised capability evidence. Direct CCAPI AF-ON uses the advertised `POST /shooting/control/af` start/stop contract; coordinate Tap AF and Click White Balance map normalized UI input through Canon `flipdetail` image geometry before sending integer `PUT afframeposition` or `POST clickwb` commands; USB engines use their verified balanced half-press path. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
 
 Create the environment below. Install `gphoto2` on the host only when using a USB camera:
 
@@ -134,7 +135,7 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "replace-with-a-long-random-token"
 
 Choose **Desktop Bridge** on the Android or iOS connection screen, enter the computer LAN URL and the same token, then scan and select the camera. The token is kept only in process memory and is never persisted or included in diagnostics. Direct iOS USB/PTP remains a research item; this Bridge path is the implemented iPhone/iPad route to a PC-attached USB camera.
 
-The current CLI adapter deliberately advertises at most 5 FPS because each JPEG is a separate `gphoto2 --capture-preview` transaction. The CCAPI engine advertises 1-30 FPS client polling, defaults to 15 FPS, retries the R6 Mark III-compatible Live View start payload after an `Invalid parameter` response, and reports observed FPS separately. Its same-origin full-URL/relative-path discovery, settings, capture, guaranteed shutter release, recording, detail-metadata-backed `afframeposition` Tap AF, bounded JPEG extraction, same-origin media traversal, streaming downloads, auth handling, and capability gates are automated-test covered. The browser workflow has also exercised CCAPI connection, valid JPEG display, 15 FPS selection, Tap AF, English/Traditional Chinese, and desktop/narrow layouts. Physical PC/R6 Mark III validation is still required.
+The current CLI adapter deliberately advertises at most 5 FPS because each JPEG is a separate `gphoto2 --capture-preview` transaction. The CCAPI engine advertises 1-30 FPS client polling, defaults to 15 FPS, retries the R6 Mark III-compatible Live View start payload after an `Invalid parameter` response, and reports observed FPS separately. Its same-origin full-URL/relative-path discovery, settings, capture, guaranteed shutter release, recording, detail-metadata-backed `afframeposition` Tap AF and `clickwb` Click White Balance, bounded JPEG extraction, same-origin media traversal, streaming downloads, auth handling, and capability gates are automated-test covered. The browser workflow has also exercised CCAPI connection, valid JPEG display, 15 FPS selection, tap-action switching, English/Traditional Chinese, and desktop/narrow layouts. Physical PC/R6 Mark III validation is still required.
 
 ## Fake Camera Simulator
 
@@ -159,6 +160,7 @@ Useful endpoints:
 - `POST /ccapi/record/start`
 - `POST /ccapi/record/stop`
 - `POST /ccapi/focus/tap`
+- `POST /ccapi/whitebalance/click`
 - `POST /ccapi/shutter/half-press`
 - `POST /ccapi/shutter/release`
 - `GET /ccapi/media`

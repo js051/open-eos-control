@@ -68,6 +68,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func clickWhiteBalance(x: Double, y: Double) async throws -> CameraStatus {
+        switch self {
+        case let .ccapi(client): return try await client.clickWhiteBalance(x: x, y: y)
+        case let .desktopBridge(client): return try await client.clickWhiteBalance(x: x, y: y)
+        }
+    }
+
     func driveFocus(direction: FocusDriveDirection, step: FocusDriveStep) async throws -> FocusDriveResult {
         switch self {
         case let .ccapi(client):

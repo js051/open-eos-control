@@ -419,6 +419,9 @@ class CcapiClient(
             if (supportsCoordinateTapFocus()) {
                 supportedFeatures.add(CameraFeature.TAP_FOCUS)
             }
+            if (supportsCoordinateClickWhiteBalance()) {
+                supportedFeatures.add(CameraFeature.CLICK_WHITE_BALANCE)
+            }
             if (focusDriveOperation() != null) {
                 supportedFeatures.add(CameraFeature.FOCUS_DRIVE)
             }
@@ -754,17 +757,12 @@ class CcapiClient(
     }
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
-        require(x in 0.0..1.0 && y in 0.0..1.0) {
-            "Focus coordinates must be normalized from 0 through 1."
-        }
         return if (isRealCamera) {
             val operation = tapFocusOperation()
             if (enforceAdvertisedOperations && !supportsCoordinateTapFocus()) {
                 error("Camera did not advertise Canon Live View AF frame position control with detailed Live View metadata.")
             }
-            val geometry = latestLiveViewGeometry
-                ?: error("Tap AF needs a detailed Live View frame with Canon image position metadata before focusing.")
-            val (positionX, positionY) = geometry.cameraPosition(x, y)
+            val (positionX, positionY) = cameraLiveViewPosition(x, y, CameraFeature.TAP_FOCUS)
             val payload = JSONObject()
                 .put("positionx", positionX)
                 .put("positiony", positionY)
@@ -783,6 +781,31 @@ class CcapiClient(
                 y = json.optDouble("y"),
             )
         }
+    }
+
+    suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus {
+        if (!isRealCamera) {
+            return postJson(
+                    "/ccapi/whitebalance/click",
+                    JSONObject().put("x", x).put("y", y),
+                ).toCameraStatus()
+        }
+        val operation = clickWhiteBalanceOperation()
+        if (enforceAdvertisedOperations && !supportsCoordinateClickWhiteBalance()) {
+            error("Camera did not advertise Canon Click WB control with detailed Live View metadata.")
+        }
+        val (positionX, positionY) = cameraLiveViewPosition(x, y, CameraFeature.CLICK_WHITE_BALANCE)
+        val selectedOperation = operation ?: CcapiApiOperation(
+            method = "POST",
+            path = apiPath("POST", "/shooting/liveview/clickwb"),
+        )
+        commandOk(
+            "/shooting/liveview/clickwb",
+            JSONObject().put("positionx", positionX).put("positiony", positionY),
+            selectedOperation,
+        )
+        observedFeatures.add(CameraFeature.CLICK_WHITE_BALANCE)
+        return status()
     }
 
     fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String =
@@ -904,11 +927,23 @@ class CcapiClient(
     private fun detailedLiveViewOperation(): CcapiApiOperation? =
         apiOperation("GET", "/shooting/liveview/flipdetail")
 
+    private fun clickWhiteBalanceOperation(): CcapiApiOperation? =
+        apiOperation("POST", "/shooting/liveview/clickwb")
+
     private fun supportsCoordinateTapFocus(): Boolean =
         tapFocusOperation() != null &&
             detailedLiveViewOperation() != null &&
             supportsApi("POST", "/shooting/liveview") &&
             supportsApi("DELETE", "/shooting/liveview")
+
+    private fun supportsCoordinateClickWhiteBalance(): Boolean =
+        clickWhiteBalanceOperation() != null &&
+            detailedLiveViewOperation() != null &&
+            supportsApi("POST", "/shooting/liveview") &&
+            supportsApi("DELETE", "/shooting/liveview")
+
+    private fun needsLiveViewGeometry(): Boolean =
+        supportsCoordinateTapFocus() || supportsCoordinateClickWhiteBalance()
 
     private fun autofocusOperation(): CcapiApiOperation? =
         apiOperation("POST", "/shooting/control/af")
@@ -925,7 +960,7 @@ class CcapiClient(
             )
         }
         return buildList {
-            if (supportsCoordinateTapFocus()) {
+            if (needsLiveViewGeometry()) {
                 detailedLiveViewOperation()?.let { add("${it.path}?kind=both") }
             }
             apiOperation("GET", "/shooting/liveview/flip")?.let { add(it.path) }
@@ -1485,6 +1520,19 @@ class CcapiClient(
         }
 
         return find(root)
+    }
+
+    private fun cameraLiveViewPosition(
+        x: Double,
+        y: Double,
+        feature: CameraFeature,
+    ): Pair<Int, Int> {
+        require(x in 0.0..1.0 && y in 0.0..1.0) {
+            "${feature.label} coordinates must be normalized from 0 through 1."
+        }
+        val geometry = latestLiveViewGeometry
+            ?: error("${feature.label} needs a detailed Live View frame with Canon image position metadata.")
+        return geometry.cameraPosition(x, y)
     }
 
     private fun InputStream.readBoundedBytes(maxBytes: Int): ByteArray {

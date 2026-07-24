@@ -6,7 +6,7 @@
 
 - CCAPI discovery through `/ccapi`, including Canon's same-origin full `url` entries and relative `path` fixtures, versioned operation parsing, and `ver110`/`ver100` fallback; query data and unsafe origins/paths are never promoted to capabilities
 - Camera identity, battery, storage, exposure, white balance, and dynamic settings; writable controls require the exact setting-specific `PUT` operation and a value from camera `ability`
-- Still capture, independent AF-ON through advertised Canon start/stop or a balanced half-press fallback, explicit timed half-press, recording, and tap focus only when supported
+- Still capture, independent AF-ON through advertised Canon start/stop or a balanced half-press fallback, explicit timed half-press, recording, Tap AF, and Click White Balance only when supported
 - JPEG Live View only when discovery advertises a complete start/frame/stop lifecycle, with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
 - Bounded, same-origin media traversal and file-backed downloads with Canon main-file query fallbacks; text/JSON metadata is rejected even when returned with HTTP 2xx
 - Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
@@ -19,7 +19,7 @@ CCAPI RTP, focus drive without a camera/engine-advertised operation, and direct 
 ## Implemented App
 
 - Direct HTTP/HTTPS/Simulator presets or Desktop Bridge URL/token with USB scan and camera selection; passwords/tokens stay in memory while non-secret URLs and usernames may be remembered
-- Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, AF-ON, recording, tap focus or manual focus drive when advertised, and adjustable JPEG Live View
+- Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, AF-ON, recording, a Tap AF/Click White Balance action selector, manual focus drive when advertised, and adjustable JPEG Live View
 - Live View FPS from 1-30, clamped to the camera-advertised range, plus size, automatic refresh, grid, rolling FPS, frame bytes, and source diagnostics
 - Media listing, file-backed download/share, capability-gated confirmation deletion, redacted diagnostic report, and no fake USB/PTP action
 - English, Traditional Chinese, and system language selection

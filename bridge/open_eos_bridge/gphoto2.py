@@ -667,7 +667,11 @@ class GPhoto2Session:
 
             planned = {
                 feature
-                for feature in (CameraFeature.TAP_FOCUS, CameraFeature.LIVE_VIEW_RTP)
+                for feature in (
+                    CameraFeature.TAP_FOCUS,
+                    CameraFeature.CLICK_WHITE_BALANCE,
+                    CameraFeature.LIVE_VIEW_RTP,
+                )
                 if feature not in supported
             }
             model = self.info().model
@@ -679,6 +683,9 @@ class GPhoto2Session:
                     CameraFeature.TAP_FOCUS.value: (
                         "gphoto2 exposes autofocus and relative lens drive for this camera, but not a verified "
                         "normalized image-coordinate AF point command."
+                    ),
+                    CameraFeature.CLICK_WHITE_BALANCE.value: (
+                        "The libgphoto2 CLI engine has no verified Live View coordinate Click WB command."
                     ),
                     CameraFeature.LIVE_VIEW.value: (
                         "The CLI adapter uses one gphoto2 --capture-preview transaction per HTTP frame; "
@@ -785,6 +792,14 @@ class GPhoto2Session:
             CameraFeature.TAP_FOCUS.value,
             self.engine_name,
             "The libgphoto2 CLI engine has no verified normalized image-coordinate AF point command.",
+        )
+
+    def click_white_balance(self, x: float, y: float) -> CameraStatus:
+        del x, y
+        raise unsupported(
+            CameraFeature.CLICK_WHITE_BALANCE.value,
+            self.engine_name,
+            "The libgphoto2 CLI engine has no verified Live View coordinate Click WB command.",
         )
 
     def start_live_view(self, request: LiveViewStartRequest) -> None:
@@ -1017,9 +1032,7 @@ class GPhoto2Session:
                 commands.append("MEDIA_DELETE")
         writable_settings = sorted(
             {
-                config.path.replace("\r", "").replace("\n", "")[
-                    :MAX_CAPABILITY_EVIDENCE_ITEM_CHARS
-                ]
+                config.path.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
                 for config in self._configs.values()
                 if not config.readonly and config.selectable_values()
             }

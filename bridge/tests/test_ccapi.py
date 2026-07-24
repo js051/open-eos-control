@@ -40,6 +40,7 @@ DISCOVERY = {
         {"path": "/shooting/control/af", "post": True},
         {"path": "/shooting/control/recbutton", "post": True},
         {"path": "/shooting/liveview/afframeposition", "put": True},
+        {"path": "/shooting/liveview/clickwb", "post": True},
         {"path": "/shooting/control/drivefocus", "post": True},
         {"path": "/shooting/liveview", "get": True, "post": True, "delete": True},
         {"path": "/shooting/liveview/flip", "get": True},
@@ -160,6 +161,7 @@ class FakeCcapiTransport:
             "/ccapi/ver100/shooting/control/af",
             "/ccapi/ver100/shooting/control/recbutton",
             "/ccapi/ver100/shooting/liveview/afframeposition",
+            "/ccapi/ver100/shooting/liveview/clickwb",
             "/ccapi/ver100/shooting/control/drivefocus",
             "/ccapi/ver100/shooting/liveview",
         }:
@@ -222,6 +224,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.STILL_CAPTURE,
         CameraFeature.AUTOFOCUS,
         CameraFeature.TAP_FOCUS,
+        CameraFeature.CLICK_WHITE_BALANCE,
         CameraFeature.FOCUS_DRIVE,
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
@@ -255,6 +258,13 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     )
     assert focus_request.method == "PUT"
     assert focus_request.body == {"positionx": 1600, "positiony": 3200}
+    click_status = session.click_white_balance(0.4, 0.6)
+    assert click_status.connected is True
+    click_request = next(
+        request for request in transport.requests if request.path.endswith("/shooting/liveview/clickwb")
+    )
+    assert click_request.method == "POST"
+    assert click_request.body == {"positionx": 2500, "positiony": 2600}
     media = session.list_media()
     assert media[0].name == "IMG_0001.JPG"
     assert "/" not in media[0].id
@@ -440,6 +450,12 @@ def test_ccapi_tap_focus_without_detailed_frame_sends_no_command() -> None:
     assert failure.value.code == "LIVE_VIEW_COORDINATES_UNAVAILABLE"
     assert len(transport.requests) == before
 
+    with pytest.raises(BridgeError) as click_failure:
+        session.click_white_balance(0.25, 0.75)
+
+    assert click_failure.value.code == "LIVE_VIEW_COORDINATES_UNAVAILABLE"
+    assert len(transport.requests) == before
+
 
 def test_ccapi_media_rejects_cross_origin_camera_paths() -> None:
     transport = FakeCcapiTransport(external_media=True)
@@ -509,6 +525,11 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
             headers=headers,
             json={"x": 0.4, "y": 0.6},
         )
+        white_balanced = client.post(
+            f"/v1/session/{session_id}/whitebalance/click",
+            headers=headers,
+            json={"x": 0.4, "y": 0.6},
+        )
         driven = client.post(
             f"/v1/session/{session_id}/focus/drive",
             headers=headers,
@@ -526,8 +547,10 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert created.json()["engine"] == "ccapi"
     assert "camera-secret" not in created.text
     assert "TAP_FOCUS" in capabilities.json()["supported"]
+    assert "CLICK_WHITE_BALANCE" in capabilities.json()["supported"]
     assert "FOCUS_DRIVE" in capabilities.json()["supported"]
     assert focused.json() == {"accepted": True, "x": 0.4, "y": 0.6}
+    assert white_balanced.json()["connected"] is True
     assert driven.json() == {"accepted": True, "direction": "NEAR", "step": "MEDIUM"}
     assert duplicate.status_code == 409
     assert duplicate.json()["error"]["code"] == "CAMERA_BUSY"

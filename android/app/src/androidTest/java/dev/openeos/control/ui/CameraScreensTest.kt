@@ -236,6 +236,27 @@ class CameraScreensTest {
     }
 
     @Test
+    fun offlinePreviewCanSelectClickWhiteBalanceAsTheLiveViewTapAction() {
+        var selectedAction: LiveViewTapAction? = null
+        val actions = noOpActions().copy(
+            setLiveViewTapAction = { selectedAction = it },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(CameraUiState().withOfflinePreview(), actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithText(resourceText(R.string.live_view_tap_action)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.tap_action_white_balance)).performClick()
+
+        compose.runOnIdle {
+            assertEquals(LiveViewTapAction.WHITE_BALANCE, selectedAction)
+        }
+    }
+
+    @Test
     fun offlinePreviewIncludesMediaBrowserWithoutEnablingFakeDownloads() {
         val state = CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA)
         compose.setContent {
@@ -479,9 +500,11 @@ class CameraScreensTest {
         useHttpPreset = {}, useHttpsPreset = {}, useSimulatorPreset = {}, enterOfflinePreview = {},
         connect = {}, connectBridge = {}, disconnect = {}, refresh = {}, refreshUsb = {}, requestUsbPermission = {},
         connectUsb = { _, _, _ -> },
-        setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
+        setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, setLiveViewTapAction = {},
+        openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
         captureStill = {}, autofocus = {}, driveFocus = { _, _ -> }, toggleRecording = {}, tapFocus = { _, _ -> },
+        clickWhiteBalance = { _, _ -> },
         refreshMedia = {}, loadMediaThumbnail = {}, downloadMedia = { _, _ -> }, deleteMedia = {},
         cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {},

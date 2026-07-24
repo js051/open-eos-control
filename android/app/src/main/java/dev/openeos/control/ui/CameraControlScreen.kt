@@ -501,6 +501,9 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(stringResource(R.string.more_settings), color = AppText, fontWeight = FontWeight.Bold)
+                if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
+                    LiveViewTapActionControls(state, actions)
+                }
                 if (state.supports(CameraFeature.AUTOFOCUS)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -525,12 +528,56 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 }
                 if (
                     settings.isEmpty() &&
+                    !state.supports(CameraFeature.CLICK_WHITE_BALANCE) &&
                     !state.supports(CameraFeature.AUTOFOCUS) &&
                     !state.supports(CameraFeature.FOCUS_DRIVE)
                 ) {
                     Text(stringResource(R.string.no_settings), color = AppSubtleText)
                 }
                 settings.forEach { setting -> AdvancedSettingRow(setting, actions) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveViewTapActionControls(state: CameraUiState, actions: CameraActions) {
+    val selectedAction = when {
+        state.liveViewTapAction == LiveViewTapAction.WHITE_BALANCE &&
+            state.supports(CameraFeature.CLICK_WHITE_BALANCE) -> LiveViewTapAction.WHITE_BALANCE
+        state.supports(CameraFeature.TAP_FOCUS) -> LiveViewTapAction.FOCUS
+        else -> LiveViewTapAction.WHITE_BALANCE
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.live_view_tap_action), color = AppText, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (state.supports(CameraFeature.TAP_FOCUS)) {
+                Button(
+                    onClick = { actions.setLiveViewTapAction(LiveViewTapAction.FOCUS) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedAction == LiveViewTapAction.FOCUS) AppAccent else AppSurfaceHigh,
+                        contentColor = if (selectedAction == LiveViewTapAction.FOCUS) AppBackground else AppText,
+                    ),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.weight(1f).height(48.dp),
+                ) {
+                    Icon(painterResource(LucideR.drawable.lucide_ic_focus), null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.tap_action_focus))
+                }
+            }
+            Button(
+                onClick = { actions.setLiveViewTapAction(LiveViewTapAction.WHITE_BALANCE) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedAction == LiveViewTapAction.WHITE_BALANCE) AppWarning else AppSurfaceHigh,
+                    contentColor = if (selectedAction == LiveViewTapAction.WHITE_BALANCE) AppBackground else AppText,
+                ),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.weight(1f).height(48.dp),
+            ) {
+                Icon(painterResource(LucideR.drawable.lucide_ic_pipette), null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.tap_action_white_balance))
             }
         }
     }

@@ -63,6 +63,9 @@
 "step_large" = "大步";
 "focus_drive_live_view_required" = "請先啟用 Live View 自動更新再驅動對焦。";
 "more_settings" = "更多設定";
+"live_view_tap_action" = "Live View 點按動作";
+"tap_action_focus" = "點按對焦";
+"tap_action_white_balance" = "點選白平衡";
 "live_view_settings" = "Live View 設定";
 
 "live_view" = "Live View";

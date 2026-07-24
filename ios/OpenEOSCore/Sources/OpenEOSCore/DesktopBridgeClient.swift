@@ -285,6 +285,14 @@ public actor DesktopBridgeClient {
         )
     }
 
+    public func clickWhiteBalance(x: Double, y: Double) async throws -> CameraStatus {
+        let body = try await postJSON(
+            sessionEndpoint(["whitebalance", "click"]),
+            payload: ["x": x, "y": y]
+        )
+        return parseStatus(body)
+    }
+
     public func driveFocus(
         direction: FocusDriveDirection,
         step: FocusDriveStep

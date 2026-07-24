@@ -201,6 +201,7 @@ class UsbPtpCameraBackend(
             CameraFeature.SHUTTER_HALF_PRESS,
             CameraFeature.VIDEO_RECORDING,
             CameraFeature.TAP_FOCUS,
+            CameraFeature.CLICK_WHITE_BALANCE,
             CameraFeature.LIVE_VIEW,
             CameraFeature.LIVE_VIEW_JPEG_POLLING,
             CameraFeature.FOCUS_DRIVE,
@@ -244,6 +245,8 @@ class UsbPtpCameraBackend(
                         "Uses a balanced Canon EOS half-press sequence when the full remote event operation set is advertised.",
                     CameraFeature.FOCUS_DRIVE to
                         "Uses Canon EOS DriveLens with the Near/Far 1-3 values documented by libgphoto2.",
+                    CameraFeature.CLICK_WHITE_BALANCE to
+                        "No verified Canon USB/PTP Live View coordinate Click WB command is implemented.",
                     CameraFeature.VIDEO_RECORDING to
                         "Uses Canon EOS EVFRecordStatus only when camera events advertise both Card and None values.",
                     CameraFeature.MEDIA_BROWSER to

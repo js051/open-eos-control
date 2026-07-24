@@ -299,7 +299,18 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     val bitmap = state.liveViewBitmap
     val sourceAspectRatio = bitmap?.takeIf { it.width > 0 && it.height > 0 }
         ?.let { it.width.toFloat() / it.height.toFloat() } ?: 16f / 9f
-    val canFocus = state.supports(CameraFeature.TAP_FOCUS) && !state.isBusy(CameraOperation.FOCUS)
+    val tapAction = when {
+        state.liveViewTapAction == LiveViewTapAction.WHITE_BALANCE &&
+            state.supports(CameraFeature.CLICK_WHITE_BALANCE) -> LiveViewTapAction.WHITE_BALANCE
+        state.supports(CameraFeature.TAP_FOCUS) -> LiveViewTapAction.FOCUS
+        state.supports(CameraFeature.CLICK_WHITE_BALANCE) -> LiveViewTapAction.WHITE_BALANCE
+        else -> null
+    }
+    val canTap = when (tapAction) {
+        LiveViewTapAction.FOCUS -> !state.isBusy(CameraOperation.FOCUS)
+        LiveViewTapAction.WHITE_BALANCE -> !state.isBusy(CameraOperation.SETTING)
+        null -> false
+    }
     val context = LocalContext.current
     var lastFramePainter by remember { mutableStateOf<Painter?>(null) }
     val imageLoader = remember(context) {
@@ -309,16 +320,22 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     Box(
         modifier = modifier
             .background(Color.Black)
-            .pointerInput(canFocus, sourceAspectRatio) {
+            .pointerInput(canTap, tapAction, sourceAspectRatio) {
                 detectTapGestures { offset ->
-                    if (canFocus) {
+                    if (canTap) {
                         mapLiveViewTap(
                             tapX = offset.x,
                             tapY = offset.y,
                             containerWidth = size.width.toFloat(),
                             containerHeight = size.height.toFloat(),
                             sourceAspectRatio = sourceAspectRatio,
-                        )?.let { actions.tapFocus(it.x, it.y) }
+                        )?.let { point ->
+                            when (tapAction) {
+                                LiveViewTapAction.FOCUS -> actions.tapFocus(point.x, point.y)
+                                LiveViewTapAction.WHITE_BALANCE -> actions.clickWhiteBalance(point.x, point.y)
+                                null -> Unit
+                            }
+                        }
                     }
                 }
             },
@@ -366,6 +383,39 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         }
 
         if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
+        if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
+            val focusAvailable = state.supports(CameraFeature.TAP_FOCUS)
+            val description = stringResource(
+                if (tapAction == LiveViewTapAction.WHITE_BALANCE) {
+                    R.string.tap_action_white_balance
+                } else {
+                    R.string.tap_action_focus
+                }
+            )
+            ToolIconButton(
+                icon = if (tapAction == LiveViewTapAction.WHITE_BALANCE) {
+                    LucideR.drawable.lucide_ic_pipette
+                } else {
+                    LucideR.drawable.lucide_ic_focus
+                },
+                description = description,
+                onClick = {
+                    actions.setLiveViewTapAction(
+                        if (tapAction == LiveViewTapAction.WHITE_BALANCE && focusAvailable) {
+                            LiveViewTapAction.FOCUS
+                        } else {
+                            LiveViewTapAction.WHITE_BALANCE
+                        }
+                    )
+                },
+                enabled = !state.busy,
+                tint = if (tapAction == LiveViewTapAction.WHITE_BALANCE) AppWarning else AppAccent,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp)
+                    .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp)),
+            )
+        }
         if (state.showGrid) GridOverlay(sourceAspectRatio)
         FocusIndicator(state.focusPoint, state.focusFeedback, sourceAspectRatio)
         if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))

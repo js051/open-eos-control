@@ -251,6 +251,13 @@ class DesktopBridgeClient(
         return FocusResult(ok = body.optBoolean("accepted"), x = x, y = y)
     }
 
+    suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus = parseStatus(
+        postJson(
+            sessionEndpoint("whitebalance", "click"),
+            JSONObject().put("x", x).put("y", y),
+        )
+    )
+
     suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusDriveResult {
         val body = postJson(
             sessionEndpoint("focus", "drive"),

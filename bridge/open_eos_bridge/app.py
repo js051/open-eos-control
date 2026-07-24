@@ -209,6 +209,10 @@ def create_app(
     def tap_focus(session_id: str, payload: TapFocusRequest) -> FocusResult:
         return manager.get(session_id).tap_focus(payload.x, payload.y)
 
+    @router.post("/session/{session_id}/whitebalance/click", response_model=CameraStatus)
+    def click_white_balance(session_id: str, payload: TapFocusRequest) -> CameraStatus:
+        return manager.get(session_id).click_white_balance(payload.x, payload.y)
+
     @router.post("/session/{session_id}/focus/drive", response_model=FocusResult, response_model_exclude_none=True)
     def drive_focus(session_id: str, payload: FocusDriveRequest) -> FocusResult:
         return manager.get(session_id).drive_focus(payload.direction, payload.step)

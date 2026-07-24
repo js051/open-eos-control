@@ -24,6 +24,8 @@ enum class UiMode { CONTROL, MEDIA, DEBUG }
 
 enum class CaptureMode { PHOTO, VIDEO }
 
+enum class LiveViewTapAction { FOCUS, WHITE_BALANCE }
+
 enum class ConnectionTarget { CCAPI, DESKTOP_BRIDGE }
 
 enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MORE, LANGUAGE }
@@ -75,6 +77,7 @@ data class CameraUiState(
     val captureMode: CaptureMode = CaptureMode.PHOTO,
     val hudVisible: Boolean = true,
     val showGrid: Boolean = false,
+    val liveViewTapAction: LiveViewTapAction = LiveViewTapAction.FOCUS,
     val activeSettingPicker: SettingPicker? = null,
     val captureFeedback: CaptureFeedback? = null,
     val focusPoint: FocusPoint? = null,

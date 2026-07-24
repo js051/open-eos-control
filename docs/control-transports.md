@@ -12,7 +12,7 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III, strictly advertised writable settings and shutter/autofocus/focus-drive commands, complete start/frame/stop Live View gating, and paged media retrieval with capability-gated deletion.
 - Android routes only camera HTTP sockets through the Wi-Fi network that reaches the camera, allowing cellular internet to remain available without process-wide network binding. A physical coexistence result is still required.
 - Current tradeoffs: live view is JPEG polling today, so smoothness and latency depend on Wi-Fi, camera response time, and device JPEG decode cost.
-- Device-validation queue: still capture, independent AF-ON, shutter half-press, movie recording, tap focus, manual focus drive, media browser, media download, and media deletion on EOS R6 Mark III.
+- Device-validation queue: still capture, independent AF-ON, shutter half-press, movie recording, tap focus, Click White Balance, manual focus drive, media browser, media download, and media deletion on EOS R6 Mark III.
 - Planned upgrades: RTP live view experiments.
 
 ## Wired Backends
@@ -38,7 +38,7 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Status: HTTP service, built-in PC control UI, libgphoto2 CLI engine, direct CCAPI engine, and Android/iOS clients are implemented and tested; EOS R6 Mark III device validation remains.
 - Connection: the PC UI can control a USB camera through libgphoto2 or connect directly to the camera's wireless CCAPI origin. Android and iOS can use the same authenticated bridge for a computer-attached USB camera.
 - Engines: `libgphoto2` is the executable open-source USB path; `ccapi` is the executable HTTP(S) wireless path. The Canon EDSDK adapter remains optional research and no Canon binary is redistributed.
-- Current implementation: both engines map into the same session/capability API. libgphoto2 provides camera discovery, dynamic settings, capture, independent AF-ON through its balanced half-press path, explicit half-press, movie target control, relative focus drive, JPEG preview, media transfer and ability-gated deletion. CCAPI provides advertised-operation discovery, dynamic settings, capture with guaranteed manual release, advertised independent AF-ON start/stop with manual half-press fallback, explicit half-press, recording, normalized UI Tap AF mapped through Canon detailed Live View geometry to advertised `PUT afframeposition`, advertised `drivefocus` Near/Far control, bounded JPEG polling, same-origin media traversal, streamed downloads and advertised deletion. The built-in responsive PC UI offers USB/CCAPI mode selection, English/Traditional Chinese, authenticated binary transfer, confirmed deletion and redacted diagnostics. Bridge Bearer tokens and camera passwords are memory-only; camera URL and username may be remembered. Loopback is the secure service default; LAN use requires a Bearer token.
+- Current implementation: both engines map into the same session/capability API. libgphoto2 provides camera discovery, dynamic settings, capture, independent AF-ON through its balanced half-press path, explicit half-press, movie target control, relative focus drive, JPEG preview, media transfer and ability-gated deletion. CCAPI provides advertised-operation discovery, dynamic settings, capture with guaranteed manual release, advertised independent AF-ON start/stop with manual half-press fallback, explicit half-press, recording, normalized UI Tap AF and Click White Balance mapped through Canon detailed Live View geometry to advertised `PUT afframeposition` and `POST clickwb`, advertised `drivefocus` Near/Far control, bounded JPEG polling, same-origin media traversal, streamed downloads and advertised deletion. The built-in responsive PC UI offers USB/CCAPI mode selection, English/Traditional Chinese, authenticated binary transfer, confirmed deletion and redacted diagnostics. Bridge Bearer tokens and camera passwords are memory-only; camera URL and username may be remembered. Loopback is the secure service default; LAN use requires a Bearer token.
 - Strengths: immediate access to mature libgphoto2 Canon mappings, including the checked-in upstream R6 Mark III capability snapshot.
 - Tradeoffs: Android Bridge use requires a computer in the loop. The USB CLI preview launches one process per JPEG and is truthfully capped at 5 FPS; persistent native libgphoto2 and physical-camera validation are later milestones. Direct PC CCAPI uses camera Wi-Fi and client polling, defaults to 15 FPS, and allows up to 30 FPS without claiming the camera will sustain it.
 
@@ -60,7 +60,7 @@ Each backend should map into this surface:
 - battery, storage, and camera status
 - capability matrix and dynamic settings
 - exposure, white balance, and generic setting writes
-- still capture, half-press, recording, tap focus, and focus drive where available
+- still capture, half-press, recording, tap focus, Click White Balance, and focus drive where available
 - media list/download/delete where available
 - live view source, size, and FPS request
 

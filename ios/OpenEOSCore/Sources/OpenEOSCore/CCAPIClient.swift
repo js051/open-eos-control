@@ -254,6 +254,7 @@ public actor CCAPIClient {
             supported.insert(.autofocus)
         }
         if supportsCoordinateTapFocus() { supported.insert(.tapFocus) }
+        if supportsCoordinateClickWhiteBalance() { supported.insert(.clickWhiteBalance) }
         if focusDriveOperation() != nil { supported.insert(.focusDrive) }
         if supports(.get, suffix: "/contents") {
             supported.formUnion([.mediaBrowser, .mediaDownload])
@@ -262,6 +263,7 @@ public actor CCAPIClient {
 
         let allPlanned: Set<CameraFeature> = [
             .liveViewRTP, .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
+            .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaDownload,
             .mediaDelete,
         ]
@@ -275,6 +277,7 @@ public actor CCAPIClient {
                     .liveViewRTP: "RTP decoding is not implemented; this client uses bounded JPEG polling.",
                     .autofocus: "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation.",
                     .tapFocus: "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
+                    .clickWhiteBalance: "The camera must advertise POST clickwb and detailed Live View metadata for Click WB.",
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
                     .mediaThumbnail: "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
                 ]
@@ -401,9 +404,6 @@ public actor CCAPIClient {
 
     public func tapFocus(x: Double, y: Double) async throws -> FocusResult {
         try await ensureInitialized()
-        guard (0...1).contains(x), (0...1).contains(y) else {
-            throw CCAPIError.invalidResponse("Focus coordinates must be normalized from 0 through 1.")
-        }
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/focus/tap", method: .post, json: ["x": x, "y": y])
             return FocusResult(
@@ -418,17 +418,33 @@ public actor CCAPIClient {
         guard supportsCoordinateTapFocus() else {
             throw CCAPIError.unsupported(.tapFocus)
         }
-        guard let geometry = latestLiveViewGeometry else {
-            throw CCAPIError.invalidResponse(
-                "Tap AF needs a detailed Live View frame with Canon image position metadata before focusing."
-            )
-        }
-        let position = geometry.cameraPosition(normalizedX: x, normalizedY: y)
+        let position = try cameraLiveViewPosition(x: x, y: y, feature: .tapFocus)
         try await commandOK(
             operation: operation,
             json: ["positionx": position.x, "positiony": position.y]
         )
         return FocusResult(accepted: true, x: x, y: y)
+    }
+
+    public func clickWhiteBalance(x: Double, y: Double) async throws -> CameraStatus {
+        try await ensureInitialized()
+        if resolvedMode == .simulator {
+            return try parseSimulatorStatus(await requestJSON(
+                path: "/ccapi/whitebalance/click",
+                method: .post,
+                json: ["x": x, "y": y]
+            ))
+        }
+        guard let operation = clickWhiteBalanceOperation(), supportsCoordinateClickWhiteBalance() else {
+            throw CCAPIError.unsupported(.clickWhiteBalance)
+        }
+        let position = try cameraLiveViewPosition(x: x, y: y, feature: .clickWhiteBalance)
+        try await commandOK(
+            operation: operation,
+            json: ["positionx": position.x, "positiony": position.y]
+        )
+        observedFeatures.insert(.clickWhiteBalance)
+        return try await status()
     }
 
     public func driveFocus(
@@ -784,11 +800,26 @@ public actor CCAPIClient {
         operation(.get, suffix: "/shooting/liveview/flipdetail")
     }
 
+    private func clickWhiteBalanceOperation() -> CCAPIOperation? {
+        operation(.post, suffix: "/shooting/liveview/clickwb")
+    }
+
     private func supportsCoordinateTapFocus() -> Bool {
         tapFocusOperation() != nil &&
             detailedLiveViewOperation() != nil &&
             supports(.post, suffix: "/shooting/liveview") &&
             supports(.delete, suffix: "/shooting/liveview")
+    }
+
+    private func supportsCoordinateClickWhiteBalance() -> Bool {
+        clickWhiteBalanceOperation() != nil &&
+            detailedLiveViewOperation() != nil &&
+            supports(.post, suffix: "/shooting/liveview") &&
+            supports(.delete, suffix: "/shooting/liveview")
+    }
+
+    private func needsLiveViewGeometry() -> Bool {
+        supportsCoordinateTapFocus() || supportsCoordinateClickWhiteBalance()
     }
 
     private func autofocusOperation() -> CCAPIOperation? {
@@ -808,7 +839,7 @@ public actor CCAPIClient {
             ]
         }
         var paths: [String] = []
-        if supportsCoordinateTapFocus(), let detail = detailedLiveViewOperation() {
+        if needsLiveViewGeometry(), let detail = detailedLiveViewOperation() {
             paths.append("\(detail.path)?kind=both")
         }
         paths.append(contentsOf: [
@@ -884,6 +915,22 @@ public actor CCAPIClient {
         }
 
         return find(root)
+    }
+
+    private func cameraLiveViewPosition(
+        x: Double,
+        y: Double,
+        feature: CameraFeature
+    ) throws -> (x: Int, y: Int) {
+        guard (0...1).contains(x), (0...1).contains(y) else {
+            throw CCAPIError.invalidResponse("\(feature.rawValue) coordinates must be normalized from 0 through 1.")
+        }
+        guard let geometry = latestLiveViewGeometry else {
+            throw CCAPIError.invalidResponse(
+                "\(feature.rawValue) needs a detailed Live View frame with Canon image position metadata."
+            )
+        }
+        return geometry.cameraPosition(normalizedX: x, normalizedY: y)
     }
 
     private func supportsCompleteLiveView() -> Bool {
@@ -1104,7 +1151,7 @@ public actor CCAPIClient {
         ]
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
-            .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
+            .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]

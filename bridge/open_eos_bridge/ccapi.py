@@ -472,6 +472,8 @@ class CcapiSession:
                 supported.add(CameraFeature.AUTOFOCUS)
             if self._supports_coordinate_tap_focus():
                 supported.add(CameraFeature.TAP_FOCUS)
+            if self._supports_coordinate_click_white_balance():
+                supported.add(CameraFeature.CLICK_WHITE_BALANCE)
             if self._operation("POST", "/shooting/control/drivefocus"):
                 supported.add(CameraFeature.FOCUS_DRIVE)
             if self._supports("GET", "/contents"):
@@ -486,6 +488,7 @@ class CcapiSession:
                 CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.VIDEO_RECORDING,
                 CameraFeature.TAP_FOCUS,
+                CameraFeature.CLICK_WHITE_BALANCE,
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
@@ -513,6 +516,9 @@ class CcapiSession:
                     CameraFeature.TAP_FOCUS.value: (
                         "The camera must advertise PUT afframeposition and detailed Live View metadata "
                         "for coordinate Tap AF."
+                    ),
+                    CameraFeature.CLICK_WHITE_BALANCE.value: (
+                        "The camera must advertise POST clickwb and detailed Live View metadata for Click WB."
                     ),
                     CameraFeature.MEDIA_THUMBNAIL.value: (
                         "No verified Canon CCAPI thumbnail resource is advertised by this camera."
@@ -640,30 +646,27 @@ class CcapiSession:
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
         with self._lock:
-            if not 0 <= x <= 1 or not 0 <= y <= 1:
-                raise BridgeError(
-                    "INVALID_FOCUS_POSITION",
-                    "Focus coordinates must be normalized from 0 through 1.",
-                    status_code=422,
-                    feature=CameraFeature.TAP_FOCUS.value,
-                    engine=self.engine_name,
-                )
             operation = self._operation("PUT", "/shooting/liveview/afframeposition")
             if operation is None or not self._supports_coordinate_tap_focus():
                 raise unsupported(CameraFeature.TAP_FOCUS.value, self.engine_name)
-            geometry = self._latest_live_view_geometry
-            if geometry is None:
-                raise BridgeError(
-                    "LIVE_VIEW_COORDINATES_UNAVAILABLE",
-                    "Tap AF needs a detailed Live View frame with Canon image position metadata before focusing.",
-                    status_code=409,
-                    feature=CameraFeature.TAP_FOCUS.value,
-                    engine=self.engine_name,
-                )
-            position_x, position_y = geometry.camera_position(x, y)
+            position_x, position_y = self._camera_live_view_position(x, y, CameraFeature.TAP_FOCUS)
             self._command_ok(operation, {"positionx": position_x, "positiony": position_y})
             self._observed.add(CameraFeature.TAP_FOCUS)
             return FocusResult(accepted=True, x=x, y=y)
+
+    def click_white_balance(self, x: float, y: float) -> CameraStatus:
+        with self._lock:
+            operation = self._operation("POST", "/shooting/liveview/clickwb")
+            if operation is None or not self._supports_coordinate_click_white_balance():
+                raise unsupported(CameraFeature.CLICK_WHITE_BALANCE.value, self.engine_name)
+            position_x, position_y = self._camera_live_view_position(
+                x,
+                y,
+                CameraFeature.CLICK_WHITE_BALANCE,
+            )
+            self._command_ok(operation, {"positionx": position_x, "positiony": position_y})
+            self._observed.add(CameraFeature.CLICK_WHITE_BALANCE)
+            return self.status()
 
     def start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._lock:
@@ -1155,7 +1158,7 @@ class CcapiSession:
         flip = self._operation("GET", "/shooting/liveview/flip")
         flip_detail = self._operation("GET", "/shooting/liveview/flipdetail")
         live_view = self._operation("GET", "/shooting/liveview")
-        if flip_detail and self._supports_coordinate_tap_focus():
+        if flip_detail and self._needs_live_view_geometry():
             candidates.append(f"{flip_detail.path}?kind=both")
         if flip:
             candidates.append(flip.path)
@@ -1172,6 +1175,42 @@ class CcapiSession:
             and self._supports("POST", "/shooting/liveview")
             and self._supports("DELETE", "/shooting/liveview")
         )
+
+    def _supports_coordinate_click_white_balance(self) -> bool:
+        return bool(
+            self._operation("POST", "/shooting/liveview/clickwb")
+            and self._operation("GET", "/shooting/liveview/flipdetail")
+            and self._supports("POST", "/shooting/liveview")
+            and self._supports("DELETE", "/shooting/liveview")
+        )
+
+    def _needs_live_view_geometry(self) -> bool:
+        return self._supports_coordinate_tap_focus() or self._supports_coordinate_click_white_balance()
+
+    def _camera_live_view_position(
+        self,
+        x: float,
+        y: float,
+        feature: CameraFeature,
+    ) -> tuple[int, int]:
+        if not 0 <= x <= 1 or not 0 <= y <= 1:
+            raise BridgeError(
+                "INVALID_LIVE_VIEW_POSITION",
+                "Live View coordinates must be normalized from 0 through 1.",
+                status_code=422,
+                feature=feature.value,
+                engine=self.engine_name,
+            )
+        geometry = self._latest_live_view_geometry
+        if geometry is None:
+            raise BridgeError(
+                "LIVE_VIEW_COORDINATES_UNAVAILABLE",
+                "A detailed Live View frame with Canon image position metadata is required before this command.",
+                status_code=409,
+                feature=feature.value,
+                engine=self.engine_name,
+            )
+        return geometry.camera_position(x, y)
 
     def _supports(self, method: str, suffix: str) -> bool:
         return any(item.method == method and item.path.endswith(suffix) for item in self._operations)

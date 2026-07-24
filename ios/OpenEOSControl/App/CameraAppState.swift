@@ -32,6 +32,7 @@ final class CameraAppState: ObservableObject {
     @Published var activeSheet: CameraSheet?
     @Published var hudVisible = true
     @Published var showGrid = false
+    @Published var liveViewTapAction = LiveViewTapAction.focus
     @Published var autoRefresh = true
     @Published private(set) var requestedFPS: Int
     @Published private(set) var liveViewSize: LiveViewSize
@@ -65,6 +66,12 @@ final class CameraAppState: ObservableObject {
     var capabilities: CameraCapabilities? { snapshot?.capabilities }
     var status: CameraStatus? { snapshot?.status }
     var info: CameraInfo? { snapshot?.info }
+    var effectiveLiveViewTapAction: LiveViewTapAction? {
+        if liveViewTapAction == .whiteBalance, supports(.clickWhiteBalance) { return .whiteBalance }
+        if supports(.tapFocus) { return .focus }
+        if supports(.clickWhiteBalance) { return .whiteBalance }
+        return nil
+    }
     var connectionEndpoint: String { connectionMode == .ccapi ? baseURL : bridgeURL }
     var transportIdentifier: String {
         if isPreview { return "OFFLINE_PREVIEW" }
@@ -389,6 +396,29 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    func clickWhiteBalance(x: Double, y: Double) async {
+        guard supports(.clickWhiteBalance), begin(.setting) else { return }
+        defer { end(.setting) }
+        let normalizedX = min(max(x, 0), 1)
+        let normalizedY = min(max(y, 0), 1)
+        if isPreview {
+            if let status {
+                updateStatus(status.replacing(exposure: status.exposure.replacing(key: "whitebalance", value: "click")))
+            }
+            showFocusMarker(x: normalizedX, y: normalizedY, accepted: true)
+            return
+        }
+        guard let session else { return }
+        do {
+            updateStatus(try await session.clickWhiteBalance(x: normalizedX, y: normalizedY))
+            showFocusMarker(x: normalizedX, y: normalizedY, accepted: true)
+            lastError = nil
+        } catch {
+            record(error)
+            showFocusMarker(x: normalizedX, y: normalizedY, accepted: false)
+        }
+    }
+
     func driveFocus(direction: FocusDriveDirection, step: FocusDriveStep) async {
         guard supports(.focusDrive), begin(.focus) else { return }
         defer { end(.focus) }
@@ -701,7 +731,7 @@ final class CameraAppState: ObservableObject {
         ]
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
-            .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
+            .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
             .exposureControl, .whiteBalanceControl, .advancedSettings, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]

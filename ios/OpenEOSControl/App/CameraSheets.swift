@@ -332,7 +332,11 @@ private struct MoreSettingsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if settings.isEmpty {
+                    if camera.supports(.clickWhiteBalance) {
+                        liveViewTapActionPicker
+                        Divider().overlay(Color.cameraBorder)
+                    }
+                    if settings.isEmpty && !camera.supports(.clickWhiteBalance) {
                         ContentUnavailableView("no_settings", systemImage: "slider.horizontal.3")
                             .padding(.top, 48)
                     } else {
@@ -359,6 +363,29 @@ private struct MoreSettingsView: View {
 
     private var settings: [CameraSetting] {
         advancedSettingsForMode(camera.capabilities?.settings ?? [], mode: camera.captureMode)
+    }
+
+    private var liveViewTapActionPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("live_view_tap_action")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Color.cameraText)
+            Picker("live_view_tap_action", selection: liveViewTapActionBinding) {
+                if camera.supports(.tapFocus) {
+                    Label("tap_action_focus", systemImage: "viewfinder").tag(LiveViewTapAction.focus)
+                }
+                Label("tap_action_white_balance", systemImage: "eyedropper").tag(LiveViewTapAction.whiteBalance)
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(.vertical, 14)
+    }
+
+    private var liveViewTapActionBinding: Binding<LiveViewTapAction> {
+        Binding(
+            get: { camera.effectiveLiveViewTapAction ?? .focus },
+            set: { camera.liveViewTapAction = $0 }
+        )
     }
 
     private func settingRow(_ setting: CameraSetting) -> some View {

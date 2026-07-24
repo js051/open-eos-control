@@ -52,6 +52,7 @@ class DesktopBridgeClientTest {
         client.halfPressShutter()
         val recording = client.startRecording()
         val stopped = client.stopRecording()
+        val clickWhiteBalanceStatus = client.clickWhiteBalance(0.4, 0.6)
         client.startLiveView(LiveViewRequest(fps = 5, size = LiveViewSize.MEDIUM))
         val frame = client.liveViewFrame(9)
         val focus = client.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.LARGE)
@@ -73,10 +74,12 @@ class DesktopBridgeClientTest {
         assertEquals("Daylight", whiteBalanceStatus.exposure.whiteBalance)
         assertTrue(recording.recording == true)
         assertFalse(stopped.recording == true)
+        assertEquals("click", clickWhiteBalanceStatus.exposure.whiteBalance)
         assertTrue(capabilities.matrix.supports(CameraFeature.DESKTOP_BRIDGE))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.CLICK_WHITE_BALANCE))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
         assertFalse(capabilities.matrix.supports(CameraFeature.USB_DIAGNOSTICS))
         assertEquals(listOf("Auto", "100", "400", "800"), capabilities.iso)
@@ -109,6 +112,12 @@ class DesktopBridgeClientTest {
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/auto") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/shutter/half-press") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/drive") == true })
+        val clickWhiteBalanceRequest = requests.first {
+            it.requestUrl?.encodedPath?.endsWith("/whitebalance/click") == true
+        }
+        val clickWhiteBalancePayload = JSONObject(clickWhiteBalanceRequest.body.readUtf8())
+        assertEquals(0.4, clickWhiteBalancePayload.getDouble("x"), 0.0001)
+        assertEquals(0.6, clickWhiteBalancePayload.getDouble("y"), 0.0001)
         assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath?.contains("/media/") == true })
         assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath == "/v1/session/session-1" })
     }
@@ -193,6 +202,10 @@ class DesktopBridgeClientTest {
                 }
                 path.endsWith("/settings/whitebalance") -> {
                     whiteBalance = JSONObject(request.body.readUtf8()).getString("value")
+                    json(statusJson())
+                }
+                path.endsWith("/whitebalance/click") -> {
+                    whiteBalance = "click"
                     json(statusJson())
                 }
                 path.endsWith("/capture/still") -> json(statusJson())
@@ -310,7 +323,7 @@ class DesktopBridgeClientTest {
               "supported": [
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
                 "STILL_CAPTURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
-                "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "ADVANCED_SETTINGS",
+                "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
                 "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
               ],
               "planned": ["TAP_FOCUS", "LIVE_VIEW_RTP"],

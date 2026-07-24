@@ -8,6 +8,8 @@ client = TestClient(app)
 def setup_function() -> None:
     state["capture_count"] = 0
     state["half_pressed"] = False
+    state["click_wb_count"] = 0
+    state["exposure"]["white_balance"] = "auto"
     state["media"] = [
         {
             "id": "SIM_0002.PNG",
@@ -33,6 +35,18 @@ def test_half_press_and_release_are_stateful() -> None:
     assert release.status_code == 200
     assert release.json()["half_pressed"] is False
     assert state["half_pressed"] is False
+
+
+def test_click_white_balance_records_the_point_and_updates_status() -> None:
+    response = client.post("/ccapi/whitebalance/click", json={"x": 0.4, "y": 0.6})
+
+    assert response.status_code == 200
+    assert response.json()["exposure"]["white_balance"] == "click"
+    assert (state["click_wb_x"], state["click_wb_y"], state["click_wb_count"]) == (
+        0.4,
+        0.6,
+        1,
+    )
 
 
 def test_capture_adds_a_downloadable_media_item() -> None:

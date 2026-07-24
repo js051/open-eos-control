@@ -172,6 +172,75 @@ class CcapiClientTest {
     }
 
     @Test
+    fun simulatorClickWhiteBalanceSendsNormalizedCoordinatesAndUpdatesStatus() = runTest {
+        server.enqueue(jsonResponse(STATUS_JSON.replace("\"white_balance\": \"auto\"", "\"white_balance\": \"click\"")))
+
+        val status = client.clickWhiteBalance(0.4, 0.6)
+        val request = server.takeRequest()
+        val body = JSONObject(request.body.readUtf8())
+
+        assertEquals("/ccapi/whitebalance/click", request.path)
+        assertEquals("POST", request.method)
+        assertEquals(0.4, body.getDouble("x"), 0.0001)
+        assertEquals(0.6, body.getDouble("y"), 0.0001)
+        assertEquals("click", status.exposure.whiteBalance)
+    }
+
+    @Test
+    fun realClickWhiteBalanceUsesAdvertisedCanonCoordinates() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[
+                    {"path":"/shooting/liveview","post":true,"delete":true},
+                    {"path":"/shooting/liveview/clickwb","post":true},
+                    {"path":"/shooting/liveview/flipdetail","get":true},
+                    {"path":"/shooting/settings","get":true}
+                ]}""",
+            ),
+        )
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x05, 0x06, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(
+            binaryResponse(
+                detailedLiveView(
+                    jpeg,
+                    """{"liveview":{"image":{"positionx":100,"positiony":200,"positionwidth":6000,"positionheight":4000}}}""",
+                ),
+                "application/octet-stream",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON.replace("\"auto\"", "\"click\"")))
+
+        client.initialize()
+        client.liveViewFrame(cacheKey = 8)
+        val status = client.clickWhiteBalance(0.4, 0.6)
+
+        server.takeRequest()
+        val frame = server.takeRequest()
+        val click = server.takeRequest()
+        val body = JSONObject(click.body.readUtf8())
+        assertEquals("/ccapi/ver110/shooting/liveview/flipdetail?kind=both&t=8", frame.path)
+        assertEquals("POST", click.method)
+        assertEquals("/ccapi/ver110/shooting/liveview/clickwb", click.path)
+        assertEquals(2500, body.getInt("positionx"))
+        assertEquals(2600, body.getInt("positiony"))
+        assertEquals(setOf("positionx", "positiony"), body.keys().asSequence().toSet())
+        val statusRequests = List(3) { server.takeRequest().path }
+        assertEquals(
+            listOf(
+                "/ccapi/ver110/devicestatus/batterylist",
+                "/ccapi/ver110/devicestatus/storage",
+                "/ccapi/ver110/shooting/settings",
+            ),
+            statusRequests,
+        )
+        assertEquals("click", status.exposure.whiteBalance)
+    }
+
+    @Test
     fun realTapFocusUsesAdvertisedCanonCoordinates() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
@@ -179,6 +248,7 @@ class CcapiClientTest {
                 """{"ver110":[
                     {"path":"/shooting/liveview","post":true,"delete":true},
                     {"path":"/shooting/liveview/afframeposition","put":true},
+                    {"path":"/shooting/liveview/clickwb","post":true},
                     {"path":"/shooting/liveview/flipdetail","get":true}
                 ]}""",
             ),
@@ -219,6 +289,7 @@ class CcapiClientTest {
                 """{"ver100":[
                     {"path":"/shooting/liveview","post":true,"delete":true},
                     {"path":"/shooting/liveview/afframeposition","put":true},
+                    {"path":"/shooting/liveview/clickwb","post":true},
                     {"path":"/shooting/liveview/flipdetail","get":true}
                 ]}""",
             ),
@@ -229,6 +300,11 @@ class CcapiClientTest {
 
         assertTrue(failure is IllegalStateException)
         assertTrue(failure?.message.orEmpty().contains("detailed Live View frame"))
+        assertEquals(1, server.requestCount)
+
+        val clickFailure = runCatching { client.clickWhiteBalance(0.25, 0.75) }.exceptionOrNull()
+        assertTrue(clickFailure is IllegalStateException)
+        assertTrue(clickFailure?.message.orEmpty().contains("detailed Live View frame"))
         assertEquals(1, server.requestCount)
     }
 

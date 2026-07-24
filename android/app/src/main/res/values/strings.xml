@@ -187,6 +187,9 @@
     <string name="af_on">AF</string>
     <string name="manual_focus_drive">Manual focus drive</string>
     <string name="manual_focus_drive_hint">Move lens focus in one of three relative step sizes.</string>
+    <string name="live_view_tap_action">Live View tap action</string>
+    <string name="tap_action_focus">Tap focus</string>
+    <string name="tap_action_white_balance">Click white balance</string>
     <string name="focus_nearer">Near</string>
     <string name="focus_farther">Far</string>
     <string name="focus_drive_step">%1$s focus, step %2$d</string>

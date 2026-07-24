@@ -667,6 +667,56 @@ class CameraViewModel(
         }
     }
 
+    fun setLiveViewTapAction(action: LiveViewTapAction) {
+        val feature = when (action) {
+            LiveViewTapAction.FOCUS -> CameraFeature.TAP_FOCUS
+            LiveViewTapAction.WHITE_BALANCE -> CameraFeature.CLICK_WHITE_BALANCE
+        }
+        if (_uiState.value.previewMode || _uiState.value.supports(feature)) {
+            _uiState.update { it.copy(liveViewTapAction = action) }
+        }
+    }
+
+    fun clickWhiteBalance(x: Double, y: Double) {
+        _uiState.update {
+            it.copy(
+                focusPoint = FocusPoint(x, y),
+                focusFeedback = FocusFeedback.FOCUSING,
+            )
+        }
+        if (_uiState.value.previewMode) {
+            _uiState.update { state ->
+                state.copy(
+                    status = state.status?.copy(
+                        exposure = state.status.exposure.copy(whiteBalance = "click"),
+                    ),
+                    focusFeedback = FocusFeedback.SUCCESS,
+                )
+            }
+            clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
+            return
+        }
+        runCamera(
+            operation = CameraOperation.SETTING,
+            onError = {
+                _uiState.update { state -> state.copy(focusFeedback = FocusFeedback.FAILURE) }
+                clearFocusFeedbackAfter(FocusFeedback.FAILURE)
+            },
+        ) {
+            val status = repository.clickWhiteBalance(x, y)
+            _uiState.update {
+                it.copy(
+                    status = status,
+                    focusPoint = FocusPoint(x, y),
+                    focusFeedback = FocusFeedback.SUCCESS,
+                )
+            }
+            clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
+            refreshLiveViewFrameInternal(reportErrors = false)
+            startLiveViewLoopIfNeeded()
+        }
+    }
+
     private fun updateStatus(
         operation: CameraOperation,
         block: suspend () -> dev.openeos.control.data.CameraStatus,

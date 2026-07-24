@@ -47,8 +47,24 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.stillCapture))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
+    }
+
+    func testOfflinePreviewClickWhiteBalanceUpdatesTheVisibleValue() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+        state.liveViewTapAction = .whiteBalance
+
+        await state.clickWhiteBalance(x: 0.4, y: 0.6)
+
+        XCTAssertEqual(state.snapshot?.status.exposure.whiteBalance, "click")
+        XCTAssertEqual(state.focusMarker, FocusMarker(x: 0.4, y: 0.6, accepted: true))
+        XCTAssertNil(state.lastError)
     }
 
     func testOfflinePreviewDeletionRemovesOnlyConfirmedItem() async {

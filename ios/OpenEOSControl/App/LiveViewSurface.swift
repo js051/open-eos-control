@@ -60,12 +60,18 @@ struct LiveViewSurface: View {
             .contentShape(Rectangle())
             .gesture(
                 SpatialTapGesture().onEnded { value in
-                    guard camera.supports(.tapFocus), imageRect.contains(value.location), imageRect.width > 0, imageRect.height > 0 else {
+                    guard let action = camera.effectiveLiveViewTapAction,
+                          imageRect.contains(value.location), imageRect.width > 0, imageRect.height > 0 else {
                         return
                     }
                     let x = (value.location.x - imageRect.minX) / imageRect.width
                     let y = (value.location.y - imageRect.minY) / imageRect.height
-                    Task { await camera.tapFocus(x: x, y: y) }
+                    Task {
+                        switch action {
+                        case .focus: await camera.tapFocus(x: x, y: y)
+                        case .whiteBalance: await camera.clickWhiteBalance(x: x, y: y)
+                        }
+                    }
                 }
             )
         }

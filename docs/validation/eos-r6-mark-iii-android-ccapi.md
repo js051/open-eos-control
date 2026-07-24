@@ -22,7 +22,7 @@ This record captures physical-camera evidence reported from the Android app. Ide
 | JPEG Live View | Passed | Requested 15 FPS, rolling observed 15.1 FPS, JPEG content type, 66,086-byte recorded frame |
 | Live View size compatibility fallback | Passed | Initial POST with `liveviewsize` returned HTTP 400 `Invalid parameter`; retrying the camera-display-only payload restored Live View |
 | Still capture and half-press | Pending | The client did not expose these capabilities in this older report. Current clients now parse Canon's full same-origin discovery `url` entries, but this camera still needs a fresh capability report and command result |
-| Movie start/stop and Tap AF | Pending | No recorded physical result yet |
+| Movie start/stop, Tap AF, and Click White Balance | Pending | No recorded physical result yet |
 | Storage, media browser and download | Pending | Storage was `null` in the captured report; re-test after the canonical discovery `url` parser fix |
 | Camera Wi-Fi plus cellular internet | Pending re-test | Android now binds camera HTTP sockets to the Wi-Fi route without process-wide binding; a post-change physical result is still required |
 | Android USB/PTP | Pending | No USB validation is represented by this CCAPI record |
@@ -52,5 +52,5 @@ This report predates `capabilitySource`, `protocolVersions`, `advertisedCommands
 ## Next Physical Pass
 
 1. Keep cellular data enabled while connected to the camera Wi-Fi and confirm Debug reports `cameraRoute=WIFI_BOUND` plus `cellularAvailable=true`.
-2. Install a build containing the canonical discovery `url` parser, capture a fresh diagnostic report, and retain `capabilitySource`, `protocolVersions`, `advertisedCommandCount`, `advertisedCommands`, `writableSettings`, and `capabilityEvidenceTruncated` after exercising each available still, half-press, movie, Tap AF, storage, browse and download control.
+2. Install a build containing the canonical discovery `url` parser, capture a fresh diagnostic report, and retain `capabilitySource`, `protocolVersions`, `advertisedCommandCount`, `advertisedCommands`, `writableSettings`, and `capabilityEvidenceTruncated` after exercising each available still, half-press, movie, Tap AF, Click White Balance, storage, browse and download control.
 3. Connect over USB-C/OTG and complete the checklist in [Android USB/PTP](../android-usb-ptp.md).

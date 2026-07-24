@@ -71,6 +71,8 @@ interface CameraControlBackend {
     suspend fun startRecording(): CameraStatus
     suspend fun stopRecording(): CameraStatus
     suspend fun tapFocus(x: Double, y: Double): FocusResult
+    suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus =
+        unsupported(CameraFeature.CLICK_WHITE_BALANCE)
     suspend fun captureStill(): CameraStatus = unsupported(CameraFeature.STILL_CAPTURE)
     suspend fun autofocus(): CameraStatus = unsupported(CameraFeature.AUTOFOCUS)
     suspend fun halfPressShutter(): CameraStatus = unsupported(CameraFeature.SHUTTER_HALF_PRESS)
@@ -134,6 +136,9 @@ class CcapiCameraBackend(
     override suspend fun stopRecording(): CameraStatus = client.stopRecording()
 
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = client.tapFocus(x, y)
+
+    override suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus =
+        client.clickWhiteBalance(x, y)
 
     override suspend fun captureStill(): CameraStatus = client.captureStill()
 
@@ -204,6 +209,9 @@ class DesktopBridgeCameraBackend(
     override suspend fun stopRecording(): CameraStatus = client.stopRecording()
 
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = client.tapFocus(x, y)
+
+    override suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus =
+        client.clickWhiteBalance(x, y)
 
     override suspend fun captureStill(): CameraStatus = client.captureStill()
 
@@ -303,6 +311,9 @@ class PlannedCameraBackend(
     override suspend fun stopRecording(): CameraStatus = unsupported(CameraFeature.VIDEO_RECORDING)
 
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = unsupported(CameraFeature.TAP_FOCUS)
+
+    override suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus =
+        unsupported(CameraFeature.CLICK_WHITE_BALANCE)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String =
         throw UnsupportedOperationException("${transport.label} live view is planned but not implemented yet.")

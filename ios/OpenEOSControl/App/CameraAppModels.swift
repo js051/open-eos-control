@@ -16,6 +16,13 @@ enum AppCaptureMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum LiveViewTapAction: String, CaseIterable, Identifiable {
+    case focus
+    case whiteBalance
+
+    var id: String { rawValue }
+}
+
 enum AppConnectionMode: String, CaseIterable, Identifiable {
     case ccapi
     case desktopBridge

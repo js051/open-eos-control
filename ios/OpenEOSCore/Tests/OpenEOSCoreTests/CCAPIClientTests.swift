@@ -21,6 +21,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/control/af","post":true},
         {"path":"/shooting/control/recbutton","post":true},
         {"path":"/shooting/liveview/afframeposition","put":true},
+        {"path":"/shooting/liveview/clickwb","post":true},
         {"path":"/shooting/control/drivefocus","post":true},
         {"path":"/shooting/liveview","get":true,"post":true,"delete":true},
         {"path":"/shooting/liveview/flip","get":true},
@@ -64,6 +65,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.shutterHalfPress))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.videoRecording))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.tapFocus))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.mediaThumbnail))
@@ -436,6 +438,61 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(json, ["positionx": 1600, "positiony": 3200])
     }
 
+    func testClickWhiteBalanceUsesCanonImagePositionCoordinates() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let jpeg = Data([0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9])
+        await transport.enqueue(
+            method: "GET",
+            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both&t=10",
+            headers: ["content-type": "application/octet-stream"],
+            body: detailedLiveView(jpeg: jpeg)
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver100/shooting/liveview/clickwb",
+            status: 204,
+            body: Data()
+        )
+        await enqueueStatus(on: transport)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        try await client.initialize()
+        _ = try await client.liveViewFrame(cacheKey: 10)
+        let status = try await client.clickWhiteBalance(x: 0.4, y: 0.6)
+
+        XCTAssertEqual(status.exposure.whiteBalance, "auto")
+        let requests = await transport.requests()
+        let click = try XCTUnwrap(requests.first { $0.path.hasSuffix("/shooting/liveview/clickwb") })
+        let body = try XCTUnwrap(click.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Int])
+        XCTAssertEqual(json, ["positionx": 2500, "positiony": 2600])
+    }
+
+    func testSimulatorClickWhiteBalanceUsesTheCommandResponse() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/whitebalance/click",
+            body: #"{"connected":true,"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"click"}}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let status = try await client.clickWhiteBalance(x: 0.4, y: 0.6)
+
+        XCTAssertEqual(status.exposure.whiteBalance, "click")
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi/whitebalance/click"])
+        let body = try XCTUnwrap(requests.first?.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["x"] as? Double, 0.4)
+        XCTAssertEqual(json["y"] as? Double, 0.6)
+    }
+
     func testTapFocusWithoutDetailedFrameSendsNoCommand() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
@@ -448,6 +505,12 @@ final class CCAPIClientTests: XCTestCase {
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("detailed Live View frame"))
         }
+        do {
+            _ = try await client.clickWhiteBalance(x: 0.25, y: 0.75)
+            XCTFail("Expected missing Live View metadata")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("detailed Live View frame"))
+        }
         let requests = await transport.requests()
         XCTAssertEqual(requests.count, 1)
     }
@@ -456,7 +519,7 @@ final class CCAPIClientTests: XCTestCase {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
             path: "/ccapi",
-            body: #"{"ver100":[{"path":"/shooting/liveview","post":true,"delete":true},{"path":"/shooting/liveview/afframeposition","put":true}]}"#
+            body: #"{"ver100":[{"path":"/shooting/liveview","post":true,"delete":true},{"path":"/shooting/liveview/afframeposition","put":true},{"path":"/shooting/liveview/clickwb","post":true}]}"#
         )
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
@@ -464,6 +527,8 @@ final class CCAPIClientTests: XCTestCase {
 
         XCTAssertFalse(capabilities.matrix.supports(.tapFocus))
         XCTAssertTrue(capabilities.matrix.planned.contains(.tapFocus))
+        XCTAssertFalse(capabilities.matrix.supports(.clickWhiteBalance))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.clickWhiteBalance))
     }
 
     func testSettingRejectsValueNotAdvertisedByCamera() async throws {
