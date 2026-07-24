@@ -226,10 +226,10 @@ public final class CCAPIH264RTPDepacketizer {
         }
 
         guard packet.marker else { return nil }
-        let completed = if validAccessUnit,
-                           fragmentedNAL == nil,
-                           !nalUnits.isEmpty,
-                           let timestamp {
+        let completed: CCAPIH264AccessUnit? = if validAccessUnit,
+                                                 fragmentedNAL == nil,
+                                                 !nalUnits.isEmpty,
+                                                 let timestamp {
             CCAPIH264AccessUnit(
                 nalUnits: nalUnits,
                 rtpTimestamp: timestamp,
