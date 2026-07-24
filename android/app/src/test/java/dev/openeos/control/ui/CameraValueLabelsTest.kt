@@ -18,6 +18,8 @@ class CameraValueLabelsTest {
             Triple("meteringmode", "Evaluative", R.string.camera_value_evaluative_metering),
             Triple("picturestyle", "Fine detail", R.string.camera_value_fine_detail),
             Triple("highisonr", "Multi-Shot", R.string.camera_value_multi_shot),
+            Triple("autopoweroff", "30 minutes", R.string.camera_value_30_minutes),
+            Triple("autopoweroff", "Disable", R.string.camera_value_disable),
             Triple("aeb", "off", R.string.camera_value_off),
             Triple("stillimagequalitycf", "cRAW + Large Fine JPEG", R.string.camera_value_craw_large_fine_jpeg),
             Triple("shootingmode", "TV", R.string.camera_value_shutter_priority_ae),

@@ -29,6 +29,7 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "flashmode" -> flashModeValueLabels[value]
         "picturestyle" -> pictureStyleValueLabels[value]
         "highisonr" -> highIsoNoiseReductionValueLabels[value]
+        "autopoweroff" -> autoPowerOffValueLabels[value]
         "aeb" -> toggleValueLabels[value]
         "stillimagequality", "stillimagequalitysd", "stillimagequalitycf" ->
             imageQualityValueLabels[value]
@@ -189,6 +190,17 @@ private val highIsoNoiseReductionValueLabels = mapOf(
     "normal" to R.string.camera_value_normal,
     "high" to R.string.camera_value_high,
     "multi shot" to R.string.camera_value_multi_shot,
+)
+
+private val autoPowerOffValueLabels = mapOf(
+    "15 seconds" to R.string.camera_value_15_seconds,
+    "30 seconds" to R.string.camera_value_30_seconds,
+    "1 minute" to R.string.camera_value_1_minute,
+    "3 minutes" to R.string.camera_value_3_minutes,
+    "5 minutes" to R.string.camera_value_5_minutes,
+    "10 minutes" to R.string.camera_value_10_minutes,
+    "30 minutes" to R.string.camera_value_30_minutes,
+    "disable" to R.string.camera_value_disable,
 )
 
 private val imageQualityValueLabels = mapOf(

@@ -29,6 +29,7 @@ object CanonEosPropertyCode {
     const val WHITE_BALANCE_ADJUST_B = 0xD10C
     const val COLOR_SPACE = 0xD10F
     const val PICTURE_STYLE = 0xD110
+    const val AUTO_POWER_OFF = 0xD114
     const val IMAGE_FORMAT = 0xD120
     const val IMAGE_FORMAT_CF = 0xD121
     const val IMAGE_FORMAT_SD = 0xD122
@@ -101,6 +102,7 @@ object CanonEosPtp {
         CanonEosSettingSpec(CanonEosPropertyCode.COLOR_SPACE, "colorspace", "Color space"),
         CanonEosSettingSpec(CanonEosPropertyCode.MULTI_ASPECT, "aspectratio", "Aspect ratio"),
         CanonEosSettingSpec(CanonEosPropertyCode.POWER_ZOOM_SPEED, "zoomspeed", "Power zoom speed"),
+        CanonEosSettingSpec(CanonEosPropertyCode.AUTO_POWER_OFF, "autopoweroff", "Auto power off"),
         CanonEosSettingSpec(CanonEosPropertyCode.FOCUS_MODE, "afoperation", "AF operation"),
         CanonEosSettingSpec(CanonEosPropertyCode.CONTINUOUS_AF_MODE, "continuousaf", "Continuous AF"),
         CanonEosSettingSpec(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, "afmethod", "AF method"),
@@ -289,10 +291,14 @@ object CanonEosPtp {
         }
     }
 
-    fun propertyOptions(propertyCode: Int, values: List<Long>): List<CanonEosPropertyOption> =
-        values.distinct().map { value ->
+    fun propertyOptions(propertyCode: Int, values: List<Long>): List<CanonEosPropertyOption> {
+        val selectableValues = propertySpecs[propertyCode]?.selectableValues
+        return values.distinct().filter { value ->
+            selectableValues == null || value in selectableValues
+        }.map { value ->
             CanonEosPropertyOption(value = value, label = propertyLabel(propertyCode, value))
         }.distinctBy(CanonEosPropertyOption::label)
+    }
 
     fun propertyLabel(propertyCode: Int, value: Long): String = when {
         propertyCode in imageFormatPropertyCodes -> imageFormatLabel(value)
@@ -456,6 +462,7 @@ object CanonEosPtp {
         val valueBytes: Int,
         val labels: Map<Long, String>,
         val signed: Boolean = false,
+        val selectableValues: Set<Long>? = null,
     )
 
     private val isoLabels = mapOf(
@@ -676,6 +683,17 @@ object CanonEosPtp {
         value.toLong() to value.toString()
     }
 
+    private val autoPowerOffLabels = mapOf(
+        15L to "15 seconds",
+        30L to "30 seconds",
+        60L to "1 minute",
+        180L to "3 minutes",
+        300L to "5 minutes",
+        600L to "10 minutes",
+        1800L to "30 minutes",
+        0L to "Disable",
+    )
+
     private val highIsoNoiseReductionLabels = mapOf(
         0L to "Off",
         1L to "Low",
@@ -749,6 +767,11 @@ object CanonEosPtp {
         CanonEosPropertyCode.COLOR_SPACE to CanonEosPropertySpec(2, colorSpaceLabels),
         CanonEosPropertyCode.MULTI_ASPECT to CanonEosPropertySpec(4, aspectRatioLabels),
         CanonEosPropertyCode.POWER_ZOOM_SPEED to CanonEosPropertySpec(4, powerZoomSpeedLabels),
+        CanonEosPropertyCode.AUTO_POWER_OFF to CanonEosPropertySpec(
+            valueBytes = 4,
+            labels = autoPowerOffLabels,
+            selectableValues = autoPowerOffLabels.keys,
+        ),
         CanonEosPropertyCode.PICTURE_STYLE to CanonEosPropertySpec(1, pictureStyleLabels),
         CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION to CanonEosPropertySpec(2, highIsoNoiseReductionLabels),
         CanonEosPropertyCode.MOVIE_SERVO_AF to CanonEosPropertySpec(4, offOnLabels),

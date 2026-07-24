@@ -17,7 +17,7 @@ class OfflinePreviewTest {
         assertEquals(null, state.transport)
         assertTrue(state.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(state.supports(CameraFeature.VIDEO_RECORDING))
-        assertTrue(state.capabilities?.advancedSettings.orEmpty().isNotEmpty())
+        assertTrue(state.capabilities?.advancedSettings.orEmpty().any { it.key == "autopoweroff" })
         assertFalse(state.pendingOperations.isNotEmpty())
     }
 }

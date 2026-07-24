@@ -49,6 +49,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             CameraSettingControl("colorspace", "Color space", "sRGB", listOf("sRGB", "AdobeRGB")),
             CameraSettingControl("aspectratio", "Aspect ratio", "3:2", listOf("3:2", "1:1", "4:3", "16:9", "1.6x")),
             CameraSettingControl("zoomspeed", "Power zoom speed", "8", (1..15).map(Int::toString)),
+            CameraSettingControl("autopoweroff", "Auto power off", "30 seconds", listOf("15 seconds", "30 seconds", "1 minute", "3 minutes", "5 minutes", "10 minutes", "30 minutes", "Disable")),
             CameraSettingControl("afmethod", "AF method", "WholeAreaAF", listOf("LiveSpotAF", "FlexibleZoneAF1", "WholeAreaAF")),
             CameraSettingControl("afoperation", "AF operation", "AI Servo", listOf("One Shot", "AI Servo", "AI Focus")),
             CameraSettingControl("continuousaf", "Continuous AF", "On", listOf("Off", "On")),

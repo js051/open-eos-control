@@ -121,6 +121,7 @@ class CanonEosPtpTest {
                 "colorspace",
                 "aspectratio",
                 "zoomspeed",
+                "autopoweroff",
                 "afoperation",
                 "continuousaf",
                 "afmethod",
@@ -229,6 +230,25 @@ class CanonEosPtpTest {
         assertArrayEquals(
             CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.POWER_ZOOM_SPEED, 12),
             CanonEosPtp.propertyPayload(CanonEosPropertyCode.POWER_ZOOM_SPEED, 12),
+        )
+    }
+
+    @Test
+    fun r6MarkIIIAutoPowerOffUsesOnlyDocumentedSelectableValues() {
+        assertEquals(0xD114, CanonEosPropertyCode.AUTO_POWER_OFF)
+        assertEquals("15 seconds", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_POWER_OFF, 15))
+        assertEquals("30 minutes", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_POWER_OFF, 1800))
+        assertEquals("Disable", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AUTO_POWER_OFF, 0))
+        assertEquals(
+            listOf("15 seconds", "30 seconds", "1 minute", "3 minutes", "5 minutes", "10 minutes", "30 minutes", "Disable"),
+            CanonEosPtp.propertyOptions(
+                CanonEosPropertyCode.AUTO_POWER_OFF,
+                listOf(15, 30, 60, 180, 300, 600, 1800, 0, 0xFFFFFFFFL),
+            ).map(CanonEosPropertyOption::label),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.AUTO_POWER_OFF, 600),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.AUTO_POWER_OFF, 600),
         )
     }
 

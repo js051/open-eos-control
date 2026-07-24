@@ -148,6 +148,7 @@ class DiagnosticsTest {
             CameraSettingControl("aeb", "AEB", "off", listOf("off", "+/- 1")),
             CameraSettingControl("aspectratio", "Aspect ratio", "3:2", listOf("3:2", "16:9")),
             CameraSettingControl("zoomspeed", "Power zoom speed", "8", listOf("1", "8", "15")),
+            CameraSettingControl("autopoweroff", "Auto power off", "30 seconds", listOf("30 seconds", "Disable")),
             CameraSettingControl("exposurecompensation", "Exposure compensation", "0", listOf("-1", "0", "1")),
             CameraSettingControl("movieservoaf", "Movie Servo AF", "on", listOf("off", "on")),
             CameraSettingControl("afmethod", "AF", "face", listOf("face", "spot")),
@@ -164,13 +165,22 @@ class DiagnosticsTest {
                 "aeb",
                 "aspectratio",
                 "zoomspeed",
+                "autopoweroff",
                 "exposurecompensation",
                 "afmethod",
             ),
             settingsForMode(settings, CaptureMode.PHOTO).map { it.key },
         )
         assertEquals(
-            listOf("shootingmode", "moviequality", "zoomspeed", "exposurecompensation", "movieservoaf", "afmethod"),
+            listOf(
+                "shootingmode",
+                "moviequality",
+                "zoomspeed",
+                "autopoweroff",
+                "exposurecompensation",
+                "movieservoaf",
+                "afmethod",
+            ),
             settingsForMode(settings, CaptureMode.VIDEO).map { it.key },
         )
     }

@@ -220,6 +220,7 @@ class UsbPtpCameraBackendTest {
         backend.setSetting("colorspace", "AdobeRGB")
         backend.setSetting("aspectratio", "16:9")
         backend.setSetting("zoomspeed", "12")
+        backend.setSetting("autopoweroff", "Disable")
         backend.setSetting("highisonr", "High")
         backend.setSetting("aeb", "+/- 2")
         val recordingStatus = backend.startRecording()
@@ -263,6 +264,20 @@ class UsbPtpCameraBackendTest {
         assertEquals("1.6x", settings.getValue("aspectratio").value)
         assertEquals(listOf("3:2", "1:1", "4:3", "16:9", "1.6x"), settings.getValue("aspectratio").values)
         assertEquals("8", settings.getValue("zoomspeed").value)
+        assertEquals("30 seconds", settings.getValue("autopoweroff").value)
+        assertEquals(
+            listOf(
+                "15 seconds",
+                "30 seconds",
+                "1 minute",
+                "3 minutes",
+                "5 minutes",
+                "10 minutes",
+                "30 minutes",
+                "Disable",
+            ),
+            settings.getValue("autopoweroff").values,
+        )
         assertEquals(listOf("Off", "On"), settings.getValue("continuousaf").values)
         assertEquals("WholeAreaAF", settings.getValue("afmethod").value)
         assertEquals("Super high speed continuous shooting", settings.getValue("drivemode").value)
@@ -299,6 +314,8 @@ class UsbPtpCameraBackendTest {
         assertTrue(whiteBalanceStatus.rawTransportJson.contains("\"canonVendorProperties\""))
         assertTrue(whiteBalanceStatus.rawTransportJson.contains("\"setting\":\"drivemode\""))
         assertTrue(whiteBalanceStatus.rawTransportJson.contains("\"valueBytes\":2"))
+        assertTrue(whiteBalanceStatus.rawTransportJson.contains("\"rawOptions\""))
+        assertTrue(whiteBalanceStatus.rawTransportJson.contains("0xFFFFFFFF"))
         assertEquals(listOf(LiveViewSource.USB_PTP_PREVIEW), capabilities.liveView.sources)
         assertEquals(30, capabilities.liveView.maxFps)
         assertArrayEquals(CANON_LIVE_VIEW_JPEG, frame.bytes)
@@ -444,6 +461,11 @@ class UsbPtpCameraBackendTest {
         assertTrue(
             propertyWrites.any {
                 it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.POWER_ZOOM_SPEED, 12))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.AUTO_POWER_OFF, 0))
             }
         )
         assertTrue(
@@ -943,6 +965,11 @@ class UsbPtpCameraBackendTest {
             payload += eosAvailableValues(CanonEosPropertyCode.MULTI_ASPECT, 0, 1, 2, 7, 0x0D)
             payload += eosPropertyValue(CanonEosPropertyCode.POWER_ZOOM_SPEED, 8)
             payload += eosAvailableValues(CanonEosPropertyCode.POWER_ZOOM_SPEED, *IntArray(15) { it + 1 })
+            payload += eosPropertyValue(CanonEosPropertyCode.AUTO_POWER_OFF, 30)
+            payload += eosAvailableValues(
+                CanonEosPropertyCode.AUTO_POWER_OFF,
+                15, 30, 60, 180, 300, 600, 1800, 0, -1,
+            )
             payload += eosPropertyValue(CanonEosPropertyCode.FOCUS_MODE, 1)
             payload += eosAvailableValues(CanonEosPropertyCode.FOCUS_MODE, 0, 1, 2)
             payload += eosPropertyValue(CanonEosPropertyCode.CONTINUOUS_AF_MODE, 0)

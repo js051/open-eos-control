@@ -873,6 +873,14 @@ class UsbPtpCameraBackend(
                     )
                     .put("optionCount", state.availableValues.size)
                     .put(
+                        "rawOptions",
+                        JSONArray(
+                            state.availableValues.map { value ->
+                                "0x${value.toString(16).uppercase().padStart(8, '0')}"
+                            }
+                        ),
+                    )
+                    .put(
                         "options",
                         JSONArray(CanonEosPtp.propertyOptions(propertyCode, state.availableValues).map { it.label }),
                     )
