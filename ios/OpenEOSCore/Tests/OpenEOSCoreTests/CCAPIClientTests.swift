@@ -20,7 +20,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/control/shutterbutton/manual","put":true},
         {"path":"/shooting/control/af","post":true},
         {"path":"/shooting/control/recbutton","post":true},
-        {"path":"/shooting/control/afpoint","put":true},
+        {"path":"/shooting/liveview/afframeposition","put":true},
         {"path":"/shooting/control/drivefocus","post":true},
         {"path":"/shooting/liveview","get":true,"post":true,"delete":true},
         {"path":"/shooting/liveview/flip","get":true},
@@ -385,14 +385,12 @@ final class CCAPIClientTests: XCTestCase {
             body: #"{"message":"Invalid parameter"}"#
         )
         await transport.enqueue(method: "POST", path: "/ccapi/ver100/shooting/liveview", status: 204, body: Data())
-        await transport.enqueue(method: "GET", path: "/ccapi/ver100/shooting/liveview/flip?t=7", status: 404, body: Data("not found".utf8))
         let jpeg = Data([0xFF, 0xD8, 0x05, 0x06, 0xFF, 0xD9])
-        let multipart = Data("--frame\r\n\r\n".utf8) + jpeg + Data("\r\n--frame\r\n".utf8)
         await transport.enqueue(
             method: "GET",
-            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=image&t=7",
-            headers: ["content-type": "multipart/x-mixed-replace; boundary=frame"],
-            body: multipart
+            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both&t=7",
+            headers: ["content-type": "application/octet-stream"],
+            body: detailedLiveView(jpeg: jpeg)
         )
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
@@ -406,6 +404,66 @@ final class CCAPIClientTests: XCTestCase {
         let fallback = try XCTUnwrap(JSONSerialization.jsonObject(with: startBodies[1]) as? [String: Any])
         XCTAssertEqual(fallback["cameradisplay"] as? String, "on")
         XCTAssertNil(fallback["liveviewsize"])
+    }
+
+    func testTapFocusUsesCanonImagePositionCoordinates() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let jpeg = Data([0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9])
+        await transport.enqueue(
+            method: "GET",
+            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both&t=9",
+            headers: ["content-type": "application/octet-stream"],
+            body: detailedLiveView(jpeg: jpeg)
+        )
+        await transport.enqueue(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/liveview/afframeposition",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        try await client.initialize()
+        _ = try await client.liveViewFrame(cacheKey: 9)
+        let result = try await client.tapFocus(x: 0.25, y: 0.75)
+
+        XCTAssertEqual(result, FocusResult(accepted: true, x: 0.25, y: 0.75))
+        let requests = await transport.requests()
+        let focus = try XCTUnwrap(requests.first { $0.path.hasSuffix("/shooting/liveview/afframeposition") })
+        let body = try XCTUnwrap(focus.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Int])
+        XCTAssertEqual(json, ["positionx": 1600, "positiony": 3200])
+    }
+
+    func testTapFocusWithoutDetailedFrameSendsNoCommand() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        try await client.initialize()
+        do {
+            _ = try await client.tapFocus(x: 0.25, y: 0.75)
+            XCTFail("Expected missing Live View metadata")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("detailed Live View frame"))
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testTapFocusNeedsBothAdvertisedEndpointAndDetailedLiveView() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/liveview","post":true,"delete":true},{"path":"/shooting/liveview/afframeposition","put":true}]}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertFalse(capabilities.matrix.supports(.tapFocus))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.tapFocus))
     }
 
     func testSettingRejectsValueNotAdvertisedByCamera() async throws {
@@ -596,5 +654,21 @@ final class CCAPIClientTests: XCTestCase {
             body: #"{"storagelist":[{"name":"card1","spacesize":32000000000}]}"#
         )
         await transport.enqueueJSON(path: "\(prefix)/shooting/settings", body: settings)
+    }
+
+    private func detailedLiveView(jpeg: Data) -> Data {
+        let info = Data(
+            #"{"liveview":{"image":{"positionx":100,"positiony":200,"positionwidth":6000,"positionheight":4000}}}"#.utf8
+        )
+        return detailPacket(type: 0x00, payload: jpeg) + detailPacket(type: 0x01, payload: info)
+    }
+
+    private func detailPacket(type: UInt8, payload: Data) -> Data {
+        let size = UInt32(payload.count).bigEndian
+        var result = Data([0xFF, 0x00, type])
+        withUnsafeBytes(of: size) { result.append(contentsOf: $0) }
+        result.append(payload)
+        result.append(contentsOf: [0xFF, 0xFF])
+        return result
     }
 }

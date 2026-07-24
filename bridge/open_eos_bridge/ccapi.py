@@ -92,6 +92,22 @@ class CcapiResponse:
     body: bytes
 
 
+@dataclass(frozen=True)
+class CcapiLiveViewGeometry:
+    position_x: int
+    position_y: int
+    position_width: int
+    position_height: int
+
+    def camera_position(self, normalized_x: float, normalized_y: float) -> tuple[int, int]:
+        x = self.position_x + int(normalized_x * self.position_width)
+        y = self.position_y + int(normalized_y * self.position_height)
+        return (
+            min(max(x, self.position_x), self.position_x + self.position_width - 1),
+            min(max(y, self.position_y), self.position_y + self.position_height - 1),
+        )
+
+
 @dataclass
 class CcapiStreamResponse:
     status: int
@@ -288,6 +304,7 @@ class CcapiSession:
         self._active_live_view_size = "MEDIUM"
         self._requested_fps = 1
         self._frame_key = 0
+        self._latest_live_view_geometry: CcapiLiveViewGeometry | None = None
         self._media_cache: dict[str, MediaItem] = {}
         self._last_error: str | None = None
 
@@ -378,8 +395,7 @@ class CcapiSession:
         with self._lock:
             self._ensure_initialized()
             battery = self._first_json(
-                self._versioned_paths("/devicestatus/batterylist")
-                + self._versioned_paths("/devicestatus/battery")
+                self._versioned_paths("/devicestatus/batterylist") + self._versioned_paths("/devicestatus/battery")
             )
             storage = self._first_json(
                 self._versioned_paths("/devicestatus/storage")
@@ -438,23 +454,23 @@ class CcapiSession:
                 "PUT", "/shooting/control/recbutton"
             ):
                 supported.add(CameraFeature.VIDEO_RECORDING)
-            if self._operation("POST", "/shooting/control/shutterbutton") or self._operation(
-                "PUT", "/shooting/control/shutterbutton/manual"
-            ) or self._operation(
-                "POST", "/shooting/control/shutterbutton/manual"
+            if (
+                self._operation("POST", "/shooting/control/shutterbutton")
+                or self._operation("PUT", "/shooting/control/shutterbutton/manual")
+                or self._operation("POST", "/shooting/control/shutterbutton/manual")
             ):
                 supported.add(CameraFeature.STILL_CAPTURE)
             if self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
                 "POST", "/shooting/control/shutterbutton/manual"
             ):
                 supported.add(CameraFeature.SHUTTER_HALF_PRESS)
-            if self._operation("POST", "/shooting/control/af") or self._operation(
-                "PUT", "/shooting/control/shutterbutton/manual"
-            ) or self._operation("POST", "/shooting/control/shutterbutton/manual"):
-                supported.add(CameraFeature.AUTOFOCUS)
-            if self._operation("PUT", "/shooting/control/afpoint") or self._operation(
-                "POST", "/shooting/control/afpoint"
+            if (
+                self._operation("POST", "/shooting/control/af")
+                or self._operation("PUT", "/shooting/control/shutterbutton/manual")
+                or self._operation("POST", "/shooting/control/shutterbutton/manual")
             ):
+                supported.add(CameraFeature.AUTOFOCUS)
+            if self._supports_coordinate_tap_focus():
                 supported.add(CameraFeature.TAP_FOCUS)
             if self._operation("POST", "/shooting/control/drivefocus"):
                 supported.add(CameraFeature.FOCUS_DRIVE)
@@ -477,9 +493,7 @@ class CcapiSession:
                 CameraFeature.MEDIA_DELETE,
             }
             live_sizes = (
-                [self._active_live_view_size]
-                if not self._live_view_size_control
-                else ["SMALL", "MEDIUM", "LARGE"]
+                [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
             )
             model = self.info().model
             return CameraCapabilities(
@@ -495,6 +509,10 @@ class CcapiSession:
                     ),
                     CameraFeature.AUTOFOCUS.value: (
                         "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation."
+                    ),
+                    CameraFeature.TAP_FOCUS.value: (
+                        "The camera must advertise PUT afframeposition and detailed Live View metadata "
+                        "for coordinate Tap AF."
                     ),
                     CameraFeature.MEDIA_THUMBNAIL.value: (
                         "No verified Canon CCAPI thumbnail resource is advertised by this camera."
@@ -622,18 +640,35 @@ class CcapiSession:
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
         with self._lock:
-            operation = self._operation("PUT", "/shooting/control/afpoint") or self._operation(
-                "POST", "/shooting/control/afpoint"
-            )
-            if operation is None:
+            if not 0 <= x <= 1 or not 0 <= y <= 1:
+                raise BridgeError(
+                    "INVALID_FOCUS_POSITION",
+                    "Focus coordinates must be normalized from 0 through 1.",
+                    status_code=422,
+                    feature=CameraFeature.TAP_FOCUS.value,
+                    engine=self.engine_name,
+                )
+            operation = self._operation("PUT", "/shooting/liveview/afframeposition")
+            if operation is None or not self._supports_coordinate_tap_focus():
                 raise unsupported(CameraFeature.TAP_FOCUS.value, self.engine_name)
-            self._command_ok(operation, {"x": x, "y": y})
+            geometry = self._latest_live_view_geometry
+            if geometry is None:
+                raise BridgeError(
+                    "LIVE_VIEW_COORDINATES_UNAVAILABLE",
+                    "Tap AF needs a detailed Live View frame with Canon image position metadata before focusing.",
+                    status_code=409,
+                    feature=CameraFeature.TAP_FOCUS.value,
+                    engine=self.engine_name,
+                )
+            position_x, position_y = geometry.camera_position(x, y)
+            self._command_ok(operation, {"positionx": position_x, "positiony": position_y})
             self._observed.add(CameraFeature.TAP_FOCUS)
             return FocusResult(accepted=True, x=x, y=y)
 
     def start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._lock:
             self._ensure_initialized()
+            self._latest_live_view_geometry = None
             if (
                 not self._supports("POST", "/shooting/liveview")
                 or not self._supports("DELETE", "/shooting/liveview")
@@ -663,6 +698,7 @@ class CcapiSession:
     def stop_live_view(self) -> None:
         with self._lock:
             self._require_open()
+            self._latest_live_view_geometry = None
             if not self._live_view_active:
                 return
             try:
@@ -688,6 +724,8 @@ class CcapiSession:
                 separator = "&" if "?" in candidate else "?"
                 path = f"{candidate}{separator}t={self._frame_key}"
                 try:
+                    if "flipdetail" in candidate and "kind=both" in candidate:
+                        self._latest_live_view_geometry = None
                     response = self._request(
                         "GET",
                         path,
@@ -706,6 +744,18 @@ class CcapiSession:
                             status_code=502,
                             engine=self.engine_name,
                         )
+                    if "flipdetail" in candidate and "kind=both" in candidate:
+                        image, geometry = _parse_detailed_live_view(response.body)
+                        if geometry is not None:
+                            self._latest_live_view_geometry = geometry
+                        if image is None:
+                            raise BridgeError(
+                                "INVALID_LIVE_VIEW_FRAME",
+                                "Detailed Live View response did not contain an image packet.",
+                                status_code=502,
+                                engine=self.engine_name,
+                            )
+                        return image
                     return _extract_jpeg(response.body)
                 except BridgeError as error:
                     failures.append(f"{candidate}: {error.message}")
@@ -883,17 +933,13 @@ class CcapiSession:
         self._request_ok(operation.method, operation.path, payload)
 
     def _content_paths(self, container: str) -> list[str]:
-        page_info = self._first_json(
-            [f"{container}?kind=number", f"{container}?type=all,kind=number"]
-        )
+        page_info = self._first_json([f"{container}?kind=number", f"{container}?type=all,kind=number"])
         page_count = min(MAX_MEDIA_PAGES, _integer_value(page_info, "pagenumber") or 0)
         pages = range(1, page_count + 1) if page_count > 0 else (0,)
         paths: list[str] = []
         for page in pages:
             candidates = (
-                [container]
-                if page == 0
-                else [f"{container}?page={page}&order=desc", f"{container}?page={page}"]
+                [container] if page == 0 else [f"{container}?page={page}&order=desc", f"{container}?page={page}"]
             )
             value = self._first_json(candidates, required=True)
             if not isinstance(value, dict):
@@ -979,9 +1025,7 @@ class CcapiSession:
             versions.add("ver100")
         ordered = sorted(versions, key=_version_number, reverse=True)
         self._api_prefixes = [f"/ccapi/{version}" for version in ordered]
-        self._preferred_prefix = (
-            "/ccapi/ver100" if "/ccapi/ver100" in self._api_prefixes else self._api_prefixes[0]
-        )
+        self._preferred_prefix = "/ccapi/ver100" if "/ccapi/ver100" in self._api_prefixes else self._api_prefixes[0]
 
     def _advertised_operation_path(
         self,
@@ -1111,6 +1155,8 @@ class CcapiSession:
         flip = self._operation("GET", "/shooting/liveview/flip")
         flip_detail = self._operation("GET", "/shooting/liveview/flipdetail")
         live_view = self._operation("GET", "/shooting/liveview")
+        if flip_detail and self._supports_coordinate_tap_focus():
+            candidates.append(f"{flip_detail.path}?kind=both")
         if flip:
             candidates.append(flip.path)
         if flip_detail:
@@ -1118,6 +1164,14 @@ class CcapiSession:
         if live_view:
             candidates.append(live_view.path)
         return candidates
+
+    def _supports_coordinate_tap_focus(self) -> bool:
+        return bool(
+            self._operation("PUT", "/shooting/liveview/afframeposition")
+            and self._operation("GET", "/shooting/liveview/flipdetail")
+            and self._supports("POST", "/shooting/liveview")
+            and self._supports("DELETE", "/shooting/liveview")
+        )
 
     def _supports(self, method: str, suffix: str) -> bool:
         return any(item.method == method and item.path.endswith(suffix) for item in self._operations)
@@ -1259,6 +1313,72 @@ def _extract_jpeg(value: bytes) -> bytes:
             engine=ENGINE_NAME,
         )
     return frame
+
+
+def _parse_detailed_live_view(value: bytes) -> tuple[bytes | None, CcapiLiveViewGeometry | None]:
+    offset = 0
+    image: bytes | None = None
+    geometry: CcapiLiveViewGeometry | None = None
+    found_packet = False
+    while offset + 9 <= len(value):
+        if value[offset : offset + 2] != b"\xff\x00":
+            break
+        data_type = value[offset + 2]
+        data_size = int.from_bytes(value[offset + 3 : offset + 7], byteorder="big", signed=False)
+        data_start = offset + 7
+        data_end = data_start + data_size
+        if data_size > MAX_LIVE_VIEW_SCAN_BYTES or data_end + 2 > len(value):
+            break
+        if value[data_end : data_end + 2] != b"\xff\xff":
+            break
+        found_packet = True
+        data = value[data_start:data_end]
+        if data_type == 0x00:
+            image = _extract_jpeg(data)
+        elif data_type == 0x01:
+            geometry = _parse_live_view_geometry(data)
+        offset = data_end + 2
+    if not found_packet:
+        raise BridgeError(
+            "INVALID_LIVE_VIEW_FRAME",
+            "Detailed Live View response did not contain a valid Canon packet.",
+            status_code=502,
+            engine=ENGINE_NAME,
+        )
+    return image, geometry
+
+
+def _parse_live_view_geometry(value: bytes) -> CcapiLiveViewGeometry | None:
+    if len(value) > MAX_JSON_BYTES:
+        return None
+    try:
+        root = json.loads(value)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+    def find(node: object) -> CcapiLiveViewGeometry | None:
+        if not isinstance(node, dict):
+            return None
+        image_info = node.get("image")
+        if isinstance(image_info, dict):
+            keys = ("positionx", "positiony", "positionwidth", "positionheight")
+            if all(isinstance(image_info.get(key), int) and not isinstance(image_info.get(key), bool) for key in keys):
+                width = image_info["positionwidth"]
+                height = image_info["positionheight"]
+                if width > 0 and height > 0:
+                    return CcapiLiveViewGeometry(
+                        position_x=image_info["positionx"],
+                        position_y=image_info["positiony"],
+                        position_width=width,
+                        position_height=height,
+                    )
+        for child in node.values():
+            result = find(child)
+            if result is not None:
+                return result
+        return None
+
+    return find(root)
 
 
 def _battery_status(value: object | None) -> BatteryStatus:

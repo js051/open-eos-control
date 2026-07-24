@@ -36,7 +36,7 @@ open-eos-control/
 - ISO、shutter、aperture、white balance 與動態 advanced settings
 - 可選跟隨系統、英文或繁體中文；相機公告的設定值會本地化顯示，寫入時仍保留精確的協定原值
 - REC 開始/停止
-- Tap focus，已經走共用 backend layer
+- Canon 座標 Tap AF：只有相機公告 `PUT afframeposition` 且詳細 Live View 提供影像座標時才開放，不會把 0..1 座標直接猜測成機身命令
 - 獨立 AF-ON：CCAPI 使用相機公告的自動對焦命令，有線傳輸則以確實釋放的半按流程作為後備
 - 依相機公告能力執行手動快門半按，並保證送出釋放命令
 - 支援分頁及按需縮圖的相機媒體瀏覽、透過 Android 文件選擇器串流下載大型檔案，以及需確認後才執行的刪除
@@ -109,7 +109,7 @@ GitHub Actions 會建置最終 App bundle、確認 ICON／語系／區網／方�
 
 ## Desktop Bridge
 
-Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、AF-ON、半按快門、錄影、焦點前後移動或座標 Tap AF、JPEG Live View、需身分驗證的按需媒體縮圖、串流下載、需確認後執行的刪除，以及包含 engine 公告能力證據且不含敏感資料的診斷。直接 CCAPI 的 AF-ON 使用相機公告的 `POST /shooting/control/af` start/stop；USB engine 使用已驗證且確實釋放的半按流程。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
+Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、AF-ON、半按快門、錄影、焦點前後移動或座標 Tap AF、JPEG Live View、需身分驗證的按需媒體縮圖、串流下載、需確認後執行的刪除，以及包含 engine 公告能力證據且不含敏感資料的診斷。直接 CCAPI 的 AF-ON 使用相機公告的 `POST /shooting/control/af` start/stop；座標 Tap AF 會先用 Canon `flipdetail` 的影像幾何資訊換算，再送出整數 `PUT afframeposition`；USB engine 使用已驗證且確實釋放的半按流程。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
 
 先建立下列環境；只有使用 USB 相機時才需要在電腦安裝 `gphoto2`：
 
@@ -134,7 +134,7 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "請替換成足夠長的隨機字串"
 
 在 Android 或 iOS 連線頁選擇「Desktop Bridge」，輸入電腦的區網 URL 與相同 token，再掃描並選擇相機。token 只保留在 App 程序記憶體中，不會持久化，也不會出現在診斷報告。iOS 直接 USB/PTP 仍屬研究項目；目前這條 Bridge 路徑才是 iPhone／iPad 控制電腦 USB 相機的已實作方案。
 
-目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS。CCAPI engine 提供 1-30 FPS 的 client polling，初始預設 15 FPS；若 R6 Mark III 對含尺寸的 Live View 啟動 payload 回覆 `Invalid parameter`，會自動改用相容 payload 重試，並把要求與實測 FPS 分開顯示。同源完整 URL／相對 path discovery、設定、拍照、保證釋放快門、錄影、Tap AF、有界 JPEG 擷取、同源媒體遍歷、串流下載、驗證與能力閘門都有自動測試；瀏覽器也實際跑過 CCAPI 連線、有效 JPEG、15 FPS 切換、Tap AF、英／繁中及桌面／窄版流程。PC 與 R6 Mark III 的實體真機驗證仍待完成。
+目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS。CCAPI engine 提供 1-30 FPS 的 client polling，初始預設 15 FPS；若 R6 Mark III 對含尺寸的 Live View 啟動 payload 回覆 `Invalid parameter`，會自動改用相容 payload 重試，並把要求與實測 FPS 分開顯示。同源完整 URL／相對 path discovery、設定、拍照、保證釋放快門、錄影、以詳細 metadata 換算的 `afframeposition` Tap AF、有界 JPEG 擷取、同源媒體遍歷、串流下載、驗證與能力閘門都有自動測試；瀏覽器也實際跑過 CCAPI 連線、有效 JPEG、15 FPS 切換、Tap AF、英／繁中及桌面／窄版流程。PC 與 R6 Mark III 的實體真機驗證仍待完成。
 
 ## Fake Camera Simulator
 

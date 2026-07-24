@@ -23,10 +23,30 @@ import java.net.URI
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.floor
 
 private data class CcapiApiOperation(
     val method: String,
     val path: String,
+)
+
+private data class CcapiLiveViewGeometry(
+    val positionX: Int,
+    val positionY: Int,
+    val positionWidth: Int,
+    val positionHeight: Int,
+) {
+    fun cameraPosition(normalizedX: Double, normalizedY: Double): Pair<Int, Int> {
+        val x = positionX + floor(normalizedX * positionWidth).toInt()
+        val y = positionY + floor(normalizedY * positionHeight).toInt()
+        return x.coerceIn(positionX, positionX + positionWidth - 1) to
+            y.coerceIn(positionY, positionY + positionHeight - 1)
+    }
+}
+
+private data class CcapiDetailedLiveView(
+    val image: ByteArray?,
+    val geometry: CcapiLiveViewGeometry?,
 )
 
 private class CcapiHttpException(
@@ -72,6 +92,7 @@ class CcapiClient(
     private var discoverySource = "unknown"
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.MEDIUM
+    private var latestLiveViewGeometry: CcapiLiveViewGeometry? = null
 
     suspend fun initialize() {
         val isLocalOrSim = try {
@@ -395,7 +416,7 @@ class CcapiClient(
             if (autofocusOperation() != null || manualShutterOperation() != null) {
                 supportedFeatures.add(CameraFeature.AUTOFOCUS)
             }
-            if (tapFocusOperation() != null) {
+            if (supportsCoordinateTapFocus()) {
                 supportedFeatures.add(CameraFeature.TAP_FOCUS)
             }
             if (focusDriveOperation() != null) {
@@ -698,6 +719,7 @@ class CcapiClient(
 
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
         if (isRealCamera) {
+            latestLiveViewGeometry = null
             if (enforceAdvertisedOperations && !supportsCompleteLiveView()) {
                 error("Camera did not advertise a complete Live View start, frame, and stop lifecycle.")
             }
@@ -720,6 +742,7 @@ class CcapiClient(
     }
 
     suspend fun stopLiveView() {
+        latestLiveViewGeometry = null
         if (isRealCamera) {
             if (enforceAdvertisedOperations && !supportsApi("DELETE", "/shooting/liveview")) return
             try {
@@ -731,13 +754,25 @@ class CcapiClient(
     }
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
+        require(x in 0.0..1.0 && y in 0.0..1.0) {
+            "Focus coordinates must be normalized from 0 through 1."
+        }
         return if (isRealCamera) {
             val operation = tapFocusOperation()
-            if (enforceAdvertisedOperations && operation == null) {
-                error("Camera did not advertise coordinate Tap AF control.")
+            if (enforceAdvertisedOperations && !supportsCoordinateTapFocus()) {
+                error("Camera did not advertise Canon Live View AF frame position control with detailed Live View metadata.")
             }
-            val payload = JSONObject().put("x", x).put("y", y)
-            commandOk("/shooting/control/afpoint", payload, operation)
+            val geometry = latestLiveViewGeometry
+                ?: error("Tap AF needs a detailed Live View frame with Canon image position metadata before focusing.")
+            val (positionX, positionY) = geometry.cameraPosition(x, y)
+            val payload = JSONObject()
+                .put("positionx", positionX)
+                .put("positiony", positionY)
+            val selectedOperation = operation ?: CcapiApiOperation(
+                method = "PUT",
+                path = apiPath("PUT", "/shooting/liveview/afframeposition"),
+            )
+            commandOk("/shooting/liveview/afframeposition", payload, selectedOperation)
             FocusResult(ok = true, x = x, y = y)
         } else {
             val payload = JSONObject().put("x", x).put("y", y)
@@ -864,8 +899,16 @@ class CcapiClient(
             ?: apiOperation("PUT", "/shooting/control/recbutton")
 
     private fun tapFocusOperation(): CcapiApiOperation? =
-        apiOperation("PUT", "/shooting/control/afpoint")
-            ?: apiOperation("POST", "/shooting/control/afpoint")
+        apiOperation("PUT", "/shooting/liveview/afframeposition")
+
+    private fun detailedLiveViewOperation(): CcapiApiOperation? =
+        apiOperation("GET", "/shooting/liveview/flipdetail")
+
+    private fun supportsCoordinateTapFocus(): Boolean =
+        tapFocusOperation() != null &&
+            detailedLiveViewOperation() != null &&
+            supportsApi("POST", "/shooting/liveview") &&
+            supportsApi("DELETE", "/shooting/liveview")
 
     private fun autofocusOperation(): CcapiApiOperation? =
         apiOperation("POST", "/shooting/control/af")
@@ -882,6 +925,9 @@ class CcapiClient(
             )
         }
         return buildList {
+            if (supportsCoordinateTapFocus()) {
+                detailedLiveViewOperation()?.let { add("${it.path}?kind=both") }
+            }
             apiOperation("GET", "/shooting/liveview/flip")?.let { add(it.path) }
             apiOperation("GET", "/shooting/liveview/flipdetail")?.let { add("${it.path}?kind=image") }
             apiOperation("GET", "/shooting/liveview")?.let { add(it.path) }
@@ -1332,6 +1378,10 @@ class CcapiClient(
 
     private suspend fun requestLiveViewFrame(request: Request, sourceUrl: String): LiveViewFrame =
         withContext(Dispatchers.IO) {
+            val isDetailedFrame = sourceUrl.contains("/shooting/liveview/flipdetail") && sourceUrl.contains("kind=both")
+            if (isDetailedFrame) {
+                latestLiveViewGeometry = null
+            }
             httpClient.newCall(request).execute().use { response ->
                 val contentType = response.header("content-type")
                 val body = response.body ?: error("Live view frame failed: empty response body")
@@ -1353,13 +1403,103 @@ class CcapiClient(
                     )
                 }
 
+                val detailed = if (isDetailedFrame) {
+                    parseDetailedLiveView(body.byteStream().readBoundedBytes(MAX_LIVE_VIEW_SCAN_BYTES))
+                } else {
+                    null
+                }
+                if (detailed?.geometry != null) {
+                    latestLiveViewGeometry = detailed.geometry
+                }
+
                 LiveViewFrame(
-                    bytes = readFirstJpegFrame(body.byteStream()),
+                    bytes = when {
+                        detailed?.image != null -> detailed.image
+                        detailed != null -> error("Detailed Live View response did not contain an image packet.")
+                        else -> readFirstJpegFrame(body.byteStream())
+                    },
                     contentType = contentType,
                     sourceUrl = sourceUrl,
                 )
             }
         }
+
+    private fun parseDetailedLiveView(payload: ByteArray): CcapiDetailedLiveView {
+        var offset = 0
+        var image: ByteArray? = null
+        var geometry: CcapiLiveViewGeometry? = null
+
+        while (offset + CCAPI_DETAIL_OVERHEAD_BYTES <= payload.size) {
+            if ((payload[offset].toInt() and 0xFF) != 0xFF || (payload[offset + 1].toInt() and 0xFF) != 0x00) break
+            val type = payload[offset + 2].toInt() and 0xFF
+            val size = ((payload[offset + 3].toInt() and 0xFF) shl 24) or
+                ((payload[offset + 4].toInt() and 0xFF) shl 16) or
+                ((payload[offset + 5].toInt() and 0xFF) shl 8) or
+                (payload[offset + 6].toInt() and 0xFF)
+            if (size < 0 || size > MAX_LIVE_VIEW_SCAN_BYTES) break
+            val dataStart = offset + CCAPI_DETAIL_HEADER_BYTES
+            val dataEnd = dataStart + size
+            if (dataEnd + CCAPI_DETAIL_FOOTER_BYTES > payload.size) break
+            if ((payload[dataEnd].toInt() and 0xFF) != 0xFF || (payload[dataEnd + 1].toInt() and 0xFF) != 0xFF) break
+            val data = payload.copyOfRange(dataStart, dataEnd)
+            when (type) {
+                CCAPI_DETAIL_IMAGE_TYPE -> image = readFirstJpegFrame(data.inputStream())
+                CCAPI_DETAIL_INFO_TYPE -> geometry = parseLiveViewGeometry(data)
+            }
+            offset = dataEnd + CCAPI_DETAIL_FOOTER_BYTES
+        }
+
+        if (image == null && geometry == null) {
+            error("Detailed Live View response did not contain a valid Canon image or info packet.")
+        }
+        return CcapiDetailedLiveView(image = image, geometry = geometry)
+    }
+
+    private fun parseLiveViewGeometry(payload: ByteArray): CcapiLiveViewGeometry? {
+        if (payload.size > MAX_LIVE_VIEW_INFO_BYTES) return null
+        val root = runCatching { JSONObject(String(payload, StandardCharsets.UTF_8)) }.getOrNull() ?: return null
+
+        fun find(node: JSONObject): CcapiLiveViewGeometry? {
+            val image = node.optJSONObject("image")
+            if (image != null) {
+                val keys = listOf("positionx", "positiony", "positionwidth", "positionheight")
+                if (keys.all(image::has)) {
+                    val width = image.optInt("positionwidth", 0)
+                    val height = image.optInt("positionheight", 0)
+                    if (width > 0 && height > 0) {
+                        return CcapiLiveViewGeometry(
+                            positionX = image.optInt("positionx"),
+                            positionY = image.optInt("positiony"),
+                            positionWidth = width,
+                            positionHeight = height,
+                        )
+                    }
+                }
+            }
+            val keys = node.keys()
+            while (keys.hasNext()) {
+                val child = node.optJSONObject(keys.next()) ?: continue
+                find(child)?.let { return it }
+            }
+            return null
+        }
+
+        return find(root)
+    }
+
+    private fun InputStream.readBoundedBytes(maxBytes: Int): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val count = read(buffer)
+            if (count < 0) break
+            if (output.size() + count > maxBytes) {
+                error("Detailed Live View response exceeded $maxBytes bytes.")
+            }
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
+    }
 
     private fun readFirstJpegFrame(input: InputStream): ByteArray {
         val output = ByteArrayOutputStream()
@@ -1418,8 +1558,14 @@ class CcapiClient(
         const val JPEG_MARKER_PREFIX = 0xFF
         const val JPEG_START_MARKER = 0xD8
         const val JPEG_END_MARKER = 0xD9
+        const val CCAPI_DETAIL_IMAGE_TYPE = 0x00
+        const val CCAPI_DETAIL_INFO_TYPE = 0x01
+        const val CCAPI_DETAIL_HEADER_BYTES = 7
+        const val CCAPI_DETAIL_FOOTER_BYTES = 2
+        const val CCAPI_DETAIL_OVERHEAD_BYTES = CCAPI_DETAIL_HEADER_BYTES + CCAPI_DETAIL_FOOTER_BYTES
         const val MAX_LIVE_VIEW_SCAN_BYTES = 16 * 1024 * 1024
         const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024
+        const val MAX_LIVE_VIEW_INFO_BYTES = 1024 * 1024
         const val MAX_ERROR_BODY_CHARS = 2_000
         const val HALF_PRESS_DURATION_MILLIS = 350L
         const val MAX_MEDIA_ITEMS = 500

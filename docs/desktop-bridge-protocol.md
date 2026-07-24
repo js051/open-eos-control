@@ -137,7 +137,7 @@ The current CLI adapter serves `GET /liveview/frame` as JPEG polling. Each frame
 
 `GET /v1/session/{id}/media/{itemId}/thumbnail` returns a bounded JPEG or PNG with `Cache-Control: private, no-store`. The libgphoto2 engine advertises `MEDIA_THUMBNAIL` only when `gphoto2 --abilities` reports file-preview support and then executes the documented `--folder ... --get-thumbnail ... --stdout` command. The direct CCAPI engine does not advertise this capability because no verified camera-advertised thumbnail resource is available; clients keep their file-type fallback.
 
-The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. Requested FPS controls client polling; observed FPS remains a separate UI metric.
+The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. When coordinate Tap AF is advertised, `flipdetail?kind=both` is preferred so the same bounded response supplies the JPEG and Canon image-position metadata. Requested FPS controls client polling; observed FPS remains a separate UI metric.
 
 ## CCAPI Mapping
 
@@ -149,7 +149,7 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - timed half-press with guaranteed release
 - independent autofocus through advertised `POST /shooting/control/af` start/stop, falling back to the advertised balanced half-press operation
 - movie start/stop through `recbutton`
-- normalized coordinate Tap AF through `afpoint`
+- normalized UI Tap AF mapped through detailed Live View `image` geometry to integer `positionx`/`positiony`, then sent only through advertised `PUT /shooting/liveview/afframeposition`
 - bounded JPEG Live View lifecycle and frame extraction
 - bounded/paged storage traversal plus opaque same-origin media IDs, streamed downloads, and deletion only when the camera advertises a matching `DELETE` operation
 

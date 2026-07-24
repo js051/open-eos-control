@@ -39,10 +39,11 @@ DISCOVERY = {
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/af", "post": True},
         {"path": "/shooting/control/recbutton", "post": True},
-        {"path": "/shooting/control/afpoint", "put": True},
+        {"path": "/shooting/liveview/afframeposition", "put": True},
         {"path": "/shooting/control/drivefocus", "post": True},
         {"path": "/shooting/liveview", "get": True, "post": True, "delete": True},
         {"path": "/shooting/liveview/flip", "get": True},
+        {"path": "/shooting/liveview/flipdetail", "get": True},
         {"path": "/contents", "get": True, "delete": True},
     ]
 }
@@ -120,6 +121,22 @@ class FakeCcapiTransport:
         if method == "GET" and path.startswith("/ccapi/ver100/shooting/liveview/flip?"):
             multipart = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + JPEG + b"\r\n--frame\r\n"
             return CcapiResponse(200, {"content-type": "multipart/x-mixed-replace; boundary=frame"}, multipart)
+        if method == "GET" and path.startswith("/ccapi/ver100/shooting/liveview/flipdetail?kind=both"):
+            info = {
+                "liveview": {
+                    "image": {
+                        "positionx": 100,
+                        "positiony": 200,
+                        "positionwidth": 6000,
+                        "positionheight": 4000,
+                    }
+                }
+            }
+            return CcapiResponse(
+                200,
+                {"content-type": "application/octet-stream"},
+                _detailed_live_view(JPEG, info),
+            )
         if method == "GET" and path == "/ccapi/ver100/contents?kind=number":
             return _json_response({"pagenumber": 1})
         if method == "GET" and path == "/ccapi/ver100/contents?page=1&order=desc":
@@ -142,7 +159,7 @@ class FakeCcapiTransport:
             "/ccapi/ver100/shooting/control/shutterbutton/manual",
             "/ccapi/ver100/shooting/control/af",
             "/ccapi/ver100/shooting/control/recbutton",
-            "/ccapi/ver100/shooting/control/afpoint",
+            "/ccapi/ver100/shooting/liveview/afframeposition",
             "/ccapi/ver100/shooting/control/drivefocus",
             "/ccapi/ver100/shooting/liveview",
         }:
@@ -226,14 +243,18 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     session.half_press_shutter()
     assert session.start_recording().recording is True
     assert session.stop_recording().recording is False
-    focus = session.tap_focus(0.25, 0.75)
-    assert (focus.accepted, focus.x, focus.y) == (True, 0.25, 0.75)
-
     session.start_live_view(LiveViewStartRequest(fps=15, size="LARGE", source="CCAPI_JPEG_POLLING"))
     assert session.requested_fps == 15
     focus_drive = session.drive_focus("far", "large")
     assert (focus_drive.accepted, focus_drive.direction, focus_drive.step) == (True, "FAR", "LARGE")
     assert session.live_view_frame() == JPEG
+    focus = session.tap_focus(0.25, 0.75)
+    assert (focus.accepted, focus.x, focus.y) == (True, 0.25, 0.75)
+    focus_request = next(
+        request for request in transport.requests if request.path.endswith("/shooting/liveview/afframeposition")
+    )
+    assert focus_request.method == "PUT"
+    assert focus_request.body == {"positionx": 1600, "positiony": 3200}
     media = session.list_media()
     assert media[0].name == "IMG_0001.JPG"
     assert "/" not in media[0].id
@@ -247,21 +268,26 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
 
     command_paths = [request.path for request in transport.requests]
     assert command_paths.count("/ccapi/ver100/shooting/control/shutterbutton/manual") == 2
-    assert [
-        request.body
-        for request in transport.requests
-        if request.path == "/ccapi/ver100/shooting/control/af"
-    ] == [{"action": "start"}, {"action": "stop"}]
-    assert RecordedRequest(
-        "POST",
-        "/ccapi/ver100/shooting/control/drivefocus",
-        {"value": "far3"},
-    ) in transport.requests
-    assert RecordedRequest(
-        "DELETE",
-        "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
-        None,
-    ) in transport.requests
+    assert [request.body for request in transport.requests if request.path == "/ccapi/ver100/shooting/control/af"] == [
+        {"action": "start"},
+        {"action": "stop"},
+    ]
+    assert (
+        RecordedRequest(
+            "POST",
+            "/ccapi/ver100/shooting/control/drivefocus",
+            {"value": "far3"},
+        )
+        in transport.requests
+    )
+    assert (
+        RecordedRequest(
+            "DELETE",
+            "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
+            None,
+        )
+        in transport.requests
+    )
     live_starts = [
         request.body
         for request in transport.requests
@@ -363,10 +389,7 @@ def test_failed_ccapi_autofocus_start_still_sends_stop() -> None:
 
 def test_ccapi_capability_evidence_is_bounded_and_removes_queries() -> None:
     discovery = {
-        "ver100": [
-            {"path": f"/diagnostics/item{index}/{'x' * 600}?token=secret", "get": True}
-            for index in range(300)
-        ]
+        "ver100": [{"path": f"/diagnostics/item{index}/{'x' * 600}?token=secret", "get": True} for index in range(300)]
     }
     transport = FakeCcapiTransport(discovery=discovery)
     session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
@@ -384,6 +407,7 @@ def test_ccapi_does_not_enable_wrong_method_shutter_or_incomplete_live_view() ->
         "ver100": [
             {"path": "/deviceinformation", "get": True},
             {"path": "/shooting/control/shutterbutton", "put": True},
+            {"path": "/shooting/liveview/afframeposition", "put": True},
             {"path": "/shooting/liveview", "post": True},
             {"path": "/shooting/liveview/flip", "get": True},
         ]
@@ -400,6 +424,20 @@ def test_ccapi_does_not_enable_wrong_method_shutter_or_incomplete_live_view() ->
 
     assert CameraFeature.STILL_CAPTURE not in capabilities.supported
     assert CameraFeature.LIVE_VIEW not in capabilities.supported
+    assert CameraFeature.TAP_FOCUS not in capabilities.supported
+    assert CameraFeature.TAP_FOCUS in capabilities.planned
+    assert len(transport.requests) == before
+
+
+def test_ccapi_tap_focus_without_detailed_frame_sends_no_command() -> None:
+    transport = FakeCcapiTransport()
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+    before = len(transport.requests)
+
+    with pytest.raises(BridgeError) as failure:
+        session.tap_focus(0.25, 0.75)
+
+    assert failure.value.code == "LIVE_VIEW_COORDINATES_UNAVAILABLE"
     assert len(transport.requests) == before
 
 
@@ -460,6 +498,12 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
         )
         session_id = created.json()["id"]
         capabilities = client.get(f"/v1/session/{session_id}/capabilities", headers=headers)
+        client.post(
+            f"/v1/session/{session_id}/liveview/start",
+            headers=headers,
+            json={"fps": 15, "size": "MEDIUM", "source": "CCAPI_JPEG_POLLING"},
+        )
+        client.get(f"/v1/session/{session_id}/liveview/frame", headers=headers)
         focused = client.post(
             f"/v1/session/{session_id}/focus/tap",
             headers=headers,
@@ -503,3 +547,11 @@ def _request_path(url: str) -> str:
 
 def _json_response(value: object, *, status: int = 200) -> CcapiResponse:
     return CcapiResponse(status, {"content-type": "application/json"}, json.dumps(value).encode())
+
+
+def _detailed_live_view(jpeg: bytes, info: object) -> bytes:
+    return _detail_packet(0x00, jpeg) + _detail_packet(0x01, json.dumps(info).encode())
+
+
+def _detail_packet(data_type: int, payload: bytes) -> bytes:
+    return b"\xff\x00" + bytes([data_type]) + len(payload).to_bytes(4, "big") + payload + b"\xff\xff"

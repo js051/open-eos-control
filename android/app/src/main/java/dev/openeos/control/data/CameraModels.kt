@@ -116,12 +116,24 @@ data class CapabilityMatrix(
                 CameraFeature.STILL_CAPTURE,
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
+                CameraFeature.VIDEO_RECORDING,
+                CameraFeature.TAP_FOCUS,
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
             ) - supported,
+            reasons = mapOf(
+                CameraFeature.LIVE_VIEW_RTP to
+                    "CCAPI RTP decoding is not implemented; this client uses bounded JPEG polling.",
+                CameraFeature.TAP_FOCUS to
+                    "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
+                CameraFeature.AUTOFOCUS to
+                    "The camera must advertise CCAPI POST autofocus or a verified manual half-press operation.",
+                CameraFeature.FOCUS_DRIVE to "The camera must advertise the verified CCAPI POST drivefocus operation.",
+                CameraFeature.MEDIA_THUMBNAIL to "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
+            ),
         )
 
         fun androidUsbPtpRoadmap(): CapabilityMatrix = CapabilityMatrix(

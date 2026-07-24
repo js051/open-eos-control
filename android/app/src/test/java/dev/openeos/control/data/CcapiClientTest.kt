@@ -172,34 +172,64 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realTapFocusDoesNotReportPlainAutofocusAsPositionSuccess() = runTest {
-        client.forceRealCamera()
-        server.enqueue(MockResponse().setResponseCode(404).setBody("unsupported"))
-
-        val failure = runCatching { client.tapFocus(0.25, 0.75) }.exceptionOrNull()
-
-        assertTrue(failure is IllegalStateException)
-        assertEquals(1, server.requestCount)
-        assertEquals("/ccapi/ver100/shooting/control/afpoint", server.takeRequest().path)
-    }
-
-    @Test
-    fun realTapFocusUsesAdvertisedPutMethod() = runTest {
+    fun realTapFocusUsesAdvertisedCanonCoordinates() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
-                """{"ver110":[{"path":"/shooting/control/afpoint","put":true}]}""",
+                """{"ver110":[
+                    {"path":"/shooting/liveview","post":true,"delete":true},
+                    {"path":"/shooting/liveview/afframeposition","put":true},
+                    {"path":"/shooting/liveview/flipdetail","get":true}
+                ]}""",
+            ),
+        )
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x05, 0x06, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(
+            binaryResponse(
+                detailedLiveView(
+                    jpeg,
+                    """{"liveview":{"image":{"positionx":100,"positiony":200,"positionwidth":6000,"positionheight":4000}}}""",
+                ),
+                "application/octet-stream",
             ),
         )
         server.enqueue(MockResponse().setResponseCode(204))
 
         client.initialize()
+        client.liveViewFrame(cacheKey = 7)
         client.tapFocus(0.25, 0.75)
 
         server.takeRequest()
+        val frame = server.takeRequest()
         val focus = server.takeRequest()
+        val body = JSONObject(focus.body.readUtf8())
+        assertEquals("/ccapi/ver110/shooting/liveview/flipdetail?kind=both&t=7", frame.path)
         assertEquals("PUT", focus.method)
-        assertEquals("/ccapi/ver110/shooting/control/afpoint", focus.path)
+        assertEquals("/ccapi/ver110/shooting/liveview/afframeposition", focus.path)
+        assertEquals(1600, body.getInt("positionx"))
+        assertEquals(3200, body.getInt("positiony"))
+        assertEquals(setOf("positionx", "positiony"), body.keys().asSequence().toSet())
+    }
+
+    @Test
+    fun realTapFocusWithoutDetailedFrameDoesNotSendGuessedCoordinates() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/liveview","post":true,"delete":true},
+                    {"path":"/shooting/liveview/afframeposition","put":true},
+                    {"path":"/shooting/liveview/flipdetail","get":true}
+                ]}""",
+            ),
+        )
+
+        client.initialize()
+        val failure = runCatching { client.tapFocus(0.25, 0.75) }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("detailed Live View frame"))
+        assertEquals(1, server.requestCount)
     }
 
     @Test
@@ -318,6 +348,7 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
         assertTrue(!capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.TAP_FOCUS))
         assertTrue(!capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
         assertEquals("GET /ccapi", capabilities.evidence.source)
         assertEquals(listOf("ver110"), capabilities.evidence.protocolVersions)
@@ -1005,6 +1036,24 @@ class CcapiClientTest {
         MockResponse()
             .setHeader("content-type", contentType)
             .setBody(Buffer().write(body))
+
+    private fun detailedLiveView(jpeg: ByteArray, info: String): ByteArray =
+        detailedPacket(0x00, jpeg) + detailedPacket(0x01, info.toByteArray())
+
+    private fun detailedPacket(type: Int, payload: ByteArray): ByteArray = ByteArrayOutputStream().use { output ->
+        output.write(byteArrayOf(0xFF.toByte(), 0x00, type.toByte()))
+        output.write(
+            byteArrayOf(
+                (payload.size ushr 24).toByte(),
+                (payload.size ushr 16).toByte(),
+                (payload.size ushr 8).toByte(),
+                payload.size.toByte(),
+            ),
+        )
+        output.write(payload)
+        output.write(byteArrayOf(0xFF.toByte(), 0xFF.toByte()))
+        output.toByteArray()
+    }
 
     private fun enqueueRealStatus() {
         server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89}]}"""))

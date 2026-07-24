@@ -23,6 +23,27 @@ private struct CCAPIOperation: Hashable, Sendable {
     let path: String
 }
 
+private struct CCAPILiveViewGeometry: Sendable {
+    let positionX: Int
+    let positionY: Int
+    let positionWidth: Int
+    let positionHeight: Int
+
+    func cameraPosition(normalizedX: Double, normalizedY: Double) -> (x: Int, y: Int) {
+        let rawX = positionX + Int(normalizedX * Double(positionWidth))
+        let rawY = positionY + Int(normalizedY * Double(positionHeight))
+        return (
+            min(max(rawX, positionX), positionX + positionWidth - 1),
+            min(max(rawY, positionY), positionY + positionHeight - 1)
+        )
+    }
+}
+
+private struct CCAPIDetailedLiveView {
+    let image: Data?
+    let geometry: CCAPILiveViewGeometry?
+}
+
 public actor CCAPIClient {
     private static let maximumErrorBodyCharacters = 2_000
     private static let maximumMediaItems = 500
@@ -52,6 +73,7 @@ public actor CCAPIClient {
     private var recording: Bool?
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.medium
+    private var latestLiveViewGeometry: CCAPILiveViewGeometry?
 
     public init(
         baseURL value: String,
@@ -231,7 +253,7 @@ public actor CCAPIClient {
         if autofocusOperation() != nil || manualShutterOperation() != nil {
             supported.insert(.autofocus)
         }
-        if tapFocusOperation() != nil { supported.insert(.tapFocus) }
+        if supportsCoordinateTapFocus() { supported.insert(.tapFocus) }
         if focusDriveOperation() != nil { supported.insert(.focusDrive) }
         if supports(.get, suffix: "/contents") {
             supported.formUnion([.mediaBrowser, .mediaDownload])
@@ -252,6 +274,7 @@ public actor CCAPIClient {
                 reasons: [
                     .liveViewRTP: "RTP decoding is not implemented; this client uses bounded JPEG polling.",
                     .autofocus: "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation.",
+                    .tapFocus: "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
                     .mediaThumbnail: "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
                 ]
@@ -392,7 +415,19 @@ public actor CCAPIClient {
         guard let operation = tapFocusOperation() else {
             throw CCAPIError.unsupported(.tapFocus)
         }
-        try await commandOK(operation: operation, json: ["x": x, "y": y])
+        guard supportsCoordinateTapFocus() else {
+            throw CCAPIError.unsupported(.tapFocus)
+        }
+        guard let geometry = latestLiveViewGeometry else {
+            throw CCAPIError.invalidResponse(
+                "Tap AF needs a detailed Live View frame with Canon image position metadata before focusing."
+            )
+        }
+        let position = geometry.cameraPosition(normalizedX: x, normalizedY: y)
+        try await commandOK(
+            operation: operation,
+            json: ["positionx": position.x, "positiony": position.y]
+        )
         return FocusResult(accepted: true, x: x, y: y)
     }
 
@@ -423,6 +458,7 @@ public actor CCAPIClient {
 
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
         try await ensureInitialized()
+        latestLiveViewGeometry = nil
         if resolvedMode == .simulator { return }
         guard supportsCompleteLiveView() else {
             throw CCAPIError.unsupported(.liveView)
@@ -445,6 +481,7 @@ public actor CCAPIClient {
     }
 
     public func stopLiveView() async {
+        latestLiveViewGeometry = nil
         guard initialized, resolvedMode != .simulator else { return }
         guard !enforceAdvertisedOperations || supports(.delete, suffix: "/shooting/liveview") else { return }
         try? await requestOK(path: apiPath(.delete, suffix: "/shooting/liveview"), method: .delete)
@@ -470,13 +507,31 @@ public actor CCAPIClient {
             request.setValue("no-cache", forHTTPHeaderField: "Pragma")
             request.setValue("close", forHTTPHeaderField: "Connection")
             do {
+                let isDetailedFrame = path.contains("/shooting/liveview/flipdetail") && path.contains("kind=both")
+                if isDetailedFrame {
+                    latestLiveViewGeometry = nil
+                }
                 let response = try await transport.send(request)
                 try validate(response, request: request)
                 let contentType = response.header("content-type")
                 if Self.isTextContentType(contentType) {
                     throw CCAPIError.invalidResponse("Live View returned \(contentType ?? "text") instead of image bytes.")
                 }
-                let frame = try JPEGFrameParser.validatedImageData(response.body, contentType: contentType)
+                let frame: Data
+                if isDetailedFrame {
+                    let detailed = try Self.parseDetailedLiveView(response.body)
+                    if let geometry = detailed.geometry {
+                        latestLiveViewGeometry = geometry
+                    }
+                    guard let image = detailed.image else {
+                        throw CCAPIError.invalidResponse(
+                            "Detailed Live View response did not contain an image packet."
+                        )
+                    }
+                    frame = image
+                } else {
+                    frame = try JPEGFrameParser.validatedImageData(response.body, contentType: contentType)
+                }
                 return LiveViewFrame(data: frame, contentType: contentType, sourceURL: sourceURL)
             } catch {
                 if error is CancellationError { throw error }
@@ -722,8 +777,18 @@ public actor CCAPIClient {
     }
 
     private func tapFocusOperation() -> CCAPIOperation? {
-        operation(.put, suffix: "/shooting/control/afpoint")
-            ?? operation(.post, suffix: "/shooting/control/afpoint")
+        operation(.put, suffix: "/shooting/liveview/afframeposition")
+    }
+
+    private func detailedLiveViewOperation() -> CCAPIOperation? {
+        operation(.get, suffix: "/shooting/liveview/flipdetail")
+    }
+
+    private func supportsCoordinateTapFocus() -> Bool {
+        tapFocusOperation() != nil &&
+            detailedLiveViewOperation() != nil &&
+            supports(.post, suffix: "/shooting/liveview") &&
+            supports(.delete, suffix: "/shooting/liveview")
     }
 
     private func autofocusOperation() -> CCAPIOperation? {
@@ -742,11 +807,83 @@ public actor CCAPIClient {
                 apiPath(.get, suffix: "/shooting/liveview"),
             ]
         }
-        return [
+        var paths: [String] = []
+        if supportsCoordinateTapFocus(), let detail = detailedLiveViewOperation() {
+            paths.append("\(detail.path)?kind=both")
+        }
+        paths.append(contentsOf: [
             operation(.get, suffix: "/shooting/liveview/flip")?.path,
             operation(.get, suffix: "/shooting/liveview/flipdetail").map { "\($0.path)?kind=image" },
             operation(.get, suffix: "/shooting/liveview")?.path,
-        ].compactMap { $0 }
+        ].compactMap { $0 })
+        return paths
+    }
+
+    private static func parseDetailedLiveView(_ data: Data) throws -> CCAPIDetailedLiveView {
+        let bytes = [UInt8](data)
+        var offset = 0
+        var image: Data?
+        var geometry: CCAPILiveViewGeometry?
+        var foundPacket = false
+
+        while offset + 9 <= bytes.count {
+            guard bytes[offset] == 0xFF, bytes[offset + 1] == 0x00 else { break }
+            let type = bytes[offset + 2]
+            let size = (Int(bytes[offset + 3]) << 24) |
+                (Int(bytes[offset + 4]) << 16) |
+                (Int(bytes[offset + 5]) << 8) |
+                Int(bytes[offset + 6])
+            let dataStart = offset + 7
+            let dataEnd = dataStart + size
+            guard size <= JPEGFrameParser.maximumScanBytes,
+                  dataEnd + 2 <= bytes.count,
+                  bytes[dataEnd] == 0xFF,
+                  bytes[dataEnd + 1] == 0xFF else { break }
+            foundPacket = true
+            let payload = Data(bytes[dataStart..<dataEnd])
+            if type == 0x00 {
+                image = try JPEGFrameParser.firstJPEG(in: payload)
+            } else if type == 0x01 {
+                geometry = parseLiveViewGeometry(payload)
+            }
+            offset = dataEnd + 2
+        }
+
+        guard foundPacket else {
+            throw CCAPIError.invalidResponse(
+                "Detailed Live View response did not contain a valid Canon packet."
+            )
+        }
+        return CCAPIDetailedLiveView(image: image, geometry: geometry)
+    }
+
+    private static func parseLiveViewGeometry(_ data: Data) -> CCAPILiveViewGeometry? {
+        guard data.count <= 2 * 1024 * 1024,
+              let root = try? JSONSerialization.jsonObject(with: data) else { return nil }
+
+        func find(_ node: Any) -> CCAPILiveViewGeometry? {
+            guard let object = node as? [String: Any] else { return nil }
+            if let image = object["image"] as? [String: Any],
+               let x = image["positionx"] as? NSNumber,
+               let y = image["positiony"] as? NSNumber,
+               let width = image["positionwidth"] as? NSNumber,
+               let height = image["positionheight"] as? NSNumber,
+               width.intValue > 0,
+               height.intValue > 0 {
+                return CCAPILiveViewGeometry(
+                    positionX: x.intValue,
+                    positionY: y.intValue,
+                    positionWidth: width.intValue,
+                    positionHeight: height.intValue
+                )
+            }
+            for child in object.values {
+                if let geometry = find(child) { return geometry }
+            }
+            return nil
+        }
+
+        return find(root)
     }
 
     private func supportsCompleteLiveView() -> Bool {
