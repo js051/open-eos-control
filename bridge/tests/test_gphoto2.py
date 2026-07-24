@@ -9,6 +9,7 @@ from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import (
     CommandOutput,
     GPhoto2Engine,
+    MjpegFrameParser,
     SubprocessGPhotoRunner,
     parse_abilities,
     parse_auto_detect,
@@ -88,6 +89,8 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     ]
     assert capabilities.evidence.source == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_PREVIEW" in capabilities.evidence.advertised_commands
+    assert "CAPTURE_MOVIE_STDOUT" in capabilities.evidence.advertised_commands
+    assert capabilities.live_view.max_fps == 30
     assert "/main/imgsettings/iso" in capabilities.evidence.writable_settings
 
     status = session.set_setting("iso", "800")
@@ -105,14 +108,20 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert session.stop_recording().recording is False
 
     session.start_live_view(LiveViewStartRequest(fps=15))
-    assert session.requested_fps == 5
+    assert session.requested_fps == 15
     assert runner.values["/main/actions/viewfinder"] == "1"
     assert session.live_view_frame() == JPEG
+    assert any("--capture-movie" in command for command in runner.commands)
+    assert not any("--capture-preview" in command for command in runner.commands)
     focus = session.drive_focus("far", "large")
     assert focus.accepted is True
     assert runner.values["/main/actions/manualfocusdrive"] == "Far 3"
+    assert runner.movie_streams[0].closed is True
+    assert session.live_view_frame() == JPEG
+    assert len(runner.movie_streams) == 2
     session.stop_live_view()
     assert runner.values["/main/actions/viewfinder"] == "0"
+    assert runner.movie_streams[-1].closed is True
 
     media = session.list_media()
     thumbnail, thumbnail_type = session.media_thumbnail(media[0].id)
@@ -190,9 +199,37 @@ def test_subprocess_stream_preserves_binary_output_and_enforces_timeout() -> Non
     assert failure.value.code == "ENGINE_TIMEOUT"
     assert time.monotonic() - started < 3.0
 
+    started = time.monotonic()
+    stream = runner.open_stream(
+        [
+            "-u",
+            "-c",
+            "import sys,time; sys.stdout.buffer.write(b'x'*65536); sys.stdout.flush(); time.sleep(10)",
+        ],
+        timeout=30.0,
+    )
+    assert len(next(stream)) == 65536
+    stream.close()
+    assert time.monotonic() - started < 3.0
+
+
+def test_mjpeg_parser_handles_split_markers_junk_and_multiple_frames() -> None:
+    parser = MjpegFrameParser()
+
+    assert parser.feed(b"stderr-like-junk\xff") == []
+    assert parser.feed(b"\xd8first\xff") == []
+    assert parser.feed(b"\xd9more-junk\xff\xd8second\xff\xd9tail") == [
+        b"\xff\xd8first\xff\xd9",
+        b"\xff\xd8second\xff\xd9",
+    ]
+
 
 def test_failed_live_view_start_restores_camera_viewfinder() -> None:
     class FailingPreviewRunner(FakeRunner):
+        def open_stream(self, arguments: list[str], *, timeout: float = 300.0):
+            del arguments, timeout
+            raise BridgeError("ENGINE_COMMAND_FAILED", "movie preview failed", status_code=502)
+
         def run(self, arguments: list[str], *, timeout: float = 30.0):
             if arguments[-2:] == ["--capture-preview", "--stdout"]:
                 raise BridgeError("ENGINE_COMMAND_FAILED", "preview failed", status_code=502)
@@ -206,3 +243,24 @@ def test_failed_live_view_start_restores_camera_viewfinder() -> None:
 
     assert runner.values["/main/actions/viewfinder"] == "0"
     assert session.live_view_active is False
+
+
+def test_live_view_falls_back_to_single_preview_and_caps_requested_fps() -> None:
+    class NoMovieRunner(FakeRunner):
+        def open_stream(self, arguments: list[str], *, timeout: float = 300.0):
+            self.commands.append(tuple(arguments))
+            del timeout
+            raise BridgeError("ENGINE_COMMAND_FAILED", "capture-movie is unavailable", status_code=502)
+
+    runner = NoMovieRunner()
+    session = GPhoto2Engine(runner).open()
+
+    session.start_live_view(LiveViewStartRequest(fps=30))
+
+    assert session.requested_fps == 5
+    assert session.live_view_frame() == JPEG
+    assert any("--capture-movie" in command for command in runner.commands)
+    assert any("--capture-preview" in command for command in runner.commands)
+    assert session.status().raw["liveViewTransport"] == "GPHOTO2_CAPTURE_PREVIEW"
+    assert "capture-movie is unavailable" in session.status().raw["liveViewFallbackReason"]
+    session.stop_live_view()

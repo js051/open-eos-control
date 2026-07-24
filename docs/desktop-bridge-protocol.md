@@ -100,7 +100,7 @@ The bridge should mirror the app-side capability model:
     "defaultSource": "DESKTOP_BRIDGE_STREAM",
     "sizes": ["MEDIUM"],
     "minFps": 1,
-    "maxFps": 5
+    "maxFps": 30
   },
   "settings": [
     {
@@ -136,7 +136,7 @@ The bridge should mirror the app-side capability model:
 
 The response includes the effective `source`, so clients can distinguish an `AUTO` request that selected `CCAPI_RTP` from one that fell back to `CCAPI_JPEG_POLLING`.
 
-The current CLI adapter serves `GET /liveview/frame` as JPEG polling. Each frame is one bounded `gphoto2 --capture-preview --stdout` process, so it advertises at most 5 FPS. The client controls polling at or below `requestedFps`; the server does not claim the camera delivered that rate. A later native libgphoto2 adapter can keep a persistent stream while preserving the endpoint and capability vocabulary.
+The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --stdout` process and incrementally extracts bounded JPEG frames from its concatenated MJPEG output. It accepts a 1-30 FPS output cap but does not claim the camera and USB link delivered that rate. Commands that need exclusive camera access stop the movie process first; the next frame request automatically starts a fresh process. Startup, early termination, malformed-frame, size-limit, or frame-timeout failures switch the session to bounded `--capture-preview --stdout` transactions and reduce effective `requestedFps` to at most 5. `CameraStatus.raw.liveViewTransport` and `liveViewFallbackReason` distinguish these paths.
 
 `GET /v1/session/{id}/media/{itemId}/thumbnail` returns a bounded JPEG or PNG with `Cache-Control: private, no-store`. The libgphoto2 engine advertises `MEDIA_THUMBNAIL` only when `gphoto2 --abilities` reports file-preview support and then executes the documented `--folder ... --get-thumbnail ... --stdout` command. The direct CCAPI engine does not advertise this capability because no verified camera-advertised thumbnail resource is available; clients keep their file-type fallback.
 
@@ -174,7 +174,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - independent autofocus: the same balanced half-press path, exposed separately from the lower-level half-press command
 - recording: advertised `movierecordtarget` Card/None values
 - focus drive: advertised `manualfocusdrive` Near/Far values while Live View is active
-- Live View: advertised `viewfinder` lifecycle plus `--capture-preview --stdout`, with cleanup on stop, failed start, and session close
+- Live View: advertised `viewfinder` lifecycle plus cancellable `--capture-movie --stdout` MJPEG, command-safe restart and bounded `--capture-preview --stdout` fallback, with cleanup on stop, failed start, and session close
 - media: recursive `--list-files`, streamed `--get-file ... --stdout`, and exact `--folder ... --delete-file ...` only when `--abilities` reports file deletion
 
 Coordinate tap focus and Click White Balance remain unavailable because the public CLI surface does not provide verified normalized image-coordinate commands for this camera. Unsupported controls return an error and are never reported as accepted.

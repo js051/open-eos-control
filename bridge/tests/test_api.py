@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from open_eos_bridge.app import create_app
+from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine, SubprocessGPhotoRunner
 
 from .fakes import JPEG, MEDIA_BYTES, THUMBNAIL, FakeRunner
@@ -89,7 +90,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert autofocus.status_code == 200
     assert live_start.json() == {
         "active": True,
-        "requestedFps": 5,
+        "requestedFps": 15,
         "source": "DESKTOP_BRIDGE_STREAM",
     }
     assert live_frame.content == JPEG
@@ -114,6 +115,30 @@ def test_camera_cannot_be_opened_by_two_bridge_sessions() -> None:
     assert first.status_code == 201
     assert second.status_code == 409
     assert second.json()["error"]["code"] == "CAMERA_BUSY"
+
+
+def test_bridge_reports_effective_fps_when_gphoto2_movie_stream_falls_back() -> None:
+    class NoMovieRunner(FakeRunner):
+        def open_stream(self, arguments: list[str], *, timeout: float = 300.0):
+            self.commands.append(tuple(arguments))
+            del timeout
+            raise BridgeError("ENGINE_COMMAND_FAILED", "capture-movie is unavailable", status_code=502)
+
+    headers = {"Authorization": "Bearer test-token"}
+    with TestClient(create_app(engine=GPhoto2Engine(NoMovieRunner()), token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        started = client.post(
+            f"/v1/session/{session_id}/liveview/start",
+            headers=headers,
+            json={"fps": 30, "size": "MEDIUM", "source": "DESKTOP_BRIDGE_STREAM"},
+        )
+
+    assert started.json() == {
+        "active": True,
+        "requestedFps": 5,
+        "source": "DESKTOP_BRIDGE_STREAM",
+    }
 
 
 def test_edsdk_request_is_explicitly_unavailable() -> None:

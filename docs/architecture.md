@@ -62,5 +62,5 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 2. Validate the implemented Android USB/PTP session, DeviceInfo, storage, media, conditional standard capture and property paths on R6 Mark III.
 3. Validate the capability-gated Canon EOS remote release, half-press, ISO/Tv/Av/WB, focus drive and JPEG Live View paths on R6 Mark III.
 4. Record remaining real vendor properties/events and add only setting, movie or Touch AF mappings supported by reliable evidence.
-5. Validate the tested PC CCAPI JPEG/RTP, Android-to-libgphoto2 desktop bridge, and PC UI paths on R6 Mark III, then pursue persistent native libgphoto2 streaming and an optional EDSDK adapter.
+5. Validate the tested PC CCAPI JPEG/RTP, persistent gphoto2 MJPEG desktop bridge, control-restart behavior, and PC UI paths on R6 Mark III, then consider a native libgphoto2 engine and optional EDSDK adapter from measured results.
 6. Validate the simulator-tested iOS CCAPI app on a physical iPhone and R6 Mark III.

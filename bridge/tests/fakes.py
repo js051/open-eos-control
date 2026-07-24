@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 
 from open_eos_bridge.gphoto2 import CommandOutput
@@ -55,9 +56,33 @@ THUMBNAIL = b"\xff\xd8open-eos-thumbnail\xff\xd9"
 MEDIA_BYTES = b"jpeg!!"
 
 
+class FakeMovieStream:
+    def __init__(self, chunks: list[bytes] | None = None) -> None:
+        self._chunks = iter(chunks or [JPEG])
+        self._closed = threading.Event()
+
+    @property
+    def closed(self) -> bool:
+        return self._closed.is_set()
+
+    def __iter__(self) -> FakeMovieStream:
+        return self
+
+    def __next__(self) -> bytes:
+        try:
+            return next(self._chunks)
+        except StopIteration:
+            self._closed.wait()
+            raise
+
+    def close(self) -> None:
+        self._closed.set()
+
+
 class FakeRunner:
     def __init__(self) -> None:
         self.commands: list[tuple[str, ...]] = []
+        self.movie_streams: list[FakeMovieStream] = []
         self.values = {
             "/main/status/eosserialnumber": "TEST-SERIAL-0001",
             "/main/status/cameramodel": "Canon EOS R6 Mark III",
@@ -138,6 +163,15 @@ class FakeRunner:
         ]
         yield MEDIA_BYTES[:3]
         yield MEDIA_BYTES[3:]
+
+    def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> FakeMovieStream:
+        del timeout
+        self.commands.append(tuple(arguments))
+        command = self._without_camera(arguments)
+        assert command == ["--capture-movie", "--stdout"]
+        stream = FakeMovieStream()
+        self.movie_streams.append(stream)
+        return stream
 
     @staticmethod
     def _without_camera(arguments: list[str]) -> list[str]:

@@ -41,7 +41,13 @@ MAX_MEDIA_ITEMS = 500
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 CONFIG_REFRESH_SECONDS = 1.0
-MAX_BRIDGE_LIVE_VIEW_FPS = 5
+MAX_BRIDGE_LIVE_VIEW_FPS = 30
+MAX_PREVIEW_FALLBACK_FPS = 5
+MAX_LIVE_VIEW_FRAME_BYTES = 16 * 1024 * 1024
+MAX_LIVE_VIEW_BUFFER_BYTES = MAX_LIVE_VIEW_FRAME_BYTES + 64 * 1024
+LIVE_VIEW_FIRST_FRAME_TIMEOUT_SECONDS = 10.0
+LIVE_VIEW_FRAME_TIMEOUT_SECONDS = 10.0
+LIVE_VIEW_STREAM_TIMEOUT_SECONDS = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -59,7 +65,139 @@ class GPhotoRunner(Protocol):
 
     def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput: ...
 
+    def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> ClosableByteStream: ...
+
     def stream(self, arguments: list[str], *, timeout: float = 300.0) -> Iterator[bytes]: ...
+
+
+class ClosableByteStream(Protocol):
+    def __iter__(self) -> Iterator[bytes]: ...
+
+    def __next__(self) -> bytes: ...
+
+    def close(self) -> None: ...
+
+
+class SubprocessByteStream:
+    def __init__(self, binary: str, arguments: list[str], *, timeout: float) -> None:
+        self._arguments = arguments
+        self._timeout = timeout
+        self._started_at = time.monotonic()
+        self._stdout_queue: queue.Queue[bytes | object] = queue.Queue(maxsize=8)
+        self._stdout_complete = object()
+        self._stop_reading = threading.Event()
+        self._closed = threading.Event()
+        self._close_lock = threading.Lock()
+        self._stderr_parts: list[bytes] = []
+        self._stderr_size = 0
+        try:
+            self._process = subprocess.Popen(
+                [binary, *arguments],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=_command_environment(),
+            )
+        except FileNotFoundError as error:
+            raise _engine_unavailable(binary) from error
+
+        self._stdout_thread = threading.Thread(
+            target=self._drain_stdout,
+            name="gphoto2-stdout",
+            daemon=True,
+        )
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr,
+            name="gphoto2-stderr",
+            daemon=True,
+        )
+        self._stdout_thread.start()
+        self._stderr_thread.start()
+
+    def __iter__(self) -> SubprocessByteStream:
+        return self
+
+    def __next__(self) -> bytes:
+        while not self._closed.is_set():
+            remaining = self._timeout - (time.monotonic() - self._started_at)
+            if remaining <= 0:
+                self.close()
+                raise BridgeError(
+                    "ENGINE_TIMEOUT",
+                    f"gphoto2 media transfer exceeded {self._timeout:g} seconds.",
+                    status_code=504,
+                    engine=ENGINE_NAME,
+                )
+            try:
+                chunk = self._stdout_queue.get(timeout=min(remaining, 0.25))
+            except queue.Empty:
+                continue
+            if chunk is self._stdout_complete:
+                with self._close_lock:
+                    if self._closed.is_set():
+                        raise StopIteration
+                    return_code = self._finish_process(terminate=False)
+                    self._closed.set()
+                if return_code != 0:
+                    raise _command_error(self._arguments, return_code, self._stderr_text())
+                raise StopIteration
+            assert isinstance(chunk, bytes)
+            return chunk
+        raise StopIteration
+
+    def close(self) -> None:
+        with self._close_lock:
+            if self._closed.is_set():
+                return
+            self._closed.set()
+            self._stop_reading.set()
+            self._finish_process(terminate=True)
+
+    def _drain_stdout(self) -> None:
+        assert self._process.stdout is not None
+        try:
+            while not self._stop_reading.is_set():
+                chunk = self._process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                while not self._stop_reading.is_set():
+                    try:
+                        self._stdout_queue.put(chunk, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+        finally:
+            while not self._stop_reading.is_set():
+                try:
+                    self._stdout_queue.put(self._stdout_complete, timeout=0.1)
+                    break
+                except queue.Full:
+                    continue
+
+    def _drain_stderr(self) -> None:
+        assert self._process.stderr is not None
+        while chunk := self._process.stderr.read(16 * 1024):
+            self._stderr_parts.append(chunk)
+            self._stderr_size += len(chunk)
+            while self._stderr_size > 256 * 1024 and len(self._stderr_parts) > 1:
+                self._stderr_size -= len(self._stderr_parts.pop(0))
+
+    def _finish_process(self, *, terminate: bool) -> int:
+        self._stop_reading.set()
+        if terminate and self._process.poll() is None:
+            self._process.terminate()
+        try:
+            return_code = self._process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            self._process.kill()
+            return_code = self._process.wait(timeout=5.0)
+        if threading.current_thread() is not self._stdout_thread:
+            self._stdout_thread.join(timeout=1.0)
+        if threading.current_thread() is not self._stderr_thread:
+            self._stderr_thread.join(timeout=1.0)
+        return return_code
+
+    def _stderr_text(self) -> str:
+        return b"".join(self._stderr_parts).decode("utf-8", errors="replace")
 
 
 class SubprocessGPhotoRunner:
@@ -108,95 +246,17 @@ class SubprocessGPhotoRunner:
             raise _command_error(arguments, completed.returncode, stderr)
         return CommandOutput(stdout=completed.stdout, stderr=stderr)
 
+    def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> ClosableByteStream:
+        return SubprocessByteStream(self.binary, arguments, timeout=timeout)
+
     def stream(self, arguments: list[str], *, timeout: float = 300.0) -> Iterator[bytes]:
-        command = [self.binary, *arguments]
+        stream = self.open_stream(arguments, timeout=timeout)
 
         def iterator() -> Iterator[bytes]:
             try:
-                process = subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env=_command_environment(),
-                )
-            except FileNotFoundError as error:
-                raise _engine_unavailable(self.binary) from error
-
-            stderr_parts: list[bytes] = []
-            stderr_size = 0
-            stdout_queue: queue.Queue[bytes | object] = queue.Queue(maxsize=8)
-            stdout_complete = object()
-            stop_reading = threading.Event()
-
-            def drain_stdout() -> None:
-                assert process.stdout is not None
-                try:
-                    while not stop_reading.is_set():
-                        chunk = process.stdout.read(64 * 1024)
-                        if not chunk:
-                            break
-                        while not stop_reading.is_set():
-                            try:
-                                stdout_queue.put(chunk, timeout=0.1)
-                                break
-                            except queue.Full:
-                                continue
-                finally:
-                    while not stop_reading.is_set():
-                        try:
-                            stdout_queue.put(stdout_complete, timeout=0.1)
-                            break
-                        except queue.Full:
-                            continue
-
-            def drain_stderr() -> None:
-                nonlocal stderr_size
-                assert process.stderr is not None
-                while chunk := process.stderr.read(16 * 1024):
-                    stderr_parts.append(chunk)
-                    stderr_size += len(chunk)
-                    while stderr_size > 256 * 1024 and len(stderr_parts) > 1:
-                        stderr_size -= len(stderr_parts.pop(0))
-
-            stdout_thread = threading.Thread(target=drain_stdout, name="gphoto2-stdout", daemon=True)
-            stderr_thread = threading.Thread(target=drain_stderr, name="gphoto2-stderr", daemon=True)
-            stdout_thread.start()
-            stderr_thread.start()
-            deadline = time.monotonic() + timeout
-            completed_normally = False
-            try:
-                while True:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise BridgeError(
-                            "ENGINE_TIMEOUT",
-                            f"gphoto2 media transfer exceeded {timeout:g} seconds.",
-                            status_code=504,
-                            engine=ENGINE_NAME,
-                        )
-                    try:
-                        chunk = stdout_queue.get(timeout=min(remaining, 0.25))
-                    except queue.Empty:
-                        continue
-                    if chunk is stdout_complete:
-                        break
-                    assert isinstance(chunk, bytes)
-                    yield chunk
-                completed_normally = True
+                yield from stream
             finally:
-                stop_reading.set()
-                if process.poll() is None:
-                    process.terminate()
-                try:
-                    return_code = process.wait(timeout=5.0)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    return_code = process.wait(timeout=5.0)
-                stdout_thread.join(timeout=1.0)
-                stderr_thread.join(timeout=1.0)
-                if completed_normally and return_code != 0:
-                    stderr = b"".join(stderr_parts).decode("utf-8", errors="replace")
-                    raise _command_error(arguments, return_code, stderr)
+                stream.close()
 
         return iterator()
 
@@ -231,6 +291,152 @@ def _command_error(arguments: list[str], return_code: int, stderr: str) -> Bridg
         status_code=502,
         engine=ENGINE_NAME,
     )
+
+
+class MjpegFrameParser:
+    def __init__(self) -> None:
+        self._buffer = bytearray()
+
+    def feed(self, chunk: bytes) -> list[bytes]:
+        if chunk:
+            self._buffer.extend(chunk)
+        frames: list[bytes] = []
+        while True:
+            start = self._buffer.find(b"\xff\xd8")
+            if start < 0:
+                if len(self._buffer) > MAX_LIVE_VIEW_BUFFER_BYTES:
+                    del self._buffer[:-1]
+                return frames
+            if start:
+                del self._buffer[:start]
+            end = self._buffer.find(b"\xff\xd9", 2)
+            if end < 0:
+                if len(self._buffer) > MAX_LIVE_VIEW_FRAME_BYTES:
+                    raise BridgeError(
+                        "LIVE_VIEW_FRAME_LIMIT",
+                        f"gphoto2 returned a Live View frame larger than {MAX_LIVE_VIEW_FRAME_BYTES} bytes.",
+                        status_code=502,
+                        feature=CameraFeature.LIVE_VIEW.value,
+                        engine=ENGINE_NAME,
+                    )
+                return frames
+            end += 2
+            frames.append(bytes(self._buffer[:end]))
+            del self._buffer[:end]
+
+
+class GPhotoMjpegSession:
+    def __init__(self, source: ClosableByteStream, *, target_fps: int) -> None:
+        self._source = source
+        self._target_fps = max(1, min(target_fps, MAX_BRIDGE_LIVE_VIEW_FPS))
+        self._condition = threading.Condition()
+        self._closed = False
+        self._latest_frame: bytes | None = None
+        self._frame_generation = 0
+        self._delivered_generation = 0
+        self._last_published_at = 0.0
+        self._error: BridgeError | None = None
+        self._thread = threading.Thread(target=self._pump, name="gphoto2-mjpeg", daemon=True)
+
+    def start(self, timeout: float = LIVE_VIEW_FIRST_FRAME_TIMEOUT_SECONDS) -> None:
+        self._thread.start()
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while not self._closed and self._frame_generation == 0 and self._error is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._condition.wait(remaining)
+            if self._frame_generation > 0:
+                return
+            error = self._error or BridgeError(
+                "LIVE_VIEW_FIRST_FRAME_TIMEOUT",
+                f"gphoto2 capture-movie did not produce a JPEG frame within {timeout:g} seconds.",
+                status_code=504,
+                feature=CameraFeature.LIVE_VIEW.value,
+                engine=ENGINE_NAME,
+            )
+        self.close()
+        raise error
+
+    def read_frame(self, timeout: float = LIVE_VIEW_FRAME_TIMEOUT_SECONDS) -> bytes:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while (
+                not self._closed
+                and self._frame_generation <= self._delivered_generation
+                and self._error is None
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._condition.wait(remaining)
+            if self._latest_frame is not None and self._frame_generation > self._delivered_generation:
+                self._delivered_generation = self._frame_generation
+                return self._latest_frame
+            if self._error is not None:
+                raise self._error
+            raise BridgeError(
+                "LIVE_VIEW_FRAME_TIMEOUT",
+                f"gphoto2 capture-movie did not produce another JPEG frame within {timeout:g} seconds.",
+                status_code=504,
+                feature=CameraFeature.LIVE_VIEW.value,
+                engine=ENGINE_NAME,
+            )
+
+    def close(self) -> None:
+        with self._condition:
+            if self._closed:
+                return
+            self._closed = True
+            self._condition.notify_all()
+        self._source.close()
+        if threading.current_thread() is not self._thread:
+            self._thread.join(timeout=3.0)
+
+    def _pump(self) -> None:
+        parser = MjpegFrameParser()
+        try:
+            for chunk in self._source:
+                for frame in parser.feed(chunk):
+                    now = time.monotonic()
+                    if self._last_published_at and now - self._last_published_at < 1 / self._target_fps:
+                        continue
+                    with self._condition:
+                        if self._closed:
+                            return
+                        self._latest_frame = frame
+                        self._frame_generation += 1
+                        self._last_published_at = now
+                        self._condition.notify_all()
+            with self._condition:
+                if not self._closed:
+                    self._error = BridgeError(
+                        "LIVE_VIEW_STREAM_ENDED",
+                        "gphoto2 capture-movie ended before Live View was stopped.",
+                        status_code=502,
+                        feature=CameraFeature.LIVE_VIEW.value,
+                        engine=ENGINE_NAME,
+                    )
+                    self._condition.notify_all()
+        except BridgeError as error:
+            with self._condition:
+                if not self._closed:
+                    self._error = error
+                    self._condition.notify_all()
+        except Exception as error:
+            with self._condition:
+                if not self._closed:
+                    self._error = BridgeError(
+                        "LIVE_VIEW_STREAM_FAILED",
+                        f"gphoto2 capture-movie failed: {type(error).__name__}: {error}",
+                        status_code=502,
+                        feature=CameraFeature.LIVE_VIEW.value,
+                        engine=ENGINE_NAME,
+                    )
+                    self._condition.notify_all()
+        finally:
+            self._source.close()
 
 
 @dataclass
@@ -542,6 +748,9 @@ class GPhoto2Session:
         self._closed = False
         self._live_view_active = False
         self._cached_live_view_frame: bytes | None = None
+        self._live_view_stream: GPhotoMjpegSession | None = None
+        self._live_view_transport: str | None = None
+        self._live_view_fallback_reason: str | None = None
         self._requested_fps = 1
         self._last_error: str | None = None
         self._summary_text = ""
@@ -563,13 +772,16 @@ class GPhoto2Session:
         with self._lock:
             if self._closed:
                 return
-            if self._live_view_active:
+            was_live_view_active = self._live_view_active
+            self._live_view_active = False
+            self._stop_movie_stream()
+            if was_live_view_active:
                 try:
                     self._set_viewfinder(False)
                 except BridgeError as error:
                     self._last_error = error.message
-            self._live_view_active = False
             self._cached_live_view_frame = None
+            self._live_view_transport = None
             self._closed = True
 
     def info(self) -> CameraInfo:
@@ -627,6 +839,8 @@ class GPhoto2Session:
                     "port": self.camera.port,
                     "configCount": len(self._configs),
                     "lastError": self._last_error,
+                    "liveViewTransport": self._live_view_transport,
+                    "liveViewFallbackReason": self._live_view_fallback_reason,
                 },
             )
 
@@ -688,8 +902,8 @@ class GPhoto2Session:
                         "The libgphoto2 CLI engine has no verified Live View coordinate Click WB command."
                     ),
                     CameraFeature.LIVE_VIEW.value: (
-                        "The CLI adapter uses one gphoto2 --capture-preview transaction per HTTP frame; "
-                        "a future native libgphoto2 adapter can provide a persistent stream."
+                        "The CLI adapter uses persistent gphoto2 --capture-movie --stdout MJPEG and "
+                        "automatically falls back to bounded --capture-preview transactions when needed."
                     ),
                 },
                 live_view=(
@@ -815,28 +1029,40 @@ class GPhoto2Session:
                     status_code=422,
                 )
             viewfinder_enabled = self._set_viewfinder(True)
+            self._requested_fps = min(request.fps, MAX_BRIDGE_LIVE_VIEW_FPS)
+            self._live_view_fallback_reason = None
             try:
-                frame = self._capture_preview()
+                try:
+                    self._start_movie_stream()
+                    assert self._live_view_stream is not None
+                    frame = self._live_view_stream.read_frame()
+                    self._live_view_transport = "GPHOTO2_CAPTURE_MOVIE"
+                except BridgeError as stream_error:
+                    self._fallback_to_capture_preview(stream_error)
+                    frame = self._capture_preview()
             except BridgeError:
+                self._stop_movie_stream()
                 if viewfinder_enabled:
                     try:
                         self._set_viewfinder(False)
                     except BridgeError as cleanup_error:
                         self._last_error = cleanup_error.message
                 raise
-            self._requested_fps = min(request.fps, MAX_BRIDGE_LIVE_VIEW_FPS)
             self._cached_live_view_frame = frame
             self._live_view_active = True
 
     def stop_live_view(self) -> None:
         with self._lock:
             self._require_open()
+            was_live_view_active = self._live_view_active
+            self._live_view_active = False
+            self._stop_movie_stream()
             try:
-                if self._live_view_active:
+                if was_live_view_active:
                     self._set_viewfinder(False)
             finally:
-                self._live_view_active = False
                 self._cached_live_view_frame = None
+                self._live_view_transport = None
 
     def live_view_frame(self) -> bytes:
         with self._lock:
@@ -852,6 +1078,14 @@ class GPhoto2Session:
                 frame = self._cached_live_view_frame
                 self._cached_live_view_frame = None
                 return frame
+            if self._live_view_transport == "GPHOTO2_CAPTURE_MOVIE":
+                try:
+                    if self._live_view_stream is None:
+                        self._start_movie_stream()
+                    assert self._live_view_stream is not None
+                    return self._live_view_stream.read_frame()
+                except BridgeError as stream_error:
+                    self._fallback_to_capture_preview(stream_error)
             return self._capture_preview()
 
     def list_media(self) -> list[MediaItem]:
@@ -944,6 +1178,34 @@ class GPhoto2Session:
             )
         return output[start : end + 2]
 
+    def _start_movie_stream(self) -> None:
+        if self._live_view_stream is not None:
+            return
+        source = self.runner.open_stream(
+            self._camera_arguments(["--capture-movie", "--stdout"]),
+            timeout=LIVE_VIEW_STREAM_TIMEOUT_SECONDS,
+        )
+        stream = GPhotoMjpegSession(source, target_fps=self._requested_fps)
+        try:
+            stream.start()
+        except BaseException:
+            stream.close()
+            raise
+        self._live_view_stream = stream
+
+    def _stop_movie_stream(self) -> None:
+        stream = self._live_view_stream
+        self._live_view_stream = None
+        if stream is not None:
+            stream.close()
+
+    def _fallback_to_capture_preview(self, error: BridgeError) -> None:
+        self._stop_movie_stream()
+        self._live_view_transport = "GPHOTO2_CAPTURE_PREVIEW"
+        self._live_view_fallback_reason = error.message
+        self._last_error = error.message
+        self._requested_fps = min(self._requested_fps, MAX_PREVIEW_FALLBACK_FPS)
+
     def _camera_settings(self) -> list[CameraSetting]:
         settings: list[CameraSetting] = []
         for spec in CONFIG_SPECS:
@@ -1028,6 +1290,7 @@ class GPhoto2Session:
             commands.append("TRIGGER_CAPTURE")
         if self._abilities.capture_preview:
             commands.append("CAPTURE_PREVIEW")
+            commands.append("CAPTURE_MOVIE_STDOUT")
         if self._media_supported:
             commands.extend(("MEDIA_LIST", "MEDIA_DOWNLOAD"))
             if self._abilities.file_preview:
@@ -1110,6 +1373,7 @@ class GPhoto2Session:
 
     def _run(self, arguments: list[str], *, timeout: float) -> CommandOutput:
         self._require_open()
+        self._stop_movie_stream()
         return self.runner.run(self._camera_arguments(arguments), timeout=timeout)
 
     def _camera_arguments(self, arguments: list[str]) -> list[str]:
