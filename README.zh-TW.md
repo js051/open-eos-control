@@ -33,7 +33,7 @@ open-eos-control/
 - Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon EOS 遠端快門、半按、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
 - Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、AF-ON、Live View、焦點移動，以及依能力提供的媒體縮圖／傳輸／刪除
 - Live view 畫面，自動/手動更新與 FPS 控制
-- Android 與 iOS 上依能力開放的 Canon CCAPI RTP H.264 Live View：UDP 綁定相機 Wi-Fi、分別使用系統 `MediaCodec`／`AVSampleBufferVideoRenderer` 原生顯示、可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示幀率；只有相機同時公告兩個 RTP endpoint 且手機有可達的 Wi-Fi 位址時才會出現
+- Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用 decoder 時才會出現
 - ISO、shutter、aperture、white balance 與動態 advanced settings
 - 可選跟隨系統、英文或繁體中文；相機公告的設定值會本地化顯示，寫入時仍保留精確的協定原值
 - REC 開始/停止
@@ -111,7 +111,7 @@ GitHub Actions 會建置最終 App bundle、確認 ICON／語系／區網／方�
 
 ## Desktop Bridge
 
-Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、AF-ON、半按快門、錄影、焦點前後移動、座標 Tap AF 或點選白平衡、JPEG Live View、需身分驗證的按需媒體縮圖、串流下載、需確認後執行的刪除，以及包含 engine 公告能力證據且不含敏感資料的診斷。直接 CCAPI 的 AF-ON 使用相機公告的 `POST /shooting/control/af` start/stop；座標 Tap AF 與點選白平衡會先用 Canon `flipdetail` 的影像幾何資訊換算，再分別送出整數 `PUT afframeposition` 或 `POST clickwb`；USB engine 使用已驗證且確實釋放的半按流程。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
+Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、AF-ON、半按快門、錄影、焦點前後移動、座標 Tap AF 或點選白平衡、JPEG 或相機公告的 RTP H.264 Live View、需身分驗證的按需媒體縮圖、串流下載、需確認後執行的刪除，以及包含 engine 公告能力證據且不含敏感資料的診斷。PC RTP 會驗證 Canon SDP，以 RFC 3550／RFC 6184 接收與重組 H.264，由 PyAV／FFmpeg 解碼，再透過既有 Bridge endpoint 輸出受 FPS 上限控制的 JPEG。直接 CCAPI 的 AF-ON 使用相機公告的 `POST /shooting/control/af` start/stop；座標 Tap AF 與點選白平衡會先用 Canon `flipdetail` 的影像幾何資訊換算，再分別送出整數 `PUT afframeposition` 或 `POST clickwb`；USB engine 使用已驗證且確實釋放的半按流程。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
 
 先建立下列環境；只有使用 USB 相機時才需要在電腦安裝 `gphoto2`：
 
@@ -136,7 +136,7 @@ $env:OPEN_EOS_BRIDGE_TOKEN = "請替換成足夠長的隨機字串"
 
 在 Android 或 iOS 連線頁選擇「Desktop Bridge」，輸入電腦的區網 URL 與相同 token，再掃描並選擇相機。token 只保留在 App 程序記憶體中，不會持久化，也不會出現在診斷報告。iOS 直接 USB/PTP 仍屬研究項目；目前這條 Bridge 路徑才是 iPhone／iPad 控制電腦 USB 相機的已實作方案。
 
-目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS。CCAPI engine 提供 1-30 FPS 的 client polling，初始預設 15 FPS；若 R6 Mark III 對含尺寸的 Live View 啟動 payload 回覆 `Invalid parameter`，會自動改用相容 payload 重試，並把要求與實測 FPS 分開顯示。同源完整 URL／相對 path discovery、設定、拍照、保證釋放快門、錄影、以詳細 metadata 換算的 `afframeposition` Tap AF 與 `clickwb` 點選白平衡、有界 JPEG 擷取、同源媒體遍歷、串流下載、驗證與能力閘門都有自動測試；瀏覽器也實際跑過 CCAPI 連線、有效 JPEG、15 FPS 切換、點選動作切換、英／繁中及桌面／窄版流程。PC 與 R6 Mark III 的實體真機驗證仍待完成。
+目前 CLI adapter 每張 JPEG 都是一次獨立的 `gphoto2 --capture-preview` transaction，因此刻意只公告最高 5 FPS。CCAPI engine 提供 1-30 FPS，介面初始預設 15 FPS；若 R6 Mark III 對含尺寸的 JPEG Live View 啟動 payload 回覆 `Invalid parameter`，會自動改用相容 payload 重試。若 discovery 公告 Canon RTP endpoint，且 PyAV 與本機可達 IPv4 都可用，自動模式會優先使用 RTP，啟動失敗時完整清理後退回 JPEG；明確選 RTP 則顯示真實錯誤。FPS 在 RTP 下限制解碼後 JPEG 輸出，因 Canon start body 沒有編碼器 FPS 參數。同源 discovery、設定、拍照、快門釋放、錄影、兩種來源下以詳細 metadata 換算的 Tap AF／點選白平衡、有界 JPEG／RTP 解碼、媒體、驗證與能力閘門都有自動測試。PC 與 R6 Mark III 的 RTP 真機驗證仍待完成；最近一次 R6 Mark III discovery 並未公告 RTP。
 
 ## Fake Camera Simulator
 
@@ -171,7 +171,7 @@ http://localhost:18080
 
 ## Roadmap
 
-- 保持 R6 Mark III 的 CCAPI 無線控制穩定，並驗證機身公告的 API 是否包含已實作的 Android／iOS RTP H.264 路徑；若未公告就維持 JPEG 輪詢。
+- 保持 R6 Mark III 的 CCAPI 無線控制穩定，並驗證機身公告的 API 是否包含已實作的 Android／iOS／PC RTP H.264 路徑；若未公告就維持 JPEG 輪詢。
 - 在 R6 Mark III 真機驗證已實作的 Android USB/PTP 標準路徑，以及 Canon EOS 遠端快門、曝光、色彩、包圍曝光、錄影、進階設定、焦點移動與 Live View；後續只加入有可靠依據的其他專有設定或 Touch AF 命令。
 - 在 R6 Mark III 完成已實作 PC CCAPI、Android-to-Desktop-Bridge 與 USB PC 控制介面的真機驗證，以 persistent engine 改善 libgphoto2 預覽效能，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
 - 以實體 iPhone 與 R6 Mark III 驗證已實作的 iOS SwiftUI CCAPI App、相機有公告時的 RTP，以及 Wi-Fi／行動網路共存；iOS USB/PTP 先列為研究線。

@@ -8,6 +8,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import BinaryIO, Protocol
 from urllib.error import HTTPError, URLError
@@ -32,6 +33,15 @@ from .models import (
     MediaItem,
     StorageStatus,
 )
+from .rtp import (
+    RtpError,
+    RtpLiveViewSession,
+    RtpSessionFactory,
+    create_udp_rtp_session,
+    parse_sdp,
+    pyav_decoder_available,
+    resolve_local_ipv4,
+)
 
 ENGINE_NAME = "ccapi"
 ENGINE_VERSION = "CCAPI HTTP"
@@ -39,6 +49,7 @@ MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_ERROR_BYTES = 2_000
 MAX_LIVE_VIEW_SCAN_BYTES = 16 * 1024 * 1024
 MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024
+MAX_RTP_SESSION_DESCRIPTION_BYTES = 64 * 1024
 MAX_MEDIA_ITEMS = 500
 MAX_MEDIA_PAGES = 100
 MAX_MEDIA_TREE_DEPTH = 4
@@ -77,6 +88,7 @@ SETTING_LABELS = {
     "exposurecompensation": "Exposure compensation",
     "ae": "AE mode",
 }
+_DEFAULT_RTP_FACTORY = object()
 
 
 @dataclass(frozen=True)
@@ -242,17 +254,31 @@ class CcapiEngine:
         transport_factory: Callable[[str, str], CcapiTransport] | None = None,
         *,
         sleeper: Callable[[float], None] = time.sleep,
+        rtp_session_factory: RtpSessionFactory | None | object = _DEFAULT_RTP_FACTORY,
+        route_resolver: Callable[[str], str | None] = resolve_local_ipv4,
     ) -> None:
         self._transport_factory = transport_factory or UrllibCcapiTransport
         self._sleeper = sleeper
+        if rtp_session_factory is _DEFAULT_RTP_FACTORY:
+            self._rtp_session_factory = create_udp_rtp_session if pyav_decoder_available() else None
+        else:
+            self._rtp_session_factory = rtp_session_factory
+        self._route_resolver = route_resolver
 
     def health(self) -> tuple[bool, str | None, str | None]:
-        return True, ENGINE_VERSION, "Enter a camera CCAPI URL to use the network engine."
+        rtp = "PyAV RTP decoder ready." if self._rtp_session_factory else "PyAV RTP decoder unavailable."
+        return True, ENGINE_VERSION, f"Enter a camera CCAPI URL to use the network engine. {rtp}"
 
     def open_connection(self, base_url: str, username: str = "", password: str = "") -> CcapiSession:
         normalized = normalize_base_url(base_url)
         transport = self._transport_factory(username, password)
-        session = CcapiSession(normalized, transport, sleeper=self._sleeper)
+        session = CcapiSession(
+            normalized,
+            transport,
+            sleeper=self._sleeper,
+            rtp_session_factory=self._rtp_session_factory,
+            rtp_destination_address=self._route_resolver(normalized),
+        )
         try:
             session.initialize()
             info = session.info()
@@ -277,6 +303,8 @@ class CcapiSession:
         transport: CcapiTransport,
         *,
         sleeper: Callable[[float], None] = time.sleep,
+        rtp_session_factory: RtpSessionFactory | None = None,
+        rtp_destination_address: str | None = None,
     ) -> None:
         self.base_url = base_url
         self.transport = transport
@@ -287,6 +315,8 @@ class CcapiSession:
             engine=self.engine_name,
         )
         self._sleep = sleeper
+        self._rtp_session_factory = rtp_session_factory
+        self._rtp_destination_address = rtp_destination_address
         self._lock = threading.RLock()
         self._closed = False
         self._initialized = False
@@ -300,6 +330,8 @@ class CcapiSession:
         self._discovery_source = "unknown"
         self._recording: bool | None = None
         self._live_view_active = False
+        self._active_live_view_source: str | None = None
+        self._rtp_session: RtpLiveViewSession | None = None
         self._live_view_size_control = True
         self._active_live_view_size = "MEDIUM"
         self._requested_fps = 1
@@ -365,10 +397,15 @@ class CcapiSession:
                 return
             if self._live_view_active:
                 try:
-                    self._request_ok("DELETE", self._api_path("DELETE", "/shooting/liveview"))
+                    self._stop_live_view_locked()
                 except BridgeError as error:
                     self._last_error = error.message
             self._live_view_active = False
+            self._active_live_view_source = None
+            if self._rtp_session is not None:
+                with suppress(Exception):
+                    self._rtp_session.close()
+                self._rtp_session = None
             self._settings_cache = None
             self._media_cache.clear()
             self.transport.close()
@@ -426,6 +463,8 @@ class CcapiSession:
                     "apiVersions": self._api_prefixes,
                     "battery": battery,
                     "storage": storage,
+                    "liveViewSource": self._active_live_view_source,
+                    "rtpSource": self._rtp_session.source_url if self._rtp_session else None,
                     "lastError": self._last_error,
                 },
             )
@@ -443,13 +482,14 @@ class CcapiSession:
                 supported.add(CameraFeature.WHITE_BALANCE_CONTROL)
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
-            live_view_supported = (
-                self._supports("POST", "/shooting/liveview")
-                and self._supports("DELETE", "/shooting/liveview")
-                and bool(self._live_view_frame_paths())
-            )
-            if live_view_supported:
-                supported.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+            jpeg_live_view_supported = self._supports_jpeg_live_view()
+            rtp_live_view_supported = self._supports_rtp_live_view()
+            if jpeg_live_view_supported or rtp_live_view_supported:
+                supported.add(CameraFeature.LIVE_VIEW)
+            if jpeg_live_view_supported:
+                supported.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+            if rtp_live_view_supported:
+                supported.add(CameraFeature.LIVE_VIEW_RTP)
             if self._operation("POST", "/shooting/control/recbutton") or self._operation(
                 "PUT", "/shooting/control/recbutton"
             ):
@@ -498,15 +538,18 @@ class CcapiSession:
             live_sizes = (
                 [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
             )
+            live_sources = []
+            if rtp_live_view_supported:
+                live_sources.append("CCAPI_RTP")
+            if jpeg_live_view_supported:
+                live_sources.append("CCAPI_JPEG_POLLING")
             model = self.info().model
             return CameraCapabilities(
                 profile=_camera_profile(model),
                 supported=sorted(supported, key=str),
                 planned=sorted(candidates - supported, key=str),
                 reasons={
-                    CameraFeature.LIVE_VIEW_RTP.value: (
-                        "CCAPI RTP decoding is not implemented; this engine uses bounded JPEG polling."
-                    ),
+                    CameraFeature.LIVE_VIEW_RTP.value: (self._rtp_capability_reason()),
                     CameraFeature.FOCUS_DRIVE.value: (
                         "The camera did not advertise the verified CCAPI POST drivefocus operation."
                     ),
@@ -526,10 +569,14 @@ class CcapiSession:
                 },
                 live_view=(
                     LiveViewCapabilities(
-                        sources=["CCAPI_JPEG_POLLING"],
-                        default_source="CCAPI_JPEG_POLLING",
-                        sizes=live_sizes,
-                        default_size="MEDIUM" if "MEDIUM" in live_sizes else live_sizes[0],
+                        sources=live_sources,
+                        default_source=live_sources[0],
+                        sizes=live_sizes if jpeg_live_view_supported else [],
+                        default_size=(
+                            "MEDIUM" if jpeg_live_view_supported and "MEDIUM" in live_sizes else live_sizes[0]
+                        )
+                        if jpeg_live_view_supported
+                        else None,
                         min_fps=1,
                         max_fps=30,
                     )
@@ -649,6 +696,7 @@ class CcapiSession:
             operation = self._operation("PUT", "/shooting/liveview/afframeposition")
             if operation is None or not self._supports_coordinate_tap_focus():
                 raise unsupported(CameraFeature.TAP_FOCUS.value, self.engine_name)
+            self._ensure_live_view_geometry_for_native_stream()
             position_x, position_y = self._camera_live_view_position(x, y, CameraFeature.TAP_FOCUS)
             self._command_ok(operation, {"positionx": position_x, "positiony": position_y})
             self._observed.add(CameraFeature.TAP_FOCUS)
@@ -659,6 +707,7 @@ class CcapiSession:
             operation = self._operation("POST", "/shooting/liveview/clickwb")
             if operation is None or not self._supports_coordinate_click_white_balance():
                 raise unsupported(CameraFeature.CLICK_WHITE_BALANCE.value, self.engine_name)
+            self._ensure_live_view_geometry_for_native_stream()
             position_x, position_y = self._camera_live_view_position(
                 x,
                 y,
@@ -672,31 +721,104 @@ class CcapiSession:
         with self._lock:
             self._ensure_initialized()
             self._latest_live_view_geometry = None
-            if (
-                not self._supports("POST", "/shooting/liveview")
-                or not self._supports("DELETE", "/shooting/liveview")
-                or not self._live_view_frame_paths()
-            ):
-                raise unsupported(CameraFeature.LIVE_VIEW.value, self.engine_name)
             source = request.source.upper()
-            if source not in {"AUTO", "CCAPI_JPEG_POLLING", "DESKTOP_BRIDGE_STREAM"}:
+            if source == "DESKTOP_BRIDGE_STREAM":
+                source = "AUTO"
+            if source not in {"AUTO", "CCAPI_RTP", "CCAPI_JPEG_POLLING"}:
                 raise BridgeError("INVALID_LIVE_VIEW_SOURCE", "Unsupported CCAPI Live View source.", status_code=422)
             size = request.size.upper()
             if size not in {"SMALL", "MEDIUM", "LARGE"}:
                 raise BridgeError("INVALID_LIVE_VIEW_SIZE", "Unsupported CCAPI Live View size.", status_code=422)
-            path = self._api_path("POST", "/shooting/liveview")
-            try:
-                self._request_ok("POST", path, {"cameradisplay": "on", "liveviewsize": size.casefold()})
-                self._live_view_size_control = True
-            except _CcapiHTTPError as error:
-                if error.camera_status != 400:
-                    raise
-                self._request_ok("POST", path, {"cameradisplay": "on"})
-                self._live_view_size_control = False
-            self._active_live_view_size = size
-            self._requested_fps = max(1, min(30, request.fps))
-            self._live_view_active = True
-            self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+
+            jpeg_supported = self._supports_jpeg_live_view()
+            rtp_supported = self._supports_rtp_live_view()
+            selected = "CCAPI_RTP" if source == "AUTO" and rtp_supported else source
+            if selected == "AUTO":
+                selected = "CCAPI_JPEG_POLLING"
+            if selected == "CCAPI_RTP":
+                if not rtp_supported:
+                    raise unsupported(
+                        CameraFeature.LIVE_VIEW_RTP.value,
+                        self.engine_name,
+                        self._rtp_capability_reason(),
+                    )
+                try:
+                    self._start_rtp_live_view(request)
+                    return
+                except BridgeError:
+                    if source != "AUTO" or not jpeg_supported:
+                        raise
+            if not jpeg_supported:
+                raise unsupported(CameraFeature.LIVE_VIEW.value, self.engine_name)
+            self._start_jpeg_live_view(request, size)
+
+    def _start_jpeg_live_view(self, request: LiveViewStartRequest, size: str) -> None:
+        path = self._api_path("POST", "/shooting/liveview")
+        try:
+            self._request_ok("POST", path, {"cameradisplay": "on", "liveviewsize": size.casefold()})
+            self._live_view_size_control = True
+        except _CcapiHTTPError as error:
+            if error.camera_status != 400:
+                raise
+            self._request_ok("POST", path, {"cameradisplay": "on"})
+            self._live_view_size_control = False
+        self._active_live_view_size = size
+        self._requested_fps = max(1, min(30, request.fps))
+        self._live_view_active = True
+        self._active_live_view_source = "CCAPI_JPEG_POLLING"
+        self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+
+    def _start_rtp_live_view(self, request: LiveViewStartRequest) -> None:
+        factory = self._rtp_session_factory
+        destination = self._rtp_destination_address
+        if factory is None or destination is None:
+            raise unsupported(CameraFeature.LIVE_VIEW_RTP.value, self.engine_name, self._rtp_capability_reason())
+        description_path = self._api_path("GET", "/shooting/liveview/rtpsessiondesc")
+        control_path = self._api_path("POST", "/shooting/liveview/rtp")
+        response = self._request("GET", description_path, max_bytes=MAX_RTP_SESSION_DESCRIPTION_BYTES)
+        session: RtpLiveViewSession | None = None
+        try:
+            description = parse_sdp(response.body.decode("utf-8"))
+            session = factory(description, destination)
+            session.set_target_fps(request.fps)
+            session.start()
+        except Exception as error:
+            if session is not None:
+                with suppress(Exception):
+                    session.close()
+            raise BridgeError(
+                "CCAPI_RTP_START_FAILED",
+                f"Could not prepare the Canon RTP receiver: {error}",
+                status_code=502,
+                feature=CameraFeature.LIVE_VIEW_RTP.value,
+                engine=self.engine_name,
+            ) from error
+        assert session is not None
+        try:
+            self._request_ok("POST", control_path, {"action": "start", "ipaddress": destination})
+            session.wait_until_ready(timeout=5.0)
+        except Exception as error:
+            with suppress(Exception):
+                session.close()
+            with suppress(BridgeError):
+                self._request_ok("POST", control_path, {"action": "stop", "ipaddress": ""})
+            if isinstance(error, BridgeError):
+                raise
+            raise BridgeError(
+                "CCAPI_RTP_START_FAILED",
+                f"Canon RTP started but no decoded video became ready: {error}",
+                status_code=502,
+                feature=CameraFeature.LIVE_VIEW_RTP.value,
+                engine=self.engine_name,
+            ) from error
+        if self._rtp_session is not None:
+            with suppress(Exception):
+                self._rtp_session.close()
+        self._rtp_session = session
+        self._requested_fps = max(1, min(30, request.fps))
+        self._live_view_active = True
+        self._active_live_view_source = "CCAPI_RTP"
+        self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_RTP})
 
     def stop_live_view(self) -> None:
         with self._lock:
@@ -704,10 +826,26 @@ class CcapiSession:
             self._latest_live_view_geometry = None
             if not self._live_view_active:
                 return
-            try:
+            self._stop_live_view_locked()
+
+    def _stop_live_view_locked(self) -> None:
+        source = self._active_live_view_source
+        try:
+            if source == "CCAPI_RTP":
+                self._request_ok(
+                    "POST",
+                    self._api_path("POST", "/shooting/liveview/rtp"),
+                    {"action": "stop", "ipaddress": ""},
+                )
+            else:
                 self._request_ok("DELETE", self._api_path("DELETE", "/shooting/liveview"))
-            finally:
-                self._live_view_active = False
+        finally:
+            if self._rtp_session is not None:
+                with suppress(Exception):
+                    self._rtp_session.close()
+                self._rtp_session = None
+            self._live_view_active = False
+            self._active_live_view_source = None
 
     def live_view_frame(self) -> bytes:
         with self._lock:
@@ -720,55 +858,81 @@ class CcapiSession:
                     feature=CameraFeature.LIVE_VIEW.value,
                     engine=self.engine_name,
                 )
-            self._frame_key += 1
-            candidates = self._live_view_frame_paths()
-            failures: list[str] = []
-            for candidate in candidates:
-                separator = "&" if "?" in candidate else "?"
-                path = f"{candidate}{separator}t={self._frame_key}"
-                try:
-                    if "flipdetail" in candidate and "kind=both" in candidate:
-                        self._latest_live_view_geometry = None
-                    response = self._request(
-                        "GET",
-                        path,
-                        headers={
-                            "Accept": "multipart/x-mixed-replace,image/jpeg,image/*,*/*",
-                            "Connection": "close",
-                            "Pragma": "no-cache",
-                        },
-                        max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
+            if self._active_live_view_source == "CCAPI_RTP":
+                session = self._rtp_session
+                if session is None:
+                    raise BridgeError(
+                        "CCAPI_RTP_SESSION_MISSING",
+                        "Canon RTP Live View is active without a receiver session.",
+                        status_code=502,
+                        feature=CameraFeature.LIVE_VIEW_RTP.value,
+                        engine=self.engine_name,
                     )
-                    content_type = response.headers.get("content-type", "")
-                    if _is_text_content_type(content_type):
+            else:
+                return self._jpeg_live_view_frame()
+        try:
+            return session.read_frame(timeout=5.0)
+        except (RtpError, OSError, RuntimeError) as error:
+            with self._lock:
+                self._last_error = str(error)
+            raise BridgeError(
+                "CCAPI_RTP_FRAME_FAILED",
+                str(error),
+                status_code=502,
+                feature=CameraFeature.LIVE_VIEW_RTP.value,
+                engine=self.engine_name,
+            ) from error
+
+    def _jpeg_live_view_frame(self) -> bytes:
+        self._frame_key += 1
+        candidates = self._live_view_frame_paths()
+        failures: list[str] = []
+        for candidate in candidates:
+            separator = "&" if "?" in candidate else "?"
+            path = f"{candidate}{separator}t={self._frame_key}"
+            try:
+                if "flipdetail" in candidate and "kind=both" in candidate:
+                    self._latest_live_view_geometry = None
+                response = self._request(
+                    "GET",
+                    path,
+                    headers={
+                        "Accept": "multipart/x-mixed-replace,image/jpeg,image/*,*/*",
+                        "Connection": "close",
+                        "Pragma": "no-cache",
+                    },
+                    max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
+                )
+                content_type = response.headers.get("content-type", "")
+                if _is_text_content_type(content_type):
+                    raise BridgeError(
+                        "INVALID_LIVE_VIEW_FRAME",
+                        f"Camera returned {content_type or 'text'} instead of image bytes.",
+                        status_code=502,
+                        engine=self.engine_name,
+                    )
+                if "flipdetail" in candidate and "kind=both" in candidate:
+                    image, geometry = _parse_detailed_live_view(response.body)
+                    if geometry is not None:
+                        self._latest_live_view_geometry = geometry
+                    if image is None:
                         raise BridgeError(
                             "INVALID_LIVE_VIEW_FRAME",
-                            f"Camera returned {content_type or 'text'} instead of image bytes.",
+                            "Detailed Live View response did not contain an image packet.",
                             status_code=502,
                             engine=self.engine_name,
                         )
-                    if "flipdetail" in candidate and "kind=both" in candidate:
-                        image, geometry = _parse_detailed_live_view(response.body)
-                        if geometry is not None:
-                            self._latest_live_view_geometry = geometry
-                        if image is None:
-                            raise BridgeError(
-                                "INVALID_LIVE_VIEW_FRAME",
-                                "Detailed Live View response did not contain an image packet.",
-                                status_code=502,
-                                engine=self.engine_name,
-                            )
-                        return image
-                    return _extract_jpeg(response.body)
-                except BridgeError as error:
-                    failures.append(f"{candidate}: {error.message}")
-            raise BridgeError(
-                "INVALID_LIVE_VIEW_FRAME",
-                "Live View failed on every advertised JPEG endpoint.\n" + "\n".join(f"- {item}" for item in failures),
-                status_code=502,
-                feature=CameraFeature.LIVE_VIEW.value,
-                engine=self.engine_name,
-            )
+                    return image
+                return _extract_jpeg(response.body)
+            except BridgeError as error:
+                failures.append(f"{candidate}: {error.message}")
+        raise BridgeError(
+            "INVALID_LIVE_VIEW_FRAME",
+            "Live View failed on every advertised JPEG endpoint.\n" + "\n".join(f"- {item}" for item in failures),
+            status_code=502,
+            feature=CameraFeature.LIVE_VIEW.value,
+            engine=self.engine_name,
+        )
 
     def list_media(self) -> list[MediaItem]:
         with self._lock:
@@ -888,6 +1052,10 @@ class CcapiSession:
     @property
     def live_view_active(self) -> bool:
         return self._live_view_active
+
+    @property
+    def live_view_source(self) -> str | None:
+        return self._active_live_view_source
 
     def _set_recording(self, recording: bool) -> CameraStatus:
         with self._lock:
@@ -1168,20 +1336,74 @@ class CcapiSession:
             candidates.append(live_view.path)
         return candidates
 
+    def _supports_jpeg_live_view(self) -> bool:
+        return bool(
+            self._supports("POST", "/shooting/liveview")
+            and self._supports("DELETE", "/shooting/liveview")
+            and any(
+                self._operation("GET", suffix)
+                for suffix in (
+                    "/shooting/liveview/flip",
+                    "/shooting/liveview/flipdetail",
+                    "/shooting/liveview",
+                )
+            )
+        )
+
+    def _supports_rtp_live_view(self) -> bool:
+        return bool(
+            self._supports("GET", "/shooting/liveview/rtpsessiondesc")
+            and self._supports("POST", "/shooting/liveview/rtp")
+            and self._rtp_destination_address
+            and self._rtp_session_factory
+        )
+
+    def _rtp_capability_reason(self) -> str:
+        if not self._supports("GET", "/shooting/liveview/rtpsessiondesc") or not self._supports(
+            "POST", "/shooting/liveview/rtp"
+        ):
+            return "The camera did not advertise the verified Canon CCAPI RTP endpoints."
+        if self._rtp_session_factory is None:
+            return "The desktop PyAV H.264 decoder is unavailable. Reinstall the bridge runtime dependencies."
+        if self._rtp_destination_address is None:
+            return "No routed local IPv4 address is available for the camera to send Canon RTP video to."
+        return "Canon CCAPI RTP H.264 Live View is available."
+
+    def _ensure_live_view_geometry_for_native_stream(self) -> None:
+        if self._active_live_view_source != "CCAPI_RTP" or self._latest_live_view_geometry is not None:
+            return
+        detail = self._operation("GET", "/shooting/liveview/flipdetail")
+        if detail is None:
+            return
+        self._frame_key += 1
+        response = self._request(
+            "GET",
+            f"{detail.path}?kind=both&t={self._frame_key}",
+            headers={"Accept": "application/octet-stream,*/*", "Cache-Control": "no-cache"},
+            max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
+        )
+        _, geometry = _parse_detailed_live_view(response.body)
+        if geometry is None:
+            raise BridgeError(
+                "LIVE_VIEW_COORDINATES_UNAVAILABLE",
+                "Detailed Live View did not contain Canon image position metadata.",
+                status_code=409,
+                engine=self.engine_name,
+            )
+        self._latest_live_view_geometry = geometry
+
     def _supports_coordinate_tap_focus(self) -> bool:
         return bool(
             self._operation("PUT", "/shooting/liveview/afframeposition")
             and self._operation("GET", "/shooting/liveview/flipdetail")
-            and self._supports("POST", "/shooting/liveview")
-            and self._supports("DELETE", "/shooting/liveview")
+            and (self._supports_jpeg_live_view() or self._supports_rtp_live_view())
         )
 
     def _supports_coordinate_click_white_balance(self) -> bool:
         return bool(
             self._operation("POST", "/shooting/liveview/clickwb")
             and self._operation("GET", "/shooting/liveview/flipdetail")
-            and self._supports("POST", "/shooting/liveview")
-            and self._supports("DELETE", "/shooting/liveview")
+            and (self._supports_jpeg_live_view() or self._supports_rtp_live_view())
         )
 
     def _needs_live_view_geometry(self) -> bool:

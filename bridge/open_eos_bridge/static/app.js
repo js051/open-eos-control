@@ -71,6 +71,11 @@
       near: "Near",
       far: "Far",
       liveViewSettings: "Live View",
+      liveViewSource: "Source",
+      liveViewSourceAuto: "Auto",
+      liveViewSourceRtp: "RTP H.264",
+      liveViewSourceJpeg: "JPEG polling",
+      liveViewSourceBridge: "Desktop preview",
       frameRate: "Frame rate",
       moreSettings: "More settings",
       diagnosticSafe: "Authentication token is excluded",
@@ -190,6 +195,11 @@
       near: "近",
       far: "遠",
       liveViewSettings: "即時預覽",
+      liveViewSource: "畫面來源",
+      liveViewSourceAuto: "自動",
+      liveViewSourceRtp: "RTP H.264",
+      liveViewSourceJpeg: "JPEG 輪詢",
+      liveViewSourceBridge: "電腦預覽",
       frameRate: "影格率",
       moreSettings: "更多設定",
       diagnosticSafe: "診斷內容不包含驗證 token",
@@ -311,6 +321,8 @@
     liveActive: false,
     liveGeneration: 0,
     requestedFps: 1,
+    liveSource: "AUTO",
+    activeLiveSource: null,
     frameTimes: [],
     observedFps: 0,
     frameBytes: 0,
@@ -379,6 +391,8 @@
     focusNearButton: byId("focus-near-button"),
     focusFarButton: byId("focus-far-button"),
     fpsSelect: byId("fps-select"),
+    liveSourceRow: byId("live-source-row"),
+    liveSourceSelect: byId("live-source-select"),
     tapActionRow: byId("tap-action-row"),
     tapActionSelect: byId("tap-action-select"),
     advancedSettings: byId("advanced-settings"),
@@ -750,6 +764,8 @@
     state.media = [];
     state.mediaLoaded = false;
     state.captureMode = "photo";
+    state.liveSource = "AUTO";
+    state.activeLiveSource = null;
     state.busy = false;
     state.token = "";
     ui.connectionView.hidden = false;
@@ -797,6 +813,7 @@
     ui.modeIndicator.textContent = state.status.mode && state.status.mode !== "unknown" ? state.status.mode : "-";
     renderExposure();
     renderAdvancedSettings();
+    renderLiveSource();
     renderFps();
     renderTapAction();
     renderCaptureMode();
@@ -1021,6 +1038,29 @@
     ui.fpsSelect.disabled = state.busy || !featureSupported(FEATURES.LIVE_VIEW);
   }
 
+  function renderLiveSource() {
+    const sources = liveCapabilities().sources || [];
+    if (state.liveSource !== "AUTO" && !sources.includes(state.liveSource)) state.liveSource = "AUTO";
+    const options = sources.length > 1 ? ["AUTO", ...sources] : sources;
+    const labels = {
+      AUTO: "liveViewSourceAuto",
+      CCAPI_RTP: "liveViewSourceRtp",
+      CCAPI_JPEG_POLLING: "liveViewSourceJpeg",
+      DESKTOP_BRIDGE_STREAM: "liveViewSourceBridge",
+    };
+    ui.liveSourceSelect.replaceChildren();
+    options.forEach((source) => {
+      const option = document.createElement("option");
+      option.value = source;
+      option.textContent = t(labels[source] || "liveViewSource");
+      ui.liveSourceSelect.append(option);
+    });
+    if (sources.length === 1) state.liveSource = sources[0];
+    ui.liveSourceSelect.value = state.liveSource;
+    ui.liveSourceRow.hidden = sources.length <= 1;
+    ui.liveSourceSelect.disabled = state.busy || !featureSupported(FEATURES.LIVE_VIEW);
+  }
+
   function effectiveTapAction() {
     if (state.tapAction === "whiteBalance" && featureSupported(FEATURES.CLICK_WHITE_BALANCE)) {
       return "whiteBalance";
@@ -1059,10 +1099,11 @@
         json: {
           fps: clampFps(state.requestedFps),
           size: capabilities.defaultSize || capabilities.sizes?.[0] || "MEDIUM",
-          source: capabilities.defaultSource || capabilities.sources?.[0] || "DESKTOP_BRIDGE_STREAM",
+          source: state.liveSource || "AUTO",
         },
       });
       state.requestedFps = response.requestedFps || clampFps(state.requestedFps);
+      state.activeLiveSource = response.source || state.liveSource;
       state.liveActive = true;
       state.frameTimes = [];
       state.observedFps = 0;
@@ -1112,6 +1153,7 @@
     state.observedFps = 0;
     state.frameBytes = 0;
     state.frameContentType = null;
+    state.activeLiveSource = null;
     state.lastFrameAt = null;
     if (state.liveObjectUrl) URL.revokeObjectURL(state.liveObjectUrl);
     state.liveObjectUrl = null;
@@ -1173,6 +1215,13 @@
     await stopLiveView({ announce: false });
     await startLiveView({ announce: false });
     showToast(`${state.requestedFps} FPS`);
+  }
+
+  async function changeLiveSource() {
+    state.liveSource = ui.liveSourceSelect.value;
+    if (!state.liveActive) return;
+    await stopLiveView({ announce: false });
+    await startLiveView({ announce: false });
   }
 
   function renderLiveState() {
@@ -1322,6 +1371,7 @@
     ui.focusNearButton.disabled = state.busy || !state.liveActive;
     ui.focusFarButton.disabled = state.busy || !state.liveActive;
     ui.fpsSelect.disabled = state.busy || !liveSupported;
+    ui.liveSourceSelect.disabled = state.busy || !liveSupported;
     ui.tapActionSelect.disabled = state.busy || !state.liveActive;
     document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
       button.disabled = state.busy || !settingByKey(button.dataset.settingKey);
@@ -1600,6 +1650,8 @@
       capabilities: state.capabilities,
       liveView: {
         active: state.liveActive,
+        requestedSource: state.liveSource,
+        activeSource: state.activeLiveSource,
         requestedFps: state.requestedFps,
         observedFps: Number(state.observedFps.toFixed(1)),
         frameBytes: state.frameBytes,
@@ -1711,6 +1763,7 @@
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
     ui.railLiveButton.addEventListener("click", toggleLiveView);
     ui.fpsSelect.addEventListener("change", changeFps);
+    ui.liveSourceSelect.addEventListener("change", changeLiveSource);
     ui.tapActionSelect.addEventListener("change", () => {
       state.tapAction = ui.tapActionSelect.value;
       renderAvailability();

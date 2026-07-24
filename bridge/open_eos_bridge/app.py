@@ -222,7 +222,8 @@ def create_app(
         session = manager.get(session_id)
         session.start_live_view(payload)
         requested_fps = getattr(session, "requested_fps", min(payload.fps, 5))
-        return LiveViewState(active=True, requested_fps=requested_fps)
+        source = getattr(session, "live_view_source", payload.source)
+        return LiveViewState(active=True, requested_fps=requested_fps, source=source)
 
     @router.post("/session/{session_id}/liveview/stop", response_model=LiveViewState)
     def stop_live_view(session_id: str) -> LiveViewState:

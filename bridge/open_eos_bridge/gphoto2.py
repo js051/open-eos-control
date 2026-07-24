@@ -917,6 +917,10 @@ class GPhoto2Session:
     def live_view_active(self) -> bool:
         return self._live_view_active
 
+    @property
+    def live_view_source(self) -> str | None:
+        return "DESKTOP_BRIDGE_STREAM" if self._live_view_active else None
+
     def _set_recording(self, recording: bool) -> CameraStatus:
         with self._lock:
             values = self._recording_values()

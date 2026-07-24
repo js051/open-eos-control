@@ -181,6 +181,7 @@ class LiveViewStartRequest(ApiModel):
 class LiveViewState(ApiModel):
     active: bool
     requested_fps: int | None = None
+    source: str | None = None
 
 
 class FocusDriveRequest(ApiModel):

@@ -130,15 +130,19 @@ The bridge should mirror the app-side capability model:
 {
   "fps": 15,
   "size": "MEDIUM",
-  "source": "DESKTOP_BRIDGE_STREAM"
+  "source": "AUTO"
 }
 ```
+
+The response includes the effective `source`, so clients can distinguish an `AUTO` request that selected `CCAPI_RTP` from one that fell back to `CCAPI_JPEG_POLLING`.
 
 The current CLI adapter serves `GET /liveview/frame` as JPEG polling. Each frame is one bounded `gphoto2 --capture-preview --stdout` process, so it advertises at most 5 FPS. The client controls polling at or below `requestedFps`; the server does not claim the camera delivered that rate. A later native libgphoto2 adapter can keep a persistent stream while preserving the endpoint and capability vocabulary.
 
 `GET /v1/session/{id}/media/{itemId}/thumbnail` returns a bounded JPEG or PNG with `Cache-Control: private, no-store`. The libgphoto2 engine advertises `MEDIA_THUMBNAIL` only when `gphoto2 --abilities` reports file-preview support and then executes the documented `--folder ... --get-thumbnail ... --stdout` command. The direct CCAPI engine does not advertise this capability because no verified camera-advertised thumbnail resource is available; clients keep their file-type fallback.
 
 The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. When coordinate Tap AF or Click White Balance is advertised, `flipdetail?kind=both` is preferred so the same bounded response supplies the JPEG and Canon image-position metadata. Requested FPS controls client polling; observed FPS remains a separate UI metric.
+
+The CCAPI engine also advertises `CCAPI_RTP` only when discovery contains `GET /shooting/liveview/rtpsessiondesc` and `POST /shooting/liveview/rtp`, the camera route resolves to a usable local IPv4 address, and the installed PyAV runtime can create an H.264 decoder. It validates the SDP H.264/90 kHz stream, binds the advertised UDP port before posting `{"action":"start","ipaddress":"..."}`, parses RFC 3550 and RFC 6184 single NAL/STAP-A/FU-A packets, waits for SPS/PPS plus a keyframe, decodes every access unit, and converts only FPS-eligible decoded frames to JPEG. Start is not reported successful until the first frame is actually decoded; a timeout closes the receiver, sends Canon's stop body, and lets AUTO fall back to JPEG. Stop, failed HTTP start, session close, and AUTO fallback all clean up both sides. `GET /liveview/frame` remains `image/jpeg`, so existing Bridge clients need no video-container decoder. AAC LATM audio in the SDP is not implemented.
 
 ## CCAPI Mapping
 
@@ -153,9 +157,10 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - normalized UI Tap AF mapped through detailed Live View `image` geometry to integer `positionx`/`positiony`, then sent only through advertised `PUT /shooting/liveview/afframeposition`
 - normalized UI Click White Balance mapped through the same geometry, then sent only through advertised `POST /shooting/liveview/clickwb`
 - bounded JPEG Live View lifecycle and frame extraction
+- advertised RTP H.264 lifecycle, UDP reception, RFC 3550/RFC 6184 depacketization and PyAV decode-to-JPEG output
 - bounded/paged storage traversal plus opaque same-origin media IDs, streamed downloads, and deletion only when the camera advertises a matching `DELETE` operation
 
-Basic Auth is sent preemptively when a username is supplied. The Authorization value, username, and password are never exposed in status, diagnostics, media URLs, or API responses. Focus drive is available only when the camera advertises the verified `drivefocus` POST operation. RTP remains unavailable until a documented decoder and session implementation is added.
+Basic Auth is sent preemptively when a username is supplied. The Authorization value, username, and password are never exposed in status, diagnostics, media URLs, or API responses. Focus drive is available only when the camera advertises the verified `drivefocus` POST operation. RTP is hidden when any camera-endpoint, route, or decoder gate is absent; no unusable source is advertised.
 
 ## libgphoto2 Mapping
 

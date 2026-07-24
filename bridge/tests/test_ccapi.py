@@ -20,11 +20,19 @@ from open_eos_bridge.ccapi import (
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine
 from open_eos_bridge.models import CameraFeature, LiveViewStartRequest
+from open_eos_bridge.rtp import RtpError, RtpSessionDescription
 
 from .fakes import FakeRunner
 
 JPEG = b"\xff\xd8open-eos-ccapi\xff\xd9"
 MEDIA = b"camera-media"
+RTP_JPEG = b"\xff\xd8ccapi-rtp\xff\xd9"
+RTP_SDP = """v=0
+m=video 12000 RTP/AVP 96
+a=rtpmap:96 H264/90000
+m=audio 12002 RTP/AVP 97
+a=rtpmap:97 MP4A-LATM/48000/2
+"""
 DISCOVERY = {
     "ver100": [
         {"path": "/deviceinformation", "get": True},
@@ -48,6 +56,13 @@ DISCOVERY = {
         {"path": "/contents", "get": True, "delete": True},
     ]
 }
+RTP_DISCOVERY = {
+    "ver100": [
+        *DISCOVERY["ver100"],
+        {"path": "/shooting/liveview/rtpsessiondesc", "get": True},
+        {"path": "/shooting/liveview/rtp", "post": True},
+    ]
+}
 
 
 @dataclass(frozen=True)
@@ -64,10 +79,12 @@ class FakeCcapiTransport:
         discovery: dict[str, object] | None = None,
         external_media: bool = False,
         reject_autofocus_start: bool = False,
+        reject_rtp_start: bool = False,
     ) -> None:
         self.discovery = discovery or DISCOVERY
         self.external_media = external_media
         self.reject_autofocus_start = reject_autofocus_start
+        self.reject_rtp_start = reject_rtp_start
         self.requests: list[RecordedRequest] = []
         self.settings = {
             "iso": {"value": "800", "ability": ["100", "800", "1600"]},
@@ -118,6 +135,12 @@ class FakeCcapiTransport:
             if self.reject_live_view_size and payload and "liveviewsize" in payload:
                 self.reject_live_view_size = False
                 return _json_response({"message": "Invalid parameter"}, status=400)
+            return CcapiResponse(204, {}, b"")
+        if method == "GET" and path == "/ccapi/ver100/shooting/liveview/rtpsessiondesc":
+            return CcapiResponse(200, {"content-type": "application/sdp"}, RTP_SDP.encode())
+        if method == "POST" and path == "/ccapi/ver100/shooting/liveview/rtp":
+            if self.reject_rtp_start and payload == {"action": "start", "ipaddress": "192.168.1.20"}:
+                return _json_response({"message": "RTP unavailable"}, status=503)
             return CcapiResponse(204, {}, b"")
         if method == "GET" and path.startswith("/ccapi/ver100/shooting/liveview/flip?"):
             multipart = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + JPEG + b"\r\n--frame\r\n"
@@ -192,6 +215,42 @@ class FakeCcapiTransport:
                 BytesIO(MEDIA),
             )
         return CcapiStreamResponse(404, {}, BytesIO(b"not found"))
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeRtpSession:
+    def __init__(
+        self,
+        *,
+        start_error: Exception | None = None,
+        ready_error: Exception | None = None,
+    ) -> None:
+        self.source_url = "rtp://192.168.1.20:12000"
+        self.last_error: str | None = None
+        self.start_error = start_error
+        self.ready_error = ready_error
+        self.target_fps = 0
+        self.started = False
+        self.closed = False
+
+    def start(self) -> None:
+        if self.start_error is not None:
+            raise self.start_error
+        self.started = True
+
+    def set_target_fps(self, fps: int) -> None:
+        self.target_fps = fps
+
+    def read_frame(self, timeout: float = 5.0) -> bytes:
+        assert timeout == 5.0
+        return RTP_JPEG
+
+    def wait_until_ready(self, timeout: float = 5.0) -> None:
+        assert timeout == 5.0
+        if self.ready_error is not None:
+            raise self.ready_error
 
     def close(self) -> None:
         self.closed = True
@@ -307,6 +366,133 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         {"cameradisplay": "on", "liveviewsize": "large"},
         {"cameradisplay": "on"},
     ]
+
+
+def test_ccapi_rtp_capability_and_exact_lifecycle_are_end_to_end() -> None:
+    transport = FakeCcapiTransport(discovery=RTP_DISCOVERY)
+    rtp_sessions: list[FakeRtpSession] = []
+    descriptions: list[tuple[RtpSessionDescription, str]] = []
+
+    def rtp_factory(description: RtpSessionDescription, destination: str) -> FakeRtpSession:
+        descriptions.append((description, destination))
+        result = FakeRtpSession()
+        rtp_sessions.append(result)
+        return result
+
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        rtp_session_factory=rtp_factory,
+        route_resolver=lambda _url: "192.168.1.20",
+    ).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    assert CameraFeature.LIVE_VIEW_RTP in capabilities.supported
+    assert capabilities.live_view.sources == ["CCAPI_RTP", "CCAPI_JPEG_POLLING"]
+    assert capabilities.live_view.default_source == "CCAPI_RTP"
+
+    session.start_live_view(LiveViewStartRequest(fps=24, source="CCAPI_RTP"))
+    assert descriptions[0][0].video.codec == "H264"
+    assert descriptions[0][1] == "192.168.1.20"
+    assert rtp_sessions[0].started is True
+    assert rtp_sessions[0].target_fps == 24
+    assert session.live_view_source == "CCAPI_RTP"
+    assert session.status().raw["rtpSource"] == "rtp://192.168.1.20:12000"
+    assert session.live_view_frame() == RTP_JPEG
+
+    focus = session.tap_focus(0.25, 0.75)
+    assert focus.accepted is True
+    session.stop_live_view()
+    assert rtp_sessions[0].closed is True
+
+    rtp_requests = [request for request in transport.requests if request.path.endswith("/shooting/liveview/rtp")]
+    assert [(request.method, request.body) for request in rtp_requests] == [
+        ("POST", {"action": "start", "ipaddress": "192.168.1.20"}),
+        ("POST", {"action": "stop", "ipaddress": ""}),
+    ]
+    assert any(request.path.endswith("/shooting/liveview/rtpsessiondesc") for request in transport.requests)
+    assert not any(
+        request.path == "/ccapi/ver100/shooting/liveview" and request.method == "POST" for request in transport.requests
+    )
+
+
+def test_ccapi_auto_falls_back_to_jpeg_when_local_rtp_start_fails() -> None:
+    transport = FakeCcapiTransport(discovery=RTP_DISCOVERY)
+    failed_session = FakeRtpSession(start_error=RtpError("UDP bind failed"))
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        rtp_session_factory=lambda _description, _destination: failed_session,
+        route_resolver=lambda _url: "192.168.1.20",
+        sleeper=lambda _: None,
+    ).open_connection("http://192.168.1.2:8080")
+
+    session.start_live_view(LiveViewStartRequest(fps=15, source="AUTO"))
+
+    assert failed_session.closed is True
+    assert session.live_view_source == "CCAPI_JPEG_POLLING"
+    assert session.live_view_frame() == JPEG
+    assert any(
+        request.path == "/ccapi/ver100/shooting/liveview" and request.method == "POST" for request in transport.requests
+    )
+    assert not any(request.path.endswith("/shooting/liveview/rtp") for request in transport.requests)
+    session.stop_live_view()
+
+
+def test_ccapi_rtp_http_start_failure_closes_receiver_and_sends_stop() -> None:
+    transport = FakeCcapiTransport(discovery=RTP_DISCOVERY, reject_rtp_start=True)
+    rtp_session = FakeRtpSession()
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        rtp_session_factory=lambda _description, _destination: rtp_session,
+        route_resolver=lambda _url: "192.168.1.20",
+    ).open_connection("http://192.168.1.2:8080")
+
+    with pytest.raises(BridgeError) as failure:
+        session.start_live_view(LiveViewStartRequest(source="CCAPI_RTP"))
+
+    assert failure.value.code == "CCAPI_HTTP_ERROR"
+    assert rtp_session.closed is True
+    rtp_requests = [request for request in transport.requests if request.path.endswith("/shooting/liveview/rtp")]
+    assert [request.body for request in rtp_requests] == [
+        {"action": "start", "ipaddress": "192.168.1.20"},
+        {"action": "stop", "ipaddress": ""},
+    ]
+
+
+def test_ccapi_auto_stops_and_falls_back_when_rtp_never_decodes_a_frame() -> None:
+    transport = FakeCcapiTransport(discovery=RTP_DISCOVERY)
+    rtp_session = FakeRtpSession(ready_error=RtpError("No decoded keyframe"))
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        rtp_session_factory=lambda _description, _destination: rtp_session,
+        route_resolver=lambda _url: "192.168.1.20",
+        sleeper=lambda _: None,
+    ).open_connection("http://192.168.1.2:8080")
+
+    session.start_live_view(LiveViewStartRequest(source="AUTO"))
+
+    assert rtp_session.closed is True
+    assert session.live_view_source == "CCAPI_JPEG_POLLING"
+    rtp_requests = [request for request in transport.requests if request.path.endswith("/shooting/liveview/rtp")]
+    assert [request.body for request in rtp_requests] == [
+        {"action": "start", "ipaddress": "192.168.1.20"},
+        {"action": "stop", "ipaddress": ""},
+    ]
+
+
+def test_ccapi_rtp_is_not_advertised_without_a_real_decoder_or_route() -> None:
+    transport = FakeCcapiTransport(discovery=RTP_DISCOVERY)
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        rtp_session_factory=None,
+        route_resolver=lambda _url: "192.168.1.20",
+    ).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.LIVE_VIEW_RTP not in capabilities.supported
+    assert CameraFeature.LIVE_VIEW_RTP in capabilities.planned
+    assert capabilities.live_view.sources == ["CCAPI_JPEG_POLLING"]
+    assert "decoder" in capabilities.reasons[CameraFeature.LIVE_VIEW_RTP.value].casefold()
 
 
 def test_ccapi_discovery_accepts_same_origin_url_entries_and_rejects_unsafe_operations() -> None:
@@ -514,7 +700,7 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
         )
         session_id = created.json()["id"]
         capabilities = client.get(f"/v1/session/{session_id}/capabilities", headers=headers)
-        client.post(
+        live_started = client.post(
             f"/v1/session/{session_id}/liveview/start",
             headers=headers,
             json={"fps": 15, "size": "MEDIUM", "source": "CCAPI_JPEG_POLLING"},
@@ -552,6 +738,7 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert focused.json() == {"accepted": True, "x": 0.4, "y": 0.6}
     assert white_balanced.json()["connected"] is True
     assert driven.json() == {"accepted": True, "direction": "NEAR", "step": "MEDIUM"}
+    assert live_started.json()["source"] == "CCAPI_JPEG_POLLING"
     assert duplicate.status_code == 409
     assert duplicate.json()["error"]["code"] == "CAMERA_BUSY"
     assert credentials == [("camera-user", "camera-secret"), ("", "")]

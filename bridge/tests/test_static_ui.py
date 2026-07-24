@@ -56,6 +56,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "focus-section",
         "tap-action-row",
         "tap-action-select",
+        "live-source-select",
         "media-list",
         "diagnostics-output",
     }
@@ -113,5 +114,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert all("password" not in line and "token" not in line for line in storage_lines)
     assert "ccapi_password_key" not in script.casefold()
     assert "Math.min(15, state.capabilities.liveView?.maxFps || 1)" in script
+    assert 'source: state.liveSource || "AUTO"' in script
+    assert "CCAPI_RTP" in script
     report_source = script.split("function diagnosticReport()", 1)[1].split("\n  function ", 1)[0]
     assert "token" not in report_source.casefold()

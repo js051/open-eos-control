@@ -87,7 +87,11 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert setting.json()["exposure"]["iso"] == "800"
     assert autofocus.status_code == 200
-    assert live_start.json() == {"active": True, "requestedFps": 5}
+    assert live_start.json() == {
+        "active": True,
+        "requestedFps": 5,
+        "source": "DESKTOP_BRIDGE_STREAM",
+    }
     assert live_frame.content == JPEG
     assert focus.json()["accepted"] is True
     assert unsupported_tap.status_code == 409
