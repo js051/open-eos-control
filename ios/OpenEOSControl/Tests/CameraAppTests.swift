@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import OpenEOSCore
 import XCTest
 
@@ -61,6 +62,57 @@ final class CameraAppTests: XCTestCase {
 
         XCTAssertEqual(advancedSettingsForMode(settings, mode: .photo).map(\.key), ["drivemode", "meteringmode"])
         XCTAssertEqual(advancedSettingsForMode(settings, mode: .video).map(\.key), ["moviequality", "meteringmode"])
+    }
+
+    func testR6AdvancedSettingLocalizationKeepsProtocolValuesSeparate() {
+        let expectedLabels = [
+            "whitebalanceadjusta": "setting_white_balance_shift_a",
+            "whitebalanceadjustb": "setting_white_balance_shift_b",
+            "aspectratio": "setting_aspect_ratio",
+            "zoomspeed": "setting_power_zoom_speed",
+            "autopoweroff": "setting_auto_power_off",
+            "stillimagequalitysd": "setting_image_quality_sd",
+            "stillimagequalitycf": "setting_image_quality_cf",
+        ]
+        for (key, localizationKey) in expectedLabels {
+            XCTAssertEqual(settingLabelLocalizationKey(key), localizationKey)
+        }
+
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "autopoweroff", value: "1800"),
+            "camera_value_30_minutes"
+        )
+        XCTAssertNil(settingValueLocalizationKey(key: "autopoweroff", value: "4294967295"))
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "stillimagequalitycf", value: "cRAW + Large Fine JPEG"),
+            "camera_value_craw_large_fine_jpeg"
+        )
+        XCTAssertEqual(settingValueLocalizationKey(key: "continuousaf", value: "Off"), "camera_value_off")
+    }
+
+    func testEnglishAndTraditionalChineseResourcesHaveMatchingKeys() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let english = try String(
+            contentsOf: projectRoot.appendingPathComponent("App/Resources/en.lproj/Localizable.strings"),
+            encoding: .utf8
+        )
+        let traditionalChinese = try String(
+            contentsOf: projectRoot.appendingPathComponent("App/Resources/zh-Hant.lproj/Localizable.strings"),
+            encoding: .utf8
+        )
+
+        func resourceKeys(_ source: String) -> Set<String> {
+            Set(source.split(separator: "\n").compactMap { line in
+                guard line.first == "\"" else { return nil }
+                let remainder = line.dropFirst()
+                guard let closingQuote = remainder.firstIndex(of: "\"") else { return nil }
+                return String(remainder[..<closingQuote])
+            })
+        }
+
+        XCTAssertEqual(resourceKeys(english), resourceKeys(traditionalChinese))
     }
 
     func testOfflinePreviewHasRealisticCapabilityGating() {

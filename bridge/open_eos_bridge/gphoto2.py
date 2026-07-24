@@ -632,9 +632,16 @@ CONFIG_SPECS = (
     ConfigSpec("meteringmode", "Metering mode", ("meteringmode",)),
     ConfigSpec("picturestyle", "Picture style", ("picturestyle",)),
     ConfigSpec("stillimagequality", "Image quality", ("imageformat", "imagequality")),
+    ConfigSpec("stillimagequalitysd", "SD image quality", ("imageformatsd",)),
+    ConfigSpec("stillimagequalitycf", "CF/CFexpress image quality", ("imageformatcf",)),
     ConfigSpec("shootingmode", "Shooting mode", ("autoexposuremode",)),
     ConfigSpec("colortemperature", "Color temperature", ("colortemperature",)),
+    ConfigSpec("whitebalanceadjusta", "White balance shift A", ("whitebalanceadjusta",)),
+    ConfigSpec("whitebalanceadjustb", "White balance shift B", ("whitebalanceadjustb",)),
     ConfigSpec("colorspace", "Color space", ("colorspace",)),
+    ConfigSpec("aspectratio", "Aspect ratio", ("aspectratio",)),
+    ConfigSpec("zoomspeed", "Power zoom speed", ("zoomspeed",)),
+    ConfigSpec("autopoweroff", "Auto power off", ("autopoweroff",)),
     ConfigSpec("highisonr", "High ISO noise reduction", ("highisonr",)),
     ConfigSpec("continuousaf", "Continuous AF", ("continuousaf",)),
     ConfigSpec("movieservoaf", "Movie Servo AF", ("movieservoaf",)),
@@ -1059,7 +1066,16 @@ class GPhoto2Session:
             if config is None:
                 feature = _feature_for_setting(key)
                 raise unsupported(feature.value, self.engine_name)
-            self._set_config_value(config, value, refresh=False)
+            values = self._setting_values(spec, config)
+            selected_value = _case_insensitive_choice(values, value)
+            if selected_value is None:
+                raise BridgeError(
+                    "INVALID_SETTING_VALUE",
+                    f"Value '{value}' is not an advertised safe choice for {config.label or config.path}.",
+                    status_code=422,
+                    engine=self.engine_name,
+                )
+            self._set_config_value(config, selected_value, refresh=False)
             return self.status()
 
     def capture_still(self) -> CameraStatus:
@@ -1339,18 +1355,26 @@ class GPhoto2Session:
             config = self._find_config(spec.suffixes, writable=True)
             if config is None:
                 continue
-            values = config.selectable_values()
-            if not values:
+            values = self._setting_values(spec, config)
+            if not values or (not spec.core and len(values) < 2):
                 continue
+            current_value = _case_insensitive_choice(values, config.current) or "-"
             settings.append(
                 CameraSetting(
                     key=spec.key,
                     label=config.label or spec.label,
-                    value=config.current,
+                    value=current_value,
                     values=values,
                 )
             )
         return settings
+
+    @staticmethod
+    def _setting_values(spec: ConfigSpec, config: GPhotoConfig) -> list[str]:
+        values = config.selectable_values()
+        if spec.key == "autopoweroff":
+            return [value for value in values if value.casefold() not in {"4294967295", "0xffffffff"}]
+        return values
 
     def _setting_value(self, key: str) -> str:
         spec = next(candidate for candidate in CONFIG_SPECS if candidate.key == key)

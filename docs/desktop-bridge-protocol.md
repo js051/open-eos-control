@@ -168,7 +168,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 
 - discovery: `--auto-detect`
 - identity and status: `--summary`, `--list-all-config`, `--storage-info`
-- settings: camera-advertised values through `--set-config-value`
+- settings: camera-advertised values through `--set-config-value`; the R6 Mark III mapping includes WB A/B shifts, SD and CF/CFexpress image quality, aspect ratio, power-zoom speed, and Auto Power Off in addition to the existing exposure, AF, drive, metering, Picture Style, color, noise-reduction, AEB and movie controls
 - still capture: `--trigger-capture`, falling back to `--capture-image` only when advertised
 - half-press: advertised `eosremoterelease` press/release values with guaranteed release
 - independent autofocus: the same balanced half-press path, exposed separately from the lower-level half-press command
@@ -177,7 +177,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - Live View: advertised `viewfinder` lifecycle plus cancellable `--capture-movie --stdout` MJPEG, command-safe restart and bounded `--capture-preview --stdout` fallback, with cleanup on stop, failed start, and session close
 - media: recursive `--list-files`, streamed `--get-file ... --stdout`, and exact `--folder ... --delete-file ...` only when `--abilities` reports file deletion
 
-Coordinate tap focus and Click White Balance remain unavailable because the public CLI surface does not provide verified normalized image-coordinate commands for this camera. Unsupported controls return an error and are never reported as accepted.
+Settings are exposed only when the runtime config is writable and has safe selectable values. The undocumented R6 Mark III Auto Power Off `0xFFFFFFFF` sentinel is rejected even if posted directly to the API, and one-choice advanced controls stay out of the product UI. `Capture Target` is intentionally not mapped yet: selecting libgphoto2 host RAM without completing its object-transfer/cleanup lifecycle would create a misleading or lossy capture path. Coordinate tap focus and Click White Balance remain unavailable because the public CLI surface does not provide verified normalized image-coordinate commands for this camera. Unsupported controls return an error and are never reported as accepted.
 
 ## Run Locally
 

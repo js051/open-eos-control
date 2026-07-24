@@ -92,14 +92,21 @@ class FakeRunner:
             "/main/imgsettings/iso": "400",
             "/main/imgsettings/whitebalance": "Auto",
             "/main/imgsettings/imageformat": "RAW",
+            "/main/imgsettings/imageformatsd": "RAW",
+            "/main/imgsettings/imageformatcf": "RAW",
+            "/main/imgsettings/whitebalanceadjusta": "0",
+            "/main/imgsettings/whitebalanceadjustb": "0",
             "/main/capturesettings/aperture": "2.8",
             "/main/capturesettings/shutterspeed": "1/50",
             "/main/capturesettings/autoexposuremode": "Manual",
             "/main/capturesettings/drivemode": "Single",
+            "/main/capturesettings/aspectratio": "3:2",
+            "/main/capturesettings/zoomspeed": "8",
             "/main/actions/manualfocusdrive": "None",
             "/main/actions/viewfinder": "0",
             "/main/actions/eosremoterelease": "None",
             "/main/settings/movierecordtarget": "SDRAM",
+            "/main/settings/autopoweroff": "30",
         }
 
     def health(self) -> tuple[bool, str | None, str | None]:
@@ -190,12 +197,34 @@ class FakeRunner:
                 self._radio("/main/imgsettings/iso", "ISO Speed", ["Auto", "100", "400", "800"]),
                 self._radio("/main/imgsettings/whitebalance", "WhiteBalance", ["Auto", "Daylight", "Cloudy"]),
                 self._radio("/main/imgsettings/imageformat", "Image Format", ["JPEG", "RAW", "cRAW"]),
+                self._radio(
+                    "/main/imgsettings/imageformatsd",
+                    "Image Format SD",
+                    ["Large Fine JPEG", "RAW", "cRAW"],
+                ),
+                self._radio(
+                    "/main/imgsettings/imageformatcf",
+                    "Image Format CF",
+                    ["Large Fine JPEG", "RAW", "cRAW"],
+                ),
+                self._radio(
+                    "/main/imgsettings/whitebalanceadjusta",
+                    "WhiteBalance Adjust A",
+                    ["-9", "0", "9"],
+                ),
+                self._radio(
+                    "/main/imgsettings/whitebalanceadjustb",
+                    "WhiteBalance Adjust B",
+                    ["-9", "0", "9"],
+                ),
                 self._radio("/main/capturesettings/aperture", "Aperture", ["2.8", "4", "5.6"]),
                 self._radio("/main/capturesettings/shutterspeed", "Shutter Speed", ["1/25", "1/50", "1/100"]),
                 self._radio(
                     "/main/capturesettings/autoexposuremode", "Canon Auto Exposure Mode", ["P", "AV", "TV", "Manual"]
                 ),
                 self._radio("/main/capturesettings/drivemode", "Drive Mode", ["Single", "Continuous high speed"]),
+                self._radio("/main/capturesettings/aspectratio", "Aspect Ratio", ["3:2", "16:9", "1.6x"]),
+                self._radio("/main/capturesettings/zoomspeed", "Zoom Speed", ["1", "8", "15"]),
                 self._radio(
                     "/main/actions/manualfocusdrive",
                     "Drive Canon DSLR Manual focus",
@@ -208,6 +237,11 @@ class FakeRunner:
                     ["None", "Press Half", "Press Full", "Release Half", "Release Full"],
                 ),
                 self._radio("/main/settings/movierecordtarget", "Recording Destination", ["Card", "None", "SDRAM"]),
+                self._radio(
+                    "/main/settings/autopoweroff",
+                    "Auto Power Off",
+                    ["15", "30", "60", "180", "300", "600", "1800", "0", "4294967295"],
+                ),
             ]
         )
 

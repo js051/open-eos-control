@@ -426,7 +426,7 @@ private struct MoreSettingsView: View {
                 Text(localizedSettingLabel(setting))
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Color.cameraText)
-                Text(currentValue(for: setting))
+                Text(localizedSettingValue(setting, value: currentValue(for: setting)))
                     .font(.caption)
                     .foregroundStyle(Color.cameraSecondaryText)
                     .lineLimit(1)
@@ -438,9 +438,9 @@ private struct MoreSettingsView: View {
                         Task { await camera.setSetting(key: setting.key, value: value) }
                     } label: {
                         if value == currentValue(for: setting) {
-                            Label(value, systemImage: "checkmark")
+                            Label(localizedSettingValue(setting, value: value), systemImage: "checkmark")
                         } else {
-                            Text(value)
+                            Text(localizedSettingValue(setting, value: value))
                         }
                     }
                 }
@@ -460,17 +460,10 @@ private struct MoreSettingsView: View {
     }
 
     private func localizedSettingLabel(_ setting: CameraSetting) -> LocalizedStringKey {
-        switch setting.key.lowercased() {
-        case "afmethod": "setting_af_method"
-        case "afoperation": "setting_af_operation"
-        case "drivemode": "setting_drive_mode"
-        case "meteringmode": "setting_metering_mode"
-        case "picturestyle": "setting_picture_style"
-        case "shootingmode": "setting_shooting_mode"
-        case "stillimagequality": "setting_image_quality"
-        case "moviequality": "setting_movie_quality"
-        case "framerate": "setting_frame_rate"
-        default: LocalizedStringKey(setting.label)
-        }
+        LocalizedStringKey(settingLabelLocalizationKey(setting.key) ?? setting.label)
+    }
+
+    private func localizedSettingValue(_ setting: CameraSetting, value: String) -> LocalizedStringKey {
+        LocalizedStringKey(settingValueLocalizationKey(key: setting.key, value: value) ?? value)
     }
 }

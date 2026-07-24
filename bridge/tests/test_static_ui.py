@@ -79,6 +79,23 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         declarations = re.findall(rf"^\s+{re.escape(key)}:\s+\"", script, flags=re.MULTILINE)
         assert len(declarations) >= 2, f"{key} must be declared in English and Traditional Chinese"
 
+    setting_keys = {
+        "whitebalanceadjusta",
+        "whitebalanceadjustb",
+        "aspectratio",
+        "zoomspeed",
+        "autopoweroff",
+        "stillimagequalitysd",
+        "stillimagequalitycf",
+    }
+    for key in setting_keys:
+        declarations = re.findall(rf"^\s+{re.escape(key)}:\s+\"", script, flags=re.MULTILINE)
+        assert len(declarations) == 2, f"{key} must have exactly one label in each supported language"
+
+    assert "function settingValueLabel(settingOrKey, value)" in script
+    assert "option.value = value" in script
+    assert "option.textContent = settingValueLabel(setting, value)" in script
+
 
 def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -> None:
     script = (STATIC / "app.js").read_text(encoding="utf-8")

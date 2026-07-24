@@ -121,13 +121,45 @@
       meteringmode: "Metering mode",
       picturestyle: "Picture style",
       stillimagequality: "Image quality",
+      stillimagequalitysd: "SD image quality",
+      stillimagequalitycf: "CF/CFexpress image quality",
       shootingmode: "Shooting mode",
       colortemperature: "Color temperature",
+      whitebalanceadjusta: "White balance shift A",
+      whitebalanceadjustb: "White balance shift B",
       colorspace: "Color space",
+      aspectratio: "Aspect ratio",
+      zoomspeed: "Power zoom speed",
+      autopoweroff: "Auto power off",
       highisonr: "High ISO noise reduction",
       continuousaf: "Continuous AF",
       movieservoaf: "Movie Servo AF",
       aeb: "Auto exposure bracketing",
+      valueAuto: "Auto",
+      valueOn: "On",
+      valueOff: "Off",
+      valueLow: "Low",
+      valueNormal: "Normal",
+      valueHigh: "High",
+      valueDisable: "Disable",
+      duration15Seconds: "15 seconds",
+      duration30Seconds: "30 seconds",
+      duration1Minute: "1 minute",
+      duration3Minutes: "3 minutes",
+      duration5Minutes: "5 minutes",
+      duration10Minutes: "10 minutes",
+      duration30Minutes: "30 minutes",
+      imageQualityLargeFineJpeg: "Large Fine JPEG",
+      imageQualityLargeNormalJpeg: "Large Normal JPEG",
+      imageQualitySmallerJpeg: "Smaller JPEG",
+      imageQualityCrawLargeFineJpeg: "cRAW + Large Fine JPEG",
+      imageQualityCrawLargeNormalJpeg: "cRAW + Large Normal JPEG",
+      imageQualityRawLargeFineJpeg: "RAW + Large Fine JPEG",
+      imageQualityRawLargeNormalJpeg: "RAW + Large Normal JPEG",
+      imageQualityCrawSmallerJpeg: "cRAW + Smaller JPEG",
+      imageQualityRawSmallerJpeg: "RAW + Smaller JPEG",
+      imageQualityRaw: "RAW",
+      imageQualityCraw: "cRAW",
       mediaCount: "{count} media item(s)",
       mediaEmpty: "No media was reported by the camera",
       mediaThumbnail: "Thumbnail for {name}",
@@ -245,13 +277,45 @@
       meteringmode: "測光模式",
       picturestyle: "相片風格",
       stillimagequality: "影像品質",
+      stillimagequalitysd: "SD 卡影像品質",
+      stillimagequalitycf: "CF／CFexpress 卡影像品質",
       shootingmode: "拍攝模式",
       colortemperature: "色溫",
+      whitebalanceadjusta: "白平衡偏移 A",
+      whitebalanceadjustb: "白平衡偏移 B",
       colorspace: "色彩空間",
+      aspectratio: "畫面比例",
+      zoomspeed: "電動變焦速度",
+      autopoweroff: "自動關閉電源",
       highisonr: "高 ISO 降噪",
       continuousaf: "連續自動對焦",
       movieservoaf: "短片伺服自動對焦",
       aeb: "自動包圍曝光",
+      valueAuto: "自動",
+      valueOn: "開啟",
+      valueOff: "關閉",
+      valueLow: "低",
+      valueNormal: "標準",
+      valueHigh: "高",
+      valueDisable: "停用",
+      duration15Seconds: "15 秒",
+      duration30Seconds: "30 秒",
+      duration1Minute: "1 分鐘",
+      duration3Minutes: "3 分鐘",
+      duration5Minutes: "5 分鐘",
+      duration10Minutes: "10 分鐘",
+      duration30Minutes: "30 分鐘",
+      imageQualityLargeFineJpeg: "大型精細 JPEG",
+      imageQualityLargeNormalJpeg: "大型一般 JPEG",
+      imageQualitySmallerJpeg: "較小型 JPEG",
+      imageQualityCrawLargeFineJpeg: "cRAW ＋大型精細 JPEG",
+      imageQualityCrawLargeNormalJpeg: "cRAW ＋大型一般 JPEG",
+      imageQualityRawLargeFineJpeg: "RAW ＋大型精細 JPEG",
+      imageQualityRawLargeNormalJpeg: "RAW ＋大型一般 JPEG",
+      imageQualityCrawSmallerJpeg: "cRAW ＋較小型 JPEG",
+      imageQualityRawSmallerJpeg: "RAW ＋較小型 JPEG",
+      imageQualityRaw: "RAW",
+      imageQualityCraw: "cRAW",
       mediaCount: "共 {count} 個媒體檔案",
       mediaEmpty: "相機未回報任何媒體檔案",
       mediaThumbnail: "{name} 的縮圖",
@@ -270,6 +334,38 @@
       liveViewImage: "相機即時預覽",
       authRequired: "此 Bridge 需要 Bearer token",
     },
+  };
+
+  const commonSettingValueKeys = {
+    auto: "valueAuto",
+    on: "valueOn",
+    off: "valueOff",
+    low: "valueLow",
+    normal: "valueNormal",
+    high: "valueHigh",
+  };
+  const autoPowerOffValueKeys = {
+    0: "valueDisable",
+    15: "duration15Seconds",
+    30: "duration30Seconds",
+    60: "duration1Minute",
+    180: "duration3Minutes",
+    300: "duration5Minutes",
+    600: "duration10Minutes",
+    1800: "duration30Minutes",
+  };
+  const imageQualityValueKeys = {
+    "Large Fine JPEG": "imageQualityLargeFineJpeg",
+    "Large Normal JPEG": "imageQualityLargeNormalJpeg",
+    "Smaller JPEG": "imageQualitySmallerJpeg",
+    "cRAW + Large Fine JPEG": "imageQualityCrawLargeFineJpeg",
+    "cRAW + Large Normal JPEG": "imageQualityCrawLargeNormalJpeg",
+    "RAW + Large Fine JPEG": "imageQualityRawLargeFineJpeg",
+    "RAW + Large Normal JPEG": "imageQualityRawLargeNormalJpeg",
+    "cRAW + Smaller JPEG": "imageQualityCrawSmallerJpeg",
+    "RAW + Smaller JPEG": "imageQualityRawSmallerJpeg",
+    RAW: "imageQualityRaw",
+    cRAW: "imageQualityCraw",
   };
 
   function readLanguagePreference() {
@@ -791,6 +887,17 @@
     return messages[resolvedLanguage()][key] || messages.en[key] || settingOrKey.label || key;
   }
 
+  function settingValueLabel(settingOrKey, value) {
+    const key = typeof settingOrKey === "string" ? settingOrKey : settingOrKey.key;
+    const rawValue = String(value);
+    let messageKey = commonSettingValueKeys[rawValue.toLowerCase()];
+    if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue];
+    if (["stillimagequality", "stillimagequalitysd", "stillimagequalitycf"].includes(key)) {
+      messageKey = imageQualityValueKeys[rawValue];
+    }
+    return messageKey ? t(messageKey) : rawValue;
+  }
+
   function currentSettingValue(setting) {
     const exposureKey = {
       iso: "iso",
@@ -836,7 +943,7 @@
       const label = document.createElement("span");
       label.textContent = settingLabel(setting || key);
       const value = document.createElement("strong");
-      value.textContent = setting ? currentSettingValue(setting) : "-";
+      value.textContent = setting ? settingValueLabel(setting, currentSettingValue(setting)) : "-";
       button.append(label, value);
       if (setting) button.addEventListener("click", () => openSettingDialog(setting));
       ui.exposureStrip.append(button);
@@ -862,7 +969,7 @@
       setting.values.forEach((value) => {
         const option = document.createElement("option");
         option.value = value;
-        option.textContent = value;
+        option.textContent = settingValueLabel(setting, value);
         select.append(option);
       });
       select.value = setting.value;
@@ -881,7 +988,7 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "setting-option";
-      button.textContent = value;
+      button.textContent = settingValueLabel(setting, value);
       button.classList.toggle("active", value === current);
       button.setAttribute("aria-pressed", String(value === current));
       button.addEventListener("click", async () => {
@@ -908,7 +1015,7 @@
       );
       setting.value = value;
       setOperationState(t("ready"));
-      showToast(t("settingUpdated", { label: settingLabel(setting), value }));
+      showToast(t("settingUpdated", { label: settingLabel(setting), value: settingValueLabel(setting, value) }));
     } catch (error) {
       const normalized = captureError(error);
       setOperationState(normalized.message, true);

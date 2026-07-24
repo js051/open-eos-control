@@ -129,3 +129,73 @@ func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) 
         }
     }
 }
+
+func settingLabelLocalizationKey(_ key: String) -> String? {
+    switch key.lowercased() {
+    case "afmethod": "setting_af_method"
+    case "afoperation": "setting_af_operation"
+    case "drivemode": "setting_drive_mode"
+    case "meteringmode": "setting_metering_mode"
+    case "flashmode": "setting_flash_mode"
+    case "picturestyle": "setting_picture_style"
+    case "shootingmode": "setting_shooting_mode"
+    case "stillimagequality": "setting_image_quality"
+    case "stillimagequalitysd": "setting_image_quality_sd"
+    case "stillimagequalitycf": "setting_image_quality_cf"
+    case "moviequality": "setting_movie_quality"
+    case "framerate": "setting_frame_rate"
+    case "exposurecompensation": "setting_exposure_compensation"
+    case "colortemperature": "setting_color_temperature"
+    case "whitebalanceadjusta": "setting_white_balance_shift_a"
+    case "whitebalanceadjustb": "setting_white_balance_shift_b"
+    case "colorspace": "setting_color_space"
+    case "aspectratio": "setting_aspect_ratio"
+    case "zoomspeed": "setting_power_zoom_speed"
+    case "autopoweroff": "setting_auto_power_off"
+    case "highisonr": "setting_high_iso_noise_reduction"
+    case "continuousaf": "setting_continuous_af"
+    case "movieservoaf": "setting_movie_servo_af"
+    case "aeb": "setting_aeb"
+    default: nil
+    }
+}
+
+func settingValueLocalizationKey(key: String, value: String) -> String? {
+    let normalizedKey = key.lowercased()
+    let common = [
+        "auto": "camera_value_auto",
+        "on": "camera_value_on",
+        "off": "camera_value_off",
+        "low": "camera_value_low",
+        "normal": "camera_value_normal",
+        "high": "camera_value_high",
+    ]
+    if normalizedKey == "autopoweroff" {
+        return [
+            "0": "camera_value_disable",
+            "15": "camera_value_15_seconds",
+            "30": "camera_value_30_seconds",
+            "60": "camera_value_1_minute",
+            "180": "camera_value_3_minutes",
+            "300": "camera_value_5_minutes",
+            "600": "camera_value_10_minutes",
+            "1800": "camera_value_30_minutes",
+        ][value]
+    }
+    if ["stillimagequality", "stillimagequalitysd", "stillimagequalitycf"].contains(normalizedKey) {
+        return [
+            "Large Fine JPEG": "camera_value_large_fine_jpeg",
+            "Large Normal JPEG": "camera_value_large_normal_jpeg",
+            "Smaller JPEG": "camera_value_smaller_jpeg",
+            "cRAW + Large Fine JPEG": "camera_value_craw_large_fine_jpeg",
+            "cRAW + Large Normal JPEG": "camera_value_craw_large_normal_jpeg",
+            "RAW + Large Fine JPEG": "camera_value_raw_large_fine_jpeg",
+            "RAW + Large Normal JPEG": "camera_value_raw_large_normal_jpeg",
+            "cRAW + Smaller JPEG": "camera_value_craw_smaller_jpeg",
+            "RAW + Smaller JPEG": "camera_value_raw_smaller_jpeg",
+            "RAW": "camera_value_raw",
+            "cRAW": "camera_value_craw",
+        ][value]
+    }
+    return common[value.lowercased()]
+}

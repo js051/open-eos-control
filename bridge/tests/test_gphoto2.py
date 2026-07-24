@@ -248,6 +248,50 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert any("--delete-file" in command for command in runner.commands)
 
 
+def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+
+    settings = {setting.key: setting for setting in session.capabilities().settings}
+    expected = {
+        "whitebalanceadjusta",
+        "whitebalanceadjustb",
+        "aspectratio",
+        "zoomspeed",
+        "autopoweroff",
+        "stillimagequalitysd",
+        "stillimagequalitycf",
+    }
+    assert expected <= settings.keys()
+    assert settings["autopoweroff"].values == ["15", "30", "60", "180", "300", "600", "1800", "0"]
+
+    writes = {
+        "whitebalanceadjusta": ("9", "/main/imgsettings/whitebalanceadjusta"),
+        "whitebalanceadjustb": ("-9", "/main/imgsettings/whitebalanceadjustb"),
+        "aspectratio": ("16:9", "/main/capturesettings/aspectratio"),
+        "zoomspeed": ("15", "/main/capturesettings/zoomspeed"),
+        "autopoweroff": ("1800", "/main/settings/autopoweroff"),
+        "stillimagequalitysd": ("cRAW", "/main/imgsettings/imageformatsd"),
+        "stillimagequalitycf": ("Large Fine JPEG", "/main/imgsettings/imageformatcf"),
+    }
+    for key, (value, path) in writes.items():
+        session.set_setting(key, value)
+        assert runner.values[path] == value
+
+    with pytest.raises(BridgeError) as rejected:
+        session.set_setting("autopoweroff", "4294967295")
+    assert rejected.value.code == "INVALID_SETTING_VALUE"
+    assert runner.values["/main/settings/autopoweroff"] == "1800"
+
+    unsafe_runner = FakeRunner()
+    unsafe_runner.values["/main/settings/autopoweroff"] = "4294967295"
+    unsafe_session = GPhoto2Engine(unsafe_runner).open()
+    unsafe_current = next(
+        setting for setting in unsafe_session.capabilities().settings if setting.key == "autopoweroff"
+    )
+    assert unsafe_current.value == "-"
+
+
 def test_media_thumbnail_requires_gphoto2_advertised_ability() -> None:
     class NoThumbnailRunner(FakeRunner):
         def run(self, arguments: list[str], *, timeout: float = 30.0):
