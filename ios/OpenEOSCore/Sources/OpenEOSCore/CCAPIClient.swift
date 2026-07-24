@@ -229,6 +229,7 @@ public actor CCAPIClient {
             supported.insert(.shutterHalfPress)
         }
         if tapFocusOperation() != nil { supported.insert(.tapFocus) }
+        if focusDriveOperation() != nil { supported.insert(.focusDrive) }
         if supports(.get, suffix: "/contents") {
             supported.formUnion([.mediaBrowser, .mediaDownload])
         }
@@ -247,7 +248,7 @@ public actor CCAPIClient {
                 planned: allPlanned.subtracting(supported),
                 reasons: [
                     .liveViewRTP: "RTP decoding is not implemented; this client uses bounded JPEG polling.",
-                    .focusDrive: "CCAPI focus drive is not exposed without a camera-advertised operation.",
+                    .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
                     .mediaThumbnail: "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
                 ]
             ),
@@ -360,6 +361,31 @@ public actor CCAPIClient {
         }
         try await commandOK(operation: operation, json: ["x": x, "y": y])
         return FocusResult(accepted: true, x: x, y: y)
+    }
+
+    public func driveFocus(
+        direction: FocusDriveDirection,
+        step: FocusDriveStep
+    ) async throws -> FocusDriveResult {
+        try await ensureInitialized()
+        guard resolvedMode != .simulator else {
+            throw CCAPIError.unsupported(.focusDrive)
+        }
+        guard let operation = focusDriveOperation() else {
+            throw CCAPIError.unsupported(.focusDrive)
+        }
+        let stepNumber: Int
+        switch step {
+        case .small: stepNumber = 1
+        case .medium: stepNumber = 2
+        case .large: stepNumber = 3
+        }
+        try await commandOK(
+            operation: operation,
+            json: ["value": "\(direction.rawValue)\(stepNumber)"]
+        )
+        observedFeatures.insert(.focusDrive)
+        return FocusDriveResult(accepted: true, direction: direction, step: step)
     }
 
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
@@ -665,6 +691,10 @@ public actor CCAPIClient {
     private func tapFocusOperation() -> CCAPIOperation? {
         operation(.put, suffix: "/shooting/control/afpoint")
             ?? operation(.post, suffix: "/shooting/control/afpoint")
+    }
+
+    private func focusDriveOperation() -> CCAPIOperation? {
+        operation(.post, suffix: "/shooting/control/drivefocus")
     }
 
     private func liveViewFramePaths() -> [String] {

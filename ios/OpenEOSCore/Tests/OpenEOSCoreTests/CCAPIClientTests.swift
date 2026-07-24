@@ -20,6 +20,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/control/shutterbutton/manual","put":true},
         {"path":"/shooting/control/recbutton","post":true},
         {"path":"/shooting/control/afpoint","put":true},
+        {"path":"/shooting/control/drivefocus","post":true},
         {"path":"/shooting/liveview","get":true,"post":true,"delete":true},
         {"path":"/shooting/liveview/flip","get":true},
         {"path":"/shooting/liveview/flipdetail","get":true},
@@ -66,7 +67,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.mediaThumbnail))
         XCTAssertTrue(snapshot.capabilities.matrix.planned.contains(.mediaThumbnail))
-        XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.evidence.source, "GET /ccapi")
         XCTAssertEqual(snapshot.capabilities.evidence.protocolVersions, ["ver100"])
         XCTAssertTrue(
@@ -174,6 +175,46 @@ final class CCAPIClientTests: XCTestCase {
             XCTFail("Expected unsupported capture")
         } catch {
             XCTAssertEqual(error as? CCAPIError, .unsupported(.stillCapture))
+        }
+        let requestCount = await transport.requests().count
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    func testFocusDriveUsesAdvertisedPostAndCanonValue() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver100/shooting/control/drivefocus",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let result = try await client.driveFocus(direction: .far, step: .large)
+
+        XCTAssertEqual(result, FocusDriveResult(accepted: true, direction: .far, step: .large))
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.first { $0.path.contains("drivefocus") })
+        XCTAssertEqual(request.method, "POST")
+        let body = try XCTUnwrap(request.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(json, ["value": "far3"])
+    }
+
+    func testUnadvertisedFocusDriveFailsWithoutSendingACommand() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/deviceinformation","get":true}]}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        do {
+            _ = try await client.driveFocus(direction: .near, step: .small)
+            XCTFail("Expected unsupported focus drive")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.focusDrive))
         }
         let requestCount = await transport.requests().count
         XCTAssertEqual(requestCount, 1)

@@ -395,6 +395,9 @@ class CcapiClient(
             if (tapFocusOperation() != null) {
                 supportedFeatures.add(CameraFeature.TAP_FOCUS)
             }
+            if (focusDriveOperation() != null) {
+                supportedFeatures.add(CameraFeature.FOCUS_DRIVE)
+            }
             if (supportsApi("GET", "/contents")) {
                 supportedFeatures.add(CameraFeature.MEDIA_BROWSER)
                 supportedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
@@ -575,6 +578,30 @@ class CcapiClient(
             )
         }
         return status()
+    }
+
+    suspend fun driveFocus(
+        direction: FocusDriveDirection,
+        step: FocusDriveStep,
+    ): FocusDriveResult {
+        if (!isRealCamera) {
+            error("Manual focus drive is not available in the simulator.")
+        }
+        val operation = focusDriveOperation()
+            ?: error("Camera did not advertise manual focus drive control.")
+        val stepNumber = when (step) {
+            FocusDriveStep.SMALL -> 1
+            FocusDriveStep.MEDIUM -> 2
+            FocusDriveStep.LARGE -> 3
+        }
+        val value = "${direction.name.lowercase()}$stepNumber"
+        commandOk(
+            pathSuffix = "/shooting/control/drivefocus",
+            payload = JSONObject().put("value", value),
+            operation = operation,
+        )
+        observedFeatures.add(CameraFeature.FOCUS_DRIVE)
+        return FocusDriveResult(ok = true, direction = direction, step = step)
     }
 
     suspend fun listMedia(): List<CameraMediaItem> =
@@ -781,6 +808,9 @@ class CcapiClient(
     private fun tapFocusOperation(): CcapiApiOperation? =
         apiOperation("PUT", "/shooting/control/afpoint")
             ?: apiOperation("POST", "/shooting/control/afpoint")
+
+    private fun focusDriveOperation(): CcapiApiOperation? =
+        apiOperation("POST", "/shooting/control/drivefocus")
 
     private fun liveViewFramePaths(): List<String> {
         if (!enforceAdvertisedOperations) {

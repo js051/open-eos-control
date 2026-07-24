@@ -452,6 +452,8 @@ class CcapiSession:
                 "POST", "/shooting/control/afpoint"
             ):
                 supported.add(CameraFeature.TAP_FOCUS)
+            if self._operation("POST", "/shooting/control/drivefocus"):
+                supported.add(CameraFeature.FOCUS_DRIVE)
             if self._supports("GET", "/contents"):
                 supported.update({CameraFeature.MEDIA_BROWSER, CameraFeature.MEDIA_DOWNLOAD})
             if self._supports_media_delete():
@@ -484,7 +486,7 @@ class CcapiSession:
                         "CCAPI RTP decoding is not implemented; this engine uses bounded JPEG polling."
                     ),
                     CameraFeature.FOCUS_DRIVE.value: (
-                        "CCAPI focus drive is not exposed without a camera-advertised, verified operation."
+                        "The camera did not advertise the verified CCAPI POST drivefocus operation."
                     ),
                     CameraFeature.MEDIA_THUMBNAIL.value: (
                         "No verified Canon CCAPI thumbnail resource is advertised by this camera."
@@ -572,8 +574,18 @@ class CcapiSession:
         return self._set_recording(False)
 
     def drive_focus(self, direction: str, step: str) -> FocusResult:
-        del direction, step
-        raise unsupported(CameraFeature.FOCUS_DRIVE.value, self.engine_name)
+        with self._lock:
+            normalized_direction = direction.strip().upper()
+            normalized_step = step.strip().upper()
+            step_number = {"SMALL": 1, "MEDIUM": 2, "LARGE": 3}.get(normalized_step)
+            if normalized_direction not in {"NEAR", "FAR"} or step_number is None:
+                raise BridgeError("INVALID_FOCUS_DRIVE", "direction and step are invalid.", status_code=422)
+            operation = self._operation("POST", "/shooting/control/drivefocus")
+            if operation is None:
+                raise unsupported(CameraFeature.FOCUS_DRIVE.value, self.engine_name)
+            self._command_ok(operation, {"value": f"{normalized_direction.lower()}{step_number}"})
+            self._observed.add(CameraFeature.FOCUS_DRIVE)
+            return FocusResult(accepted=True, direction=normalized_direction, step=normalized_step)
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
         with self._lock:

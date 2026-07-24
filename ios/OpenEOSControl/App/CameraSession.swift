@@ -63,8 +63,8 @@ enum CameraSession: Sendable {
 
     func driveFocus(direction: FocusDriveDirection, step: FocusDriveStep) async throws -> FocusDriveResult {
         switch self {
-        case .ccapi:
-            throw CCAPIError.unsupported(.focusDrive)
+        case let .ccapi(client):
+            return try await client.driveFocus(direction: direction, step: step)
         case let .desktopBridge(client):
             return try await client.driveFocus(direction: direction, step: step)
         }

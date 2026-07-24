@@ -138,6 +138,9 @@ class CcapiCameraBackend(
 
     override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
 
+    override suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusDriveResult =
+        client.driveFocus(direction, step)
+
     override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
 
     override suspend fun downloadMedia(

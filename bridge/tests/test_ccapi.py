@@ -39,6 +39,7 @@ DISCOVERY = {
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/recbutton", "post": True},
         {"path": "/shooting/control/afpoint", "put": True},
+        {"path": "/shooting/control/drivefocus", "post": True},
         {"path": "/shooting/liveview", "get": True, "post": True, "delete": True},
         {"path": "/shooting/liveview/flip", "get": True},
         {"path": "/contents", "get": True, "delete": True},
@@ -127,6 +128,7 @@ class FakeCcapiTransport:
             "/ccapi/ver100/shooting/control/shutterbutton/manual",
             "/ccapi/ver100/shooting/control/recbutton",
             "/ccapi/ver100/shooting/control/afpoint",
+            "/ccapi/ver100/shooting/control/drivefocus",
             "/ccapi/ver100/shooting/liveview",
         }:
             return CcapiResponse(204, {}, b"")
@@ -187,6 +189,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert {
         CameraFeature.STILL_CAPTURE,
         CameraFeature.TAP_FOCUS,
+        CameraFeature.FOCUS_DRIVE,
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= set(capabilities.supported)
@@ -211,6 +214,8 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
 
     session.start_live_view(LiveViewStartRequest(fps=15, size="LARGE", source="CCAPI_JPEG_POLLING"))
     assert session.requested_fps == 15
+    focus_drive = session.drive_focus("far", "large")
+    assert (focus_drive.accepted, focus_drive.direction, focus_drive.step) == (True, "FAR", "LARGE")
     assert session.live_view_frame() == JPEG
     media = session.list_media()
     assert media[0].name == "IMG_0001.JPG"
@@ -225,6 +230,11 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
 
     command_paths = [request.path for request in transport.requests]
     assert command_paths.count("/ccapi/ver100/shooting/control/shutterbutton/manual") == 2
+    assert RecordedRequest(
+        "POST",
+        "/ccapi/ver100/shooting/control/drivefocus",
+        {"value": "far3"},
+    ) in transport.requests
     assert RecordedRequest(
         "DELETE",
         "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
@@ -291,6 +301,8 @@ def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
         session.delete_media("ccapi:invalid")
     with pytest.raises(BridgeError) as thumbnail_failure:
         session.media_thumbnail("ccapi:invalid")
+    with pytest.raises(BridgeError) as focus_failure:
+        session.drive_focus("near", "small")
 
     assert CameraFeature.STILL_CAPTURE not in capabilities.supported
     assert CameraFeature.EXPOSURE_CONTROL not in capabilities.supported
@@ -298,6 +310,19 @@ def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
     assert failure.value.code == "UNSUPPORTED_FEATURE"
     assert delete_failure.value.code == "UNSUPPORTED_FEATURE"
     assert thumbnail_failure.value.code == "UNSUPPORTED_FEATURE"
+    assert focus_failure.value.code == "UNSUPPORTED_FEATURE"
+    assert len(transport.requests) == before
+
+
+def test_ccapi_focus_drive_rejects_invalid_values_without_a_camera_request() -> None:
+    transport = FakeCcapiTransport()
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+    before = len(transport.requests)
+
+    with pytest.raises(BridgeError) as failure:
+        session.drive_focus("sideways", "large")
+
+    assert failure.value.code == "INVALID_FOCUS_DRIVE"
     assert len(transport.requests) == before
 
 
@@ -405,6 +430,11 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
             headers=headers,
             json={"x": 0.4, "y": 0.6},
         )
+        driven = client.post(
+            f"/v1/session/{session_id}/focus/drive",
+            headers=headers,
+            json={"direction": "NEAR", "step": "MEDIUM"},
+        )
         duplicate = client.post(
             "/v1/session",
             headers=headers,
@@ -417,7 +447,9 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert created.json()["engine"] == "ccapi"
     assert "camera-secret" not in created.text
     assert "TAP_FOCUS" in capabilities.json()["supported"]
+    assert "FOCUS_DRIVE" in capabilities.json()["supported"]
     assert focused.json() == {"accepted": True, "x": 0.4, "y": 0.6}
+    assert driven.json() == {"accepted": True, "direction": "NEAR", "step": "MEDIUM"}
     assert duplicate.status_code == 409
     assert duplicate.json()["error"]["code"] == "CAMERA_BUSY"
     assert credentials == [("camera-user", "camera-secret"), ("", "")]

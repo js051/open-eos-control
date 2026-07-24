@@ -310,6 +310,7 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(!capabilities.matrix.isPlanned(CameraFeature.STILL_CAPTURE))
         assertTrue(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
+        assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
         assertTrue(!capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.MEDIA_THUMBNAIL))
@@ -358,6 +359,44 @@ class CcapiClientTest {
         assertTrue(capabilities.evidence.advertisedCommands.none { "secret" in it || "attacker" in it })
         assertEquals("/ccapi", server.takeRequest().path)
         assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+    }
+
+    @Test
+    fun realFocusDriveUsesAdvertisedPostAndCanonValue() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/shooting/control/drivefocus","post":true}]}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        val result = client.driveFocus(FocusDriveDirection.NEAR, FocusDriveStep.MEDIUM)
+
+        assertEquals("/ccapi", server.takeRequest().path)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/ccapi/ver110/shooting/control/drivefocus", request.path)
+        assertEquals("near2", JSONObject(request.body.readUtf8()).getString("value"))
+        assertTrue(result.ok)
+        assertEquals(FocusDriveDirection.NEAR, result.direction)
+        assertEquals(FocusDriveStep.MEDIUM, result.step)
+    }
+
+    @Test
+    fun realFocusDriveRejectsUnadvertisedCommandWithoutRequest() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/deviceinformation","get":true}]}"""))
+
+        client.initialize()
+        val failure = runCatching {
+            client.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.LARGE)
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("did not advertise manual focus drive"))
+        assertEquals(1, server.requestCount)
     }
 
     @Test
@@ -1012,6 +1051,7 @@ class CcapiClientTest {
                 {"path":"/shooting/control/recbutton","post":true},
                 {"path":"/shooting/control/shutterbutton","post":true},
                 {"path":"/shooting/control/shutterbutton/manual","put":true},
+                {"path":"/shooting/control/drivefocus","post":true},
                 {"path":"/contents","get":true,"delete":true},
                 {"path":"/shooting/settings","get":true},
                 {"path":"/shooting/settings/iso","put":true},
