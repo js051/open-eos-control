@@ -30,6 +30,7 @@ import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewCapabilities
+import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.UsbCameraDevice
 import dev.openeos.control.data.UsbCameraInterface
 import dev.openeos.control.data.UsbPtpDiagnostics
@@ -452,6 +453,37 @@ class CameraScreensTest {
     }
 
     @Test
+    fun liveViewSettingsExposeOnlyAdvertisedStreamSources() {
+        var selectedSource: LiveViewSource? = null
+        val capabilities = connectedState().capabilities!!.let { current ->
+            current.copy(
+                liveView = current.liveView.copy(
+                    sources = listOf(LiveViewSource.CCAPI_RTP, LiveViewSource.CCAPI_JPEG_POLLING),
+                    defaultSource = LiveViewSource.CCAPI_RTP,
+                )
+            )
+        }
+        val actions = noOpActions().copy(setLiveViewSource = { selectedSource = it })
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(
+                        capabilities = capabilities,
+                        activeSettingPicker = SettingPicker.LIVE_VIEW,
+                        liveViewSource = LiveViewSource.CCAPI_RTP,
+                    ),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.live_view_source_rtp)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.live_view_source_jpeg)).performClick()
+        compose.runOnIdle { assertEquals(LiveViewSource.CCAPI_JPEG_POLLING, selectedSource) }
+        compose.onAllNodesWithText(resourceText(R.string.size)).assertCountEquals(0)
+    }
+
+    @Test
     fun languageSheetOffersAutomaticEnglishAndTraditionalChinese() {
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
@@ -508,7 +540,7 @@ class CameraScreensTest {
         refreshMedia = {}, loadMediaThumbnail = {}, downloadMedia = { _, _ -> }, deleteMedia = {},
         cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {},
-        setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setAppLanguage = {}, clearError = {},
+        setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setLiveViewSource = {}, setAppLanguage = {}, clearError = {},
     )
 
     private fun resourceText(@StringRes resource: Int, vararg arguments: Any): String =

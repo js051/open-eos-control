@@ -129,7 +129,7 @@ data class CapabilityMatrix(
             ) - supported,
             reasons = mapOf(
                 CameraFeature.LIVE_VIEW_RTP to
-                    "CCAPI RTP decoding is not implemented; this client uses bounded JPEG polling.",
+                    "Requires advertised Canon RTP SDP/start endpoints plus a camera Wi-Fi route for native H.264 decoding.",
                 CameraFeature.TAP_FOCUS to
                     "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
                 CameraFeature.CLICK_WHITE_BALANCE to

@@ -20,6 +20,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.openeos.control.data.LiveViewSize
+import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
@@ -87,6 +88,7 @@ fun OpenEosControlApp(
         setAutoRefresh = viewModel::setLiveViewAutoRefresh,
         setFps = viewModel::setLiveViewFrameRate,
         setLiveViewSize = viewModel::setLiveViewSize,
+        setLiveViewSource = viewModel::setLiveViewSource,
         setAppLanguage = { language ->
             viewModel.closeSettingPicker()
             AppLanguageManager.set(language)
@@ -194,6 +196,7 @@ data class CameraActions(
     val setAutoRefresh: (Boolean) -> Unit,
     val setFps: (Int) -> Unit,
     val setLiveViewSize: (LiveViewSize) -> Unit,
+    val setLiveViewSource: (LiveViewSource) -> Unit,
     val setAppLanguage: (AppLanguage) -> Unit,
     val clearError: () -> Unit,
 )

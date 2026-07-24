@@ -66,6 +66,7 @@ fun buildDiagnosticReport(state: CameraUiState): String {
             "transportDetails=${state.status?.rawTransportJson?.ifBlank { "unknown" }?.let { redactDiagnosticText(it, state) } ?: "unknown"}"
         )
         appendLine("requestedFps=${state.liveViewFrameRateFps}")
+        appendLine("liveViewSource=${state.liveViewSource.name}")
         appendLine("observedFps=${String.format(Locale.US, "%.1f", live.observedFps)}")
         appendLine("frameBytes=${live.frameBytes ?: "unknown"}")
         appendLine("contentType=${live.contentType ?: "unknown"}")

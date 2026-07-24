@@ -57,6 +57,14 @@
     <string name="fps_value">%1$d FPS</string>
     <string name="fps_compact">%1$d FPS</string>
     <string name="live_view_frame_rate">Live View frame rate</string>
+    <string name="rtp_render_frame_rate">Rendered frame rate</string>
+    <string name="live_view_source">Stream source</string>
+    <string name="live_view_source_auto">Automatic</string>
+    <string name="live_view_source_rtp">RTP H.264</string>
+    <string name="live_view_source_jpeg">JPEG polling</string>
+    <string name="live_view_source_usb">USB preview</string>
+    <string name="live_view_source_bridge">Desktop bridge</string>
+    <string name="live_view_source_simulator">Simulator</string>
     <string name="fps_control_description">Live View frame rate, %1$d FPS</string>
     <string name="fps_requested_observed">Requested %1$d · Observed %2$.1f FPS</string>
     <string name="decrease_fps">Decrease frame rate</string>

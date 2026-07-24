@@ -17,6 +17,9 @@ import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewRequest
 import dev.openeos.control.data.LiveViewSize
+import dev.openeos.control.data.LiveViewSource
+import dev.openeos.control.data.NativeLiveViewEvent
+import dev.openeos.control.data.NativeLiveViewSession
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -200,6 +203,7 @@ class CameraViewModel(
 
     fun connect() = runCamera(CameraOperation.CONNECT) {
         stopLiveViewLoop()
+        detachNativeLiveViewListener()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -211,6 +215,7 @@ class CameraViewModel(
             request = LiveViewRequest(
                 fps = _uiState.value.liveViewFrameRateFps,
                 size = _uiState.value.liveViewSize,
+                source = _uiState.value.liveViewSource,
             ),
         )
         applyConnectedSession(session)
@@ -218,6 +223,7 @@ class CameraViewModel(
 
     fun connectUsb(deviceName: String, vendorId: Int, productId: Int) = runCamera(CameraOperation.CONNECT) {
         stopLiveViewLoop()
+        detachNativeLiveViewListener()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -229,6 +235,7 @@ class CameraViewModel(
             request = LiveViewRequest(
                 fps = _uiState.value.liveViewFrameRateFps,
                 size = _uiState.value.liveViewSize,
+                source = _uiState.value.liveViewSource,
             ),
         )
         applyConnectedSession(session)
@@ -253,6 +260,7 @@ class CameraViewModel(
 
     fun connectBridge() = runCamera(CameraOperation.CONNECT) {
         stopLiveViewLoop()
+        detachNativeLiveViewListener()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -265,6 +273,7 @@ class CameraViewModel(
             request = LiveViewRequest(
                 fps = state.liveViewFrameRateFps,
                 size = state.liveViewSize,
+                source = state.liveViewSource,
             ),
         )
         applyConnectedSession(session)
@@ -276,6 +285,12 @@ class CameraViewModel(
             session.capabilities.liveView.maxFps,
         )
         repository.updateLiveViewRequest(fps = supportedFps)
+        configureNativeLiveViewSession(session.nativeLiveViewSession, supportedFps)
+        val activeSource = session.nativeLiveViewSession?.source ?: when {
+            session.liveViewRequest.source != LiveViewSource.AUTO -> session.liveViewRequest.source
+            LiveViewSource.CCAPI_JPEG_POLLING in session.capabilities.liveView.sources -> LiveViewSource.CCAPI_JPEG_POLLING
+            else -> session.capabilities.liveView.defaultSource
+        }
         val captureMode = captureModeFrom(session.capabilities)
         _uiState.update {
             it.copy(
@@ -286,14 +301,23 @@ class CameraViewModel(
                 networkDiagnostics = session.networkDiagnostics,
                 liveViewFrameUrl = session.liveViewFrameUrl,
                 liveViewBitmap = null,
+                nativeLiveViewSession = session.nativeLiveViewSession,
                 liveViewFrameRateFps = supportedFps,
                 liveViewSize = session.liveViewRequest.size,
+                liveViewSource = activeSource,
+                liveViewDiagnostics = session.nativeLiveViewSession?.let { native ->
+                    LiveViewDiagnostics(contentType = native.contentType, sourceUrl = native.sourceUrl)
+                } ?: it.liveViewDiagnostics,
                 captureMode = captureMode ?: it.captureMode,
+                error = session.liveViewStartError,
+                errorOperation = session.liveViewStartError?.let { CameraOperation.LIVE_VIEW },
             )
         }
         if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
-            refreshLiveViewFrameInternal(reportErrors = true)
-            startLiveViewLoopIfNeeded()
+            if (session.nativeLiveViewSession == null) {
+                refreshLiveViewFrameInternal(reportErrors = true)
+                startLiveViewLoopIfNeeded()
+            }
         }
     }
 
@@ -310,6 +334,7 @@ class CameraViewModel(
 
     fun disconnect() {
         stopLiveViewLoop()
+        detachNativeLiveViewListener()
         cancelMediaDownload()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
@@ -353,6 +378,8 @@ class CameraViewModel(
     fun setLiveViewAutoRefresh(enabled: Boolean) {
         _uiState.update { it.copy(liveViewAutoRefresh = enabled) }
         if (_uiState.value.previewMode) return
+        repository.setNativeLiveViewRenderingEnabled(enabled)
+        if (_uiState.value.nativeLiveViewSession != null) return
         if (enabled) {
             refreshLiveViewFrame()
             startLiveViewLoopIfNeeded()
@@ -375,8 +402,21 @@ class CameraViewModel(
         }
     }
 
+    fun setLiveViewSource(source: LiveViewSource) {
+        val state = _uiState.value
+        if (source == state.liveViewSource || source !in state.capabilities?.liveView?.sources.orEmpty()) return
+        if (state.previewMode) {
+            _uiState.update { it.copy(liveViewSource = source) }
+            return
+        }
+        repository.updateLiveViewRequest(source = source)
+        _uiState.update { it.copy(liveViewSource = source) }
+        restartLiveView()
+    }
+
     fun setLiveViewSize(size: LiveViewSize) {
         if (_uiState.value.liveViewSize == size) return
+        if (_uiState.value.liveViewSource == LiveViewSource.CCAPI_RTP) return
         if (_uiState.value.previewMode) {
             _uiState.update { it.copy(liveViewSize = size) }
             return
@@ -390,9 +430,23 @@ class CameraViewModel(
         if (_uiState.value.previewMode || !_uiState.value.supports(CameraFeature.LIVE_VIEW)) return@runCamera
         repository.restartLiveView()
         val capabilities = repository.refreshCapabilities()
-        _uiState.update { it.copy(capabilities = capabilities) }
-        refreshLiveViewFrameInternal(reportErrors = true)
-        startLiveViewLoopIfNeeded()
+        val nativeSession = repository.nativeLiveViewSession()
+        configureNativeLiveViewSession(nativeSession, _uiState.value.liveViewFrameRateFps)
+        _uiState.update {
+            it.copy(
+                capabilities = capabilities,
+                nativeLiveViewSession = nativeSession,
+                liveViewSource = nativeSession?.source ?: it.liveViewSource,
+                liveViewBitmap = null,
+                liveViewFrameUrl = null,
+                liveViewDiagnostics = LiveViewDiagnostics(),
+            )
+        }
+        resetFrameMetrics()
+        if (nativeSession == null) {
+            refreshLiveViewFrameInternal(reportErrors = true)
+            startLiveViewLoopIfNeeded()
+        }
     }
 
     fun setIso(value: String) {
@@ -816,6 +870,7 @@ class CameraViewModel(
             !_uiState.value.connected ||
             _uiState.value.previewMode ||
             !_uiState.value.supports(CameraFeature.LIVE_VIEW)
+            || _uiState.value.nativeLiveViewSession != null
         ) return
 
         if (!repository.isRealCamera()) {
@@ -903,6 +958,7 @@ class CameraViewModel(
             state.previewMode ||
             !state.liveViewAutoRefresh ||
             !state.supports(CameraFeature.LIVE_VIEW)
+            || state.nativeLiveViewSession != null
         ) return
 
         liveViewJob = viewModelScope.launch {
@@ -948,6 +1004,7 @@ class CameraViewModel(
 
     override fun onCleared() {
         stopLiveViewLoop()
+        detachNativeLiveViewListener()
         cancelMediaDownload()
         cancelMediaThumbnailLoads()
         viewModelScope.launch(NonCancellable + Dispatchers.IO) {
@@ -975,7 +1032,9 @@ class CameraViewModel(
         lastDeletedMediaName = null,
         liveViewFrameUrl = null,
         liveViewBitmap = null,
+        nativeLiveViewSession = null,
         liveViewDiagnostics = LiveViewDiagnostics(),
+        liveViewAspectRatio = 16f / 9f,
         networkDiagnostics = CameraNetworkDiagnostics.Empty,
         focusPoint = null,
         focusFeedback = null,
@@ -1017,6 +1076,47 @@ class CameraViewModel(
             sourceUrl = sourceUrl,
             lastFrameAtMillis = nowMillis,
         )
+    }
+
+    private fun configureNativeLiveViewSession(session: NativeLiveViewSession?, fps: Int) {
+        session ?: return
+        session.setTargetFps(fps)
+        session.setRenderingEnabled(_uiState.value.liveViewAutoRefresh)
+        session.setListener { event ->
+            viewModelScope.launch {
+                if (_uiState.value.nativeLiveViewSession !== session && repository.nativeLiveViewSession() !== session) {
+                    return@launch
+                }
+                when (event) {
+                    is NativeLiveViewEvent.FrameRendered -> _uiState.update {
+                        it.copy(
+                            liveViewAspectRatio = event.width.toFloat() / event.height.coerceAtLeast(1),
+                            liveViewDiagnostics = recordFrame(
+                                current = it.liveViewDiagnostics,
+                                nowMillis = event.atMillis,
+                                frameBytes = event.encodedBytes,
+                                contentType = session.contentType,
+                                sourceUrl = session.sourceUrl,
+                            ),
+                            error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
+                            errorOperation = it.errorOperation.takeUnless { operation -> operation == CameraOperation.LIVE_VIEW },
+                        )
+                    }
+
+                    is NativeLiveViewEvent.VideoSizeChanged -> if (event.width > 0 && event.height > 0) {
+                        _uiState.update { it.copy(liveViewAspectRatio = event.width.toFloat() / event.height) }
+                    }
+
+                    is NativeLiveViewEvent.Failed -> _uiState.update {
+                        it.copy(error = event.message, errorOperation = CameraOperation.LIVE_VIEW)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun detachNativeLiveViewListener() {
+        _uiState.value.nativeLiveViewSession?.setListener(null)
     }
 
     private fun resetFrameMetrics() {

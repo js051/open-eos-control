@@ -31,7 +31,7 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | Media thumbnails | Planned for direct CCAPI | Not valid | No public, camera-advertised Canon CCAPI thumbnail resource has been verified; the UI keeps a file-type fallback instead of guessing a query parameter |
 | Media download | Implemented as a streaming transfer | Device validation required | SAF destination, same-origin stream, progress/cancel, best-effort incomplete-file cleanup, unit tests |
 | Media deletion | Implemented when advertised | Device validation required | Same-origin exact resource `DELETE`, confirmation UI, success-only list mutation, simulator and unit/UI tests |
-| CCAPI RTP Live View | Planned | Not valid | No decoder/session implementation |
+| CCAPI RTP H.264 Live View on Android | Implemented when advertised | Device validation required; the latest R6 Mark III report did not advertise the RTP endpoints | Requires advertised `GET rtpsessiondesc` plus `POST rtp`, a reachable camera-Wi-Fi IPv4 address, SDP validation, Wi-Fi-bound UDP reception, RFC 3550/RFC 6184 packet handling, native `MediaCodec` rendering, exact start/stop contract tests and RTP parser tests. The 1-30 FPS control caps rendered frames because Canon's RTP start payload has no encoder-FPS field. Audio from the advertised AAC LATM stream is not rendered. |
 
 ## Wired And Other Platforms
 

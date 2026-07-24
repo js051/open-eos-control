@@ -33,6 +33,7 @@ open-eos-control/
 - Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon EOS 遠端快門、半按、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
 - Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、AF-ON、Live View、焦點移動，以及依能力提供的媒體縮圖／傳輸／刪除
 - Live view 畫面，自動/手動更新與 FPS 控制
+- Android 上依能力開放的 Canon CCAPI RTP H.264 Live View：UDP 綁定相機 Wi-Fi、使用系統 `MediaCodec` 原生顯示、可切換 RTP／JPEG 來源並限制 1-30 FPS 顯示幀率；只有相機同時公告兩個 RTP endpoint 才會出現
 - ISO、shutter、aperture、white balance 與動態 advanced settings
 - 可選跟隨系統、英文或繁體中文；相機公告的設定值會本地化顯示，寫入時仍保留精確的協定原值
 - REC 開始/停止
@@ -170,7 +171,7 @@ http://localhost:18080
 
 ## Roadmap
 
-- 先把 R6 Mark III 的 CCAPI 無線控制維持穩定。
+- 保持 R6 Mark III 的 CCAPI 無線控制穩定，並驗證機身公告的 API 是否包含已實作的 Android RTP H.264 路徑；若未公告就維持 JPEG 輪詢。
 - 在 R6 Mark III 真機驗證已實作的 Android USB/PTP 標準路徑，以及 Canon EOS 遠端快門、曝光、色彩、包圍曝光、錄影、進階設定、焦點移動與 Live View；後續只加入有可靠依據的其他專有設定或 Touch AF 命令。
 - 在 R6 Mark III 完成已實作 PC CCAPI、Android-to-Desktop-Bridge 與 USB PC 控制介面的真機驗證，以 persistent engine 改善 libgphoto2 預覽效能，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
 - 以實體 iPhone 與 R6 Mark III 驗證已實作的 iOS SwiftUI CCAPI App；iOS USB/PTP 先列為研究線。

@@ -9,6 +9,7 @@ import dev.openeos.control.data.CameraNetworkRouting
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.ExposureState
+import dev.openeos.control.data.LiveViewSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -64,6 +65,7 @@ class DiagnosticsTest {
                 cellularAvailable = true,
             ),
             liveViewDiagnostics = LiveViewDiagnostics(lastFrameAtMillis = 1_000L),
+            liveViewSource = LiveViewSource.CCAPI_RTP,
         )
 
         val report = buildDiagnosticReport(state)
@@ -72,6 +74,7 @@ class DiagnosticsTest {
         assertTrue(report.contains("cameraInterface=wlan0"))
         assertTrue(report.contains("cellularAvailable=true"))
         assertTrue(report.contains("liveViewHealthy=true"))
+        assertTrue(report.contains("liveViewSource=CCAPI_RTP"))
         assertTrue(report.contains("capabilitySource=GET /ccapi"))
         assertTrue(report.contains("advertisedCommandCount=1"))
         assertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))

@@ -1,5 +1,6 @@
 package dev.openeos.control.data
 
+import android.view.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
@@ -294,18 +295,21 @@ class CcapiClientTest {
                 ]}""",
             ),
         )
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x01, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(binaryResponse(detailedPacket(0x00, jpeg), "application/octet-stream"))
+        server.enqueue(binaryResponse(detailedPacket(0x00, jpeg), "application/octet-stream"))
 
         client.initialize()
         val failure = runCatching { client.tapFocus(0.25, 0.75) }.exceptionOrNull()
 
         assertTrue(failure is IllegalStateException)
-        assertTrue(failure?.message.orEmpty().contains("detailed Live View frame"))
-        assertEquals(1, server.requestCount)
+        assertTrue(failure?.message.orEmpty().contains("position metadata"))
+        assertEquals(2, server.requestCount)
 
         val clickFailure = runCatching { client.clickWhiteBalance(0.25, 0.75) }.exceptionOrNull()
         assertTrue(clickFailure is IllegalStateException)
-        assertTrue(clickFailure?.message.orEmpty().contains("detailed Live View frame"))
-        assertEquals(1, server.requestCount)
+        assertTrue(clickFailure?.message.orEmpty().contains("position metadata"))
+        assertEquals(3, server.requestCount)
     }
 
     @Test
@@ -431,6 +435,85 @@ class CcapiClientTest {
         assertTrue("POST /ccapi/ver110/shooting/control/shutterbutton" in capabilities.evidence.advertisedCommands)
         assertTrue("iso" in capabilities.evidence.writableSettings)
         assertTrue(!capabilities.evidence.truncated)
+    }
+
+    @Test
+    fun canonRtpLiveViewUsesAdvertisedSdpStartAndStopContract() = runTest {
+        lateinit var nativeSession: FakeNativeLiveViewSession
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+            rtpDestinationAddress = "192.168.11.5",
+            rtpSessionFactory = CcapiRtpSessionFactory { description, destinationAddress ->
+                FakeNativeLiveViewSession(description, destinationAddress).also { nativeSession = it }
+            },
+        )
+        server.enqueue(jsonResponse(DISCOVERY_RTP_JSON))
+        server.enqueue(MockResponse().setHeader("content-type", "text/plain").setBody(CANON_RTP_SDP))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("{}"))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        client.startLiveView(LiveViewRequest(fps = 15, source = LiveViewSource.CCAPI_RTP))
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_RTP))
+        assertEquals(listOf(LiveViewSource.CCAPI_RTP), capabilities.liveView.sources)
+        assertTrue(nativeSession.started)
+        assertEquals(15, nativeSession.selectedFps)
+        assertEquals("rtp://192.168.11.5:12000", nativeSession.sourceUrl)
+        assertEquals(nativeSession, client.nativeLiveViewSession)
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/shooting/liveview/rtpsessiondesc", server.takeRequest().path)
+        val start = server.takeRequest()
+        val startBody = JSONObject(start.body.readUtf8())
+        assertEquals("/ccapi/ver110/shooting/liveview/rtp", start.path)
+        assertEquals("POST", start.method)
+        assertEquals("start", startBody.getString("action"))
+        assertEquals("192.168.11.5", startBody.getString("ipaddress"))
+
+        client.stopLiveView()
+
+        val stop = server.takeRequest()
+        val stopBody = JSONObject(stop.body.readUtf8())
+        assertEquals("/ccapi/ver110/shooting/liveview/rtp", stop.path)
+        assertEquals("stop", stopBody.getString("action"))
+        assertEquals("", stopBody.getString("ipaddress"))
+        assertTrue(nativeSession.closed)
+        assertNull(client.nativeLiveViewSession)
+    }
+
+    @Test
+    fun automaticLiveViewCleansUpRejectedRtpAndFallsBackToJpeg() = runTest {
+        lateinit var nativeSession: FakeNativeLiveViewSession
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+            rtpDestinationAddress = "192.168.11.5",
+            rtpSessionFactory = CcapiRtpSessionFactory { description, destinationAddress ->
+                FakeNativeLiveViewSession(description, destinationAddress).also { nativeSession = it }
+            },
+        )
+        server.enqueue(jsonResponse(DISCOVERY_RTP_AND_JPEG_JSON))
+        server.enqueue(MockResponse().setHeader("content-type", "text/plain").setBody(CANON_RTP_SDP))
+        server.enqueue(MockResponse().setResponseCode(400).setBody("RTP unavailable"))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        client.startLiveView(LiveViewRequest(source = LiveViewSource.AUTO))
+
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/shooting/liveview/rtpsessiondesc", server.takeRequest().path)
+        assertEquals("start", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        assertEquals("stop", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        val jpegStart = server.takeRequest()
+        assertEquals("/ccapi/ver110/shooting/liveview", jpegStart.path)
+        assertEquals("on", JSONObject(jpegStart.body.readUtf8()).getString("cameradisplay"))
+        assertTrue(nativeSession.closed)
+        assertNull(client.nativeLiveViewSession)
+        assertTrue(client.liveViewFrameUrl(1, LiveViewRequest(source = LiveViewSource.AUTO)).contains("/flip"))
     }
 
     @Test
@@ -1176,6 +1259,38 @@ class CcapiClientTest {
         }
     }
 
+    private class FakeNativeLiveViewSession(
+        description: CcapiRtpSessionDescription,
+        destinationAddress: String,
+    ) : NativeLiveViewSession {
+        override val source: LiveViewSource = LiveViewSource.CCAPI_RTP
+        override val sourceUrl: String = "rtp://$destinationAddress:${description.video.port}"
+        override val contentType: String = "video/H264"
+        var started = false
+        var closed = false
+        var selectedFps = 0
+
+        override fun start() {
+            started = true
+        }
+
+        override fun attachSurface(surface: Surface) = Unit
+
+        override fun detachSurface(surface: Surface) = Unit
+
+        override fun setTargetFps(fps: Int) {
+            selectedFps = fps
+        }
+
+        override fun setRenderingEnabled(enabled: Boolean) = Unit
+
+        override fun setListener(listener: ((NativeLiveViewEvent) -> Unit)?) = Unit
+
+        override fun close() {
+            closed = true
+        }
+    }
+
     private companion object {
         const val INFO_JSON = """
             {
@@ -1243,6 +1358,39 @@ class CcapiClientTest {
                 {"path":"/shooting/settings/shootingmode","put":true}
               ]
             }
+        """
+
+        const val DISCOVERY_RTP_JSON = """
+            {
+              "ver110": [
+                {"path":"/shooting/liveview/rtpsessiondesc","get":true},
+                {"path":"/shooting/liveview/rtp","post":true}
+              ]
+            }
+        """
+
+        const val DISCOVERY_RTP_AND_JPEG_JSON = """
+            {
+              "ver110": [
+                {"path":"/shooting/liveview","post":true,"delete":true},
+                {"path":"/shooting/liveview/flip","get":true},
+                {"path":"/shooting/liveview/rtpsessiondesc","get":true},
+                {"path":"/shooting/liveview/rtp","post":true}
+              ]
+            }
+        """
+
+        const val CANON_RTP_SDP = """
+            v=0
+            o=- 0 0 IN IP4 192.168.11.4
+            s=RTP Session
+            c=IN IP4 0.0.0.0
+            t=0 0
+            a=control *
+            m=video 12000 RTP/AVP 103
+            a=rtpmap:103 H264/90000
+            m=audio 12010 RTP/AVP 106
+            a=rtpmap:106 MP4A-LATM/48000
         """
     }
 }

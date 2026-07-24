@@ -13,6 +13,8 @@ import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.LiveViewSize
+import dev.openeos.control.data.LiveViewSource
+import dev.openeos.control.data.NativeLiveViewSession
 import dev.openeos.control.data.UsbPtpDiagnostics
 import java.util.Locale
 
@@ -67,11 +69,14 @@ data class CameraUiState(
     val lastDeletedMediaName: String? = null,
     val liveViewFrameUrl: String? = null,
     val liveViewBitmap: Bitmap? = null,
+    val nativeLiveViewSession: NativeLiveViewSession? = null,
     val usbDiagnostics: UsbPtpDiagnostics = UsbPtpDiagnostics.Empty,
     val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty,
     val liveViewAutoRefresh: Boolean = true,
     val liveViewFrameRateFps: Int = DEFAULT_LIVE_VIEW_FPS,
     val liveViewSize: LiveViewSize = LiveViewSize.MEDIUM,
+    val liveViewSource: LiveViewSource = LiveViewSource.AUTO,
+    val liveViewAspectRatio: Float = 16f / 9f,
     val liveViewDiagnostics: LiveViewDiagnostics = LiveViewDiagnostics(),
     val uiMode: UiMode = UiMode.CONTROL,
     val captureMode: CaptureMode = CaptureMode.PHOTO,

@@ -19,6 +19,8 @@ class CameraRepository(
 
     fun isRealCamera(): Boolean = backend.prefersBitmapLiveViewFrames
 
+    fun nativeLiveViewSession(): NativeLiveViewSession? = backend.nativeLiveViewSession
+
     fun configureAndroidNetworkRouting(context: Context) {
         check(!active) { "Camera network routing cannot change while connected." }
         backendFactory = CameraBackendFactory(
@@ -91,14 +93,16 @@ class CameraRepository(
             val capabilities = backend.capabilities().forCamera(info)
             liveViewRequest = request.clampTo(capabilities.liveView)
             var liveViewFrameUrl: String? = null
+            var liveViewStartError: String? = null
             if (capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
                 try {
                     backend.startLiveView(liveViewRequest)
                     if (!backend.prefersBitmapLiveViewFrames) {
                         liveViewFrameUrl = nextLiveViewFrameUrl()
                     }
-                } catch (_: Exception) {
+                } catch (exception: Exception) {
                     // A session can still provide settings and status without live view.
+                    liveViewStartError = "${exception.javaClass.simpleName}: ${exception.message ?: "Live View start failed"}"
                 }
             }
             CameraSession(
@@ -110,6 +114,8 @@ class CameraRepository(
                 networkDiagnostics = backend.networkDiagnostics,
                 liveViewFrameUrl = liveViewFrameUrl,
                 liveViewRequest = liveViewRequest,
+                nativeLiveViewSession = backend.nativeLiveViewSession,
+                liveViewStartError = liveViewStartError,
             )
         } catch (exception: Exception) {
             runCatching { backend.close() }
@@ -197,6 +203,11 @@ class CameraRepository(
             size = size ?: liveViewRequest.size,
             source = source ?: liveViewRequest.source,
         )
+        backend.nativeLiveViewSession?.setTargetFps(liveViewRequest.fps)
+    }
+
+    fun setNativeLiveViewRenderingEnabled(enabled: Boolean) {
+        backend.nativeLiveViewSession?.setRenderingEnabled(enabled)
     }
 
     fun nextLiveViewFrameUrl(): String = backend.liveViewFrameUrl(++frameVersion, liveViewRequest)
@@ -220,6 +231,8 @@ data class CameraSession(
     val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty,
     val liveViewFrameUrl: String?,
     val liveViewRequest: LiveViewRequest,
+    val nativeLiveViewSession: NativeLiveViewSession? = null,
+    val liveViewStartError: String? = null,
 )
 
 private fun CameraCapabilities.forCamera(info: CameraInfo): CameraCapabilities =

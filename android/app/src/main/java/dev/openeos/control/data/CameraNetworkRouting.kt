@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import java.net.InetAddress
+import java.net.Inet4Address
 import java.net.URI
 
 data class CameraNetworkDiagnostics(
@@ -30,6 +31,8 @@ enum class CameraNetworkRouting {
 data class CameraHttpTransport(
     val client: OkHttpClient,
     val diagnostics: CameraNetworkDiagnostics,
+    val rtpDestinationAddress: String? = null,
+    val rtpSessionFactory: CcapiRtpSessionFactory? = null,
 )
 
 fun interface CameraHttpTransportFactory {
@@ -79,6 +82,12 @@ class AndroidCameraHttpTransportFactory(
                 "Connect the phone to the camera's Wi-Fi and keep mobile data enabled."
         )
         val linkProperties = connectivityManager.getLinkProperties(selected)
+        val rtpDestinationAddress = linkProperties?.linkAddresses
+            ?.asSequence()
+            ?.map { it.address }
+            ?.filterIsInstance<Inet4Address>()
+            ?.firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
+            ?.hostAddress
         val diagnostics = CameraNetworkDiagnostics(
             routing = CameraNetworkRouting.WIFI_BOUND,
             targetHost = host,
@@ -98,6 +107,8 @@ class AndroidCameraHttpTransportFactory(
                 )
                 .build(),
             diagnostics = diagnostics,
+            rtpDestinationAddress = rtpDestinationAddress,
+            rtpSessionFactory = AndroidCcapiRtpSessionFactory(selected),
         )
     }
 

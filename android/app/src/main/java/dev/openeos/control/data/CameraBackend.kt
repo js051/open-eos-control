@@ -57,6 +57,8 @@ interface CameraControlBackend {
     val connection: CameraConnection
     val prefersBitmapLiveViewFrames: Boolean
     val networkDiagnostics: CameraNetworkDiagnostics
+    val nativeLiveViewSession: NativeLiveViewSession?
+        get() = null
 
     suspend fun initialize()
     suspend fun close() = Unit
@@ -103,6 +105,8 @@ class CcapiCameraBackend(
         httpClient = httpTransport.client,
         username = connection.username,
         password = connection.password,
+        rtpDestinationAddress = httpTransport.rtpDestinationAddress,
+        rtpSessionFactory = httpTransport.rtpSessionFactory,
     )
 
     override val transport: CameraTransport = CameraTransport.CCAPI_NETWORK
@@ -111,6 +115,9 @@ class CcapiCameraBackend(
         get() = client.isRealCamera
 
     override val networkDiagnostics: CameraNetworkDiagnostics = httpTransport.diagnostics
+
+    override val nativeLiveViewSession: NativeLiveViewSession?
+        get() = client.nativeLiveViewSession
 
     override suspend fun initialize() = client.initialize()
 

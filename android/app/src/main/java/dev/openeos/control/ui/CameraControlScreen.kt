@@ -71,6 +71,7 @@ import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewSize
+import dev.openeos.control.data.LiveViewSource
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -421,9 +422,42 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
                     Text(stringResource(R.string.composition_grid), color = AppText, modifier = Modifier.weight(1f))
                     Switch(state.showGrid, actions.setGridVisible)
                 }
+                Text(stringResource(R.string.live_view_source), color = AppText, fontWeight = FontWeight.SemiBold)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(state.capabilities?.liveView?.sources.orEmpty()) { source ->
+                        Box(
+                            Modifier
+                                .height(48.dp)
+                                .background(
+                                    if (source == state.liveViewSource) AppAccent else AppSurfaceHigh,
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .clickable(enabled = !state.isBusy(CameraOperation.LIVE_VIEW)) {
+                                    actions.setLiveViewSource(source)
+                                }
+                                .padding(horizontal = 18.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                liveViewSourceLabel(source),
+                                color = if (source == state.liveViewSource) AppBackground else AppText,
+                            )
+                        }
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.live_view_frame_rate), color = AppText, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            stringResource(
+                                if (state.liveViewSource == LiveViewSource.CCAPI_RTP) {
+                                    R.string.rtp_render_frame_rate
+                                } else {
+                                    R.string.live_view_frame_rate
+                                }
+                            ),
+                            color = AppText,
+                            fontWeight = FontWeight.SemiBold,
+                        )
                         Text(
                             stringResource(R.string.fps_requested_observed, displayedFps, state.liveViewDiagnostics.observedFps),
                             color = AppSubtleText,
@@ -459,13 +493,15 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
                         enabled = displayedFps < maxFps,
                     )
                 }
-                Text(stringResource(R.string.size), color = AppText)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(state.capabilities?.liveView?.sizes.orEmpty()) { size ->
-                        Box(
-                            Modifier.height(48.dp).background(if (size == state.liveViewSize) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { actions.setLiveViewSize(size) }.padding(horizontal = 18.dp),
-                            contentAlignment = Alignment.Center,
-                        ) { Text(liveViewSizeLabel(size), color = if (size == state.liveViewSize) AppBackground else AppText) }
+                if (state.liveViewSource != LiveViewSource.CCAPI_RTP) {
+                    Text(stringResource(R.string.size), color = AppText)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(state.capabilities?.liveView?.sizes.orEmpty()) { size ->
+                            Box(
+                                Modifier.height(48.dp).background(if (size == state.liveViewSize) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { actions.setLiveViewSize(size) }.padding(horizontal = 18.dp),
+                                contentAlignment = Alignment.Center,
+                            ) { Text(liveViewSizeLabel(size), color = if (size == state.liveViewSize) AppBackground else AppText) }
+                        }
                     }
                 }
             }
@@ -480,6 +516,18 @@ private fun liveViewSizeLabel(size: LiveViewSize): String = stringResource(
         LiveViewSize.MEDIUM -> R.string.size_medium
         LiveViewSize.LARGE -> R.string.size_large
     },
+)
+
+@Composable
+private fun liveViewSourceLabel(source: LiveViewSource): String = stringResource(
+    when (source) {
+        LiveViewSource.CCAPI_RTP -> R.string.live_view_source_rtp
+        LiveViewSource.CCAPI_JPEG_POLLING -> R.string.live_view_source_jpeg
+        LiveViewSource.USB_PTP_PREVIEW -> R.string.live_view_source_usb
+        LiveViewSource.DESKTOP_BRIDGE_STREAM -> R.string.live_view_source_bridge
+        LiveViewSource.SIMULATOR_FRAME -> R.string.live_view_source_simulator
+        LiveViewSource.AUTO -> R.string.live_view_source_auto
+    }
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

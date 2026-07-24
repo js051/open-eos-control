@@ -20,6 +20,7 @@ This record captures physical-camera evidence reported from the Android app. Ide
 | Battery | Passed | Camera returned LP-E6P, `quality=good`, `level=full` |
 | Exposure capability discovery | Passed | ISO, Tv, Av, WB and advanced settings were advertised by the camera |
 | JPEG Live View | Passed | Requested 15 FPS, rolling observed 15.1 FPS, JPEG content type, 66,086-byte recorded frame |
+| RTP H.264 Live View | Pending / not advertised in captured report | The recorded `supported` set contains JPEG polling but no RTP. A current build will expose RTP only if fresh discovery includes `GET rtpsessiondesc` and `POST rtp`; absence of those commands is a camera capability result, not a decoder failure. |
 | Live View size compatibility fallback | Passed | Initial POST with `liveviewsize` returned HTTP 400 `Invalid parameter`; retrying the camera-display-only payload restored Live View |
 | Still capture and half-press | Pending | The client did not expose these capabilities in this older report. Current clients now parse Canon's full same-origin discovery `url` entries, but this camera still needs a fresh capability report and command result |
 | Movie start/stop, Tap AF, and Click White Balance | Pending | No recorded physical result yet |
@@ -53,4 +54,5 @@ This report predates `capabilitySource`, `protocolVersions`, `advertisedCommands
 
 1. Keep cellular data enabled while connected to the camera Wi-Fi and confirm Debug reports `cameraRoute=WIFI_BOUND` plus `cellularAvailable=true`.
 2. Install a build containing the canonical discovery `url` parser, capture a fresh diagnostic report, and retain `capabilitySource`, `protocolVersions`, `advertisedCommandCount`, `advertisedCommands`, `writableSettings`, and `capabilityEvidenceTruncated` after exercising each available still, half-press, movie, Tap AF, Click White Balance, storage, browse and download control.
-3. Connect over USB-C/OTG and complete the checklist in [Android USB/PTP](../android-usb-ptp.md).
+3. Check the fresh `advertisedCommands` for `GET .../shooting/liveview/rtpsessiondesc` and `POST .../shooting/liveview/rtp`. If both exist, switch the Live View source to RTP H.264, test 6/15/30 FPS render caps, rotate portrait/landscape, background/restore the app, and record `liveViewSource`, `observedFps`, `contentType=video/H264`, the `rtp://` source and any decoder error. If either command is absent, record RTP as unsupported by this camera/API version and keep JPEG polling.
+4. Connect over USB-C/OTG and complete the checklist in [Android USB/PTP](../android-usb-ptp.md).

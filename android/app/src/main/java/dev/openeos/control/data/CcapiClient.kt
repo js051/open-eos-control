@@ -60,6 +60,8 @@ class CcapiClient(
     private val treatAsSimulator: Boolean? = null,
     username: String = "",
     password: String = "",
+    private val rtpDestinationAddress: String? = null,
+    private val rtpSessionFactory: CcapiRtpSessionFactory? = null,
 ) {
     private val baseUrl = baseUrl.trimEnd('/')
     private val httpClient = (httpClient ?: OkHttpClient()).newBuilder().apply {
@@ -93,6 +95,10 @@ class CcapiClient(
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.MEDIUM
     private var latestLiveViewGeometry: CcapiLiveViewGeometry? = null
+    private var activeLiveViewSource: LiveViewSource? = null
+
+    var nativeLiveViewSession: NativeLiveViewSession? = null
+        private set
 
     suspend fun initialize() {
         val isLocalOrSim = try {
@@ -397,9 +403,16 @@ class CcapiClient(
                 supportedFeatures.add(CameraFeature.WHITE_BALANCE_CONTROL)
             }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
-            if (supportsCompleteLiveView() || CameraFeature.LIVE_VIEW in observedFeatures) {
+            val supportsJpegLiveView = supportsCompleteLiveView()
+            val supportsRtpLiveView = supportsRtpLiveView()
+            if (supportsJpegLiveView || supportsRtpLiveView || CameraFeature.LIVE_VIEW in observedFeatures) {
                 supportedFeatures.add(CameraFeature.LIVE_VIEW)
+            }
+            if (supportsJpegLiveView) {
                 supportedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+            }
+            if (supportsRtpLiveView) {
+                supportedFeatures.add(CameraFeature.LIVE_VIEW_RTP)
             }
             if (recordingOperation() != null) {
                 supportedFeatures.add(CameraFeature.VIDEO_RECORDING)
@@ -431,7 +444,7 @@ class CcapiClient(
             }
             if (supportsMediaDelete()) supportedFeatures.add(CameraFeature.MEDIA_DELETE)
 
-            val liveViewCapabilities = LiveViewCapabilities.ccapiNetwork().let { capabilities ->
+            val liveViewCapabilities = ccapiLiveViewCapabilities().let { capabilities ->
                 if (liveViewSizeControlSupported) {
                     capabilities
                 } else {
@@ -723,36 +736,47 @@ class CcapiClient(
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
         if (isRealCamera) {
             latestLiveViewGeometry = null
-            if (enforceAdvertisedOperations && !supportsCompleteLiveView()) {
-                error("Camera did not advertise a complete Live View start, frame, and stop lifecycle.")
+            val requestedSource = request.source
+            val source = when (requestedSource) {
+                LiveViewSource.AUTO -> if (supportsRtpLiveView()) {
+                    LiveViewSource.CCAPI_RTP
+                } else {
+                    LiveViewSource.CCAPI_JPEG_POLLING
+                }
+
+                LiveViewSource.CCAPI_JPEG_POLLING,
+                LiveViewSource.CCAPI_RTP,
+                -> requestedSource
+
+                else -> error("${requestedSource.label} is not available through the CCAPI network backend.")
             }
-            val path = apiPath("POST", "/shooting/liveview")
-            val requestedPayload = JSONObject()
-                .put("cameradisplay", "on")
-                .put("liveviewsize", request.size.ccapiValue)
-            try {
-                postOk(path, requestedPayload)
-                liveViewSizeControlSupported = true
-            } catch (exception: CcapiHttpException) {
-                if (exception.statusCode != 400) throw exception
-                postOk(path, JSONObject().put("cameradisplay", "on"))
-                liveViewSizeControlSupported = false
+
+            if (source == LiveViewSource.CCAPI_RTP) {
+                try {
+                    startRtpLiveView(request)
+                    return
+                } catch (exception: Exception) {
+                    if (requestedSource != LiveViewSource.AUTO || !supportsCompleteLiveView()) throw exception
+                }
             }
-            activeLiveViewSize = request.size
-            observedFeatures.add(CameraFeature.LIVE_VIEW)
-            observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+            startJpegLiveView(request)
         }
     }
 
     suspend fun stopLiveView() {
         latestLiveViewGeometry = null
         if (isRealCamera) {
-            if (enforceAdvertisedOperations && !supportsApi("DELETE", "/shooting/liveview")) return
-            try {
-                deleteOk(apiPath("DELETE", "/shooting/liveview"))
-            } catch (e: Exception) {
-                // ignore
+            when (activeLiveViewSource) {
+                LiveViewSource.CCAPI_RTP -> stopRtpLiveView()
+                LiveViewSource.CCAPI_JPEG_POLLING -> {
+                    if (!enforceAdvertisedOperations || supportsApi("DELETE", "/shooting/liveview")) {
+                        runCatching { deleteOk(apiPath("DELETE", "/shooting/liveview")) }
+                    }
+                }
+
+                else -> Unit
             }
+            activeLiveViewSource = null
         }
     }
 
@@ -840,10 +864,15 @@ class CcapiClient(
     private fun liveViewFrameUrls(cacheKey: Long, request: LiveViewRequest): List<String> =
         if (isRealCamera) {
             when (request.source) {
-                LiveViewSource.AUTO,
+                LiveViewSource.AUTO -> if (activeLiveViewSource == LiveViewSource.CCAPI_RTP) {
+                    error("CCAPI RTP Live View renders through the native H.264 surface, not the JPEG frame reader.")
+                } else {
+                    liveViewFramePaths().map { "$baseUrl$it" }
+                }
+
                 LiveViewSource.CCAPI_JPEG_POLLING -> liveViewFramePaths().map { "$baseUrl$it" }
 
-                LiveViewSource.CCAPI_RTP -> error("CCAPI RTP live view is planned but not implemented by the JPEG frame reader yet.")
+                LiveViewSource.CCAPI_RTP -> error("CCAPI RTP Live View renders through the native H.264 surface, not the JPEG frame reader.")
 
                 else -> error("${request.source.label} is not available through the CCAPI network backend.")
             }.map { it.withCacheBust(cacheKey) }
@@ -973,6 +1002,95 @@ class CcapiClient(
         supportsApi("POST", "/shooting/liveview") &&
             supportsApi("DELETE", "/shooting/liveview") &&
             liveViewFramePaths().isNotEmpty()
+
+    private fun supportsRtpLiveView(): Boolean =
+        supportsApi("GET", "/shooting/liveview/rtpsessiondesc") &&
+            supportsApi("POST", "/shooting/liveview/rtp") &&
+            !rtpDestinationAddress.isNullOrBlank() &&
+            rtpSessionFactory != null
+
+    private fun ccapiLiveViewCapabilities(): LiveViewCapabilities {
+        val sources = buildList {
+            if (supportsRtpLiveView()) add(LiveViewSource.CCAPI_RTP)
+            if (supportsCompleteLiveView()) add(LiveViewSource.CCAPI_JPEG_POLLING)
+        }
+        return LiveViewCapabilities.ccapiNetwork().copy(
+            sources = sources,
+            defaultSource = sources.firstOrNull() ?: LiveViewSource.AUTO,
+        )
+    }
+
+    private suspend fun startJpegLiveView(request: LiveViewRequest) {
+        if (enforceAdvertisedOperations && !supportsCompleteLiveView()) {
+            error("Camera did not advertise a complete Live View JPEG start, frame, and stop lifecycle.")
+        }
+        val path = apiPath("POST", "/shooting/liveview")
+        val requestedPayload = JSONObject()
+            .put("cameradisplay", "on")
+            .put("liveviewsize", request.size.ccapiValue)
+        try {
+            postOk(path, requestedPayload)
+            liveViewSizeControlSupported = true
+        } catch (exception: CcapiHttpException) {
+            if (exception.statusCode != 400) throw exception
+            postOk(path, JSONObject().put("cameradisplay", "on"))
+            liveViewSizeControlSupported = false
+        }
+        activeLiveViewSize = request.size
+        activeLiveViewSource = LiveViewSource.CCAPI_JPEG_POLLING
+        observedFeatures.add(CameraFeature.LIVE_VIEW)
+        observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+    }
+
+    private suspend fun startRtpLiveView(request: LiveViewRequest) {
+        if (!supportsRtpLiveView()) {
+            error("Canon RTP Live View needs advertised SDP/start endpoints and a reachable camera Wi-Fi IPv4 address.")
+        }
+        val descriptionPath = apiPath("GET", "/shooting/liveview/rtpsessiondesc")
+        val controlPath = apiPath("POST", "/shooting/liveview/rtp")
+        val description = CcapiRtpSessionDescriptionParser.parse(getText(descriptionPath))
+        val session = checkNotNull(rtpSessionFactory).create(description, checkNotNull(rtpDestinationAddress))
+        session.setTargetFps(request.fps)
+        try {
+            withContext(Dispatchers.IO) { session.start() }
+            postOk(
+                controlPath,
+                JSONObject()
+                    .put("action", "start")
+                    .put("ipaddress", checkNotNull(rtpDestinationAddress)),
+            )
+        } catch (exception: Exception) {
+            session.close()
+            withContext(NonCancellable) {
+                runCatching {
+                    postOk(
+                        controlPath,
+                        JSONObject().put("action", "stop").put("ipaddress", ""),
+                    )
+                }
+            }
+            throw exception
+        }
+        nativeLiveViewSession?.close()
+        nativeLiveViewSession = session
+        activeLiveViewSource = LiveViewSource.CCAPI_RTP
+        observedFeatures.add(CameraFeature.LIVE_VIEW)
+        observedFeatures.add(CameraFeature.LIVE_VIEW_RTP)
+    }
+
+    private suspend fun stopRtpLiveView() {
+        try {
+            if (!enforceAdvertisedOperations || supportsApi("POST", "/shooting/liveview/rtp")) {
+                postOk(
+                    apiPath("POST", "/shooting/liveview/rtp"),
+                    JSONObject().put("action", "stop").put("ipaddress", ""),
+                )
+            }
+        } finally {
+            nativeLiveViewSession?.close()
+            nativeLiveViewSession = null
+        }
+    }
 
     private fun supportsMediaDelete(): Boolean = apiOperations.any { operation ->
         operation.method == "DELETE" &&
@@ -1337,6 +1455,20 @@ class CcapiClient(
         Request.Builder().url("$baseUrl$path").get().build(),
     )
 
+    private suspend fun getText(path: String): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url("$baseUrl$path").get().header("Accept", "text/plain").build()
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw CcapiHttpException(
+                    statusCode = response.code,
+                    message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
+                )
+            }
+            body
+        }
+    }
+
     private suspend fun postJson(path: String, payload: JSONObject): JSONObject = requestJson(
         Request.Builder()
             .url("$baseUrl$path")
@@ -1522,7 +1654,7 @@ class CcapiClient(
         return find(root)
     }
 
-    private fun cameraLiveViewPosition(
+    private suspend fun cameraLiveViewPosition(
         x: Double,
         y: Double,
         feature: CameraFeature,
@@ -1530,8 +1662,20 @@ class CcapiClient(
         require(x in 0.0..1.0 && y in 0.0..1.0) {
             "${feature.label} coordinates must be normalized from 0 through 1."
         }
+        if (latestLiveViewGeometry == null) {
+            detailedLiveViewOperation()?.let { operation ->
+                val sourceUrl = "$baseUrl${operation.path}?kind=both".withCacheBust(System.nanoTime())
+                val request = Request.Builder()
+                    .url(sourceUrl)
+                    .get()
+                    .header("Accept", "image/jpeg,image/*,*/*")
+                    .header("Cache-Control", "no-cache")
+                    .build()
+                requestLiveViewFrame(request, sourceUrl)
+            }
+        }
         val geometry = latestLiveViewGeometry
-            ?: error("${feature.label} needs a detailed Live View frame with Canon image position metadata.")
+            ?: error("${feature.label} needs Canon detailed Live View position metadata, but the camera returned none.")
         return geometry.cameraPosition(x, y)
     }
 

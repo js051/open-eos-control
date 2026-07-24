@@ -9,11 +9,11 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Status: implemented.
 - Platforms: direct Android and iOS clients; PC uses the native CCAPI engine inside Desktop Bridge.
 - Connection: Wi-Fi or wired network when the camera exposes CCAPI over HTTP/HTTPS.
-- Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working live view path on R6 Mark III, strictly advertised writable settings and shutter/autofocus/focus-drive commands, complete start/frame/stop Live View gating, and paged media retrieval with capability-gated deletion.
-- Android routes only camera HTTP sockets through the Wi-Fi network that reaches the camera, allowing cellular internet to remain available without process-wide network binding. A physical coexistence result is still required.
-- Current tradeoffs: live view is JPEG polling today, so smoothness and latency depend on Wi-Fi, camera response time, and device JPEG decode cost.
+- Current strengths: no driver, direct mobile control, easy HTTP diagnostics, working JPEG Live View on R6 Mark III, strictly advertised writable settings and shutter/autofocus/focus-drive commands, complete lifecycle gating, and paged media retrieval with capability-gated deletion. Android also implements Canon's advertised H.264 RTP path with a persistent native decode surface.
+- Android routes camera HTTP and RTP UDP sockets only through the Wi-Fi network that reaches the camera, allowing cellular internet to remain available without process-wide network binding. A physical coexistence result is still required.
+- Current tradeoffs: JPEG polling smoothness and latency depend on Wi-Fi, camera response time, and JPEG decode cost. RTP is exposed only when discovery advertises both required operations and the phone has a camera-Wi-Fi IPv4 address; its video path still needs physical-camera validation and does not render the SDP's AAC LATM audio stream.
 - Device-validation queue: still capture, independent AF-ON, shutter half-press, movie recording, tap focus, Click White Balance, manual focus drive, media browser, media download, and media deletion on EOS R6 Mark III.
-- Planned upgrades: RTP live view experiments.
+- RTP status: Android H.264 video receive/decode is implemented and contract-tested. The last sanitized R6 Mark III report did not advertise RTP, so that camera correctly remains on JPEG polling until a new discovery report proves otherwise; iOS and PC RTP decoders remain planned.
 
 ## Wired Backends
 

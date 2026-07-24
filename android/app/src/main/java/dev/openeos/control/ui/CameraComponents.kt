@@ -1,6 +1,8 @@
 package dev.openeos.control.ui
 
 import android.os.SystemClock
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -31,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +51,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -65,6 +69,7 @@ import coil.request.ImageRequest
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.NativeLiveViewSession
 import kotlinx.coroutines.delay
 
 @Composable
@@ -298,7 +303,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
 fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val bitmap = state.liveViewBitmap
     val sourceAspectRatio = bitmap?.takeIf { it.width > 0 && it.height > 0 }
-        ?.let { it.width.toFloat() / it.height.toFloat() } ?: 16f / 9f
+        ?.let { it.width.toFloat() / it.height.toFloat() } ?: state.liveViewAspectRatio
     val tapAction = when {
         state.liveViewTapAction == LiveViewTapAction.WHITE_BALANCE &&
             state.supports(CameraFeature.CLICK_WHITE_BALANCE) -> LiveViewTapAction.WHITE_BALANCE
@@ -364,6 +369,10 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     modifier = Modifier.padding(horizontal = 24.dp).cameraControlRotation(),
                 )
             }
+            state.nativeLiveViewSession != null -> NativeRtpLiveView(
+                session = state.nativeLiveViewSession,
+                modifier = Modifier.fillMaxSize(),
+            )
             bitmap != null -> Image(
                 bitmap.asImageBitmap(),
                 stringResource(R.string.live_view),
@@ -420,6 +429,48 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         FocusIndicator(state.focusPoint, state.focusFeedback, sourceAspectRatio)
         if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
     }
+}
+
+@Composable
+private fun NativeRtpLiveView(
+    session: NativeLiveViewSession,
+    modifier: Modifier = Modifier,
+) {
+    val contentDescription = stringResource(R.string.live_view)
+    val callback = remember(session) {
+        object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                session.attachSurface(holder.surface)
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                session.attachSurface(holder.surface)
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                session.detachSurface(holder.surface)
+            }
+        }
+    }
+    var surfaceView by remember(session) { mutableStateOf<SurfaceView?>(null) }
+    DisposableEffect(session) {
+        onDispose {
+            surfaceView?.holder?.let { holder ->
+                if (holder.surface.isValid) session.detachSurface(holder.surface)
+                holder.removeCallback(callback)
+            }
+            surfaceView = null
+        }
+    }
+    AndroidView(
+        factory = { context ->
+            SurfaceView(context).also { view ->
+                surfaceView = view
+                view.holder.addCallback(callback)
+            }
+        },
+        modifier = modifier.semantics { this.contentDescription = contentDescription },
+    )
 }
 
 @Composable
