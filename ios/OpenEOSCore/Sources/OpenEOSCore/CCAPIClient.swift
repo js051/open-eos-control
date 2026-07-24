@@ -51,6 +51,7 @@ public actor CCAPIClient {
     private static let maximumMediaTreeDepth = 4
     private static let maximumCapabilityEvidenceItems = 256
     private static let maximumCapabilityEvidenceItemCharacters = 512
+    private static let maximumRTPSessionDescriptionBytes = 64 * 1024
     private static let halfPressNanoseconds: UInt64 = 350_000_000
 
     private let baseURL: URL
@@ -58,6 +59,8 @@ public actor CCAPIClient {
     private let authorization: String?
     private let transport: any CameraHTTPTransport
     private let requestedMode: CCAPIConnectionMode
+    private let rtpDestinationAddress: String?
+    private let rtpSessionFactory: (any CCAPIRTPSessionFactory)?
     private var resolvedMode: CCAPIConnectionMode
     private var initialized = false
     private var apiVersionPrefixes = ["/ccapi/ver100"]
@@ -73,6 +76,9 @@ public actor CCAPIClient {
     private var recording: Bool?
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.medium
+    private var activeLiveViewSource: LiveViewSource?
+    private var rtpSession: (any CCAPIRTPSession)?
+    private var nativeGeometryCacheKey: Int64 = 0
     private var latestLiveViewGeometry: CCAPILiveViewGeometry?
 
     public init(
@@ -80,6 +86,8 @@ public actor CCAPIClient {
         mode: CCAPIConnectionMode = .automatic,
         username: String = "",
         password: String = "",
+        rtpDestinationAddress: String? = nil,
+        rtpSessionFactory: (any CCAPIRTPSessionFactory)? = nil,
         transport: (any CameraHTTPTransport)? = nil
     ) throws {
         guard var components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -104,6 +112,8 @@ public actor CCAPIClient {
         baseURLString = normalizedURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         requestedMode = mode
         resolvedMode = mode
+        self.rtpDestinationAddress = rtpDestinationAddress
+        self.rtpSessionFactory = rtpSessionFactory
         self.transport = transport ?? URLSessionCameraHTTPTransport()
         if !username.isEmpty {
             let token = Data("\(username):\(password)".utf8).base64EncodedString()
@@ -240,9 +250,13 @@ public actor CCAPIClient {
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
-        if supportsCompleteLiveView() || observedFeatures.contains(.liveView) {
-            supported.formUnion([.liveView, .liveViewJPEGPolling])
+        let supportsJPEGLiveView = supportsCompleteLiveView()
+        let supportsRTPLiveView = supportsRTPLiveView()
+        if supportsJPEGLiveView || supportsRTPLiveView || observedFeatures.contains(.liveView) {
+            supported.insert(.liveView)
         }
+        if supportsJPEGLiveView { supported.insert(.liveViewJPEGPolling) }
+        if supportsRTPLiveView { supported.insert(.liveViewRTP) }
         if recordingOperation() != nil { supported.insert(.videoRecording) }
         if directShutterOperation() != nil || manualShutterOperation() != nil {
             supported.insert(.stillCapture)
@@ -274,7 +288,7 @@ public actor CCAPIClient {
                 supported: supported,
                 planned: allPlanned.subtracting(supported),
                 reasons: [
-                    .liveViewRTP: "RTP decoding is not implemented; this client uses bounded JPEG polling.",
+                    .liveViewRTP: "Canon RTP needs advertised SDP/start endpoints and a reachable camera-Wi-Fi IPv4 address.",
                     .autofocus: "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation.",
                     .tapFocus: "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
                     .clickWhiteBalance: "The camera must advertise POST clickwb and detailed Live View metadata for Click WB.",
@@ -283,8 +297,8 @@ public actor CCAPIClient {
                 ]
             ),
             liveView: LiveViewCapabilities(
-                sources: supported.contains(.liveView) ? [.ccapiJPEGPolling] : [],
-                defaultSource: .ccapiJPEGPolling,
+                sources: ccapiLiveViewSources(),
+                defaultSource: ccapiLiveViewSources().first ?? .auto,
                 sizes: liveSizes,
                 defaultSize: liveSizes.contains(.medium) ? .medium : activeLiveViewSize,
                 maximumFPS: 30
@@ -418,6 +432,7 @@ public actor CCAPIClient {
         guard supportsCoordinateTapFocus() else {
             throw CCAPIError.unsupported(.tapFocus)
         }
+        try await ensureLiveViewGeometryForNativeStream()
         let position = try cameraLiveViewPosition(x: x, y: y, feature: .tapFocus)
         try await commandOK(
             operation: operation,
@@ -438,6 +453,7 @@ public actor CCAPIClient {
         guard let operation = clickWhiteBalanceOperation(), supportsCoordinateClickWhiteBalance() else {
             throw CCAPIError.unsupported(.clickWhiteBalance)
         }
+        try await ensureLiveViewGeometryForNativeStream()
         let position = try cameraLiveViewPosition(x: x, y: y, feature: .clickWhiteBalance)
         try await commandOK(
             operation: operation,
@@ -475,10 +491,36 @@ public actor CCAPIClient {
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
         try await ensureInitialized()
         latestLiveViewGeometry = nil
-        if resolvedMode == .simulator { return }
-        guard supportsCompleteLiveView() else {
-            throw CCAPIError.unsupported(.liveView)
+        if resolvedMode == .simulator {
+            activeLiveViewSource = .simulatorFrame
+            return
         }
+        let requestedSource = request.source
+        let selectedSource: LiveViewSource
+        switch requestedSource {
+        case .auto:
+            selectedSource = supportsRTPLiveView() ? .ccapiRTP : .ccapiJPEGPolling
+        case .ccapiRTP, .ccapiJPEGPolling:
+            selectedSource = requestedSource
+        default:
+            throw CCAPIError.invalidResponse(
+                "\(requestedSource.rawValue) is not available through the CCAPI network client."
+            )
+        }
+
+        if selectedSource == .ccapiRTP {
+            do {
+                try await startRTPLiveView(request)
+                return
+            } catch {
+                guard requestedSource == .auto, supportsCompleteLiveView() else { throw error }
+            }
+        }
+        try await startJPEGLiveView(request)
+    }
+
+    private func startJPEGLiveView(_ request: LiveViewRequest) async throws {
+        guard supportsCompleteLiveView() else { throw CCAPIError.unsupported(.liveView) }
         let path = apiPath(.post, suffix: "/shooting/liveview")
         do {
             try await requestOK(
@@ -493,18 +535,49 @@ public actor CCAPIClient {
             liveViewSizeControlSupported = false
         }
         activeLiveViewSize = request.size
+        activeLiveViewSource = .ccapiJPEGPolling
         observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
     }
 
     public func stopLiveView() async {
         latestLiveViewGeometry = nil
-        guard initialized, resolvedMode != .simulator else { return }
-        guard !enforceAdvertisedOperations || supports(.delete, suffix: "/shooting/liveview") else { return }
-        try? await requestOK(path: apiPath(.delete, suffix: "/shooting/liveview"), method: .delete)
+        guard initialized else { return }
+        if resolvedMode == .simulator {
+            activeLiveViewSource = nil
+            return
+        }
+        switch activeLiveViewSource {
+        case .ccapiRTP:
+            await stopRTPLiveView()
+        case .ccapiJPEGPolling:
+            if !enforceAdvertisedOperations || supports(.delete, suffix: "/shooting/liveview") {
+                try? await requestOK(path: apiPath(.delete, suffix: "/shooting/liveview"), method: .delete)
+            }
+        default:
+            break
+        }
+        activeLiveViewSource = nil
+    }
+
+    public func currentLiveViewSource() -> LiveViewSource? {
+        activeLiveViewSource
+    }
+
+    public func currentNativeLiveViewSourceURL() -> URL? {
+        rtpSession?.sourceURL
+    }
+
+    public func setLiveViewTargetFPS(_ fps: Int) async {
+        await rtpSession?.setTargetFPS(min(max(fps, 1), 30))
     }
 
     public func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
         try await ensureInitialized()
+        if activeLiveViewSource == .ccapiRTP {
+            throw CCAPIError.invalidResponse(
+                "CCAPI RTP Live View renders through the native H.264 surface, not the JPEG frame reader."
+            )
+        }
         let paths: [String]
         if resolvedMode == .simulator {
             paths = ["/ccapi/liveview/frame"]
@@ -933,10 +1006,97 @@ public actor CCAPIClient {
         return geometry.cameraPosition(normalizedX: x, normalizedY: y)
     }
 
+    private func ensureLiveViewGeometryForNativeStream() async throws {
+        guard latestLiveViewGeometry == nil, activeLiveViewSource == .ccapiRTP else { return }
+        guard let detail = detailedLiveViewOperation() else {
+            throw CCAPIError.invalidResponse(
+                "Coordinate control needs the camera's detailed Live View endpoint."
+            )
+        }
+        let cacheKey = nativeGeometryCacheKey
+        nativeGeometryCacheKey &+= 1
+        let sourceURL = try URLForPath("\(detail.path)?kind=both", cacheKey: cacheKey)
+        var request = request(url: sourceURL, method: .get)
+        request.setValue("application/octet-stream,*/*", forHTTPHeaderField: "Accept")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let response = try await transport.send(request)
+        try validate(response, request: request)
+        let detailed = try Self.parseDetailedLiveView(response.body)
+        guard let geometry = detailed.geometry else {
+            throw CCAPIError.invalidResponse(
+                "Detailed Live View response did not contain Canon image position metadata."
+            )
+        }
+        latestLiveViewGeometry = geometry
+    }
+
     private func supportsCompleteLiveView() -> Bool {
         supports(.post, suffix: "/shooting/liveview") &&
             supports(.delete, suffix: "/shooting/liveview") &&
             !liveViewFramePaths().isEmpty
+    }
+
+    private func supportsRTPLiveView() -> Bool {
+        supports(.get, suffix: "/shooting/liveview/rtpsessiondesc") &&
+            supports(.post, suffix: "/shooting/liveview/rtp") &&
+            !(rtpDestinationAddress?.isEmpty ?? true) &&
+            rtpSessionFactory != nil
+    }
+
+    private func ccapiLiveViewSources() -> [LiveViewSource] {
+        var sources: [LiveViewSource] = []
+        if supportsRTPLiveView() { sources.append(.ccapiRTP) }
+        if supportsCompleteLiveView() { sources.append(.ccapiJPEGPolling) }
+        return sources
+    }
+
+    private func startRTPLiveView(_ request: LiveViewRequest) async throws {
+        guard supportsRTPLiveView(),
+              let rtpDestinationAddress,
+              let rtpSessionFactory else {
+            throw CCAPIError.unsupported(.liveViewRTP)
+        }
+        let descriptionPath = apiPath(.get, suffix: "/shooting/liveview/rtpsessiondesc")
+        let controlPath = apiPath(.post, suffix: "/shooting/liveview/rtp")
+        let text = try await requestText(path: descriptionPath, maximumBytes: Self.maximumRTPSessionDescriptionBytes)
+        let description = try CCAPIRTPSessionDescriptionParser.parse(text)
+        let session = try await rtpSessionFactory.makeSession(
+            description: description,
+            destinationAddress: rtpDestinationAddress
+        )
+        await session.setTargetFPS(request.fps)
+        do {
+            try await session.start()
+            try await requestOK(
+                path: controlPath,
+                method: .post,
+                json: ["action": "start", "ipaddress": rtpDestinationAddress]
+            )
+        } catch {
+            await session.close()
+            try? await requestOK(
+                path: controlPath,
+                method: .post,
+                json: ["action": "stop", "ipaddress": ""]
+            )
+            throw error
+        }
+        if let existing = rtpSession { await existing.close() }
+        rtpSession = session
+        activeLiveViewSource = .ccapiRTP
+        observedFeatures.formUnion([.liveView, .liveViewRTP])
+    }
+
+    private func stopRTPLiveView() async {
+        if !enforceAdvertisedOperations || supports(.post, suffix: "/shooting/liveview/rtp") {
+            try? await requestOK(
+                path: apiPath(.post, suffix: "/shooting/liveview/rtp"),
+                method: .post,
+                json: ["action": "stop", "ipaddress": ""]
+            )
+        }
+        if let session = rtpSession { await session.close() }
+        rtpSession = nil
     }
 
     private func supportsMediaDelete() -> Bool {
@@ -1309,6 +1469,21 @@ public actor CCAPIClient {
         } catch {
             throw CCAPIError.invalidResponse("Camera returned invalid JSON: \(error.localizedDescription)")
         }
+    }
+
+    private func requestText(path: String, maximumBytes: Int) async throws -> String {
+        let request = try request(path: path, method: .get)
+        let response = try await transport.send(request)
+        try validate(response, request: request)
+        guard response.body.count <= maximumBytes else {
+            throw CCAPIError.invalidResponse(
+                "Camera response at \(path) exceeded the \(maximumBytes)-byte limit."
+            )
+        }
+        guard let text = String(data: response.body, encoding: .utf8) else {
+            throw CCAPIError.invalidResponse("Camera response at \(path) was not UTF-8 text.")
+        }
+        return text
     }
 
     private func requestOK(

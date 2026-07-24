@@ -226,9 +226,15 @@ private struct LiveViewSettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if (camera.capabilities?.liveView.sources.count ?? 0) > 1 {
+                        sourceControl
+                        Divider().overlay(Color.cameraBorder)
+                    }
                     fpsControl
-                    Divider().overlay(Color.cameraBorder)
-                    sizeControl
+                    if !camera.usesRTPLiveView {
+                        Divider().overlay(Color.cameraBorder)
+                        sizeControl
+                    }
                     Divider().overlay(Color.cameraBorder)
                     Toggle(
                         "auto_refresh",
@@ -256,6 +262,22 @@ private struct LiveViewSettingsView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+
+    private var sourceControl: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("live_view_source").font(.headline)
+            Picker("live_view_source", selection: Binding(
+                get: { camera.selectedLiveViewSource },
+                set: { value in Task { await camera.setLiveViewSource(value) } }
+            )) {
+                Text("source_auto").tag(LiveViewSource.auto)
+                ForEach(camera.capabilities?.liveView.sources ?? [], id: \.rawValue) { source in
+                    Text(localizedSource(source)).tag(source)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
     }
 
     private var fpsControl: some View {
@@ -320,6 +342,16 @@ private struct LiveViewSettingsView: View {
         case .small: "size_small"
         case .medium: "size_medium"
         case .large: "size_large"
+        }
+    }
+
+    private func localizedSource(_ source: LiveViewSource) -> LocalizedStringKey {
+        switch source {
+        case .ccapiRTP: "source_rtp"
+        case .ccapiJPEGPolling: "source_jpeg"
+        case .desktopBridgeStream: "source_bridge"
+        case .simulatorFrame: "source_simulator"
+        case .auto: "source_auto"
         }
     }
 }

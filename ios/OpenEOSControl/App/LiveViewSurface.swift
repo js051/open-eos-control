@@ -1,3 +1,4 @@
+import AVFoundation
 import OpenEOSCore
 import SwiftUI
 import UIKit
@@ -8,13 +9,17 @@ struct LiveViewSurface: View {
     var body: some View {
         GeometryReader { proxy in
             let image = camera.liveViewData.flatMap(UIImage.init(data:))
-            let imageRect = image.map { aspectFitRect(contentSize: $0.size, containerSize: proxy.size) }
+            let contentSize = image?.size ?? (camera.activeLiveViewSource == .ccapiRTP ? camera.nativeLiveViewSize : nil)
+            let imageRect = contentSize.map { aspectFitRect(contentSize: $0, containerSize: proxy.size) }
                 ?? CGRect(origin: .zero, size: proxy.size)
 
             ZStack {
                 Color.black
 
-                if let image {
+                if camera.activeLiveViewSource == .ccapiRTP {
+                    IOSCcapiRTPVideoSurface(controller: camera.rtpController)
+                    if camera.lastFrameAt == nil { offlineSurface }
+                } else if let image {
                     Image(uiImage: image)
                         .resizable()
                         .interpolation(.medium)
@@ -89,6 +94,33 @@ struct LiveViewSurface: View {
                     .foregroundStyle(Color.cameraSecondaryText)
             }
         }
+    }
+}
+
+private struct IOSCcapiRTPVideoSurface: UIViewRepresentable {
+    let controller: IOSCcapiRTPController
+
+    func makeUIView(context: Context) -> IOSCcapiRTPVideoView {
+        let view = IOSCcapiRTPVideoView()
+        controller.attach(view.displayLayer)
+        return view
+    }
+
+    func updateUIView(_ uiView: IOSCcapiRTPVideoView, context: Context) {
+        controller.attach(uiView.displayLayer)
+    }
+
+    static func dismantleUIView(_ uiView: IOSCcapiRTPVideoView, coordinator: Void) {
+        // The controller is retained by CameraAppState; detaching is handled when another layer attaches.
+        uiView.displayLayer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+    }
+}
+
+private final class IOSCcapiRTPVideoView: UIView {
+    override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
+
+    var displayLayer: AVSampleBufferDisplayLayer {
+        layer as! AVSampleBufferDisplayLayer
     }
 }
 

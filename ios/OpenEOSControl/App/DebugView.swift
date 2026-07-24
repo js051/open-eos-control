@@ -58,6 +58,7 @@ struct DebugView: View {
                     }
 
                     debugSection("live_view") {
+                        value("live_view_source", camera.activeLiveViewSource?.rawValue ?? language.string("none"))
                         value("requested_fps", "\(camera.requestedFPS)")
                         value("observed_fps", String(format: "%.1f", camera.observedFPS))
                         value("frame_bytes", "\(camera.frameBytes)")

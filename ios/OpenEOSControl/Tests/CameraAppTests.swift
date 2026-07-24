@@ -27,6 +27,30 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(rect.midY, 200, accuracy: 0.001)
     }
 
+    func testCameraRTPAddressRequiresTheSameIPv4Subnet() {
+        XCTAssertTrue(
+            CameraRTPNetworkAddress.sameIPv4Subnet(
+                cameraAddress: "192.168.1.2",
+                localAddress: "192.168.1.37",
+                netmask: "255.255.255.0"
+            )
+        )
+        XCTAssertFalse(
+            CameraRTPNetworkAddress.sameIPv4Subnet(
+                cameraAddress: "192.168.1.2",
+                localAddress: "192.168.2.37",
+                netmask: "255.255.255.0"
+            )
+        )
+        XCTAssertFalse(
+            CameraRTPNetworkAddress.sameIPv4Subnet(
+                cameraAddress: "camera.local",
+                localAddress: "192.168.1.37",
+                netmask: "255.255.255.0"
+            )
+        )
+    }
+
     func testAdvancedSettingsAreFilteredByCaptureMode() {
         let settings = [
             CameraSetting(key: "iso", label: "ISO", value: "100", values: ["100"]),

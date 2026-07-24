@@ -144,3 +144,9 @@
 "diagnostic_copied" = "已複製診斷報告";
 "refresh" = "重新整理";
 "restart_live_view" = "重啟 Live View";
+"live_view_source" = "Live View 來源";
+"source_auto" = "自動";
+"source_rtp" = "RTP H.264";
+"source_jpeg" = "JPEG";
+"source_bridge" = "電腦橋接";
+"source_simulator" = "模擬器";

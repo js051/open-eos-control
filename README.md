@@ -33,7 +33,7 @@ The app currently includes:
 - Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/thumbnail/download/deletion, advertised standard still capture/property control, and capability-gated Canon EOS remote release, half-press, shooting mode, ISO/Tv/Av/WB, exposure compensation, color temperature, white-balance shifts, color space, aspect ratio, power-zoom speed, High ISO noise reduction, AEB, movie start/stop, AF operation/method, Continuous AF, drive, metering, Picture Style, per-card RAW/cRAW/JPEG image quality, Movie Servo AF, focus drive, and JPEG Live View
 - Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, AF-ON, Live View, focus drive, and ability-gated media thumbnails/transfer/deletion
 - Live view frame display with auto/manual refresh and FPS control
-- Capability-gated Canon CCAPI RTP H.264 Live View on Android, with camera-Wi-Fi-bound UDP reception, native `MediaCodec` rendering, an RTP/JPEG source selector, and a 1-30 FPS render cap; it appears only when the camera advertises both RTP endpoints
+- Capability-gated Canon CCAPI RTP H.264 Live View on Android and iOS, with camera-Wi-Fi-bound UDP reception, native `MediaCodec`/`AVSampleBufferVideoRenderer` display, an Auto/RTP/JPEG source selector, and a 1-30 FPS display cap; it appears only when the camera advertises both RTP endpoints and a reachable local Wi-Fi address exists
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
 - System, English, or Traditional Chinese language selection, including localized camera-advertised setting values while preserving exact protocol values for writes
 - REC start/stop
@@ -89,14 +89,14 @@ GitHub Actions runs tests and debug builds on pushes to `main` and on pull reque
 
 ## iOS App And Camera Core
 
-`ios/OpenEOSCore` is a Swift Package that implements native CCAPI and authenticated Desktop Bridge clients. The CCAPI path discovers camera-advertised API versions and operations from Canon's same-origin full `url` entries or relative `path` entries. The Bridge path validates the service, scans USB cameras, owns session lifecycle, and maps dynamic capabilities into the same models. Both paths capability-gate settings and commands and support the advertised subset of JPEG Live View, still capture, independent autofocus, half-press, recording, focus, media listing/thumbnail/download/deletion, and redacted diagnostics with bounded capability evidence. The package includes deterministic HTTP contract tests and is compiled by the macOS GitHub Actions job:
+`ios/OpenEOSCore` is a Swift Package that implements native CCAPI and authenticated Desktop Bridge clients. The CCAPI path discovers camera-advertised API versions and operations from Canon's same-origin full `url` entries or relative `path` entries. It supports complete JPEG Live View lifecycles and, when the camera advertises both RTP operations, validates Canon SDP plus RFC 3550/RFC 6184 H.264 access units and owns exact RTP start/stop cleanup. The Bridge path validates the service, scans USB cameras, owns session lifecycle, and maps dynamic capabilities into the same models. Both paths capability-gate settings and commands and support the advertised subset of Live View, still capture, independent autofocus, half-press, recording, focus, media listing/thumbnail/download/deletion, and redacted diagnostics with bounded capability evidence. The package includes deterministic HTTP contract tests and is compiled by the macOS GitHub Actions job:
 
 ```bash
 cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` is the iOS 17 SwiftUI app. It provides direct CCAPI connection or Desktop Bridge URL/token, USB camera scanning and selection, offline UI preview, capability-gated Photo/Video controls, manual focus drive when advertised, JPEG Live View with requests clamped to camera-advertised limits, exposure sheets, media transfer and confirmation-gated deletion, redacted diagnostics, manual language selection, and safe portrait/landscape layouts. Bridge tokens and CCAPI passwords remain in memory. Whole-window upside-down rotation stays disabled while key controls can rotate with physical device orientation.
+`ios/OpenEOSControl` is the iOS 17 SwiftUI app. It provides direct CCAPI connection or Desktop Bridge URL/token, USB camera scanning and selection, offline UI preview, capability-gated Photo/Video controls, manual focus drive when advertised, JPEG or advertised RTP H.264 Live View, exposure sheets, media transfer and confirmation-gated deletion, redacted diagnostics, manual language selection, and safe portrait/landscape layouts. RTP uses a same-subnet Wi-Fi IPv4 address, a Wi-Fi-only Network.framework UDP listener, native sample-buffer rendering, Auto/JPEG/RTP selection, and a 1-30 FPS display cap; AUTO closes failed RTP state before falling back to JPEG. Bridge tokens and CCAPI passwords remain in memory. Whole-window upside-down rotation stays disabled while key controls can rotate with physical device orientation.
 
 On a macOS host with Xcode and XcodeGen:
 
@@ -171,10 +171,10 @@ Useful endpoints:
 
 ## Roadmap
 
-- Keep CCAPI stable for R6 Mark III wireless control and validate whether its advertised API set includes the implemented Android RTP H.264 path; otherwise retain JPEG polling.
+- Keep CCAPI stable for R6 Mark III wireless control and validate whether its advertised API set includes the implemented Android/iOS RTP H.264 path; otherwise retain JPEG polling.
 - Validate the implemented Android USB/PTP standard and Canon EOS remote-release/exposure/color/bracketing/movie/advanced-settings/focus/Live View paths on R6 Mark III, then add only further vendor settings or Touch AF commands backed by reliable evidence.
 - Validate the implemented PC CCAPI, Android-to-Desktop-Bridge, and USB PC control paths on R6 Mark III, improve libgphoto2 preview throughput with a persistent engine, and retain Canon EDSDK as an optional user-installed adapter.
-- Validate the implemented iOS SwiftUI CCAPI app on an iPhone and R6 Mark III; keep iOS USB/PTP as a research track.
+- Validate the implemented iOS SwiftUI CCAPI app, including RTP when advertised and Wi-Fi/cellular coexistence, on an iPhone and R6 Mark III; keep iOS USB/PTP as a research track.
 
 See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/android-usb-ptp.md](docs/android-usb-ptp.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), [docs/ios-ccapi.md](docs/ios-ccapi.md), and [docs/reference-projects.md](docs/reference-projects.md).
 

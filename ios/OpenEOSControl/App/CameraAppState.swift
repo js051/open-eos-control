@@ -15,6 +15,7 @@ final class CameraAppState: ObservableObject {
         static let bridgeURL = "desktop-bridge-url"
         static let requestedFPS = "live-view-requested-fps"
         static let liveViewSize = "live-view-size"
+        static let liveViewSource = "live-view-source"
     }
 
     @Published var connectionMode: AppConnectionMode
@@ -36,6 +37,9 @@ final class CameraAppState: ObservableObject {
     @Published var autoRefresh = true
     @Published private(set) var requestedFPS: Int
     @Published private(set) var liveViewSize: LiveViewSize
+    @Published private(set) var selectedLiveViewSource: LiveViewSource
+    @Published private(set) var activeLiveViewSource: LiveViewSource?
+    @Published private(set) var nativeLiveViewSize: CGSize?
     @Published private(set) var liveViewData: Data?
     @Published private(set) var observedFPS = 0.0
     @Published private(set) var frameBytes = 0
@@ -60,6 +64,7 @@ final class CameraAppState: ObservableObject {
     private var downloadedMediaID: String?
     private var unavailableMediaThumbnailIDs = Set<String>()
     private var mediaThumbnailGeneration = 0
+    let rtpController: IOSCcapiRTPController
 
     var connected: Bool { snapshot?.status.connected == true }
     var recording: Bool { snapshot?.status.recording == true }
@@ -73,6 +78,11 @@ final class CameraAppState: ObservableObject {
         return nil
     }
     var connectionEndpoint: String { connectionMode == .ccapi ? baseURL : bridgeURL }
+    var usesRTPLiveView: Bool {
+        guard capabilities?.liveView.sources.contains(.ccapiRTP) == true else { return false }
+        if activeLiveViewSource == .ccapiRTP || selectedLiveViewSource == .ccapiRTP { return true }
+        return selectedLiveViewSource == .auto && capabilities?.liveView.defaultSource == .ccapiRTP
+    }
     var transportIdentifier: String {
         if isPreview { return "OFFLINE_PREVIEW" }
         return connectionMode == .ccapi ? "CCAPI_NETWORK" : "DESKTOP_BRIDGE"
@@ -97,6 +107,7 @@ final class CameraAppState: ObservableObject {
                 DefaultsKey.bridgeURL,
                 DefaultsKey.requestedFPS,
                 DefaultsKey.liveViewSize,
+                DefaultsKey.liveViewSource,
             ]
                 .forEach { defaults.removeObject(forKey: $0) }
         }
@@ -108,6 +119,14 @@ final class CameraAppState: ObservableObject {
         let storedFPS = defaults.integer(forKey: DefaultsKey.requestedFPS)
         requestedFPS = storedFPS == 0 ? 6 : min(max(storedFPS, 1), 30)
         liveViewSize = defaults.string(forKey: DefaultsKey.liveViewSize).flatMap(LiveViewSize.init(rawValue:)) ?? .medium
+        selectedLiveViewSource = defaults.string(forKey: DefaultsKey.liveViewSource)
+            .flatMap(LiveViewSource.init(rawValue:)) ?? .auto
+        activeLiveViewSource = nil
+        nativeLiveViewSize = nil
+        rtpController = IOSCcapiRTPController()
+        rtpController.setEventHandler { [weak self] event in
+            Task { @MainActor [weak self] in self?.handleRTPEvent(event) }
+        }
     }
 
     func supports(_ feature: CameraFeature) -> Bool {
@@ -182,12 +201,15 @@ final class CameraAppState: ObservableObject {
             let newSession: CameraSession
             switch connectionMode {
             case .ccapi:
+                let rtpAddress = CameraRTPNetworkAddress.destinationAddress(cameraURL: baseURL)
                 newSession = .ccapi(
                     try CCAPIClient(
                         baseURL: baseURL,
                         mode: .automatic,
                         username: username,
-                        password: password
+                        password: password,
+                        rtpDestinationAddress: rtpAddress,
+                        rtpSessionFactory: rtpAddress == nil ? nil : rtpController
                     )
                 )
             case .desktopBridge:
@@ -243,6 +265,8 @@ final class CameraAppState: ObservableObject {
         deletedMediaName = nil
         lastError = nil
         liveViewData = nil
+        activeLiveViewSource = nil
+        nativeLiveViewSize = nil
         resetLiveViewMetrics()
     }
 
@@ -261,6 +285,8 @@ final class CameraAppState: ObservableObject {
         removeDownloadedFile()
         deletedMediaName = nil
         liveViewData = nil
+        activeLiveViewSource = nil
+        nativeLiveViewSize = nil
         focusMarker = nil
         lastError = nil
         busyOperations.removeAll()
@@ -285,19 +311,39 @@ final class CameraAppState: ObservableObject {
         let maximum = limits?.maximumFPS ?? 30
         requestedFPS = min(max(value, minimum), maximum)
         defaults.set(requestedFPS, forKey: DefaultsKey.requestedFPS)
+        if let session {
+            let fps = requestedFPS
+            Task { await session.setLiveViewTargetFPS(fps) }
+        }
     }
 
     func setLiveViewSize(_ value: LiveViewSize) async {
-        guard capabilities?.liveView.sizes.contains(value) == true else { return }
+        guard !usesRTPLiveView, capabilities?.liveView.sizes.contains(value) == true else { return }
         liveViewSize = value
         defaults.set(value.rawValue, forKey: DefaultsKey.liveViewSize)
         if session != nil, autoRefresh { await restartLiveView() }
     }
 
+    func setLiveViewSource(_ value: LiveViewSource) async {
+        let available = capabilities?.liveView.sources ?? []
+        guard value == .auto || available.contains(value) else { return }
+        selectedLiveViewSource = value
+        defaults.set(value.rawValue, forKey: DefaultsKey.liveViewSource)
+        if session != nil { await restartLiveView() }
+    }
+
     func setAutoRefresh(_ enabled: Bool) async {
         autoRefresh = enabled
+        rtpController.setRenderingEnabled(enabled)
         if enabled {
-            await startLiveView()
+            if activeLiveViewSource == .ccapiRTP {
+                return
+            }
+            if let session, activeLiveViewSource != nil {
+                beginLiveViewLoop(session: session)
+            } else {
+                await startLiveView()
+            }
         } else {
             stopLiveViewLoop()
         }
@@ -308,10 +354,20 @@ final class CameraAppState: ObservableObject {
         defer { end(.liveView) }
         do {
             try await session.startLiveView(
-                LiveViewRequest(fps: requestedFPS, size: liveViewSize, source: .auto)
+                LiveViewRequest(fps: requestedFPS, size: liveViewSize, source: effectiveRequestedLiveViewSource())
             )
+            activeLiveViewSource = await session.currentLiveViewSource()
             lastError = nil
-            if autoRefresh { beginLiveViewLoop(session: session) }
+            if activeLiveViewSource == .ccapiRTP {
+                resetLiveViewMetrics()
+                nativeLiveViewSize = nil
+                liveViewData = nil
+                frameContentType = "video/H264"
+                frameSourceURL = await session.currentNativeLiveViewSourceURL()
+                rtpController.setRenderingEnabled(autoRefresh)
+            } else if autoRefresh {
+                beginLiveViewLoop(session: session)
+            }
         } catch {
             record(error)
         }
@@ -320,6 +376,8 @@ final class CameraAppState: ObservableObject {
     func restartLiveView() async {
         stopLiveViewLoop()
         if let session { await session.stopLiveView() }
+        activeLiveViewSource = nil
+        nativeLiveViewSize = nil
         await startLiveView()
     }
 
@@ -564,6 +622,7 @@ final class CameraAppState: ObservableObject {
             observedFPS: observedFPS,
             frameBytes: frameBytes,
             contentType: frameContentType,
+            source: activeLiveViewSource,
             sourceURL: frameSourceURL,
             lastFrameAt: lastFrameAt
         )
@@ -610,6 +669,17 @@ final class CameraAppState: ObservableObject {
         guard let liveView = capabilities?.liveView else { return }
         setRequestedFPS(requestedFPS)
         if !liveView.sizes.contains(liveViewSize) { liveViewSize = liveView.defaultSize }
+        if selectedLiveViewSource != .auto, !liveView.sources.contains(selectedLiveViewSource) {
+            selectedLiveViewSource = .auto
+            defaults.set(LiveViewSource.auto.rawValue, forKey: DefaultsKey.liveViewSource)
+        }
+    }
+
+    private func effectiveRequestedLiveViewSource() -> LiveViewSource {
+        guard let liveView = capabilities?.liveView else { return .auto }
+        return selectedLiveViewSource == .auto || liveView.sources.contains(selectedLiveViewSource)
+            ? selectedLiveViewSource
+            : .auto
     }
 
     private func beginLiveViewLoop(session: CameraSession) {
@@ -660,6 +730,22 @@ final class CameraAppState: ObservableObject {
         frameContentType = nil
         frameSourceURL = nil
         lastFrameAt = nil
+    }
+
+    private func handleRTPEvent(_ event: IOSCcapiRTPEvent) {
+        guard activeLiveViewSource == .ccapiRTP else { return }
+        switch event {
+        case let .frame(encodedBytes, at):
+            frameBytes = encodedBytes
+            frameContentType = "video/H264"
+            lastFrameAt = at
+            observedFPS = rateTracker.record(at.timeIntervalSinceReferenceDate)
+            if lastError?.contains("RTP") == true { lastError = nil }
+        case let .videoSize(width, height):
+            nativeLiveViewSize = CGSize(width: CGFloat(width), height: CGFloat(height))
+        case let .failed(message):
+            lastError = message
+        }
     }
 
     private func showShutterFlash() {

@@ -105,6 +105,27 @@ enum CameraSession: Sendable {
         }
     }
 
+    func currentLiveViewSource() async -> LiveViewSource? {
+        switch self {
+        case let .ccapi(client): return await client.currentLiveViewSource()
+        case .desktopBridge: return .desktopBridgeStream
+        }
+    }
+
+    func currentNativeLiveViewSourceURL() async -> URL? {
+        switch self {
+        case let .ccapi(client): return await client.currentNativeLiveViewSourceURL()
+        case .desktopBridge: return nil
+        }
+    }
+
+    func setLiveViewTargetFPS(_ fps: Int) async {
+        switch self {
+        case let .ccapi(client): await client.setLiveViewTargetFPS(fps)
+        case .desktopBridge: break
+        }
+    }
+
     func listMedia() async throws -> [CameraMediaItem] {
         switch self {
         case let .ccapi(client): return try await client.listMedia()

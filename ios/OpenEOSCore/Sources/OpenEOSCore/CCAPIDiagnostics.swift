@@ -5,6 +5,7 @@ public struct CCAPILiveViewMetrics: Equatable, Sendable {
     public let observedFPS: Double
     public let frameBytes: Int
     public let contentType: String?
+    public let source: LiveViewSource?
     public let sourceURL: URL?
     public let lastFrameAt: Date?
 
@@ -13,6 +14,7 @@ public struct CCAPILiveViewMetrics: Equatable, Sendable {
         observedFPS: Double = 0,
         frameBytes: Int = 0,
         contentType: String? = nil,
+        source: LiveViewSource? = nil,
         sourceURL: URL? = nil,
         lastFrameAt: Date? = nil
     ) {
@@ -20,6 +22,7 @@ public struct CCAPILiveViewMetrics: Equatable, Sendable {
         self.observedFPS = observedFPS
         self.frameBytes = frameBytes
         self.contentType = contentType
+        self.source = source
         self.sourceURL = sourceURL
         self.lastFrameAt = lastFrameAt
     }
@@ -61,6 +64,7 @@ public enum CCAPIDiagnosticReport {
             "observedFps=\(String(format: "%.1f", liveView.observedFPS))",
             "frameBytes=\(liveView.frameBytes)",
             "contentType=\(liveView.contentType ?? "none")",
+            "liveViewSource=\(liveView.source?.rawValue ?? "none")",
             "source=\(source)",
             "lastFrameAt=\(liveView.lastFrameAt == nil ? "none" : date)",
             "lastError=\(redact(lastError ?? "none"))",
