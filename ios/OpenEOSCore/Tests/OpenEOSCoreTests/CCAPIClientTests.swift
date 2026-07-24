@@ -474,7 +474,7 @@ final class CCAPIClientTests: XCTestCase {
         await transport.enqueueJSON(
             method: "POST",
             path: "/ccapi/whitebalance/click",
-            body: #"{"connected":true,"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"click"}}"#
+            body: #"{"connected":true,"battery":{"level":82,"status":"good"},"media":{"available":true,"remaining_minutes":120},"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"click"}}"#
         )
         let client = try CCAPIClient(
             baseURL: "http://127.0.0.1:18080",
