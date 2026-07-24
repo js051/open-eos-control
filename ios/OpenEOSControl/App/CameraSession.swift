@@ -33,6 +33,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func autofocus() async throws -> CameraStatus {
+        switch self {
+        case let .ccapi(client): return try await client.autofocus()
+        case let .desktopBridge(client): return try await client.autofocus()
+        }
+    }
+
     func halfPressShutter() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.halfPressShutter()

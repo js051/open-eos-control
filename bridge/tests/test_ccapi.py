@@ -37,6 +37,7 @@ DISCOVERY = {
         {"path": "/shooting/settings/wb", "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
+        {"path": "/shooting/control/af", "post": True},
         {"path": "/shooting/control/recbutton", "post": True},
         {"path": "/shooting/control/afpoint", "put": True},
         {"path": "/shooting/control/drivefocus", "post": True},
@@ -55,9 +56,16 @@ class RecordedRequest:
 
 
 class FakeCcapiTransport:
-    def __init__(self, *, discovery: dict[str, object] | None = None, external_media: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        discovery: dict[str, object] | None = None,
+        external_media: bool = False,
+        reject_autofocus_start: bool = False,
+    ) -> None:
         self.discovery = discovery or DISCOVERY
         self.external_media = external_media
+        self.reject_autofocus_start = reject_autofocus_start
         self.requests: list[RecordedRequest] = []
         self.settings = {
             "iso": {"value": "800", "ability": ["100", "800", "1600"]},
@@ -123,9 +131,16 @@ class FakeCcapiTransport:
             return _json_response({"path": [media_path]})
         if method == "DELETE" and path.startswith("/ccapi/ver100/contents/"):
             return CcapiResponse(204, {}, b"")
+        if (
+            path == "/ccapi/ver100/shooting/control/af"
+            and payload == {"action": "start"}
+            and self.reject_autofocus_start
+        ):
+            return _json_response({"message": "focus failed"}, status=503)
         if path in {
             "/ccapi/ver100/shooting/control/shutterbutton",
             "/ccapi/ver100/shooting/control/shutterbutton/manual",
+            "/ccapi/ver100/shooting/control/af",
             "/ccapi/ver100/shooting/control/recbutton",
             "/ccapi/ver100/shooting/control/afpoint",
             "/ccapi/ver100/shooting/control/drivefocus",
@@ -188,6 +203,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert capabilities.live_view.max_fps == 30
     assert {
         CameraFeature.STILL_CAPTURE,
+        CameraFeature.AUTOFOCUS,
         CameraFeature.TAP_FOCUS,
         CameraFeature.FOCUS_DRIVE,
         CameraFeature.MEDIA_DOWNLOAD,
@@ -206,6 +222,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     with pytest.raises(BridgeError, match="not advertised"):
         session.set_setting("iso", "51200")
     session.capture_still()
+    session.autofocus()
     session.half_press_shutter()
     assert session.start_recording().recording is True
     assert session.stop_recording().recording is False
@@ -230,6 +247,11 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
 
     command_paths = [request.path for request in transport.requests]
     assert command_paths.count("/ccapi/ver100/shooting/control/shutterbutton/manual") == 2
+    assert [
+        request.body
+        for request in transport.requests
+        if request.path == "/ccapi/ver100/shooting/control/af"
+    ] == [{"action": "start"}, {"action": "stop"}]
     assert RecordedRequest(
         "POST",
         "/ccapi/ver100/shooting/control/drivefocus",
@@ -324,6 +346,19 @@ def test_ccapi_focus_drive_rejects_invalid_values_without_a_camera_request() -> 
 
     assert failure.value.code == "INVALID_FOCUS_DRIVE"
     assert len(transport.requests) == before
+
+
+def test_failed_ccapi_autofocus_start_still_sends_stop() -> None:
+    transport = FakeCcapiTransport(reject_autofocus_start=True)
+    session = CcapiEngine(lambda _username, _password: transport, sleeper=lambda _: None).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    with pytest.raises(BridgeError):
+        session.autofocus()
+
+    actions = [request.body for request in transport.requests if request.path.endswith("/shooting/control/af")]
+    assert actions == [{"action": "start"}, {"action": "stop"}]
 
 
 def test_ccapi_capability_evidence_is_bounded_and_removes_queries() -> None:

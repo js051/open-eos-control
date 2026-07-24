@@ -4,6 +4,7 @@
   const FEATURES = {
     LIVE_VIEW: "LIVE_VIEW",
     STILL_CAPTURE: "STILL_CAPTURE",
+    AUTOFOCUS: "AUTOFOCUS",
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
     VIDEO_RECORDING: "VIDEO_RECORDING",
     TAP_FOCUS: "TAP_FOCUS",
@@ -63,7 +64,7 @@
       stopRecording: "Stop recording",
       ready: "Ready",
       busy: "Working",
-      halfPress: "Half press",
+      autofocus: "AF-ON",
       liveView: "Live View",
       manualFocus: "Manual focus",
       near: "Near",
@@ -85,7 +86,7 @@
       refreshing: "Refreshing camera state",
       disconnected: "Camera disconnected",
       captureComplete: "Photo captured",
-      halfPressComplete: "Half press complete",
+      autofocusComplete: "Autofocus complete",
       recordingStarted: "Recording started",
       recordingStopped: "Recording stopped",
       liveViewStarted: "Live View started",
@@ -177,7 +178,7 @@
       stopRecording: "停止錄影",
       ready: "就緒",
       busy: "處理中",
-      halfPress: "半按快門",
+      autofocus: "AF-ON",
       liveView: "即時預覽",
       manualFocus: "手動對焦",
       near: "近",
@@ -199,7 +200,7 @@
       refreshing: "正在更新相機狀態",
       disconnected: "相機已中斷連線",
       captureComplete: "拍攝完成",
-      halfPressComplete: "半按快門完成",
+      autofocusComplete: "自動對焦完成",
       recordingStarted: "已開始錄影",
       recordingStopped: "已停止錄影",
       liveViewStarted: "即時預覽已啟動",
@@ -361,7 +362,7 @@
     shutterButton: byId("shutter-button"),
     shutterLabel: byId("shutter-label"),
     operationState: byId("operation-state"),
-    halfPressButton: byId("half-press-button"),
+    autofocusButton: byId("autofocus-button"),
     focusSection: byId("focus-section"),
     focusNearButton: byId("focus-near-button"),
     focusFarButton: byId("focus-far-button"),
@@ -948,17 +949,17 @@
     }
   }
 
-  async function halfPress() {
-    if (!state.session || state.busy || !featureSupported(FEATURES.SHUTTER_HALF_PRESS)) return;
+  async function autofocus() {
+    if (!state.session || state.busy || !featureSupported(FEATURES.AUTOFOCUS)) return;
     state.busy = true;
     setOperationState(t("busy"));
     renderAvailability();
     try {
-      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/shutter/half-press`, {
+      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/focus/auto`, {
         method: "POST",
       });
-      setOperationState(t("halfPressComplete"));
-      showToast(t("halfPressComplete"));
+      setOperationState(t("autofocusComplete"));
+      showToast(t("autofocusComplete"));
     } catch (error) {
       const normalized = captureError(error);
       setOperationState(normalized.message, true);
@@ -1263,15 +1264,15 @@
       : videoSupported;
     ui.shutterButton.disabled = state.busy || !shutterSupported;
     ui.shutterButton.title = shutterSupported ? ui.shutterLabel.textContent : t("unsupported");
-    const halfPressSupported = featureSupported(FEATURES.SHUTTER_HALF_PRESS);
-    ui.halfPressButton.hidden = !halfPressSupported;
-    ui.halfPressButton.disabled = state.busy || !halfPressSupported;
+    const autofocusSupported = featureSupported(FEATURES.AUTOFOCUS);
+    ui.autofocusButton.hidden = !autofocusSupported;
+    ui.autofocusButton.disabled = state.busy || !autofocusSupported;
     const liveSupported = featureSupported(FEATURES.LIVE_VIEW);
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       button.hidden = !liveSupported;
       button.disabled = state.busy || !liveSupported;
     });
-    ui.railLiveButton.parentElement.classList.toggle("single", halfPressSupported !== liveSupported);
+    ui.railLiveButton.parentElement.classList.toggle("single", autofocusSupported !== liveSupported);
     document.querySelector(".live-settings").hidden = !liveSupported;
     const focusSupported = featureSupported(FEATURES.FOCUS_DRIVE);
     ui.focusSection.hidden = !focusSupported;
@@ -1660,7 +1661,7 @@
     ui.photoModeButton.addEventListener("click", () => selectCaptureMode("photo"));
     ui.videoModeButton.addEventListener("click", () => selectCaptureMode("video"));
     ui.shutterButton.addEventListener("click", operateShutter);
-    ui.halfPressButton.addEventListener("click", halfPress);
+    ui.autofocusButton.addEventListener("click", autofocus);
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
     ui.railLiveButton.addEventListener("click", toggleLiveView);
     ui.fpsSelect.addEventListener("change", changeFps);

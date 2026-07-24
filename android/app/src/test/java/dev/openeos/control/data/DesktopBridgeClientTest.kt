@@ -48,6 +48,7 @@ class DesktopBridgeClientTest {
         val exposureStatus = client.setExposure(iso = "800")
         val whiteBalanceStatus = client.setWhiteBalance("Daylight")
         client.captureStill()
+        client.autofocus()
         client.halfPressShutter()
         val recording = client.startRecording()
         val stopped = client.stopRecording()
@@ -105,6 +106,7 @@ class DesktopBridgeClientTest {
         assertEquals("camera-r6m3", sessionPayload.getString("cameraId"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/settings/iso") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/capture/still") == true })
+        assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/auto") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/shutter/half-press") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/drive") == true })
         assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath?.contains("/media/") == true })
@@ -194,6 +196,7 @@ class DesktopBridgeClientTest {
                     json(statusJson())
                 }
                 path.endsWith("/capture/still") -> json(statusJson())
+                path.endsWith("/focus/auto") -> json(statusJson())
                 path.endsWith("/shutter/half-press") -> json(statusJson())
                 path.endsWith("/recording/start") -> {
                     recording = true
@@ -306,7 +309,7 @@ class DesktopBridgeClientTest {
               "profile": {"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},
               "supported": [
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
-                "STILL_CAPTURE", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
+                "STILL_CAPTURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "ADVANCED_SETTINGS",
                 "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
               ],

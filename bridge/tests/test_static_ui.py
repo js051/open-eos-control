@@ -83,7 +83,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "/v1/cameras",
         "/v1/session",
         "/capture/still",
-        "/shutter/half-press",
+        "/focus/auto",
         "/recording/",
         "/focus/drive",
         "/focus/tap",

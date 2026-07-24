@@ -18,6 +18,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/settings/meteringmode","put":true},
         {"path":"/shooting/control/shutterbutton","post":true},
         {"path":"/shooting/control/shutterbutton/manual","put":true},
+        {"path":"/shooting/control/af","post":true},
         {"path":"/shooting/control/recbutton","post":true},
         {"path":"/shooting/control/afpoint","put":true},
         {"path":"/shooting/control/drivefocus","post":true},
@@ -302,6 +303,76 @@ final class CCAPIClientTests: XCTestCase {
             return try XCTUnwrap(json["action"] as? String)
         }
         XCTAssertEqual(actions, ["half_press", "release"])
+    }
+
+    func testAutofocusUsesAdvertisedCanonStartAndStopActions() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver110":[{"path":"/shooting/control/af","post":true}]}"#
+        )
+        await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/control/af", status: 204, body: Data())
+        await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/control/af", status: 204, body: Data())
+        await enqueueStatus(on: transport, prefix: "/ccapi/ver110")
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        _ = try await client.autofocus()
+
+        let commands = await transport.requests().filter { $0.path.contains("/shooting/control/af") }
+        XCTAssertEqual(commands.map(\.method), ["POST", "POST"])
+        let actions = try commands.map { request -> String in
+            let body = try XCTUnwrap(request.body)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            return try XCTUnwrap(json["action"] as? String)
+        }
+        XCTAssertEqual(actions, ["start", "stop"])
+    }
+
+    func testFailedAutofocusStartStillSendsStop() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver110":[{"path":"/shooting/control/af","post":true}]}"#
+        )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/ver110/shooting/control/af",
+            status: 503,
+            body: #"{"message":"focus failed"}"#
+        )
+        await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/control/af", status: 204, body: Data())
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        do {
+            _ = try await client.autofocus()
+            XCTFail("Expected autofocus failure")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("503"))
+        }
+
+        let requests = await transport.requests()
+        let commands = requests.filter { $0.path.contains("/shooting/control/af") }
+        let actions = try commands.map { request -> String in
+            let body = try XCTUnwrap(request.body)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            return try XCTUnwrap(json["action"] as? String)
+        }
+        XCTAssertEqual(actions, ["start", "stop"])
+    }
+
+    func testUnadvertisedAutofocusFailsWithoutACommand() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: #"{"ver100":[{"path":"/deviceinformation","get":true}]}"#)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        do {
+            _ = try await client.autofocus()
+            XCTFail("Expected unsupported autofocus")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.autofocus))
+        }
+        let requestCount = await transport.requests().count
+        XCTAssertEqual(requestCount, 1)
     }
 
     func testLiveViewRetriesWithoutSizeAfter400AndFallsBackToFlipDetail() async throws {

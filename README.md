@@ -31,12 +31,13 @@ The app currently includes:
 - Camera identity, transport, profile, battery, and storage display
 - Bounded, secret-redacted capability evidence showing the discovery source, protocol versions, advertised commands, and writable settings
 - Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/thumbnail/download/deletion, advertised standard still capture/property control, and capability-gated Canon EOS remote release, half-press, shooting mode, ISO/Tv/Av/WB, exposure compensation, color temperature, white-balance shifts, color space, aspect ratio, power-zoom speed, High ISO noise reduction, AEB, movie start/stop, AF operation/method, Continuous AF, drive, metering, Picture Style, per-card RAW/cRAW/JPEG image quality, Movie Servo AF, focus drive, and JPEG Live View
-- Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, Live View, focus drive, and ability-gated media thumbnails/transfer/deletion
+- Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, AF-ON, Live View, focus drive, and ability-gated media thumbnails/transfer/deletion
 - Live view frame display with auto/manual refresh and FPS control
 - ISO, shutter, aperture, white balance, and dynamic advanced settings
 - System, English, or Traditional Chinese language selection, including localized camera-advertised setting values while preserving exact protocol values for writes
 - REC start/stop
 - Tap focus hook through the shared backend layer
+- Independent AF-ON through camera-advertised CCAPI autofocus, with a balanced half-press fallback on USB-capable transports
 - Advertised manual shutter half-press with guaranteed release
 - Paged camera media browser with lazy thumbnails where advertised, streaming download through Android's document picker, and confirmation-gated deletion
 
@@ -86,7 +87,7 @@ GitHub Actions runs tests and debug builds on pushes to `main` and on pull reque
 
 ## iOS App And Camera Core
 
-`ios/OpenEOSCore` is a Swift Package that implements native CCAPI and authenticated Desktop Bridge clients. The CCAPI path discovers camera-advertised API versions and operations from Canon's same-origin full `url` entries or relative `path` entries. The Bridge path validates the service, scans USB cameras, owns session lifecycle, and maps dynamic capabilities into the same models. Both paths capability-gate settings and commands and support the advertised subset of JPEG Live View, still capture, half-press, recording, focus, media listing/thumbnail/download/deletion, and redacted diagnostics with bounded capability evidence. The package includes deterministic HTTP contract tests and is compiled by the macOS GitHub Actions job:
+`ios/OpenEOSCore` is a Swift Package that implements native CCAPI and authenticated Desktop Bridge clients. The CCAPI path discovers camera-advertised API versions and operations from Canon's same-origin full `url` entries or relative `path` entries. The Bridge path validates the service, scans USB cameras, owns session lifecycle, and maps dynamic capabilities into the same models. Both paths capability-gate settings and commands and support the advertised subset of JPEG Live View, still capture, independent autofocus, half-press, recording, focus, media listing/thumbnail/download/deletion, and redacted diagnostics with bounded capability evidence. The package includes deterministic HTTP contract tests and is compiled by the macOS GitHub Actions job:
 
 ```bash
 cd ios/OpenEOSCore
@@ -108,7 +109,7 @@ GitHub Actions builds the final app bundle, verifies icon/localization/network/o
 
 ## Desktop Bridge
 
-The bridge is an executable local service and PC control app. It controls USB cameras through `gphoto2`, or connects directly to a camera's wireless CCAPI endpoint without requiring `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, half-press, recording, focus drive or coordinate Tap AF when supported by the selected engine, JPEG Live View, lazy authenticated media thumbnails, streaming downloads, confirmation-gated deletion, and secret-free diagnostics with the engine's advertised capability evidence. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
+The bridge is an executable local service and PC control app. It controls USB cameras through `gphoto2`, or connects directly to a camera's wireless CCAPI endpoint without requiring `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, AF-ON, half-press, recording, focus drive or coordinate Tap AF when supported by the selected engine, JPEG Live View, lazy authenticated media thumbnails, streaming downloads, confirmation-gated deletion, and secret-free diagnostics with the engine's advertised capability evidence. Direct CCAPI AF-ON uses the advertised `POST /shooting/control/af` start/stop contract; USB engines use their verified balanced half-press path. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
 
 Create the environment below. Install `gphoto2` on the host only when using a USB camera:
 

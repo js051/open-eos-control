@@ -31,6 +31,7 @@ GET  /v1/session/{id}/liveview/frame
 POST /v1/session/{id}/settings/{key}
 POST /v1/session/{id}/capture/still
 POST /v1/session/{id}/shutter/half-press
+POST /v1/session/{id}/focus/auto
 POST /v1/session/{id}/recording/start
 POST /v1/session/{id}/recording/stop
 POST /v1/session/{id}/focus/tap
@@ -146,12 +147,13 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - camera-advertised setting values and their discovered `PUT` paths
 - direct shutter or manual full press with guaranteed release
 - timed half-press with guaranteed release
+- independent autofocus through advertised `POST /shooting/control/af` start/stop, falling back to the advertised balanced half-press operation
 - movie start/stop through `recbutton`
 - normalized coordinate Tap AF through `afpoint`
 - bounded JPEG Live View lifecycle and frame extraction
 - bounded/paged storage traversal plus opaque same-origin media IDs, streamed downloads, and deletion only when the camera advertises a matching `DELETE` operation
 
-Basic Auth is sent preemptively when a username is supplied. The Authorization value, username, and password are never exposed in status, diagnostics, media URLs, or API responses. Focus drive and RTP remain unavailable unless a documented and camera-advertised implementation is added.
+Basic Auth is sent preemptively when a username is supplied. The Authorization value, username, and password are never exposed in status, diagnostics, media URLs, or API responses. Focus drive is available only when the camera advertises the verified `drivefocus` POST operation. RTP remains unavailable until a documented decoder and session implementation is added.
 
 ## libgphoto2 Mapping
 
@@ -162,6 +164,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - settings: camera-advertised values through `--set-config-value`
 - still capture: `--trigger-capture`, falling back to `--capture-image` only when advertised
 - half-press: advertised `eosremoterelease` press/release values with guaranteed release
+- independent autofocus: the same balanced half-press path, exposed separately from the lower-level half-press command
 - recording: advertised `movierecordtarget` Card/None values
 - focus drive: advertised `manualfocusdrive` Near/Far values while Live View is active
 - Live View: advertised `viewfinder` lifecycle plus `--capture-preview --stdout`, with cleanup on stop, failed start, and session close

@@ -227,6 +227,10 @@ class DesktopBridgeClient(
         postJson(sessionEndpoint("capture", "still"), JSONObject())
     )
 
+    suspend fun autofocus(): CameraStatus = parseStatus(
+        postJson(sessionEndpoint("focus", "auto"), JSONObject())
+    )
+
     suspend fun halfPressShutter(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("shutter", "half-press"), JSONObject())
     )

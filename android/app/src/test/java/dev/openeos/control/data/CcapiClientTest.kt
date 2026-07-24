@@ -659,6 +659,61 @@ class CcapiClientTest {
     }
 
     @Test
+    fun autofocusUsesAdvertisedCanonStartAndStopActions() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/shooting/control/af","post":true}]}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
+        enqueueRealStatus()
+
+        client.initialize()
+        client.autofocus()
+
+        server.takeRequest()
+        val start = server.takeRequest()
+        val stop = server.takeRequest()
+        assertEquals("POST", start.method)
+        assertEquals("/ccapi/ver110/shooting/control/af", start.path)
+        assertEquals("start", JSONObject(start.body.readUtf8()).getString("action"))
+        assertEquals("POST", stop.method)
+        assertEquals("stop", JSONObject(stop.body.readUtf8()).getString("action"))
+    }
+
+    @Test
+    fun failedAutofocusStartStillSendsStop() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/shooting/control/af","post":true}]}"""))
+        server.enqueue(MockResponse().setResponseCode(503).setBody("focus failed"))
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        val failure = runCatching { client.autofocus() }.exceptionOrNull()
+
+        server.takeRequest()
+        val start = server.takeRequest()
+        val stop = server.takeRequest()
+        assertTrue(failure is IllegalStateException)
+        assertEquals("start", JSONObject(start.body.readUtf8()).getString("action"))
+        assertEquals("stop", JSONObject(stop.body.readUtf8()).getString("action"))
+    }
+
+    @Test
+    fun unadvertisedAutofocusFailsWithoutSendingACommand() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/deviceinformation","get":true}]}"""))
+
+        client.initialize()
+        val failure = runCatching { client.autofocus() }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun cancellingHalfPressStillReleasesShutter() = runBlocking {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(

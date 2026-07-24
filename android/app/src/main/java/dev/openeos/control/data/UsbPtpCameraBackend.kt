@@ -180,6 +180,7 @@ class UsbPtpCameraBackend(
                 add(CameraFeature.STILL_CAPTURE)
             }
             if (supportsCanonRelease) add(CameraFeature.SHUTTER_HALF_PRESS)
+            if (supportsCanonRelease) add(CameraFeature.AUTOFOCUS)
             if (supportsCanonLiveView) {
                 add(CameraFeature.LIVE_VIEW)
                 add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
@@ -196,6 +197,7 @@ class UsbPtpCameraBackend(
             CameraFeature.BATTERY_STATUS,
             CameraFeature.STORAGE_STATUS,
             CameraFeature.STILL_CAPTURE,
+            CameraFeature.AUTOFOCUS,
             CameraFeature.SHUTTER_HALF_PRESS,
             CameraFeature.VIDEO_RECORDING,
             CameraFeature.TAP_FOCUS,
@@ -238,6 +240,8 @@ class UsbPtpCameraBackend(
                         "Uses standard InitiateCapture or the advertised Canon EOS RemoteReleaseOn/Off sequence.",
                     CameraFeature.SHUTTER_HALF_PRESS to
                         "Uses Canon EOS RemoteReleaseOn/Off only when the camera advertises the full remote event sequence.",
+                    CameraFeature.AUTOFOCUS to
+                        "Uses a balanced Canon EOS half-press sequence when the full remote event operation set is advertised.",
                     CameraFeature.FOCUS_DRIVE to
                         "Uses Canon EOS DriveLens with the Near/Far 1-3 values documented by libgphoto2.",
                     CameraFeature.VIDEO_RECORDING to
@@ -329,6 +333,8 @@ class UsbPtpCameraBackend(
         drainCanonEvents()
         return status()
     }
+
+    override suspend fun autofocus(): CameraStatus = halfPressShutter()
 
     override suspend fun driveFocus(
         direction: FocusDriveDirection,

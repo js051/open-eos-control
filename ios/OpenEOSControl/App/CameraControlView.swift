@@ -98,9 +98,9 @@ private struct CameraOverlayHeader: View {
                 }
                 .font(.caption.weight(.semibold))
             }
-            if camera.supports(.shutterHalfPress) {
+            if camera.supports(.autofocus) {
                 Button {
-                    Task { await camera.halfPressShutter() }
+                    Task { await camera.autofocus() }
                 } label: {
                     RotatingControl(degrees: controlRotation) {
                         Image(systemName: "viewfinder")

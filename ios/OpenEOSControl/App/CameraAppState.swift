@@ -333,8 +333,8 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    func halfPressShutter() async {
-        guard supports(.shutterHalfPress), begin(.focus) else { return }
+    func autofocus() async {
+        guard supports(.autofocus), begin(.focus) else { return }
         defer { end(.focus) }
         if isPreview {
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
@@ -342,7 +342,7 @@ final class CameraAppState: ObservableObject {
         }
         guard let session else { return }
         do {
-            updateStatus(try await session.halfPressShutter())
+            updateStatus(try await session.autofocus())
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
             lastError = nil
         } catch {
@@ -701,7 +701,7 @@ final class CameraAppState: ObservableObject {
         ]
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
-            .stillCapture, .shutterHalfPress, .videoRecording, .tapFocus,
+            .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
             .exposureControl, .whiteBalanceControl, .advancedSettings, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]

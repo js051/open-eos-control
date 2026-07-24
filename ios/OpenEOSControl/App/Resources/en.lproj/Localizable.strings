@@ -54,7 +54,7 @@
 "stop_recording" = "Stop recording";
 "capture_not_supported" = "Still capture is not advertised by this camera.";
 "recording_not_supported" = "Video recording is not advertised by this camera.";
-"focus_with_shutter" = "Shutter autofocus";
+"focus_with_shutter" = "AF-ON autofocus";
 "focus_drive" = "Manual focus drive";
 "focus_near" = "Near";
 "focus_far" = "Far";

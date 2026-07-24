@@ -54,7 +54,7 @@
 "stop_recording" = "停止錄影";
 "capture_not_supported" = "相機未公告支援拍照快門。";
 "recording_not_supported" = "相機未公告支援錄影控制。";
-"focus_with_shutter" = "快門自動對焦";
+"focus_with_shutter" = "AF-ON 自動對焦";
 "focus_drive" = "手動驅動對焦";
 "focus_near" = "近";
 "focus_far" = "遠";

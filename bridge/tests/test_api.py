@@ -49,6 +49,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
             headers=headers,
             json={"value": "800"},
         )
+        autofocus = client.post(f"/v1/session/{session_id}/focus/auto", headers=headers)
         live_start = client.post(
             f"/v1/session/{session_id}/liveview/start",
             headers=headers,
@@ -85,6 +86,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert capabilities.json()["evidence"]["source"] == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert setting.json()["exposure"]["iso"] == "800"
+    assert autofocus.status_code == 200
     assert live_start.json() == {"active": True, "requestedFps": 5}
     assert live_frame.content == JPEG
     assert focus.json()["accepted"] is True

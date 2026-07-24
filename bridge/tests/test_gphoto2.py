@@ -73,6 +73,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert CameraFeature.STILL_CAPTURE in capabilities.supported
     assert CameraFeature.LIVE_VIEW in capabilities.supported
     assert CameraFeature.SHUTTER_HALF_PRESS in capabilities.supported
+    assert CameraFeature.AUTOFOCUS in capabilities.supported
     assert CameraFeature.VIDEO_RECORDING in capabilities.supported
     assert CameraFeature.FOCUS_DRIVE in capabilities.supported
     assert CameraFeature.MEDIA_DELETE in capabilities.supported
@@ -96,6 +97,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
 
     session.capture_still()
     session.half_press_shutter()
+    session.autofocus()
     assert runner.values["/main/actions/eosremoterelease"] == "Release Half"
 
     assert session.start_recording().recording is True

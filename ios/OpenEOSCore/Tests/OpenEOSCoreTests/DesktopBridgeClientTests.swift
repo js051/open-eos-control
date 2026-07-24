@@ -6,7 +6,7 @@ import XCTest
 final class DesktopBridgeClientTests: XCTestCase {
     private let health = #"{"ok":true,"service":"open-eos-control-bridge","version":"0.1.0","authRequired":true,"loopbackOnly":false,"engines":{}}"#
     private let status = #"{"connected":true,"battery":{"level":82,"status":"good"},"recording":false,"mode":"Manual","media":{"available":true,"totalBytes":1000,"freeBytes":800,"freeImages":123,"devices":1},"exposure":{"iso":"400","shutter":"1/50","aperture":"2.8","whiteBalance":"Auto"},"raw":{"transport":"usb"}}"#
-    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","LIVE_VIEW","STILL_CAPTURE","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","FOCUS_DRIVE","EXPOSURE_CONTROL","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_DOWNLOAD","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso"],"truncated":false}}"#
+    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","LIVE_VIEW","STILL_CAPTURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","FOCUS_DRIVE","EXPOSURE_CONTROL","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_DOWNLOAD","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso"],"truncated":false}}"#
 
     func testDiscoveryValidatesServiceAndUsesBearerAuthentication() async throws {
         let transport = MockCameraHTTPTransport()
@@ -52,6 +52,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         await transport.enqueueJSON(path: "/v1/session/session_123/capabilities", body: capabilities)
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/settings/iso", on: transport)
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/capture/still", on: transport)
+        await enqueueStatus(method: "POST", path: "/v1/session/session_123/focus/auto", on: transport)
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/shutter/half-press", on: transport)
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/recording/start", on: transport)
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/recording/stop", on: transport)
@@ -119,6 +120,7 @@ final class DesktopBridgeClientTests: XCTestCase {
 
         _ = try await client.setSetting(key: "iso", value: "800")
         _ = try await client.captureStill()
+        _ = try await client.autofocus()
         _ = try await client.halfPressShutter()
         _ = try await client.startRecording()
         _ = try await client.stopRecording()

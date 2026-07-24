@@ -256,6 +256,11 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
+    public func autofocus() async throws -> CameraStatus {
+        let body = try await postJSON(sessionEndpoint(["focus", "auto"]), payload: [:])
+        return parseStatus(body)
+    }
+
     public func halfPressShutter() async throws -> CameraStatus {
         let body = try await postJSON(sessionEndpoint(["shutter", "half-press"]), payload: [:])
         return parseStatus(body)

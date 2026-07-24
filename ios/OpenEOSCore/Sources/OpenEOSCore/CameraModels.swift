@@ -8,6 +8,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case liveViewJPEGPolling = "LIVE_VIEW_JPEG_POLLING"
     case liveViewRTP = "LIVE_VIEW_RTP"
     case stillCapture = "STILL_CAPTURE"
+    case autofocus = "AUTOFOCUS"
     case shutterHalfPress = "SHUTTER_HALF_PRESS"
     case videoRecording = "VIDEO_RECORDING"
     case tapFocus = "TAP_FOCUS"

@@ -228,6 +228,9 @@ public actor CCAPIClient {
         if manualShutterOperation() != nil {
             supported.insert(.shutterHalfPress)
         }
+        if autofocusOperation() != nil || manualShutterOperation() != nil {
+            supported.insert(.autofocus)
+        }
         if tapFocusOperation() != nil { supported.insert(.tapFocus) }
         if focusDriveOperation() != nil { supported.insert(.focusDrive) }
         if supports(.get, suffix: "/contents") {
@@ -236,7 +239,7 @@ public actor CCAPIClient {
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
 
         let allPlanned: Set<CameraFeature> = [
-            .liveViewRTP, .stillCapture, .shutterHalfPress, .videoRecording, .tapFocus,
+            .liveViewRTP, .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaDownload,
             .mediaDelete,
         ]
@@ -248,6 +251,7 @@ public actor CCAPIClient {
                 planned: allPlanned.subtracting(supported),
                 reasons: [
                     .liveViewRTP: "RTP decoding is not implemented; this client uses bounded JPEG polling.",
+                    .autofocus: "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation.",
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
                     .mediaThumbnail: "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
                 ]
@@ -332,6 +336,35 @@ public actor CCAPIClient {
             holdNanoseconds: Self.halfPressNanoseconds
         )
         observedFeatures.insert(.shutterHalfPress)
+        return try await status()
+    }
+
+    public func autofocus() async throws -> CameraStatus {
+        try await ensureInitialized()
+        if resolvedMode == .simulator {
+            try await performGuaranteedRelease(
+                press: { _ = try await self.requestJSON(path: "/ccapi/shutter/half-press", method: .post, json: [:]) },
+                release: { _ = try await self.requestJSON(path: "/ccapi/shutter/release", method: .post, json: [:]) },
+                holdNanoseconds: Self.halfPressNanoseconds
+            )
+            return try await status()
+        }
+        if let operation = autofocusOperation() {
+            try await performGuaranteedRelease(
+                press: { try await self.commandOK(operation: operation, json: ["action": "start"]) },
+                release: { try await self.commandOK(operation: operation, json: ["action": "stop"]) },
+                holdNanoseconds: Self.halfPressNanoseconds
+            )
+        } else if let manual = manualShutterOperation() {
+            try await performGuaranteedRelease(
+                press: { try await self.commandOK(operation: manual, json: ["af": true, "action": "half_press"]) },
+                release: { try await self.commandOK(operation: manual, json: ["af": false, "action": "release"]) },
+                holdNanoseconds: Self.halfPressNanoseconds
+            )
+        } else {
+            throw CCAPIError.unsupported(.autofocus)
+        }
+        observedFeatures.insert(.autofocus)
         return try await status()
     }
 
@@ -693,6 +726,10 @@ public actor CCAPIClient {
             ?? operation(.post, suffix: "/shooting/control/afpoint")
     }
 
+    private func autofocusOperation() -> CCAPIOperation? {
+        operation(.post, suffix: "/shooting/control/af")
+    }
+
     private func focusDriveOperation() -> CCAPIOperation? {
         operation(.post, suffix: "/shooting/control/drivefocus")
     }
@@ -930,7 +967,7 @@ public actor CCAPIClient {
         ]
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
-            .stillCapture, .shutterHalfPress, .videoRecording, .tapFocus,
+            .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]

@@ -6,20 +6,20 @@
 
 - CCAPI discovery through `/ccapi`, including Canon's same-origin full `url` entries and relative `path` fixtures, versioned operation parsing, and `ver110`/`ver100` fallback; query data and unsafe origins/paths are never promoted to capabilities
 - Camera identity, battery, storage, exposure, white balance, and dynamic settings; writable controls require the exact setting-specific `PUT` operation and a value from camera `ability`
-- Still capture, timed half-press with guaranteed release, recording, and tap focus only when advertised
+- Still capture, independent AF-ON through advertised Canon start/stop or a balanced half-press fallback, explicit timed half-press, recording, and tap focus only when supported
 - JPEG Live View only when discovery advertises a complete start/frame/stop lifecycle, with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
 - Bounded, same-origin media traversal and file-backed downloads with Canon main-file query fallbacks; text/JSON metadata is rejected even when returned with HTTP 2xx
 - Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
 - Basic Authentication held by the client instance and redacted diagnostic output
 - Simulator mode and injectable HTTP transport for deterministic tests
-- Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, settings, capture, half-press, recording, tap/drive focus when advertised, bounded JPEG frames and media thumbnails, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
+- Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, settings, capture, independent autofocus, half-press, recording, tap/drive focus when advertised, bounded JPEG frames and media thumbnails, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
 
 CCAPI RTP, focus drive without a camera/engine-advertised operation, and direct iOS USB/PTP are not presented as implemented features. Desktop Bridge is the implemented iPhone/iPad route to a camera attached to a PC by USB.
 
 ## Implemented App
 
 - Direct HTTP/HTTPS/Simulator presets or Desktop Bridge URL/token with USB scan and camera selection; passwords/tokens stay in memory while non-secret URLs and usernames may be remembered
-- Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, half-press, recording, tap focus or manual focus drive when advertised, and adjustable JPEG Live View
+- Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, AF-ON, recording, tap focus or manual focus drive when advertised, and adjustable JPEG Live View
 - Live View FPS from 1-30, clamped to the camera-advertised range, plus size, automatic refresh, grid, rolling FPS, frame bytes, and source diagnostics
 - Media listing, file-backed download/share, capability-gated confirmation deletion, redacted diagnostic report, and no fake USB/PTP action
 - English, Traditional Chinese, and system language selection

@@ -448,6 +448,10 @@ class CcapiSession:
                 "POST", "/shooting/control/shutterbutton/manual"
             ):
                 supported.add(CameraFeature.SHUTTER_HALF_PRESS)
+            if self._operation("POST", "/shooting/control/af") or self._operation(
+                "PUT", "/shooting/control/shutterbutton/manual"
+            ) or self._operation("POST", "/shooting/control/shutterbutton/manual"):
+                supported.add(CameraFeature.AUTOFOCUS)
             if self._operation("PUT", "/shooting/control/afpoint") or self._operation(
                 "POST", "/shooting/control/afpoint"
             ):
@@ -462,6 +466,7 @@ class CcapiSession:
             candidates = {
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
+                CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.VIDEO_RECORDING,
                 CameraFeature.TAP_FOCUS,
@@ -487,6 +492,9 @@ class CcapiSession:
                     ),
                     CameraFeature.FOCUS_DRIVE.value: (
                         "The camera did not advertise the verified CCAPI POST drivefocus operation."
+                    ),
+                    CameraFeature.AUTOFOCUS.value: (
+                        "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation."
                     ),
                     CameraFeature.MEDIA_THUMBNAIL.value: (
                         "No verified Canon CCAPI thumbnail resource is advertised by this camera."
@@ -565,6 +573,31 @@ class CcapiSession:
                 hold=HALF_PRESS_SECONDS,
             )
             self._observed.add(CameraFeature.SHUTTER_HALF_PRESS)
+            return self.status()
+
+    def autofocus(self) -> CameraStatus:
+        with self._lock:
+            operation = self._operation("POST", "/shooting/control/af")
+            manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
+                "POST", "/shooting/control/shutterbutton/manual"
+            )
+            if operation is not None:
+                self._guaranteed_release(
+                    operation,
+                    {"action": "start"},
+                    {"action": "stop"},
+                    hold=HALF_PRESS_SECONDS,
+                )
+            elif manual is not None:
+                self._guaranteed_release(
+                    manual,
+                    {"af": True, "action": "half_press"},
+                    {"af": False, "action": "release"},
+                    hold=HALF_PRESS_SECONDS,
+                )
+            else:
+                raise unsupported(CameraFeature.AUTOFOCUS.value, self.engine_name)
+            self._observed.add(CameraFeature.AUTOFOCUS)
             return self.status()
 
     def start_recording(self) -> CameraStatus:
@@ -835,7 +868,7 @@ class CcapiSession:
         except Exception as release_error:
             if primary is None:
                 raise
-            self._last_error = f"{primary}; shutter release also failed: {release_error}"
+            self._last_error = f"{primary}; release command also failed: {release_error}"
         if primary is not None:
             raise primary
 

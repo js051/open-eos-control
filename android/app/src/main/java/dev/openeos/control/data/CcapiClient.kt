@@ -392,6 +392,9 @@ class CcapiClient(
             if (manualShutterOperation() != null) {
                 supportedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
             }
+            if (autofocusOperation() != null || manualShutterOperation() != null) {
+                supportedFeatures.add(CameraFeature.AUTOFOCUS)
+            }
             if (tapFocusOperation() != null) {
                 supportedFeatures.add(CameraFeature.TAP_FOCUS)
             }
@@ -542,6 +545,61 @@ class CcapiClient(
             observedFeatures.add(CameraFeature.STILL_CAPTURE)
         } else {
             postJson("/ccapi/capture/still", JSONObject().put("af", true))
+        }
+        return status()
+    }
+
+    suspend fun autofocus(): CameraStatus {
+        if (isRealCamera) {
+            val operation = autofocusOperation()
+            val manualOperation = manualShutterOperation()
+            if (enforceAdvertisedOperations && operation == null && manualOperation == null) {
+                error("Camera did not advertise autofocus or manual shutter control.")
+            }
+            if (operation != null || !enforceAdvertisedOperations) {
+                withGuaranteedRelease(
+                    press = {
+                        commandOk(
+                            pathSuffix = "/shooting/control/af",
+                            payload = JSONObject().put("action", "start"),
+                            operation = operation,
+                        )
+                    },
+                    release = {
+                        commandOk(
+                            pathSuffix = "/shooting/control/af",
+                            payload = JSONObject().put("action", "stop"),
+                            operation = operation,
+                        )
+                    },
+                    afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
+                )
+            } else {
+                withGuaranteedRelease(
+                    press = {
+                        commandOk(
+                            pathSuffix = "/shooting/control/shutterbutton/manual",
+                            payload = JSONObject().put("af", true).put("action", "half_press"),
+                            operation = manualOperation,
+                        )
+                    },
+                    release = {
+                        commandOk(
+                            pathSuffix = "/shooting/control/shutterbutton/manual",
+                            payload = JSONObject().put("af", false).put("action", "release"),
+                            operation = manualOperation,
+                        )
+                    },
+                    afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
+                )
+            }
+            observedFeatures.add(CameraFeature.AUTOFOCUS)
+        } else {
+            withGuaranteedRelease(
+                press = { postJson("/ccapi/shutter/half-press", JSONObject()) },
+                release = { postJson("/ccapi/shutter/release", JSONObject()) },
+                afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
+            )
         }
         return status()
     }
@@ -808,6 +866,9 @@ class CcapiClient(
     private fun tapFocusOperation(): CcapiApiOperation? =
         apiOperation("PUT", "/shooting/control/afpoint")
             ?: apiOperation("POST", "/shooting/control/afpoint")
+
+    private fun autofocusOperation(): CcapiApiOperation? =
+        apiOperation("POST", "/shooting/control/af")
 
     private fun focusDriveOperation(): CcapiApiOperation? =
         apiOperation("POST", "/shooting/control/drivefocus")
@@ -1432,6 +1493,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
     matrix = CapabilityMatrix.ccapiNetwork(
         CapabilityMatrix.ccapiNetwork().supported + setOf(
             CameraFeature.STILL_CAPTURE,
+            CameraFeature.AUTOFOCUS,
             CameraFeature.SHUTTER_HALF_PRESS,
             CameraFeature.MEDIA_BROWSER,
             CameraFeature.MEDIA_DOWNLOAD,

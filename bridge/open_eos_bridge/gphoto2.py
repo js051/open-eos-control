@@ -659,6 +659,7 @@ class GPhoto2Session:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             if self._half_press_values() is not None:
                 supported.add(CameraFeature.SHUTTER_HALF_PRESS)
+                supported.add(CameraFeature.AUTOFOCUS)
             if self._recording_values() is not None:
                 supported.add(CameraFeature.VIDEO_RECORDING)
             if self._focus_drive_config() is not None:
@@ -739,6 +740,9 @@ class GPhoto2Session:
                 if pressed:
                     self._set_config_value(config, release_value, refresh=False)
             return self.status()
+
+    def autofocus(self) -> CameraStatus:
+        return self.half_press_shutter()
 
     def start_recording(self) -> CameraStatus:
         return self._set_recording(True)

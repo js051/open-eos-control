@@ -501,14 +501,14 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(stringResource(R.string.more_settings), color = AppText, fontWeight = FontWeight.Bold)
-                if (state.supports(CameraFeature.SHUTTER_HALF_PRESS)) {
+                if (state.supports(CameraFeature.AUTOFOCUS)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(stringResource(R.string.focus_with_shutter), color = AppText, fontWeight = FontWeight.SemiBold)
                             Text(stringResource(R.string.focus_with_shutter_hint), color = AppSubtleText)
                         }
                         Button(
-                            onClick = actions.focusWithShutter,
+                            onClick = actions.autofocus,
                             enabled = !state.isBusy(CameraOperation.FOCUS),
                             colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
                             shape = RoundedCornerShape(6.dp),
@@ -525,7 +525,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 }
                 if (
                     settings.isEmpty() &&
-                    !state.supports(CameraFeature.SHUTTER_HALF_PRESS) &&
+                    !state.supports(CameraFeature.AUTOFOCUS) &&
                     !state.supports(CameraFeature.FOCUS_DRIVE)
                 ) {
                     Text(stringResource(R.string.no_settings), color = AppSubtleText)

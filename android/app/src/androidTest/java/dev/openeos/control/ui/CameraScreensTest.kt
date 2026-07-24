@@ -481,7 +481,7 @@ class CameraScreensTest {
         connectUsb = { _, _, _ -> },
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
-        captureStill = {}, focusWithShutter = {}, driveFocus = { _, _ -> }, toggleRecording = {}, tapFocus = { _, _ -> },
+        captureStill = {}, autofocus = {}, driveFocus = { _, _ -> }, toggleRecording = {}, tapFocus = { _, _ -> },
         refreshMedia = {}, loadMediaThumbnail = {}, downloadMedia = { _, _ -> }, deleteMedia = {},
         cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {},

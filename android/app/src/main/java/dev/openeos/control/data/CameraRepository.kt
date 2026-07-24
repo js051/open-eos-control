@@ -159,6 +159,8 @@ class CameraRepository(
 
     suspend fun captureStill(): CameraStatus = backend.captureStill()
 
+    suspend fun autofocus(): CameraStatus = backend.autofocus()
+
     suspend fun halfPressShutter(): CameraStatus = backend.halfPressShutter()
 
     suspend fun driveFocus(

@@ -193,6 +193,10 @@ def create_app(
     def half_press_shutter(session_id: str) -> CameraStatus:
         return manager.get(session_id).half_press_shutter()
 
+    @router.post("/session/{session_id}/focus/auto", response_model=CameraStatus)
+    def autofocus(session_id: str) -> CameraStatus:
+        return manager.get(session_id).autofocus()
+
     @router.post("/session/{session_id}/recording/start", response_model=CameraStatus)
     def start_recording(session_id: str) -> CameraStatus:
         return manager.get(session_id).start_recording()

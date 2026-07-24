@@ -72,6 +72,7 @@ interface CameraControlBackend {
     suspend fun stopRecording(): CameraStatus
     suspend fun tapFocus(x: Double, y: Double): FocusResult
     suspend fun captureStill(): CameraStatus = unsupported(CameraFeature.STILL_CAPTURE)
+    suspend fun autofocus(): CameraStatus = unsupported(CameraFeature.AUTOFOCUS)
     suspend fun halfPressShutter(): CameraStatus = unsupported(CameraFeature.SHUTTER_HALF_PRESS)
     suspend fun driveFocus(
         direction: FocusDriveDirection,
@@ -135,6 +136,8 @@ class CcapiCameraBackend(
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = client.tapFocus(x, y)
 
     override suspend fun captureStill(): CameraStatus = client.captureStill()
+
+    override suspend fun autofocus(): CameraStatus = client.autofocus()
 
     override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
 
@@ -203,6 +206,8 @@ class DesktopBridgeCameraBackend(
     override suspend fun tapFocus(x: Double, y: Double): FocusResult = client.tapFocus(x, y)
 
     override suspend fun captureStill(): CameraStatus = client.captureStill()
+
+    override suspend fun autofocus(): CameraStatus = client.autofocus()
 
     override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
 
