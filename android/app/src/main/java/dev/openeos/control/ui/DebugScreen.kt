@@ -37,6 +37,7 @@ import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraNetworkRouting
 import dev.openeos.control.data.CameraTransport
+import dev.openeos.control.data.SystemNetworkTransport
 import dev.openeos.control.data.UsbDiagnosticState
 import java.text.DateFormat
 import java.util.Date
@@ -109,8 +110,32 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
                 DebugValue(stringResource(R.string.target_host), network.targetHost ?: unknown, mono = true)
                 DebugValue(stringResource(R.string.network_interface), network.interfaceName ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.network_handle), network.networkHandle?.toString() ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.camera_network_available), yesNoLabel(network.cameraNetworkAvailable))
                 DebugValue(stringResource(R.string.wifi_available), yesNoLabel(network.wifiAvailable))
                 DebugValue(stringResource(R.string.cellular_available), yesNoLabel(network.cellularAvailable))
+                DebugValue(stringResource(R.string.cellular_validated), yesNoLabel(network.cellularValidated))
+                DebugValue(
+                    stringResource(R.string.system_default_transport),
+                    systemNetworkTransportLabel(network.systemDefaultTransport),
+                )
+                DebugValue(
+                    stringResource(R.string.system_default_interface),
+                    network.systemDefaultInterfaceName ?: unavailable,
+                    mono = true,
+                )
+                DebugValue(
+                    stringResource(R.string.system_default_network_handle),
+                    network.systemDefaultNetworkHandle?.toString() ?: unavailable,
+                    mono = true,
+                )
+                DebugValue(
+                    stringResource(R.string.system_default_validated),
+                    yesNoLabel(network.systemDefaultValidated),
+                )
+                DebugValue(
+                    stringResource(R.string.wifi_cellular_coexistence),
+                    yesNoLabel(network.wifiCellularCoexistence),
+                )
             }
             DebugSection(stringResource(R.string.live_view)) {
                 val live = state.liveViewDiagnostics
@@ -194,6 +219,18 @@ private fun networkRoutingLabel(routing: CameraNetworkRouting): String = stringR
     when (routing) {
         CameraNetworkRouting.SYSTEM_DEFAULT -> R.string.route_system_default
         CameraNetworkRouting.WIFI_BOUND -> R.string.route_wifi_bound
+    },
+)
+
+@Composable
+private fun systemNetworkTransportLabel(transport: SystemNetworkTransport): String = stringResource(
+    when (transport) {
+        SystemNetworkTransport.NONE -> R.string.system_network_none
+        SystemNetworkTransport.WIFI -> R.string.system_network_wifi
+        SystemNetworkTransport.CELLULAR -> R.string.system_network_cellular
+        SystemNetworkTransport.ETHERNET -> R.string.system_network_ethernet
+        SystemNetworkTransport.VPN -> R.string.system_network_vpn
+        SystemNetworkTransport.OTHER -> R.string.system_network_other
     },
 )
 

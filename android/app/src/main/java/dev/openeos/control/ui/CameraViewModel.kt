@@ -357,11 +357,13 @@ class CameraViewModel(
         if (_uiState.value.previewMode) return@runCamera
         val status = repository.refreshStatus()
         val capabilities = repository.refreshCapabilities()
+        val networkDiagnostics = repository.refreshNetworkDiagnostics()
         val captureMode = captureModeFrom(capabilities)
         _uiState.update {
             it.copy(
                 status = status,
                 capabilities = capabilities,
+                networkDiagnostics = networkDiagnostics,
                 captureMode = captureMode ?: it.captureMode,
             )
         }

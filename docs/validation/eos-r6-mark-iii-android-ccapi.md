@@ -52,7 +52,7 @@ This report predates `capabilitySource`, `protocolVersions`, `advertisedCommands
 
 ## Next Physical Pass
 
-1. Keep cellular data enabled while connected to the camera Wi-Fi and confirm Debug reports `cameraRoute=WIFI_BOUND` plus `cellularAvailable=true`.
+1. Keep cellular data enabled while connected to the camera Wi-Fi, press Debug Refresh, and confirm `cameraRoute=WIFI_BOUND`, `cameraNetworkAvailable=true`, `systemDefaultTransport=CELLULAR`, `systemDefaultValidated=true`, and `wifiCellularCoexistence=true`. Then open a public HTTPS page in another app without disconnecting the camera and record the result; `cellularAvailable` alone is not acceptance evidence.
 2. Install a build containing the canonical discovery `url` parser, capture a fresh diagnostic report, and retain `capabilitySource`, `protocolVersions`, `advertisedCommandCount`, `advertisedCommands`, `writableSettings`, and `capabilityEvidenceTruncated` after exercising each available still, half-press, movie, Tap AF, Click White Balance, storage, browse and download control.
 3. Check the fresh `advertisedCommands` for `GET .../shooting/liveview/rtpsessiondesc` and `POST .../shooting/liveview/rtp`. If both exist, switch the Live View source to RTP H.264, test 6/15/30 FPS render caps, rotate portrait/landscape, background/restore the app, and record `liveViewSource`, `observedFps`, `contentType=video/H264`, the `rtp://` source and any decoder error. If either command is absent, record RTP as unsupported by this camera/API version and keep JPEG polling.
 4. Connect over USB-C/OTG and complete the checklist in [Android USB/PTP](../android-usb-ptp.md).

@@ -158,6 +158,8 @@ class CameraRepository(
 
     suspend fun refreshCapabilities(): CameraCapabilities = backend.capabilities()
 
+    fun refreshNetworkDiagnostics(): CameraNetworkDiagnostics = backend.networkDiagnostics
+
     suspend fun toggleRecording(recording: Boolean?): CameraStatus =
         if (recording == true) backend.stopRecording() else backend.startRecording()
 

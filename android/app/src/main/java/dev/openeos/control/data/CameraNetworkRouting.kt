@@ -15,9 +15,21 @@ data class CameraNetworkDiagnostics(
     val targetHost: String? = null,
     val networkHandle: Long? = null,
     val interfaceName: String? = null,
+    val cameraNetworkAvailable: Boolean = false,
     val wifiAvailable: Boolean = false,
     val cellularAvailable: Boolean = false,
+    val cellularValidated: Boolean = false,
+    val systemDefaultTransport: SystemNetworkTransport = SystemNetworkTransport.NONE,
+    val systemDefaultValidated: Boolean = false,
+    val systemDefaultNetworkHandle: Long? = null,
+    val systemDefaultInterfaceName: String? = null,
 ) {
+    val wifiCellularCoexistence: Boolean
+        get() = routing == CameraNetworkRouting.WIFI_BOUND &&
+            cameraNetworkAvailable &&
+            systemDefaultTransport == SystemNetworkTransport.CELLULAR &&
+            systemDefaultValidated
+
     companion object {
         val Empty = CameraNetworkDiagnostics()
     }
@@ -28,11 +40,21 @@ enum class CameraNetworkRouting {
     WIFI_BOUND,
 }
 
+enum class SystemNetworkTransport {
+    NONE,
+    WIFI,
+    CELLULAR,
+    ETHERNET,
+    VPN,
+    OTHER,
+}
+
 data class CameraHttpTransport(
     val client: OkHttpClient,
     val diagnostics: CameraNetworkDiagnostics,
     val rtpDestinationAddress: String? = null,
     val rtpSessionFactory: CcapiRtpSessionFactory? = null,
+    val diagnosticsProvider: () -> CameraNetworkDiagnostics = { diagnostics },
 )
 
 fun interface CameraHttpTransportFactory {
@@ -60,13 +82,15 @@ class AndroidCameraHttpTransportFactory(
         val host = uri.host ?: throw IllegalArgumentException("Camera URL must include a host: $baseUrl")
 
         if (host.isDevelopmentHost(uri.port)) {
+            val diagnostics = currentDiagnostics(host)
             return CameraHttpTransport(
                 client = OkHttpClient(),
-                diagnostics = currentDiagnostics(host),
+                diagnostics = diagnostics,
+                diagnosticsProvider = { currentDiagnostics(host) },
             )
         }
 
-        val networks = connectivityManager.allNetworks.toList()
+        val networks = availableNetworksSnapshot()
         val wifiNetworks = networks.filter { network ->
             connectivityManager.getNetworkCapabilities(network)
                 ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
@@ -88,14 +112,7 @@ class AndroidCameraHttpTransportFactory(
             ?.filterIsInstance<Inet4Address>()
             ?.firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
             ?.hostAddress
-        val diagnostics = CameraNetworkDiagnostics(
-            routing = CameraNetworkRouting.WIFI_BOUND,
-            targetHost = host,
-            networkHandle = selected.networkHandle,
-            interfaceName = linkProperties?.interfaceName,
-            wifiAvailable = true,
-            cellularAvailable = networks.any { it.isCellular() },
-        )
+        val diagnostics = currentDiagnostics(host, selected)
         return CameraHttpTransport(
             client = OkHttpClient.Builder()
                 .socketFactory(selected.socketFactory)
@@ -109,15 +126,37 @@ class AndroidCameraHttpTransportFactory(
             diagnostics = diagnostics,
             rtpDestinationAddress = rtpDestinationAddress,
             rtpSessionFactory = AndroidCcapiRtpSessionFactory(selected),
+            diagnosticsProvider = { currentDiagnostics(host, selected) },
         )
     }
 
-    private fun currentDiagnostics(host: String): CameraNetworkDiagnostics {
-        val networks = connectivityManager.allNetworks.toList()
+    private fun currentDiagnostics(host: String, cameraNetwork: Network? = null): CameraNetworkDiagnostics {
+        val networks = availableNetworksSnapshot()
+        val cameraNetworkAvailable = cameraNetwork != null && networks.any { network ->
+            network.networkHandle == cameraNetwork.networkHandle && network.isWifi()
+        }
+        val defaultNetwork = connectivityManager.activeNetwork
+        val defaultCapabilities = defaultNetwork?.let(connectivityManager::getNetworkCapabilities)
+        val defaultLinkProperties = defaultNetwork?.let(connectivityManager::getLinkProperties)
         return CameraNetworkDiagnostics(
+            routing = if (cameraNetwork == null) {
+                CameraNetworkRouting.SYSTEM_DEFAULT
+            } else {
+                CameraNetworkRouting.WIFI_BOUND
+            },
             targetHost = host,
+            networkHandle = cameraNetwork?.networkHandle,
+            interfaceName = cameraNetwork?.let(connectivityManager::getLinkProperties)?.interfaceName,
+            cameraNetworkAvailable = cameraNetworkAvailable,
             wifiAvailable = networks.any { it.isWifi() },
             cellularAvailable = networks.any { it.isCellular() },
+            cellularValidated = networks.any { network ->
+                connectivityManager.getNetworkCapabilities(network).isValidatedCellular()
+            },
+            systemDefaultTransport = defaultCapabilities.systemTransport(),
+            systemDefaultValidated = defaultCapabilities.isValidatedInternet(),
+            systemDefaultNetworkHandle = defaultNetwork?.networkHandle,
+            systemDefaultInterfaceName = defaultLinkProperties?.interfaceName,
         )
     }
 
@@ -128,6 +167,27 @@ class AndroidCameraHttpTransportFactory(
     private fun Network.isCellular(): Boolean =
         connectivityManager.getNetworkCapabilities(this)
             ?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
+
+    @Suppress("DEPRECATION")
+    private fun availableNetworksSnapshot(): List<Network> =
+        // The camera Wi-Fi can be non-default while cellular is the active network.
+        connectivityManager.allNetworks.toList()
+}
+
+private fun NetworkCapabilities?.isValidatedInternet(): Boolean =
+    this?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
+        hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+
+private fun NetworkCapabilities?.isValidatedCellular(): Boolean =
+    this?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true && isValidatedInternet()
+
+private fun NetworkCapabilities?.systemTransport(): SystemNetworkTransport = when {
+    this == null -> SystemNetworkTransport.NONE
+    hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> SystemNetworkTransport.VPN
+    hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> SystemNetworkTransport.CELLULAR
+    hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> SystemNetworkTransport.WIFI
+    hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> SystemNetworkTransport.ETHERNET
+    else -> SystemNetworkTransport.OTHER
 }
 
 private fun String.isDevelopmentHost(port: Int): Boolean =

@@ -25,7 +25,7 @@ The app currently includes:
 
 - Direct CCAPI camera URL input with HTTP/HTTPS presets
 - Optional CCAPI Basic Authentication credentials
-- Camera HTTP sockets bound to the Wi-Fi route so cellular internet can remain enabled
+- Camera HTTP and RTP sockets bound to the Wi-Fi route so cellular internet can remain enabled, with refreshed validated-default-network diagnostics
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
@@ -52,7 +52,7 @@ https://192.168.1.2:443
 
 Use the IP and port shown by the camera CCAPI setup screen when testing with a real camera.
 
-On Android, direct-camera HTTP uses the Wi-Fi `Network` that can route to the camera instead of binding the whole app process. Mobile data can stay enabled for internet traffic. Debug diagnostics report the selected route, interface, Wi-Fi availability, and cellular availability; connection fails clearly when no Wi-Fi route reaches the camera.
+On Android, direct-camera HTTP and RTP use the Wi-Fi `Network` that can route to the camera instead of binding the whole app process. Mobile data can stay enabled for other internet traffic. Refresh in Debug re-reads the selected camera route, its current availability, cellular validation, system-default transport and system-default validation; `wifiCellularCoexistence=true` means the bound camera Wi-Fi is still present while Android currently has a validated cellular default network. The app does not claim coexistence from radio availability alone, and connection fails clearly when no Wi-Fi route reaches the camera.
 
 HTTPS uses Android's normal certificate validation. The app no longer accepts arbitrary self-signed certificates. Use HTTP on the isolated camera network or install a trusted certificate when the camera cannot present a system-trusted HTTPS certificate.
 

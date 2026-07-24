@@ -3,6 +3,7 @@ package dev.openeos.control.data
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.OkHttpClient
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -50,6 +51,37 @@ class CameraRepositoryTest {
         assertEquals("/ccapi/info", server.takeRequest().path)
         assertEquals("/ccapi/status", server.takeRequest().path)
         assertEquals("/ccapi/capabilities", server.takeRequest().path)
+    }
+
+    @Test
+    fun networkDiagnosticsAreResampledWithoutRecreatingTheCameraClient() = runTest {
+        var diagnostics = CameraNetworkDiagnostics(targetHost = "192.168.1.2")
+        val routedRepository = CameraRepository(
+            CameraBackendFactory(
+                httpTransportFactory = CameraHttpTransportFactory {
+                    CameraHttpTransport(
+                        client = OkHttpClient(),
+                        diagnostics = diagnostics,
+                        diagnosticsProvider = { diagnostics },
+                    )
+                }
+            )
+        )
+        server.enqueue(jsonResponse(INFO_JSON))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+
+        val session = routedRepository.connect(server.url("/").toString())
+        diagnostics = diagnostics.copy(
+            routing = CameraNetworkRouting.WIFI_BOUND,
+            cameraNetworkAvailable = true,
+            cellularValidated = true,
+            systemDefaultTransport = SystemNetworkTransport.CELLULAR,
+            systemDefaultValidated = true,
+        )
+
+        assertEquals(CameraNetworkRouting.SYSTEM_DEFAULT, session.networkDiagnostics.routing)
+        assertTrue(routedRepository.refreshNetworkDiagnostics().wifiCellularCoexistence)
     }
 
     @Test

@@ -25,7 +25,7 @@ open-eos-control/
 
 - 直接輸入 CCAPI 相機 URL，並提供 HTTP/HTTPS preset
 - 可選填 CCAPI Basic Authentication 帳號與密碼
-- 相機 HTTP socket 綁定可達相機的 Wi-Fi route，行動網路可保持開啟
+- 相機 HTTP 與 RTP socket 綁定可達相機的 Wi-Fi route，行動網路可保持開啟，並可重新整理已驗證的預設網路診斷
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile、電池與儲存狀態
@@ -52,7 +52,7 @@ https://192.168.1.2:443
 
 真機測試時，請以相機 CCAPI 設定畫面顯示的 IP 與 port 為準。
 
-Android 直連相機時，只會把相機 HTTP 流量綁定到可達相機的 Wi-Fi `Network`，不會綁定整個 App process，因此行動數據可繼續提供一般網路。Debug 診斷會顯示選到的 route、介面、Wi-Fi 與行動網路狀態；若沒有任何 Wi-Fi route 能到達相機，連線會顯示明確錯誤。
+Android 直連相機時，只會把相機 HTTP 與 RTP 流量綁定到可達相機的 Wi-Fi `Network`，不會綁定整個 App process，因此行動數據可繼續提供其他網路流量。在 Debug 按 Refresh 會重新讀取相機 route、相機網路是否仍存在、行動網路驗證狀態、系統預設 transport 與預設網路驗證狀態；只有相機流量確實綁定仍存在的 Wi-Fi，且 Android 當下以已驗證的行動網路作為預設網路時，才會顯示 `wifiCellularCoexistence=true`。App 不會只因行動數據 radio 存在就宣稱已可共存；若沒有任何 Wi-Fi route 能到達相機，連線會顯示明確錯誤。
 
 HTTPS 會使用 Android 正常的憑證驗證，不再接受任意自簽憑證。若相機無法提供系統信任的 HTTPS 憑證，請在隔離的相機網路使用 HTTP，或先安裝可信憑證。
 

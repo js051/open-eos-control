@@ -38,7 +38,7 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 
 | Capability | Status | Completion gate |
 | --- | --- | --- |
-| Android camera Wi-Fi routing | Implemented; device validation required | Camera HTTP sockets use the reachable Wi-Fi `Network` while cellular stays available; record `WIFI_BOUND` plus a successful internet check on a physical phone |
+| Android camera Wi-Fi routing | Implemented; device validation required | Camera HTTP and RTP sockets use the reachable Wi-Fi `Network`; refreshed diagnostics require `cameraRoute=WIFI_BOUND`, `cameraNetworkAvailable=true`, `systemDefaultTransport=CELLULAR`, `systemDefaultValidated=true`, and `wifiCellularCoexistence=true` before claiming coexistence. Record those fields plus a successful public-internet check on a physical phone |
 | Android USB device and PTP-interface diagnostics | Implemented; device validation required | Canon device, permission, interface and endpoints recorded on Android |
 | Android PTP container transport, session and DeviceInfo | Implemented; device validation required | Exact USB packet, buffered reads, transaction sequencing and dataset parsing are unit-tested; record a real R6 Mark III response |
 | Android PTP storage and media | Implemented; device validation required | Standard storage/object operations, bounded listing, advertised `GetThumb (0x100A)` with object metadata and image decoding, streaming `GetObject`, and advertised `DeleteObject (0x100B)` are test-covered; validate thumbnails, card behavior, downloads, and deletion on R6 Mark III |

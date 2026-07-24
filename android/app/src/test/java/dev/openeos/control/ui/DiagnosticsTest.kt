@@ -10,6 +10,7 @@ import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.LiveViewSource
+import dev.openeos.control.data.SystemNetworkTransport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -61,8 +62,14 @@ class DiagnosticsTest {
                 targetHost = "192.168.1.2",
                 networkHandle = 42L,
                 interfaceName = "wlan0",
+                cameraNetworkAvailable = true,
                 wifiAvailable = true,
                 cellularAvailable = true,
+                cellularValidated = true,
+                systemDefaultTransport = SystemNetworkTransport.CELLULAR,
+                systemDefaultValidated = true,
+                systemDefaultNetworkHandle = 84L,
+                systemDefaultInterfaceName = "rmnet_data0",
             ),
             liveViewDiagnostics = LiveViewDiagnostics(lastFrameAtMillis = 1_000L),
             liveViewSource = LiveViewSource.CCAPI_RTP,
@@ -72,7 +79,13 @@ class DiagnosticsTest {
 
         assertTrue(report.contains("cameraRoute=WIFI_BOUND"))
         assertTrue(report.contains("cameraInterface=wlan0"))
+        assertTrue(report.contains("cameraNetworkAvailable=true"))
         assertTrue(report.contains("cellularAvailable=true"))
+        assertTrue(report.contains("cellularValidated=true"))
+        assertTrue(report.contains("systemDefaultTransport=CELLULAR"))
+        assertTrue(report.contains("systemDefaultValidated=true"))
+        assertTrue(report.contains("systemDefaultInterface=rmnet_data0"))
+        assertTrue(report.contains("wifiCellularCoexistence=true"))
         assertTrue(report.contains("liveViewHealthy=true"))
         assertTrue(report.contains("liveViewSource=CCAPI_RTP"))
         assertTrue(report.contains("capabilitySource=GET /ccapi"))

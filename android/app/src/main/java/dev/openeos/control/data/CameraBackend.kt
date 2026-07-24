@@ -114,7 +114,8 @@ class CcapiCameraBackend(
     override val prefersBitmapLiveViewFrames: Boolean
         get() = client.isRealCamera
 
-    override val networkDiagnostics: CameraNetworkDiagnostics = httpTransport.diagnostics
+    override val networkDiagnostics: CameraNetworkDiagnostics
+        get() = httpTransport.diagnosticsProvider()
 
     override val nativeLiveViewSession: NativeLiveViewSession?
         get() = client.nativeLiveViewSession
@@ -188,7 +189,8 @@ class DesktopBridgeCameraBackend(
 
     override val prefersBitmapLiveViewFrames: Boolean = true
 
-    override val networkDiagnostics: CameraNetworkDiagnostics = httpTransport.diagnostics
+    override val networkDiagnostics: CameraNetworkDiagnostics
+        get() = httpTransport.diagnosticsProvider()
 
     override suspend fun initialize() = client.initialize()
 
