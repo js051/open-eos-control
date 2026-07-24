@@ -124,6 +124,15 @@ python -m venv .venv
 
 若要使用 USB 掃描，再以 `gphoto2 --auto-detect` 確認選用的主機端依賴可正常執行。
 
+在 Windows 上，Bridge 會優先使用 native `gphoto2`；找不到時會自動改用 `wsl.exe --exec gphoto2`。若要使用的 WSL 2 distribution 不是預設值，可設定 `OPEN_EOS_GPHOTO2_WSL_DISTRO`。Windows USB 裝置不會直接出現在 WSL，因此主機還需要 `usbipd-win`，並把 Canon 裝置 bind／attach 到 WSL。改動系統前可先執行唯讀 doctor：
+
+```powershell
+.\scripts\windows-gphoto2-doctor.ps1
+.\scripts\windows-gphoto2-doctor.ps1 -Json
+```
+
+Bridge health 會分別指出缺少 Linux distribution、WSL 內缺少 gphoto2、缺少 `usbipd-win`，或 WSL runner 已可用；doctor 只列出對應命令，不會自行安裝 distribution、driver 或 package。Microsoft 也特別說明，USB 裝置 attach 到 WSL 期間不再能由 Windows 使用，detach 後才會恢復。
+
 在電腦瀏覽器開啟 [http://127.0.0.1:18181/](http://127.0.0.1:18181/) 即可使用 PC 控制介面。選擇「USB 相機」會透過 `gphoto2` 掃描；選擇「無線 CCAPI」則輸入相機 origin，例如 `http://192.168.1.2:8080`，也可提供相機 Basic Auth 帳密。介面只會啟用相機有公告的操作；Bridge token 與相機密碼只留在記憶體且不會寫入診斷。語言、相機 URL 與使用者名稱可以保存在本機。
 
 服務預設只監聽 `127.0.0.1:18181`。Android 模擬器可在連線頁使用 `http://10.0.2.2:18181`；實體手機若要從區網連入，必須明確綁定 LAN 並設定 Bearer token：

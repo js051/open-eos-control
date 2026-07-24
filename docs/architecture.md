@@ -39,7 +39,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 
 - Android keeps the first complete app UI and owns direct phone-to-camera workflows.
 - iOS uses the native `OpenEOSCore` Swift package and `OpenEOSControl` SwiftUI app over CCAPI/Wi-Fi with the same command and capability vocabulary; iOS USB/PTP remains research until platform constraints are proven.
-- PC uses a desktop bridge service with a built-in browser control UI. The bridge exposes the shared open protocol while internally using libgphoto2 for USB, a native HTTP CCAPI engine for wireless control, or a future optional user-installed Canon EDSDK adapter.
+- PC uses a desktop bridge service with a built-in browser control UI. The bridge exposes the shared open protocol while internally using native libgphoto2/gphoto2 for USB, a no-shell WSL 2 gphoto2 command prefix on Windows when native gphoto2 is absent, a native HTTP CCAPI engine for wireless control, or a future optional user-installed Canon EDSDK adapter.
 - The bridge implementation is executable under `bridge/`: FastAPI owns auth/session/HTTP concerns, `GPhoto2Engine` maps only camera-advertised CLI abilities and configuration values, and `CcapiEngine` maps only camera-advertised HTTP operations and setting values into the shared contract.
 - The same FastAPI process serves the PC UI at `/`; it calls only the public bridge contract, keeps authentication in page memory, and renders controls from the advertised capability/settings response.
 - Android's `DesktopBridgeClient` maps that HTTP contract back into `CameraControlBackend`, including memory-only Bearer auth, bridge camera discovery/selection, binary Live View, and streaming media transfers.

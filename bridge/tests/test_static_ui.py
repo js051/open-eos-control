@@ -116,5 +116,6 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "Math.min(15, state.capabilities.liveView?.maxFps || 1)" in script
     assert 'source: state.liveSource || "AUTO"' in script
     assert "CCAPI_RTP" in script
+    assert "engine?.detail" in script
     report_source = script.split("function diagnosticReport()", 1)[1].split("\n  function ", 1)[0]
     assert "token" not in report_source.casefold()

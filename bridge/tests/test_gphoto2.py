@@ -9,17 +9,129 @@ from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import (
     CommandOutput,
     GPhoto2Engine,
+    GPhotoCommand,
     MjpegFrameParser,
     SubprocessGPhotoRunner,
+    WslHostState,
     parse_abilities,
     parse_auto_detect,
     parse_config_dump,
     parse_media_list,
     parse_storage_info,
+    resolve_gphoto_command,
 )
 from open_eos_bridge.models import CameraFeature, LiveViewStartRequest
 
 from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, THUMBNAIL, FakeRunner
+
+
+def test_gphoto_command_resolution_prefers_native_and_supports_wsl_distribution() -> None:
+    paths = {
+        "gphoto2": "/usr/bin/gphoto2",
+        "wsl.exe": "C:\\Windows\\System32\\wsl.exe",
+    }
+
+    native = resolve_gphoto_command(
+        environment={},
+        platform_name="nt",
+        which=paths.get,
+    )
+    wsl = resolve_gphoto_command(
+        environment={"OPEN_EOS_GPHOTO2_WSL_DISTRO": "Ubuntu-24.04"},
+        platform_name="nt",
+        which=lambda name: paths.get(name) if name == "wsl.exe" else None,
+    )
+    explicit = resolve_gphoto_command(
+        "D:\\Tools\\gphoto2.exe",
+        environment={},
+        platform_name="nt",
+        which=lambda _: None,
+    )
+
+    assert native == GPhotoCommand(("/usr/bin/gphoto2",), "native")
+    assert wsl == GPhotoCommand(
+        (
+            "C:\\Windows\\System32\\wsl.exe",
+            "--distribution",
+            "Ubuntu-24.04",
+            "--exec",
+            "gphoto2",
+        ),
+        "wsl",
+        "Ubuntu-24.04",
+    )
+    assert explicit == GPhotoCommand(("D:\\Tools\\gphoto2.exe",), "native")
+
+
+def test_wsl_runner_health_is_actionable_and_decodes_windows_utf16() -> None:
+    version_command = GPhotoCommand(
+        (sys.executable, "-c", "print('gphoto2 2.5.33')"),
+        "wsl",
+        "Ubuntu",
+    )
+    runner = SubprocessGPhotoRunner(
+        command=version_command,
+        wsl_probe=lambda _: WslHostState(distributions=("Ubuntu",), usbipd_available=False),
+    )
+
+    available, version, detail = runner.health()
+
+    assert available is True
+    assert version == "gphoto2 2.5.33"
+    assert detail == (
+        "Using gphoto2 in WSL distribution 'Ubuntu'. "
+        "Install usbipd-win before attaching a Windows USB camera to WSL."
+    )
+    assert CommandOutput("Ubuntu\r\n".encode("utf-16-le")).text == "Ubuntu\r\n"
+
+
+def test_wsl_runner_rejects_missing_distribution_before_launching_gphoto2() -> None:
+    runner = SubprocessGPhotoRunner(
+        command=GPhotoCommand((sys.executable,), "wsl"),
+        wsl_probe=lambda _: WslHostState(error="Install a WSL distribution."),
+    )
+
+    available, version, detail = runner.health()
+
+    assert available is False
+    assert version is None
+    assert detail == "Install a WSL distribution."
+
+
+def test_wsl_runner_explains_how_to_install_missing_gphoto2_package() -> None:
+    runner = SubprocessGPhotoRunner(
+        command=GPhotoCommand(
+            (
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('gphoto2: command not found'); raise SystemExit(1)",
+            ),
+            "wsl",
+            "Ubuntu",
+        ),
+        wsl_probe=lambda _: WslHostState(distributions=("Ubuntu",), usbipd_available=True),
+    )
+
+    available, version, detail = runner.health()
+
+    assert available is False
+    assert version is None
+    assert detail is not None
+    assert "sudo apt update && sudo apt install gphoto2 usbutils" in detail
+    assert "gphoto2: command not found" in detail
+
+
+def test_runner_executes_command_prefix_as_an_argument_array() -> None:
+    runner = SubprocessGPhotoRunner(
+        command=GPhotoCommand(
+            (sys.executable, "-c", "import sys; print(sys.argv[1])"),
+            "native",
+        )
+    )
+
+    output = runner.run(["camera value"])
+
+    assert output.text.strip() == "camera value"
 
 
 def test_gphoto2_output_parsers_preserve_camera_advertised_values() -> None:

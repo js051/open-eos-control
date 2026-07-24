@@ -124,6 +124,15 @@ python -m venv .venv
 
 For USB discovery, verify the optional host dependency separately with `gphoto2 --auto-detect`.
 
+On Windows, the Bridge prefers a native `gphoto2` executable and automatically uses `wsl.exe --exec gphoto2` when native gphoto2 is absent. Set `OPEN_EOS_GPHOTO2_WSL_DISTRO` when the desired WSL 2 distribution is not the default. Windows USB devices are not exposed to WSL directly, so the host also needs `usbipd-win` and the Canon device must be bound and attached to WSL. Run the read-only doctor before changing the machine:
+
+```powershell
+.\scripts\windows-gphoto2-doctor.ps1
+.\scripts\windows-gphoto2-doctor.ps1 -Json
+```
+
+The Bridge health response distinguishes a missing distribution, missing WSL gphoto2, missing `usbipd-win`, and a ready WSL runner. The doctor prints the corresponding commands but never installs a distribution, driver, or package by itself. Microsoft notes that a USB device attached to WSL is unavailable to Windows until detached.
+
 Open [http://127.0.0.1:18181/](http://127.0.0.1:18181/) for the PC control UI. Choose **USB camera** to scan with `gphoto2`, or **Wireless CCAPI** and enter the camera origin such as `http://192.168.1.2:8080`. Optional camera Basic Auth credentials are supported. The UI only enables advertised controls; Bridge tokens and camera passwords stay in memory and are excluded from diagnostics. Language, camera URL, and username may be remembered locally.
 
 The default service listens only on `127.0.0.1:18181`. The Android connection screen can use `http://10.0.2.2:18181` from an emulator. A physical phone requires an explicit LAN bind and Bearer token:

@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol
@@ -57,7 +57,57 @@ class CommandOutput:
 
     @property
     def text(self) -> str:
-        return self.stdout.decode("utf-8", errors="replace")
+        return _decode_process_text(self.stdout)
+
+
+@dataclass(frozen=True)
+class GPhotoCommand:
+    prefix: tuple[str, ...]
+    host_mode: str
+    wsl_distro: str | None = None
+
+    @property
+    def display(self) -> str:
+        if self.host_mode == "wsl":
+            distro = f" ({self.wsl_distro})" if self.wsl_distro else ""
+            return f"gphoto2 via WSL{distro}"
+        return self.prefix[0]
+
+
+@dataclass(frozen=True)
+class WslHostState:
+    distributions: tuple[str, ...] = ()
+    usbipd_available: bool = False
+    error: str | None = None
+
+
+def resolve_gphoto_command(
+    binary: str | None = None,
+    *,
+    environment: Mapping[str, str] | None = None,
+    platform_name: str | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+) -> GPhotoCommand:
+    configured_environment = environment if environment is not None else os.environ
+    explicit = binary or configured_environment.get("OPEN_EOS_GPHOTO2")
+    if explicit:
+        return GPhotoCommand((explicit,), "native")
+
+    native = which("gphoto2")
+    if native:
+        return GPhotoCommand((native,), "native")
+
+    if (platform_name or os.name) == "nt":
+        wsl = which("wsl.exe")
+        if wsl:
+            distro = configured_environment.get("OPEN_EOS_GPHOTO2_WSL_DISTRO") or None
+            prefix = [wsl]
+            if distro:
+                prefix.extend(("--distribution", distro))
+            prefix.extend(("--exec", "gphoto2"))
+            return GPhotoCommand(tuple(prefix), "wsl", distro)
+
+    return GPhotoCommand(("gphoto2",), "native")
 
 
 class GPhotoRunner(Protocol):
@@ -79,7 +129,8 @@ class ClosableByteStream(Protocol):
 
 
 class SubprocessByteStream:
-    def __init__(self, binary: str, arguments: list[str], *, timeout: float) -> None:
+    def __init__(self, command: GPhotoCommand, arguments: list[str], *, timeout: float) -> None:
+        self._command = command
         self._arguments = arguments
         self._timeout = timeout
         self._started_at = time.monotonic()
@@ -92,13 +143,13 @@ class SubprocessByteStream:
         self._stderr_size = 0
         try:
             self._process = subprocess.Popen(
-                [binary, *arguments],
+                [*command.prefix, *arguments],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=_command_environment(),
             )
         except FileNotFoundError as error:
-            raise _engine_unavailable(binary) from error
+            raise _engine_unavailable(command.display) from error
 
         self._stdout_thread = threading.Thread(
             target=self._drain_stdout,
@@ -197,26 +248,53 @@ class SubprocessByteStream:
         return return_code
 
     def _stderr_text(self) -> str:
-        return b"".join(self._stderr_parts).decode("utf-8", errors="replace")
+        return _decode_process_text(b"".join(self._stderr_parts))
 
 
 class SubprocessGPhotoRunner:
-    def __init__(self, binary: str | None = None) -> None:
-        self.binary = binary or os.environ.get("OPEN_EOS_GPHOTO2", "gphoto2")
+    def __init__(
+        self,
+        binary: str | None = None,
+        *,
+        command: GPhotoCommand | None = None,
+        wsl_probe: Callable[[GPhotoCommand], WslHostState] | None = None,
+    ) -> None:
+        self.command = command or resolve_gphoto_command(binary)
+        self.binary = self.command.prefix[0]
+        self._wsl_probe = wsl_probe or _probe_wsl_host
 
     def health(self) -> tuple[bool, str | None, str | None]:
-        resolved = shutil.which(self.binary)
+        resolved = shutil.which(self.command.prefix[0])
         if resolved is None:
-            return False, None, f"gphoto2 executable '{self.binary}' was not found on PATH."
+            return False, None, f"Host executable '{self.command.prefix[0]}' was not found on PATH."
+        wsl_state: WslHostState | None = None
+        if self.command.host_mode == "wsl":
+            wsl_state = self._wsl_probe(self.command)
+            if wsl_state.error:
+                return False, None, wsl_state.error
         try:
             output = self.run(["--version"], timeout=5.0)
         except BridgeError as error:
+            if self.command.host_mode == "wsl":
+                distro = self.command.wsl_distro or "the default WSL distribution"
+                return (
+                    False,
+                    None,
+                    f"gphoto2 is not runnable in {distro}. Install it there with "
+                    f"'sudo apt update && sudo apt install gphoto2 usbutils'. {error.message}",
+                )
             return False, None, error.message
         first_line = next((line.strip() for line in output.text.splitlines() if line.strip()), None)
-        return True, first_line, None
+        detail = None
+        if wsl_state is not None:
+            distro = self.command.wsl_distro or wsl_state.distributions[0]
+            detail = f"Using gphoto2 in WSL distribution '{distro}'."
+            if not wsl_state.usbipd_available:
+                detail += " Install usbipd-win before attaching a Windows USB camera to WSL."
+        return True, first_line, detail
 
     def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
-        command = [self.binary, *arguments]
+        command = [*self.command.prefix, *arguments]
         try:
             completed = subprocess.run(
                 command,
@@ -226,7 +304,7 @@ class SubprocessGPhotoRunner:
                 env=_command_environment(),
             )
         except FileNotFoundError as error:
-            raise _engine_unavailable(self.binary) from error
+            raise _engine_unavailable(self.command.display) from error
         except subprocess.TimeoutExpired as error:
             raise BridgeError(
                 "ENGINE_TIMEOUT",
@@ -241,13 +319,13 @@ class SubprocessGPhotoRunner:
                 status_code=502,
                 engine=ENGINE_NAME,
             )
-        stderr = completed.stderr.decode("utf-8", errors="replace")
+        stderr = _decode_process_text(completed.stderr)
         if completed.returncode != 0:
             raise _command_error(arguments, completed.returncode, stderr)
         return CommandOutput(stdout=completed.stdout, stderr=stderr)
 
     def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> ClosableByteStream:
-        return SubprocessByteStream(self.binary, arguments, timeout=timeout)
+        return SubprocessByteStream(self.command, arguments, timeout=timeout)
 
     def stream(self, arguments: list[str], *, timeout: float = 300.0) -> Iterator[bytes]:
         stream = self.open_stream(arguments, timeout=timeout)
@@ -268,10 +346,59 @@ def _command_environment() -> dict[str, str]:
     return environment
 
 
-def _engine_unavailable(binary: str) -> BridgeError:
+def _decode_process_text(value: bytes) -> str:
+    if not value:
+        return ""
+    if value.startswith((b"\xff\xfe", b"\xfe\xff")) or value.count(b"\x00") > len(value) // 8:
+        try:
+            encoding = "utf-16" if value.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-16-le"
+            return value.decode(encoding, errors="replace").replace("\ufeff", "")
+        except UnicodeError:
+            pass
+    return value.decode("utf-8", errors="replace")
+
+
+def _probe_wsl_host(command: GPhotoCommand) -> WslHostState:
+    wsl = command.prefix[0]
+    try:
+        completed = subprocess.run(
+            [wsl, "--list", "--quiet"],
+            capture_output=True,
+            check=False,
+            timeout=5.0,
+            env=_command_environment(),
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return WslHostState(error="WSL is installed but its distribution list could not be read.")
+    output = _decode_process_text(completed.stdout)
+    distributions = tuple(line.strip().strip("\x00") for line in output.splitlines() if line.strip().strip("\x00"))
+    if completed.returncode != 0 or not distributions:
+        return WslHostState(
+            error=(
+                "Native gphoto2 was not found and WSL has no Linux distribution. "
+                "Install one with 'wsl --install -d Ubuntu' before using PC USB control."
+            )
+        )
+    if command.wsl_distro and command.wsl_distro.casefold() not in {
+        distribution.casefold() for distribution in distributions
+    }:
+        return WslHostState(
+            distributions=distributions,
+            error=(
+                f"Configured WSL distribution '{command.wsl_distro}' was not found. "
+                f"Available: {', '.join(distributions)}."
+            ),
+        )
+    return WslHostState(
+        distributions=distributions,
+        usbipd_available=shutil.which("usbipd.exe") is not None,
+    )
+
+
+def _engine_unavailable(executable: str) -> BridgeError:
     return BridgeError(
         "ENGINE_UNAVAILABLE",
-        f"gphoto2 executable '{binary}' is not installed or is not on PATH.",
+        f"Host command '{executable}' is not installed or is not on PATH.",
         status_code=503,
         engine=ENGINE_NAME,
     )

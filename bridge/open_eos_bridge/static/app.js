@@ -553,9 +553,11 @@
     if (engine?.available) {
       const display = engine.version || engineName;
       ui.engineState.textContent = t("bridgeReady", { engine: display });
+      ui.engineState.title = engine.detail || "";
       ui.healthDot.className = "status-dot success";
     } else {
-      ui.engineState.textContent = t("bridgeUnavailable");
+      ui.engineState.textContent = engine?.detail || t("bridgeUnavailable");
+      ui.engineState.title = "";
       ui.healthDot.className = "status-dot warning";
     }
   }
