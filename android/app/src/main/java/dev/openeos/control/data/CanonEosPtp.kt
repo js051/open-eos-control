@@ -158,6 +158,11 @@ object CanonEosPtp {
             info.supports(CanonEosOperationCode.REMOTE_RELEASE_ON) &&
             info.supports(CanonEosOperationCode.REMOTE_RELEASE_OFF)
 
+    fun supportsAutofocus(info: PtpDeviceInfo): Boolean =
+        supportsRemotePreparation(info) &&
+            info.supports(CanonEosOperationCode.DO_AF) &&
+            info.supports(CanonEosOperationCode.AF_CANCEL)
+
     fun supportsLiveView(info: PtpDeviceInfo): Boolean =
         supportsRemotePreparation(info) &&
             info.supports(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX) &&

@@ -1,6 +1,8 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStream
@@ -159,6 +161,7 @@ class UsbPtpCameraBackend(
             canSetCanonProperties = CanonEosPtp.supportsPropertyControl(info),
         )
         val supportsCanonRelease = CanonEosPtp.supportsRemoteRelease(info)
+        val supportsCanonAutofocus = CanonEosPtp.supportsAutofocus(info)
         val supportsCanonLiveView = CanonEosPtp.supportsLiveView(info)
         val supportsCanonFocusDrive = CanonEosPtp.supportsFocusDrive(info)
         val supportsCanonMovieRecording = CanonEosPtp.supportsMovieRecording(
@@ -180,7 +183,7 @@ class UsbPtpCameraBackend(
                 add(CameraFeature.STILL_CAPTURE)
             }
             if (supportsCanonRelease) add(CameraFeature.SHUTTER_HALF_PRESS)
-            if (supportsCanonRelease) add(CameraFeature.AUTOFOCUS)
+            if (supportsCanonAutofocus || supportsCanonRelease) add(CameraFeature.AUTOFOCUS)
             if (supportsCanonLiveView) {
                 add(CameraFeature.LIVE_VIEW)
                 add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
@@ -242,7 +245,7 @@ class UsbPtpCameraBackend(
                     CameraFeature.SHUTTER_HALF_PRESS to
                         "Uses Canon EOS RemoteReleaseOn/Off only when the camera advertises the full remote event sequence.",
                     CameraFeature.AUTOFOCUS to
-                        "Uses a balanced Canon EOS half-press sequence when the full remote event operation set is advertised.",
+                        "Prefers advertised Canon EOS DoAf/AfCancel and falls back to a balanced half-press sequence.",
                     CameraFeature.FOCUS_DRIVE to
                         "Uses Canon EOS DriveLens with the Near/Far 1-3 values documented by libgphoto2.",
                     CameraFeature.CLICK_WHITE_BALANCE to
@@ -338,7 +341,36 @@ class UsbPtpCameraBackend(
         return status()
     }
 
-    override suspend fun autofocus(): CameraStatus = halfPressShutter()
+    override suspend fun autofocus(): CameraStatus {
+        val info = requireDeviceInfo()
+        if (!CanonEosPtp.supportsAutofocus(info)) {
+            if (!CanonEosPtp.supportsRemoteRelease(info)) unsupported<Unit>(CameraFeature.AUTOFOCUS)
+            return halfPressShutter()
+        }
+
+        ensureCanonRemoteMode()
+        drainCanonEvents()
+        val ptp = requireSession()
+        var primaryFailure: Throwable? = null
+        try {
+            ptp.executeOperation(CanonEosOperationCode.DO_AF)
+            delay(CANON_AUTOFOCUS_HOLD_MILLIS)
+            drainCanonEvents()
+        } catch (exception: Throwable) {
+            primaryFailure = exception
+            throw exception
+        } finally {
+            try {
+                withContext(NonCancellable) {
+                    ptp.executeOperation(CanonEosOperationCode.AF_CANCEL)
+                }
+            } catch (releaseFailure: Throwable) {
+                primaryFailure?.addSuppressed(releaseFailure) ?: throw releaseFailure
+            }
+        }
+        drainCanonEvents()
+        return status()
+    }
 
     override suspend fun driveFocus(
         direction: FocusDriveDirection,
@@ -1046,6 +1078,7 @@ private fun formatPtpVersion(value: Int): String =
 private const val MAX_USB_MEDIA_ITEMS = 500
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
+private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L
 private const val CANON_PROPERTY_DISCOVERY_ATTEMPTS = 10
 private const val CANON_PROPERTY_DISCOVERY_RETRY_MILLIS = 50L
 private const val CANON_CAPTURE_EVENT_TIMEOUT_MILLIS = 90_000L

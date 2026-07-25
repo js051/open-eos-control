@@ -1,5 +1,8 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -229,6 +232,7 @@ class UsbPtpCameraBackendTest {
         val whiteBalanceStatus = backend.setWhiteBalance("Daylight")
         backend.startLiveView(LiveViewRequest(fps = 30, size = LiveViewSize.MEDIUM))
         val frame = backend.liveViewFrame(cacheKey = 27)
+        backend.autofocus()
         backend.halfPressShutter()
         val focusDrive = backend.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.MEDIUM)
         backend.captureStill()
@@ -237,6 +241,7 @@ class UsbPtpCameraBackendTest {
 
         assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
+        assertTrue(capabilities.matrix.supports(CameraFeature.AUTOFOCUS))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
         assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
@@ -324,6 +329,15 @@ class UsbPtpCameraBackendTest {
         assertEquals(FocusDriveDirection.FAR, focusDrive.direction)
         assertEquals(FocusDriveStep.MEDIUM, focusDrive.step)
         assertTrue(focusDrive.ok)
+
+        val autofocusStart = transport.sentContainers.indexOfFirst { container ->
+            container.type == PtpContainerType.COMMAND && container.code == CanonEosOperationCode.DO_AF
+        }
+        val autofocusCancel = transport.sentContainers.indexOfFirst { container ->
+            container.type == PtpContainerType.COMMAND && container.code == CanonEosOperationCode.AF_CANCEL
+        }
+        assertTrue(autofocusStart >= 0)
+        assertTrue(autofocusCancel > autofocusStart)
 
         val viewfinderCommand = transport.sentContainers.single {
             it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.GET_VIEWFINDER_DATA
@@ -732,6 +746,87 @@ class UsbPtpCameraBackendTest {
         backend.close()
     }
 
+    @Test
+    fun canonAutofocusFallsBackToBalancedHalfPressWithoutDedicatedOperations() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseDedicatedAutofocus = false)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        assertTrue(backend.capabilities().matrix.supports(CameraFeature.AUTOFOCUS))
+        backend.autofocus()
+
+        assertFalse(transport.hasOperation(CanonEosOperationCode.DO_AF))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.AF_CANCEL))
+        assertTrue(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        assertTrue(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF))
+        backend.close()
+    }
+
+    @Test
+    fun canonDedicatedAutofocusDoesNotRequireRemoteReleaseOperations() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseRemoteRelease = false)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        backend.autofocus()
+        val halfPressFailure = runCatching { backend.halfPressShutter() }.exceptionOrNull()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.AUTOFOCUS))
+        assertFalse(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
+        assertFalse(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
+        assertTrue(transport.hasOperation(CanonEosOperationCode.DO_AF))
+        assertTrue(transport.hasOperation(CanonEosOperationCode.AF_CANCEL))
+        assertTrue(halfPressFailure is UnsupportedOperationException)
+        backend.close()
+    }
+
+    @Test
+    fun canonDedicatedAutofocusCancelsAfterStartFailure() = runTest {
+        val transport = CanonEosScriptedTransport(
+            rejectOperationCode = CanonEosOperationCode.DO_AF,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.autofocus() }.exceptionOrNull()
+
+        assertTrue(failure is PtpResponseException)
+        assertTrue(transport.hasOperation(CanonEosOperationCode.DO_AF))
+        assertTrue(transport.hasOperation(CanonEosOperationCode.AF_CANCEL))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        backend.close()
+    }
+
+    @Test
+    fun canonDedicatedAutofocusCancelsCameraWhenCoroutineIsCancelled() = runTest {
+        val transport = CanonEosScriptedTransport()
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val autofocus = launch(start = CoroutineStart.UNDISPATCHED) {
+            backend.autofocus()
+        }
+        assertTrue(transport.hasOperation(CanonEosOperationCode.DO_AF))
+
+        autofocus.cancelAndJoin()
+
+        assertTrue(transport.hasOperation(CanonEosOperationCode.AF_CANCEL))
+        backend.close()
+    }
+
     private class ScriptedTransport(
         private val advertiseCapture: Boolean,
         private val advertiseDelete: Boolean = true,
@@ -878,6 +973,9 @@ class UsbPtpCameraBackendTest {
         private val rejectPropertyCode: Int? = null,
         private val captureDestination: Int = 2,
         private val advertiseCardCaptureDestination: Boolean = true,
+        private val advertiseDedicatedAutofocus: Boolean = true,
+        private val advertiseRemoteRelease: Boolean = true,
+        private val rejectOperationCode: Int? = null,
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
         val sentContainers = mutableListOf<PtpContainer>()
@@ -892,7 +990,11 @@ class UsbPtpCameraBackendTest {
             val transaction = container.transactionId
             when (container.code) {
                 PtpOperationCode.GET_DEVICE_INFO -> {
-                    incoming += data(container.code, transaction, canonDeviceInfoPayload())
+                    incoming += data(
+                        container.code,
+                        transaction,
+                        canonDeviceInfoPayload(advertiseDedicatedAutofocus, advertiseRemoteRelease),
+                    )
                     incoming += ok(transaction)
                 }
 
@@ -902,7 +1004,13 @@ class UsbPtpCameraBackendTest {
                 CanonEosOperationCode.SET_EVENT_MODE,
                 CanonEosOperationCode.REMOTE_RELEASE_OFF,
                 CanonEosOperationCode.DRIVE_LENS,
-                -> incoming += ok(transaction)
+                CanonEosOperationCode.DO_AF,
+                CanonEosOperationCode.AF_CANCEL,
+                -> incoming += if (container.code == rejectOperationCode) {
+                    response(PtpResponseCode.GENERAL_ERROR, transaction)
+                } else {
+                    ok(transaction)
+                }
 
                 CanonEosOperationCode.REMOTE_RELEASE_ON -> {
                     if (container.parameters().firstOrNull() == 2L) captureEventPending = true
@@ -1225,29 +1333,41 @@ class UsbPtpCameraBackendTest {
             0xFF.toByte(), 0xD8.toByte(), 1, 2, 3, 4, 0xFF.toByte(), 0xD9.toByte(),
         )
 
-        private fun canonDeviceInfoPayload(): ByteArray = Writer().apply {
+        private fun canonDeviceInfoPayload(
+            advertiseDedicatedAutofocus: Boolean,
+            advertiseRemoteRelease: Boolean,
+        ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
             u16(100)
             string("")
             u16(0)
             u16Array(
-                listOf(
-                    PtpOperationCode.GET_DEVICE_INFO,
-                    PtpOperationCode.OPEN_SESSION,
-                    PtpOperationCode.CLOSE_SESSION,
-                    PtpOperationCode.GET_STORAGE_IDS,
-                    PtpOperationCode.GET_STORAGE_INFO,
-                    CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
-                    CanonEosOperationCode.SET_REMOTE_MODE,
-                    CanonEosOperationCode.SET_EVENT_MODE,
-                    CanonEosOperationCode.GET_EVENT,
-                    CanonEosOperationCode.REMOTE_RELEASE_ON,
-                    CanonEosOperationCode.REMOTE_RELEASE_OFF,
-                    CanonEosOperationCode.GET_VIEWFINDER_DATA,
-                    CanonEosOperationCode.DRIVE_LENS,
-                    CanonEosOperationCode.TOUCH_AF_POSITION,
-                )
+                buildList {
+                    addAll(
+                        listOf(
+                            PtpOperationCode.GET_DEVICE_INFO,
+                            PtpOperationCode.OPEN_SESSION,
+                            PtpOperationCode.CLOSE_SESSION,
+                            PtpOperationCode.GET_STORAGE_IDS,
+                            PtpOperationCode.GET_STORAGE_INFO,
+                            CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                            CanonEosOperationCode.SET_REMOTE_MODE,
+                            CanonEosOperationCode.SET_EVENT_MODE,
+                            CanonEosOperationCode.GET_EVENT,
+                            CanonEosOperationCode.GET_VIEWFINDER_DATA,
+                            CanonEosOperationCode.DRIVE_LENS,
+                        )
+                    )
+                    if (advertiseRemoteRelease) {
+                        add(CanonEosOperationCode.REMOTE_RELEASE_ON)
+                        add(CanonEosOperationCode.REMOTE_RELEASE_OFF)
+                    }
+                    if (advertiseDedicatedAutofocus) {
+                        add(CanonEosOperationCode.DO_AF)
+                        add(CanonEosOperationCode.AF_CANCEL)
+                    }
+                }
             )
             u16Array(emptyList())
             u16Array(emptyList())

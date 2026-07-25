@@ -450,6 +450,8 @@ class CanonEosPtpTest {
             CanonEosOperationCode.GET_EVENT,
             CanonEosOperationCode.REMOTE_RELEASE_ON,
             CanonEosOperationCode.REMOTE_RELEASE_OFF,
+            CanonEosOperationCode.DO_AF,
+            CanonEosOperationCode.AF_CANCEL,
             CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
             CanonEosOperationCode.GET_VIEWFINDER_DATA,
             CanonEosOperationCode.DRIVE_LENS,
@@ -457,12 +459,18 @@ class CanonEosPtpTest {
         val complete = deviceInfo(operations)
 
         assertTrue(CanonEosPtp.supportsRemoteRelease(complete))
+        assertTrue(CanonEosPtp.supportsAutofocus(complete))
         assertTrue(CanonEosPtp.supportsLiveView(complete))
         assertTrue(CanonEosPtp.supportsFocusDrive(complete))
         assertTrue(CanonEosPtp.supportsPropertyControl(complete))
         assertFalse(
             CanonEosPtp.supportsRemoteRelease(
                 deviceInfo(operations - CanonEosOperationCode.REMOTE_RELEASE_OFF)
+            )
+        )
+        assertFalse(
+            CanonEosPtp.supportsAutofocus(
+                deviceInfo(operations - CanonEosOperationCode.AF_CANCEL)
             )
         )
         assertFalse(CanonEosPtp.supportsLiveView(complete.copy(vendorExtensionId = 0L)))

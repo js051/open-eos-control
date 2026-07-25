@@ -25,12 +25,13 @@ Open EOS Control grows around a shared camera-control contract, not one protocol
 - Standard still capture is enabled only when DeviceInfo advertises `InitiateCapture (0x100E)`. A successful response is reported as command acceptance; the physical result still needs an R6 Mark III validation record.
 - Standard property controls are enabled only for writable camera-advertised descriptors with bounded options. Canon ISO/Tv/Av/WB controls separately require `0xC189/0xC18A` event state and use only camera-advertised choices with `SetDevicePropValueEx`; both paths still need an R6 Mark III validation record.
 - Canon still capture and half-press require the full remote/event operation set. Before remote release, a host-RAM `CaptureDestination (0xD11C)` is restored to the camera-advertised non-host card value; a missing card target or rejected write aborts before shutter. Capture is not reported as success until a captured-object event arrives, and press/release commands are balanced on failure paths. Host-RAM transfer is not exposed.
+- Canon independent AF-ON prefers camera-advertised `DoAf (0x9154)` and `AfCancel (0x9160)`, holds focus for a bounded interval, and sends cancel in a non-cancellable cleanup path. The balanced remote-release half-press remains the fallback only when the dedicated pair is absent.
 - Canon manual focus uses the advertised `DriveLens` operation with Near/Far steps 1-3. Canon JPEG Live View enables EVF mode/output, polls `GetViewFinderData`, and parses only validated JPEG block types.
 - Canon movie control writes `EVFRecordStatus (0xD1B8)` through `SetDevicePropValueEx`: Card (`4`) starts card recording and None (`0`) stops it. The capability is exposed only after camera events advertise both values; SDRAM (`3`) is treated as preview rather than recording.
 - Canon shooting-mode control writes camera-advertised `AutoExposureMode (0xD105)` UINT16 values through `SetDevicePropValueEx`. The app's Photo/Video context synchronizes only when the writable `shootingmode` list proves a target value, and restores only a previously observed photo mode.
 - The Canon mappings follow a pinned libgphoto2 revision and are test-covered. This includes capability-gated Auto Power Off (`0xD114`) with Canon-documented time values; the camera snapshot's unknown `0xFFFFFFFF` sentinel is diagnostic-only. They remain in device-validation status until exercised and recorded on the physical R6 Mark III.
 - Next milestone: validate the standard and Canon paths, including movie start/stop, on the camera, then map only measured property gaps.
-- Research track: Touch AF and Canon vendor settings beyond the implemented shooting-mode, exposure, color, aspect-ratio, power-zoom, Auto Power Off, image-quality, AF, drive, metering and movie paths. No active controls are exposed without proven state and value semantics.
+- Research track: Touch AF and Canon vendor settings beyond the implemented shooting-mode, exposure, color, aspect-ratio, power-zoom, Auto Power Off, image-quality, AF, drive, metering and movie paths. The R6 Mark III snapshot exposes DoAf/AfCancel but no Touch AF control; no active coordinate control is exposed without proven state and value semantics.
 - Tradeoffs: best pure phone-to-camera wired path, but it requires a real PTP engine plus Canon vendor-extension testing.
 
 ### Desktop bridge and PC control
@@ -68,7 +69,7 @@ Each backend should map into this surface:
 
 1. Keep CCAPI stable and improve diagnostics.
 2. Validate the implemented Android USB/PTP session, DeviceInfo, storage, media, download, standard properties, and conditional standard capture paths on EOS R6 Mark III.
-3. Validate the implemented Canon EOS remote release, half-press, ISO/Tv/Av/WB, movie recording, manual focus drive, and JPEG Live View paths.
+3. Validate the implemented Canon EOS remote release, native AF-ON/cancel, half-press, ISO/Tv/Av/WB, movie recording, manual focus drive, and JPEG Live View paths.
 4. Record the remaining R6 Mark III vendor property/event gaps and add only mappings supported by reliable evidence.
 5. Prove USB Touch AF coordinate semantics before exposing that control.
 6. Validate the implemented PC direct CCAPI and Android-to-desktop bridge paths with EOS R6 Mark III.
