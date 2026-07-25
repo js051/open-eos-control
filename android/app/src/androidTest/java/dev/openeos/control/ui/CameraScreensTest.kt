@@ -6,6 +6,9 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.FontScale
+import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -16,6 +19,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilityEvidence
@@ -37,6 +42,7 @@ import dev.openeos.control.data.UsbPtpDiagnostics
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 
 class CameraScreensTest {
@@ -149,6 +155,82 @@ class CameraScreensTest {
     }
 
     @Test
+    fun offlinePreviewTapActionDoesNotCoverEmptyState() {
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+            }
+        }
+
+        val tapAction = compose
+            .onNodeWithContentDescription(resourceText(R.string.tap_action_focus))
+            .assertIsDisplayed()
+        val tapActionBounds = tapAction
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val emptyStateBounds = compose
+            .onNodeWithText(resourceText(R.string.offline_preview))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val settingsBounds = compose
+            .onNodeWithContentDescription(resourceText(R.string.more_settings))
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertFalse(
+            "Tap action $tapActionBounds overlaps empty state $emptyStateBounds",
+            tapActionBounds.overlaps(emptyStateBounds),
+        )
+        assertFalse(
+            "Tap action $tapActionBounds overlaps settings $settingsBounds",
+            tapActionBounds.overlaps(settingsBounds),
+        )
+    }
+
+    @Test
+    fun portraitPhoneSizeKeepsPrimaryCameraControlsVisible() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                MaterialTheme(colorScheme = OpenEosColorScheme) {
+                    CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                }
+            }
+        }
+
+        assertPrimaryCameraControlsVisible()
+    }
+
+    @Test
+    fun landscapePhoneSizeKeepsPrimaryCameraControlsVisible() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(800.dp, 360.dp)),
+            ) {
+                MaterialTheme(colorScheme = OpenEosColorScheme) {
+                    CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                }
+            }
+        }
+
+        assertPrimaryCameraControlsVisible()
+    }
+
+    @Test
+    fun enlargedTextKeepsPrimaryCameraControlsVisible() {
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                MaterialTheme(colorScheme = OpenEosColorScheme) {
+                    CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                }
+            }
+        }
+
+        assertPrimaryCameraControlsVisible()
+    }
+
+    @Test
     fun localizedAdvancedSettingStillSendsCameraRawValue() {
         val picker = mutableStateOf<SettingPicker?>(null)
         var request: Pair<String, String>? = null
@@ -238,19 +320,29 @@ class CameraScreensTest {
 
     @Test
     fun offlinePreviewCanSelectClickWhiteBalanceAsTheLiveViewTapAction() {
+        val picker = mutableStateOf<SettingPicker?>(null)
         var selectedAction: LiveViewTapAction? = null
         val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
             setLiveViewTapAction = { selectedAction = it },
         )
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
-                CameraControlScreen(CameraUiState().withOfflinePreview(), actions)
+                CameraControlScreen(
+                    CameraUiState().withOfflinePreview().copy(activeSettingPicker = picker.value),
+                    actions,
+                )
             }
         }
 
         compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
-        compose.onNodeWithText(resourceText(R.string.live_view_tap_action)).assertIsDisplayed()
-        compose.onNodeWithText(resourceText(R.string.tap_action_white_balance)).performClick()
+        compose.onNodeWithText(resourceText(R.string.live_view_tap_action))
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.tap_action_white_balance))
+            .performScrollTo()
+            .performClick()
 
         compose.runOnIdle {
             assertEquals(LiveViewTapAction.WHITE_BALANCE, selectedAction)
@@ -525,6 +617,17 @@ class CameraScreensTest {
             ),
         ),
     )
+
+    private fun assertPrimaryCameraControlsVisible() {
+        compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.fps_control_description, 6))
+            .assertIsDisplayed()
+        compose.onNodeWithTag("exposure-control-ISO").assertIsDisplayed()
+        compose.onNodeWithTag("exposure-control-SHUTTER").assertIsDisplayed()
+        compose.onNodeWithTag("exposure-control-APERTURE").assertIsDisplayed()
+        compose.onNodeWithTag("exposure-control-WHITE_BALANCE").assertIsDisplayed()
+    }
 
     private fun noOpActions() = CameraActions(
         setConnectionTarget = {}, setBaseUrl = {}, setUsername = {}, setPassword = {},

@@ -76,8 +76,11 @@ On this Windows dev machine, use the helper script so Gradle runs with Android S
 
 ```powershell
 .\scripts\android-gradle.ps1 :app:testDebugUnitTest
+.\scripts\android-gradle.ps1 connectedDebugAndroidTest
 .\scripts\android-gradle.ps1 :app:assembleDebug
 ```
+
+`connectedDebugAndroidTest` requires a running Android emulator or attached device. The Compose suite covers connection, control, Debug, media, language selection, offline preview, and primary-control visibility at 360 x 800 portrait, 800 x 360 landscape, and 1.5x font scale.
 
 The debug APK is written to:
 
@@ -85,7 +88,7 @@ The debug APK is written to:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions runs tests and debug builds on pushes to `main` and on pull requests.
+GitHub Actions runs unit tests, the debug build, and the Compose instrumentation suite on a Pixel 5 API 35 emulator for pushes to `main` and pull requests.
 
 ## iOS App And Camera Core
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -88,22 +89,24 @@ fun ToolIconButton(
     enabled: Boolean = true,
     tint: Color = AppText,
 ) {
-    TooltipBox(
-        positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
-        tooltip = { PlainTooltip { Text(description) } },
-        state = rememberTooltipState(),
-    ) {
-        IconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = modifier.size(48.dp),
+    Box(modifier) {
+        TooltipBox(
+            positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text(description) } },
+            state = rememberTooltipState(),
         ) {
-            Icon(
-                painterResource(icon),
-                description,
-                Modifier.cameraControlRotation(),
-                tint = if (enabled) tint else AppMutedText,
-            )
+            IconButton(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    painterResource(icon),
+                    description,
+                    Modifier.cameraControlRotation(),
+                    tint = if (enabled) tint else AppMutedText,
+                )
+            }
         }
     }
 }
@@ -322,7 +325,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         ImageLoader.Builder(context).build()
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .background(Color.Black)
             .pointerInput(canTap, tapAction, sourceAspectRatio) {
@@ -393,6 +396,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
 
         if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
         if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
+            val bottomPadding = if (state.hudVisible && maxWidth <= maxHeight) 168.dp else 12.dp
             val focusAvailable = state.supports(CameraFeature.TAP_FOCUS)
             val description = stringResource(
                 if (tapAction == LiveViewTapAction.WHITE_BALANCE) {
@@ -421,7 +425,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 tint = if (tapAction == LiveViewTapAction.WHITE_BALANCE) AppWarning else AppAccent,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(12.dp)
+                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPadding)
                     .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp)),
             )
         }
@@ -538,10 +542,10 @@ fun ExposureStrip(state: CameraUiState, actions: CameraActions, modifier: Modifi
     val exposure = state.status?.exposure
     val available = !state.isBusy(CameraOperation.SETTING)
     Row(modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-        ExposureCell(stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
-        ExposureCell(stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
-        ExposureCell(stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
-        ExposureCell(stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+        ExposureCell(SettingPicker.ISO, stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
+        ExposureCell(SettingPicker.SHUTTER, stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
+        ExposureCell(SettingPicker.APERTURE, stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
+        ExposureCell(SettingPicker.WHITE_BALANCE, stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
     }
 }
 
@@ -551,20 +555,31 @@ fun LandscapeExposureGrid(state: CameraUiState, actions: CameraActions, modifier
     val available = !state.isBusy(CameraOperation.SETTING)
     Column(modifier.fillMaxWidth().height(112.dp)) {
         Row(Modifier.fillMaxWidth().weight(1f)) {
-            ExposureCell(stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
-            ExposureCell(stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
+            ExposureCell(SettingPicker.ISO, stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
+            ExposureCell(SettingPicker.SHUTTER, stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
         }
         Row(Modifier.fillMaxWidth().weight(1f)) {
-            ExposureCell(stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
-            ExposureCell(stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+            ExposureCell(SettingPicker.APERTURE, stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
+            ExposureCell(SettingPicker.WHITE_BALANCE, stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
         }
     }
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.RowScope.ExposureCell(label: String, value: String, enabled: Boolean, onClick: () -> Unit) {
+private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
+    picker: SettingPicker,
+    label: String,
+    value: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
     Column(
-        Modifier.weight(1f).fillMaxSize().clickable(enabled = enabled, onClick = onClick).padding(horizontal = 4.dp),
+        Modifier
+            .weight(1f)
+            .fillMaxSize()
+            .testTag("exposure-control-${picker.name}")
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {

@@ -35,6 +35,49 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
 
+  android-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Run UI tests on Pixel API 35
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_5
+          working-directory: android
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest
+
+      - name: Upload Android UI test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-test-results
+          path: |
+            android/app/build/reports/androidTests/connected/debug
+            android/app/build/outputs/androidTest-results/connected/debug
+          if-no-files-found: ignore
+          retention-days: 7
+
   simulator:
     runs-on: ubuntu-latest
     defaults:

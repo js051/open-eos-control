@@ -76,8 +76,11 @@ repo 內有 `android/local.properties.example`。你可以在本機建立 `andro
 
 ```powershell
 .\scripts\android-gradle.ps1 :app:testDebugUnitTest
+.\scripts\android-gradle.ps1 connectedDebugAndroidTest
 .\scripts\android-gradle.ps1 :app:assembleDebug
 ```
+
+`connectedDebugAndroidTest` 需要先啟動 Android 模擬器或接上裝置。Compose 測試涵蓋連線、控制、Debug、媒體、語言選擇、離線預覽，以及 `360 x 800` 直向、`800 x 360` 橫向和 `1.5x` 字體下主要控制是否保持可見。
 
 debug APK 會輸出到：
 
@@ -85,7 +88,7 @@ debug APK 會輸出到：
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test 和 debug build。
+GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test、debug build，以及 Pixel 5 API 35 模擬器上的 Compose 儀器測試。
 
 ## iOS App 與相機 Core
 
