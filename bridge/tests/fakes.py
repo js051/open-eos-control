@@ -103,6 +103,8 @@ class FakeRunner:
             "/main/capturesettings/aspectratio": "3:2",
             "/main/capturesettings/zoomspeed": "8",
             "/main/actions/manualfocusdrive": "None",
+            "/main/actions/autofocusdrive": "0",
+            "/main/actions/autofocuscancel": "0",
             "/main/actions/viewfinder": "0",
             "/main/actions/eosremoterelease": "None",
             "/main/settings/movierecordtarget": "SDRAM",
@@ -231,6 +233,8 @@ class FakeRunner:
                     "Drive Canon DSLR Manual focus",
                     ["Near 1", "Near 2", "Near 3", "None", "Far 1", "Far 2", "Far 3"],
                 ),
+                self._toggle("/main/actions/autofocusdrive", "Drive Canon DSLR Autofocus"),
+                self._toggle("/main/actions/autofocuscancel", "Cancel Canon DSLR Autofocus"),
                 self._toggle("/main/actions/viewfinder", "Canon EOS Viewfinder"),
                 self._radio(
                     "/main/actions/eosremoterelease",

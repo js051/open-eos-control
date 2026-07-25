@@ -1005,8 +1005,11 @@ class GPhoto2Session:
                 supported.add(CameraFeature.WHITE_BALANCE_CONTROL)
             if any(not spec.core and spec.key in settings_by_key for spec in CONFIG_SPECS):
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
-            if self._half_press_values() is not None:
+            half_press_values = self._half_press_values()
+            autofocus_configs = self._autofocus_configs()
+            if half_press_values is not None:
                 supported.add(CameraFeature.SHUTTER_HALF_PRESS)
+            if autofocus_configs is not None or half_press_values is not None:
                 supported.add(CameraFeature.AUTOFOCUS)
             if self._recording_values() is not None:
                 supported.add(CameraFeature.VIDEO_RECORDING)
@@ -1125,7 +1128,26 @@ class GPhoto2Session:
             return self.status()
 
     def autofocus(self) -> CameraStatus:
-        return self.half_press_shutter()
+        with self._lock:
+            configs = self._autofocus_configs()
+            if configs is None:
+                return self.half_press_shutter()
+            drive, cancel = configs
+            primary_error: BaseException | None = None
+            try:
+                self._set_config_value(drive, "1", refresh=False)
+                self._sleep(0.35)
+            except BaseException as error:
+                primary_error = error
+                raise
+            finally:
+                try:
+                    self._set_config_value(cancel, "1", refresh=False)
+                except BaseException as cancel_error:
+                    if primary_error is None:
+                        raise
+                    primary_error.add_note(f"Canon EOS autofocus cancel also failed: {cancel_error}")
+            return self.status()
 
     def start_recording(self) -> CameraStatus:
         return self._set_recording(True)
@@ -1428,6 +1450,11 @@ class GPhoto2Session:
         release = _first_choice(config.choices, "Release Half", "Release")
         return (config, press, release) if press and release else None
 
+    def _autofocus_configs(self) -> tuple[GPhotoConfig, GPhotoConfig] | None:
+        drive = self._find_config(("autofocusdrive",), writable=True)
+        cancel = self._find_config(("autofocuscancel",), writable=True)
+        return (drive, cancel) if drive is not None and cancel is not None else None
+
     def _recording_values(self) -> tuple[GPhotoConfig, str, str] | None:
         config = self._recording_config()
         if config is None or config.readonly:
@@ -1467,6 +1494,10 @@ class GPhoto2Session:
                 commands.append("MEDIA_THUMBNAIL")
             if self._abilities.delete_files:
                 commands.append("MEDIA_DELETE")
+        if self._autofocus_configs() is not None:
+            commands.append("AUTOFOCUS_DRIVE_CANCEL")
+        if self._half_press_values() is not None:
+            commands.append("SHUTTER_HALF_PRESS")
         writable_settings = sorted(
             {
                 config.path.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]

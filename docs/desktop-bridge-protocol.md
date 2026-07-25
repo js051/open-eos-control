@@ -171,7 +171,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - settings: camera-advertised values through `--set-config-value`; the R6 Mark III mapping includes WB A/B shifts, SD and CF/CFexpress image quality, aspect ratio, power-zoom speed, and Auto Power Off in addition to the existing exposure, AF, drive, metering, Picture Style, color, noise-reduction, AEB and movie controls
 - still capture: select an advertised writable `Memory card` capture target first, then run `--trigger-capture`, falling back to `--capture-image` only when advertised
 - half-press: advertised `eosremoterelease` press/release values with guaranteed release
-- independent autofocus: the same balanced half-press path, exposed separately from the lower-level half-press command
+- independent autofocus: paired writable `autofocusdrive=1` and guaranteed `autofocuscancel=1` actions when both exist, falling back to the balanced half-press path
 - recording: advertised `movierecordtarget` Card/None values
 - focus drive: advertised `manualfocusdrive` Near/Far values while Live View is active
 - Live View: advertised `viewfinder` lifecycle plus cancellable `--capture-movie --stdout` MJPEG, command-safe restart and bounded `--capture-preview --stdout` fallback, with cleanup on stop, failed start, and session close

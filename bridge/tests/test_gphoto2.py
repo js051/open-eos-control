@@ -202,6 +202,8 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert capabilities.evidence.source == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_PREVIEW" in capabilities.evidence.advertised_commands
     assert "CAPTURE_MOVIE_STDOUT" in capabilities.evidence.advertised_commands
+    assert "AUTOFOCUS_DRIVE_CANCEL" in capabilities.evidence.advertised_commands
+    assert "SHUTTER_HALF_PRESS" in capabilities.evidence.advertised_commands
     assert capabilities.live_view.max_fps == 30
     assert "/main/imgsettings/iso" in capabilities.evidence.writable_settings
 
@@ -223,6 +225,19 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     session.half_press_shutter()
     session.autofocus()
     assert runner.values["/main/actions/eosremoterelease"] == "Release Half"
+    assert runner.values["/main/actions/autofocusdrive"] == "1"
+    assert runner.values["/main/actions/autofocuscancel"] == "1"
+    autofocus_drive = next(
+        index
+        for index, command in enumerate(runner.commands)
+        if "/main/actions/autofocusdrive=1" in command
+    )
+    autofocus_cancel = next(
+        index
+        for index, command in enumerate(runner.commands)
+        if "/main/actions/autofocuscancel=1" in command
+    )
+    assert autofocus_drive < autofocus_cancel
 
     assert session.start_recording().recording is True
     assert session.stop_recording().recording is False
@@ -269,6 +284,64 @@ def test_capture_refuses_unhandled_host_ram_target_without_a_card_choice() -> No
 
     assert rejected.value.code == "UNSAFE_CAPTURE_TARGET"
     assert not any("--trigger-capture" in command for command in runner.commands)
+
+
+def test_autofocus_falls_back_to_half_press_without_a_complete_action_pair() -> None:
+    class NoDedicatedAutofocusRunner(FakeRunner):
+        def _config_dump(self) -> str:
+            cancel = self._toggle("/main/actions/autofocuscancel", "Cancel Canon DSLR Autofocus")
+            return super()._config_dump().replace(f"\n{cancel}", "")
+
+    runner = NoDedicatedAutofocusRunner()
+    session = GPhoto2Engine(runner).open()
+
+    assert CameraFeature.AUTOFOCUS in session.capabilities().supported
+    session.autofocus()
+
+    assert runner.values["/main/actions/eosremoterelease"] == "Release Half"
+    assert not any("/main/actions/autofocusdrive=1" in command for command in runner.commands)
+    assert not any("/main/actions/autofocuscancel=1" in command for command in runner.commands)
+
+
+def test_dedicated_autofocus_does_not_require_half_press() -> None:
+    class NoHalfPressRunner(FakeRunner):
+        def _config_dump(self) -> str:
+            release = self._radio(
+                "/main/actions/eosremoterelease",
+                "Canon EOS Remote Release",
+                ["None", "Press Half", "Press Full", "Release Half", "Release Full"],
+            )
+            return super()._config_dump().replace(f"\n{release}", "")
+
+    runner = NoHalfPressRunner()
+    session = GPhoto2Engine(runner).open()
+    capabilities = session.capabilities()
+
+    assert CameraFeature.AUTOFOCUS in capabilities.supported
+    assert CameraFeature.SHUTTER_HALF_PRESS not in capabilities.supported
+    session.autofocus()
+
+    assert runner.values["/main/actions/autofocusdrive"] == "1"
+    assert runner.values["/main/actions/autofocuscancel"] == "1"
+
+
+def test_dedicated_autofocus_attempts_cancel_after_start_failure() -> None:
+    class FailingAutofocusRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            command = self._without_camera(arguments)
+            if command == ["--set-config-value", "/main/actions/autofocusdrive=1"]:
+                self.commands.append(tuple(arguments))
+                raise BridgeError("CAMERA_REQUEST_FAILED", "Autofocus start failed.", status_code=502)
+            return super().run(arguments, timeout=timeout)
+
+    runner = FailingAutofocusRunner()
+    session = GPhoto2Engine(runner).open()
+
+    with pytest.raises(BridgeError, match="Autofocus start failed"):
+        session.autofocus()
+
+    assert runner.values["/main/actions/autofocuscancel"] == "1"
+    assert any("/main/actions/autofocuscancel=1" in command for command in runner.commands)
 
 
 def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
