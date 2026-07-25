@@ -66,6 +66,7 @@
       ready: "Ready",
       busy: "Working",
       autofocus: "AF-ON",
+      halfPress: "Half-press",
       liveView: "Live View",
       manualFocus: "Manual focus",
       near: "Near",
@@ -93,6 +94,7 @@
       disconnected: "Camera disconnected",
       captureComplete: "Photo captured",
       autofocusComplete: "Autofocus complete",
+      halfPressComplete: "Shutter half-press complete",
       recordingStarted: "Recording started",
       recordingStopped: "Recording stopped",
       liveViewStarted: "Live View started",
@@ -222,6 +224,7 @@
       ready: "就緒",
       busy: "處理中",
       autofocus: "AF-ON",
+      halfPress: "半按快門",
       liveView: "即時預覽",
       manualFocus: "手動對焦",
       near: "近",
@@ -249,6 +252,7 @@
       disconnected: "相機已中斷連線",
       captureComplete: "拍攝完成",
       autofocusComplete: "自動對焦完成",
+      halfPressComplete: "快門半按完成",
       recordingStarted: "已開始錄影",
       recordingStopped: "已停止錄影",
       liveViewStarted: "即時預覽已啟動",
@@ -483,6 +487,7 @@
     shutterLabel: byId("shutter-label"),
     operationState: byId("operation-state"),
     autofocusButton: byId("autofocus-button"),
+    halfPressButton: byId("half-press-button"),
     focusSection: byId("focus-section"),
     focusNearButton: byId("focus-near-button"),
     focusFarButton: byId("focus-far-button"),
@@ -1111,6 +1116,27 @@
     }
   }
 
+  async function halfPressShutter() {
+    if (!state.session || state.busy || !featureSupported(FEATURES.SHUTTER_HALF_PRESS)) return;
+    state.busy = true;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/shutter/half-press`, {
+        method: "POST",
+      });
+      setOperationState(t("halfPressComplete"));
+      showToast(t("halfPressComplete"));
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderSession();
+    }
+  }
+
   function flashCapture() {
     ui.captureFlash.classList.remove("active");
     void ui.captureFlash.offsetWidth;
@@ -1468,12 +1494,17 @@
     const autofocusSupported = featureSupported(FEATURES.AUTOFOCUS);
     ui.autofocusButton.hidden = !autofocusSupported;
     ui.autofocusButton.disabled = state.busy || !autofocusSupported;
+    const halfPressSupported = featureSupported(FEATURES.SHUTTER_HALF_PRESS);
+    ui.halfPressButton.hidden = !halfPressSupported;
+    ui.halfPressButton.disabled = state.busy || !halfPressSupported;
     const liveSupported = featureSupported(FEATURES.LIVE_VIEW);
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       button.hidden = !liveSupported;
       button.disabled = state.busy || !liveSupported;
     });
-    ui.railLiveButton.parentElement.classList.toggle("single", autofocusSupported !== liveSupported);
+    const quickActionCount = [autofocusSupported, halfPressSupported, liveSupported].filter(Boolean).length;
+    ui.railLiveButton.parentElement.classList.toggle("single", quickActionCount === 1);
+    ui.railLiveButton.parentElement.classList.toggle("three", quickActionCount === 3);
     document.querySelector(".live-settings").hidden = !liveSupported;
     const focusSupported = featureSupported(FEATURES.FOCUS_DRIVE);
     ui.focusSection.hidden = !focusSupported;
@@ -1869,6 +1900,7 @@
     ui.videoModeButton.addEventListener("click", () => selectCaptureMode("video"));
     ui.shutterButton.addEventListener("click", operateShutter);
     ui.autofocusButton.addEventListener("click", autofocus);
+    ui.halfPressButton.addEventListener("click", halfPressShutter);
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
     ui.railLiveButton.addEventListener("click", toggleLiveView);
     ui.fpsSelect.addEventListener("change", changeFps);

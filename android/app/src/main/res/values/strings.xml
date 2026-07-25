@@ -207,6 +207,10 @@
     <string name="focus_with_shutter">AF-ON autofocus</string>
     <string name="focus_with_shutter_hint">Runs independent camera autofocus, with a safe half-press fallback.</string>
     <string name="af_on">AF</string>
+    <string name="half_press_shutter">Half-press shutter</string>
+    <string name="half_press_shutter_hint">Meters and focuses with a timed half-press, then always releases the shutter.</string>
+    <string name="half_press_shutter_action">Run shutter half-press</string>
+    <string name="half_press">Half-press</string>
     <string name="manual_focus_drive">Manual focus drive</string>
     <string name="manual_focus_drive_hint">Move lens focus in one of three relative step sizes.</string>
     <string name="live_view_tap_action">Live View tap action</string>

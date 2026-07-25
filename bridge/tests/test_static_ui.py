@@ -52,6 +52,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "live-image",
         "exposure-strip",
         "shutter-button",
+        "half-press-button",
         "focus-reticle",
         "focus-section",
         "tap-action-row",
@@ -104,6 +105,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "/v1/session",
         "/capture/still",
         "/focus/auto",
+        "/shutter/half-press",
         "/recording/",
         "/focus/drive",
         "/focus/tap",
@@ -119,6 +121,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'MEDIA_DELETE: "MEDIA_DELETE"' in script
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE"' in script
+    assert 'SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS"' in script
+    assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
     assert "URL.revokeObjectURL" in script
     assert script.count("deleteConfirm:") == 2
     assert '{ method: "DELETE" }' in script

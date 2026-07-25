@@ -827,6 +827,10 @@ input:disabled {
   grid-template-columns: 1fr;
 }
 
+.quick-actions.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .quick-actions .button,
 .focus-actions .button {
   min-width: 0;

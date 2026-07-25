@@ -571,6 +571,28 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                if (state.supports(CameraFeature.SHUTTER_HALF_PRESS)) {
+                    val halfPressDescription = stringResource(R.string.half_press_shutter_action)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.half_press_shutter), color = AppText, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.half_press_shutter_hint), color = AppSubtleText)
+                        }
+                        Button(
+                            onClick = actions.halfPressShutter,
+                            enabled = !state.isBusy(CameraOperation.FOCUS),
+                            colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .semantics { contentDescription = halfPressDescription },
+                        ) {
+                            Icon(painterResource(LucideR.drawable.lucide_ic_camera), null, Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.half_press))
+                        }
+                    }
+                }
                 if (state.supports(CameraFeature.FOCUS_DRIVE)) {
                     ManualFocusDriveControls(state, actions)
                 }
@@ -578,6 +600,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                     settings.isEmpty() &&
                     !state.supports(CameraFeature.CLICK_WHITE_BALANCE) &&
                     !state.supports(CameraFeature.AUTOFOCUS) &&
+                    !state.supports(CameraFeature.SHUTTER_HALF_PRESS) &&
                     !state.supports(CameraFeature.FOCUS_DRIVE)
                 ) {
                     Text(stringResource(R.string.no_settings), color = AppSubtleText)

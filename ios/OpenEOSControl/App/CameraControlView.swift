@@ -124,6 +124,14 @@ private struct CameraOverlayHeader: View {
                     Label("focus_drive", systemImage: "arrow.left.and.right")
                 }
                 .disabled(!camera.supports(.focusDrive))
+                if camera.supports(.shutterHalfPress) {
+                    Button {
+                        Task { await camera.halfPressShutter() }
+                    } label: {
+                        Label("half_press_shutter", systemImage: "camera.aperture")
+                    }
+                    .disabled(camera.isBusy(.focus))
+                }
                 Button {
                     camera.screen = .debug
                 } label: {

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -316,6 +317,59 @@ class CameraScreensTest {
         compose.runOnIdle {
             assertEquals(FocusDriveDirection.FAR to FocusDriveStep.LARGE, requestedFocusDrive)
         }
+    }
+
+    @Test
+    fun offlinePreviewExposesCapabilityGatedShutterHalfPress() {
+        val picker = mutableStateOf<SettingPicker?>(null)
+        var halfPressRequested = false
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+            halfPressShutter = { halfPressRequested = true },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    CameraUiState().withOfflinePreview().copy(activeSettingPicker = picker.value),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.half_press_shutter_action))
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertTrue(halfPressRequested) }
+    }
+
+    @Test
+    fun moreSettingsHidesShutterHalfPressWhenTheCameraDoesNotAdvertiseIt() {
+        val picker = mutableStateOf<SettingPicker?>(null)
+        val preview = CameraUiState().withOfflinePreview()
+        val capabilities = requireNotNull(preview.capabilities)
+        val state = preview.copy(
+            capabilities = capabilities.copy(
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported - CameraFeature.SHUTTER_HALF_PRESS,
+                ),
+            ),
+        )
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.copy(activeSettingPicker = picker.value), actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onAllNodesWithContentDescription(resourceText(R.string.half_press_shutter_action))
+            .assertCountEquals(0)
     }
 
     @Test
@@ -639,6 +693,7 @@ class CameraScreensTest {
         openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
         captureStill = {}, autofocus = {}, driveFocus = { _, _ -> }, toggleRecording = {}, tapFocus = { _, _ -> },
+        halfPressShutter = {},
         clickWhiteBalance = { _, _ -> },
         refreshMedia = {}, loadMediaThumbnail = {}, downloadMedia = { _, _ -> }, deleteMedia = {},
         cancelMediaDownload = {},

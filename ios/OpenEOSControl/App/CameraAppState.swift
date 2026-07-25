@@ -416,6 +416,24 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    func halfPressShutter() async {
+        guard supports(.shutterHalfPress), begin(.focus) else { return }
+        defer { end(.focus) }
+        if isPreview {
+            showFocusMarker(x: 0.5, y: 0.5, accepted: true)
+            return
+        }
+        guard let session else { return }
+        do {
+            updateStatus(try await session.halfPressShutter())
+            showFocusMarker(x: 0.5, y: 0.5, accepted: true)
+            lastError = nil
+        } catch {
+            record(error)
+            showFocusMarker(x: 0.5, y: 0.5, accepted: false)
+        }
+    }
+
     func toggleRecording() async {
         guard supports(.videoRecording), begin(.recording) else { return }
         defer { end(.recording) }

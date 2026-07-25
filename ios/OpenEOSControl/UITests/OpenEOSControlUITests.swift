@@ -25,6 +25,11 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "control-landscape")
 
         moreActions.tap()
+        let halfPress = app.buttons["Half-press shutter"]
+        XCTAssertTrue(halfPress.waitForExistence(timeout: 3))
+        halfPress.tap()
+        XCTAssertTrue(halfPress.waitForNonExistence(timeout: 3))
+        moreActions.tap()
         let debug = app.buttons["Debug"]
         XCTAssertTrue(debug.waitForExistence(timeout: 3))
         debug.tap()
