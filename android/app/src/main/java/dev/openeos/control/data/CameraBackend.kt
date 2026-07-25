@@ -60,6 +60,8 @@ interface CameraControlBackend {
     val nativeLiveViewSession: NativeLiveViewSession?
         get() = null
 
+    fun observedFeatures(): Set<CameraFeature> = emptySet()
+
     suspend fun initialize()
     suspend fun close() = Unit
     suspend fun info(): CameraInfo
@@ -119,6 +121,8 @@ class CcapiCameraBackend(
 
     override val nativeLiveViewSession: NativeLiveViewSession?
         get() = client.nativeLiveViewSession
+
+    override fun observedFeatures(): Set<CameraFeature> = client.observedFeatureSnapshot()
 
     override suspend fun initialize() = client.initialize()
 
@@ -191,6 +195,8 @@ class DesktopBridgeCameraBackend(
 
     override val networkDiagnostics: CameraNetworkDiagnostics
         get() = httpTransport.diagnosticsProvider()
+
+    override fun observedFeatures(): Set<CameraFeature> = client.observedFeatureSnapshot()
 
     override suspend fun initialize() = client.initialize()
 

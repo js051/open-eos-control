@@ -155,6 +155,7 @@ class CapabilityEvidence(ApiModel):
     protocol_versions: list[str] = Field(default_factory=list, max_length=256)
     advertised_commands: list[str] = Field(default_factory=list, max_length=256)
     writable_settings: list[str] = Field(default_factory=list, max_length=256)
+    observed_features: list[CameraFeature] = Field(default_factory=list, max_length=256)
     truncated: bool = False
 
 

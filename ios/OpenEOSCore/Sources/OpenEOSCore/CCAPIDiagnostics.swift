@@ -40,6 +40,8 @@ public enum CCAPIDiagnosticReport {
         let supported = snapshot?.capabilities.matrix.supported.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
         let planned = snapshot?.capabilities.matrix.planned.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
         let evidence = snapshot?.capabilities.evidence
+        let observed = evidence?.observedFeatures.map(\.rawValue).sorted().joined(separator: ", ")
+        let observedText = observed.flatMap { $0.isEmpty ? nil : $0 } ?? "none"
         let date = ISO8601DateFormatter().string(from: liveView.lastFrameAt ?? Date(timeIntervalSince1970: 0))
         let source = sanitized(liveView.sourceURL)?.absoluteString ?? "none"
         return [
@@ -57,6 +59,7 @@ public enum CCAPIDiagnosticReport {
             "advertisedCommandCount=\(evidence?.advertisedCommands.count ?? 0)",
             "advertisedCommands=\(redact(evidence?.advertisedCommands.joined(separator: " | ") ?? "none"))",
             "writableSettings=\(evidence?.writableSettings.joined(separator: ", ") ?? "none")",
+            "observedFeatures=\(observedText)",
             "capabilityEvidenceTruncated=\(evidence?.truncated ?? false)",
             "battery=\(snapshot?.status.rawBatteryJSON ?? "null")",
             "storage=\(snapshot?.status.rawStorageJSON ?? "null")",

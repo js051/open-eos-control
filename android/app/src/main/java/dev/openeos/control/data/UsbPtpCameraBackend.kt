@@ -30,6 +30,9 @@ class UsbPtpCameraBackend(
     private val canonProperties = mutableMapOf<Int, CanonEosPropertyState>()
     private var canonPropertyDiscoveryAttempted = false
     private var canonPropertyError: String? = null
+    private val observedFeatures = mutableSetOf<CameraFeature>()
+
+    override fun observedFeatures(): Set<CameraFeature> = observedFeatures.toSet()
 
     override suspend fun initialize() {
         if (session != null) return
@@ -40,6 +43,7 @@ class UsbPtpCameraBackend(
             deviceInfo = info
             session = newSession
             loadPropertyDescriptors(newSession, info)
+            observedFeatures.addAll(setOf(CameraFeature.USB_DIAGNOSTICS, CameraFeature.CAMERA_IDENTITY))
         } catch (exception: Exception) {
             runCatching { newSession.shutdown() }
             throw exception
@@ -72,11 +76,13 @@ class UsbPtpCameraBackend(
         synchronized(canonProperties) { canonProperties.clear() }
         canonPropertyDiscoveryAttempted = false
         canonPropertyError = null
+        observedFeatures.clear()
         current?.shutdown()
     }
 
     override suspend fun info(): CameraInfo {
         val info = requireDeviceInfo()
+        observedFeatures.add(CameraFeature.CAMERA_IDENTITY)
         val model = listOf(info.manufacturer, info.model)
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -101,6 +107,10 @@ class UsbPtpCameraBackend(
             ?.unsignedLong()
             ?.takeIf { it <= 100UL }
             ?.toInt()
+        if (PtpDevicePropertyCode.BATTERY_LEVEL in propertyValues) {
+            observedFeatures.add(CameraFeature.BATTERY_STATUS)
+        }
+        if (storageResult?.isSuccess == true) observedFeatures.add(CameraFeature.STORAGE_STATUS)
         return CameraStatus(
             connected = true,
             batteryLevel = batteryLevel,
@@ -291,6 +301,7 @@ class UsbPtpCameraBackend(
                 ),
                 advertisedCommands = advertisedCommands,
                 writableSettings = writableSettings.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
+                observedFeatures = observedFeatures.toSet(),
                 truncated = info.operations.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
                     writableSettings.size > MAX_CAPABILITY_EVIDENCE_ITEMS,
             ),
@@ -301,6 +312,7 @@ class UsbPtpCameraBackend(
         val info = requireDeviceInfo()
         if (info.supports(PtpOperationCode.INITIATE_CAPTURE)) {
             requireSession().initiateCapture()
+            observedFeatures.add(CameraFeature.STILL_CAPTURE)
             return status()
         }
         if (!CanonEosPtp.supportsRemoteRelease(info)) unsupported<Unit>(CameraFeature.STILL_CAPTURE)
@@ -321,6 +333,7 @@ class UsbPtpCameraBackend(
             ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
         }
         awaitCanonCapturedObject()
+        observedFeatures.add(CameraFeature.STILL_CAPTURE)
         return status()
     }
 
@@ -338,6 +351,7 @@ class UsbPtpCameraBackend(
             ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
         }
         drainCanonEvents()
+        observedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
         return status()
     }
 
@@ -345,7 +359,7 @@ class UsbPtpCameraBackend(
         val info = requireDeviceInfo()
         if (!CanonEosPtp.supportsAutofocus(info)) {
             if (!CanonEosPtp.supportsRemoteRelease(info)) unsupported<Unit>(CameraFeature.AUTOFOCUS)
-            return halfPressShutter()
+            return halfPressShutter().also { observedFeatures.add(CameraFeature.AUTOFOCUS) }
         }
 
         ensureCanonRemoteMode()
@@ -369,6 +383,7 @@ class UsbPtpCameraBackend(
             }
         }
         drainCanonEvents()
+        observedFeatures.add(CameraFeature.AUTOFOCUS)
         return status()
     }
 
@@ -383,6 +398,7 @@ class UsbPtpCameraBackend(
             listOf(CanonEosPtp.focusDriveAmount(direction, step)),
         )
         drainCanonEvents()
+        observedFeatures.add(CameraFeature.FOCUS_DRIVE)
         return FocusDriveResult(ok = true, direction = direction, step = step)
     }
 
@@ -411,6 +427,7 @@ class UsbPtpCameraBackend(
                 CameraFeature.EXPOSURE_CONTROL,
             )
         }
+        observedFeatures.add(CameraFeature.EXPOSURE_CONTROL)
         return status()
     }
 
@@ -421,6 +438,7 @@ class UsbPtpCameraBackend(
             value,
             CameraFeature.WHITE_BALANCE_CONTROL,
         )
+        observedFeatures.add(CameraFeature.WHITE_BALANCE_CONTROL)
         return status()
     }
 
@@ -429,11 +447,13 @@ class UsbPtpCameraBackend(
         refreshCanonPropertyState(info)
         val canonSpec = CanonEosPtp.settingSpecs.firstOrNull { it.key == key }
         if (canonSpec != null && setAdvertisedCanonProperty(canonSpec.propertyCode, value)) {
+            observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             return status()
         }
         val spec = PtpStandardProperties.advancedProperties.firstOrNull { it.key == key }
             ?: throw UnsupportedOperationException("USB PTP setting $key is not implemented.")
         setProperty(spec.propertyCode, value, CameraFeature.ADVANCED_SETTINGS)
+        observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
         return status()
     }
 
@@ -460,6 +480,7 @@ class UsbPtpCameraBackend(
             }
         }
         if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null) throw firstFailure!!
+        observedFeatures.add(CameraFeature.MEDIA_BROWSER)
         return items
     }
 
@@ -486,7 +507,7 @@ class UsbPtpCameraBackend(
             item = item,
             bytes = bytes,
             contentType = thumbnailContentType(objectInfo.thumbnailFormat, bytes),
-        )
+        ).also { observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL) }
     }
 
     override suspend fun downloadMedia(
@@ -503,12 +524,13 @@ class UsbPtpCameraBackend(
             item = item,
             bytesTransferred = bytesTransferred,
             contentType = contentTypeFor(item.name, item.kind),
-        )
+        ).also { observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD) }
     }
 
     override suspend fun deleteMedia(item: CameraMediaItem) {
         requireOperation(PtpOperationCode.DELETE_OBJECT, CameraFeature.MEDIA_DELETE)
         requireSession().deleteObject(item.ptpHandle())
+        observedFeatures.add(CameraFeature.MEDIA_DELETE)
     }
 
     override suspend fun startLiveView(request: LiveViewRequest) {
@@ -527,6 +549,7 @@ class UsbPtpCameraBackend(
             )
             canonLiveViewActive = true
             drainCanonEvents()
+            observedFeatures.add(CameraFeature.LIVE_VIEW)
         } catch (exception: Exception) {
             runCatching {
                 ptp.executeDataOutOperation(
@@ -566,7 +589,10 @@ class UsbPtpCameraBackend(
             bytes = CanonEosPtp.liveViewJpeg(payload),
             contentType = "image/jpeg",
             sourceUrl = "ptp-usb://canon-eos/viewfinder?frame=$cacheKey",
-        )
+        ).also {
+            observedFeatures.add(CameraFeature.LIVE_VIEW)
+            observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+        }
     }
 
     private suspend fun ensureCanonRemoteMode() {
@@ -698,6 +724,7 @@ class UsbPtpCameraBackend(
                 canonProperties[CanonEosPropertyCode.EVF_RECORD_STATUS] = state.copy(currentValue = target)
             }
         }
+        observedFeatures.add(CameraFeature.VIDEO_RECORDING)
         return status()
     }
 

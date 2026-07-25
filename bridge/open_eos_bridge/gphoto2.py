@@ -893,6 +893,7 @@ class GPhoto2Session:
         self._storage = StorageSnapshot(None, None, None, None, 0)
         self._media_supported = False
         self._media_cache: dict[str, MediaItem] = {}
+        self._observed: set[CameraFeature] = {CameraFeature.DESKTOP_BRIDGE}
 
         with self._lock:
             self._summary_text = self._optional_text(["--summary"], timeout=20.0)
@@ -921,6 +922,7 @@ class GPhoto2Session:
     def info(self) -> CameraInfo:
         with self._lock:
             self._require_open()
+            self._observed.add(CameraFeature.CAMERA_IDENTITY)
             summary = parse_summary(self._summary_text)
             model = self._config_value("cameramodel") or summary.get("model") or self.camera.model
             serial = (
@@ -947,6 +949,10 @@ class GPhoto2Session:
             battery_level = _battery_level(battery_text)
             storage = self._storage
             recording_config = self._recording_config()
+            if self._find_config(("batterylevel",)):
+                self._observed.add(CameraFeature.BATTERY_STATUS)
+            if storage.available is not None:
+                self._observed.add(CameraFeature.STORAGE_STATUS)
             return CameraStatus(
                 battery=BatteryStatus(
                     level=battery_level,
@@ -1079,6 +1085,7 @@ class GPhoto2Session:
                     engine=self.engine_name,
                 )
             self._set_config_value(config, selected_value, refresh=False)
+            self._observed.add(_feature_for_setting(key))
             return self.status()
 
     def capture_still(self) -> CameraStatus:
@@ -1091,6 +1098,7 @@ class GPhoto2Session:
                 self._run(["--capture-image"], timeout=60.0)
             else:
                 raise unsupported(CameraFeature.STILL_CAPTURE.value, self.engine_name)
+            self._observed.add(CameraFeature.STILL_CAPTURE)
             return self.status()
 
     def _ensure_capture_target_on_card(self) -> None:
@@ -1125,13 +1133,16 @@ class GPhoto2Session:
             finally:
                 if pressed:
                     self._set_config_value(config, release_value, refresh=False)
+            self._observed.add(CameraFeature.SHUTTER_HALF_PRESS)
             return self.status()
 
     def autofocus(self) -> CameraStatus:
         with self._lock:
             configs = self._autofocus_configs()
             if configs is None:
-                return self.half_press_shutter()
+                status = self.half_press_shutter()
+                self._observed.add(CameraFeature.AUTOFOCUS)
+                return status
             drive, cancel = configs
             primary_error: BaseException | None = None
             try:
@@ -1147,6 +1158,7 @@ class GPhoto2Session:
                     if primary_error is None:
                         raise
                     primary_error.add_note(f"Canon EOS autofocus cancel also failed: {cancel_error}")
+            self._observed.add(CameraFeature.AUTOFOCUS)
             return self.status()
 
     def start_recording(self) -> CameraStatus:
@@ -1182,6 +1194,7 @@ class GPhoto2Session:
                     f"The camera did not advertise focus drive value '{requested}'.",
                 )
             self._set_config_value(config, value, refresh=False)
+            self._observed.add(CameraFeature.FOCUS_DRIVE)
             return FocusResult(accepted=True, direction=normalized_direction, step=normalized_step)
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
@@ -1234,6 +1247,7 @@ class GPhoto2Session:
                 raise
             self._cached_live_view_frame = frame
             self._live_view_active = True
+            self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
 
     def stop_live_view(self) -> None:
         with self._lock:
@@ -1279,6 +1293,7 @@ class GPhoto2Session:
             output = self._run(["--recurse", "--list-files"], timeout=60.0).text
             items = parse_media_list(output)
             self._media_cache = {item.id: item for item in items}
+            self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
 
     def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]:
@@ -1302,6 +1317,7 @@ class GPhoto2Session:
             with self._lock:
                 self._require_open()
                 yield from self.runner.stream(arguments, timeout=600.0)
+                self._observed.add(CameraFeature.MEDIA_DOWNLOAD)
 
         return item, stream()
 
@@ -1316,6 +1332,7 @@ class GPhoto2Session:
                 timeout=60.0,
             ).stdout
             thumbnail, content_type = _validated_thumbnail(output)
+            self._observed.add(CameraFeature.MEDIA_THUMBNAIL)
             return thumbnail, content_type
 
     def delete_media(self, media_id: str) -> None:
@@ -1326,6 +1343,7 @@ class GPhoto2Session:
                 raise unsupported(CameraFeature.MEDIA_DELETE.value, self.engine_name)
             self._run(["--folder", folder, "--delete-file", name], timeout=60.0)
             self._media_cache.pop(media_id, None)
+            self._observed.add(CameraFeature.MEDIA_DELETE)
 
     @property
     def requested_fps(self) -> int:
@@ -1346,6 +1364,7 @@ class GPhoto2Session:
                 raise unsupported(CameraFeature.VIDEO_RECORDING.value, self.engine_name)
             config, start_value, stop_value = values
             self._set_config_value(config, start_value if recording else stop_value, refresh=False)
+            self._observed.add(CameraFeature.VIDEO_RECORDING)
             return self.status()
 
     def _capture_preview(self) -> bytes:
@@ -1512,7 +1531,11 @@ class GPhoto2Session:
             ),
             advertised_commands=commands,
             writable_settings=writable_settings[:MAX_CAPABILITY_EVIDENCE_ITEMS],
-            truncated=len(writable_settings) > MAX_CAPABILITY_EVIDENCE_ITEMS,
+            observed_features=sorted(self._observed, key=str)[:MAX_CAPABILITY_EVIDENCE_ITEMS],
+            truncated=(
+                len(writable_settings) > MAX_CAPABILITY_EVIDENCE_ITEMS
+                or len(self._observed) > MAX_CAPABILITY_EVIDENCE_ITEMS
+            ),
         )
 
     def _refresh_configs(self, *, force: bool) -> None:

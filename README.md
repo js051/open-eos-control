@@ -29,7 +29,7 @@ The app currently includes:
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display
-- Bounded, secret-redacted capability evidence showing the discovery source, protocol versions, advertised commands, and writable settings
+- Bounded, secret-redacted capability evidence showing the discovery source, protocol versions, advertised commands, writable settings, and operations that actually succeeded in the current session
 - Android USB/PTP permission, interface diagnostics, real PTP sessions, identity, storage, media listing/thumbnail/download/deletion, advertised standard still capture/property control, and capability-gated Canon EOS remote release, half-press, native AF-ON with guaranteed cancel, shooting mode, ISO/Tv/Av/WB, exposure compensation, color temperature, white-balance shifts, color space, aspect ratio, power-zoom speed, Auto Power Off, High ISO noise reduction, AEB, movie start/stop, AF operation/method, Continuous AF, drive, metering, Picture Style, per-card RAW/cRAW/JPEG image quality, Movie Servo AF, focus drive, and JPEG Live View
 - Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, AF-ON, Live View, focus drive, and ability-gated media thumbnails/transfer/deletion; the libgphoto2 path includes R6 Mark III autofocus drive/cancel actions, per-card image quality, WB shifts, aspect ratio, power-zoom speed, safe Auto Power Off choices, and memory-card capture-target restoration before shutter
 - Live view frame display with auto/manual refresh and FPS control

@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraCapabilityEvidence
+import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraNetworkRouting
@@ -55,6 +56,7 @@ class DiagnosticsTest {
                     protocolVersions = listOf("ver100"),
                     advertisedCommands = listOf("POST /ccapi/ver100/shooting/control/shutterbutton"),
                     writableSettings = listOf("iso", "tv"),
+                    observedFeatures = setOf(CameraFeature.CAMERA_IDENTITY, CameraFeature.LIVE_VIEW),
                 ),
             ),
             networkDiagnostics = CameraNetworkDiagnostics(
@@ -92,6 +94,7 @@ class DiagnosticsTest {
         assertTrue(report.contains("advertisedCommandCount=1"))
         assertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
         assertTrue(report.contains("writableSettings=iso, tv"))
+        assertTrue(report.contains("observedFeatures=CAMERA_IDENTITY, LIVE_VIEW"))
     }
 
     @Test

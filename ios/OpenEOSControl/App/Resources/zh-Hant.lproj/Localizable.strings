@@ -165,6 +165,7 @@
 "protocol_versions" = "協定版本";
 "advertised_commands" = "相機公告命令";
 "writable_settings" = "可寫設定";
+"observed_features" = "本次工作階段已成功";
 "evidence_truncated" = "證據清單已截短";
 "yes" = "是";
 "no" = "否";

@@ -94,6 +94,7 @@
     <string name="protocol_versions">Protocol versions</string>
     <string name="advertised_commands">Advertised commands</string>
     <string name="writable_settings">Writable settings</string>
+    <string name="observed_features">Observed this session</string>
     <string name="evidence_truncated">Evidence truncated</string>
     <string name="battery_raw">Battery raw JSON</string>
     <string name="storage_raw">Storage raw JSON</string>

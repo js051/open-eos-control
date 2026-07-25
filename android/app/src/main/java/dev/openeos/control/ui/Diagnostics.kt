@@ -66,6 +66,9 @@ fun buildDiagnosticReport(state: CameraUiState): String {
             "advertisedCommands=${evidence?.advertisedCommands.orEmpty().joinToString(" | ") { redactDiagnosticText(it, state) }.ifBlank { "none" }}"
         )
         appendLine("writableSettings=${evidence?.writableSettings.orEmpty().joinToString().ifBlank { "none" }}")
+        appendLine(
+            "observedFeatures=${evidence?.observedFeatures.orEmpty().sortedBy(CameraFeature::name).joinToString { it.name }.ifBlank { "none" }}"
+        )
         appendLine("capabilityEvidenceTruncated=${evidence?.truncated ?: false}")
         appendLine("battery=${state.status?.rawBatteryJson?.ifBlank { state.status?.batteryStatus } ?: "unknown"}")
         appendLine("storage=${state.status?.rawStorageJson?.ifBlank { state.status?.mediaAvailable?.toString() } ?: "unknown"}")

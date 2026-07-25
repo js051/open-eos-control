@@ -633,6 +633,7 @@ class CameraViewModel(
                 _uiState.update { current ->
                     current.copy(mediaThumbnails = current.mediaThumbnails + (item.id to bitmap))
                 }
+                refreshCapabilityEvidence()
             } catch (exception: CancellationException) {
                 throw exception
             } catch (_: Exception) {
@@ -857,6 +858,9 @@ class CameraViewModel(
         return viewModelScope.launch {
             try {
                 block()
+                if (operation in CAPABILITY_EVIDENCE_OPERATIONS) {
+                    refreshCapabilityEvidence()
+                }
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
@@ -872,6 +876,24 @@ class CameraViewModel(
                 _uiState.update {
                     it.copy(pendingOperations = it.pendingOperations - operation)
                 }
+            }
+        }
+    }
+
+    private fun refreshCapabilityEvidence() {
+        val state = _uiState.value
+        if (!state.connected || state.previewMode) return
+        val observedFeatures = repository.observedFeatures()
+        _uiState.update { current ->
+            val capabilities = current.capabilities
+            if (current.connected && !current.previewMode && capabilities != null) {
+                current.copy(
+                    capabilities = capabilities.copy(
+                        evidence = capabilities.evidence.copy(observedFeatures = observedFeatures),
+                    ),
+                )
+            } else {
+                current
             }
         }
     }
@@ -946,6 +968,12 @@ class CameraViewModel(
                 } else {
                     it
                 }
+            }
+            if (
+                CameraFeature.LIVE_VIEW_JPEG_POLLING !in
+                _uiState.value.capabilities?.evidence?.observedFeatures.orEmpty()
+            ) {
+                refreshCapabilityEvidence()
             }
         } catch (exception: Exception) {
             exception.printStackTrace()
@@ -1156,5 +1184,13 @@ class CameraViewModel(
         const val CAPTURE_FLASH_MILLIS = 120L
         const val FOCUS_FEEDBACK_MILLIS = 1_200L
         const val FPS_WINDOW_SIZE = 30
+        val CAPABILITY_EVIDENCE_OPERATIONS = setOf(
+            CameraOperation.SETTING,
+            CameraOperation.CAPTURE,
+            CameraOperation.RECORDING,
+            CameraOperation.FOCUS,
+            CameraOperation.LIVE_VIEW,
+            CameraOperation.MEDIA,
+        )
     }
 }

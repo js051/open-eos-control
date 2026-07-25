@@ -332,8 +332,26 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert b"".join(chunks) == MEDIA
     session.delete_media(media[0].id)
     session.stop_live_view()
+    observed = set(session.capabilities().evidence.observed_features)
     session.close()
     assert transport.closed is True
+    assert {
+        CameraFeature.DESKTOP_BRIDGE,
+        CameraFeature.CAMERA_IDENTITY,
+        CameraFeature.EXPOSURE_CONTROL,
+        CameraFeature.STILL_CAPTURE,
+        CameraFeature.AUTOFOCUS,
+        CameraFeature.SHUTTER_HALF_PRESS,
+        CameraFeature.VIDEO_RECORDING,
+        CameraFeature.TAP_FOCUS,
+        CameraFeature.CLICK_WHITE_BALANCE,
+        CameraFeature.FOCUS_DRIVE,
+        CameraFeature.LIVE_VIEW,
+        CameraFeature.LIVE_VIEW_JPEG_POLLING,
+        CameraFeature.MEDIA_BROWSER,
+        CameraFeature.MEDIA_DOWNLOAD,
+        CameraFeature.MEDIA_DELETE,
+    } <= observed
 
     command_paths = [request.path for request in transport.requests]
     assert command_paths.count("/ccapi/ver100/shooting/control/shutterbutton/manual") == 2
@@ -555,7 +573,26 @@ def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
     assert delete_failure.value.code == "UNSUPPORTED_FEATURE"
     assert thumbnail_failure.value.code == "UNSUPPORTED_FEATURE"
     assert focus_failure.value.code == "UNSUPPORTED_FEATURE"
+    observed = set(session.capabilities().evidence.observed_features)
+    assert CameraFeature.STILL_CAPTURE not in observed
+    assert CameraFeature.MEDIA_DELETE not in observed
+    assert CameraFeature.FOCUS_DRIVE not in observed
     assert len(transport.requests) == before
+
+
+def test_ccapi_incomplete_media_stream_is_not_recorded_as_observed() -> None:
+    transport = FakeCcapiTransport()
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+    media = session.list_media()
+    _, chunks = session.download_media(media[0].id)
+
+    stream = iter(chunks)
+    assert next(stream) == MEDIA
+    stream.close()
+
+    observed = set(session.capabilities().evidence.observed_features)
+    assert CameraFeature.MEDIA_BROWSER in observed
+    assert CameraFeature.MEDIA_DOWNLOAD not in observed
 
 
 def test_ccapi_focus_drive_rejects_invalid_values_without_a_camera_request() -> None:

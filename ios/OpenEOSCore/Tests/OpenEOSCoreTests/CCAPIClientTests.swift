@@ -166,6 +166,8 @@ final class CCAPIClientTests: XCTestCase {
         let body = try XCTUnwrap(request.body)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         XCTAssertEqual(json["af"] as? Bool, true)
+        let capabilities = try await client.capabilities()
+        XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.stillCapture))
     }
 
     func testUnadvertisedCaptureFailsWithoutSendingACommand() async throws {
@@ -181,6 +183,8 @@ final class CCAPIClientTests: XCTestCase {
         }
         let requestCount = await transport.requests().count
         XCTAssertEqual(requestCount, 1)
+        let capabilities = try await client.capabilities()
+        XCTAssertFalse(capabilities.evidence.observedFeatures.contains(.stillCapture))
     }
 
     func testFocusDriveUsesAdvertisedPostAndCanonValue() async throws {
@@ -690,7 +694,8 @@ final class CCAPIClientTests: XCTestCase {
                 source: "GET /ccapi",
                 protocolVersions: ["ver100"],
                 advertisedCommands: ["POST /ccapi/ver100/shooting/control/shutterbutton"],
-                writableSettings: ["iso", "tv"]
+                writableSettings: ["iso", "tv"],
+                observedFeatures: [.cameraIdentity, .liveView]
             )
         )
         let snapshot = CameraSnapshot(
@@ -710,6 +715,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(report.contains("advertisedCommandCount=1"))
         XCTAssertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
         XCTAssertTrue(report.contains("writableSettings=iso, tv"))
+        XCTAssertTrue(report.contains("observedFeatures=CAMERA_IDENTITY, LIVE_VIEW"))
     }
 
     private func enqueueStatus(on transport: MockCameraHTTPTransport, prefix: String = "/ccapi/ver100") async {

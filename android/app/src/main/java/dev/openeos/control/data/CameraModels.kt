@@ -290,6 +290,7 @@ data class CameraCapabilityEvidence(
     val protocolVersions: List<String> = emptyList(),
     val advertisedCommands: List<String> = emptyList(),
     val writableSettings: List<String> = emptyList(),
+    val observedFeatures: Set<CameraFeature> = emptySet(),
     val truncated: Boolean = false,
 )
 

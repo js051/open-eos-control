@@ -10,13 +10,15 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 - **Device validation**: implemented and test-covered, but still needs a recorded result from the named physical camera.
 - **Planned**: architecture or interface only; users must not be shown an active product control.
 - **Research**: public platform or protocol evidence is not yet sufficient for a product claim.
+- **Supported** in a diagnostic report means the camera or active engine advertised a usable path; it is not proof that the path succeeded on that device.
+- **Observed this session** means the current client received a successful response or valid payload from the real backend. Failed, rejected, and merely advertised operations are never added.
 
 ## Android And Canon CCAPI
 
 | Capability | Code status | EOS R6 Mark III | Acceptance evidence |
 | --- | --- | --- | --- |
 | Discovery and API versions | Implemented | Device validation passed; refreshed capability report required | `CcapiClientTest`; same-origin Canon `url` and relative `path` entries are normalized to query-free paths while cross-origin/unsafe entries are ignored; [sanitized physical-camera record](validation/eos-r6-mark-iii-android-ccapi.md) |
-| Capability evidence diagnostics | Implemented | Fresh device report required | Android Debug/report exposes bounded discovery source, versions, advertised method/path pairs and writable setting keys without URL queries or credentials |
+| Capability evidence diagnostics | Implemented | Fresh device report required | Android, iOS and Desktop Bridge reports expose bounded discovery source, versions, advertised method/path pairs, writable setting keys, and success-only `observedFeatures` without URL queries or credentials |
 | Identity, battery, storage | Implemented | Identity and battery passed; storage pending after discovery-parser fix | Unit tests plus diagnostic raw JSON |
 | ISO, Tv, Av, WB | Implemented | Device validation passed | Advertised setting paths, unit tests, physical camera control |
 | Dynamic camera settings | Implemented | Device validation in progress | Values come from camera `ability`; controls require an advertised setting-specific `PUT` path |
@@ -78,5 +80,6 @@ A capability can move to **supported** only when:
 3. Errors preserve the operation and transport context.
 4. The target physical camera result is recorded when vendor-specific behavior is involved.
 5. English and Traditional Chinese UI strings, accessibility labels, and offline preview states are present.
+6. A fresh physical-device report lists the capability in `observedFeatures` after the user exercises it; an entry in `supported` alone is insufficient.
 
 Canon's current public SDK page lists EOS R6 Mark III for CCAPI and describes remote settings, capture, and image retrieval. Canon's detailed API specification remains the conformance authority distributed through CAP; public reference implementations are corroborating evidence, not a substitute for physical R6 Mark III validation.

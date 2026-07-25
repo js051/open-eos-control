@@ -323,7 +323,7 @@ class CcapiSession:
         self._api_prefixes = ["/ccapi/ver100"]
         self._preferred_prefix = "/ccapi/ver100"
         self._operations: set[CcapiOperation] = set()
-        self._observed: set[CameraFeature] = set()
+        self._observed: set[CameraFeature] = {CameraFeature.DESKTOP_BRIDGE}
         self._cached_info: CameraInfo | None = None
         self._settings_cache: dict[str, object] | None = None
         self._setting_paths: dict[str, str] = {}
@@ -609,6 +609,7 @@ class CcapiSession:
                 raise unsupported(_feature_for_setting(canonical).value, self.engine_name)
             self._request_ok("PUT", path, {"value": value})
             self._settings_cache = None
+            self._observed.add(_feature_for_setting(canonical))
             return self.status()
 
     def capture_still(self) -> CameraStatus:
@@ -965,8 +966,7 @@ class CcapiSession:
                 for path in media_paths[:MAX_MEDIA_ITEMS]
             ]
             self._media_cache = {item.id: item for item in items}
-            if items:
-                self._observed.update({CameraFeature.MEDIA_BROWSER, CameraFeature.MEDIA_DOWNLOAD})
+            self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
 
     def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]:
@@ -1009,10 +1009,10 @@ class CcapiSession:
                             try:
                                 while chunk := active.body.read(TRANSFER_CHUNK_BYTES):
                                     yield chunk
+                                self._observed.add(CameraFeature.MEDIA_DOWNLOAD)
                             finally:
                                 active.close()
 
-                    self._observed.add(CameraFeature.MEDIA_DOWNLOAD)
                     return item, stream()
                 try:
                     preview = response.body.read(MAX_ERROR_BYTES).decode("utf-8", errors="replace").strip()
@@ -1241,10 +1241,12 @@ class CcapiSession:
             protocol_versions=protocol_versions[:MAX_CAPABILITY_EVIDENCE_ITEMS],
             advertised_commands=commands[:MAX_CAPABILITY_EVIDENCE_ITEMS],
             writable_settings=writable_settings[:MAX_CAPABILITY_EVIDENCE_ITEMS],
+            observed_features=sorted(self._observed, key=str)[:MAX_CAPABILITY_EVIDENCE_ITEMS],
             truncated=(
                 len(protocol_versions) > MAX_CAPABILITY_EVIDENCE_ITEMS
                 or len(commands) > MAX_CAPABILITY_EVIDENCE_ITEMS
                 or len(writable_settings) > MAX_CAPABILITY_EVIDENCE_ITEMS
+                or len(self._observed) > MAX_CAPABILITY_EVIDENCE_ITEMS
             ),
         )
 

@@ -641,6 +641,9 @@ class CcapiClientTest {
         assertTrue(captureFailure is IllegalStateException)
         assertTrue(settingFailure is IllegalStateException)
         assertTrue(liveViewFailure is IllegalStateException)
+        assertTrue(CameraFeature.STILL_CAPTURE !in client.observedFeatureSnapshot())
+        assertTrue(CameraFeature.EXPOSURE_CONTROL !in client.observedFeatureSnapshot())
+        assertTrue(CameraFeature.LIVE_VIEW !in client.observedFeatureSnapshot())
         assertEquals(requestCount, server.requestCount)
     }
 
@@ -792,12 +795,14 @@ class CcapiClientTest {
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
         server.enqueue(jsonResponse("""{}"""))
 
+        assertTrue(CameraFeature.STILL_CAPTURE !in client.observedFeatureSnapshot())
         client.captureStill()
         val request = server.takeRequest()
 
         assertEquals("/ccapi/ver110/shooting/control/shutterbutton", request.path)
         assertEquals("POST", request.method)
         assertTrue(JSONObject(request.body.readUtf8()).getBoolean("af"))
+        assertTrue(CameraFeature.STILL_CAPTURE in client.observedFeatureSnapshot())
     }
 
     @Test

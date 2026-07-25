@@ -34,6 +34,7 @@ class UsbPtpCameraBackendTest {
         val download = backend.downloadMedia(media.single(), output, progress::add)
         backend.deleteMedia(media.single())
         backend.captureStill()
+        val observedFeatures = backend.observedFeatures()
         backend.close()
 
         assertEquals("Canon EOS R6 Mark III", info.model)
@@ -64,6 +65,23 @@ class UsbPtpCameraBackendTest {
         assertEquals(listOf("2.8", "4"), capabilities.aperture)
         assertEquals("800", exposureStatus.exposure.iso)
         assertEquals("daylight", whiteBalanceStatus.exposure.whiteBalance)
+        assertTrue(
+            observedFeatures.containsAll(
+                setOf(
+                    CameraFeature.USB_DIAGNOSTICS,
+                    CameraFeature.CAMERA_IDENTITY,
+                    CameraFeature.BATTERY_STATUS,
+                    CameraFeature.STORAGE_STATUS,
+                    CameraFeature.EXPOSURE_CONTROL,
+                    CameraFeature.WHITE_BALANCE_CONTROL,
+                    CameraFeature.MEDIA_BROWSER,
+                    CameraFeature.MEDIA_THUMBNAIL,
+                    CameraFeature.MEDIA_DOWNLOAD,
+                    CameraFeature.MEDIA_DELETE,
+                    CameraFeature.STILL_CAPTURE,
+                ),
+            ),
+        )
         assertEquals("IMG_0042.JPG", media.single().name)
         assertEquals("2026-07-21 14:30:25", media.single().captureTime)
         assertArrayEquals(THUMBNAIL_BYTES, thumbnail.bytes)

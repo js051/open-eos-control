@@ -239,6 +239,7 @@ public struct CameraCapabilityEvidence: Equatable, Sendable {
     public let protocolVersions: [String]
     public let advertisedCommands: [String]
     public let writableSettings: [String]
+    public let observedFeatures: Set<CameraFeature>
     public let truncated: Bool
 
     public init(
@@ -246,12 +247,14 @@ public struct CameraCapabilityEvidence: Equatable, Sendable {
         protocolVersions: [String] = [],
         advertisedCommands: [String] = [],
         writableSettings: [String] = [],
+        observedFeatures: Set<CameraFeature> = [],
         truncated: Bool = false
     ) {
         self.source = source
         self.protocolVersions = protocolVersions
         self.advertisedCommands = advertisedCommands
         self.writableSettings = writableSettings
+        self.observedFeatures = observedFeatures
         self.truncated = truncated
     }
 }

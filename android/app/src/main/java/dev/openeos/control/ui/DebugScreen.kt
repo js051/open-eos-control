@@ -99,6 +99,11 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
                     mono = true,
                 )
                 DebugValue(
+                    stringResource(R.string.observed_features),
+                    evidence?.observedFeatures.orEmpty().sortedBy { it.name }.joinToString { it.name }.ifBlank { none },
+                    mono = true,
+                )
+                DebugValue(
                     stringResource(R.string.evidence_truncated),
                     yesNoLabel(evidence?.truncated == true),
                     warning = evidence?.truncated == true,

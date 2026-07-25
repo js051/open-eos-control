@@ -51,6 +51,11 @@ struct DebugView: View {
                             mono: true
                         )
                         value(
+                            "observed_features",
+                            featureList(camera.capabilities?.evidence.observedFeatures),
+                            mono: true
+                        )
+                        value(
                             "evidence_truncated",
                             language.string(camera.capabilities?.evidence.truncated == true ? "yes" : "no"),
                             warning: camera.capabilities?.evidence.truncated == true

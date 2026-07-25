@@ -266,9 +266,27 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert item.name == "IMG_0001.JPG"
     assert b"".join(chunks) == MEDIA_BYTES
     session.delete_media(media[0].id)
+    observed = set(session.capabilities().evidence.observed_features)
     assert any("/main/imgsettings/iso=800" in command for command in runner.commands)
     assert any("--trigger-capture" in command for command in runner.commands)
     assert any("--delete-file" in command for command in runner.commands)
+    assert {
+        CameraFeature.DESKTOP_BRIDGE,
+        CameraFeature.CAMERA_IDENTITY,
+        CameraFeature.EXPOSURE_CONTROL,
+        CameraFeature.WHITE_BALANCE_CONTROL,
+        CameraFeature.STILL_CAPTURE,
+        CameraFeature.AUTOFOCUS,
+        CameraFeature.SHUTTER_HALF_PRESS,
+        CameraFeature.VIDEO_RECORDING,
+        CameraFeature.FOCUS_DRIVE,
+        CameraFeature.LIVE_VIEW,
+        CameraFeature.LIVE_VIEW_JPEG_POLLING,
+        CameraFeature.MEDIA_BROWSER,
+        CameraFeature.MEDIA_THUMBNAIL,
+        CameraFeature.MEDIA_DOWNLOAD,
+        CameraFeature.MEDIA_DELETE,
+    } <= observed
 
 
 def test_capture_refuses_unhandled_host_ram_target_without_a_card_choice() -> None:
@@ -283,6 +301,7 @@ def test_capture_refuses_unhandled_host_ram_target_without_a_card_choice() -> No
         session.capture_still()
 
     assert rejected.value.code == "UNSAFE_CAPTURE_TARGET"
+    assert CameraFeature.STILL_CAPTURE not in session.capabilities().evidence.observed_features
     assert not any("--trigger-capture" in command for command in runner.commands)
 
 

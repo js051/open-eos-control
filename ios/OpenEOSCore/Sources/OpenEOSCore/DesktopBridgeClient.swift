@@ -214,16 +214,22 @@ public actor DesktopBridgeClient {
         let versions = Self.boundedEvidence(evidenceBody.stringArray("protocolVersions"))
         let commands = Self.boundedEvidence(evidenceBody.stringArray("advertisedCommands"), removeQuery: true)
         let writableSettings = Self.boundedEvidence(evidenceBody.stringArray("writableSettings"))
+        let rawObservedFeatures = evidenceBody.stringArray("observedFeatures")
+        let observedFeatures = Set(
+            rawObservedFeatures.prefix(Self.maximumEvidenceItems).compactMap(CameraFeature.init(rawValue:))
+        )
         let source = Self.cleanEvidenceItem(evidenceBody.string("source") ?? "unknown", removeQuery: false).value
         let evidence = CameraCapabilityEvidence(
             source: source.isEmpty ? "unknown" : source,
             protocolVersions: versions.values,
             advertisedCommands: commands.values,
             writableSettings: writableSettings.values,
+            observedFeatures: observedFeatures,
             truncated: (evidenceBody.optionalBool("truncated") ?? false)
                 || versions.truncated
                 || commands.truncated
                 || writableSettings.truncated
+                || rawObservedFeatures.count > Self.maximumEvidenceItems
         )
 
         return CameraCapabilities(
@@ -419,12 +425,18 @@ public actor DesktopBridgeClient {
         snapshot: CameraSnapshot?,
         liveView: CCAPILiveViewMetrics = CCAPILiveViewMetrics(),
         lastError: String? = nil
-    ) -> String {
-        DesktopBridgeDiagnosticReport.make(
+    ) async -> String {
+        let currentSnapshot: CameraSnapshot?
+        if let snapshot, let capabilities = try? await capabilities() {
+            currentSnapshot = CameraSnapshot(info: snapshot.info, status: snapshot.status, capabilities: capabilities)
+        } else {
+            currentSnapshot = snapshot
+        }
+        return DesktopBridgeDiagnosticReport.make(
             baseURL: baseURL,
             bridgeVersion: bridgeVersion,
             engine: sessionEngine,
-            snapshot: snapshot,
+            snapshot: currentSnapshot,
             liveView: liveView,
             lastError: lastError
         )
@@ -710,6 +722,8 @@ public enum DesktopBridgeDiagnosticReport {
         let supported = snapshot?.capabilities.matrix.supported.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
         let planned = snapshot?.capabilities.matrix.planned.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
         let evidence = snapshot?.capabilities.evidence
+        let observed = evidence?.observedFeatures.map(\.rawValue).sorted().joined(separator: ", ")
+        let observedText = observed.flatMap { $0.isEmpty ? nil : $0 } ?? "none"
         let date = ISO8601DateFormatter().string(from: liveView.lastFrameAt ?? Date(timeIntervalSince1970: 0))
         let report = [
             "Open EOS Control iOS diagnostic report",
@@ -726,6 +740,7 @@ public enum DesktopBridgeDiagnosticReport {
             "advertisedCommandCount=\(evidence?.advertisedCommands.count ?? 0)",
             "advertisedCommands=\(evidence?.advertisedCommands.joined(separator: " | ") ?? "none")",
             "writableSettings=\(evidence?.writableSettings.joined(separator: ", ") ?? "none")",
+            "observedFeatures=\(observedText)",
             "capabilityEvidenceTruncated=\(evidence?.truncated ?? false)",
             "battery=\(snapshot?.status.rawBatteryJSON ?? "null")",
             "storage=\(snapshot?.status.rawStorageJSON ?? "null")",

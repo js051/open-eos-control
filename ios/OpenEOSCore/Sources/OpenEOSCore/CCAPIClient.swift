@@ -181,6 +181,7 @@ public actor CCAPIClient {
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/info")
             cachedModel = value.string("model", default: "Unknown camera")
+            observedFeatures.insert(.cameraIdentity)
             return CameraInfo(
                 connected: value.bool("connected") ?? true,
                 model: cachedModel,
@@ -203,7 +204,9 @@ public actor CCAPIClient {
     public func status() async throws -> CameraStatus {
         try await ensureInitialized()
         if resolvedMode == .simulator {
-            return try parseSimulatorStatus(await requestJSON(path: "/ccapi/status"))
+            let status = try parseSimulatorStatus(await requestJSON(path: "/ccapi/status"))
+            observedFeatures.formUnion([.batteryStatus, .storageStatus])
+            return status
         }
 
         let battery = try await firstJSON(
@@ -323,6 +326,7 @@ public actor CCAPIClient {
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
+            observedFeatures.insert(featureForSetting(key))
             return try await status()
         }
 
@@ -332,6 +336,7 @@ public actor CCAPIClient {
             throw CCAPIError.invalidSetting(key: key, value: value)
         }
         try await putSettingValue(candidateKeys: aliases(for: key), value: value)
+        observedFeatures.insert(featureForSetting(key))
         return try await status()
     }
 
@@ -339,6 +344,7 @@ public actor CCAPIClient {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             _ = try await requestJSON(path: "/ccapi/capture/still", method: .post, json: ["af": true])
+            observedFeatures.insert(.stillCapture)
             return try await status()
         }
 
@@ -365,6 +371,7 @@ public actor CCAPIClient {
                 release: { _ = try await self.requestJSON(path: "/ccapi/shutter/release", method: .post, json: [:]) },
                 holdNanoseconds: Self.halfPressNanoseconds
             )
+            observedFeatures.insert(.shutterHalfPress)
             return try await status()
         }
         guard let manual = manualShutterOperation() else {
@@ -387,6 +394,7 @@ public actor CCAPIClient {
                 release: { _ = try await self.requestJSON(path: "/ccapi/shutter/release", method: .post, json: [:]) },
                 holdNanoseconds: Self.halfPressNanoseconds
             )
+            observedFeatures.insert(.autofocus)
             return try await status()
         }
         if let operation = autofocusOperation() {
@@ -420,11 +428,13 @@ public actor CCAPIClient {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/focus/tap", method: .post, json: ["x": x, "y": y])
-            return FocusResult(
+            let result = FocusResult(
                 accepted: value.bool("ok") ?? false,
                 x: (value["x"] as? NSNumber)?.doubleValue ?? x,
                 y: (value["y"] as? NSNumber)?.doubleValue ?? y
             )
+            if result.accepted { observedFeatures.insert(.tapFocus) }
+            return result
         }
         guard let operation = tapFocusOperation() else {
             throw CCAPIError.unsupported(.tapFocus)
@@ -438,17 +448,20 @@ public actor CCAPIClient {
             operation: operation,
             json: ["positionx": position.x, "positiony": position.y]
         )
+        observedFeatures.insert(.tapFocus)
         return FocusResult(accepted: true, x: x, y: y)
     }
 
     public func clickWhiteBalance(x: Double, y: Double) async throws -> CameraStatus {
         try await ensureInitialized()
         if resolvedMode == .simulator {
-            return try parseSimulatorStatus(await requestJSON(
+            let status = try parseSimulatorStatus(await requestJSON(
                 path: "/ccapi/whitebalance/click",
                 method: .post,
                 json: ["x": x, "y": y]
             ))
+            observedFeatures.insert(.clickWhiteBalance)
+            return status
         }
         guard let operation = clickWhiteBalanceOperation(), supportsCoordinateClickWhiteBalance() else {
             throw CCAPIError.unsupported(.clickWhiteBalance)
@@ -493,6 +506,7 @@ public actor CCAPIClient {
         latestLiveViewGeometry = nil
         if resolvedMode == .simulator {
             activeLiveViewSource = .simulatorFrame
+            observedFeatures.insert(.liveView)
             return
         }
         let requestedSource = request.source
@@ -621,6 +635,7 @@ public actor CCAPIClient {
                 } else {
                     frame = try JPEGFrameParser.validatedImageData(response.body, contentType: contentType)
                 }
+                observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
                 return LiveViewFrame(data: frame, contentType: contentType, sourceURL: sourceURL)
             } catch {
                 if error is CancellationError { throw error }
@@ -636,7 +651,7 @@ public actor CCAPIClient {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/media")
-            return value.array("items")?.objects.map {
+            let items = value.array("items")?.objects.map {
                 CameraMediaItem(
                     id: $0.string("id"),
                     name: $0.string("name"),
@@ -645,6 +660,8 @@ public actor CCAPIClient {
                     captureTime: $0.string("capture_time").nilIfEmpty
                 )
             } ?? []
+            observedFeatures.insert(.mediaBrowser)
+            return items
         }
         guard supports(.get, suffix: "/contents") else { throw CCAPIError.unsupported(.mediaBrowser) }
 
@@ -664,7 +681,7 @@ public actor CCAPIClient {
                 }
             }
         }
-        if !mediaPaths.isEmpty { observedFeatures.formUnion([.mediaBrowser, .mediaDownload]) }
+        observedFeatures.insert(.mediaBrowser)
         return mediaPaths.prefix(Self.maximumMediaItems).map {
             CameraMediaItem(id: $0, name: ($0 as NSString).lastPathComponent, kind: Self.mediaKind($0))
         }
@@ -747,12 +764,18 @@ public actor CCAPIClient {
         snapshot: CameraSnapshot?,
         liveView: CCAPILiveViewMetrics = CCAPILiveViewMetrics(),
         lastError: String? = nil
-    ) -> String {
-        CCAPIDiagnosticReport.make(
+    ) async -> String {
+        let currentSnapshot: CameraSnapshot?
+        if let snapshot, let capabilities = try? await capabilities() {
+            currentSnapshot = CameraSnapshot(info: snapshot.info, status: snapshot.status, capabilities: capabilities)
+        } else {
+            currentSnapshot = snapshot
+        }
+        return CCAPIDiagnosticReport.make(
             baseURL: baseURL,
             mode: resolvedMode,
             versions: apiVersionPrefixes,
-            snapshot: snapshot,
+            snapshot: currentSnapshot,
             liveView: liveView,
             lastError: lastError
         )
@@ -1145,9 +1168,11 @@ public actor CCAPIClient {
             protocolVersions: Array(protocolVersions.prefix(Self.maximumCapabilityEvidenceItems)),
             advertisedCommands: Array(commands.prefix(Self.maximumCapabilityEvidenceItems)),
             writableSettings: Array(writableSettings.prefix(Self.maximumCapabilityEvidenceItems)),
+            observedFeatures: observedFeatures,
             truncated: protocolVersions.count > Self.maximumCapabilityEvidenceItems ||
                 commands.count > Self.maximumCapabilityEvidenceItems ||
-                writableSettings.count > Self.maximumCapabilityEvidenceItems
+                writableSettings.count > Self.maximumCapabilityEvidenceItems ||
+                observedFeatures.count > Self.maximumCapabilityEvidenceItems
         )
     }
 
@@ -1249,6 +1274,14 @@ public actor CCAPIClient {
         }
     }
 
+    private func featureForSetting(_ key: String) -> CameraFeature {
+        switch key.lowercased() {
+        case "iso", "shutter", "aperture": .exposureControl
+        case "whitebalance": .whiteBalanceControl
+        default: .advancedSettings
+        }
+    }
+
     private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
         try await ensureInitialized()
         if resolvedMode == .simulator {
@@ -1260,6 +1293,7 @@ public actor CCAPIClient {
             try await commandOK(operation: operation, json: ["action": enabled ? "start" : "stop"])
         }
         recording = enabled
+        observedFeatures.insert(.videoRecording)
         return try await status()
     }
 
@@ -1326,7 +1360,10 @@ public actor CCAPIClient {
                 maximumFPS: 2
             ),
             profile: CameraProfile.from(modelName: cachedModel),
-            evidence: CameraCapabilityEvidence(source: discoverySource)
+            evidence: CameraCapabilityEvidence(
+                source: discoverySource,
+                observedFeatures: observedFeatures
+            )
         )
     }
 

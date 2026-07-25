@@ -100,6 +100,8 @@ class CcapiClient(
     var nativeLiveViewSession: NativeLiveViewSession? = null
         private set
 
+    fun observedFeatureSnapshot(): Set<CameraFeature> = observedFeatures.toSet()
+
     suspend fun initialize() {
         val isLocalOrSim = try {
             val uri = java.net.URI.create(baseUrl)
@@ -317,7 +319,9 @@ class CcapiClient(
                 api = json?.optString("version", "ccapi") ?: "ccapi"
             )
         } else {
-            getJson("/ccapi/info").toCameraInfo()
+            getJson("/ccapi/info").toCameraInfo().also {
+                observedFeatures.add(CameraFeature.CAMERA_IDENTITY)
+            }
         }
     }
 
@@ -376,7 +380,9 @@ class CcapiClient(
                 rawStorageJson = storageJson?.toString() ?: "null"
             )
         } else {
-            getJson("/ccapi/status").toCameraStatus()
+            getJson("/ccapi/status").toCameraStatus().also {
+                observedFeatures.addAll(setOf(CameraFeature.BATTERY_STATUS, CameraFeature.STORAGE_STATUS))
+            }
         }
     }
 
@@ -466,7 +472,10 @@ class CcapiClient(
             )
         } else {
             getJson("/ccapi/capabilities").toCameraCapabilities().copy(
-                evidence = CameraCapabilityEvidence(source = discoverySource),
+                evidence = CameraCapabilityEvidence(
+                    source = discoverySource,
+                    observedFeatures = observedFeatures.toSet(),
+                ),
             )
         }
     }
@@ -476,7 +485,7 @@ class CcapiClient(
         shutter: String? = null,
         aperture: String? = null,
     ): CameraStatus {
-        return if (isRealCamera) {
+        val status = if (isRealCamera) {
             iso?.let { putSettingValue(listOf("iso"), it) }
             shutter?.let {
                 putSettingValue(listOf("tv", "shutterspeed", "shutter"), it)
@@ -492,24 +501,30 @@ class CcapiClient(
             aperture?.let { payload.put("aperture", it) }
             patchJson("/ccapi/exposure", payload).toCameraStatus()
         }
+        observedFeatures.add(CameraFeature.EXPOSURE_CONTROL)
+        return status
     }
 
     suspend fun setWhiteBalance(value: String): CameraStatus {
-        return if (isRealCamera) {
+        val status = if (isRealCamera) {
             putSettingValue(listOf("wb", "whitebalance", "white_balance"), value)
             status()
         } else {
             patchJson("/ccapi/white-balance", JSONObject().put("white_balance", value)).toCameraStatus()
         }
+        observedFeatures.add(CameraFeature.WHITE_BALANCE_CONTROL)
+        return status
     }
 
     suspend fun setSetting(key: String, value: String): CameraStatus {
-        return if (isRealCamera) {
+        val status = if (isRealCamera) {
             putSettingValue(listOf(key), value)
             status()
         } else {
             status()
         }
+        observedFeatures.add(featureForSetting(key))
+        return status
     }
 
     suspend fun startRecording(): CameraStatus {
@@ -527,6 +542,7 @@ class CcapiClient(
         } else {
             postJson("/ccapi/record/start", JSONObject())
         }
+        observedFeatures.add(CameraFeature.VIDEO_RECORDING)
         return status()
     }
 
@@ -545,6 +561,7 @@ class CcapiClient(
         } else {
             postJson("/ccapi/record/stop", JSONObject())
         }
+        observedFeatures.add(CameraFeature.VIDEO_RECORDING)
         return status()
     }
 
@@ -579,10 +596,10 @@ class CcapiClient(
                     },
                 )
             }
-            observedFeatures.add(CameraFeature.STILL_CAPTURE)
         } else {
             postJson("/ccapi/capture/still", JSONObject().put("af", true))
         }
+        observedFeatures.add(CameraFeature.STILL_CAPTURE)
         return status()
     }
 
@@ -630,7 +647,6 @@ class CcapiClient(
                     afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
                 )
             }
-            observedFeatures.add(CameraFeature.AUTOFOCUS)
         } else {
             withGuaranteedRelease(
                 press = { postJson("/ccapi/shutter/half-press", JSONObject()) },
@@ -638,6 +654,7 @@ class CcapiClient(
                 afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
             )
         }
+        observedFeatures.add(CameraFeature.AUTOFOCUS)
         return status()
     }
 
@@ -664,7 +681,6 @@ class CcapiClient(
                 },
                 afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
             )
-            observedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
         } else {
             withGuaranteedRelease(
                 press = { postJson("/ccapi/shutter/half-press", JSONObject()) },
@@ -672,6 +688,7 @@ class CcapiClient(
                 afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
             )
         }
+        observedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
         return status()
     }
 
@@ -699,8 +716,11 @@ class CcapiClient(
         return FocusDriveResult(ok = true, direction = direction, step = step)
     }
 
-    suspend fun listMedia(): List<CameraMediaItem> =
-        if (isRealCamera) listRealMedia() else listSimulatorMedia()
+    suspend fun listMedia(): List<CameraMediaItem> {
+        val items = if (isRealCamera) listRealMedia() else listSimulatorMedia()
+        observedFeatures.add(CameraFeature.MEDIA_BROWSER)
+        return items
+    }
 
     suspend fun downloadMedia(
         item: CameraMediaItem,
@@ -795,6 +815,7 @@ class CcapiClient(
                 path = apiPath("PUT", "/shooting/liveview/afframeposition"),
             )
             commandOk("/shooting/liveview/afframeposition", payload, selectedOperation)
+            observedFeatures.add(CameraFeature.TAP_FOCUS)
             FocusResult(ok = true, x = x, y = y)
         } else {
             val payload = JSONObject().put("x", x).put("y", y)
@@ -803,16 +824,18 @@ class CcapiClient(
                 ok = json.optBoolean("ok"),
                 x = json.optDouble("x"),
                 y = json.optDouble("y"),
-            )
+            ).also { if (it.ok) observedFeatures.add(CameraFeature.TAP_FOCUS) }
         }
     }
 
     suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus {
         if (!isRealCamera) {
-            return postJson(
+            val status = postJson(
                     "/ccapi/whitebalance/click",
                     JSONObject().put("x", x).put("y", y),
                 ).toCameraStatus()
+            observedFeatures.add(CameraFeature.CLICK_WHITE_BALANCE)
+            return status
         }
         val operation = clickWhiteBalanceOperation()
         if (enforceAdvertisedOperations && !supportsCoordinateClickWhiteBalance()) {
@@ -849,7 +872,10 @@ class CcapiClient(
                 .build()
 
             try {
-                return requestLiveViewFrame(request, sourceUrl)
+                return requestLiveViewFrame(request, sourceUrl).also {
+                    observedFeatures.add(CameraFeature.LIVE_VIEW)
+                    observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+                }
             } catch (exception: Exception) {
                 errors.add("$sourceUrl\n${exception.javaClass.simpleName}: ${exception.message ?: "Unknown error"}")
             }
@@ -920,10 +946,17 @@ class CcapiClient(
             protocolVersions = protocolVersions.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
             advertisedCommands = commands.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
             writableSettings = writableSettings.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
+            observedFeatures = observedFeatures.toSet(),
             truncated = protocolVersions.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
                 commands.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
                 writableSettings.size > MAX_CAPABILITY_EVIDENCE_ITEMS,
         )
+    }
+
+    private fun featureForSetting(key: String): CameraFeature = when (key.lowercase()) {
+        "iso", "tv", "shutter", "shutterspeed", "av", "aperture" -> CameraFeature.EXPOSURE_CONTROL
+        "wb", "whitebalance", "white_balance" -> CameraFeature.WHITE_BALANCE_CONTROL
+        else -> CameraFeature.ADVANCED_SETTINGS
     }
 
     private fun advertisedApiPaths(method: String, pathSuffix: String): List<String> =
@@ -1181,10 +1214,6 @@ class CcapiClient(
             }
         }
 
-        if (mediaPaths.isNotEmpty()) {
-            observedFeatures.add(CameraFeature.MEDIA_BROWSER)
-            observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
-        }
         return mediaPaths.take(MAX_MEDIA_ITEMS).map { path ->
             CameraMediaItem(
                 id = path,

@@ -165,6 +165,7 @@
 "protocol_versions" = "Protocol versions";
 "advertised_commands" = "Advertised commands";
 "writable_settings" = "Writable settings";
+"observed_features" = "Observed this session";
 "evidence_truncated" = "Evidence truncated";
 "yes" = "Yes";
 "no" = "No";

@@ -842,6 +842,15 @@
     }
   }
 
+  async function refreshCapabilityEvidence() {
+    if (!state.session) return;
+    try {
+      state.capabilities = await api(`/v1/session/${encodeURIComponent(state.session.id)}/capabilities`);
+    } catch (_) {
+      // Evidence refresh must not turn an already successful camera operation into a failure.
+    }
+  }
+
   async function disconnectCamera() {
     if (!state.session) return;
     const sessionId = state.session.id;
@@ -1557,7 +1566,9 @@
       button.setAttribute("aria-current", active ? "page" : "false");
     });
     if (view === "media" && !state.mediaLoaded) refreshMedia();
-    if (view === "diagnostics") renderDiagnostics();
+    if (view === "diagnostics") {
+      refreshCapabilityEvidence().then(renderDiagnostics);
+    }
   }
 
   async function refreshMedia() {
@@ -1808,6 +1819,8 @@
   }
 
   async function copyDiagnostics() {
+    await refreshCapabilityEvidence();
+    renderDiagnostics();
     const report = ui.diagnosticsOutput.textContent;
     try {
       await navigator.clipboard.writeText(report);

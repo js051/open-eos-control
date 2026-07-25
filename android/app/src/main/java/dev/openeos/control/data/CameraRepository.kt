@@ -15,6 +15,7 @@ class CameraRepository(
     private var frameVersion = 0L
     private var liveViewRequest = LiveViewRequest()
     private var active = false
+    private var activeInfo: CameraInfo? = null
     private val connectionMutex = Mutex()
 
     fun isRealCamera(): Boolean = backend.prefersBitmapLiveViewFrames
@@ -89,6 +90,7 @@ class CameraRepository(
             active = true
             frameVersion = 0L
             val info = backend.info()
+            activeInfo = info
             val status = backend.status()
             val capabilities = backend.capabilities().forCamera(info)
             liveViewRequest = request.clampTo(capabilities.liveView)
@@ -120,6 +122,7 @@ class CameraRepository(
         } catch (exception: Exception) {
             runCatching { backend.close() }
             active = false
+            activeInfo = null
             throw exception
         }
     }
@@ -141,6 +144,7 @@ class CameraRepository(
             // ignore failure to stop live view
         } finally {
             active = false
+            activeInfo = null
         }
     }
 
@@ -156,7 +160,11 @@ class CameraRepository(
 
     suspend fun setCameraSetting(key: String, value: String): CameraStatus = backend.setSetting(key, value)
 
-    suspend fun refreshCapabilities(): CameraCapabilities = backend.capabilities()
+    suspend fun refreshCapabilities(): CameraCapabilities = backend.capabilities().forCamera(
+        activeInfo ?: backend.info().also { activeInfo = it }
+    )
+
+    fun observedFeatures(): Set<CameraFeature> = backend.observedFeatures()
 
     fun refreshNetworkDiagnostics(): CameraNetworkDiagnostics = backend.networkDiagnostics
 

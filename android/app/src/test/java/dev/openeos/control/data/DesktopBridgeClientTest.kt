@@ -63,6 +63,7 @@ class DesktopBridgeClientTest {
         val download = client.downloadMedia(media.single(), destination, progress::add)
         client.deleteMedia(media.single())
         client.stopLiveView()
+        val observedFeatures = client.observedFeatureSnapshot()
         client.close()
 
         assertEquals("Canon EOS R6 Mark III", cameras.single().model)
@@ -89,6 +90,29 @@ class DesktopBridgeClientTest {
         assertEquals(listOf("gphoto2 2.5.33"), capabilities.evidence.protocolVersions)
         assertTrue("CAPTURE_PREVIEW" in capabilities.evidence.advertisedCommands)
         assertTrue("/main/imgsettings/iso" in capabilities.evidence.writableSettings)
+        assertTrue(CameraFeature.BATTERY_STATUS in capabilities.evidence.observedFeatures)
+        assertTrue(
+            observedFeatures.containsAll(
+                setOf(
+                    CameraFeature.DESKTOP_BRIDGE,
+                    CameraFeature.CAMERA_IDENTITY,
+                    CameraFeature.EXPOSURE_CONTROL,
+                    CameraFeature.WHITE_BALANCE_CONTROL,
+                    CameraFeature.STILL_CAPTURE,
+                    CameraFeature.AUTOFOCUS,
+                    CameraFeature.SHUTTER_HALF_PRESS,
+                    CameraFeature.VIDEO_RECORDING,
+                    CameraFeature.CLICK_WHITE_BALANCE,
+                    CameraFeature.FOCUS_DRIVE,
+                    CameraFeature.LIVE_VIEW,
+                    CameraFeature.LIVE_VIEW_JPEG_POLLING,
+                    CameraFeature.MEDIA_BROWSER,
+                    CameraFeature.MEDIA_THUMBNAIL,
+                    CameraFeature.MEDIA_DOWNLOAD,
+                    CameraFeature.MEDIA_DELETE,
+                ),
+            ),
+        )
         assertArrayEquals(JPEG, frame.bytes)
         assertTrue(frame.sourceUrl.endsWith("/liveview/frame?t=9"))
         assertTrue(focus.ok)
@@ -346,6 +370,7 @@ class DesktopBridgeClientTest {
                 "protocolVersions": ["gphoto2 2.5.33"],
                 "advertisedCommands": ["CAPTURE_IMAGE", "CAPTURE_PREVIEW"],
                 "writableSettings": ["/main/imgsettings/iso"],
+                "observedFeatures": ["BATTERY_STATUS"],
                 "truncated": false
               }
             }

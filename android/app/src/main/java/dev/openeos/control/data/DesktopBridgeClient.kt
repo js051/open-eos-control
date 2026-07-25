@@ -65,6 +65,9 @@ class DesktopBridgeClient(
     }.build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var sessionId: String? = null
+    private val observedFeatures = mutableSetOf(CameraFeature.DESKTOP_BRIDGE)
+
+    fun observedFeatureSnapshot(): Set<CameraFeature> = observedFeatures.toSet()
 
     suspend fun discoverCameras(): List<DesktopBridgeCamera> {
         validateService()
@@ -73,6 +76,8 @@ class DesktopBridgeClient(
 
     suspend fun initialize() {
         check(sessionId == null) { "Desktop bridge session is already initialized." }
+        observedFeatures.clear()
+        observedFeatures.add(CameraFeature.DESKTOP_BRIDGE)
         validateService()
         val payload = JSONObject().put("engine", "auto")
         cameraId?.takeIf(String::isNotBlank)?.let { payload.put("cameraId", it) }
@@ -100,7 +105,7 @@ class DesktopBridgeClient(
             manufacturer = body.optNullableString("manufacturer"),
             deviceVersion = body.optNullableString("deviceVersion"),
             engineVersion = body.optNullableString("engineVersion"),
-        )
+        ).also { observedFeatures.add(CameraFeature.CAMERA_IDENTITY) }
     }
 
     suspend fun status(): CameraStatus = parseStatus(getJson(sessionEndpoint("status")))
@@ -150,6 +155,12 @@ class DesktopBridgeClient(
             .map { it.replace("\r", "").replace("\n", "").take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS) }
             .distinct()
             .take(MAX_CAPABILITY_EVIDENCE_ITEMS)
+        val evidenceObservedFeatures = (
+            evidenceBody.optJSONArray("observedFeatures").cameraFeatures() + observedFeatures
+        )
+            .take(MAX_CAPABILITY_EVIDENCE_ITEMS)
+            .toSet()
+        observedFeatures.addAll(evidenceObservedFeatures)
         return CameraCapabilities(
             iso = settingsByKey["iso"]?.values.orEmpty(),
             shutter = settingsByKey["shutter"]?.values.orEmpty(),
@@ -190,10 +201,12 @@ class DesktopBridgeClient(
                 protocolVersions = evidenceVersions,
                 advertisedCommands = evidenceCommands,
                 writableSettings = evidenceSettings,
+                observedFeatures = evidenceObservedFeatures,
                 truncated = evidenceBody.optBoolean("truncated") ||
                     (evidenceBody.optJSONArray("protocolVersions")?.length() ?: 0) > evidenceVersions.size ||
                     (evidenceBody.optJSONArray("advertisedCommands")?.length() ?: 0) > evidenceCommands.size ||
-                    (evidenceBody.optJSONArray("writableSettings")?.length() ?: 0) > evidenceSettings.size,
+                    (evidenceBody.optJSONArray("writableSettings")?.length() ?: 0) > evidenceSettings.size ||
+                    (evidenceBody.optJSONArray("observedFeatures")?.length() ?: 0) > evidenceObservedFeatures.size,
             ),
         )
     }
@@ -221,34 +234,36 @@ class DesktopBridgeClient(
             sessionEndpoint("settings", key),
             JSONObject().put("value", value),
         )
-    )
+    ).also { observedFeatures.add(featureForSetting(key)) }
 
     suspend fun captureStill(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("capture", "still"), JSONObject())
-    )
+    ).also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }
 
     suspend fun autofocus(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("focus", "auto"), JSONObject())
-    )
+    ).also { observedFeatures.add(CameraFeature.AUTOFOCUS) }
 
     suspend fun halfPressShutter(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("shutter", "half-press"), JSONObject())
-    )
+    ).also { observedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS) }
 
     suspend fun startRecording(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("recording", "start"), JSONObject())
-    )
+    ).also { observedFeatures.add(CameraFeature.VIDEO_RECORDING) }
 
     suspend fun stopRecording(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("recording", "stop"), JSONObject())
-    )
+    ).also { observedFeatures.add(CameraFeature.VIDEO_RECORDING) }
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
         val body = postJson(
             sessionEndpoint("focus", "tap"),
             JSONObject().put("x", x).put("y", y),
         )
-        return FocusResult(ok = body.optBoolean("accepted"), x = x, y = y)
+        return FocusResult(ok = body.optBoolean("accepted"), x = x, y = y).also {
+            if (it.ok) observedFeatures.add(CameraFeature.TAP_FOCUS)
+        }
     }
 
     suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus = parseStatus(
@@ -256,7 +271,7 @@ class DesktopBridgeClient(
             sessionEndpoint("whitebalance", "click"),
             JSONObject().put("x", x).put("y", y),
         )
-    )
+    ).also { observedFeatures.add(CameraFeature.CLICK_WHITE_BALANCE) }
 
     suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusDriveResult {
         val body = postJson(
@@ -269,7 +284,7 @@ class DesktopBridgeClient(
             ok = body.optBoolean("accepted"),
             direction = body.optString("direction").toEnumOrNull<FocusDriveDirection>() ?: direction,
             step = body.optString("step").toEnumOrNull<FocusDriveStep>() ?: step,
-        )
+        ).also { if (it.ok) observedFeatures.add(CameraFeature.FOCUS_DRIVE) }
     }
 
     suspend fun startLiveView(request: LiveViewRequest) {
@@ -280,6 +295,7 @@ class DesktopBridgeClient(
                 .put("size", request.size.name)
                 .put("source", request.source.name),
         )
+        observedFeatures.add(CameraFeature.LIVE_VIEW)
     }
 
     suspend fun stopLiveView() {
@@ -318,6 +334,7 @@ class DesktopBridgeClient(
             }
             val bytes = output.toByteArray()
             check(bytes.isCompleteJpeg()) { "Desktop Bridge did not return a complete JPEG frame." }
+            observedFeatures.addAll(setOf(CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING))
             LiveViewFrame(
                 bytes = bytes,
                 contentType = response.header("content-type"),
@@ -326,8 +343,8 @@ class DesktopBridgeClient(
         }
     }
 
-    suspend fun listMedia(): List<CameraMediaItem> =
-        getJson(sessionEndpoint("media")).optJSONArray("items").objects().mapNotNull { item ->
+    suspend fun listMedia(): List<CameraMediaItem> {
+        val items = getJson(sessionEndpoint("media")).optJSONArray("items").objects().mapNotNull { item ->
             val id = item.optString("id").trim()
             val name = item.optString("name").trim()
             if (id.isBlank() || name.isBlank()) {
@@ -342,6 +359,9 @@ class DesktopBridgeClient(
                 )
             }
         }
+        observedFeatures.add(CameraFeature.MEDIA_BROWSER)
+        return items
+    }
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = withContext(Dispatchers.IO) {
         val request = Request.Builder()
@@ -374,7 +394,9 @@ class DesktopBridgeClient(
             check(bytes.isNotEmpty() && contentType?.startsWith("image/") == true) {
                 "Desktop Bridge did not return an image thumbnail."
             }
-            CameraMediaThumbnail(item = item, bytes = bytes, contentType = contentType)
+            CameraMediaThumbnail(item = item, bytes = bytes, contentType = contentType).also {
+                observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL)
+            }
         }
     }
 
@@ -433,7 +455,7 @@ class DesktopBridgeClient(
                     item = item.copy(sizeBytes = item.sizeBytes ?: bytesTransferred),
                     bytesTransferred = bytesTransferred,
                     contentType = response.header("content-type"),
-                )
+                ).also { observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD) }
             }
         } finally {
             cancelCall.set(false)
@@ -448,6 +470,13 @@ class DesktopBridgeClient(
                 .delete()
                 .build(),
         )
+        observedFeatures.add(CameraFeature.MEDIA_DELETE)
+    }
+
+    private fun featureForSetting(key: String): CameraFeature = when (key.lowercase()) {
+        "iso", "shutter", "aperture" -> CameraFeature.EXPOSURE_CONTROL
+        "whitebalance" -> CameraFeature.WHITE_BALANCE_CONTROL
+        else -> CameraFeature.ADVANCED_SETTINGS
     }
 
     private suspend fun validateService() {
