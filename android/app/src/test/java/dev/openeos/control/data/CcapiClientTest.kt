@@ -107,6 +107,10 @@ class CcapiClientTest {
         assertEquals("1/50", status.exposure.shutter)
         assertEquals("2.8", status.exposure.aperture)
         assertEquals("auto", status.exposure.whiteBalance)
+        assertEquals(128_000_000_000L, status.storageTotalBytes)
+        assertEquals(84_000_000_000L, status.storageFreeBytes)
+        assertEquals(2_418L, status.storageFreeImages)
+        assertEquals(2, status.storageDeviceCount)
     }
 
     @Test
@@ -668,7 +672,7 @@ class CcapiClientTest {
     fun realStatusUsesBatteryListStorageListAndMergedSettings() = runTest {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
-        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000,"freeimages":-1},{"name":"card2","capacity":128000000000,"freebytes":64000000000,"remainingimages":2400}]}"""))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
         server.enqueue(jsonResponse("""{}"""))
 
@@ -681,6 +685,10 @@ class CcapiClientTest {
         assertEquals(89, status.batteryLevel)
         assertEquals("89%", status.batteryStatus)
         assertTrue(status.mediaAvailable == true)
+        assertEquals(192_000_000_000L, status.storageTotalBytes)
+        assertEquals(96_000_000_000L, status.storageFreeBytes)
+        assertEquals(2_400L, status.storageFreeImages)
+        assertEquals(2, status.storageDeviceCount)
         assertEquals("800", status.exposure.iso)
         assertEquals("1/50", status.exposure.shutter)
         assertEquals("2.8", status.exposure.aperture)
@@ -1312,7 +1320,7 @@ class CcapiClientTest {
               "battery": {"level": 82, "status": "normal"},
               "recording": false,
               "mode": "movie",
-              "media": {"available": true, "remaining_minutes": 120},
+              "media": {"available": true, "remaining_minutes": 120, "total_bytes": 128000000000, "free_bytes": 84000000000, "free_images": 2418, "devices": 2},
               "exposure": {
                 "iso": "800",
                 "shutter": "1/50",

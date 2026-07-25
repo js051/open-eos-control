@@ -151,8 +151,12 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
+        compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
+        compose.onNodeWithText(
+            compose.activity.resources.getQuantityString(R.plurals.storage_shots_remaining, 2_418, 2_418L)
+        ).assertIsDisplayed()
     }
 
     @Test

@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import android.os.SystemClock
+import android.text.format.Formatter
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.annotation.DrawableRes
@@ -54,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -70,6 +72,7 @@ import coil.request.ImageRequest
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.NativeLiveViewSession
 import kotlinx.coroutines.delay
 
@@ -188,10 +191,7 @@ private fun SegmentItem(label: String, selected: Boolean, onClick: () -> Unit, m
 fun CameraHeader(state: CameraUiState, actions: CameraActions) {
     val battery = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
         ?: stringResource(R.string.unknown)
-    val storage = when (state.status?.mediaAvailable) {
-        true -> stringResource(R.string.storage_ready)
-        else -> stringResource(R.string.storage_unknown)
-    }
+    val storage = cameraStorageLabel(state.status)
     Row(
         modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -224,6 +224,7 @@ fun CameraHeader(state: CameraUiState, actions: CameraActions) {
 fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val battery = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
         ?: stringResource(R.string.unknown)
+    val storage = cameraStorageLabel(state.status)
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = modifier.fillMaxWidth().height(48.dp).background(Color(0xB8000000)).padding(start = 12.dp),
@@ -232,7 +233,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
     ) {
         Box(Modifier.size(8.dp).background(AppSuccess, CircleShape))
         Text(
-            state.info?.model ?: stringResource(R.string.unknown),
+            state.info?.model?.toCompactCameraName() ?: stringResource(R.string.unknown),
             color = AppText,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -240,6 +241,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             modifier = Modifier.weight(1f).cameraControlRotation(),
         )
         Text(battery, Modifier.cameraControlRotation(), color = AppSubtleText, maxLines = 1)
+        Text(storage, Modifier.cameraControlRotation(), color = AppSubtleText, maxLines = 1)
         ToolIconButton(
             if (state.captureMode == CaptureMode.PHOTO) LucideR.drawable.lucide_ic_camera else LucideR.drawable.lucide_ic_video,
             stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.switch_to_video else R.string.switch_to_photo),
@@ -301,6 +303,27 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
         }
     }
 }
+
+@Composable
+private fun cameraStorageLabel(status: CameraStatus?): String {
+    val context = LocalContext.current
+    return when {
+        status?.storageFreeImages != null -> pluralStringResource(
+            R.plurals.storage_shots_remaining,
+            status.storageFreeImages.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            status.storageFreeImages,
+        )
+        status?.storageFreeBytes != null -> stringResource(
+            R.string.storage_free_short,
+            Formatter.formatShortFileSize(context, status.storageFreeBytes),
+        )
+        status?.mediaAvailable == true -> stringResource(R.string.storage_ready)
+        else -> stringResource(R.string.storage_unknown)
+    }
+}
+
+private fun String.toCompactCameraName(): String =
+    removePrefix("Canon EOS ").ifBlank { this }
 
 @Composable
 fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {

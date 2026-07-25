@@ -68,7 +68,14 @@ def camera_status() -> dict[str, object]:
         "recording": state["recording"],
         "capture_count": state["capture_count"],
         "mode": "movie",
-        "media": {"available": True, "remaining_minutes": 120},
+        "media": {
+            "available": True,
+            "remaining_minutes": 120,
+            "total_bytes": 128_000_000_000,
+            "free_bytes": 84_000_000_000,
+            "free_images": 2_418,
+            "devices": 2,
+        },
         "exposure": state["exposure"],
     }
 

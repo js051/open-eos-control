@@ -57,6 +57,10 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(snapshot.info.model, "Canon EOS R6 Mark III")
         XCTAssertEqual(snapshot.status.batteryLevel, 89)
         XCTAssertEqual(snapshot.status.exposure.shutter, "1/50")
+        XCTAssertEqual(snapshot.status.storageTotalBytes, 192_000_000_000)
+        XCTAssertEqual(snapshot.status.storageFreeBytes, 96_000_000_000)
+        XCTAssertEqual(snapshot.status.storageFreeImages, 2_400)
+        XCTAssertEqual(snapshot.status.storageDeviceCount, 2)
         XCTAssertEqual(snapshot.capabilities.profile.priority, .primary)
         XCTAssertEqual(snapshot.capabilities.setting("iso")?.values, ["100", "800", "1600"])
         XCTAssertEqual(snapshot.capabilities.setting("meteringmode")?.values, ["evaluative", "spot"])
@@ -478,7 +482,7 @@ final class CCAPIClientTests: XCTestCase {
         await transport.enqueueJSON(
             method: "POST",
             path: "/ccapi/whitebalance/click",
-            body: #"{"connected":true,"battery":{"level":82,"status":"good"},"media":{"available":true,"remaining_minutes":120},"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"click"}}"#
+            body: #"{"connected":true,"battery":{"level":82,"status":"good"},"media":{"available":true,"remaining_minutes":120,"total_bytes":128000000000,"free_bytes":84000000000,"free_images":2418,"devices":2},"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"click"}}"#
         )
         let client = try CCAPIClient(
             baseURL: "http://127.0.0.1:18080",
@@ -489,6 +493,8 @@ final class CCAPIClientTests: XCTestCase {
         let status = try await client.clickWhiteBalance(x: 0.4, y: 0.6)
 
         XCTAssertEqual(status.exposure.whiteBalance, "click")
+        XCTAssertEqual(status.storageFreeImages, 2_418)
+        XCTAssertEqual(status.storageDeviceCount, 2)
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.path), ["/ccapi/whitebalance/click"])
         let body = try XCTUnwrap(requests.first?.body)
@@ -700,7 +706,13 @@ final class CCAPIClientTests: XCTestCase {
         )
         let snapshot = CameraSnapshot(
             info: CameraInfo(model: "Canon EOS R6 Mark III", serial: "redacted", api: "ccapi"),
-            status: CameraStatus(),
+            status: CameraStatus(
+                mediaAvailable: true,
+                storageTotalBytes: 64_000,
+                storageFreeBytes: 32_000,
+                storageFreeImages: 1_234,
+                storageDeviceCount: 1
+            ),
             capabilities: capabilities
         )
 
@@ -716,13 +728,17 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
         XCTAssertTrue(report.contains("writableSettings=iso, tv"))
         XCTAssertTrue(report.contains("observedFeatures=CAMERA_IDENTITY, LIVE_VIEW"))
+        XCTAssertTrue(report.contains("storageTotalBytes=64000"))
+        XCTAssertTrue(report.contains("storageFreeBytes=32000"))
+        XCTAssertTrue(report.contains("storageFreeImages=1234"))
+        XCTAssertTrue(report.contains("storageDevices=1"))
     }
 
     private func enqueueStatus(on transport: MockCameraHTTPTransport, prefix: String = "/ccapi/ver100") async {
         await transport.enqueueJSON(path: "\(prefix)/devicestatus/batterylist", body: #"{"batterylist":[{"level":89}]}"#)
         await transport.enqueueJSON(
             path: "\(prefix)/devicestatus/storage",
-            body: #"{"storagelist":[{"name":"card1","spacesize":32000000000}]}"#
+            body: #"{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000,"freeimages":-1},{"name":"card2","capacity":128000000000,"freebytes":64000000000,"remainingimages":2400}]}"#
         )
         await transport.enqueueJSON(path: "\(prefix)/shooting/settings", body: settings)
     }

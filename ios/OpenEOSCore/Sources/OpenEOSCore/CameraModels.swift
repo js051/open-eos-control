@@ -22,6 +22,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case mediaDownload = "MEDIA_DOWNLOAD"
     case mediaDelete = "MEDIA_DELETE"
     case desktopBridge = "DESKTOP_BRIDGE"
+    case usbDiagnostics = "USB_DIAGNOSTICS"
 }
 
 public struct CapabilityMatrix: Equatable, Sendable {
@@ -131,6 +132,10 @@ public struct CameraStatus: Equatable, Sendable {
     public let mediaAvailable: Bool?
     public let remainingMinutes: Int?
     public let exposure: ExposureState
+    public let storageTotalBytes: Int64?
+    public let storageFreeBytes: Int64?
+    public let storageFreeImages: Int64?
+    public let storageDeviceCount: Int?
     public let rawBatteryJSON: String
     public let rawStorageJSON: String
 
@@ -143,6 +148,10 @@ public struct CameraStatus: Equatable, Sendable {
         mediaAvailable: Bool? = nil,
         remainingMinutes: Int? = nil,
         exposure: ExposureState = ExposureState(),
+        storageTotalBytes: Int64? = nil,
+        storageFreeBytes: Int64? = nil,
+        storageFreeImages: Int64? = nil,
+        storageDeviceCount: Int? = nil,
         rawBatteryJSON: String = "null",
         rawStorageJSON: String = "null"
     ) {
@@ -154,6 +163,10 @@ public struct CameraStatus: Equatable, Sendable {
         self.mediaAvailable = mediaAvailable
         self.remainingMinutes = remainingMinutes
         self.exposure = exposure
+        self.storageTotalBytes = storageTotalBytes
+        self.storageFreeBytes = storageFreeBytes
+        self.storageFreeImages = storageFreeImages
+        self.storageDeviceCount = storageDeviceCount
         self.rawBatteryJSON = rawBatteryJSON
         self.rawStorageJSON = rawStorageJSON
     }

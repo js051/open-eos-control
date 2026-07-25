@@ -860,6 +860,10 @@ final class CameraAppState: ObservableObject {
             mediaAvailable: true,
             remainingMinutes: 118,
             exposure: ExposureState(iso: "800", shutter: "1/125", aperture: "2.8", whiteBalance: "auto"),
+            storageTotalBytes: 128_000_000_000,
+            storageFreeBytes: 84_000_000_000,
+            storageFreeImages: 2_418,
+            storageDeviceCount: 2,
             rawBatteryJSON: #"{"kind":"battery","level":82,"quality":"good"}"#,
             rawStorageJSON: #"{"name":"card1","status":"ready"}"#
         )

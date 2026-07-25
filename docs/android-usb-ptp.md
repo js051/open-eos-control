@@ -7,7 +7,7 @@ The Android wired backend is split into a standards-based core, a small Android 
 1. Android's Canon USB attach filter can launch the app with temporary permission; `UsbPtpDiagnosticScanner` also enumerates already-attached devices and requests permission explicitly.
 2. `AndroidUsbPtpTransport` selects a USB Still Image interface with class/subclass/protocol `06/01/01`, requires bulk IN and OUT endpoints, opens the device, and claims the interface.
 3. `PtpSession` sends `GetDeviceInfo`, opens session ID 1, and assigns monotonically increasing transaction IDs to subsequent operations.
-4. The backend maps standard DeviceInfo, storage and object datasets into the shared camera models.
+4. The backend maps standard DeviceInfo, storage and object datasets into the shared camera models, preserving per-session card count, total/free bytes and remaining-shot estimates while leaving PTP unknown sentinels unset.
 5. Advertised standard device properties are decoded from `GetDevicePropDesc (0x1014)`, refreshed with `GetDevicePropValue (0x1015)`, and written through the command/data/response form of `SetDevicePropValue (0x1016)`.
 6. Media downloads use `GetObject` and stream each USB chunk directly to the caller's `OutputStream`; deletion uses the standard `DeleteObject` command only when DeviceInfo advertises it.
 7. Generic no-data, data-in, and data-out operation helpers preserve the same mutex, transaction-ID and response validation rules for vendor operations.

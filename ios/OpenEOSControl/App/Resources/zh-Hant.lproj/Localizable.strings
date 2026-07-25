@@ -171,6 +171,14 @@
 "no" = "否";
 "battery_raw" = "電池原始 JSON";
 "storage_raw" = "儲存卡原始 JSON";
+"storage_ready" = "記憶卡就緒";
+"storage_shots_format" = "剩餘 %@ 張";
+"storage_free_format" = "可用 %@";
+"storage_available" = "儲存空間可用";
+"storage_total_bytes" = "儲存空間總位元組";
+"storage_free_bytes" = "儲存空間可用位元組";
+"storage_free_images" = "剩餘可拍張數";
+"storage_devices" = "儲存裝置數";
 "requested_fps" = "要求 FPS";
 "observed_fps" = "實測 FPS";
 "frame_bytes" = "畫面位元組";

@@ -58,8 +58,11 @@ extension Dictionary where Key == String, Value == Any {
     func integer64(_ key: String) -> Int64? {
         if let value = self[key] as? NSNumber { return value.int64Value }
         if let value = self[key] as? String {
-            let digits = value.filter { $0.isNumber }
-            return Int64(digits)
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let exact = Int64(trimmed) { return exact }
+            let sign = trimmed.hasPrefix("-") ? "-" : ""
+            let digits = trimmed.filter { $0.isNumber }
+            return digits.isEmpty ? nil : Int64(sign + digits)
         }
         return nil
     }

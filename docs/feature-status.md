@@ -19,7 +19,7 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | --- | --- | --- | --- |
 | Discovery and API versions | Implemented | Device validation passed; refreshed capability report required | `CcapiClientTest`; same-origin Canon `url` and relative `path` entries are normalized to query-free paths while cross-origin/unsafe entries are ignored; [sanitized physical-camera record](validation/eos-r6-mark-iii-android-ccapi.md) |
 | Capability evidence diagnostics | Implemented | Fresh device report required | Android, iOS and Desktop Bridge reports expose bounded discovery source, versions, advertised method/path pairs, writable setting keys, and success-only `observedFeatures` without URL queries or credentials |
-| Identity, battery, storage | Implemented | Identity and battery passed; storage pending after discovery-parser fix | Unit tests plus diagnostic raw JSON |
+| Identity, battery, storage | Implemented | Identity and battery passed; structured storage summary requires a refreshed device report | CCAPI, Android USB/PTP and Desktop Bridge tests preserve availability, device count, total/free bytes and remaining shots; Android/iOS shooting HUDs, Debug views and diagnostic reports consume the same fields without inferring missing values |
 | ISO, Tv, Av, WB | Implemented | Device validation passed | Advertised setting paths, unit tests, physical camera control |
 | Dynamic camera settings | Implemented | Device validation in progress | Values come from camera `ability`; controls require an advertised setting-specific `PUT` path |
 | JPEG Live View | Implemented | Device validation passed at requested 15 FPS | Frame parser tests and [physical rolling-FPS record](validation/eos-r6-mark-iii-android-ccapi.md) |

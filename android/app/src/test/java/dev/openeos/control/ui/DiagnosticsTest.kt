@@ -112,6 +112,10 @@ class DiagnosticsTest {
                     mediaAvailable = true,
                     remainingMinutes = null,
                     exposure = ExposureState("400", "1/50", "2.8", "auto"),
+                    storageTotalBytes = 64_000L,
+                    storageFreeBytes = 32_000L,
+                    storageFreeImages = 1_234L,
+                    storageDeviceCount = 1,
                     rawTransportJson = "{\"kind\":\"ptp-usb\",\"operations\":[\"0x1014\"]}",
                 ),
             )
@@ -120,6 +124,10 @@ class DiagnosticsTest {
         assertTrue(report.contains("transport=USB_PTP"))
         assertTrue(report.contains("baseUrl=not-applicable"))
         assertTrue(report.contains("transportDetails={\"kind\":\"ptp-usb\""))
+        assertTrue(report.contains("storageTotalBytes=64000"))
+        assertTrue(report.contains("storageFreeBytes=32000"))
+        assertTrue(report.contains("storageFreeImages=1234"))
+        assertTrue(report.contains("storageDevices=1"))
         assertFalse(report.contains("192.168.1.2"))
     }
 

@@ -120,6 +120,16 @@
     <string name="battery_percent">%1$d%%</string>
     <string name="storage_ready">Card ready</string>
     <string name="storage_unknown">Card unknown</string>
+    <plurals name="storage_shots_remaining">
+        <item quantity="one">%1$,d shot</item>
+        <item quantity="other">%1$,d shots</item>
+    </plurals>
+    <string name="storage_free_short">%1$s free</string>
+    <string name="storage_available">Storage available</string>
+    <string name="storage_total_bytes">Storage total bytes</string>
+    <string name="storage_free_bytes">Storage free bytes</string>
+    <string name="storage_free_images">Shots remaining</string>
+    <string name="storage_devices">Storage devices</string>
     <string name="none">None</string>
     <string name="unavailable">Unavailable</string>
     <string name="device">Device</string>

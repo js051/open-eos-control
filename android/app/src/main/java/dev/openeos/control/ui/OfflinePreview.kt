@@ -34,6 +34,10 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             aperture = "2.8",
             whiteBalance = "auto",
         ),
+        storageTotalBytes = 128_000_000_000,
+        storageFreeBytes = 84_000_000_000,
+        storageFreeImages = 2_418,
+        storageDeviceCount = 2,
     ),
     capabilities = CameraCapabilities(
         iso = listOf("Auto", "100", "200", "400", "800", "1600", "3200", "6400", "12800"),

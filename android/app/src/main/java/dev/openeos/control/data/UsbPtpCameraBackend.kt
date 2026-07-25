@@ -136,6 +136,13 @@ class UsbPtpCameraBackend(
                     PtpDevicePropertyCode.WHITE_BALANCE,
                 ),
             ),
+            storageTotalBytes = storageSnapshot.sumUnsignedBytesOrNull(PtpStorageInfo::maxCapacityBytes),
+            storageFreeBytes = storageSnapshot.sumUnsignedBytesOrNull(PtpStorageInfo::freeSpaceBytes),
+            storageFreeImages = storageSnapshot.mapNotNull {
+                it.freeSpaceImages.takeIf { value -> value >= 0 && value != 0xFFFF_FFFFL }
+            }
+                .takeIf(List<Long>::isNotEmpty)?.sum(),
+            storageDeviceCount = storageSnapshot.size,
             rawBatteryJson = batteryPropertyJson(batteryLevel),
             rawStorageJson = storageError?.let(::storageErrorJson) ?: storageSnapshot.toStorageJson(),
             rawTransportJson = ptpTransportJson(info),
@@ -1054,6 +1061,16 @@ private fun List<PtpStorageInfo>.toStorageJson(): String {
         )
     }
     return array.toString()
+}
+
+private fun List<PtpStorageInfo>.sumUnsignedBytesOrNull(selector: (PtpStorageInfo) -> ULong): Long? {
+    val values = map(selector).filter { it != ULong.MAX_VALUE }
+    if (values.isEmpty()) return null
+    var total = 0UL
+    for (value in values) {
+        total = if (ULong.MAX_VALUE - total < value) ULong.MAX_VALUE else total + value
+    }
+    return total.takeIf { it <= Long.MAX_VALUE.toULong() }?.toLong()
 }
 
 private fun storageErrorJson(message: String): String = JSONObject().put("error", message).toString()

@@ -99,6 +99,10 @@ extension CameraStatus {
             mediaAvailable: mediaAvailable,
             remainingMinutes: remainingMinutes,
             exposure: exposure ?? self.exposure,
+            storageTotalBytes: storageTotalBytes,
+            storageFreeBytes: storageFreeBytes,
+            storageFreeImages: storageFreeImages,
+            storageDeviceCount: storageDeviceCount,
             rawBatteryJSON: rawBatteryJSON,
             rawStorageJSON: rawStorageJSON
         )

@@ -341,7 +341,7 @@ class CcapiClient(
                     versionedPaths("/devicestatus/currentstorage") +
                     versionedPaths("/contents")
             )
-            val cardReady = if (storageJson != null) {
+            val storageInfo = if (storageJson != null) {
                 observedFeatures.add(CameraFeature.STORAGE_STATUS)
                 parseStorageInfo(storageJson.toString())
             } else {
@@ -368,7 +368,7 @@ class CcapiClient(
                 batteryStatus = batteryLevelStr,
                 recording = isRecording,
                 mode = modeVal,
-                mediaAvailable = cardReady,
+                mediaAvailable = storageInfo?.available,
                 remainingMinutes = null,
                 exposure = ExposureState(
                     iso = isoVal ?: "-",
@@ -376,6 +376,10 @@ class CcapiClient(
                     aperture = apertureVal ?: "-",
                     whiteBalance = wbVal ?: "-"
                 ),
+                storageTotalBytes = storageInfo?.totalBytes,
+                storageFreeBytes = storageInfo?.freeBytes,
+                storageFreeImages = storageInfo?.freeImages,
+                storageDeviceCount = storageInfo?.devices,
                 rawBatteryJson = batteryJson?.toString() ?: "null",
                 rawStorageJson = storageJson?.toString() ?: "null"
             )
@@ -1849,6 +1853,10 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
             aperture = exposure.optString("aperture"),
             whiteBalance = exposure.optString("white_balance"),
         ),
+        storageTotalBytes = media.optNullableLong("total_bytes") ?: media.optNullableLong("totalBytes"),
+        storageFreeBytes = media.optNullableLong("free_bytes") ?: media.optNullableLong("freeBytes"),
+        storageFreeImages = media.optNullableLong("free_images") ?: media.optNullableLong("freeImages"),
+        storageDeviceCount = media.optNullableInt("devices"),
     )
 }
 
@@ -1937,6 +1945,9 @@ private fun org.json.JSONArray.toStringList(): List<String> =
 private fun JSONObject.optNullableInt(key: String): Int? =
     if (has(key) && !isNull(key)) optInt(key) else null
 
+private fun JSONObject.optNullableLong(key: String): Long? =
+    if (has(key) && !isNull(key)) optLong(key) else null
+
 private fun JSONObject.optNullableBoolean(key: String): Boolean? =
     if (has(key) && !isNull(key)) optBoolean(key) else null
 
@@ -1999,46 +2010,67 @@ private fun parseSingleBattery(obj: JSONObject): Pair<Int?, String> {
     return Pair(batteryLevel, batteryLevelStr)
 }
 
-private fun parseStorageInfo(jsonStr: String): Boolean {
-    try {
+private data class ParsedStorageInfo(
+    val available: Boolean,
+    val totalBytes: Long? = null,
+    val freeBytes: Long? = null,
+    val freeImages: Long? = null,
+    val devices: Int = 0,
+)
+
+private fun parseStorageInfo(jsonStr: String): ParsedStorageInfo {
+    return try {
         val trimmed = jsonStr.trim()
+        val cards = mutableListOf<JSONObject>()
         if (trimmed.startsWith("[")) {
             val array = org.json.JSONArray(trimmed)
             for (i in 0 until array.length()) {
-                if (isSingleCardReady(array.getJSONObject(i))) return true
+                array.optJSONObject(i)?.let(cards::add)
             }
         } else {
             val obj = JSONObject(trimmed)
-            if (obj.has("storagelist")) {
-                val array = obj.optJSONArray("storagelist")
-                if (array != null) {
-                    for (i in 0 until array.length()) {
-                        if (isSingleCardReady(array.getJSONObject(i))) return true
-                    }
+            for (key in listOf("storagelist", "storage")) {
+                obj.optJSONArray(key)?.let { array ->
+                    for (i in 0 until array.length()) array.optJSONObject(i)?.let(cards::add)
                 }
             }
-            if (obj.has("storage")) {
-                val array = obj.optJSONArray("storage")
-                if (array != null) {
-                    for (i in 0 until array.length()) {
-                        if (isSingleCardReady(array.getJSONObject(i))) return true
-                    }
-                }
+            if (obj.optJSONArray("path")?.length()?.let { it > 0 } == true) {
+                return ParsedStorageInfo(available = true, devices = 1)
             }
-            if (obj.has("path")) {
-                val array = obj.optJSONArray("path")
-                if (array != null && array.length() > 0) {
-                    return true
-                }
-            }
-            if (obj.has("name") || obj.has("accesscapability") || obj.has("status")) {
-                return isSingleCardReady(obj)
+            if (cards.isEmpty() && (obj.has("name") || obj.has("accesscapability") || obj.has("status"))) {
+                cards += obj
             }
         }
-    } catch (e: Exception) {
-        // ignore
+        val usable = cards.filter(::isSingleCardReady)
+        ParsedStorageInfo(
+            available = usable.isNotEmpty(),
+            totalBytes = sumStorageValues(usable, "maxsize", "capacity", "totalbytes", "totalsize"),
+            freeBytes = sumStorageValues(usable, "spacesize", "free", "freebytes", "freespace"),
+            freeImages = sumStorageValues(usable, "freeimages", "remainingimages", "numberofimages"),
+            devices = usable.size,
+        )
+    } catch (_: Exception) {
+        ParsedStorageInfo(available = false)
     }
-    return false
+}
+
+private fun sumStorageValues(cards: List<JSONObject>, vararg keys: String): Long? {
+    val values = cards.mapNotNull { card ->
+        keys.firstNotNullOfOrNull { key -> positiveStorageValue(card, key) }
+    }
+    if (values.isEmpty()) return null
+    return values.fold(0L) { total, value ->
+        if (value > Long.MAX_VALUE - total) Long.MAX_VALUE else total + value
+    }
+}
+
+private fun positiveStorageValue(card: JSONObject, key: String): Long? {
+    if (!card.has(key) || card.isNull(key)) return null
+    val numberValue = card.optLong(key, Long.MIN_VALUE)
+    if (numberValue != Long.MIN_VALUE) return numberValue.takeIf { it > 0 }
+    val text = card.optString(key, "").trim()
+    if (text.startsWith('-')) return null
+    return text.filter(Char::isDigit).toLongOrNull()?.takeIf { it > 0 }
 }
 
 private fun isSingleCardReady(card: JSONObject): Boolean {
@@ -2060,13 +2092,5 @@ private fun isSingleCardReady(card: JSONObject): Boolean {
 }
 
 private fun hasPositiveStorageValue(card: JSONObject, key: String): Boolean {
-    if (!card.has(key) || card.isNull(key)) return false
-    val numberValue = card.optLong(key, Long.MIN_VALUE)
-    if (numberValue > 0) return true
-    val textValue = card.optString(key, "")
-    return textValue
-        .filter { it.isDigit() }
-        .toLongOrNull()
-        ?.let { it > 0 }
-        ?: false
+    return positiveStorageValue(card, key) != null
 }

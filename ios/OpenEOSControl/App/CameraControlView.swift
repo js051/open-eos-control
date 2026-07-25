@@ -76,6 +76,7 @@ struct CameraControlView: View {
 
 private struct CameraOverlayHeader: View {
     @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
     let controlRotation: Double
 
     var body: some View {
@@ -85,7 +86,7 @@ private struct CameraOverlayHeader: View {
                     Circle()
                         .fill(camera.isPreview ? Color.cameraWarning : Color.cameraStatus)
                         .frame(width: 8, height: 8)
-                    Text(camera.info?.model ?? "unknown")
+                    Text(compactCameraName(camera.info?.model ?? "unknown"))
                         .font(.caption.weight(.semibold))
                         .lineLimit(1)
                 }
@@ -97,6 +98,15 @@ private struct CameraOverlayHeader: View {
                     Text(camera.status?.batteryLevel.map { "\($0)%" } ?? "--")
                 }
                 .font(.caption.weight(.semibold))
+            }
+            if let storageText {
+                RotatingControl(degrees: controlRotation) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sdcard")
+                        Text(storageText)
+                    }
+                    .font(.caption.weight(.semibold))
+                }
             }
             if camera.supports(.autofocus) {
                 Button {
@@ -163,6 +173,27 @@ private struct CameraOverlayHeader: View {
         .foregroundStyle(Color.cameraText)
         .background(Color.black.opacity(0.66))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var storageText: String? {
+        if let shots = camera.status?.storageFreeImages {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.locale = language.locale
+            let value = formatter.string(from: NSNumber(value: shots)) ?? String(shots)
+            return language.format("storage_shots_format", value)
+        }
+        if let bytes = camera.status?.storageFreeBytes {
+            return language.format(
+                "storage_free_format",
+                ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+            )
+        }
+        return camera.status?.mediaAvailable == true ? language.string("storage_ready") : nil
+    }
+
+    private func compactCameraName(_ value: String) -> String {
+        value.hasPrefix("Canon EOS ") ? String(value.dropFirst("Canon EOS ".count)) : value
     }
 }
 

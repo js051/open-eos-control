@@ -58,7 +58,7 @@ Each backend should map into this surface:
 
 - connect/disconnect
 - camera identity and profile
-- battery, storage, and camera status
+- battery, camera status, and a shared storage summary containing availability, device count, total/free bytes, and remaining shots when the active transport reports them
 - capability matrix and dynamic settings
 - exposure, white balance, and generic setting writes
 - still capture, half-press, recording, tap focus, Click White Balance, and focus drive where available

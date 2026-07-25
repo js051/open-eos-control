@@ -468,6 +468,10 @@ public actor DesktopBridgeClient {
                 aperture: exposure.string("aperture") ?? "-",
                 whiteBalance: exposure.string("whiteBalance") ?? "-"
             ),
+            storageTotalBytes: media.int64("totalBytes"),
+            storageFreeBytes: media.int64("freeBytes"),
+            storageFreeImages: media.int64("freeImages"),
+            storageDeviceCount: media.int("devices"),
             rawBatteryJSON: Self.jsonString(battery),
             rawStorageJSON: Self.jsonString(media)
         )
@@ -744,6 +748,11 @@ public enum DesktopBridgeDiagnosticReport {
             "capabilityEvidenceTruncated=\(evidence?.truncated ?? false)",
             "battery=\(snapshot?.status.rawBatteryJSON ?? "null")",
             "storage=\(snapshot?.status.rawStorageJSON ?? "null")",
+            "storageAvailable=\(snapshot?.status.mediaAvailable.map { String($0) } ?? "unknown")",
+            "storageTotalBytes=\(snapshot?.status.storageTotalBytes.map { String($0) } ?? "unknown")",
+            "storageFreeBytes=\(snapshot?.status.storageFreeBytes.map { String($0) } ?? "unknown")",
+            "storageFreeImages=\(snapshot?.status.storageFreeImages.map { String($0) } ?? "unknown")",
+            "storageDevices=\(snapshot?.status.storageDeviceCount.map { String($0) } ?? "unknown")",
             "requestedFps=\(liveView.requestedFPS)",
             "observedFps=\(String(format: "%.1f", liveView.observedFPS))",
             "frameBytes=\(liveView.frameBytes)",
@@ -805,7 +814,9 @@ private extension Dictionary where Key == String, Value == Any {
 
     func int64(_ key: String) -> Int64? {
         if let value = self[key] as? Int64 { return value }
-        return (self[key] as? NSNumber)?.int64Value
+        if let value = self[key] as? NSNumber { return value.int64Value }
+        if let value = self[key] as? String { return Int64(value) }
+        return nil
     }
 
     func double(_ key: String) -> Double? {

@@ -26,6 +26,11 @@ struct DebugView: View {
                         value("base_url", camera.connectionEndpoint, mono: true)
                         value("supported_features", featureList(camera.capabilities?.matrix.supported))
                         value("planned_features", featureList(camera.capabilities?.matrix.planned))
+                        value("storage_available", camera.status?.mediaAvailable.map { language.string($0 ? "yes" : "no") } ?? language.string("unknown"))
+                        value("storage_total_bytes", camera.status?.storageTotalBytes.map { String($0) } ?? language.string("none"), mono: true)
+                        value("storage_free_bytes", camera.status?.storageFreeBytes.map { String($0) } ?? language.string("none"), mono: true)
+                        value("storage_free_images", camera.status?.storageFreeImages.map { String($0) } ?? language.string("none"), mono: true)
+                        value("storage_devices", camera.status?.storageDeviceCount.map { String($0) } ?? language.string("none"), mono: true)
                         value("battery_raw", camera.status?.rawBatteryJSON ?? "null", mono: true)
                         value("storage_raw", camera.status?.rawStorageJSON ?? "null", mono: true)
                     }

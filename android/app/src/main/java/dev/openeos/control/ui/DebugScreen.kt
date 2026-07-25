@@ -77,6 +77,14 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
             DebugSection(stringResource(R.string.ccapi)) {
                 DebugValue(stringResource(R.string.supported_features), state.capabilities?.matrix?.supported.orEmpty().joinToString { it.name }.ifBlank { none })
                 DebugValue(stringResource(R.string.planned_features), state.capabilities?.matrix?.planned.orEmpty().joinToString { it.name }.ifBlank { none })
+                DebugValue(
+                    stringResource(R.string.storage_available),
+                    state.status?.mediaAvailable?.let { yesNoLabel(it) } ?: unknown,
+                )
+                DebugValue(stringResource(R.string.storage_total_bytes), state.status?.storageTotalBytes?.toString() ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.storage_free_bytes), state.status?.storageFreeBytes?.toString() ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.storage_free_images), state.status?.storageFreeImages?.toString() ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.storage_devices), state.status?.storageDeviceCount?.toString() ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.battery_raw), state.status?.rawBatteryJson?.ifBlank { unavailable } ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.storage_raw), state.status?.rawStorageJson?.ifBlank { unavailable } ?: unavailable, mono = true)
             }

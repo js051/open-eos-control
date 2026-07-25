@@ -223,14 +223,19 @@ public actor CCAPIClient {
         if storage != nil { observedFeatures.insert(.storageStatus) }
         let settings = try await loadShootingSettings()
         let batteryState = parseBattery(battery)
+        let storageState = storage.map(parseStorage)
 
         return CameraStatus(
             batteryLevel: batteryState.level,
             batteryStatus: batteryState.status,
             recording: recording,
             mode: settingObject(in: settings, aliases: ["shootingmode"])?.string("value", default: "unknown") ?? "unknown",
-            mediaAvailable: storage.map(parseStorage),
+            mediaAvailable: storageState?.available,
             exposure: exposureState(settings),
+            storageTotalBytes: storageState?.totalBytes,
+            storageFreeBytes: storageState?.freeBytes,
+            storageFreeImages: storageState?.freeImages,
+            storageDeviceCount: storageState?.devices,
             rawBatteryJSON: JSONString(battery),
             rawStorageJSON: JSONString(storage)
         )
@@ -1386,7 +1391,11 @@ public actor CCAPIClient {
                 shutter: exposure.string("shutter", default: "-"),
                 aperture: exposure.string("aperture", default: "-"),
                 whiteBalance: exposure.string("white_balance", default: "-")
-            )
+            ),
+            storageTotalBytes: media.integer64("total_bytes") ?? media.integer64("totalBytes"),
+            storageFreeBytes: media.integer64("free_bytes") ?? media.integer64("freeBytes"),
+            storageFreeImages: media.integer64("free_images") ?? media.integer64("freeImages"),
+            storageDeviceCount: media.integer("devices")
         )
     }
 
@@ -1425,17 +1434,45 @@ public actor CCAPIClient {
         return (level, battery.string("state", default: text))
     }
 
-    private func parseStorage(_ value: JSONDictionary) -> Bool {
+    private struct StorageSummary {
+        let available: Bool
+        let totalBytes: Int64?
+        let freeBytes: Int64?
+        let freeImages: Int64?
+        let devices: Int
+    }
+
+    private func parseStorage(_ value: JSONDictionary) -> StorageSummary {
+        if let paths = value.array("path"), !paths.isEmpty {
+            return StorageSummary(available: true, totalBytes: nil, freeBytes: nil, freeImages: nil, devices: 1)
+        }
         let cards = value.array("storagelist")?.objects
             ?? value.array("storage")?.objects
             ?? [value]
-        return cards.contains { card in
+        let usable = cards.filter { card in
             let status = card.string("status").lowercased()
             let access = card.string("accesscapability", default: card.string("access")).lowercased()
             if ["ready", "access"].contains(status) || ["readwrite", "readonly"].contains(access) { return true }
             let hasSpace = ["spacesize", "maxsize", "capacity", "free"].contains { (card.integer64($0) ?? 0) > 0 }
             return hasSpace && !["not_inserted", "none"].contains(status)
         }
+        func sum(_ keys: [String]) -> Int64? {
+            let values = usable.compactMap { card in
+                keys.compactMap { card.integer64($0) }.first(where: { $0 > 0 })
+            }
+            guard !values.isEmpty else { return nil }
+            return values.reduce(0) { total, value in
+                let (sum, overflow) = total.addingReportingOverflow(value)
+                return overflow ? Int64.max : sum
+            }
+        }
+        return StorageSummary(
+            available: !usable.isEmpty,
+            totalBytes: sum(["maxsize", "capacity", "totalbytes", "totalsize"]),
+            freeBytes: sum(["spacesize", "free", "freebytes", "freespace"]),
+            freeImages: sum(["freeimages", "remainingimages", "numberofimages"]),
+            devices: usable.count
+        )
     }
 
     private func contentPaths(container: String) async throws -> [String] {

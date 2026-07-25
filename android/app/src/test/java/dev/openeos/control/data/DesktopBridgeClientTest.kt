@@ -71,6 +71,10 @@ class DesktopBridgeClientTest {
         assertEquals("TEST-SERIAL-0001", info.serial)
         assertEquals("gphoto2 2.5.33", info.engineVersion)
         assertEquals(82, initialStatus.batteryLevel)
+        assertEquals(2048L, initialStatus.storageTotalBytes)
+        assertEquals(1024L, initialStatus.storageFreeBytes)
+        assertEquals(123L, initialStatus.storageFreeImages)
+        assertEquals(2, initialStatus.storageDeviceCount)
         assertEquals("800", exposureStatus.exposure.iso)
         assertEquals("Daylight", whiteBalanceStatus.exposure.whiteBalance)
         assertTrue(recording.recording == true)
@@ -270,7 +274,7 @@ class DesktopBridgeClientTest {
               "battery": {"level": 82, "status": "normal"},
               "recording": $recording,
               "mode": "Manual",
-              "media": {"available": true, "freeBytes": 1024, "devices": 2},
+              "media": {"available": true, "totalBytes": 2048, "freeBytes": 1024, "freeImages": 123, "devices": 2},
               "exposure": {
                 "iso": "$iso",
                 "shutter": "1/50",

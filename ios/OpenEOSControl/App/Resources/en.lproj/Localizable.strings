@@ -171,6 +171,14 @@
 "no" = "No";
 "battery_raw" = "Battery raw JSON";
 "storage_raw" = "Storage raw JSON";
+"storage_ready" = "Card ready";
+"storage_shots_format" = "%@ shots";
+"storage_free_format" = "%@ free";
+"storage_available" = "Storage available";
+"storage_total_bytes" = "Storage total bytes";
+"storage_free_bytes" = "Storage free bytes";
+"storage_free_images" = "Shots remaining";
+"storage_devices" = "Storage devices";
 "requested_fps" = "Requested FPS";
 "observed_fps" = "Observed FPS";
 "frame_bytes" = "Frame bytes";

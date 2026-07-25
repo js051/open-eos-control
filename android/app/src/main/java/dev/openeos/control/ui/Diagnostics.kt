@@ -72,6 +72,11 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine("capabilityEvidenceTruncated=${evidence?.truncated ?: false}")
         appendLine("battery=${state.status?.rawBatteryJson?.ifBlank { state.status?.batteryStatus } ?: "unknown"}")
         appendLine("storage=${state.status?.rawStorageJson?.ifBlank { state.status?.mediaAvailable?.toString() } ?: "unknown"}")
+        appendLine("storageAvailable=${state.status?.mediaAvailable ?: "unknown"}")
+        appendLine("storageTotalBytes=${state.status?.storageTotalBytes ?: "unknown"}")
+        appendLine("storageFreeBytes=${state.status?.storageFreeBytes ?: "unknown"}")
+        appendLine("storageFreeImages=${state.status?.storageFreeImages ?: "unknown"}")
+        appendLine("storageDevices=${state.status?.storageDeviceCount ?: "unknown"}")
         appendLine(
             "transportDetails=${state.status?.rawTransportJson?.ifBlank { "unknown" }?.let { redactDiagnosticText(it, state) } ?: "unknown"}"
         )
