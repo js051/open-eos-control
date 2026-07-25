@@ -16,6 +16,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/settings/av","put":true},
         {"path":"/shooting/settings/wb","put":true},
         {"path":"/shooting/settings/stillimagequality","put":true},
+        {"path":"/shooting/settings/wbshift","put":true},
         {"path":"/shooting/settings/meteringmode","put":true},
         {"path":"/shooting/control/shutterbutton","post":true},
         {"path":"/shooting/control/shutterbutton/manual","put":true},
@@ -42,6 +43,10 @@ final class CCAPIClientTests: XCTestCase {
       "stillimagequality":{
         "value":{"raw":"none","jpeg":"large_fine"},
         "ability":{"raw":["none","raw","craw"],"jpeg":["none","large_fine","large_normal"]}
+      },
+      "wbshift":{
+        "value":{"ba":0,"mg":0},
+        "ability":{"ba":{"min":-9,"max":9,"step":1},"mg":{"min":-9,"max":9,"step":1}}
       },
       "readonly":{"value":"fixed","ability":["fixed"]}
     }
@@ -71,6 +76,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(snapshot.capabilities.setting("meteringmode")?.values, ["evaluative", "spot"])
         XCTAssertEqual(snapshot.capabilities.setting("stillimagequality.raw")?.values, ["none", "raw", "craw"])
         XCTAssertEqual(snapshot.capabilities.setting("stillimagequality.jpeg")?.value, "large_fine")
+        XCTAssertEqual(snapshot.capabilities.setting("wbshift.ba")?.values, (-9...9).map(String.init))
         XCTAssertNil(snapshot.capabilities.setting("readonly"))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.stillCapture))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.shutterHalfPress))
@@ -616,6 +622,79 @@ final class CCAPIClientTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         let value = try XCTUnwrap(object["value"] as? [String: String])
         XCTAssertEqual(value, ["raw": "raw", "jpeg": "large_fine"])
+    }
+
+    func testWhiteBalanceShiftWritesIntegerObjectAndPreservesCompanionAxis() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
+        await transport.enqueue(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/settings/wbshift",
+            status: 204,
+            body: Data()
+        )
+        await enqueueStatus(on: transport)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        _ = try await client.capabilities()
+        do {
+            _ = try await client.setSetting(key: "wbshift.ba", value: "10")
+            XCTFail("Expected out-of-range WB shift to be rejected")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .invalidSetting(key: "wbshift.ba", value: "10"))
+        }
+        _ = try await client.setSetting(key: "wbshift.ba", value: "9")
+
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.first {
+            $0.method == "PUT" && $0.path == "/ccapi/ver100/shooting/settings/wbshift"
+        })
+        let body = try XCTUnwrap(request.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let value = try XCTUnwrap(object["value"] as? [String: Int])
+        XCTAssertEqual(value, ["ba": 9, "mg": 0])
+    }
+
+    func testWhiteBalanceShiftHidesMalformedOrUnboundedRanges() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/wbshift","put":true}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings",
+            body: #"{"wbshift":{"value":{"ba":0,"mg":0},"ability":{"ba":{"min":-1000,"max":1000,"step":1},"mg":{"min":-9,"max":9,"step":0}}}}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertFalse(capabilities.settings.contains { $0.key.hasPrefix("wbshift.") })
+    }
+
+    func testWhiteBalanceShiftRequiresCompleteIntegerCurrentValue() async throws {
+        let malformedSettings = [
+            #"{"wbshift":{"value":{"ba":0},"ability":{"ba":{"min":-9,"max":9,"step":1},"mg":{"min":-9,"max":9,"step":1}}}}"#,
+            #"{"wbshift":{"value":{"ba":0.5,"mg":0},"ability":{"ba":{"min":-9,"max":9,"step":1},"mg":{"min":-9,"max":9,"step":1}}}}"#,
+        ]
+        for body in malformedSettings {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(
+                path: "/ccapi",
+                body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/wbshift","put":true}]}"#
+            )
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: body)
+            let client = try CCAPIClient(
+                baseURL: "http://192.168.1.2:8080",
+                mode: .camera,
+                transport: transport
+            )
+
+            let capabilities = try await client.capabilities()
+
+            XCTAssertFalse(capabilities.settings.contains { $0.key.hasPrefix("wbshift.") })
+        }
     }
 
     func testMediaDownloadRejectsCrossOriginCameraResource() async throws {

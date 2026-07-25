@@ -62,6 +62,9 @@ COMMAND_METHODS = {"PUT", "POST"}
 PRIMARY_SETTING_KEYS = {"iso", "shutter", "aperture", "whitebalance"}
 IMAGE_QUALITY_SETTING_KEY = "stillimagequality"
 IMAGE_QUALITY_FIELDS = ("raw", "jpeg", "heif")
+WB_SHIFT_SETTING_KEY = "wbshift"
+WB_SHIFT_FIELDS = ("ba", "mg")
+MAX_STRUCTURED_SETTING_OPTIONS = 256
 SETTING_ALIASES = {
     "iso": "iso",
     "tv": "shutter",
@@ -88,6 +91,8 @@ SETTING_LABELS = {
     "stillimagequality.raw": "RAW quality",
     "stillimagequality.jpeg": "JPEG quality",
     "stillimagequality.heif": "HEIF quality",
+    "wbshift.ba": "WB shift B/A",
+    "wbshift.mg": "WB shift M/G",
     "moviequality": "Movie quality",
     "colortemperature": "Color temperature",
     "exposurecompensation": "Exposure compensation",
@@ -620,20 +625,26 @@ class CcapiSession:
                 current = raw.get("value") if isinstance(raw, dict) else None
                 if not isinstance(current, dict):
                     raise unsupported(_feature_for_setting(canonical).value, self.engine_name)
+                if base_key == WB_SHIFT_SETTING_KEY and any(
+                    isinstance(current.get(item), bool) or not isinstance(current.get(item), int)
+                    for item in WB_SHIFT_FIELDS
+                ):
+                    raise unsupported(_feature_for_setting(canonical).value, self.engine_name)
                 updated = dict(current)
-                updated[field] = value
-                active = [
-                    current_value
-                    for item in IMAGE_QUALITY_FIELDS
-                    if (current_value := _string_value(updated.get(item)))
-                ]
-                if active and all(item.casefold() == "none" for item in active):
-                    raise BridgeError(
-                        "INVALID_SETTING_VALUE",
-                        "At least one still image format must remain enabled.",
-                        status_code=422,
-                        engine=self.engine_name,
-                    )
+                updated[field] = int(value) if base_key == WB_SHIFT_SETTING_KEY else value
+                if base_key == IMAGE_QUALITY_SETTING_KEY:
+                    active = [
+                        current_value
+                        for item in IMAGE_QUALITY_FIELDS
+                        if (current_value := _string_value(updated.get(item)))
+                    ]
+                    if active and all(item.casefold() == "none" for item in active):
+                        raise BridgeError(
+                            "INVALID_SETTING_VALUE",
+                            "At least one still image format must remain enabled.",
+                            status_code=422,
+                            engine=self.engine_name,
+                        )
                 self._request_ok("PUT", path, {"value": updated})
             else:
                 self._request_ok("PUT", path, {"value": value})
@@ -1179,6 +1190,9 @@ class CcapiSession:
                 continue
             if key == IMAGE_QUALITY_SETTING_KEY:
                 controls.extend(_structured_image_quality_controls(raw))
+                continue
+            if key == WB_SHIFT_SETTING_KEY:
+                controls.extend(_structured_wb_shift_controls(raw))
                 continue
             value = _string_value(raw.get("value"))
             ability = raw.get("ability")
@@ -1792,12 +1806,55 @@ def _structured_image_quality_controls(raw: dict[str, object]) -> list[CameraSet
     return controls
 
 
+def _structured_wb_shift_controls(raw: dict[str, object]) -> list[CameraSetting]:
+    current = raw.get("value")
+    ability = raw.get("ability")
+    if not isinstance(current, dict) or not isinstance(ability, dict):
+        return []
+    if any(
+        isinstance(current.get(field), bool) or not isinstance(current.get(field), int)
+        for field in WB_SHIFT_FIELDS
+    ):
+        return []
+    controls: list[CameraSetting] = []
+    for field in WB_SHIFT_FIELDS:
+        values = _bounded_integer_range_values(ability.get(field))
+        current_value = current.get(field)
+        assert isinstance(current_value, int) and not isinstance(current_value, bool)
+        value = str(current_value)
+        if len(values) >= 2 and value in values:
+            key = f"{WB_SHIFT_SETTING_KEY}.{field}"
+            controls.append(CameraSetting(key=key, label=SETTING_LABELS[key], value=value, values=values))
+    return controls
+
+
+def _bounded_integer_range_values(raw: object) -> list[str]:
+    if not isinstance(raw, dict):
+        return []
+    minimum = raw.get("min")
+    maximum = raw.get("max")
+    step = raw.get("step")
+    if any(isinstance(item, bool) or not isinstance(item, int) for item in (minimum, maximum, step)):
+        return []
+    assert isinstance(minimum, int) and isinstance(maximum, int) and isinstance(step, int)
+    if step <= 0 or minimum > maximum:
+        return []
+    count = ((maximum - minimum) // step) + 1
+    if count < 1 or count > MAX_STRUCTURED_SETTING_OPTIONS:
+        return []
+    return [str(minimum + index * step) for index in range(count)]
+
+
 def _structured_setting_parts(key: str) -> tuple[str, str] | None:
-    prefix = f"{IMAGE_QUALITY_SETTING_KEY}."
-    if not key.startswith(prefix):
-        return None
-    field = key.removeprefix(prefix)
-    return (IMAGE_QUALITY_SETTING_KEY, field) if field in IMAGE_QUALITY_FIELDS else None
+    for base_key, fields in (
+        (IMAGE_QUALITY_SETTING_KEY, IMAGE_QUALITY_FIELDS),
+        (WB_SHIFT_SETTING_KEY, WB_SHIFT_FIELDS),
+    ):
+        prefix = f"{base_key}."
+        if key.startswith(prefix):
+            field = key.removeprefix(prefix)
+            return (base_key, field) if field in fields else None
+    return None
 
 
 def _first_setting_value(settings: dict[str, object], *keys: str) -> str | None:

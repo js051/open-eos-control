@@ -55,6 +55,9 @@ public actor CCAPIClient {
     private static let halfPressNanoseconds: UInt64 = 350_000_000
     private static let imageQualitySettingKey = "stillimagequality"
     private static let imageQualityFields = ["raw", "jpeg", "heif"]
+    private static let wbShiftSettingKey = "wbshift"
+    private static let wbShiftFields = ["ba", "mg"]
+    private static let maximumStructuredSettingOptions = 256
 
     private let baseURL: URL
     private let baseURLString: String
@@ -1248,6 +1251,8 @@ public actor CCAPIClient {
             }
             if key == Self.imageQualitySettingKey {
                 controls.append(contentsOf: structuredImageQualityControls(setting))
+            } else if key == Self.wbShiftSettingKey {
+                controls.append(contentsOf: structuredWBShiftControls(setting))
             } else if let settingControl = control(key, Self.settingLabel(key), setting) {
                 controls.append(settingControl)
             }
@@ -1264,6 +1269,41 @@ public actor CCAPIClient {
             let key = "\(Self.imageQualitySettingKey).\(field)"
             return CameraSetting(key: key, label: Self.settingLabel(key), value: value, values: values)
         }
+    }
+
+    private func structuredWBShiftControls(_ setting: JSONDictionary) -> [CameraSetting] {
+        guard let current = setting.object("value"), let ability = setting.object("ability") else { return [] }
+        let currentValues = Dictionary(uniqueKeysWithValues: Self.wbShiftFields.compactMap { field in
+            Self.strictInteger(current[field]).map { (field, $0) }
+        })
+        guard currentValues.count == Self.wbShiftFields.count else { return [] }
+        return Self.wbShiftFields.compactMap { field in
+            let values = Self.boundedIntegerRangeValues(ability.object(field))
+            guard let currentValue = currentValues[field] else { return nil }
+            let value = String(currentValue)
+            guard values.count >= 2, values.contains(value) else { return nil }
+            let key = "\(Self.wbShiftSettingKey).\(field)"
+            return CameraSetting(key: key, label: Self.settingLabel(key), value: value, values: values)
+        }
+    }
+
+    private static func boundedIntegerRangeValues(_ range: JSONDictionary?) -> [String] {
+        guard let range,
+              let minimum = strictInteger(range["min"]),
+              let maximum = strictInteger(range["max"]),
+              let step = strictInteger(range["step"]),
+              step > 0,
+              minimum <= maximum else { return [] }
+        let (distance, overflow) = maximum.subtractingReportingOverflow(minimum)
+        guard !overflow else { return [] }
+        let (count, countOverflow) = (distance / step).addingReportingOverflow(1)
+        guard !countOverflow, count >= 1, count <= maximumStructuredSettingOptions else { return [] }
+        return (0..<count).map { String(minimum + ($0 * step)) }
+    }
+
+    private static func strictInteger(_ value: Any?) -> Int? {
+        guard !(value is Bool), let number = value as? NSNumber else { return nil }
+        return Int(number.stringValue)
     }
 
     private func control(_ key: String, _ label: String, _ value: JSONDictionary) -> CameraSetting? {
@@ -1308,22 +1348,41 @@ public actor CCAPIClient {
             throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
         }
         var updated = current
-        updated[field] = value
-        let activeFormats = Self.imageQualityFields.compactMap { field -> String? in
-            guard let value = updated[field] as? String, !value.isEmpty else { return nil }
-            return value
+        if baseKey == Self.wbShiftSettingKey {
+            guard Self.wbShiftFields.allSatisfy({ Self.strictInteger(current[$0]) != nil }),
+                  let integerValue = Int(value) else {
+                throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
+            }
+            updated[field] = integerValue
+        } else {
+            updated[field] = value
         }
-        guard activeFormats.isEmpty || !activeFormats.allSatisfy({ $0.caseInsensitiveCompare("none") == .orderedSame }) else {
-            throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
+        if baseKey == Self.imageQualitySettingKey {
+            let activeFormats = Self.imageQualityFields.compactMap { field -> String? in
+                guard let value = updated[field] as? String, !value.isEmpty else { return nil }
+                return value
+            }
+            guard activeFormats.isEmpty || !activeFormats.allSatisfy({
+                $0.caseInsensitiveCompare("none") == .orderedSame
+            }) else {
+                throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
+            }
         }
         try await requestOK(path: path, method: .put, json: ["value": updated])
     }
 
     private func structuredSettingParts(_ key: String) -> (baseKey: String, field: String)? {
-        let prefix = "\(Self.imageQualitySettingKey)."
-        guard key.hasPrefix(prefix) else { return nil }
-        let field = String(key.dropFirst(prefix.count))
-        return Self.imageQualityFields.contains(field) ? (Self.imageQualitySettingKey, field) : nil
+        for (baseKey, fields) in [
+            (Self.imageQualitySettingKey, Self.imageQualityFields),
+            (Self.wbShiftSettingKey, Self.wbShiftFields),
+        ] {
+            let prefix = "\(baseKey)."
+            if key.hasPrefix(prefix) {
+                let field = String(key.dropFirst(prefix.count))
+                return fields.contains(field) ? (baseKey, field) : nil
+            }
+        }
+        return nil
     }
 
     private func aliases(for key: String) -> [String] {
@@ -1703,6 +1762,7 @@ public actor CCAPIClient {
             "stillimagequality": "Image quality", "moviequality": "Movie quality",
             "stillimagequality.raw": "RAW quality", "stillimagequality.jpeg": "JPEG quality",
             "stillimagequality.heif": "HEIF quality",
+            "wbshift.ba": "WB shift B/A", "wbshift.mg": "WB shift M/G",
             "colortemperature": "Color temperature", "exposurecompensation": "Exposure compensation",
         ]
         if let label = known[key] { return label }

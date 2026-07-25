@@ -1459,6 +1459,27 @@ class CcapiClient(
                                 }
                             }
                         }
+                    } else if (key == WB_SHIFT_SETTING_KEY) {
+                        val current = setting?.optJSONObject("value")
+                        val ability = setting?.optJSONObject("ability")
+                        val currentValues = current?.let { value ->
+                            WB_SHIFT_FIELDS.associateWith { field -> value.opt(field).toExactJsonInt() }
+                        }
+                        if (
+                            current != null && ability != null && currentValues != null &&
+                            currentValues.values.all { it != null }
+                        ) {
+                            structuredSettingCurrentValues.putIfAbsent(key, JSONObject(current.toString()))
+                            WB_SHIFT_FIELDS.forEach { field ->
+                                val fieldValues = ability.optJSONObject(field)?.toBoundedIntegerRangeValues().orEmpty()
+                                val currentValue = currentValues.getValue(field)!!.toString()
+                                if (fieldValues.size >= 2 && currentValue in fieldValues) {
+                                    val virtualKey = "$key.$field"
+                                    structuredSettingPathsByKey.putIfAbsent(virtualKey, settingPath)
+                                    structuredSettingValuesByKey.putIfAbsent(virtualKey, fieldValues.toSet())
+                                }
+                            }
+                        }
                     }
                 }
                 if (!merged.has(key)) {
@@ -1520,12 +1541,23 @@ class CcapiClient(
         }
         val current = structuredSettingCurrentValues[baseKey]
             ?: error("Camera did not return the current value for $baseKey.")
-        val updated = JSONObject(current.toString()).put(field, value)
-        val activeFormats = IMAGE_QUALITY_FIELDS.mapNotNull { format ->
-            updated.optString(format).takeIf { it.isNotBlank() }
+        val encodedValue: Any = if (baseKey == WB_SHIFT_SETTING_KEY) {
+            WB_SHIFT_FIELDS.forEach { requiredField ->
+                current.opt(requiredField).toExactJsonInt()
+                    ?: error("Camera returned an invalid $WB_SHIFT_SETTING_KEY.$requiredField value.")
+            }
+            value.toIntOrNull() ?: error("Value '$value' is not an integer for $key.")
+        } else {
+            value
         }
-        if (activeFormats.isNotEmpty() && activeFormats.all { it.equals("none", ignoreCase = true) }) {
-            error("At least one still image format must remain enabled.")
+        val updated = JSONObject(current.toString()).put(field, encodedValue)
+        if (baseKey == IMAGE_QUALITY_SETTING_KEY) {
+            val activeFormats = IMAGE_QUALITY_FIELDS.mapNotNull { format ->
+                updated.optString(format).takeIf { it.isNotBlank() }
+            }
+            if (activeFormats.isNotEmpty() && activeFormats.all { it.equals("none", ignoreCase = true) }) {
+                error("At least one still image format must remain enabled.")
+            }
         }
         val path = structuredSettingPathsByKey.getValue(key)
         putOk(path, JSONObject().put("value", updated))
@@ -1962,6 +1994,28 @@ private fun JSONObject.toAdvancedSettingControls(writableKeys: Set<String>): Lis
             }
             continue
         }
+        if (key == WB_SHIFT_SETTING_KEY) {
+            val current = setting.optJSONObject("value") ?: continue
+            val ability = setting.optJSONObject("ability") ?: continue
+            val currentValues = WB_SHIFT_FIELDS.associateWith { field -> current.opt(field).toExactJsonInt() }
+            if (currentValues.values.any { it == null }) continue
+            WB_SHIFT_FIELDS.forEach { field ->
+                val values = ability.optJSONObject(field)?.toBoundedIntegerRangeValues().orEmpty()
+                val value = currentValues.getValue(field)!!.toString()
+                if (values.size >= 2 && value in values) {
+                    val virtualKey = "$key.$field"
+                    controls.add(
+                        CameraSettingControl(
+                            key = virtualKey,
+                            label = virtualKey.toSettingLabel(),
+                            value = value,
+                            values = values,
+                        )
+                    )
+                }
+            }
+            continue
+        }
         val values = setting.optJSONArray("ability")?.toStringList().orEmpty()
             .filter { it.isNotBlank() }
             .distinct()
@@ -2004,6 +2058,8 @@ private fun String.toSettingLabel(): String =
         "stillimagequality.raw" -> "RAW quality"
         "stillimagequality.jpeg" -> "JPEG quality"
         "stillimagequality.heif" -> "HEIF quality"
+        "wbshift.ba" -> "WB shift B/A"
+        "wbshift.mg" -> "WB shift M/G"
         "moviequality" -> "Movie quality"
         "colortemperature" -> "Color temperature"
         "exposurecompensation" -> "Exposure compensation"
@@ -2020,11 +2076,36 @@ private fun String.splitStructuredSettingKey(): Pair<String, String>? {
     if (separator <= 0 || separator == lastIndex) return null
     val base = substring(0, separator)
     val field = substring(separator + 1)
-    return if (base == IMAGE_QUALITY_SETTING_KEY && field in IMAGE_QUALITY_FIELDS) base to field else null
+    return when {
+        base == IMAGE_QUALITY_SETTING_KEY && field in IMAGE_QUALITY_FIELDS -> base to field
+        base == WB_SHIFT_SETTING_KEY && field in WB_SHIFT_FIELDS -> base to field
+        else -> null
+    }
 }
 
 private const val IMAGE_QUALITY_SETTING_KEY = "stillimagequality"
 private val IMAGE_QUALITY_FIELDS = listOf("raw", "jpeg", "heif")
+private const val WB_SHIFT_SETTING_KEY = "wbshift"
+private val WB_SHIFT_FIELDS = listOf("ba", "mg")
+private const val MAX_STRUCTURED_SETTING_OPTIONS = 256
+
+private fun Any?.toExactJsonInt(): Int? = when (this) {
+    is Byte -> toInt()
+    is Short -> toInt()
+    is Int -> this
+    is Long -> takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }?.toInt()
+    else -> null
+}
+
+private fun JSONObject.toBoundedIntegerRangeValues(): List<String> {
+    val minimum = opt("min").toExactJsonInt() ?: return emptyList()
+    val maximum = opt("max").toExactJsonInt() ?: return emptyList()
+    val step = opt("step").toExactJsonInt() ?: return emptyList()
+    if (step <= 0 || minimum > maximum) return emptyList()
+    val count = ((maximum.toLong() - minimum.toLong()) / step.toLong()) + 1L
+    if (count !in 1..MAX_STRUCTURED_SETTING_OPTIONS.toLong()) return emptyList()
+    return List(count.toInt()) { index -> (minimum.toLong() + index.toLong() * step).toString() }
+}
 
 private fun String.splitCamelCaseWords(): List<String> =
     replace(Regex("([a-z])([A-Z])"), "$1 $2").split(" ")

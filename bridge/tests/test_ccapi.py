@@ -44,6 +44,7 @@ DISCOVERY = {
         {"path": "/shooting/settings/av", "put": True},
         {"path": "/shooting/settings/wb", "put": True},
         {"path": "/shooting/settings/stillimagequality", "put": True},
+        {"path": "/shooting/settings/wbshift", "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/af", "post": True},
@@ -98,6 +99,13 @@ class FakeCcapiTransport:
                 "ability": {
                     "raw": ["none", "raw", "craw"],
                     "jpeg": ["none", "large_fine", "large_normal"],
+                },
+            },
+            "wbshift": {
+                "value": {"ba": 0, "mg": 0},
+                "ability": {
+                    "ba": {"min": -9, "max": 9, "step": 1},
+                    "mg": {"min": -9, "max": 9, "step": 1},
                 },
             },
         }
@@ -305,6 +313,9 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         "craw",
     ]
     assert next(item for item in capabilities.settings if item.key == "stillimagequality.jpeg").value == "large_fine"
+    assert next(item for item in capabilities.settings if item.key == "wbshift.ba").values == [
+        str(value) for value in range(-9, 10)
+    ]
     assert capabilities.evidence.source == "GET /ccapi"
     assert capabilities.evidence.protocol_versions == ["ver100"]
     assert "POST /ccapi/ver100/shooting/control/shutterbutton" in capabilities.evidence.advertised_commands
@@ -322,6 +333,15 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     session.set_setting("stillimagequality.raw", "none")
     with pytest.raises(BridgeError, match="At least one still image format"):
         session.set_setting("stillimagequality.jpeg", "none")
+    session.set_setting("wbshift.ba", "9")
+    wb_shift_write = next(
+        request
+        for request in transport.requests
+        if request.method == "PUT" and request.path.endswith("/shooting/settings/wbshift")
+    )
+    assert wb_shift_write.body == {"value": {"ba": 9, "mg": 0}}
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("wbshift.ba", "10")
     with pytest.raises(BridgeError, match="not advertised"):
         session.set_setting("iso", "51200")
     session.capture_still()
@@ -572,6 +592,39 @@ def test_ccapi_discovery_accepts_same_origin_url_entries_and_rejects_unsafe_oper
     assert all(
         "secret" not in command and "attacker" not in command for command in capabilities.evidence.advertised_commands
     )
+
+
+def test_ccapi_wb_shift_hides_malformed_or_unbounded_ranges() -> None:
+    transport = FakeCcapiTransport()
+    transport.settings["wbshift"] = {
+        "value": {"ba": 0, "mg": 0},
+        "ability": {
+            "ba": {"min": -1000, "max": 1000, "step": 1},
+            "mg": {"min": -9, "max": 9, "step": 0},
+        },
+    }
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert not any(setting.key.startswith("wbshift.") for setting in capabilities.settings)
+
+
+@pytest.mark.parametrize("current", [{"ba": 0}, {"ba": 0.5, "mg": 0}])
+def test_ccapi_wb_shift_requires_complete_integer_current_value(current: dict[str, object]) -> None:
+    transport = FakeCcapiTransport()
+    transport.settings["wbshift"] = {
+        "value": current,
+        "ability": {
+            "ba": {"min": -9, "max": 9, "step": 1},
+            "mg": {"min": -9, "max": 9, "step": 1},
+        },
+    }
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert not any(setting.key.startswith("wbshift.") for setting in capabilities.settings)
 
 
 def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:

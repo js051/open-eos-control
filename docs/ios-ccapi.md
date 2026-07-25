@@ -5,7 +5,7 @@
 ## Implemented Core
 
 - CCAPI discovery through `/ccapi`, including Canon's same-origin full `url` entries and relative `path` fixtures, versioned operation parsing, and `ver110`/`ver100` fallback; query data and unsafe origins/paths are never promoted to capabilities
-- Camera identity, battery, storage, exposure, white balance, and dynamic settings; writable controls require the exact setting-specific `PUT` operation and a value from camera `ability`. Object-valued `stillimagequality` is presented as separate RAW/JPEG/HEIF controls and written as Canon's complete nested value while preserving companion fields.
+- Camera identity, battery, storage, exposure, white balance, and dynamic settings; writable controls require the exact setting-specific `PUT` operation and a value from camera `ability`. Object-valued `stillimagequality` is presented as separate RAW/JPEG/HEIF controls, while `wbshift` uses bounded B/A and M/G ranges. Both write Canon's complete nested value while preserving companion fields.
 - Still capture, independent AF-ON through advertised Canon start/stop or a balanced half-press fallback, explicit timed half-press, recording, Tap AF, and Click White Balance only when supported
 - JPEG Live View only when discovery advertises a complete start/frame/stop lifecycle, with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
 - Canon RTP H.264 Live View only when discovery advertises `GET rtpsessiondesc` and `POST rtp` and the App supplies a same-subnet camera-Wi-Fi IPv4 receiver; the core validates SDP, RFC 3550 packets and RFC 6184 single NAL/STAP-A/FU-A access units, owns exact start/stop cleanup, and falls back to JPEG for AUTO startup failures

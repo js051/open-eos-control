@@ -102,6 +102,8 @@
 "setting_color_temperature" = "Color temperature";
 "setting_white_balance_shift_a" = "White balance shift A";
 "setting_white_balance_shift_b" = "White balance shift B";
+"setting_white_balance_shift_ba" = "WB shift B/A";
+"setting_white_balance_shift_mg" = "WB shift M/G";
 "setting_color_space" = "Color space";
 "setting_aspect_ratio" = "Aspect ratio";
 "setting_power_zoom_speed" = "Power zoom speed";

@@ -815,6 +815,88 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realWhiteBalanceShiftUsesAdvertisedRangeAndWritesIntegerObject() = runTest {
+        client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{}"""))
+
+        val capabilities = client.capabilities()
+        val ba = capabilities.advancedSettings.first { it.key == "wbshift.ba" }
+        assertEquals((-9..9).map(Int::toString), ba.values)
+        assertEquals("0", ba.value)
+        val requestCount = server.requestCount
+        val invalid = runCatching { client.setSetting("wbshift.ba", "10") }.exceptionOrNull()
+        assertTrue(invalid is IllegalStateException)
+        assertTrue(invalid?.message.orEmpty().contains("not advertised"))
+        assertEquals(requestCount, server.requestCount)
+
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON.replace("\"ba\": 0", "\"ba\": 9")))
+        server.enqueue(jsonResponse("""{}"""))
+
+        client.setSetting("wbshift.ba", "9")
+
+        assertEquals("/ccapi/ver110/shooting/settings", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+        val put = server.takeRequest()
+        assertEquals("PUT", put.method)
+        assertEquals("/ccapi/ver110/shooting/settings/wbshift", put.path)
+        val value = JSONObject(put.body.readUtf8()).getJSONObject("value")
+        assertEquals(9, value.getInt("ba"))
+        assertEquals(0, value.getInt("mg"))
+    }
+
+    @Test
+    fun realWhiteBalanceShiftHidesMalformedOrUnboundedRanges() = runTest {
+        client.forceRealCamera()
+        server.enqueue(
+            jsonResponse(
+                """
+                {
+                  "wbshift": {
+                    "value": {"ba": 0, "mg": 0},
+                    "ability": {
+                      "ba": {"min": -1000, "max": 1000, "step": 1},
+                      "mg": {"min": -9, "max": 9, "step": 0}
+                    }
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val capabilities = client.capabilities()
+
+        assertTrue(capabilities.advancedSettings.none { it.key.startsWith("wbshift.") })
+    }
+
+    @Test
+    fun realWhiteBalanceShiftRequiresCompleteIntegerCurrentValue() = runTest {
+        client.forceRealCamera()
+        server.enqueue(
+            jsonResponse(
+                """
+                {
+                  "wbshift": {
+                    "value": {"ba": 0.5},
+                    "ability": {
+                      "ba": {"min": -9, "max": 9, "step": 1},
+                      "mg": {"min": -9, "max": 9, "step": 1}
+                    }
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val capabilities = client.capabilities()
+
+        assertTrue(capabilities.advancedSettings.none { it.key.startsWith("wbshift.") })
+    }
+
+    @Test
     fun realRecordingAcceptsEmptyCommandSuccess() = runTest {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(MockResponse().setResponseCode(204))
@@ -1391,6 +1473,13 @@ class CcapiClientTest {
                 "value": {"raw": "none", "jpeg": "large_fine"},
                 "ability": {"raw": ["none", "raw", "craw"], "jpeg": ["none", "large_fine", "large_normal"]}
               },
+              "wbshift": {
+                "value": {"ba": 0, "mg": 0},
+                "ability": {
+                  "ba": {"min": -9, "max": 9, "step": 1},
+                  "mg": {"min": -9, "max": 9, "step": 1}
+                }
+              },
               "shootingmode": {"value": "movie", "ability": ["movie"]}
             }
         """
@@ -1413,6 +1502,7 @@ class CcapiClientTest {
                 {"path":"/shooting/settings/meteringmode","put":true},
                 {"path":"/shooting/settings/afmethod","put":true},
                 {"path":"/shooting/settings/stillimagequality","put":true},
+                {"path":"/shooting/settings/wbshift","put":true},
                 {"path":"/shooting/settings/shootingmode","put":true}
               ]
             }

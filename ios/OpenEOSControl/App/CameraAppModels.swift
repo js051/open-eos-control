@@ -155,6 +155,8 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "colortemperature": "setting_color_temperature"
     case "whitebalanceadjusta": "setting_white_balance_shift_a"
     case "whitebalanceadjustb": "setting_white_balance_shift_b"
+    case "wbshift.ba": "setting_white_balance_shift_ba"
+    case "wbshift.mg": "setting_white_balance_shift_mg"
     case "colorspace": "setting_color_space"
     case "aspectratio": "setting_aspect_ratio"
     case "zoomspeed": "setting_power_zoom_speed"

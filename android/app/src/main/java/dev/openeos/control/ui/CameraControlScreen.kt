@@ -767,6 +767,8 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "exposurecompensation" -> stringResource(R.string.setting_exposure_compensation)
     "whitebalanceadjusta" -> stringResource(R.string.setting_white_balance_shift_a)
     "whitebalanceadjustb" -> stringResource(R.string.setting_white_balance_shift_b)
+    "wbshift.ba" -> stringResource(R.string.setting_white_balance_shift_ba)
+    "wbshift.mg" -> stringResource(R.string.setting_white_balance_shift_mg)
     "colorspace" -> stringResource(R.string.setting_color_space)
     "aspectratio" -> stringResource(R.string.setting_aspect_ratio)
     "zoomspeed" -> stringResource(R.string.setting_power_zoom_speed)

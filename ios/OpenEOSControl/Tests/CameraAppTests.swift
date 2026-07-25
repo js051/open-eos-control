@@ -68,6 +68,8 @@ final class CameraAppTests: XCTestCase {
         let expectedLabels = [
             "whitebalanceadjusta": "setting_white_balance_shift_a",
             "whitebalanceadjustb": "setting_white_balance_shift_b",
+            "wbshift.ba": "setting_white_balance_shift_ba",
+            "wbshift.mg": "setting_white_balance_shift_mg",
             "aspectratio": "setting_aspect_ratio",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",

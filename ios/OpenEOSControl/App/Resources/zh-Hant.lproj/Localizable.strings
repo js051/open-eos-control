@@ -102,6 +102,8 @@
 "setting_color_temperature" = "色溫";
 "setting_white_balance_shift_a" = "白平衡偏移 A";
 "setting_white_balance_shift_b" = "白平衡偏移 B";
+"setting_white_balance_shift_ba" = "白平衡偏移 B/A";
+"setting_white_balance_shift_mg" = "白平衡偏移 M/G";
 "setting_color_space" = "色彩空間";
 "setting_aspect_ratio" = "畫面比例";
 "setting_power_zoom_speed" = "電動變焦速度";
