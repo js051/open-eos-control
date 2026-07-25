@@ -60,6 +60,8 @@ HALF_PRESS_SECONDS = 0.35
 HTTP_METHODS = ("GET", "PUT", "POST", "DELETE")
 COMMAND_METHODS = {"PUT", "POST"}
 PRIMARY_SETTING_KEYS = {"iso", "shutter", "aperture", "whitebalance"}
+IMAGE_QUALITY_SETTING_KEY = "stillimagequality"
+IMAGE_QUALITY_FIELDS = ("raw", "jpeg", "heif")
 SETTING_ALIASES = {
     "iso": "iso",
     "tv": "shutter",
@@ -83,6 +85,9 @@ SETTING_LABELS = {
     "picturestyle": "Picture style",
     "shootingmode": "Shooting mode",
     "stillimagequality": "Image quality",
+    "stillimagequality.raw": "RAW quality",
+    "stillimagequality.jpeg": "JPEG quality",
+    "stillimagequality.heif": "HEIF quality",
     "moviequality": "Movie quality",
     "colortemperature": "Color temperature",
     "exposurecompensation": "Exposure compensation",
@@ -591,8 +596,9 @@ class CcapiSession:
         with self._lock:
             self._ensure_initialized()
             canonical = SETTING_ALIASES.get(key, key)
+            settings = self._load_settings(False)
             control = next(
-                (item for item in self._camera_settings(self._load_settings(False)) if item.key == canonical),
+                (item for item in self._camera_settings(settings) if item.key == canonical),
                 None,
             )
             if control is None:
@@ -604,10 +610,33 @@ class CcapiSession:
                     status_code=422,
                     engine=self.engine_name,
                 )
-            path = self._setting_paths.get(canonical)
+            structured = _structured_setting_parts(canonical)
+            path = self._setting_paths.get(structured[0] if structured else canonical)
             if path is None:
                 raise unsupported(_feature_for_setting(canonical).value, self.engine_name)
-            self._request_ok("PUT", path, {"value": value})
+            if structured:
+                base_key, field = structured
+                raw = settings.get(base_key)
+                current = raw.get("value") if isinstance(raw, dict) else None
+                if not isinstance(current, dict):
+                    raise unsupported(_feature_for_setting(canonical).value, self.engine_name)
+                updated = dict(current)
+                updated[field] = value
+                active = [
+                    current_value
+                    for item in IMAGE_QUALITY_FIELDS
+                    if (current_value := _string_value(updated.get(item)))
+                ]
+                if active and all(item.casefold() == "none" for item in active):
+                    raise BridgeError(
+                        "INVALID_SETTING_VALUE",
+                        "At least one still image format must remain enabled.",
+                        status_code=422,
+                        engine=self.engine_name,
+                    )
+                self._request_ok("PUT", path, {"value": updated})
+            else:
+                self._request_ok("PUT", path, {"value": value})
             self._settings_cache = None
             self._observed.add(_feature_for_setting(canonical))
             return self.status()
@@ -1147,6 +1176,9 @@ class CcapiSession:
             if key not in self._setting_paths:
                 continue
             if not isinstance(raw, dict):
+                continue
+            if key == IMAGE_QUALITY_SETTING_KEY:
+                controls.extend(_structured_image_quality_controls(raw))
                 continue
             value = _string_value(raw.get("value"))
             ability = raw.get("ability")
@@ -1737,6 +1769,35 @@ def _positive_int(value: object) -> int | None:
 def _setting_value(settings: dict[str, object], key: str) -> str | None:
     value = settings.get(key)
     return _string_value(value.get("value")) if isinstance(value, dict) else None
+
+
+def _structured_image_quality_controls(raw: dict[str, object]) -> list[CameraSetting]:
+    current = raw.get("value")
+    ability = raw.get("ability")
+    if not isinstance(current, dict) or not isinstance(ability, dict):
+        return []
+    controls: list[CameraSetting] = []
+    for field in IMAGE_QUALITY_FIELDS:
+        value = _string_value(current.get(field))
+        raw_values = ability.get(field)
+        values = (
+            list(dict.fromkeys(_string_value(item) for item in raw_values))
+            if isinstance(raw_values, list)
+            else []
+        )
+        values = [item for item in values if item]
+        if value and len(values) >= 2:
+            key = f"{IMAGE_QUALITY_SETTING_KEY}.{field}"
+            controls.append(CameraSetting(key=key, label=SETTING_LABELS[key], value=value, values=values))
+    return controls
+
+
+def _structured_setting_parts(key: str) -> tuple[str, str] | None:
+    prefix = f"{IMAGE_QUALITY_SETTING_KEY}."
+    if not key.startswith(prefix):
+        return None
+    field = key.removeprefix(prefix)
+    return (IMAGE_QUALITY_SETTING_KEY, field) if field in IMAGE_QUALITY_FIELDS else None
 
 
 def _first_setting_value(settings: dict[str, object], *keys: str) -> str | None:

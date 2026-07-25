@@ -87,6 +87,9 @@ class CcapiClient(
     private var isRecording: Boolean? = null
     private val settingPathsByKey = mutableMapOf<String, String>()
     private val settingValuesByKey = mutableMapOf<String, Set<String>>()
+    private val structuredSettingPathsByKey = mutableMapOf<String, String>()
+    private val structuredSettingValuesByKey = mutableMapOf<String, Set<String>>()
+    private val structuredSettingCurrentValues = mutableMapOf<String, JSONObject>()
     private val apiOperations = linkedSetOf<CcapiApiOperation>()
     private val observedFeatures = mutableSetOf<CameraFeature>()
     private var enforceAdvertisedOperations = false
@@ -1403,6 +1406,9 @@ class CcapiClient(
     private suspend fun loadShootingSettings(): JSONObject? {
         settingPathsByKey.clear()
         settingValuesByKey.clear()
+        structuredSettingPathsByKey.clear()
+        structuredSettingValuesByKey.clear()
+        structuredSettingCurrentValues.clear()
         settingsLoaded = false
         val merged = JSONObject()
 
@@ -1427,13 +1433,33 @@ class CcapiClient(
                 val settingPath = "$prefix/shooting/settings/$key"
                 if (!enforceAdvertisedOperations || apiOperations.contains(CcapiApiOperation("PUT", settingPath))) {
                     settingPathsByKey.putIfAbsent(key, settingPath)
-                    val values = settings.optJSONObject(key)
-                        ?.optJSONArray("ability")
+                    val setting = settings.optJSONObject(key)
+                    val values = setting?.optJSONArray("ability")
                         ?.toStringList()
                         .orEmpty()
                         .filter { it.isNotBlank() }
                         .toSet()
                     if (values.isNotEmpty()) settingValuesByKey.putIfAbsent(key, values)
+                    if (key == IMAGE_QUALITY_SETTING_KEY) {
+                        val current = setting?.optJSONObject("value")
+                        val ability = setting?.optJSONObject("ability")
+                        if (current != null && ability != null) {
+                            structuredSettingCurrentValues.putIfAbsent(key, JSONObject(current.toString()))
+                            IMAGE_QUALITY_FIELDS.forEach { field ->
+                                val fieldValues = ability.optJSONArray(field)
+                                    ?.toStringList()
+                                    .orEmpty()
+                                    .filter { it.isNotBlank() }
+                                    .distinct()
+                                    .toSet()
+                                if (fieldValues.isNotEmpty() && current.optString(field).isNotBlank()) {
+                                    val virtualKey = "$key.$field"
+                                    structuredSettingPathsByKey.putIfAbsent(virtualKey, settingPath)
+                                    structuredSettingValuesByKey.putIfAbsent(virtualKey, fieldValues)
+                                }
+                            }
+                        }
+                    }
                 }
                 if (!merged.has(key)) {
                     merged.put(key, settings.get(key))
@@ -1449,6 +1475,13 @@ class CcapiClient(
         if (!settingsLoaded) {
             loadShootingSettings()
         }
+
+        candidateKeys.singleOrNull()
+            ?.takeIf(structuredSettingPathsByKey::containsKey)
+            ?.let { key ->
+                putStructuredSettingValue(key, value)
+                return
+            }
 
         val supportedCandidates = candidateKeys.filter(settingPathsByKey::containsKey)
         if (supportedCandidates.isEmpty()) {
@@ -1476,6 +1509,27 @@ class CcapiClient(
             "Failed to set shooting setting to '$value'. Tried:\n" +
                 errors.joinToString(separator = "\n") { "  - $it" }
         )
+    }
+
+    private suspend fun putStructuredSettingValue(key: String, value: String) {
+        val (baseKey, field) = key.splitStructuredSettingKey()
+            ?: error("Unsupported structured camera setting '$key'.")
+        val advertisedValues = structuredSettingValuesByKey[key].orEmpty()
+        if (value !in advertisedValues) {
+            error("Value '$value' is not advertised for $key.")
+        }
+        val current = structuredSettingCurrentValues[baseKey]
+            ?: error("Camera did not return the current value for $baseKey.")
+        val updated = JSONObject(current.toString()).put(field, value)
+        val activeFormats = IMAGE_QUALITY_FIELDS.mapNotNull { format ->
+            updated.optString(format).takeIf { it.isNotBlank() }
+        }
+        if (activeFormats.isNotEmpty() && activeFormats.all { it.equals("none", ignoreCase = true) }) {
+            error("At least one still image format must remain enabled.")
+        }
+        val path = structuredSettingPathsByKey.getValue(key)
+        putOk(path, JSONObject().put("value", updated))
+        structuredSettingCurrentValues[baseKey] = updated
     }
 
     private fun writableSetting(settings: JSONObject?, candidateKeys: List<String>): JSONObject? {
@@ -1886,6 +1940,28 @@ private fun JSONObject.toAdvancedSettingControls(writableKeys: Set<String>): Lis
         if (key in PRIMARY_SETTING_KEYS || key !in writableKeys) continue
 
         val setting = optJSONObject(key) ?: continue
+        if (key == IMAGE_QUALITY_SETTING_KEY) {
+            val current = setting.optJSONObject("value") ?: continue
+            val ability = setting.optJSONObject("ability") ?: continue
+            IMAGE_QUALITY_FIELDS.forEach { field ->
+                val values = ability.optJSONArray(field)?.toStringList().orEmpty()
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                val value = current.optString(field)
+                if (values.size >= 2 && value.isNotBlank()) {
+                    val virtualKey = "$key.$field"
+                    controls.add(
+                        CameraSettingControl(
+                            key = virtualKey,
+                            label = virtualKey.toSettingLabel(),
+                            value = value,
+                            values = values,
+                        )
+                    )
+                }
+            }
+            continue
+        }
         val values = setting.optJSONArray("ability")?.toStringList().orEmpty()
             .filter { it.isNotBlank() }
             .distinct()
@@ -1925,6 +2001,9 @@ private fun String.toSettingLabel(): String =
         "picturestyle" -> "Picture style"
         "shootingmode" -> "Shooting mode"
         "stillimagequality" -> "Image quality"
+        "stillimagequality.raw" -> "RAW quality"
+        "stillimagequality.jpeg" -> "JPEG quality"
+        "stillimagequality.heif" -> "HEIF quality"
         "moviequality" -> "Movie quality"
         "colortemperature" -> "Color temperature"
         "exposurecompensation" -> "Exposure compensation"
@@ -1935,6 +2014,17 @@ private fun String.toSettingLabel(): String =
             .joinToString(" ") { it.replaceFirstChar { char -> char.uppercaseChar() } }
             .ifBlank { this }
     }
+
+private fun String.splitStructuredSettingKey(): Pair<String, String>? {
+    val separator = lastIndexOf('.')
+    if (separator <= 0 || separator == lastIndex) return null
+    val base = substring(0, separator)
+    val field = substring(separator + 1)
+    return if (base == IMAGE_QUALITY_SETTING_KEY && field in IMAGE_QUALITY_FIELDS) base to field else null
+}
+
+private const val IMAGE_QUALITY_SETTING_KEY = "stillimagequality"
+private val IMAGE_QUALITY_FIELDS = listOf("raw", "jpeg", "heif")
 
 private fun String.splitCamelCaseWords(): List<String> =
     replace(Regex("([a-z])([A-Z])"), "$1 $2").split(" ")

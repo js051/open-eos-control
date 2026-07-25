@@ -31,7 +31,8 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "highisonr" -> highIsoNoiseReductionValueLabels[value]
         "autopoweroff" -> autoPowerOffValueLabels[value]
         "aeb" -> toggleValueLabels[value]
-        "stillimagequality", "stillimagequalitysd", "stillimagequalitycf" ->
+        "stillimagequality", "stillimagequalityraw", "stillimagequalityjpeg", "stillimagequalityheif",
+        "stillimagequalitysd", "stillimagequalitycf" ->
             imageQualityValueLabels[value]
 
         "shootingmode", "autoexposuremode", "ae" -> shootingModeValueLabels[value]
@@ -204,6 +205,7 @@ private val autoPowerOffValueLabels = mapOf(
 )
 
 private val imageQualityValueLabels = mapOf(
+    "none" to R.string.camera_value_none,
     "raw" to R.string.camera_value_raw,
     "craw" to R.string.camera_value_craw,
     "mraw" to R.string.camera_value_mraw,
@@ -217,6 +219,17 @@ private val imageQualityValueLabels = mapOf(
     "raw + large normal jpeg" to R.string.camera_value_raw_large_normal_jpeg,
     "craw + smaller jpeg" to R.string.camera_value_craw_smaller_jpeg,
     "raw + smaller jpeg" to R.string.camera_value_raw_smaller_jpeg,
+    "large" to R.string.camera_value_large,
+    "medium1" to R.string.camera_value_medium_1,
+    "medium2" to R.string.camera_value_medium_2,
+    "small" to R.string.camera_value_small,
+    "large fine" to R.string.camera_value_large_fine,
+    "large normal" to R.string.camera_value_large_normal,
+    "medium fine" to R.string.camera_value_medium_fine,
+    "medium normal" to R.string.camera_value_medium_normal,
+    "small1 fine" to R.string.camera_value_small_1_fine,
+    "small1 normal" to R.string.camera_value_small_1_normal,
+    "small2" to R.string.camera_value_small_2,
 )
 
 private val shootingModeValueLabels = mapOf(

@@ -22,6 +22,8 @@ class CameraValueLabelsTest {
             Triple("autopoweroff", "Disable", R.string.camera_value_disable),
             Triple("aeb", "off", R.string.camera_value_off),
             Triple("stillimagequalitycf", "cRAW + Large Fine JPEG", R.string.camera_value_craw_large_fine_jpeg),
+            Triple("stillimagequality.raw", "none", R.string.camera_value_none),
+            Triple("stillimagequality.jpeg", "large_fine", R.string.camera_value_large_fine),
             Triple("shootingmode", "TV", R.string.camera_value_shutter_priority_ae),
             Triple("autoexposuremode", "Fv", R.string.camera_value_flexible_priority_ae),
         )

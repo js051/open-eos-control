@@ -123,6 +123,9 @@
       meteringmode: "Metering mode",
       picturestyle: "Picture style",
       stillimagequality: "Image quality",
+      "stillimagequality.raw": "RAW quality",
+      "stillimagequality.jpeg": "JPEG quality",
+      "stillimagequality.heif": "HEIF quality",
       stillimagequalitysd: "SD image quality",
       stillimagequalitycf: "CF/CFexpress image quality",
       shootingmode: "Shooting mode",
@@ -162,6 +165,18 @@
       imageQualityRawSmallerJpeg: "RAW + Smaller JPEG",
       imageQualityRaw: "RAW",
       imageQualityCraw: "cRAW",
+      imageQualityNone: "None",
+      imageQualityLarge: "Large",
+      imageQualityMedium1: "Medium 1",
+      imageQualityMedium2: "Medium 2",
+      imageQualitySmall: "Small",
+      imageQualityLargeFine: "Large/Fine",
+      imageQualityLargeNormal: "Large/Normal",
+      imageQualityMediumFine: "Medium/Fine",
+      imageQualityMediumNormal: "Medium/Normal",
+      imageQualitySmall1Fine: "Small 1/Fine",
+      imageQualitySmall1Normal: "Small 1/Normal",
+      imageQualitySmall2: "Small 2",
       mediaCount: "{count} media item(s)",
       mediaEmpty: "No media was reported by the camera",
       mediaThumbnail: "Thumbnail for {name}",
@@ -281,6 +296,9 @@
       meteringmode: "測光模式",
       picturestyle: "相片風格",
       stillimagequality: "影像品質",
+      "stillimagequality.raw": "RAW 畫質",
+      "stillimagequality.jpeg": "JPEG 畫質",
+      "stillimagequality.heif": "HEIF 畫質",
       stillimagequalitysd: "SD 卡影像品質",
       stillimagequalitycf: "CF／CFexpress 卡影像品質",
       shootingmode: "拍攝模式",
@@ -320,6 +338,18 @@
       imageQualityRawSmallerJpeg: "RAW ＋較小型 JPEG",
       imageQualityRaw: "RAW",
       imageQualityCraw: "cRAW",
+      imageQualityNone: "無",
+      imageQualityLarge: "大型",
+      imageQualityMedium1: "中型 1",
+      imageQualityMedium2: "中型 2",
+      imageQualitySmall: "小型",
+      imageQualityLargeFine: "大型／精細",
+      imageQualityLargeNormal: "大型／一般",
+      imageQualityMediumFine: "中型／精細",
+      imageQualityMediumNormal: "中型／一般",
+      imageQualitySmall1Fine: "小型 1／精細",
+      imageQualitySmall1Normal: "小型 1／一般",
+      imageQualitySmall2: "小型 2",
       mediaCount: "共 {count} 個媒體檔案",
       mediaEmpty: "相機未回報任何媒體檔案",
       mediaThumbnail: "{name} 的縮圖",
@@ -359,6 +389,20 @@
     1800: "duration30Minutes",
   };
   const imageQualityValueKeys = {
+    none: "imageQualityNone",
+    raw: "imageQualityRaw",
+    craw: "imageQualityCraw",
+    large: "imageQualityLarge",
+    medium1: "imageQualityMedium1",
+    medium2: "imageQualityMedium2",
+    small: "imageQualitySmall",
+    large_fine: "imageQualityLargeFine",
+    large_normal: "imageQualityLargeNormal",
+    medium_fine: "imageQualityMediumFine",
+    medium_normal: "imageQualityMediumNormal",
+    small1_fine: "imageQualitySmall1Fine",
+    small1_normal: "imageQualitySmall1Normal",
+    small2: "imageQualitySmall2",
     "Large Fine JPEG": "imageQualityLargeFineJpeg",
     "Large Normal JPEG": "imageQualityLargeNormalJpeg",
     "Smaller JPEG": "imageQualitySmallerJpeg",
@@ -906,7 +950,16 @@
     const rawValue = String(value);
     let messageKey = commonSettingValueKeys[rawValue.toLowerCase()];
     if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue];
-    if (["stillimagequality", "stillimagequalitysd", "stillimagequalitycf"].includes(key)) {
+    if (
+      [
+        "stillimagequality",
+        "stillimagequality.raw",
+        "stillimagequality.jpeg",
+        "stillimagequality.heif",
+        "stillimagequalitysd",
+        "stillimagequalitycf",
+      ].includes(key)
+    ) {
       messageKey = imageQualityValueKeys[rawValue];
     }
     return messageKey ? t(messageKey) : rawValue;

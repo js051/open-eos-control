@@ -53,6 +53,8 @@ public actor CCAPIClient {
     private static let maximumCapabilityEvidenceItemCharacters = 512
     private static let maximumRTPSessionDescriptionBytes = 64 * 1024
     private static let halfPressNanoseconds: UInt64 = 350_000_000
+    private static let imageQualitySettingKey = "stillimagequality"
+    private static let imageQualityFields = ["raw", "jpeg", "heif"]
 
     private let baseURL: URL
     private let baseURLString: String
@@ -340,7 +342,16 @@ public actor CCAPIClient {
               control.values.contains(value) else {
             throw CCAPIError.invalidSetting(key: key, value: value)
         }
-        try await putSettingValue(candidateKeys: aliases(for: key), value: value)
+        if let structured = structuredSettingParts(key) {
+            try await putStructuredSettingValue(
+                settings: settings,
+                baseKey: structured.baseKey,
+                field: structured.field,
+                value: value
+            )
+        } else {
+            try await putSettingValue(candidateKeys: aliases(for: key), value: value)
+        }
         observedFeatures.insert(featureForSetting(key))
         return try await status()
     }
@@ -1232,12 +1243,27 @@ public actor CCAPIClient {
             }
         }
         for key in value.keys.sorted() where !Self.allPrimaryAliases.contains(key) && settingPaths[key] != nil {
-            guard let setting = value.object(key), let settingControl = control(key, Self.settingLabel(key), setting) else {
+            guard let setting = value.object(key) else {
                 continue
             }
-            controls.append(settingControl)
+            if key == Self.imageQualitySettingKey {
+                controls.append(contentsOf: structuredImageQualityControls(setting))
+            } else if let settingControl = control(key, Self.settingLabel(key), setting) {
+                controls.append(settingControl)
+            }
         }
         return controls
+    }
+
+    private func structuredImageQualityControls(_ setting: JSONDictionary) -> [CameraSetting] {
+        guard let current = setting.object("value"), let ability = setting.object("ability") else { return [] }
+        return Self.imageQualityFields.compactMap { field in
+            let values = (ability.array(field)?.strings ?? []).removingDuplicates()
+            let value = current.string(field)
+            guard !value.isEmpty, values.count >= 2 else { return nil }
+            let key = "\(Self.imageQualitySettingKey).\(field)"
+            return CameraSetting(key: key, label: Self.settingLabel(key), value: value, values: values)
+        }
     }
 
     private func control(_ key: String, _ label: String, _ value: JSONDictionary) -> CameraSetting? {
@@ -1268,6 +1294,36 @@ public actor CCAPIClient {
         throw CCAPIError.invalidResponse(
             "Setting write failed for '\(value)'.\n" + failures.map { "- \($0)" }.joined(separator: "\n")
         )
+    }
+
+    private func putStructuredSettingValue(
+        settings: JSONDictionary?,
+        baseKey: String,
+        field: String,
+        value: String
+    ) async throws {
+        guard let path = settingPaths[baseKey],
+              let setting = settings?.object(baseKey),
+              let current = setting.object("value") else {
+            throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
+        }
+        var updated = current
+        updated[field] = value
+        let activeFormats = Self.imageQualityFields.compactMap { field -> String? in
+            guard let value = updated[field] as? String, !value.isEmpty else { return nil }
+            return value
+        }
+        guard activeFormats.isEmpty || !activeFormats.allSatisfy({ $0.caseInsensitiveCompare("none") == .orderedSame }) else {
+            throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
+        }
+        try await requestOK(path: path, method: .put, json: ["value": updated])
+    }
+
+    private func structuredSettingParts(_ key: String) -> (baseKey: String, field: String)? {
+        let prefix = "\(Self.imageQualitySettingKey)."
+        guard key.hasPrefix(prefix) else { return nil }
+        let field = String(key.dropFirst(prefix.count))
+        return Self.imageQualityFields.contains(field) ? (Self.imageQualitySettingKey, field) : nil
     }
 
     private func aliases(for key: String) -> [String] {
@@ -1645,6 +1701,8 @@ public actor CCAPIClient {
             "afmethod": "AF method", "afoperation": "AF operation", "drivemode": "Drive mode",
             "meteringmode": "Metering", "picturestyle": "Picture style", "shootingmode": "Shooting mode",
             "stillimagequality": "Image quality", "moviequality": "Movie quality",
+            "stillimagequality.raw": "RAW quality", "stillimagequality.jpeg": "JPEG quality",
+            "stillimagequality.heif": "HEIF quality",
             "colortemperature": "Color temperature", "exposurecompensation": "Exposure compensation",
         ]
         if let label = known[key] { return label }

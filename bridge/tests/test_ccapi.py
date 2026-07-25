@@ -43,6 +43,7 @@ DISCOVERY = {
         {"path": "/shooting/settings/tv", "put": True},
         {"path": "/shooting/settings/av", "put": True},
         {"path": "/shooting/settings/wb", "put": True},
+        {"path": "/shooting/settings/stillimagequality", "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/af", "post": True},
@@ -92,6 +93,13 @@ class FakeCcapiTransport:
             "av": {"value": "2.8", "ability": ["2.8", "4.0"]},
             "wb": {"value": "auto", "ability": ["auto", "daylight"]},
             "meteringmode": {"value": "evaluative", "ability": ["evaluative", "spot"]},
+            "stillimagequality": {
+                "value": {"raw": "none", "jpeg": "large_fine"},
+                "ability": {
+                    "raw": ["none", "raw", "craw"],
+                    "jpeg": ["none", "large_fine", "large_normal"],
+                },
+            },
         }
         self.reject_live_view_size = True
         self.closed = False
@@ -291,6 +299,12 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert CameraFeature.MEDIA_THUMBNAIL not in capabilities.supported
     assert CameraFeature.MEDIA_THUMBNAIL in capabilities.planned
     assert next(item for item in capabilities.settings if item.key == "shutter").values == ["1/50", "1/100"]
+    assert next(item for item in capabilities.settings if item.key == "stillimagequality.raw").values == [
+        "none",
+        "raw",
+        "craw",
+    ]
+    assert next(item for item in capabilities.settings if item.key == "stillimagequality.jpeg").value == "large_fine"
     assert capabilities.evidence.source == "GET /ccapi"
     assert capabilities.evidence.protocol_versions == ["ver100"]
     assert "POST /ccapi/ver100/shooting/control/shutterbutton" in capabilities.evidence.advertised_commands
@@ -298,6 +312,16 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert capabilities.evidence.truncated is False
 
     assert session.set_setting("iso", "1600").exposure.iso == "1600"
+    session.set_setting("stillimagequality.raw", "raw")
+    quality_write = next(
+        request
+        for request in transport.requests
+        if request.method == "PUT" and request.path.endswith("/shooting/settings/stillimagequality")
+    )
+    assert quality_write.body == {"value": {"raw": "raw", "jpeg": "large_fine"}}
+    session.set_setting("stillimagequality.raw", "none")
+    with pytest.raises(BridgeError, match="At least one still image format"):
+        session.set_setting("stillimagequality.jpeg", "none")
     with pytest.raises(BridgeError, match="not advertised"):
         session.set_setting("iso", "51200")
     session.capture_still()

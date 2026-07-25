@@ -71,6 +71,8 @@ final class CameraAppTests: XCTestCase {
             "aspectratio": "setting_aspect_ratio",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
+            "stillimagequality.raw": "setting_image_quality_raw",
+            "stillimagequality.jpeg": "setting_image_quality_jpeg",
             "stillimagequalitysd": "setting_image_quality_sd",
             "stillimagequalitycf": "setting_image_quality_cf",
         ]
@@ -86,6 +88,10 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(
             settingValueLocalizationKey(key: "stillimagequalitycf", value: "cRAW + Large Fine JPEG"),
             "camera_value_craw_large_fine_jpeg"
+        )
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "stillimagequality.jpeg", value: "large_fine"),
+            "camera_value_large_fine"
         )
         XCTAssertEqual(settingValueLocalizationKey(key: "continuousaf", value: "Off"), "camera_value_off")
     }

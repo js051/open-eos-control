@@ -93,6 +93,11 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         declarations = re.findall(rf"^\s+{re.escape(key)}:\s+\"", script, flags=re.MULTILINE)
         assert len(declarations) == 2, f"{key} must have exactly one label in each supported language"
 
+    for key in {"stillimagequality.raw", "stillimagequality.jpeg", "stillimagequality.heif"}:
+        declarations = re.findall(rf'^\s+"{re.escape(key)}":\s+"', script, flags=re.MULTILINE)
+        assert len(declarations) == 2, f"{key} must have exactly one label in each supported language"
+    assert 'large_fine: "imageQualityLargeFine"' in script
+
     assert "function settingValueLabel(settingOrKey, value)" in script
     assert "option.value = value" in script
     assert "option.textContent = settingValueLabel(setting, value)" in script

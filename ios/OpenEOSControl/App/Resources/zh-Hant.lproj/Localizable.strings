@@ -91,6 +91,9 @@
 "setting_picture_style" = "相片風格";
 "setting_shooting_mode" = "拍攝模式";
 "setting_image_quality" = "影像畫質";
+"setting_image_quality_raw" = "RAW 畫質";
+"setting_image_quality_jpeg" = "JPEG 畫質";
+"setting_image_quality_heif" = "HEIF 畫質";
 "setting_image_quality_sd" = "SD 卡影像畫質";
 "setting_image_quality_cf" = "CF／CFexpress 卡影像畫質";
 "setting_movie_quality" = "短片畫質";
@@ -133,6 +136,18 @@
 "camera_value_raw_smaller_jpeg" = "RAW ＋較小型 JPEG";
 "camera_value_raw" = "RAW";
 "camera_value_craw" = "cRAW";
+"camera_value_none" = "無";
+"camera_value_large" = "大型";
+"camera_value_medium_1" = "中型 1";
+"camera_value_medium_2" = "中型 2";
+"camera_value_small" = "小型";
+"camera_value_large_fine" = "大型／精細";
+"camera_value_large_normal" = "大型／一般";
+"camera_value_medium_fine" = "中型／精細";
+"camera_value_medium_normal" = "中型／一般";
+"camera_value_small_1_fine" = "小型 1／精細";
+"camera_value_small_1_normal" = "小型 1／一般";
+"camera_value_small_2" = "小型 2";
 
 "camera_media" = "相機媒體";
 "back_to_camera" = "返回相機";

@@ -144,6 +144,9 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "picturestyle": "setting_picture_style"
     case "shootingmode": "setting_shooting_mode"
     case "stillimagequality": "setting_image_quality"
+    case "stillimagequality.raw": "setting_image_quality_raw"
+    case "stillimagequality.jpeg": "setting_image_quality_jpeg"
+    case "stillimagequality.heif": "setting_image_quality_heif"
     case "stillimagequalitysd": "setting_image_quality_sd"
     case "stillimagequalitycf": "setting_image_quality_cf"
     case "moviequality": "setting_movie_quality"
@@ -186,8 +189,25 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
             "1800": "camera_value_30_minutes",
         ][value]
     }
-    if ["stillimagequality", "stillimagequalitysd", "stillimagequalitycf"].contains(normalizedKey) {
+    if [
+        "stillimagequality", "stillimagequality.raw", "stillimagequality.jpeg", "stillimagequality.heif",
+        "stillimagequalitysd", "stillimagequalitycf",
+    ].contains(normalizedKey) {
         return [
+            "none": "camera_value_none",
+            "raw": "camera_value_raw",
+            "craw": "camera_value_craw",
+            "large": "camera_value_large",
+            "medium1": "camera_value_medium_1",
+            "medium2": "camera_value_medium_2",
+            "small": "camera_value_small",
+            "large_fine": "camera_value_large_fine",
+            "large_normal": "camera_value_large_normal",
+            "medium_fine": "camera_value_medium_fine",
+            "medium_normal": "camera_value_medium_normal",
+            "small1_fine": "camera_value_small_1_fine",
+            "small1_normal": "camera_value_small_1_normal",
+            "small2": "camera_value_small_2",
             "Large Fine JPEG": "camera_value_large_fine_jpeg",
             "Large Normal JPEG": "camera_value_large_normal_jpeg",
             "Smaller JPEG": "camera_value_smaller_jpeg",

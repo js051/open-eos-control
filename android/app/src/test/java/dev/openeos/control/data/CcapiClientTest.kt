@@ -775,6 +775,46 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realStillImageQualityUsesAdvertisedObjectFieldsAndPreservesCompanionFormat() = runTest {
+        client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{}"""))
+
+        val capabilities = client.capabilities()
+
+        assertEquals(
+            listOf("none", "raw", "craw"),
+            capabilities.advancedSettings.first { it.key == "stillimagequality.raw" }.values,
+        )
+        assertEquals(
+            "large_fine",
+            capabilities.advancedSettings.first { it.key == "stillimagequality.jpeg" }.value,
+        )
+        val requestCount = server.requestCount
+        val invalid = runCatching { client.setSetting("stillimagequality.jpeg", "none") }.exceptionOrNull()
+        assertTrue(invalid is IllegalStateException)
+        assertTrue(invalid?.message.orEmpty().contains("at least one", ignoreCase = true))
+        assertEquals(requestCount, server.requestCount)
+
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON.replace("\"raw\": \"none\"", "\"raw\": \"raw\"")))
+        server.enqueue(jsonResponse("""{}"""))
+
+        client.setSetting("stillimagequality.raw", "raw")
+
+        assertEquals("/ccapi/ver110/shooting/settings", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+        val put = server.takeRequest()
+        assertEquals("PUT", put.method)
+        assertEquals("/ccapi/ver110/shooting/settings/stillimagequality", put.path)
+        val value = JSONObject(put.body.readUtf8()).getJSONObject("value")
+        assertEquals("raw", value.getString("raw"))
+        assertEquals("large_fine", value.getString("jpeg"))
+    }
+
+    @Test
     fun realRecordingAcceptsEmptyCommandSuccess() = runTest {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(MockResponse().setResponseCode(204))
@@ -1347,6 +1387,10 @@ class CcapiClientTest {
               "wb": {"value": "auto", "ability": ["auto", "daylight"]},
               "meteringmode": {"value": "evaluative", "ability": ["evaluative", "spot"]},
               "afmethod": {"value": "face+tracking", "ability": ["face+tracking", "1-point"]},
+              "stillimagequality": {
+                "value": {"raw": "none", "jpeg": "large_fine"},
+                "ability": {"raw": ["none", "raw", "craw"], "jpeg": ["none", "large_fine", "large_normal"]}
+              },
               "shootingmode": {"value": "movie", "ability": ["movie"]}
             }
         """
@@ -1368,6 +1412,7 @@ class CcapiClientTest {
                 {"path":"/shooting/settings/wb","put":true},
                 {"path":"/shooting/settings/meteringmode","put":true},
                 {"path":"/shooting/settings/afmethod","put":true},
+                {"path":"/shooting/settings/stillimagequality","put":true},
                 {"path":"/shooting/settings/shootingmode","put":true}
               ]
             }

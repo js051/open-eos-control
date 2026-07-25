@@ -15,6 +15,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/settings/tv","put":true},
         {"path":"/shooting/settings/av","put":true},
         {"path":"/shooting/settings/wb","put":true},
+        {"path":"/shooting/settings/stillimagequality","put":true},
         {"path":"/shooting/settings/meteringmode","put":true},
         {"path":"/shooting/control/shutterbutton","post":true},
         {"path":"/shooting/control/shutterbutton/manual","put":true},
@@ -38,6 +39,10 @@ final class CCAPIClientTests: XCTestCase {
       "av":{"value":"2.8","ability":["2.8","4.0"]},
       "wb":{"value":"auto","ability":["auto","daylight"]},
       "meteringmode":{"value":"evaluative","ability":["evaluative","spot"]},
+      "stillimagequality":{
+        "value":{"raw":"none","jpeg":"large_fine"},
+        "ability":{"raw":["none","raw","craw"],"jpeg":["none","large_fine","large_normal"]}
+      },
       "readonly":{"value":"fixed","ability":["fixed"]}
     }
     """
@@ -64,6 +69,8 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(snapshot.capabilities.profile.priority, .primary)
         XCTAssertEqual(snapshot.capabilities.setting("iso")?.values, ["100", "800", "1600"])
         XCTAssertEqual(snapshot.capabilities.setting("meteringmode")?.values, ["evaluative", "spot"])
+        XCTAssertEqual(snapshot.capabilities.setting("stillimagequality.raw")?.values, ["none", "raw", "craw"])
+        XCTAssertEqual(snapshot.capabilities.setting("stillimagequality.jpeg")?.value, "large_fine")
         XCTAssertNil(snapshot.capabilities.setting("readonly"))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.stillCapture))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.shutterHalfPress))
@@ -574,6 +581,41 @@ final class CCAPIClientTests: XCTestCase {
         let body = try XCTUnwrap(write.body)
         let value = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
         XCTAssertEqual(value, ["value": "1600"])
+    }
+
+    func testStillImageQualityWritesCanonObjectAndPreservesCompanionFormat() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
+        await transport.enqueue(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/settings/stillimagequality",
+            status: 204,
+            body: Data()
+        )
+        await enqueueStatus(on: transport)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        _ = try await client.capabilities()
+        do {
+            _ = try await client.setSetting(key: "stillimagequality.jpeg", value: "none")
+            XCTFail("Expected all-disabled image quality to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidSetting(key: "stillimagequality.jpeg", value: "none")
+            )
+        }
+        _ = try await client.setSetting(key: "stillimagequality.raw", value: "raw")
+
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.first {
+            $0.method == "PUT" && $0.path == "/ccapi/ver100/shooting/settings/stillimagequality"
+        })
+        let body = try XCTUnwrap(request.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let value = try XCTUnwrap(object["value"] as? [String: String])
+        XCTAssertEqual(value, ["raw": "raw", "jpeg": "large_fine"])
     }
 
     func testMediaDownloadRejectsCrossOriginCameraResource() async throws {

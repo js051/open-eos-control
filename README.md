@@ -34,7 +34,7 @@ The app currently includes:
 - Desktop Bridge discovery, Bearer authentication, multi-camera selection, sessions, dynamic capabilities/settings, capture, AF-ON, Live View, focus drive, and ability-gated media thumbnails/transfer/deletion; the libgphoto2 path includes R6 Mark III autofocus drive/cancel actions, per-card image quality, WB shifts, aspect ratio, power-zoom speed, safe Auto Power Off choices, and memory-card capture-target restoration before shutter
 - Live view frame display with auto/manual refresh and FPS control
 - Capability-gated Canon CCAPI RTP H.264 Live View on Android, iOS, and PC, with routed UDP reception, RFC 3550/RFC 6184 packet handling, native mobile display or PyAV decode on PC, an Auto/RTP/JPEG source selector, and a 1-30 FPS display/output cap; it appears only when the camera advertises both RTP endpoints and a reachable local IPv4 address plus a working decoder exist
-- ISO, shutter, aperture, white balance, and dynamic advanced settings
+- ISO, shutter, aperture, white balance, and dynamic advanced settings, including camera-advertised Canon CCAPI RAW/JPEG/HEIF image-quality leaves with specification-shaped object writes
 - System, English, or Traditional Chinese language selection, including localized camera-advertised setting values while preserving exact protocol values for writes
 - REC start/stop
 - Canon coordinate Tap AF through advertised `PUT afframeposition`, using detailed Live View image geometry instead of guessed normalized camera coordinates

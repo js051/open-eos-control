@@ -91,6 +91,9 @@
 "setting_picture_style" = "Picture style";
 "setting_shooting_mode" = "Shooting mode";
 "setting_image_quality" = "Image quality";
+"setting_image_quality_raw" = "RAW quality";
+"setting_image_quality_jpeg" = "JPEG quality";
+"setting_image_quality_heif" = "HEIF quality";
 "setting_image_quality_sd" = "SD image quality";
 "setting_image_quality_cf" = "CF/CFexpress image quality";
 "setting_movie_quality" = "Movie quality";
@@ -133,6 +136,18 @@
 "camera_value_raw_smaller_jpeg" = "RAW + Smaller JPEG";
 "camera_value_raw" = "RAW";
 "camera_value_craw" = "cRAW";
+"camera_value_none" = "None";
+"camera_value_large" = "Large";
+"camera_value_medium_1" = "Medium 1";
+"camera_value_medium_2" = "Medium 2";
+"camera_value_small" = "Small";
+"camera_value_large_fine" = "Large/Fine";
+"camera_value_large_normal" = "Large/Normal";
+"camera_value_medium_fine" = "Medium/Fine";
+"camera_value_medium_normal" = "Medium/Normal";
+"camera_value_small_1_fine" = "Small 1/Fine";
+"camera_value_small_1_normal" = "Small 1/Normal";
+"camera_value_small_2" = "Small 2";
 
 "camera_media" = "Camera media";
 "back_to_camera" = "Back to camera";
