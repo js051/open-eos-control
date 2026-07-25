@@ -212,6 +212,14 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert status.exposure.white_balance == "Daylight"
 
     session.capture_still()
+    assert runner.values["/main/settings/capturetarget"] == "Memory card"
+    capture_target_write = next(
+        index
+        for index, command in enumerate(runner.commands)
+        if "/main/settings/capturetarget=Memory card" in command
+    )
+    shutter_command = next(index for index, command in enumerate(runner.commands) if "--trigger-capture" in command)
+    assert capture_target_write < shutter_command
     session.half_press_shutter()
     session.autofocus()
     assert runner.values["/main/actions/eosremoterelease"] == "Release Half"
@@ -246,6 +254,21 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert any("/main/imgsettings/iso=800" in command for command in runner.commands)
     assert any("--trigger-capture" in command for command in runner.commands)
     assert any("--delete-file" in command for command in runner.commands)
+
+
+def test_capture_refuses_unhandled_host_ram_target_without_a_card_choice() -> None:
+    class HostOnlyRunner(FakeRunner):
+        def _config_dump(self) -> str:
+            return super()._config_dump().replace("Choice: 1 Memory card\n", "")
+
+    runner = HostOnlyRunner()
+    session = GPhoto2Engine(runner).open()
+
+    with pytest.raises(BridgeError) as rejected:
+        session.capture_still()
+
+    assert rejected.value.code == "UNSAFE_CAPTURE_TARGET"
+    assert not any("--trigger-capture" in command for command in runner.commands)
 
 
 def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:

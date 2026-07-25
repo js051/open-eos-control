@@ -83,6 +83,34 @@ class CanonEosPtpTest {
         assertEquals(0x60L, CanonEosPtp.propertyValue(CanonEosPropertyCode.ISO_SPEED, options.map { it.value }, "800"))
     }
 
+    @Test
+    fun captureDestinationUsesCameraAdvertisedNonHostTarget() {
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(
+                CanonEosPropertyCode.CAPTURE_DESTINATION,
+                CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            ),
+        ) + block(
+            type = CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.CAPTURE_DESTINATION, 3, 2, 4, 2),
+        ) + block(type = 0, bytes = byteArrayOf())
+
+        val updates = CanonEosPtp.propertyUpdates(payload)
+        val currentValue = updates.single { it.currentValue != null }.currentValue
+        val availableValues = updates.single { it.availableValues != null }.availableValues.orEmpty()
+
+        assertEquals(CanonEosPtp.CAPTURE_DESTINATION_HOST, currentValue)
+        assertEquals(2L, CanonEosPtp.captureDestinationCardValue(availableValues))
+        assertEquals(null, CanonEosPtp.captureDestinationCardValue(listOf(4L)))
+        assertEquals("Internal RAM", CanonEosPtp.propertyLabel(CanonEosPropertyCode.CAPTURE_DESTINATION, 4L))
+        assertEquals("Memory card", CanonEosPtp.propertyLabel(CanonEosPropertyCode.CAPTURE_DESTINATION, 2L))
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.CAPTURE_DESTINATION, 2L),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.CAPTURE_DESTINATION, 2L),
+        )
+    }
+
     @Test(expected = PtpProtocolException::class)
     fun eosPropertyParserRejectsTruncatedAvailableValueList() {
         CanonEosPtp.propertyUpdates(

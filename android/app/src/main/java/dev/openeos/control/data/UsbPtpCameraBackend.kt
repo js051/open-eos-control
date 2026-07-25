@@ -304,6 +304,7 @@ class UsbPtpCameraBackend(
 
         ensureCanonRemoteMode()
         drainCanonEvents()
+        ensureCanonCaptureDestinationOnCard()
         val ptp = requireSession()
         ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
         try {
@@ -617,6 +618,26 @@ class UsbPtpCameraBackend(
             "Canon EOS shutter commands completed, but the camera did not report a captured object " +
                 "within ${CANON_CAPTURE_EVENT_TIMEOUT_MILLIS / 1_000} seconds."
         )
+    }
+
+    private suspend fun ensureCanonCaptureDestinationOnCard() {
+        val state = canonPropertyState(CanonEosPropertyCode.CAPTURE_DESTINATION)
+        if (state.currentValue != CanonEosPtp.CAPTURE_DESTINATION_HOST) return
+
+        val cardTarget = CanonEosPtp.captureDestinationCardValue(state.availableValues)
+            ?: throw PtpProtocolException(
+                "Canon EOS is targeting host RAM but did not advertise a memory-card capture destination."
+            )
+        requireSession().executeDataOutOperation(
+            operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+            payload = CanonEosPtp.uint32PropertyPayload(
+                CanonEosPropertyCode.CAPTURE_DESTINATION,
+                cardTarget,
+            ),
+        )
+        synchronized(canonProperties) {
+            canonProperties[CanonEosPropertyCode.CAPTURE_DESTINATION] = state.copy(currentValue = cardTarget)
+        }
     }
 
     private suspend fun setCanonMovieRecording(recording: Boolean): CameraStatus {

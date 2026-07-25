@@ -1081,6 +1081,7 @@ class GPhoto2Session:
     def capture_still(self) -> CameraStatus:
         with self._lock:
             self._require_open()
+            self._ensure_capture_target_on_card()
             if self._abilities.trigger_capture:
                 self._run(["--trigger-capture"], timeout=60.0)
             elif self._abilities.capture_image:
@@ -1088,6 +1089,24 @@ class GPhoto2Session:
             else:
                 raise unsupported(CameraFeature.STILL_CAPTURE.value, self.engine_name)
             return self.status()
+
+    def _ensure_capture_target_on_card(self) -> None:
+        config = self._find_config(("capturetarget",), writable=True)
+        if config is None:
+            return
+        card_value = _first_choice(config.choices, "Memory card", "Memory Card", "Card")
+        if card_value is None:
+            if config.current.casefold() in {"internal ram", "sdram"}:
+                raise BridgeError(
+                    "UNSAFE_CAPTURE_TARGET",
+                    "The camera is targeting host RAM but did not advertise a memory-card capture target.",
+                    status_code=409,
+                    feature=CameraFeature.STILL_CAPTURE.value,
+                    engine=self.engine_name,
+                )
+            return
+        if config.current.casefold() != card_value.casefold():
+            self._set_config_value(config, card_value, refresh=False)
 
     def half_press_shutter(self) -> CameraStatus:
         with self._lock:

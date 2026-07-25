@@ -15,7 +15,7 @@ The Android wired backend is split into a standards-based core, a small Android 
 9. Canon ISO, Tv, Av and white balance state comes from `PropValueChanged (0xC189)` and `AvailListChanged (0xC18A)` event blocks. Writes use the exact advertised raw choice with `SetDevicePropValueEx (0x9110)`.
 10. Canon shooting mode, exposure compensation, color temperature, signed white-balance shifts, color space, aspect ratio, power-zoom speed, Auto Power Off, High ISO noise reduction, AEB, AF operation, Continuous AF, AF method, drive, metering, Picture Style and Movie Servo AF use their pinned libgphoto2 data widths and value tables. The backend exposes only choices present in each camera-provided available-value event and, where required, a documented safe subset.
 11. Canon generic, SD and CF/CFexpress ImageFormat events are decoded from bounded one/two-entry structures into RAW/cRAW/JPEG choices. Writes rebuild the camera's 28- or 44-byte `SetDevicePropValueEx` payload instead of treating the setting as a fixed UINT16 wire value.
-12. Canon capture sends half/full press and balanced release operations, then waits for a captured-object event instead of treating command acceptance as a completed exposure. Manual half-press and Near/Far focus-drive commands use the same prepared session.
+12. Canon capture first checks `CaptureDestination (0xD11C)`. If the camera reports host RAM (`4`), the backend writes the camera-advertised non-host memory-card value through `SetDevicePropValueEx`; a missing card choice or rejected write aborts before any shutter command. It then sends half/full press and balanced release operations and waits for a captured-object event instead of treating command acceptance as a completed exposure. Manual half-press and Near/Far focus-drive commands use the same prepared session.
 13. Canon Live View writes EVF mode/output, requests `GetViewFinderData`, retries documented busy/not-ready responses, validates each response block, and returns only JPEG block types 1 or 11 as in-memory frames.
 14. Canon movie control writes the camera-advertised `EVFRecordStatus (0xD1B8)` value through `SetDevicePropValueEx`: Card (`4`) starts recording, None (`0`) stops, and SDRAM (`3`) represents preview output.
 15. Disconnect stops EVF output, restores Canon remote/event state on a best-effort basis, sends `CloseSession`, and always releases the USB interface and device connection.
@@ -31,6 +31,7 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 - Media deletion requires `DeleteObject (0x100B)` and a user confirmation; the list changes only after the exact object handle succeeds.
 - Standard still capture requires the camera to advertise `InitiateCapture (0x100E)`.
 - Canon still capture and half-press require vendor extension ID `0x0000000B`, remote/event preparation, and both `RemoteReleaseOn (0x9128)` and `RemoteReleaseOff (0x9129)`.
+- `CaptureDestination` is diagnostic-only and never offered as a user setting. Host-RAM capture remains unsupported because the app does not yet complete Canon's host object-transfer and cleanup lifecycle.
 - Canon still capture succeeds only after an object-added or object-transfer event is observed. A malformed event or 90-second timeout is an error, not a synthetic success.
 - Canon manual focus requires `DriveLens (0x9155)` and exposes only the libgphoto2 Near/Far values 1-3.
 - Canon JPEG Live View requires remote/event preparation, `SetDevicePropValueEx (0x9110)`, and `GetViewFinderData (0x9153)`. The backend exposes the feature only when the full set is advertised.
@@ -70,7 +71,7 @@ The pinned open-source implementation provides reproducible operation codes, pac
 - Download a JPEG, RAW file and movie; compare byte length and checksum.
 - Delete a disposable test image only when `0x100B` is advertised; confirm the exact object disappears while adjacent handles remain.
 - Run still capture only if `0x100E` is advertised and verify that a new object appears.
-- Record whether the complete Canon remote/event operation set is advertised; run vendor capture and verify the object event and card result.
+- Record whether the complete Canon remote/event operation set is advertised. If diagnostics report host RAM for `0xD11C`, run vendor capture and verify the destination write precedes remote release, the object event arrives, and the file exists on the selected card.
 - Verify half-press always releases after success, focus failure, cancellation, and transport errors.
 - Run each Near/Far focus step with an MF-compatible lens/camera state and record direction and distance.
 - Record the Canon property events in multiple exposure modes, verify the displayed ISO/Tv/Av/WB choices exactly match the camera, write representative values, and confirm both camera state and returned events change.

@@ -30,6 +30,7 @@ object CanonEosPropertyCode {
     const val COLOR_SPACE = 0xD10F
     const val PICTURE_STYLE = 0xD110
     const val AUTO_POWER_OFF = 0xD114
+    const val CAPTURE_DESTINATION = 0xD11C
     const val IMAGE_FORMAT = 0xD120
     const val IMAGE_FORMAT_CF = 0xD121
     const val IMAGE_FORMAT_SD = 0xD122
@@ -80,6 +81,7 @@ object CanonEosPtp {
     const val MOVIE_RECORD_TARGET_NONE = 0L
     const val MOVIE_RECORD_TARGET_SDRAM = 3L
     const val MOVIE_RECORD_TARGET_CARD = 4L
+    const val CAPTURE_DESTINATION_HOST = 4L
 
     val settingSpecs = listOf(
         CanonEosSettingSpec(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, "shootingmode", "Shooting mode"),
@@ -177,6 +179,9 @@ object CanonEosPtp {
         MOVIE_RECORD_TARGET_NONE, MOVIE_RECORD_TARGET_SDRAM -> false
         else -> null
     }
+
+    fun captureDestinationCardValue(availableValues: List<Long>): Long? =
+        availableValues.distinct().firstOrNull { it != CAPTURE_DESTINATION_HOST }
 
     fun focusDriveAmount(direction: FocusDriveDirection, step: FocusDriveStep): Long {
         val magnitude = when (step) {
@@ -302,6 +307,8 @@ object CanonEosPtp {
 
     fun propertyLabel(propertyCode: Int, value: Long): String = when {
         propertyCode in imageFormatPropertyCodes -> imageFormatLabel(value)
+        propertyCode == CanonEosPropertyCode.CAPTURE_DESTINATION ->
+            if (value == CAPTURE_DESTINATION_HOST) "Internal RAM" else "Memory card"
         else -> propertySpecs[propertyCode]?.labels?.get(value)
             ?: value.hexLabel(propertySpecs[propertyCode]?.valueBytes ?: 4)
     }
@@ -772,6 +779,7 @@ object CanonEosPtp {
             labels = autoPowerOffLabels,
             selectableValues = autoPowerOffLabels.keys,
         ),
+        CanonEosPropertyCode.CAPTURE_DESTINATION to CanonEosPropertySpec(4, emptyMap()),
         CanonEosPropertyCode.PICTURE_STYLE to CanonEosPropertySpec(1, pictureStyleLabels),
         CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION to CanonEosPropertySpec(2, highIsoNoiseReductionLabels),
         CanonEosPropertyCode.MOVIE_SERVO_AF to CanonEosPropertySpec(4, offOnLabels),

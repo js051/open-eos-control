@@ -107,6 +107,7 @@ class FakeRunner:
             "/main/actions/eosremoterelease": "None",
             "/main/settings/movierecordtarget": "SDRAM",
             "/main/settings/autopoweroff": "30",
+            "/main/settings/capturetarget": "Internal RAM",
         }
 
     def health(self) -> tuple[bool, str | None, str | None]:
@@ -241,6 +242,11 @@ class FakeRunner:
                     "/main/settings/autopoweroff",
                     "Auto Power Off",
                     ["15", "30", "60", "180", "300", "600", "1800", "0", "4294967295"],
+                ),
+                self._radio(
+                    "/main/settings/capturetarget",
+                    "Capture Target",
+                    ["Internal RAM", "Memory card"],
                 ),
             ]
         )

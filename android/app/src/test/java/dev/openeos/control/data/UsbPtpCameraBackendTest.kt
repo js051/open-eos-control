@@ -647,6 +647,91 @@ class UsbPtpCameraBackendTest {
         backend.close()
     }
 
+    @Test
+    fun canonCaptureRestoresCameraAdvertisedCardDestinationBeforeShutter() = runTest {
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        backend.captureStill()
+
+        val destinationWrite = transport.sentContainers.indexOfFirst { container ->
+            container.type == PtpContainerType.DATA &&
+                container.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
+                container.parameters().getOrNull(1)?.toInt() == CanonEosPropertyCode.CAPTURE_DESTINATION
+        }
+        val shutter = transport.sentContainers.indexOfFirst { container ->
+            container.type == PtpContainerType.COMMAND &&
+                container.code == CanonEosOperationCode.REMOTE_RELEASE_ON
+        }
+
+        assertTrue(destinationWrite >= 0)
+        assertTrue(shutter >= 0)
+        assertTrue(destinationWrite < shutter)
+        val destinationFields = transport.sentContainers[destinationWrite].parameters()
+        assertEquals(2L, destinationFields[2])
+        backend.close()
+    }
+
+    @Test
+    fun canonCaptureDoesNotRewriteAnExistingCardDestination() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 2)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        backend.captureStill()
+
+        assertFalse(transport.hasCanonPropertyWrite(CanonEosPropertyCode.CAPTURE_DESTINATION))
+        backend.close()
+    }
+
+    @Test
+    fun canonCaptureRefusesHostDestinationWhenNoCardTargetIsAdvertised() = runTest {
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            advertiseCardCaptureDestination = false,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("memory-card capture destination"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        backend.close()
+    }
+
+    @Test
+    fun canonCaptureStopsBeforeShutterWhenCardDestinationWriteIsRejected() = runTest {
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            rejectPropertyCode = CanonEosPropertyCode.CAPTURE_DESTINATION,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue(failure is PtpResponseException)
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        backend.close()
+    }
+
     private class ScriptedTransport(
         private val advertiseCapture: Boolean,
         private val advertiseDelete: Boolean = true,
@@ -791,6 +876,8 @@ class UsbPtpCameraBackendTest {
         private val rejectMovieRecording: Boolean = false,
         private val advertiseAdvancedSettings: Boolean = true,
         private val rejectPropertyCode: Int? = null,
+        private val captureDestination: Int = 2,
+        private val advertiseCardCaptureDestination: Boolean = true,
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
         val sentContainers = mutableListOf<PtpContainer>()
@@ -828,6 +915,8 @@ class UsbPtpCameraBackendTest {
                         initialPropertyEventsPending -> canonPropertyEvents(
                             advertiseMovieRecording,
                             advertiseAdvancedSettings,
+                            captureDestination,
+                            advertiseCardCaptureDestination,
                         ).also {
                             initialPropertyEventsPending = false
                         }
@@ -904,6 +993,10 @@ class UsbPtpCameraBackendTest {
                 container.parameters().getOrNull(1)?.toInt() == propertyCode
         }
 
+        fun hasOperation(operationCode: Int): Boolean = sentContainers.any { container ->
+            container.type == PtpContainerType.COMMAND && container.code == operationCode
+        }
+
         private fun data(operation: Int, transaction: Long, payload: ByteArray) =
             PtpContainer(PtpContainerType.DATA, operation, transaction, payload)
 
@@ -930,6 +1023,8 @@ class UsbPtpCameraBackendTest {
     private fun canonPropertyEvents(
         advertiseMovieRecording: Boolean,
         advertiseAdvancedSettings: Boolean,
+        captureDestination: Int,
+        advertiseCardCaptureDestination: Boolean,
     ): ByteArray {
         var payload = eosPropertyValue(CanonEosPropertyCode.ISO_SPEED, 0x58) +
             eosAvailableValues(CanonEosPropertyCode.ISO_SPEED, 0x48, 0x58, 0x60) +
@@ -939,6 +1034,11 @@ class UsbPtpCameraBackendTest {
             eosAvailableValues(CanonEosPropertyCode.APERTURE, 0x20, 0x28) +
             eosPropertyValue(CanonEosPropertyCode.WHITE_BALANCE, 0) +
             eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE, 0, 1, 8)
+        payload += eosPropertyValue(CanonEosPropertyCode.CAPTURE_DESTINATION, captureDestination)
+        payload += eosAvailableValues(
+            CanonEosPropertyCode.CAPTURE_DESTINATION,
+            *if (advertiseCardCaptureDestination) intArrayOf(4, 2) else intArrayOf(4),
+        )
         if (advertiseAdvancedSettings) {
             payload += eosPropertyValue(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0)
             payload += eosAvailableValues(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0xE8, 0, 0x0B, 0x18)
