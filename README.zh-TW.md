@@ -90,9 +90,11 @@ debug APK 會輸出到：
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test、debug build，以及 Pixel 5 API 35 模擬器上的 Compose 儀器測試。
+GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test、debug build，以及 Pixel 5 API 34 模擬器上的 Compose 儀器測試。
 
 開發版完全由 GitHub Actions 線上建置。`vX.Y.Z` tag 必須符合所有平台的版本，且指向已存在於 `main` 的 commit；完整歷史機密掃描及 Android、Desktop Bridge、Simulator、iOS 驗證全部通過後，release workflow 才會把 Android debug APK、Desktop Bridge wheel／source distribution、release notes 與 SHA-256 校驗檔發布為 GitHub prerelease。
+
+iOS App 會在 iPhone Simulator 完成編譯與測試，但 Release 不會附上可安裝的 IPA。實體裝置發行需要 Apple Developer Team、distribution certificate 與相符的 provisioning profile；這些簽章憑證都不會存放在公開 repository。
 
 ## iOS App 與相機 Core
 
@@ -114,7 +116,7 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions 會建置最終 App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 實際跑過英文直向／橫向控制、確認式媒體刪除、繁中連線與 Desktop Bridge 連線表單流程。這些證據不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄；細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
+GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 實際跑過英文直向／橫向控制、確認式媒體刪除、繁中連線與 Desktop Bridge 連線表單流程。workflow 明確使用 `CODE_SIGNING_ALLOWED=NO`，因此這個 build 無法安裝到實體 iPhone，也不會作為 IPA 發布。這些證據不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄；細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
 
 ## Desktop Bridge
 
