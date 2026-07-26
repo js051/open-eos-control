@@ -1,17 +1,23 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-eos-control-simulator"
 version = "0.1.0"
 description = "Fake Canon camera simulator for Open EOS Control"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0",
   "pydantic>=2.8.0",
   "uvicorn[standard]>=0.30.0"
 ]
+
+[project.urls]
+Homepage = "https://github.com/js051/open-eos-control"
+Repository = "https://github.com/js051/open-eos-control"
+Issues = "https://github.com/js051/open-eos-control/issues"
 
 [tool.setuptools]
 py-modules = ["main"]

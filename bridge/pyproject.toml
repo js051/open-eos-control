@@ -1,11 +1,14 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-eos-control-bridge"
 version = "0.1.0"
 description = "Open EOS Control desktop camera bridge"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "av>=18.0.0,<19.0",
@@ -24,6 +27,11 @@ dev = [
 
 [project.scripts]
 open-eos-bridge = "open_eos_bridge.main:run"
+
+[project.urls]
+Homepage = "https://github.com/js051/open-eos-control"
+Repository = "https://github.com/js051/open-eos-control"
+Issues = "https://github.com/js051/open-eos-control/issues"
 
 [tool.setuptools.packages.find]
 include = ["open_eos_bridge*"]

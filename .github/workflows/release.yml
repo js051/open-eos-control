@@ -1,23 +1,40 @@
-name: CI
+name: Release development preview
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  secret-scan:
+  release-gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Verify tag and product versions
+        run: python3 scripts/release/verify-version.py --tag "$GITHUB_REF_NAME"
+
+      - name: Require a release commit from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Validate GitHub Actions workflows
+        run: bash scripts/ci/run-actionlint.sh
 
       - name: Scan repository history for secrets
         shell: bash
@@ -37,15 +54,10 @@ jobs:
             --no-color \
             --timeout 300
 
-      - name: Verify product version consistency
-        run: python3 scripts/release/verify-version.py
-
-      - name: Validate GitHub Actions workflows
-        run: bash scripts/ci/run-actionlint.sh
-
-  test:
-    needs: secret-scan
+  android:
+    needs: release-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: android
@@ -66,15 +78,27 @@ jobs:
       - name: Prepare Gradle wrapper
         run: chmod +x gradlew
 
-      - name: Run unit tests
-        run: ./gradlew :app:testDebugUnitTest
+      - name: Test, lint, and build Android debug APK
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug
+      - name: Stage Android package
+        run: |
+          mkdir -p ../dist
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            ../dist/open-eos-control-android-${GITHUB_REF_NAME#v}-debug.apk
+
+      - name: Upload Android package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: dist/open-eos-control-android-*-debug.apk
+          if-no-files-found: error
+          retention-days: 14
 
   android-ui:
-    needs: secret-scan
+    needs: release-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: android
@@ -105,23 +129,13 @@ jobs:
           disable-animations: true
           script: ./gradlew :app:connectedDebugAndroidTest
 
-      - name: Upload Android UI test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-ui-test-results
-          path: |
-            android/app/build/reports/androidTests/connected/debug
-            android/app/build/outputs/androidTest-results/connected/debug
-          if-no-files-found: ignore
-          retention-days: 7
-
-  simulator:
-    needs: secret-scan
+  desktop-bridge:
+    needs: release-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
-        working-directory: simulator
+        working-directory: bridge
 
     steps:
       - name: Checkout
@@ -137,21 +151,36 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install simulator and test dependencies
-        run: python -m pip install -e ".[dev]"
+      - name: Install build and test dependencies
+        run: python -m pip install build==1.5.0 -e ".[dev]"
 
-      - name: Lint simulator
-        run: ruff check --no-cache .
+      - name: Lint and test Desktop Bridge
+        run: |
+          ruff check --no-cache .
+          pytest -q -p no:cacheprovider
+          node --check open_eos_bridge/static/icons.js
+          node --check open_eos_bridge/static/app.js
 
-      - name: Test simulator contract
-        run: pytest -q
+      - name: Build Desktop Bridge packages
+        run: python -m build --outdir ../dist
 
-  desktop-bridge:
-    needs: secret-scan
+      - name: Upload Desktop Bridge packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-desktop-bridge
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  simulator:
+    needs: release-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
-        working-directory: bridge
+        working-directory: simulator
 
     steps:
       - name: Checkout
@@ -162,59 +191,33 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install bridge and test dependencies
+      - name: Install simulator and test dependencies
         run: python -m pip install -e ".[dev]"
 
-      - name: Lint desktop bridge
-        run: ruff check --no-cache .
-
-      - name: Check desktop control scripts
+      - name: Lint and test simulator
         run: |
-          node --check open_eos_bridge/static/icons.js
-          node --check open_eos_bridge/static/app.js
+          ruff check --no-cache .
+          pytest -q -p no:cacheprovider
 
-      - name: Test desktop bridge contract
-        run: pytest -q -p no:cacheprovider
-
-  ios-core:
-    needs: secret-scan
+  ios:
+    needs: release-gate
     runs-on: macos-15
-    defaults:
-      run:
-        working-directory: ios/OpenEOSCore
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Swift toolchain
-        run: swift --version
-
-      - name: Test iOS CCAPI core
-        run: swift test
-
-  ios-app:
-    needs: secret-scan
-    runs-on: macos-15
-    defaults:
-      run:
-        working-directory: ios/OpenEOSControl
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Test iOS core
+        run: swift test --package-path ios/OpenEOSCore
 
       - name: Install XcodeGen
         run: command -v xcodegen >/dev/null || brew install xcodegen
 
-      - name: Validate app metadata
+      - name: Generate and build iOS app
+        working-directory: ios/OpenEOSControl
         run: |
-          plutil -lint App/Info.plist
           xcodegen generate
-          xcodebuild -project OpenEOSControl.xcodeproj -scheme OpenEOSControl -list
-
-      - name: Build iOS app
-        run: |
           xcodebuild \
             -project OpenEOSControl.xcodeproj \
             -scheme OpenEOSControl \
@@ -223,26 +226,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Verify bundled app resources
-        run: |
-          APP_PATH=".derived-data/Build/Products/Debug-iphonesimulator/OpenEOSControl.app"
-          test -f "$APP_PATH/Assets.car"
-          test -f "$APP_PATH/en.lproj/Localizable.strings"
-          test -f "$APP_PATH/zh-Hant.lproj/Localizable.strings"
-          plutil -extract UILaunchScreen xml1 -o /dev/null "$APP_PATH/Info.plist"
-          test -n "$(plutil -extract NSLocalNetworkUsageDescription raw -o - "$APP_PATH/Info.plist")"
-          test "$(plutil -extract NSAppTransportSecurity.NSAllowsLocalNetworking raw -o - "$APP_PATH/Info.plist")" = "true"
-          ORIENTATIONS=$(plutil -extract UISupportedInterfaceOrientations xml1 -o - "$APP_PATH/Info.plist")
-          grep -q UIInterfaceOrientationPortrait <<< "$ORIENTATIONS"
-          grep -q UIInterfaceOrientationLandscapeLeft <<< "$ORIENTATIONS"
-          grep -q UIInterfaceOrientationLandscapeRight <<< "$ORIENTATIONS"
-          if grep -q UIInterfaceOrientationPortraitUpsideDown <<< "$ORIENTATIONS"; then
-            echo "Whole-window upside-down orientation must remain disabled"
-            exit 1
-          fi
-
       - name: Select iPhone simulator
         id: simulator
+        working-directory: ios/OpenEOSControl
         run: |
           DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
@@ -257,22 +243,68 @@ jobs:
           xcrun simctl bootstatus "$DEVICE_ID" -b
 
       - name: Test iOS app and UI
+        working-directory: ios/OpenEOSControl
         run: |
-          rm -rf TestResults.xcresult
           xcodebuild \
             -project OpenEOSControl.xcodeproj \
             -scheme OpenEOSControl \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.device_id }}' \
             -derivedDataPath .derived-data \
-            -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             test
 
-      - name: Upload iOS test results
-        if: always()
-        uses: actions/upload-artifact@v4
+  publish:
+    needs:
+      - android
+      - android-ui
+      - desktop-bridge
+      - simulator
+      - ios
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Download release packages
+        uses: actions/download-artifact@v4
         with:
-          name: ios-test-results
-          path: ios/OpenEOSControl/TestResults.xcresult
-          if-no-files-found: ignore
-          retention-days: 7
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify packages and create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          test -f "dist/open-eos-control-android-$version-debug.apk"
+          test -f "dist/open_eos_control_bridge-$version-py3-none-any.whl"
+          test -f "dist/open_eos_control_bridge-$version.tar.gz"
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Create or update GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="docs/releases/$GITHUB_REF_NAME.md"
+          title="Open EOS Control ${GITHUB_REF_NAME#v} Development Preview"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$title" \
+              --notes-file "$notes" \
+              --prerelease
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --verify-tag \
+              --title "$title" \
+              --notes-file "$notes" \
+              --prerelease
+          fi
