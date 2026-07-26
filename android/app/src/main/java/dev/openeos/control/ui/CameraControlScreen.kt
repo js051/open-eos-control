@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -80,7 +79,7 @@ import kotlin.math.roundToInt
 
 @Composable
 fun CameraControlScreen(state: CameraUiState, actions: CameraActions) {
-    BoxWithConstraints(
+    Box(
         Modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -101,13 +100,13 @@ fun CameraControlScreen(state: CameraUiState, actions: CameraActions) {
                 )
             },
     ) {
-        if (maxWidth > maxHeight) LandscapeControls(state, actions) else PortraitControls(state, actions)
+        StableCameraControls(state, actions)
     }
     SettingSheets(state, actions)
 }
 
 @Composable
-private fun PortraitControls(state: CameraUiState, actions: CameraActions) {
+private fun StableCameraControls(state: CameraUiState, actions: CameraActions) {
     Box(Modifier.fillMaxSize()) {
         LiveViewFrame(state, actions, Modifier.fillMaxSize())
         if (state.hudVisible) {
@@ -116,46 +115,6 @@ private fun PortraitControls(state: CameraUiState, actions: CameraActions) {
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xE6101214)),
             ) {
                 ExposureStrip(state, actions)
-                CaptureBar(state, actions)
-            }
-        } else {
-            ToolIconButton(
-                LucideR.drawable.lucide_ic_eye,
-                stringResource(R.string.show_hud),
-                { actions.setHudVisible(true) },
-                Modifier.align(Alignment.TopEnd),
-            )
-        }
-    }
-}
-
-@Composable
-private fun LandscapeControls(state: CameraUiState, actions: CameraActions) {
-    Box(Modifier.fillMaxSize()) {
-        LiveViewFrame(
-            state,
-            actions,
-            if (state.hudVisible) {
-                Modifier.align(Alignment.CenterStart).fillMaxWidth(0.66f).fillMaxHeight()
-            } else {
-                Modifier.fillMaxSize()
-            },
-        )
-        if (state.hudVisible) {
-            CameraOverlayHeader(state, actions, Modifier.align(Alignment.TopStart).fillMaxWidth(0.66f))
-            Column(
-                Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxWidth(0.34f)
-                    .fillMaxHeight()
-                    .background(Color(0xE6101214))
-                    .verticalScroll(rememberScrollState())
-                    .padding(10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                LandscapeExposureGrid(state, actions)
-                Spacer(Modifier.height(4.dp))
                 CaptureBar(state, actions)
             }
         } else {
@@ -186,7 +145,7 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
             Text(
                 stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.capture_not_supported else R.string.recording_not_supported),
                 color = AppWarning,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp).cameraControlRotation(),
             )
         }
     }

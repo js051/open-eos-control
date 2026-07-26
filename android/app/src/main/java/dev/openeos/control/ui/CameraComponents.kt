@@ -136,19 +136,24 @@ fun LiveViewFpsButton(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Icon(
-                painterResource(LucideR.drawable.lucide_ic_gauge),
-                null,
-                Modifier.size(24.dp).cameraControlRotation(),
-                tint = AppAccent,
-            )
-            Text(
-                stringResource(R.string.fps_compact, state.liveViewFrameRateFps),
+            Column(
                 Modifier.cameraControlRotation(),
-                color = AppText,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-            )
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    painterResource(LucideR.drawable.lucide_ic_gauge),
+                    null,
+                    Modifier.size(24.dp),
+                    tint = AppAccent,
+                )
+                Text(
+                    stringResource(R.string.fps_compact, state.liveViewFrameRateFps),
+                    color = AppText,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -373,27 +378,32 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         contentAlignment = Alignment.Center,
     ) {
         when {
-            state.previewMode -> Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            state.previewMode -> Box(
+                modifier = Modifier.fillMaxSize().cameraPreviewViewport(state.hudVisible),
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    painterResource(LucideR.drawable.lucide_ic_camera),
-                    contentDescription = null,
-                    tint = AppAccent,
-                    modifier = Modifier.size(40.dp).cameraControlRotation(),
-                )
-                Text(
-                    stringResource(R.string.offline_preview),
-                    color = AppText,
-                    fontWeight = FontWeight.SemiBold,
+                Column(
                     modifier = Modifier.cameraControlRotation(),
-                )
-                Text(
-                    stringResource(R.string.offline_preview_hint),
-                    color = AppSubtleText,
-                    modifier = Modifier.padding(horizontal = 24.dp).cameraControlRotation(),
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        painterResource(LucideR.drawable.lucide_ic_camera),
+                        contentDescription = null,
+                        tint = AppAccent,
+                        modifier = Modifier.size(40.dp),
+                    )
+                    Text(
+                        stringResource(R.string.offline_preview),
+                        color = AppText,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        stringResource(R.string.offline_preview_hint),
+                        color = AppSubtleText,
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                    )
+                }
             }
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
                 session = state.nativeLiveViewSession,
@@ -414,12 +424,17 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 contentScale = ContentScale.Fit,
                 onSuccess = { result -> lastFramePainter = result.painter },
             )
-            else -> Text(stringResource(R.string.live_view_unavailable), color = AppMutedText)
+            else -> Box(
+                modifier = Modifier.fillMaxSize().cameraPreviewViewport(state.hudVisible),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(stringResource(R.string.live_view_unavailable), color = AppMutedText)
+            }
         }
 
         if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
         if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
-            val bottomPadding = if (state.hudVisible && maxWidth <= maxHeight) 168.dp else 12.dp
+            val bottomPadding = if (state.hudVisible) 188.dp else 12.dp
             val focusAvailable = state.supports(CameraFeature.TAP_FOCUS)
             val description = stringResource(
                 if (tapAction == LiveViewTapAction.WHITE_BALANCE) {
@@ -456,6 +471,12 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         FocusIndicator(state.focusPoint, state.focusFeedback, sourceAspectRatio)
         if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
     }
+}
+
+private fun Modifier.cameraPreviewViewport(hudVisible: Boolean): Modifier = if (hudVisible) {
+    this.padding(top = 48.dp, bottom = 176.dp)
+} else {
+    this
 }
 
 @Composable
@@ -546,14 +567,14 @@ private fun RecordingIndicator(modifier: Modifier = Modifier) {
     }
     val elapsed = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
     Row(
-        modifier.background(Color(0xB8000000), RoundedCornerShape(4.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+        modifier.cameraControlRotation().background(Color(0xB8000000), RoundedCornerShape(4.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(Modifier.size(8.dp).background(AppRecord, CircleShape))
         Text(
             stringResource(R.string.recording_time, elapsed),
-            Modifier.cameraControlRotation(),
             color = AppText,
             fontWeight = FontWeight.Bold,
         )
@@ -564,27 +585,11 @@ private fun RecordingIndicator(modifier: Modifier = Modifier) {
 fun ExposureStrip(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val exposure = state.status?.exposure
     val available = !state.isBusy(CameraOperation.SETTING)
-    Row(modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().height(84.dp), verticalAlignment = Alignment.CenterVertically) {
         ExposureCell(SettingPicker.ISO, stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
         ExposureCell(SettingPicker.SHUTTER, stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
         ExposureCell(SettingPicker.APERTURE, stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
         ExposureCell(SettingPicker.WHITE_BALANCE, stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
-    }
-}
-
-@Composable
-fun LandscapeExposureGrid(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
-    val exposure = state.status?.exposure
-    val available = !state.isBusy(CameraOperation.SETTING)
-    Column(modifier.fillMaxWidth().height(112.dp)) {
-        Row(Modifier.fillMaxWidth().weight(1f)) {
-            ExposureCell(SettingPicker.ISO, stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
-            ExposureCell(SettingPicker.SHUTTER, stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
-        }
-        Row(Modifier.fillMaxWidth().weight(1f)) {
-            ExposureCell(SettingPicker.APERTURE, stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
-            ExposureCell(SettingPicker.WHITE_BALANCE, stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
-        }
     }
 }
 
@@ -606,15 +611,19 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(label, Modifier.cameraControlRotation(), color = AppMutedText, maxLines = 1)
-        Text(
-            value,
+        Column(
             Modifier.cameraControlRotation(),
-            color = if (enabled) AppText else AppMutedText,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(label, color = AppMutedText, maxLines = 1)
+            Text(
+                value,
+                color = if (enabled) AppText else AppMutedText,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
