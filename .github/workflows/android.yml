@@ -103,9 +103,16 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run UI tests on Pixel API 34
-        env:
-          ANDROID_API_LEVEL: "34"
-        run: bash ../scripts/ci/run-android-ui-tests.sh
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.34.0
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_5
+          emulator-boot-timeout: 900
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          working-directory: android
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest
 
       - name: Upload Android UI test results
         if: always()
