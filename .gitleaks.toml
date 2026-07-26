@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "open-eos-user-home-path"
+description = "Machine-local user home path"
+regex = '''(?i)([a-z]:[\\/]+users[\\/]+[a-z0-9._-]+|/users/[a-z0-9._-]+|/home/[a-z0-9._-]+)'''
+
+[[rules]]
+id = "open-eos-camera-serial"
+description = "Concrete numeric camera serial"
+regex = '''(?i)(camera[ _-]*serial|serial(number)?)[ \t]*["']?[ \t]*[:=][ \t]*["']?[0-9]{8,20}'''

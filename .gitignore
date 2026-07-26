@@ -12,6 +12,28 @@ android/local.properties
 android/**/build/
 *.apk
 
+# Signing keys, certificates, and machine-local credentials
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+*.cer
+*.der
+key.properties
+keystore.properties
+credentials.*
+secrets.*
+!credentials.example.*
+!secrets.example.*
+
+# Local diagnostics may contain camera serials, paths, or credentials
+diagnostic-report*
+diagnostics-report*
+open-eos-diagnostic*
+
 # Apple / Swift
 .build/
 DerivedData/

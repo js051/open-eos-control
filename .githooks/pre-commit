@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+
+if command -v pwsh >/dev/null 2>&1; then
+    shell=pwsh
+elif command -v powershell.exe >/dev/null 2>&1; then
+    shell=powershell.exe
+else
+    echo "PowerShell is required to run the Open EOS Control secret scan." >&2
+    exit 1
+fi
+
+"$shell" -NoProfile -ExecutionPolicy Bypass -File "$repo_root/scripts/security/scan-secrets.ps1" -Mode Staged
