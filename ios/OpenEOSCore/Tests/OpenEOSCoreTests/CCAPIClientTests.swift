@@ -677,6 +677,7 @@ final class CCAPIClientTests: XCTestCase {
         let malformedSettings = [
             #"{"wbshift":{"value":{"ba":0},"ability":{"ba":{"min":-9,"max":9,"step":1},"mg":{"min":-9,"max":9,"step":1}}}}"#,
             #"{"wbshift":{"value":{"ba":0.5,"mg":0},"ability":{"ba":{"min":-9,"max":9,"step":1},"mg":{"min":-9,"max":9,"step":1}}}}"#,
+            #"{"wbshift":{"value":{"ba":false,"mg":0},"ability":{"ba":{"min":-9,"max":9,"step":1},"mg":{"min":-9,"max":9,"step":1}}}}"#,
         ]
         for body in malformedSettings {
             let transport = MockCameraHTTPTransport()

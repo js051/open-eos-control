@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -1302,7 +1303,8 @@ public actor CCAPIClient {
     }
 
     private static func strictInteger(_ value: Any?) -> Int? {
-        guard !(value is Bool), let number = value as? NSNumber else { return nil }
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
         return Int(number.stringValue)
     }
 
