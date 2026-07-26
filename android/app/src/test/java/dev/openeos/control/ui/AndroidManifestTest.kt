@@ -7,7 +7,7 @@ import org.junit.Test
 
 class AndroidManifestTest {
     @Test
-    fun mainActivityDefersOrientationToCameraController() {
+    fun mainActivityDefersDisplayOrientationToSystemSettings() {
         val document = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
         }.newDocumentBuilder().parse(manifestFile())
@@ -19,7 +19,7 @@ class AndroidManifestTest {
             }
 
         assertEquals(
-            "MainActivity must not be statically locked; MainActivity maps portrait and both landscapes while preserving upside-down layout",
+            "MainActivity must not bypass the user's system rotation setting",
             "",
             mainActivity.attributes.getNamedItemNS(ANDROID_NAMESPACE, "screenOrientation")?.nodeValue.orEmpty(),
         )

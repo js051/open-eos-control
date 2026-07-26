@@ -208,7 +208,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun landscapePhoneSizeKeepsPrimaryCameraControlsVisible() {
+    fun landscapePhoneSizeKeepsTheSameCameraControlLayout() {
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(800.dp, 360.dp)),
@@ -220,6 +220,28 @@ class CameraScreensTest {
         }
 
         assertPrimaryCameraControlsVisible()
+        val exposureCenters = listOf(
+            "exposure-control-ISO",
+            "exposure-control-SHUTTER",
+            "exposure-control-APERTURE",
+            "exposure-control-WHITE_BALANCE",
+        ).map { tag -> compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.center.y }
+        assertTrue(
+            "Exposure controls must remain in one stable row instead of switching to a landscape grid",
+            exposureCenters.max() - exposureCenters.min() < 1f,
+        )
+        val previewHintBounds = compose
+            .onNodeWithText(resourceText(R.string.offline_preview_hint))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val exposureBounds = compose
+            .onNodeWithTag("exposure-control-ISO")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "Landscape preview content must stay above the fixed exposure controls",
+            previewHintBounds.bottom <= exposureBounds.top,
+        )
     }
 
     @Test

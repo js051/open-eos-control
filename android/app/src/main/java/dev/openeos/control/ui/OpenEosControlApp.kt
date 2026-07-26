@@ -2,6 +2,8 @@ package dev.openeos.control.ui
 
 import android.app.Activity
 import android.net.Uri
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +34,11 @@ fun OpenEosControlApp(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val animatedControlRotation by animateFloatAsState(
+        targetValue = controlRotationDegrees,
+        animationSpec = tween(durationMillis = 180),
+        label = "camera-control-rotation",
+    )
     LaunchedEffect(viewModel) { viewModel.initialize(context) }
 
     val actions = CameraActions(
@@ -97,7 +104,7 @@ fun OpenEosControlApp(
         clearError = viewModel::clearError,
     )
 
-    CompositionLocalProvider(LocalCameraControlRotation provides controlRotationDegrees) {
+    CompositionLocalProvider(LocalCameraControlRotation provides animatedControlRotation) {
         MaterialTheme(colorScheme = OpenEosColorScheme) {
             SystemBarsEffect(immersive = state.connected && state.uiMode == UiMode.CONTROL)
             Box(Modifier.fillMaxSize().background(AppBackground)) {

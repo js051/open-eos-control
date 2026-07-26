@@ -2,22 +2,28 @@ package dev.openeos.control.ui
 
 import androidx.compose.runtime.staticCompositionLocalOf
 
-enum class CameraDisplayOrientation {
-    PORTRAIT,
-    LANDSCAPE,
-    REVERSE_LANDSCAPE,
+fun resolveCameraControlRotation(sensorDegrees: Int, displayRotationDegrees: Int): Float {
+    val deviceRotation = when (sensorDegrees) {
+        in 45..134 -> 90
+        in 135..224 -> 180
+        in 225..314 -> 270
+        else -> 0
+    }
+    val displayDeviceRotation = (-displayRotationDegrees).floorMod(360)
+    val delta = (displayDeviceRotation - deviceRotation).floorMod(360)
+    return when (delta) {
+        270 -> -90f
+        180 -> 180f
+        else -> delta.toFloat()
+    }
 }
 
-data class CameraOrientationDecision(
-    val displayOrientation: CameraDisplayOrientation,
-    val controlRotationDegrees: Float,
-)
-
-fun resolveCameraOrientation(sensorDegrees: Int): CameraOrientationDecision = when (sensorDegrees) {
-    in 45..134 -> CameraOrientationDecision(CameraDisplayOrientation.REVERSE_LANDSCAPE, 0f)
-    in 135..224 -> CameraOrientationDecision(CameraDisplayOrientation.PORTRAIT, 180f)
-    in 225..314 -> CameraOrientationDecision(CameraDisplayOrientation.LANDSCAPE, 0f)
-    else -> CameraOrientationDecision(CameraDisplayOrientation.PORTRAIT, 0f)
+fun nearestEquivalentCameraRotation(currentDegrees: Float, targetDegrees: Float): Float {
+    val rawDelta = targetDegrees - currentDegrees + 180f
+    val delta = ((rawDelta % 360f) + 360f) % 360f - 180f
+    return currentDegrees + if (delta == -180f) 180f else delta
 }
+
+private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus
 
 val LocalCameraControlRotation = staticCompositionLocalOf { 0f }

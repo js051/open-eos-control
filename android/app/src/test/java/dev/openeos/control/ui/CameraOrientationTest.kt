@@ -5,24 +5,24 @@ import org.junit.Test
 
 class CameraOrientationTest {
     @Test
-    fun portraitAndLandscapeUseStableDisplayOrientations() {
-        val portrait = resolveCameraOrientation(0)
-        val reverseLandscape = resolveCameraOrientation(90)
-        val landscape = resolveCameraOrientation(270)
-
-        assertEquals(CameraDisplayOrientation.PORTRAIT, portrait.displayOrientation)
-        assertEquals(CameraDisplayOrientation.REVERSE_LANDSCAPE, reverseLandscape.displayOrientation)
-        assertEquals(CameraDisplayOrientation.LANDSCAPE, landscape.displayOrientation)
-        assertEquals(0f, portrait.controlRotationDegrees)
-        assertEquals(0f, reverseLandscape.controlRotationDegrees)
-        assertEquals(0f, landscape.controlRotationDegrees)
+    fun rotationLockedDisplayRotatesOnlyCameraControls() {
+        assertEquals(0f, resolveCameraControlRotation(sensorDegrees = 0, displayRotationDegrees = 0))
+        assertEquals(-90f, resolveCameraControlRotation(sensorDegrees = 90, displayRotationDegrees = 0))
+        assertEquals(180f, resolveCameraControlRotation(sensorDegrees = 180, displayRotationDegrees = 0))
+        assertEquals(90f, resolveCameraControlRotation(sensorDegrees = 270, displayRotationDegrees = 0))
     }
 
     @Test
-    fun upsideDownKeepsPortraitLayoutAndRotatesOnlyControls() {
-        val decision = resolveCameraOrientation(180)
+    fun systemRotatedDisplayDoesNotDoubleRotateControls() {
+        assertEquals(0f, resolveCameraControlRotation(sensorDegrees = 90, displayRotationDegrees = 270))
+        assertEquals(0f, resolveCameraControlRotation(sensorDegrees = 270, displayRotationDegrees = 90))
+    }
 
-        assertEquals(CameraDisplayOrientation.PORTRAIT, decision.displayOrientation)
-        assertEquals(180f, decision.controlRotationDegrees)
+    @Test
+    fun equivalentRotationUsesTheShortestAnimationPath() {
+        assertEquals(-180f, nearestEquivalentCameraRotation(currentDegrees = -90f, targetDegrees = 180f))
+        assertEquals(-270f, nearestEquivalentCameraRotation(currentDegrees = -180f, targetDegrees = 90f))
+        assertEquals(720f, nearestEquivalentCameraRotation(currentDegrees = 720f, targetDegrees = 0f))
+        assertEquals(720f, nearestEquivalentCameraRotation(currentDegrees = 630f, targetDegrees = 0f))
     }
 }
