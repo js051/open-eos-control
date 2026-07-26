@@ -90,9 +90,11 @@ The debug APK is written to:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions runs unit tests, the debug build, and the Compose instrumentation suite on a Pixel 5 API 35 emulator for pushes to `main` and pull requests.
+GitHub Actions runs unit tests, the debug build, and the Compose instrumentation suite on a Pixel 5 API 34 emulator for pushes to `main` and pull requests.
 
 Development releases are built entirely by GitHub Actions. A `vX.Y.Z` tag must match every platform version and point to a commit already on `main`; after secret scanning and Android, Desktop Bridge, Simulator, and iOS validation pass, the release workflow publishes the Android debug APK, Desktop Bridge wheel/source distribution, release notes, and SHA-256 checksums as a GitHub prerelease.
+
+The iOS app is compiled and tested on an iPhone Simulator, but the release does not include an installable IPA. Physical-device distribution requires an Apple Developer team, a distribution certificate, and a matching provisioning profile; none of those signing credentials are stored in this public repository.
 
 ## iOS App And Camera Core
 
@@ -114,7 +116,7 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions builds the final app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises English portrait/landscape control, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection-form flows on an iPhone Simulator. This does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
+GitHub Actions builds an unsigned Simulator app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises English portrait/landscape control, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection-form flows on an iPhone Simulator. The workflow intentionally sets `CODE_SIGNING_ALLOWED=NO`, so this build cannot be installed on a physical iPhone and is not published as an IPA. This does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
 
 ## Desktop Bridge
 
