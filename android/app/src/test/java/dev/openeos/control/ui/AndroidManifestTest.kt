@@ -7,7 +7,7 @@ import org.junit.Test
 
 class AndroidManifestTest {
     @Test
-    fun mainActivityDefersDisplayOrientationToSystemSettings() {
+    fun mainActivityKeepsCameraLayoutInTheDevicesNaturalOrientation() {
         val document = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
         }.newDocumentBuilder().parse(manifestFile())
@@ -19,8 +19,8 @@ class AndroidManifestTest {
             }
 
         assertEquals(
-            "MainActivity must not bypass the user's system rotation setting",
-            "",
+            "MainActivity must keep the camera layout fixed while controls rotate independently",
+            "nosensor",
             mainActivity.attributes.getNamedItemNS(ANDROID_NAMESPACE, "screenOrientation")?.nodeValue.orEmpty(),
         )
         assertEquals(

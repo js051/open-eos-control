@@ -32,3 +32,4 @@ fun nearestEquivalentCameraRotation(currentDegrees: Float, targetDegrees: Float)
 private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus
 
 val LocalCameraControlRotation = staticCompositionLocalOf { 0f }
+val LocalCameraControlTargetRotation = staticCompositionLocalOf { 0f }

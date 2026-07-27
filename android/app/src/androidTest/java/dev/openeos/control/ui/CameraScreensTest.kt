@@ -246,12 +246,15 @@ class CameraScreensTest {
     }
 
     @Test
-    fun rotatedCompactControlsDoNotRotateLongCameraText() {
+    fun layoutAwareRotationKeepsLongCameraTextWithinViewport() {
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
             ) {
-                CompositionLocalProvider(LocalCameraControlRotation provides -90f) {
+                CompositionLocalProvider(
+                    LocalCameraControlRotation provides -90f,
+                    LocalCameraControlTargetRotation provides -90f,
+                ) {
                     MaterialTheme(colorScheme = OpenEosColorScheme) {
                         CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
                     }
@@ -261,6 +264,30 @@ class CameraScreensTest {
 
         val previewHintBounds = compose
             .onNodeWithText(resourceText(R.string.offline_preview_hint))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val previewBounds = compose
+            .onNodeWithTag("live-view-frame")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val offlineContentBounds = compose
+            .onNodeWithTag("offline-preview-content", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val exposureBounds = compose
+            .onNodeWithTag("exposure-control-ISO")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val headerBounds = compose
+            .onNodeWithTag("camera-overlay-header")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val cameraNameBounds = compose
+            .onNodeWithTag("camera-name", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val storageBounds = compose
+            .onNodeWithTag("storage-status", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInRoot
         val isoCellBounds = compose
@@ -273,9 +300,29 @@ class CameraScreensTest {
             .boundsInRoot
 
         assertTrue(
-            "Long preview guidance must stay horizontal when compact controls rotate: $previewHintBounds",
-            previewHintBounds.width > previewHintBounds.height,
+            "Long preview guidance should rotate with the camera controls: $previewHintBounds",
+            previewHintBounds.height > previewHintBounds.width,
         )
+        assertTrue(
+            "Rotated offline content $offlineContentBounds must stay inside live view $previewBounds",
+            offlineContentBounds.left >= previewBounds.left &&
+                offlineContentBounds.top >= previewBounds.top &&
+                offlineContentBounds.right <= previewBounds.right &&
+                offlineContentBounds.bottom <= previewBounds.bottom,
+        )
+        assertTrue(
+            "Rotated offline content must stay above exposure controls",
+            offlineContentBounds.bottom <= exposureBounds.top,
+        )
+        listOf(cameraNameBounds, storageBounds).forEach { statusBounds ->
+            assertTrue(
+                "Rotated status $statusBounds must stay inside header $headerBounds",
+                statusBounds.left >= headerBounds.left &&
+                    statusBounds.top >= headerBounds.top &&
+                    statusBounds.right <= headerBounds.right &&
+                    statusBounds.bottom <= headerBounds.bottom,
+            )
+        }
         assertTrue(
             "Rotated ISO content $isoContentBounds must stay inside its bounded cell $isoCellBounds",
             isoContentBounds.left >= isoCellBounds.left &&

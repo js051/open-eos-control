@@ -46,7 +46,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -64,6 +63,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -75,13 +75,8 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.NativeLiveViewSession
+import java.text.NumberFormat
 import kotlinx.coroutines.delay
-
-@Composable
-fun Modifier.cameraControlRotation(): Modifier {
-    val rotation = LocalCameraControlRotation.current
-    return graphicsLayer { rotationZ = rotation }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -230,24 +225,46 @@ fun CameraHeader(state: CameraUiState, actions: CameraActions) {
 fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val battery = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
         ?: stringResource(R.string.unknown)
-    val storage = cameraStorageLabel(state.status)
+    val fullCameraName = state.info?.model?.toCompactCameraName() ?: stringResource(R.string.unknown)
+    val fullStorage = cameraStorageLabel(state.status)
+    val quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
+    val cameraName = if (quarterTurn) fullCameraName.toQuarterTurnCameraName() else fullCameraName
+    val storage = if (quarterTurn) cameraStorageCompactLabel(state.status) else fullStorage
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
-        modifier = modifier.fillMaxWidth().height(48.dp).background(Color(0xB8000000)).padding(start = 12.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .testTag("camera-overlay-header")
+            .background(Color(0xB8000000))
+            .padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(Modifier.size(8.dp).background(AppSuccess, CircleShape))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            Text(
+                cameraName,
+                color = AppText,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .cameraLayoutRotation()
+                    .testTag("camera-name")
+                    .semantics { contentDescription = fullCameraName },
+            )
+        }
+        Text(battery, Modifier.cameraLayoutRotation(), color = AppSubtleText, maxLines = 1)
         Text(
-            state.info?.model?.toCompactCameraName() ?: stringResource(R.string.unknown),
-            color = AppText,
-            fontWeight = FontWeight.SemiBold,
+            storage,
+            Modifier
+                .cameraLayoutRotation()
+                .testTag("storage-status")
+                .semantics { contentDescription = fullStorage },
+            color = AppSubtleText,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
         )
-        Text(battery, color = AppSubtleText, maxLines = 1)
-        Text(storage, color = AppSubtleText, maxLines = 1)
         ToolIconButton(
             if (state.captureMode == CaptureMode.PHOTO) LucideR.drawable.lucide_ic_camera else LucideR.drawable.lucide_ic_video,
             stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.switch_to_video else R.string.switch_to_photo),
@@ -328,8 +345,22 @@ private fun cameraStorageLabel(status: CameraStatus?): String {
     }
 }
 
+@Composable
+private fun cameraStorageCompactLabel(status: CameraStatus?): String {
+    val context = LocalContext.current
+    return when {
+        status?.storageFreeImages != null -> NumberFormat.getIntegerInstance().format(status.storageFreeImages)
+        status?.storageFreeBytes != null -> Formatter.formatShortFileSize(context, status.storageFreeBytes)
+        status?.mediaAvailable == true -> stringResource(R.string.storage_ready)
+        else -> "-"
+    }
+}
+
 private fun String.toCompactCameraName(): String =
     removePrefix("Canon EOS ").ifBlank { this }
+
+private fun String.toQuarterTurnCameraName(): String =
+    replace(" Mark ", " ")
 
 @Composable
 fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
@@ -356,6 +387,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
 
     BoxWithConstraints(
         modifier = modifier
+            .testTag("live-view-frame")
             .background(Color.Black)
             .pointerInput(canTap, tapAction, sourceAspectRatio) {
                 detectTapGestures { offset ->
@@ -384,7 +416,9 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
-                    modifier = Modifier,
+                    modifier = Modifier
+                        .cameraLayoutRotation()
+                        .testTag("offline-preview-content"),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -403,6 +437,8 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                         stringResource(R.string.offline_preview_hint),
                         color = AppSubtleText,
                         modifier = Modifier.padding(horizontal = 24.dp),
+                        maxLines = 2,
+                        textAlign = TextAlign.Center,
                     )
                 }
             }

@@ -104,7 +104,10 @@ fun OpenEosControlApp(
         clearError = viewModel::clearError,
     )
 
-    CompositionLocalProvider(LocalCameraControlRotation provides animatedControlRotation) {
+    CompositionLocalProvider(
+        LocalCameraControlRotation provides animatedControlRotation,
+        LocalCameraControlTargetRotation provides controlRotationDegrees,
+    ) {
         MaterialTheme(colorScheme = OpenEosColorScheme) {
             SystemBarsEffect(immersive = state.connected && state.uiMode == UiMode.CONTROL)
             Box(Modifier.fillMaxSize().background(AppBackground)) {
