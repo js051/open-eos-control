@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -243,10 +244,10 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).cameraControlRotation(),
+            modifier = Modifier.weight(1f),
         )
-        Text(battery, Modifier.cameraControlRotation(), color = AppSubtleText, maxLines = 1)
-        Text(storage, Modifier.cameraControlRotation(), color = AppSubtleText, maxLines = 1)
+        Text(battery, color = AppSubtleText, maxLines = 1)
+        Text(storage, color = AppSubtleText, maxLines = 1)
         ToolIconButton(
             if (state.captureMode == CaptureMode.PHOTO) LucideR.drawable.lucide_ic_camera else LucideR.drawable.lucide_ic_video,
             stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.switch_to_video else R.string.switch_to_photo),
@@ -383,7 +384,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
-                    modifier = Modifier.cameraControlRotation(),
+                    modifier = Modifier,
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -566,18 +567,21 @@ private fun RecordingIndicator(modifier: Modifier = Modifier) {
         }
     }
     val elapsed = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
-    Row(
-        modifier.cameraControlRotation().background(Color(0xB8000000), RoundedCornerShape(4.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(Modifier.size(8.dp).background(AppRecord, CircleShape))
-        Text(
-            stringResource(R.string.recording_time, elapsed),
-            color = AppText,
-            fontWeight = FontWeight.Bold,
-        )
+    Box(modifier.size(104.dp), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.cameraControlRotation().background(Color(0xB8000000), RoundedCornerShape(4.dp))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(Modifier.size(8.dp).background(AppRecord, CircleShape))
+            Text(
+                stringResource(R.string.recording_time, elapsed),
+                color = AppText,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -612,7 +616,10 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
         verticalArrangement = Arrangement.Center,
     ) {
         Column(
-            Modifier.cameraControlRotation(),
+            Modifier
+                .widthIn(max = 76.dp)
+                .cameraControlRotation()
+                .testTag("exposure-content-${picker.name}"),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(label, color = AppMutedText, maxLines = 1)

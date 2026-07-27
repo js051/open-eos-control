@@ -145,7 +145,7 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
             Text(
                 stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.capture_not_supported else R.string.recording_not_supported),
                 color = AppWarning,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp).cameraControlRotation(),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
     }

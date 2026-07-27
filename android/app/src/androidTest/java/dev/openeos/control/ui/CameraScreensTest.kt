@@ -20,6 +20,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
@@ -241,6 +242,46 @@ class CameraScreensTest {
         assertTrue(
             "Landscape preview content must stay above the fixed exposure controls",
             previewHintBounds.bottom <= exposureBounds.top,
+        )
+    }
+
+    @Test
+    fun rotatedCompactControlsDoNotRotateLongCameraText() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                CompositionLocalProvider(LocalCameraControlRotation provides -90f) {
+                    MaterialTheme(colorScheme = OpenEosColorScheme) {
+                        CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                    }
+                }
+            }
+        }
+
+        val previewHintBounds = compose
+            .onNodeWithText(resourceText(R.string.offline_preview_hint))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val isoCellBounds = compose
+            .onNodeWithTag("exposure-control-ISO")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val isoContentBounds = compose
+            .onNodeWithTag("exposure-content-ISO", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertTrue(
+            "Long preview guidance must stay horizontal when compact controls rotate: $previewHintBounds",
+            previewHintBounds.width > previewHintBounds.height,
+        )
+        assertTrue(
+            "Rotated ISO content $isoContentBounds must stay inside its bounded cell $isoCellBounds",
+            isoContentBounds.left >= isoCellBounds.left &&
+                isoContentBounds.top >= isoCellBounds.top &&
+                isoContentBounds.right <= isoCellBounds.right &&
+                isoContentBounds.bottom <= isoCellBounds.bottom,
         )
     }
 
