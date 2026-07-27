@@ -2,7 +2,12 @@ package dev.openeos.control.ui
 
 import androidx.compose.runtime.staticCompositionLocalOf
 
-fun resolveCameraControlRotation(sensorDegrees: Int, displayRotationDegrees: Int): Float {
+fun resolveCameraControlRotation(
+    autoRotationEnabled: Boolean,
+    sensorDegrees: Int,
+    displayRotationDegrees: Int,
+): Float {
+    if (!autoRotationEnabled || sensorDegrees < 0) return 0f
     val deviceRotation = when (sensorDegrees) {
         in 45..134 -> 90
         in 135..224 -> 180

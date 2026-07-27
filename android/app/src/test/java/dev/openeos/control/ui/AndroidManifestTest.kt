@@ -23,6 +23,15 @@ class AndroidManifestTest {
             "",
             mainActivity.attributes.getNamedItemNS(ANDROID_NAMESPACE, "screenOrientation")?.nodeValue.orEmpty(),
         )
+        assertEquals(
+            setOf("orientation", "screenSize", "keyboardHidden"),
+            mainActivity.attributes.getNamedItemNS(ANDROID_NAMESPACE, "configChanges")
+                ?.nodeValue
+                .orEmpty()
+                .split('|')
+                .filter(String::isNotBlank)
+                .toSet(),
+        )
     }
 
     private fun manifestFile(): File = sequenceOf(
