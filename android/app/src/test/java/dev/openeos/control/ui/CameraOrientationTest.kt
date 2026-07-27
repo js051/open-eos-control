@@ -32,6 +32,16 @@ class CameraOrientationTest {
     }
 
     @Test
+    fun quarterTurnsSwapLayoutDimensions() {
+        assertEquals(false, cameraRotationSwapsDimensions(0f))
+        assertEquals(true, cameraRotationSwapsDimensions(90f))
+        assertEquals(false, cameraRotationSwapsDimensions(180f))
+        assertEquals(true, cameraRotationSwapsDimensions(270f))
+        assertEquals(true, cameraRotationSwapsDimensions(-90f))
+        assertEquals(false, cameraRotationSwapsDimensions(720f))
+    }
+
+    @Test
     fun equivalentRotationUsesTheShortestAnimationPath() {
         assertEquals(-180f, nearestEquivalentCameraRotation(currentDegrees = -90f, targetDegrees = 180f))
         assertEquals(-270f, nearestEquivalentCameraRotation(currentDegrees = -180f, targetDegrees = 90f))
