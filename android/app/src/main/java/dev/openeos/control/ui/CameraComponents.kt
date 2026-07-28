@@ -241,21 +241,8 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(Modifier.size(8.dp).background(AppSuccess, CircleShape))
-        CameraRotatingSlot(
-            Modifier.weight(1f).fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                cameraName,
-                color = AppText,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .testTag("camera-name")
-                    .semantics { contentDescription = fullCameraName },
-            )
-        }
+        CameraModelIndicator(cameraName, fullCameraName)
+        Box(Modifier.weight(1f))
         CameraStatusIndicator(
             icon = batteryStatusIcon(state.status?.batteryLevel),
             value = batteryValue,
@@ -327,6 +314,26 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CameraModelIndicator(value: String, description: String) {
+    CameraRotatingSlot(
+        Modifier
+            .size(48.dp)
+            .testTag("camera-model-status")
+            .semantics { contentDescription = description },
+    ) {
+        Text(
+            value,
+            color = AppText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.testTag("camera-name"),
+        )
     }
 }
 

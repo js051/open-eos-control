@@ -30,7 +30,9 @@ class MainActivity : AppCompatActivity() {
         orientationListener = object : OrientationEventListener(this) {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN) return
-                orientationPolicy.onSensorOrientation(orientation)
+                val autoRotationEnabled = isSystemAutoRotationEnabled()
+                orientationPolicy.onSensorOrientation(orientation, autoRotationEnabled)
+                if (!autoRotationEnabled) orientationListener.disable()
                 updateControlRotation()
             }
         }
@@ -81,7 +83,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        updateControlRotation()
+        refreshSystemAutoRotationSetting()
     }
 
     private fun refreshSystemAutoRotationSetting() {
