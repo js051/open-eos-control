@@ -251,7 +251,7 @@
 
       <main id="diagnostics-panel" class="content-panel view-panel" hidden>
         <div class="content-heading">
-          <div><h2 data-i18n="diagnostics">Diagnostics</h2><p class="supporting" data-i18n="diagnosticSafe">Authentication token is excluded</p></div>
+          <div><h2 data-i18n="diagnostics">Diagnostics</h2><p class="supporting" data-i18n="diagnosticSafe">Authentication secrets and camera serial are excluded</p></div>
           <div class="content-actions">
             <button id="diagnostics-refresh-button" class="button secondary" type="button">
               <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span><span data-i18n="refresh">Refresh</span>
@@ -278,6 +278,7 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script src="/app/icons.js"></script>
+  <script src="/app/diagnostics.js"></script>
   <script src="/app/app.js"></script>
 </body>
 </html>

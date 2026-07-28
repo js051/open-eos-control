@@ -721,7 +721,8 @@ public enum DesktopBridgeDiagnosticReport {
         engine: String? = nil,
         snapshot: CameraSnapshot?,
         liveView: CCAPILiveViewMetrics = CCAPILiveViewMetrics(),
-        lastError: String? = nil
+        lastError: String? = nil,
+        metadata: DiagnosticReportMetadata = .current()
     ) -> String {
         let supported = snapshot?.capabilities.matrix.supported.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
         let planned = snapshot?.capabilities.matrix.planned.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
@@ -729,10 +730,14 @@ public enum DesktopBridgeDiagnosticReport {
         let observed = evidence?.observedFeatures.map(\.rawValue).sorted().joined(separator: ", ")
         let observedText = observed.flatMap { $0.isEmpty ? nil : $0 } ?? "none"
         let date = ISO8601DateFormatter().string(from: liveView.lastFrameAt ?? Date(timeIntervalSince1970: 0))
+        let validation = DiagnosticValidationSummary(capabilities: snapshot?.capabilities)
         let report = [
             "Open EOS Control iOS diagnostic report",
+            "reportSchema=\(diagnosticReportSchema)",
+            "generatedAt=\(metadata.generatedAt)",
+            "productVersion=\(metadata.productVersion)",
             "camera=\(snapshot?.info.model ?? "unknown")",
-            "serial=\(snapshot?.info.serial ?? "unknown")",
+            "serial=\(diagnosticSerial(snapshot?.info.serial))",
             "transport=DESKTOP_BRIDGE",
             "bridgeUrl=\(sanitized(baseURL)?.absoluteString ?? "invalid")",
             "bridgeVersion=\(bridgeVersion ?? "unknown")",
@@ -745,6 +750,11 @@ public enum DesktopBridgeDiagnosticReport {
             "advertisedCommands=\(evidence?.advertisedCommands.joined(separator: " | ") ?? "none")",
             "writableSettings=\(evidence?.writableSettings.joined(separator: ", ") ?? "none")",
             "observedFeatures=\(observedText)",
+            "advertisedFeatureCount=\(validation.advertisedFeatures.count)",
+            "observedFeatureCount=\(validation.observedFeatures.count)",
+            "validatedAdvertisedFeatureCount=\(validation.validatedAdvertisedFeatures.count)",
+            "unverifiedAdvertisedFeatures=\(diagnosticFeatureList(validation.unverifiedAdvertisedFeatures))",
+            "observedWithoutAdvertisement=\(diagnosticFeatureList(validation.observedWithoutAdvertisement))",
             "capabilityEvidenceTruncated=\(evidence?.truncated ?? false)",
             "battery=\(snapshot?.status.rawBatteryJSON ?? "null")",
             "storage=\(snapshot?.status.rawStorageJSON ?? "null")",
@@ -761,7 +771,7 @@ public enum DesktopBridgeDiagnosticReport {
             "lastFrameAt=\(liveView.lastFrameAt == nil ? "none" : date)",
             "lastError=\(lastError ?? "none")",
         ].joined(separator: "\n")
-        return redact(report)
+        return redactDiagnosticText(report, sensitiveValues: [snapshot?.info.serial])
     }
 
     private static func sanitized(_ value: URL?) -> URL? {
@@ -771,24 +781,6 @@ public enum DesktopBridgeDiagnosticReport {
         return components.url
     }
 
-    private static func redact(_ value: String) -> String {
-        value
-            .replacingOccurrences(
-                of: #"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s\r\n]+"#,
-                with: "$1[redacted]",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"(?i)((?:password|token)=)[^\s&]+"#,
-                with: "$1[redacted]",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"(?i)(\"(?:password|token)\"\s*:\s*\")[^\"]+"#,
-                with: "$1[redacted]",
-                options: .regularExpression
-            )
-    }
 }
 
 private typealias BridgeJSON = [String: Any]

@@ -220,6 +220,44 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(report.contains("transport=DESKTOP_BRIDGE"))
     }
 
+    func testDesktopBridgeReportRedactsSerialAndCarriesValidationMetadata() throws {
+        let snapshot = CameraSnapshot(
+            info: CameraInfo(
+                model: "Canon EOS R6 Mark III",
+                serial: "PRIVATE-BRIDGE-CAMERA-SERIAL",
+                api: "gphoto2"
+            ),
+            status: CameraStatus(),
+            capabilities: CameraCapabilities(
+                settings: [],
+                matrix: CapabilityMatrix(supported: [.cameraIdentity, .stillCapture]),
+                liveView: LiveViewCapabilities(),
+                profile: CameraProfile.from(modelName: "Canon EOS R6 Mark III"),
+                evidence: CameraCapabilityEvidence(observedFeatures: [.cameraIdentity])
+            )
+        )
+
+        let report = DesktopBridgeDiagnosticReport.make(
+            baseURL: try XCTUnwrap(URL(string: "http://192.168.1.10:18181")),
+            bridgeVersion: "0.1.0",
+            engine: "libgphoto2",
+            snapshot: snapshot,
+            lastError: "Camera PRIVATE-BRIDGE-CAMERA-SERIAL was busy",
+            metadata: DiagnosticReportMetadata(
+                productVersion: "9.8.7-test",
+                generatedAt: "2026-07-29T00:00:00Z"
+            )
+        )
+
+        XCTAssertTrue(report.contains("reportSchema=1"))
+        XCTAssertTrue(report.contains("generatedAt=2026-07-29T00:00:00Z"))
+        XCTAssertTrue(report.contains("productVersion=9.8.7-test"))
+        XCTAssertTrue(report.contains("serial=[redacted]"))
+        XCTAssertFalse(report.contains("PRIVATE-BRIDGE-CAMERA-SERIAL"))
+        XCTAssertTrue(report.contains("validatedAdvertisedFeatureCount=1"))
+        XCTAssertTrue(report.contains("unverifiedAdvertisedFeatures=STILL_CAPTURE"))
+    }
+
     func testRejectsCredentialsQueryAndSubpathsInBaseURL() {
         for value in [
             "http://user:password@192.168.1.10:18181",

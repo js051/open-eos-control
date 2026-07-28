@@ -18,7 +18,11 @@ struct DebugView: View {
                         value("camera_profile", camera.capabilities?.profile.modelName ?? "unknown")
                         value("transport", camera.transportIdentifier)
                         value("api_version", camera.info?.api ?? "unknown")
-                        value("serial_number", camera.info?.serial ?? "unknown", mono: true)
+                        value(
+                            "serial_number",
+                            displayedSerial(camera.info?.serial),
+                            mono: true
+                        )
                         value("last_error", camera.lastError ?? language.string("none"), warning: camera.lastError != nil)
                     }
 
@@ -36,6 +40,7 @@ struct DebugView: View {
                     }
 
                     debugSection("capability_evidence") {
+                        let validation = DiagnosticValidationSummary(capabilities: camera.capabilities)
                         value("capability_source", camera.capabilities?.evidence.source ?? "unknown", mono: true)
                         value(
                             "protocol_versions",
@@ -59,6 +64,22 @@ struct DebugView: View {
                             "observed_features",
                             featureList(camera.capabilities?.evidence.observedFeatures),
                             mono: true
+                        )
+                        value(
+                            "validation_coverage",
+                            "\(validation.validatedAdvertisedFeatures.count) / \(validation.advertisedFeatures.count)"
+                        )
+                        value(
+                            "unverified_advertised_features",
+                            featureList(validation.unverifiedAdvertisedFeatures),
+                            mono: true,
+                            warning: !validation.unverifiedAdvertisedFeatures.isEmpty
+                        )
+                        value(
+                            "observed_without_advertisement",
+                            featureList(validation.observedWithoutAdvertisement),
+                            mono: true,
+                            warning: !validation.observedWithoutAdvertisement.isEmpty
                         )
                         value(
                             "evidence_truncated",
@@ -188,6 +209,13 @@ struct DebugView: View {
 
     private func featureList(_ features: Set<CameraFeature>?) -> String {
         features?.map(\.rawValue).sorted().joined(separator: ", ").nilIfBlank ?? language.string("none")
+    }
+
+    private func displayedSerial(_ serial: String?) -> String {
+        let normalized = serial?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == nil || normalized == "" || normalized == "unknown" || normalized == "none"
+            ? language.string("unknown")
+            : language.string("redacted")
     }
 }
 

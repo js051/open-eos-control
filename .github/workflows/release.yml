@@ -168,7 +168,9 @@ jobs:
           ruff check --no-cache .
           pytest -q -p no:cacheprovider
           node --check open_eos_bridge/static/icons.js
+          node --check open_eos_bridge/static/diagnostics.js
           node --check open_eos_bridge/static/app.js
+          node tests/diagnostics.test.js
 
       - name: Build Desktop Bridge packages
         run: python -m build --outdir ../dist

@@ -1,6 +1,9 @@
 (() => {
   "use strict";
 
+  const diagnostics = globalThis.OpenEOSDiagnostics;
+  if (!diagnostics) throw new Error("Open EOS diagnostics module is unavailable.");
+
   const FEATURES = {
     LIVE_VIEW: "LIVE_VIEW",
     STILL_CAPTURE: "STILL_CAPTURE",
@@ -79,7 +82,7 @@
       liveViewSourceBridge: "Desktop preview",
       frameRate: "Frame rate",
       moreSettings: "More settings",
-      diagnosticSafe: "Authentication token is excluded",
+      diagnosticSafe: "Authentication secrets and camera serial are excluded",
       copy: "Copy",
       close: "Close",
       bridgeReady: "{engine} ready",
@@ -254,7 +257,7 @@
       liveViewSourceBridge: "電腦預覽",
       frameRate: "影格率",
       moreSettings: "更多設定",
-      diagnosticSafe: "診斷內容不包含驗證 token",
+      diagnosticSafe: "診斷內容不包含驗證機密與相機序號",
       copy: "複製",
       close: "關閉",
       bridgeReady: "{engine} 已就緒",
@@ -1848,14 +1851,17 @@
   }
 
   function diagnosticReport() {
-    return {
+    const report = {
       product: "Open EOS Control Desktop",
+      reportSchema: 1,
       generatedAt: new Date().toISOString(),
+      productVersion: state.health?.version || "unknown",
       bridge: state.health,
       camera: state.session?.camera || null,
       info: state.info,
       status: state.status,
       capabilities: state.capabilities,
+      validation: diagnostics.featureSummary(state.capabilities),
       liveView: {
         active: state.liveActive,
         requestedSource: state.liveSource,
@@ -1868,6 +1874,9 @@
       },
       lastError: state.lastError,
     };
+    return diagnostics.safeValue(report, {
+      secrets: [state.token, ui.ccapiPasswordInput?.value, state.info?.serial],
+    });
   }
 
   function renderDiagnostics() {

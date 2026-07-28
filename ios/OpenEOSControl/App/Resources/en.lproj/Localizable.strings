@@ -27,6 +27,7 @@
 "dismiss" = "Dismiss";
 "done" = "Done";
 "unknown" = "Unknown";
+"redacted" = "[redacted]";
 "none" = "None";
 
 "language" = "Language";
@@ -183,6 +184,9 @@
 "advertised_commands" = "Advertised commands";
 "writable_settings" = "Writable settings";
 "observed_features" = "Observed this session";
+"validation_coverage" = "Validated advertised features";
+"unverified_advertised_features" = "Advertised, not yet observed";
+"observed_without_advertisement" = "Observed without advertisement";
 "evidence_truncated" = "Evidence truncated";
 "yes" = "Yes";
 "no" = "No";

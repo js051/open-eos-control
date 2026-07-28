@@ -44,6 +44,68 @@ class DiagnosticsTest {
     }
 
     @Test
+    fun diagnosticReportIsVersionedRedactsSerialAndSummarizesValidationEvidence() {
+        val serial = "PRIVATE-CAMERA-SERIAL"
+        val report = buildDiagnosticReport(
+            state = CameraUiState(
+                info = CameraInfo(
+                    connected = true,
+                    model = "Canon EOS R6 Mark III",
+                    serial = serial,
+                    api = "ccapi",
+                ),
+                status = CameraStatus(
+                    connected = true,
+                    batteryLevel = 80,
+                    batteryStatus = "good",
+                    recording = false,
+                    mode = "M",
+                    mediaAvailable = true,
+                    remainingMinutes = null,
+                    exposure = ExposureState("400", "1/125", "2.8", "auto"),
+                    rawTransportJson = "{\"serial\":\"$serial\"}",
+                ),
+                capabilities = CameraCapabilities(
+                    iso = emptyList(),
+                    shutter = emptyList(),
+                    aperture = emptyList(),
+                    whiteBalance = emptyList(),
+                    matrix = dev.openeos.control.data.CapabilityMatrix(
+                        supported = setOf(
+                            CameraFeature.CAMERA_IDENTITY,
+                            CameraFeature.LIVE_VIEW,
+                            CameraFeature.STILL_CAPTURE,
+                        ),
+                    ),
+                    evidence = CameraCapabilityEvidence(
+                        observedFeatures = setOf(
+                            CameraFeature.CAMERA_IDENTITY,
+                            CameraFeature.LIVE_VIEW,
+                            CameraFeature.USB_DIAGNOSTICS,
+                        ),
+                    ),
+                ),
+                error = "Camera $serial rejected a request",
+            ),
+            metadata = DiagnosticReportMetadata(
+                productVersion = "9.8.7-test",
+                generatedAt = "2026-07-29T00:00:00Z",
+            ),
+        )
+
+        assertTrue(report.contains("reportSchema=1"))
+        assertTrue(report.contains("generatedAt=2026-07-29T00:00:00Z"))
+        assertTrue(report.contains("productVersion=9.8.7-test"))
+        assertTrue(report.contains("serial=[redacted]"))
+        assertFalse(report.contains(serial))
+        assertTrue(report.contains("advertisedFeatureCount=3"))
+        assertTrue(report.contains("observedFeatureCount=3"))
+        assertTrue(report.contains("validatedAdvertisedFeatureCount=2"))
+        assertTrue(report.contains("unverifiedAdvertisedFeatures=STILL_CAPTURE"))
+        assertTrue(report.contains("observedWithoutAdvertisement=USB_DIAGNOSTICS"))
+    }
+
+    @Test
     fun diagnosticReportIncludesCameraNetworkRouteAndStreamHealth() {
         val state = CameraUiState(
             capabilities = CameraCapabilities(
