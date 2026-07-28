@@ -12,17 +12,16 @@ import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.core.view.WindowCompat
+import dev.openeos.control.ui.CameraOrientationPolicy
 import dev.openeos.control.ui.OpenEosControlApp
 import dev.openeos.control.ui.nearestEquivalentCameraRotation
-import dev.openeos.control.ui.resolveCameraControlRotation
-import dev.openeos.control.ui.snapCameraDeviceRotation
 
 class MainActivity : AppCompatActivity() {
     private val controlRotationDegrees = mutableFloatStateOf(0f)
+    private val orientationPolicy = CameraOrientationPolicy()
     private lateinit var orientationListener: OrientationEventListener
     private lateinit var autoRotationObserver: ContentObserver
-    private var latestSensorDegrees = OrientationEventListener.ORIENTATION_UNKNOWN
-    private var snappedSensorDegrees = 0
+    private var activityStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,8 +29,7 @@ class MainActivity : AppCompatActivity() {
         orientationListener = object : OrientationEventListener(this) {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN) return
-                latestSensorDegrees = orientation
-                snappedSensorDegrees = snapCameraDeviceRotation(snappedSensorDegrees, orientation)
+                orientationPolicy.onSensorOrientation(orientation)
                 updateControlRotation()
             }
         }
@@ -47,16 +45,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        activityStarted = true
         contentResolver.registerContentObserver(
             Settings.System.getUriFor(Settings.System.ACCELEROMETER_ROTATION),
             false,
             autoRotationObserver,
         )
         refreshSystemAutoRotationSetting()
-        if (orientationListener.canDetectOrientation()) orientationListener.enable()
     }
 
     override fun onStop() {
+        activityStarted = false
         orientationListener.disable()
         contentResolver.unregisterContentObserver(autoRotationObserver)
         super.onStop()
@@ -68,19 +67,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshSystemAutoRotationSetting() {
+        val enabled = isSystemAutoRotationEnabled()
+        orientationPolicy.setSystemAutoRotation(enabled)
+        if (orientationPolicy.shouldListen(activityStarted, orientationListener.canDetectOrientation())) {
+            orientationListener.enable()
+        } else {
+            orientationListener.disable()
+        }
         updateControlRotation()
     }
 
     private fun updateControlRotation() {
-        val target = resolveCameraControlRotation(
-            autoRotationEnabled = isSystemAutoRotationEnabled(),
-            sensorDegrees = if (latestSensorDegrees == OrientationEventListener.ORIENTATION_UNKNOWN) {
-                latestSensorDegrees
-            } else {
-                snappedSensorDegrees
-            },
-            displayRotationDegrees = currentDisplayRotationDegrees(),
-        )
+        val target = orientationPolicy.resolveControlRotation(currentDisplayRotationDegrees())
         controlRotationDegrees.floatValue = nearestEquivalentCameraRotation(
             currentDegrees = controlRotationDegrees.floatValue,
             targetDegrees = target,

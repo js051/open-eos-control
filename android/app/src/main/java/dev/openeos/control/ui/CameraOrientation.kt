@@ -3,6 +3,39 @@ package dev.openeos.control.ui
 import androidx.compose.runtime.staticCompositionLocalOf
 
 private const val CAMERA_ORIENTATION_HYSTERESIS_DEGREES = 5
+private const val ORIENTATION_UNKNOWN = -1
+
+internal class CameraOrientationPolicy {
+    private var systemAutoRotationEnabled = false
+    private var latestSensorDegrees = ORIENTATION_UNKNOWN
+    private var snappedSensorDegrees = 0
+
+    fun setSystemAutoRotation(enabled: Boolean) {
+        if (systemAutoRotationEnabled == enabled) return
+        systemAutoRotationEnabled = enabled
+        latestSensorDegrees = ORIENTATION_UNKNOWN
+        snappedSensorDegrees = 0
+    }
+
+    fun onSensorOrientation(sensorDegrees: Int) {
+        if (!systemAutoRotationEnabled || sensorDegrees < 0) return
+        latestSensorDegrees = sensorDegrees
+        snappedSensorDegrees = snapCameraDeviceRotation(snappedSensorDegrees, sensorDegrees)
+    }
+
+    fun shouldListen(activityStarted: Boolean, canDetectOrientation: Boolean): Boolean =
+        activityStarted && systemAutoRotationEnabled && canDetectOrientation
+
+    fun resolveControlRotation(displayRotationDegrees: Int): Float = resolveCameraControlRotation(
+        autoRotationEnabled = systemAutoRotationEnabled,
+        sensorDegrees = if (latestSensorDegrees == ORIENTATION_UNKNOWN) {
+            latestSensorDegrees
+        } else {
+            snappedSensorDegrees
+        },
+        displayRotationDegrees = displayRotationDegrees,
+    )
+}
 
 fun snapCameraDeviceRotation(previousDegrees: Int, sensorDegrees: Int): Int {
     if (sensorDegrees < 0) return previousDegrees.floorMod(360)

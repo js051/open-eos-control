@@ -5,6 +5,33 @@ import org.junit.Test
 
 class CameraOrientationTest {
     @Test
+    fun systemRotationLockStopsAndResetsCameraOrientation() {
+        val policy = CameraOrientationPolicy()
+
+        policy.setSystemAutoRotation(true)
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        policy.onSensorOrientation(90)
+        assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.setSystemAutoRotation(false)
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.onSensorOrientation(270)
+        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
+    }
+
+    @Test
+    fun orientationListenerOnlyRunsWhileActivityAndSystemRotationAreEnabled() {
+        val policy = CameraOrientationPolicy()
+
+        policy.setSystemAutoRotation(true)
+        assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = false))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+    }
+
+    @Test
     fun sensorRotationUsesHysteresisAroundQuarterTurnBoundaries() {
         assertEquals(0, snapCameraDeviceRotation(previousDegrees = 0, sensorDegrees = 49))
         assertEquals(90, snapCameraDeviceRotation(previousDegrees = 0, sensorDegrees = 50))

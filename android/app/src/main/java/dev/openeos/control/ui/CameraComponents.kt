@@ -124,17 +124,15 @@ fun LiveViewFpsButton(
         tooltip = { PlainTooltip { Text(stringResource(R.string.live_view_frame_rate)) } },
         state = rememberTooltipState(),
     ) {
-        Column(
+        CameraRotatingSlot(
             modifier
                 .size(64.dp)
                 .testTag("fps-control")
                 .clickable(onClick = onClick)
                 .semantics { contentDescription = description; role = Role.Button },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
         ) {
             Column(
-                Modifier.cameraControlRotation(),
+                Modifier.testTag("fps-content"),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -244,7 +242,10 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(Modifier.size(8.dp).background(AppSuccess, CircleShape))
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+        CameraRotatingSlot(
+            Modifier.weight(1f).fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
             Text(
                 cameraName,
                 color = AppText,
@@ -252,7 +253,6 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
-                    .cameraLayoutRotation()
                     .testTag("camera-name")
                     .semantics { contentDescription = fullCameraName },
             )
@@ -338,15 +338,14 @@ private fun CameraStatusIndicator(
     description: String,
     testTag: String,
 ) {
-    Box(
+    CameraRotatingSlot(
         Modifier
             .size(48.dp)
             .testTag(testTag)
             .semantics { contentDescription = description },
-        contentAlignment = Alignment.Center,
     ) {
         Column(
-            Modifier.cameraControlRotation(),
+            Modifier.testTag("$testTag-content"),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -460,35 +459,40 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         contentAlignment = Alignment.Center,
     ) {
         when {
-            state.previewMode -> Box(
+            state.previewMode -> BoxWithConstraints(
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state.hudVisible),
                 contentAlignment = Alignment.Center,
             ) {
-                Column(
-                    modifier = Modifier
-                        .cameraLayoutRotation()
-                        .testTag("offline-preview-content"),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                val slotSize = minOf(maxWidth, maxHeight).coerceAtMost(320.dp)
+                CameraRotatingSlot(
+                    Modifier.size(slotSize).testTag("offline-preview-content"),
                 ) {
-                    Icon(
-                        painterResource(LucideR.drawable.lucide_ic_camera),
-                        contentDescription = null,
-                        tint = AppAccent,
-                        modifier = Modifier.size(40.dp),
-                    )
-                    Text(
-                        stringResource(R.string.offline_preview),
-                        color = AppText,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        stringResource(R.string.offline_preview_hint),
-                        color = AppSubtleText,
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                        maxLines = 2,
-                        textAlign = TextAlign.Center,
-                    )
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            painterResource(LucideR.drawable.lucide_ic_camera),
+                            contentDescription = null,
+                            tint = AppAccent,
+                            modifier = Modifier.size(40.dp),
+                        )
+                        Text(
+                            stringResource(R.string.offline_preview),
+                            color = AppText,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            stringResource(R.string.offline_preview_hint),
+                            color = AppSubtleText,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
@@ -652,9 +656,9 @@ private fun RecordingIndicator(modifier: Modifier = Modifier) {
         }
     }
     val elapsed = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
-    Box(modifier.size(104.dp), contentAlignment = Alignment.Center) {
+    CameraRotatingSlot(modifier.size(104.dp)) {
         Row(
-            Modifier.cameraControlRotation().background(Color(0xB8000000), RoundedCornerShape(4.dp))
+            Modifier.background(Color(0xB8000000), RoundedCornerShape(4.dp))
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -690,20 +694,17 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    Column(
+    CameraRotatingSlot(
         Modifier
             .weight(1f)
             .fillMaxSize()
             .testTag("exposure-control-${picker.name}")
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
         Column(
             Modifier
                 .widthIn(max = 76.dp)
-                .cameraControlRotation()
                 .testTag("exposure-content-${picker.name}"),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
