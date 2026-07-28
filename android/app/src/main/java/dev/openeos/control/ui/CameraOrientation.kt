@@ -23,6 +23,11 @@ internal class CameraOrientationPolicy {
         snappedSensorDegrees = snapCameraDeviceRotation(snappedSensorDegrees, sensorDegrees)
     }
 
+    fun onSensorOrientation(sensorDegrees: Int, systemAutoRotationEnabled: Boolean) {
+        setSystemAutoRotation(systemAutoRotationEnabled)
+        onSensorOrientation(sensorDegrees)
+    }
+
     fun shouldListen(activityStarted: Boolean, canDetectOrientation: Boolean): Boolean =
         activityStarted && systemAutoRotationEnabled && canDetectOrientation
 

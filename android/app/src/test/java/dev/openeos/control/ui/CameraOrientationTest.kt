@@ -22,6 +22,20 @@ class CameraOrientationTest {
     }
 
     @Test
+    fun everySensorEventReconcilesTheCurrentSystemRotationSetting() {
+        val policy = CameraOrientationPolicy()
+
+        policy.onSensorOrientation(sensorDegrees = 90, systemAutoRotationEnabled = true)
+        assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.onSensorOrientation(sensorDegrees = 270, systemAutoRotationEnabled = false)
+        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.onSensorOrientation(sensorDegrees = 270, systemAutoRotationEnabled = true)
+        assertEquals(90f, policy.resolveControlRotation(displayRotationDegrees = 0))
+    }
+
+    @Test
     fun orientationListenerOnlyRunsWhileActivityAndSystemRotationAreEnabled() {
         val policy = CameraOrientationPolicy()
 

@@ -316,6 +316,7 @@ class CameraScreensTest {
             )
         }
         val stableSlots = listOf(
+            "camera-model-status" to "camera-name",
             "exposure-control-ISO" to "exposure-content-ISO",
             "exposure-control-SHUTTER" to "exposure-content-SHUTTER",
             "exposure-control-APERTURE" to "exposure-content-APERTURE",
