@@ -1,6 +1,10 @@
 package dev.openeos.control.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -11,6 +15,27 @@ import androidx.compose.ui.unit.Constraints
 fun Modifier.cameraControlRotation(): Modifier {
     val rotation = LocalCameraControlRotation.current
     return graphicsLayer { rotationZ = rotation }
+}
+
+/**
+ * Keeps the control's outer geometry stable while remeasuring its content for a quarter turn.
+ * This mirrors the measure/layout behavior of AOSP Camera's RotateLayout.
+ */
+@Composable
+fun CameraRotatingSlot(
+    modifier: Modifier = Modifier,
+    contentAlignment: Alignment = Alignment.Center,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(modifier, contentAlignment = contentAlignment) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .cameraLayoutRotation(),
+            contentAlignment = contentAlignment,
+            content = content,
+        )
+    }
 }
 
 @Composable

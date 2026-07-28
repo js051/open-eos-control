@@ -291,15 +291,6 @@ class CameraScreensTest {
             .onNodeWithTag("storage-status", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInRoot
-        val isoCellBounds = compose
-            .onNodeWithTag("exposure-control-ISO")
-            .fetchSemanticsNode()
-            .boundsInRoot
-        val isoContentBounds = compose
-            .onNodeWithTag("exposure-content-ISO", useUnmergedTree = true)
-            .fetchSemanticsNode()
-            .boundsInRoot
-
         assertTrue(
             "Long preview guidance should rotate with the camera controls: $previewHintBounds",
             previewHintBounds.height > previewHintBounds.width,
@@ -324,13 +315,29 @@ class CameraScreensTest {
                     statusBounds.bottom <= headerBounds.bottom,
             )
         }
-        assertTrue(
-            "Rotated ISO content $isoContentBounds must stay inside its bounded cell $isoCellBounds",
-            isoContentBounds.left >= isoCellBounds.left &&
-                isoContentBounds.top >= isoCellBounds.top &&
-                isoContentBounds.right <= isoCellBounds.right &&
-                isoContentBounds.bottom <= isoCellBounds.bottom,
+        val stableSlots = listOf(
+            "exposure-control-ISO" to "exposure-content-ISO",
+            "exposure-control-SHUTTER" to "exposure-content-SHUTTER",
+            "exposure-control-APERTURE" to "exposure-content-APERTURE",
+            "exposure-control-WHITE_BALANCE" to "exposure-content-WHITE_BALANCE",
+            "battery-status" to "battery-status-content",
+            "storage-status" to "storage-status-content",
+            "fps-control" to "fps-content",
         )
+        stableSlots.forEach { (slotTag, contentTag) ->
+            val slotBounds = compose.onNodeWithTag(slotTag).fetchSemanticsNode().boundsInRoot
+            val contentBounds = compose
+                .onNodeWithTag(contentTag, useUnmergedTree = true)
+                .fetchSemanticsNode()
+                .boundsInRoot
+            assertTrue(
+                "Rotated content $contentTag $contentBounds must stay inside $slotTag $slotBounds",
+                contentBounds.left >= slotBounds.left &&
+                    contentBounds.top >= slotBounds.top &&
+                    contentBounds.right <= slotBounds.right &&
+                    contentBounds.bottom <= slotBounds.bottom,
+            )
+        }
     }
 
     @Test

@@ -38,7 +38,7 @@ The app currently includes:
 - Capability-gated Canon CCAPI RTP H.264 Live View on Android, iOS, and PC, with routed UDP reception, RFC 3550/RFC 6184 packet handling, native mobile display or PyAV decode on PC, an Auto/RTP/JPEG source selector, and a 1-30 FPS display/output cap; it appears only when the camera advertises both RTP endpoints and a reachable local IPv4 address plus a working decoder exist
 - ISO, shutter, aperture, white balance, and dynamic advanced settings, including camera-advertised Canon CCAPI RAW/JPEG/HEIF image quality and bounded B/A/M/G white-balance shift with specification-shaped object writes
 - System, English, or Traditional Chinese language selection, including localized camera-advertised setting values while preserving exact protocol values for writes
-- Camera-style orientation that keeps capture geometry fixed, rereads the Android system auto-rotate preference on every sensor update, rotates bounded controls with hysteresis, and remeasures settings as a full panel when the phone is held sideways or upside down
+- Camera-style orientation that keeps capture geometry fixed, observes the Android system auto-rotate preference, disables orientation sensing while rotation is locked, and remeasures rotating text/icons inside stable control slots when the phone is held sideways or upside down
 - REC start/stop
 - Canon coordinate Tap AF through advertised `PUT afframeposition`, using detailed Live View image geometry instead of guessed normalized camera coordinates
 - Canon Click White Balance through advertised `POST clickwb`, using the same detailed Live View geometry and a Focus/White Balance tap-action selector
