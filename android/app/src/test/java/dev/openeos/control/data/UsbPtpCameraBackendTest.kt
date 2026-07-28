@@ -10,6 +10,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 
 class UsbPtpCameraBackendTest {
@@ -701,6 +702,156 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun canonHostCaptureDownloadsInBoundedChunksBeforeTransferComplete() = runTest {
+        val objectBytes = ByteArray(1024 * 1024 + 17) { index -> (index % 251).toByte() }
+        val captured = HostCaptureObject(
+            handle = 0x42,
+            objectFormat = PtpObjectFormat.EXIF_JPEG,
+            filename = "IMG_0042.JPG",
+            bytes = objectBytes,
+        )
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            advertiseCardCaptureDestination = false,
+            hostCaptureObjects = listOf(captured),
+        )
+        val store = MemoryHostCaptureStore()
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = store,
+        )
+        backend.initialize()
+
+        backend.captureStill()
+        val media = backend.listMedia().single()
+        val output = ByteArrayOutputStream()
+        backend.downloadMedia(media, output) {}
+
+        assertEquals("IMG_0042.JPG", media.name)
+        assertEquals("image", media.kind)
+        assertArrayEquals(objectBytes, store.bytes(media))
+        assertArrayEquals(objectBytes, output.toByteArray())
+        val partialCommands = transport.sentContainers.filter {
+            it.type == PtpContainerType.COMMAND && it.code == PtpOperationCode.GET_PARTIAL_OBJECT
+        }
+        assertEquals(2, partialCommands.size)
+        assertEquals(listOf(0L, 1024L * 1024L), partialCommands.map { it.parameters()[1] })
+        val transferComplete = transport.sentContainers.indexOfFirst {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.TRANSFER_COMPLETE
+        }
+        val lastPartial = transport.sentContainers.indexOfLast {
+            it.type == PtpContainerType.COMMAND && it.code == PtpOperationCode.GET_PARTIAL_OBJECT
+        }
+        assertTrue(transferComplete > lastPartial)
+        assertFalse(transport.hasCanonPropertyWrite(CanonEosPropertyCode.CAPTURE_DESTINATION))
+
+        backend.deleteMedia(media)
+        assertTrue(backend.listMedia().isEmpty())
+        backend.close()
+    }
+
+    @Test
+    fun canonHostCaptureCompletesEveryRawAndJpegTransferRequest() = runTest {
+        val jpeg = HostCaptureObject(
+            handle = 0x51,
+            objectFormat = PtpObjectFormat.EXIF_JPEG,
+            filename = "IMG_0051.JPG",
+            bytes = byteArrayOf(1, 2, 3, 4),
+        )
+        val raw = HostCaptureObject(
+            handle = 0x52,
+            objectFormat = PtpObjectFormat.CANON_CR3,
+            filename = null,
+            bytes = byteArrayOf(5, 6, 7, 8, 9),
+            eventCode = CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64_LFN,
+        )
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            advertiseCardCaptureDestination = false,
+            hostCaptureObjects = listOf(jpeg, raw),
+        )
+        val store = MemoryHostCaptureStore()
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = store,
+        )
+        backend.initialize()
+
+        backend.captureStill()
+
+        val media = backend.listMedia()
+        assertEquals(2, media.size)
+        assertTrue(media.any { it.name == "IMG_0051.JPG" && it.kind == "image" })
+        assertTrue(media.any { it.name.endsWith(".cr3") && it.kind == "raw" })
+        assertEquals(
+            listOf(0x51L, 0x52L),
+            transport.sentContainers.filter {
+                it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.TRANSFER_COMPLETE
+            }.map { it.parameters().single() },
+        )
+        backend.close()
+    }
+
+    @Test
+    fun canonHostCaptureRefreshesPcCapacityBeforeShutterWhenShotsAreLow() = runTest {
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            advertiseCardCaptureDestination = false,
+            availableShots = 0,
+            hostCaptureObjects = listOf(
+                HostCaptureObject(0x61, PtpObjectFormat.EXIF_JPEG, "IMG_0061.JPG", byteArrayOf(1)),
+            ),
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = MemoryHostCaptureStore(),
+        )
+        backend.initialize()
+
+        backend.captureStill()
+
+        val capacity = transport.sentContainers.indexOfFirst {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.PC_HDD_CAPACITY
+        }
+        val shutter = transport.sentContainers.indexOfFirst {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.REMOTE_RELEASE_ON
+        }
+        assertTrue(capacity >= 0)
+        assertTrue(capacity < shutter)
+        assertEquals(listOf(0x0FFF_FFFFL, 0x1000L, 1L), transport.sentContainers[capacity].parameters())
+        backend.close()
+    }
+
+    @Test
+    fun canonHostCaptureFailureLeavesNoFileAndDoesNotAcknowledgeTransfer() = runTest {
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            advertiseCardCaptureDestination = false,
+            hostCaptureObjects = listOf(
+                HostCaptureObject(0x71, PtpObjectFormat.EXIF_JPEG, "IMG_0071.JPG", byteArrayOf(1, 2, 3)),
+            ),
+            rejectPartialAtOffset = 0,
+        )
+        val store = MemoryHostCaptureStore()
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = store,
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue(failure is PtpResponseException)
+        assertTrue(store.list().isEmpty())
+        assertFalse(transport.hasOperation(CanonEosOperationCode.TRANSFER_COMPLETE))
+        backend.close()
+    }
+
+    @Test
     fun canonCaptureRestoresCameraAdvertisedCardDestinationBeforeShutter() = runTest {
         val transport = CanonEosScriptedTransport(
             captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
@@ -1016,6 +1167,9 @@ class UsbPtpCameraBackendTest {
         private val advertiseRemoteRelease: Boolean = true,
         private val rejectOperationCode: Int? = null,
         private val availableShots: Int = 46_822,
+        private val hostCaptureObjects: List<HostCaptureObject> = emptyList(),
+        private val advertiseHostTransferOperations: Boolean = hostCaptureObjects.isNotEmpty(),
+        private val rejectPartialAtOffset: Long? = null,
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
         val sentContainers = mutableListOf<PtpContainer>()
@@ -1033,7 +1187,11 @@ class UsbPtpCameraBackendTest {
                     incoming += data(
                         container.code,
                         transaction,
-                        canonDeviceInfoPayload(advertiseDedicatedAutofocus, advertiseRemoteRelease),
+                        canonDeviceInfoPayload(
+                            advertiseDedicatedAutofocus,
+                            advertiseRemoteRelease,
+                            advertiseHostTransferOperations,
+                        ),
                     )
                     incoming += ok(transaction)
                 }
@@ -1046,6 +1204,8 @@ class UsbPtpCameraBackendTest {
                 CanonEosOperationCode.DRIVE_LENS,
                 CanonEosOperationCode.DO_AF,
                 CanonEosOperationCode.AF_CANCEL,
+                CanonEosOperationCode.TRANSFER_COMPLETE,
+                CanonEosOperationCode.PC_HDD_CAPACITY,
                 -> incoming += if (container.code == rejectOperationCode) {
                     response(PtpResponseCode.GENERAL_ERROR, transaction)
                 } else {
@@ -1076,6 +1236,9 @@ class UsbPtpCameraBackendTest {
                             }
                         !captureEventPending -> eosBlock(0, byteArrayOf())
                         malformedCaptureEvent -> byteArrayOf(40, 0, 0, 0, 0x81.toByte(), 0xC1.toByte(), 0, 0)
+                        hostCaptureObjects.isNotEmpty() -> hostCaptureObjects
+                            .fold(byteArrayOf()) { events, item -> events + eosHostTransfer(item) } +
+                            eosBlock(0, byteArrayOf())
                         else -> eosBlock(CanonEosEventCode.OBJECT_ADDED_EX, ByteArray(40)) + eosBlock(0, byteArrayOf())
                     }
                     captureEventPending = false
@@ -1125,6 +1288,22 @@ class UsbPtpCameraBackendTest {
                     incoming += ok(transaction)
                 }
 
+                PtpOperationCode.GET_PARTIAL_OBJECT -> {
+                    val parameters = container.parameters()
+                    val handle = parameters[0]
+                    val offset = parameters[1]
+                    val requested = parameters[2].toInt()
+                    val item = hostCaptureObjects.single { it.handle == handle }
+                    if (offset == rejectPartialAtOffset) {
+                        incoming += response(PtpResponseCode.GENERAL_ERROR, transaction)
+                    } else {
+                        val start = offset.toInt()
+                        val end = minOf(start + requested, item.bytes.size)
+                        incoming += data(container.code, transaction, item.bytes.copyOfRange(start, end))
+                        incoming += ok(transaction)
+                    }
+                }
+
                 else -> error("Unexpected Canon EOS operation 0x${container.code.toString(16)}")
             }
         }
@@ -1156,6 +1335,64 @@ class UsbPtpCameraBackendTest {
             PtpContainer(PtpContainerType.RESPONSE, code, transaction)
     }
 
+    private data class HostCaptureObject(
+        val handle: Long,
+        val objectFormat: Int,
+        val filename: String?,
+        val bytes: ByteArray,
+        val eventCode: Int = CanonEosEventCode.REQUEST_OBJECT_TRANSFER,
+    )
+
+    private class MemoryHostCaptureStore : UsbHostCaptureStore {
+        private val items = linkedMapOf<String, Pair<CameraMediaItem, ByteArray>>()
+
+        override fun owns(item: CameraMediaItem): Boolean = item.id.startsWith("memory-host:")
+
+        override suspend fun save(
+            filename: String,
+            kind: String,
+            expectedSizeBytes: Long,
+            writer: suspend (OutputStream) -> Long,
+        ): CameraMediaItem {
+            val output = ByteArrayOutputStream()
+            val written = writer(output)
+            assertEquals(expectedSizeBytes, written)
+            assertEquals(expectedSizeBytes, output.size().toLong())
+            val id = "memory-host:${items.size}:$filename"
+            val item = CameraMediaItem(id, filename, kind, written, "test")
+            items[id] = item to output.toByteArray()
+            return item
+        }
+
+        override suspend fun list(): List<CameraMediaItem> = items.values.map { it.first }
+
+        override suspend fun thumbnail(item: CameraMediaItem): CameraMediaThumbnail = CameraMediaThumbnail(
+            item = item,
+            bytes = requireEntry(item).second,
+            contentType = "image/jpeg",
+        )
+
+        override suspend fun download(
+            item: CameraMediaItem,
+            destination: OutputStream,
+            onProgress: (CameraMediaTransferProgress) -> Unit,
+        ): CameraMediaDownloadResult {
+            val bytes = requireEntry(item).second
+            destination.write(bytes)
+            onProgress(CameraMediaTransferProgress(bytes.size.toLong(), bytes.size.toLong()))
+            return CameraMediaDownloadResult(item, bytes.size.toLong(), "application/octet-stream")
+        }
+
+        override suspend fun delete(item: CameraMediaItem) {
+            check(items.remove(item.id) != null)
+        }
+
+        fun bytes(item: CameraMediaItem): ByteArray = requireEntry(item).second
+
+        private fun requireEntry(item: CameraMediaItem): Pair<CameraMediaItem, ByteArray> =
+            items[item.id] ?: error("Missing host capture ${item.id}")
+    }
+
     private fun PtpContainer.parameters(): List<Long> = payload.asList().chunked(4).map { bytes ->
         bytes[0].toUByte().toLong() or
             (bytes[1].toUByte().toLong() shl 8) or
@@ -1167,6 +1404,17 @@ class UsbPtpCameraBackendTest {
         repeat(4) { index -> block[index] = (block.size ushr (index * 8)).toByte() }
         repeat(4) { index -> block[4 + index] = (type ushr (index * 8)).toByte() }
         data.copyInto(block, destinationOffset = 8)
+    }
+
+    private fun eosHostTransfer(item: HostCaptureObject): ByteArray {
+        val lfn = item.eventCode == CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64_LFN
+        val filename = if (lfn) byteArrayOf() else item.filename.orEmpty().encodeToByteArray() + byteArrayOf(0)
+        val data = ByteArray(if (lfn) 29 else 20 + filename.size)
+        repeat(4) { index -> data[index] = (item.handle ushr (index * 8)).toByte() }
+        repeat(2) { index -> data[4 + index] = (item.objectFormat ushr (index * 8)).toByte() }
+        repeat(4) { index -> data[12 + index] = (item.bytes.size ushr (index * 8)).toByte() }
+        if (!lfn) filename.copyInto(data, destinationOffset = 20)
+        return eosBlock(item.eventCode, data)
     }
 
     private fun canonPropertyEvents(
@@ -1379,6 +1627,7 @@ class UsbPtpCameraBackendTest {
         private fun canonDeviceInfoPayload(
             advertiseDedicatedAutofocus: Boolean,
             advertiseRemoteRelease: Boolean,
+            advertiseHostTransferOperations: Boolean = false,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
@@ -1409,6 +1658,11 @@ class UsbPtpCameraBackendTest {
                     if (advertiseDedicatedAutofocus) {
                         add(CanonEosOperationCode.DO_AF)
                         add(CanonEosOperationCode.AF_CANCEL)
+                    }
+                    if (advertiseHostTransferOperations) {
+                        add(PtpOperationCode.GET_PARTIAL_OBJECT)
+                        add(CanonEosOperationCode.TRANSFER_COMPLETE)
+                        add(CanonEosOperationCode.PC_HDD_CAPACITY)
                     }
                 }
             )

@@ -11,6 +11,7 @@ import java.util.Locale
 class UsbPtpCameraBackend(
     override val connection: CameraConnection.AndroidUsbPtp,
     private val transportFactory: PtpTransportFactory,
+    private val hostCaptureStore: UsbHostCaptureStore? = null,
 ) : CameraControlBackend {
     override val transport: CameraTransport = CameraTransport.USB_PTP
     override val prefersBitmapLiveViewFrames: Boolean = true
@@ -189,17 +190,18 @@ class UsbPtpCameraBackend(
             info,
             canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).availableValues,
         )
+        val supportsHostMedia = hostCaptureStore != null
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
             add(CameraFeature.CAMERA_IDENTITY)
             if (PtpDevicePropertyCode.BATTERY_LEVEL in propertyDescriptors) add(CameraFeature.BATTERY_STATUS)
             if (supportsStorage(info)) add(CameraFeature.STORAGE_STATUS)
-            if (supportsMediaBrowser(info)) add(CameraFeature.MEDIA_BROWSER)
-            if (supportsMediaBrowser(info) && info.supports(PtpOperationCode.GET_THUMB)) {
+            if (supportsMediaBrowser(info) || supportsHostMedia) add(CameraFeature.MEDIA_BROWSER)
+            if ((supportsMediaBrowser(info) && info.supports(PtpOperationCode.GET_THUMB)) || supportsHostMedia) {
                 add(CameraFeature.MEDIA_THUMBNAIL)
             }
-            if (info.supports(PtpOperationCode.GET_OBJECT)) add(CameraFeature.MEDIA_DOWNLOAD)
-            if (info.supports(PtpOperationCode.DELETE_OBJECT)) add(CameraFeature.MEDIA_DELETE)
+            if (info.supports(PtpOperationCode.GET_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_DOWNLOAD)
+            if (info.supports(PtpOperationCode.DELETE_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_DELETE)
             if (info.supports(PtpOperationCode.INITIATE_CAPTURE) || supportsCanonRelease) {
                 add(CameraFeature.STILL_CAPTURE)
             }
@@ -262,7 +264,7 @@ class UsbPtpCameraBackend(
                 planned = candidates - supported,
                 reasons = mapOf(
                     CameraFeature.STILL_CAPTURE to
-                        "Uses standard InitiateCapture or the advertised Canon EOS RemoteReleaseOn/Off sequence.",
+                        "Uses standard InitiateCapture or Canon EOS RemoteReleaseOn/Off; advertised host-RAM transfers are downloaded in 1 MiB partial-object chunks before TransferComplete.",
                     CameraFeature.SHUTTER_HALF_PRESS to
                         "Uses Canon EOS RemoteReleaseOn/Off only when the camera advertises the full remote event sequence.",
                     CameraFeature.AUTOFOCUS to
@@ -274,13 +276,13 @@ class UsbPtpCameraBackend(
                     CameraFeature.VIDEO_RECORDING to
                         "Uses Canon EOS EVFRecordStatus only when camera events advertise both Card and None values.",
                     CameraFeature.MEDIA_BROWSER to
-                        "Uses standard GetStorageIDs, GetObjectHandles, and GetObjectInfo operations.",
+                        "Uses standard camera object operations plus completed Canon EOS host captures stored in app-private media.",
                     CameraFeature.MEDIA_THUMBNAIL to
-                        "Uses standard PTP GetThumb only when operation 0x100A is advertised by DeviceInfo.",
+                        "Uses advertised standard PTP GetThumb for card media or Android decoding for app-private host captures.",
                     CameraFeature.MEDIA_DOWNLOAD to
-                        "Uses standard GetObject with bounded USB reads and streaming output.",
+                        "Uses standard GetObject with bounded USB reads or streams a completed app-private host capture.",
                     CameraFeature.MEDIA_DELETE to
-                        "Uses standard DeleteObject only when the camera advertises operation 0x100B.",
+                        "Uses standard DeleteObject for card media and local deletion for app-private host captures.",
                     CameraFeature.EXPOSURE_CONTROL to
                         "Uses writable standard PTP descriptors or Canon EOS PropValueChanged/AvailListChanged events with SetDevicePropValueEx.",
                     CameraFeature.LIVE_VIEW to
@@ -321,7 +323,7 @@ class UsbPtpCameraBackend(
 
     override suspend fun captureStill(): CameraStatus {
         val info = requireDeviceInfo()
-        if (info.supports(PtpOperationCode.INITIATE_CAPTURE)) {
+        if (!CanonEosPtp.supportsRemoteRelease(info) && info.supports(PtpOperationCode.INITIATE_CAPTURE)) {
             requireSession().initiateCapture()
             observedFeatures.add(CameraFeature.STILL_CAPTURE)
             return status()
@@ -330,7 +332,7 @@ class UsbPtpCameraBackend(
 
         ensureCanonRemoteMode()
         drainCanonEvents()
-        ensureCanonCaptureDestinationOnCard()
+        val hostTransferPrepared = prepareCanonCaptureDestination()
         val ptp = requireSession()
         ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
         try {
@@ -343,7 +345,7 @@ class UsbPtpCameraBackend(
         } finally {
             ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
         }
-        awaitCanonCapturedObject()
+        awaitCanonCapturedObject(hostTransferPrepared)
         observedFeatures.add(CameraFeature.STILL_CAPTURE)
         return status()
     }
@@ -470,6 +472,11 @@ class UsbPtpCameraBackend(
 
     override suspend fun listMedia(): List<CameraMediaItem> {
         requireMediaBrowser()
+        val hostItems = hostCaptureStore?.list().orEmpty()
+        if (!supportsMediaBrowser(requireDeviceInfo())) {
+            if (hostItems.isNotEmpty()) observedFeatures.add(CameraFeature.MEDIA_BROWSER)
+            return hostItems
+        }
         val ptp = requireSession()
         val handles = ptp.storageIds()
             .flatMap { storageId -> ptp.objectHandles(storageId) }
@@ -490,12 +497,15 @@ class UsbPtpCameraBackend(
                 null
             }
         }
-        if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null) throw firstFailure!!
+        if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null && hostItems.isEmpty()) throw firstFailure!!
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
-        return items
+        return (hostItems + items).take(MAX_USB_MEDIA_ITEMS)
     }
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
+            return store.thumbnail(item).also { observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL) }
+        }
         requireOperation(PtpOperationCode.GET_THUMB, CameraFeature.MEDIA_THUMBNAIL)
         val handle = item.ptpHandle()
         val objectInfo = mediaInfo[handle] ?: requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
@@ -526,6 +536,10 @@ class UsbPtpCameraBackend(
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaDownloadResult {
+        hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
+            return store.download(item, destination, onProgress)
+                .also { observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD) }
+        }
         requireOperation(PtpOperationCode.GET_OBJECT, CameraFeature.MEDIA_DOWNLOAD)
         val handle = item.ptpHandle()
         val bytesTransferred = requireSession().downloadObject(handle, destination) { transferred, total ->
@@ -539,6 +553,11 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun deleteMedia(item: CameraMediaItem) {
+        hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
+            store.delete(item)
+            observedFeatures.add(CameraFeature.MEDIA_DELETE)
+            return
+        }
         requireOperation(PtpOperationCode.DELETE_OBJECT, CameraFeature.MEDIA_DELETE)
         requireSession().deleteObject(item.ptpHandle())
         observedFeatures.add(CameraFeature.MEDIA_DELETE)
@@ -677,16 +696,103 @@ class UsbPtpCameraBackend(
         canonProperties.values.any { it.availableValues.isNotEmpty() }
     }
 
-    private suspend fun awaitCanonCapturedObject() {
-        val deadline = System.currentTimeMillis() + CANON_CAPTURE_EVENT_TIMEOUT_MILLIS
+    private suspend fun awaitCanonCapturedObject(hostTransferPrepared: Boolean) {
+        var deadline = System.currentTimeMillis() + CANON_CAPTURE_EVENT_TIMEOUT_MILLIS
+        var hostTransferCount = 0
+        var hostTransferQuietAt = Long.MAX_VALUE
         do {
-            if (CanonEosPtp.containsCapturedObjectEvent(drainCanonEvents())) return
+            val payload = drainCanonEvents()
+            val transfers = CanonEosPtp.objectTransferRequests(payload)
+            if (transfers.isNotEmpty()) {
+                if (!hostTransferPrepared) {
+                    throw PtpProtocolException(
+                        "Canon EOS requested a host object transfer without the required advertised transfer operations."
+                    )
+                }
+                transfers.forEach { transfer -> downloadCanonHostCapture(transfer) }
+                hostTransferCount += transfers.size
+                hostTransferQuietAt = System.currentTimeMillis() + CANON_HOST_TRANSFER_QUIET_MILLIS
+                deadline = maxOf(deadline, hostTransferQuietAt)
+            }
+            if (CanonEosPtp.containsCardCapturedObjectEvent(payload)) return
+            if (hostTransferCount > 0 && System.currentTimeMillis() >= hostTransferQuietAt) return
             delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
         } while (System.currentTimeMillis() < deadline)
         throw PtpProtocolException(
             "Canon EOS shutter commands completed, but the camera did not report a captured object " +
                 "within ${CANON_CAPTURE_EVENT_TIMEOUT_MILLIS / 1_000} seconds."
         )
+    }
+
+    private suspend fun downloadCanonHostCapture(request: CanonEosObjectTransferRequest) {
+        if (request.handle == 0L || request.sizeBytes <= 0L || request.sizeBytes > UINT32_MAX) {
+            throw PtpProtocolException(
+                "Canon EOS host transfer advertised invalid handle/size " +
+                    "0x${request.handle.toString(16)}/${request.sizeBytes}."
+            )
+        }
+        val store = hostCaptureStore
+            ?: throw PtpProtocolException("Android host-capture storage is unavailable.")
+        val ptp = requireSession()
+        val filename = request.filename ?: synthesizedCaptureFilename(request.objectFormat)
+        val item = store.save(
+            filename = filename,
+            kind = mediaKind(filename, request.objectFormat),
+            expectedSizeBytes = request.sizeBytes,
+        ) { output ->
+            var offset = 0L
+            while (offset < request.sizeBytes) {
+                val requested = minOf(CANON_HOST_TRANSFER_CHUNK_BYTES.toLong(), request.sizeBytes - offset).toInt()
+                val chunk = ptp.partialObject(request.handle, offset, requested)
+                if (chunk.size > requested || offset + chunk.size > request.sizeBytes) {
+                    throw PtpProtocolException(
+                        "Canon EOS host transfer returned ${chunk.size} bytes at offset $offset; " +
+                            "$requested were requested."
+                    )
+                }
+                output.write(chunk)
+                offset += chunk.size
+            }
+            offset
+        }
+        try {
+            ptp.executeOperation(CanonEosOperationCode.TRANSFER_COMPLETE, listOf(request.handle))
+        } catch (exception: Exception) {
+            runCatching { store.delete(item) }
+            throw exception
+        }
+        observedFeatures.add(CameraFeature.MEDIA_BROWSER)
+        observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
+    }
+
+    private suspend fun prepareCanonCaptureDestination(): Boolean {
+        val state = canonPropertyState(CanonEosPropertyCode.CAPTURE_DESTINATION)
+        if (state.currentValue != CanonEosPtp.CAPTURE_DESTINATION_HOST) return false
+        val info = requireDeviceInfo()
+        val hostTransferReady = hostCaptureStore != null &&
+            info.supports(PtpOperationCode.GET_PARTIAL_OBJECT) &&
+            info.supports(CanonEosOperationCode.TRANSFER_COMPLETE) &&
+            prepareCanonHostCapacity(info)
+        if (hostTransferReady) return true
+        ensureCanonCaptureDestinationOnCard()
+        return false
+    }
+
+    private suspend fun prepareCanonHostCapacity(info: PtpDeviceInfo): Boolean {
+        val availableShots = CanonEosPtp.availableShots(
+            canonPropertyState(CanonEosPropertyCode.AVAILABLE_SHOTS).currentValue,
+        )
+        if (availableShots != null && availableShots >= CANON_HOST_MIN_AVAILABLE_SHOTS) return true
+        if (!info.supports(CanonEosOperationCode.PC_HDD_CAPACITY)) return false
+        return try {
+            requireSession().executeOperation(
+                CanonEosOperationCode.PC_HDD_CAPACITY,
+                listOf(CANON_HOST_CAPACITY_CLUSTERS, CANON_HOST_CAPACITY_CLUSTER_BYTES, 1L),
+            )
+            true
+        } catch (exception: PtpResponseException) {
+            exception.responseCode == PtpResponseCode.DEVICE_BUSY
+        }
     }
 
     private suspend fun ensureCanonCaptureDestinationOnCard() {
@@ -990,7 +1096,7 @@ class UsbPtpCameraBackend(
 
     private fun requireMediaBrowser() {
         val info = requireDeviceInfo()
-        if (!supportsMediaBrowser(info)) unsupported<Unit>(CameraFeature.MEDIA_BROWSER)
+        if (!supportsMediaBrowser(info) && hostCaptureStore == null) unsupported<Unit>(CameraFeature.MEDIA_BROWSER)
     }
 
     private fun requireOperation(operationCode: Int, feature: CameraFeature) {
@@ -1096,10 +1202,26 @@ private fun batteryStatus(level: Int?): String = when {
 private fun mediaKind(filename: String, objectFormat: Int): String {
     val extension = filename.substringAfterLast('.', "").lowercase(Locale.ROOT)
     return when {
-        extension in setOf("cr2", "cr3", "dng", "raw") || objectFormat == PtpObjectFormat.DNG -> "raw"
+        extension in setOf("cr2", "cr3", "dng", "raw") || objectFormat in setOf(
+            PtpObjectFormat.DNG,
+            PtpObjectFormat.CANON_CRW,
+            PtpObjectFormat.CANON_CRW3,
+            PtpObjectFormat.CANON_CR3,
+        ) -> "raw"
         extension in setOf("mp4", "mov", "avi", "mkv") || objectFormat == PtpObjectFormat.MP4 -> "video"
         else -> "image"
     }
+}
+
+private fun synthesizedCaptureFilename(objectFormat: Int): String {
+    val extension = when (objectFormat) {
+        PtpObjectFormat.CANON_CRW, PtpObjectFormat.CANON_CRW3 -> "cr2"
+        PtpObjectFormat.CANON_CR3 -> "cr3"
+        PtpObjectFormat.DNG -> "dng"
+        PtpObjectFormat.PNG -> "png"
+        else -> "jpg"
+    }
+    return "capture-${System.currentTimeMillis()}.$extension"
 }
 
 private fun contentTypeFor(filename: String, kind: String): String =
@@ -1130,4 +1252,9 @@ private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L
 private const val CANON_PROPERTY_DISCOVERY_ATTEMPTS = 10
 private const val CANON_PROPERTY_DISCOVERY_RETRY_MILLIS = 50L
 private const val CANON_CAPTURE_EVENT_TIMEOUT_MILLIS = 90_000L
+private const val CANON_HOST_TRANSFER_QUIET_MILLIS = 1_000L
+private const val CANON_HOST_TRANSFER_CHUNK_BYTES = 1 * 1024 * 1024
+private const val CANON_HOST_MIN_AVAILABLE_SHOTS = 100L
+private const val CANON_HOST_CAPACITY_CLUSTERS = 0x0FFF_FFFFL
+private const val CANON_HOST_CAPACITY_CLUSTER_BYTES = 0x0000_1000L
 private const val CANON_LIVE_VIEW_READY_TIMEOUT_MILLIS = 3_000L
