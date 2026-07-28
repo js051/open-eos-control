@@ -87,6 +87,7 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         "aspectratio",
         "zoomspeed",
         "autopoweroff",
+        "capturetarget",
         "stillimagequalitysd",
         "stillimagequalitycf",
     }
@@ -104,10 +105,14 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         declarations = re.findall(rf'^\s+"{re.escape(key)}":\s+"', script, flags=re.MULTILINE)
         assert len(declarations) == 2, f"{key} must have exactly one label in each supported language"
     assert 'large_fine: "imageQualityLargeFine"' in script
+    assert '"internal ram": "valueInternalRam"' in script
+    assert '"memory card": "valueMemoryCard"' in script
 
     assert "function settingValueLabel(settingOrKey, value)" in script
     assert "option.value = value" in script
     assert "option.textContent = settingValueLabel(setting, value)" in script
+    assert '"capturetarget"' in script
+    assert "settingMatchesCaptureMode(setting)" in script
 
 
 def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -> None:

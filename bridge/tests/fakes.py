@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Iterator
+from pathlib import Path
+
+from PIL import Image
 
 from open_eos_bridge.gphoto2 import CommandOutput
 
@@ -116,6 +119,10 @@ class FakeRunner:
     def health(self) -> tuple[bool, str | None, str | None]:
         return True, "gphoto2 2.5.33", None
 
+    @staticmethod
+    def host_path(path: Path) -> str:
+        return str(path.resolve(strict=False))
+
     def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
         del timeout
         self.commands.append(tuple(arguments))
@@ -146,6 +153,17 @@ class FakeRunner:
             return CommandOutput(THUMBNAIL)
         if command in (["--trigger-capture"], ["--capture-image"]):
             return CommandOutput(b"New file is in location /store_00010001/DCIM/100CANON/IMG_0002.JPG\n")
+        if "--capture-image-and-download" in command:
+            filename_index = command.index("--filename") + 1
+            target = Path(
+                command[filename_index]
+                .replace("%%", "%")
+                .replace("%04n", "0001")
+                .replace("%C", "JPG")
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (8, 6), color=(20, 120, 180)).save(target, format="JPEG")
+            return CommandOutput(f"Saving file as {target}\n".encode())
         if command == [
             "--folder",
             "/store_00010001/DCIM/100CANON",

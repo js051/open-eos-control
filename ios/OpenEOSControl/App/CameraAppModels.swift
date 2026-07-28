@@ -123,7 +123,7 @@ extension ExposureState {
 func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) -> [CameraSetting] {
     let primary = Set(["iso", "shutter", "aperture", "whitebalance"])
     let videoTokens = ["movie", "video", "frame", "codec", "record", "sound"]
-    let photoTokens = ["still", "photo", "drive", "imagequality"]
+    let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget"]
     return settings.filter { setting in
         guard !primary.contains(setting.key) else { return false }
         let key = setting.key.lowercased()
@@ -161,6 +161,7 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "aspectratio": "setting_aspect_ratio"
     case "zoomspeed": "setting_power_zoom_speed"
     case "autopoweroff": "setting_auto_power_off"
+    case "capturetarget": "setting_capture_target"
     case "highisonr": "setting_high_iso_noise_reduction"
     case "continuousaf": "setting_continuous_af"
     case "movieservoaf": "setting_movie_servo_af"
@@ -190,6 +191,14 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
             "600": "camera_value_10_minutes",
             "1800": "camera_value_30_minutes",
         ][value]
+    }
+    if normalizedKey == "capturetarget" {
+        return [
+            "internal ram": "camera_value_internal_ram",
+            "sdram": "camera_value_internal_ram",
+            "memory card": "camera_value_memory_card",
+            "card": "camera_value_memory_card",
+        ][value.lowercased()]
     }
     if [
         "stillimagequality", "stillimagequality.raw", "stillimagequality.jpeg", "stillimagequality.heif",

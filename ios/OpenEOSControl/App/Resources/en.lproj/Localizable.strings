@@ -109,6 +109,7 @@
 "setting_aspect_ratio" = "Aspect ratio";
 "setting_power_zoom_speed" = "Power zoom speed";
 "setting_auto_power_off" = "Auto power off";
+"setting_capture_target" = "Capture target";
 "setting_high_iso_noise_reduction" = "High ISO noise reduction";
 "setting_continuous_af" = "Continuous AF";
 "setting_movie_servo_af" = "Movie Servo AF";
@@ -121,6 +122,8 @@
 "camera_value_normal" = "Normal";
 "camera_value_high" = "High";
 "camera_value_disable" = "Disable";
+"camera_value_internal_ram" = "Computer";
+"camera_value_memory_card" = "Memory card";
 "camera_value_15_seconds" = "15 seconds";
 "camera_value_30_seconds" = "30 seconds";
 "camera_value_1_minute" = "1 minute";

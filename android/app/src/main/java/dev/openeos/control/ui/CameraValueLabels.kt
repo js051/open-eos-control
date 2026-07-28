@@ -30,6 +30,7 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "picturestyle" -> pictureStyleValueLabels[value]
         "highisonr" -> highIsoNoiseReductionValueLabels[value]
         "autopoweroff" -> autoPowerOffValueLabels[value]
+        "capturetarget" -> captureTargetValueLabels[value]
         "aeb" -> toggleValueLabels[value]
         "stillimagequality", "stillimagequalityraw", "stillimagequalityjpeg", "stillimagequalityheif",
         "stillimagequalitysd", "stillimagequalitycf" ->
@@ -202,6 +203,13 @@ private val autoPowerOffValueLabels = mapOf(
     "10 minutes" to R.string.camera_value_10_minutes,
     "30 minutes" to R.string.camera_value_30_minutes,
     "disable" to R.string.camera_value_disable,
+)
+
+private val captureTargetValueLabels = mapOf(
+    "internal ram" to R.string.camera_value_internal_ram,
+    "sdram" to R.string.camera_value_internal_ram,
+    "memory card" to R.string.camera_value_memory_card,
+    "card" to R.string.camera_value_memory_card,
 )
 
 private val imageQualityValueLabels = mapOf(

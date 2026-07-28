@@ -10,12 +10,15 @@ import shutil
 import subprocess
 import threading
 import time
+import uuid
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path, PureWindowsPath
 from typing import Protocol
 
 from .errors import BridgeError, unsupported
+from .local_media import LocalCaptureStore, default_capture_directory, is_host_media_id
 from .models import (
     BatteryStatus,
     CameraCapabilities,
@@ -114,6 +117,8 @@ class GPhotoRunner(Protocol):
     def health(self) -> tuple[bool, str | None, str | None]: ...
 
     def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput: ...
+
+    def host_path(self, path: Path) -> str: ...
 
     def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> ClosableByteStream: ...
 
@@ -324,6 +329,12 @@ class SubprocessGPhotoRunner:
             raise _command_error(arguments, completed.returncode, stderr)
         return CommandOutput(stdout=completed.stdout, stderr=stderr)
 
+    def host_path(self, path: Path) -> str:
+        resolved = path.resolve(strict=False)
+        if self.command.host_mode != "wsl":
+            return os.fspath(resolved)
+        return _windows_path_to_wsl(os.fspath(resolved))
+
     def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> ClosableByteStream:
         return SubprocessByteStream(self.command, arguments, timeout=timeout)
 
@@ -344,6 +355,22 @@ def _command_environment() -> dict[str, str]:
     environment["LC_ALL"] = "C"
     environment["LANG"] = "C"
     return environment
+
+
+def _windows_path_to_wsl(value: str) -> str:
+    windows_path = PureWindowsPath(value)
+    drive = windows_path.drive
+    if len(drive) != 2 or drive[1] != ":":
+        raise BridgeError(
+            "UNSUPPORTED_CAPTURE_DIRECTORY",
+            "WSL capture storage must be on a local Windows drive.",
+            status_code=500,
+            feature=CameraFeature.STILL_CAPTURE.value,
+            engine=ENGINE_NAME,
+        )
+    relative_parts = windows_path.parts[1:]
+    suffix = "/".join(relative_parts)
+    return f"/mnt/{drive[0].lower()}/{suffix}" if suffix else f"/mnt/{drive[0].lower()}"
 
 
 def _decode_process_text(value: bytes) -> str:
@@ -646,6 +673,7 @@ CONFIG_SPECS = (
     ConfigSpec("continuousaf", "Continuous AF", ("continuousaf",)),
     ConfigSpec("movieservoaf", "Movie Servo AF", ("movieservoaf",)),
     ConfigSpec("aeb", "Auto exposure bracketing", ("aeb",)),
+    ConfigSpec("capturetarget", "Capture target", ("capturetarget",)),
 )
 
 
@@ -822,8 +850,17 @@ def parse_media_list(output: str) -> list[MediaItem]:
 class GPhoto2Engine:
     name = ENGINE_NAME
 
-    def __init__(self, runner: GPhotoRunner | None = None) -> None:
+    def __init__(
+        self,
+        runner: GPhotoRunner | None = None,
+        *,
+        capture_directory: Path | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> None:
         self.runner = runner or SubprocessGPhotoRunner()
+        self.capture_store = LocalCaptureStore(
+            capture_directory or default_capture_directory(environment=environment)
+        )
 
     def health(self) -> tuple[bool, str | None, str | None]:
         return self.runner.health()
@@ -860,7 +897,12 @@ class GPhoto2Engine:
                 engine=self.name,
             )
         _, version, _ = self.health()
-        return GPhoto2Session(self.runner, cameras[0], engine_version=version)
+        return GPhoto2Session(
+            self.runner,
+            cameras[0],
+            engine_version=version,
+            capture_store=self.capture_store,
+        )
 
 
 class GPhoto2Session:
@@ -873,11 +915,13 @@ class GPhoto2Session:
         *,
         engine_version: str | None = None,
         sleeper: Callable[[float], None] = time.sleep,
+        capture_store: LocalCaptureStore | None = None,
     ) -> None:
         self.runner = runner
         self.camera = camera
         self.engine_version = engine_version
         self._sleep = sleeper
+        self._capture_store = capture_store or LocalCaptureStore(default_capture_directory())
         self._lock = threading.RLock()
         self._closed = False
         self._live_view_active = False
@@ -891,7 +935,7 @@ class GPhoto2Session:
         self._configs: dict[str, GPhotoConfig] = {}
         self._last_config_refresh = 0.0
         self._storage = StorageSnapshot(None, None, None, None, 0)
-        self._media_supported = False
+        self._camera_media_supported = False
         self._media_cache: dict[str, MediaItem] = {}
         self._observed: set[CameraFeature] = {CameraFeature.DESKTOP_BRIDGE}
 
@@ -901,7 +945,7 @@ class GPhoto2Session:
             self._abilities = parse_abilities(abilities_output)
             self._refresh_configs(force=True)
             self._refresh_storage()
-            self._media_supported = self._probe(["--folder", "/", "--no-recurse", "--list-files"])
+            self._camera_media_supported = self._probe(["--folder", "/", "--no-recurse", "--list-files"])
 
     def close(self) -> None:
         with self._lock:
@@ -997,20 +1041,22 @@ class GPhoto2Session:
             self._refresh_configs(force=False)
             settings = self._camera_settings()
             settings_by_key = {setting.key: setting for setting in settings}
+            host_media_supported = self._host_capture_supported() or bool(self._capture_store.list_items())
+            media_supported = self._camera_media_supported or host_media_supported
             supported = {CameraFeature.DESKTOP_BRIDGE, CameraFeature.CAMERA_IDENTITY}
             if self._find_config(("batterylevel",)):
                 supported.add(CameraFeature.BATTERY_STATUS)
             if self._storage.available is not None:
                 supported.add(CameraFeature.STORAGE_STATUS)
-            if self._abilities.capture_image or self._abilities.trigger_capture:
+            if self._still_capture_supported():
                 supported.add(CameraFeature.STILL_CAPTURE)
             if self._abilities.capture_preview:
                 supported.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
-            if self._media_supported:
+            if media_supported:
                 supported.update({CameraFeature.MEDIA_BROWSER, CameraFeature.MEDIA_DOWNLOAD})
-                if self._abilities.file_preview:
+                if self._abilities.file_preview or host_media_supported:
                     supported.add(CameraFeature.MEDIA_THUMBNAIL)
-                if self._abilities.delete_files:
+                if self._abilities.delete_files or host_media_supported:
                     supported.add(CameraFeature.MEDIA_DELETE)
             if any(key in settings_by_key for key in ("iso", "shutter", "aperture")):
                 supported.add(CameraFeature.EXPOSURE_CONTROL)
@@ -1098,7 +1144,15 @@ class GPhoto2Session:
     def capture_still(self) -> CameraStatus:
         with self._lock:
             self._require_open()
-            self._ensure_capture_target_on_card()
+            capture_target = self._find_config(("capturetarget",), writable=True)
+            if capture_target is not None and _is_host_capture_target(capture_target.current):
+                if self._abilities.capture_image:
+                    self._capture_to_host_store()
+                    self._observed.add(CameraFeature.STILL_CAPTURE)
+                    return self.status()
+                self._ensure_capture_target_on_card(capture_target)
+
+            self._ensure_capture_target_on_card(capture_target)
             if self._abilities.trigger_capture:
                 self._run(["--trigger-capture"], timeout=60.0)
             elif self._abilities.capture_image:
@@ -1108,8 +1162,37 @@ class GPhoto2Session:
             self._observed.add(CameraFeature.STILL_CAPTURE)
             return self.status()
 
-    def _ensure_capture_target_on_card(self) -> None:
-        config = self._find_config(("capturetarget",), writable=True)
+    def _capture_to_host_store(self) -> None:
+        staging = self._capture_store.begin_capture()
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        basename = f"OEC_{timestamp}_{uuid.uuid4().hex[:12]}_%04n.%C"
+        mapped_directory = self.runner.host_path(staging).replace("%", "%%").rstrip("/\\")
+        filename_pattern = f"{mapped_directory}/{basename}"
+        try:
+            self._run(
+                ["--filename", filename_pattern, "--capture-image-and-download"],
+                timeout=120.0,
+            )
+            promoted = self._capture_store.promote_capture(staging)
+        except BridgeError as error:
+            self._capture_store.discard_capture(staging)
+            literal_directory = mapped_directory.replace("%%", "%")
+            redacted_message = error.message.replace(literal_directory, "<capture-directory>")
+            redacted_message = redacted_message.replace(os.fspath(staging), "<capture-directory>")
+            raise BridgeError(
+                error.code,
+                redacted_message,
+                status_code=error.status_code,
+                feature=error.feature,
+                engine=error.engine,
+            ) from error
+        except BaseException:
+            self._capture_store.discard_capture(staging)
+            raise
+        self._media_cache.update({item.id: item for item in promoted})
+
+    def _ensure_capture_target_on_card(self, config: GPhotoConfig | None = None) -> None:
+        config = config or self._find_config(("capturetarget",), writable=True)
         if config is None:
             return
         card_value = _first_choice(config.choices, "Memory card", "Memory Card", "Card")
@@ -1295,19 +1378,39 @@ class GPhoto2Session:
 
     def list_media(self) -> list[MediaItem]:
         with self._lock:
-            if not self._media_supported:
+            host_items = self._capture_store.list_items()
+            if not self._camera_media_supported and not self._host_capture_supported() and not host_items:
                 raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
-            output = self._run(["--recurse", "--list-files"], timeout=60.0).text
-            items = parse_media_list(output)
+            camera_items: list[MediaItem] = []
+            if self._camera_media_supported:
+                output = self._run(["--recurse", "--list-files"], timeout=60.0).text
+                camera_items = parse_media_list(output)
+            items = sorted(
+                [*host_items, *camera_items],
+                key=lambda item: item.capture_time or "",
+                reverse=True,
+            )[:MAX_MEDIA_ITEMS]
             self._media_cache = {item.id: item for item in items}
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
 
     def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]:
+        if is_host_media_id(media_id):
+            with self._lock:
+                self._require_open()
+                item, chunks = self._capture_store.stream(media_id)
+
+            def local_stream() -> Iterator[bytes]:
+                yield from chunks
+                with self._lock:
+                    self._observed.add(CameraFeature.MEDIA_DOWNLOAD)
+
+            return item, local_stream()
+
         folder, name = _decode_media_id(media_id)
         with self._lock:
             self._require_open()
-            if not self._media_supported:
+            if not self._camera_media_supported:
                 raise unsupported(CameraFeature.MEDIA_DOWNLOAD.value, self.engine_name)
             cached = self._media_cache.get(media_id)
             content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
@@ -1329,10 +1432,17 @@ class GPhoto2Session:
         return item, stream()
 
     def media_thumbnail(self, media_id: str) -> tuple[bytes, str]:
+        if is_host_media_id(media_id):
+            with self._lock:
+                self._require_open()
+                thumbnail = self._capture_store.thumbnail(media_id)
+                self._observed.add(CameraFeature.MEDIA_THUMBNAIL)
+                return thumbnail
+
         folder, name = _decode_media_id(media_id)
         with self._lock:
             self._require_open()
-            if not self._media_supported or not self._abilities.file_preview:
+            if not self._camera_media_supported or not self._abilities.file_preview:
                 raise unsupported(CameraFeature.MEDIA_THUMBNAIL.value, self.engine_name)
             output = self._run(
                 ["--folder", folder, "--get-thumbnail", name, "--stdout"],
@@ -1343,10 +1453,18 @@ class GPhoto2Session:
             return thumbnail, content_type
 
     def delete_media(self, media_id: str) -> None:
+        if is_host_media_id(media_id):
+            with self._lock:
+                self._require_open()
+                self._capture_store.delete(media_id)
+                self._media_cache.pop(media_id, None)
+                self._observed.add(CameraFeature.MEDIA_DELETE)
+                return
+
         folder, name = _decode_media_id(media_id)
         with self._lock:
             self._require_open()
-            if not self._media_supported or not self._abilities.delete_files:
+            if not self._camera_media_supported or not self._abilities.delete_files:
                 raise unsupported(CameraFeature.MEDIA_DELETE.value, self.engine_name)
             self._run(["--folder", folder, "--delete-file", name], timeout=60.0)
             self._media_cache.pop(media_id, None)
@@ -1436,11 +1554,17 @@ class GPhoto2Session:
             )
         return settings
 
-    @staticmethod
-    def _setting_values(spec: ConfigSpec, config: GPhotoConfig) -> list[str]:
+    def _setting_values(self, spec: ConfigSpec, config: GPhotoConfig) -> list[str]:
         values = config.selectable_values()
         if spec.key == "autopoweroff":
             return [value for value in values if value.casefold() not in {"4294967295", "0xffffffff"}]
+        if spec.key == "capturetarget":
+            return [
+                value
+                for value in values
+                if _is_card_capture_target(value)
+                or (_is_host_capture_target(value) and self._abilities.capture_image)
+            ]
         return values
 
     def _setting_value(self, key: str) -> str:
@@ -1505,6 +1629,24 @@ class GPhoto2Session:
         self._set_config_value(config, "1" if enabled else "0", refresh=False)
         return True
 
+    def _host_capture_supported(self) -> bool:
+        config = self._find_config(("capturetarget",), writable=True)
+        return bool(
+            self._abilities.capture_image
+            and config is not None
+            and any(_is_host_capture_target(choice) for choice in config.choices)
+        )
+
+    def _still_capture_supported(self) -> bool:
+        if not (self._abilities.capture_image or self._abilities.trigger_capture):
+            return False
+        config = self._find_config(("capturetarget",), writable=True)
+        if config is None or not _is_host_capture_target(config.current):
+            return True
+        if self._abilities.capture_image:
+            return True
+        return _first_choice(config.choices, "Memory card", "Memory Card", "Card") is not None
+
     def _capability_evidence(self) -> CapabilityEvidence:
         commands: list[str] = []
         if self._abilities.capture_image:
@@ -1514,7 +1656,17 @@ class GPhoto2Session:
         if self._abilities.capture_preview:
             commands.append("CAPTURE_PREVIEW")
             commands.append("CAPTURE_MOVIE_STDOUT")
-        if self._media_supported:
+        if self._host_capture_supported():
+            commands.extend(
+                (
+                    "CAPTURE_IMAGE_AND_DOWNLOAD",
+                    "HOST_MEDIA_LIST",
+                    "HOST_MEDIA_DOWNLOAD",
+                    "HOST_MEDIA_THUMBNAIL",
+                    "HOST_MEDIA_DELETE",
+                )
+            )
+        if self._camera_media_supported:
             commands.extend(("MEDIA_LIST", "MEDIA_DOWNLOAD"))
             if self._abilities.file_preview:
                 commands.append("MEDIA_THUMBNAIL")
@@ -1752,6 +1904,14 @@ def _first_choice(choices: list[str], *candidates: str) -> str | None:
 def _case_insensitive_choice(choices: list[str], candidate: str) -> str | None:
     normalized = candidate.casefold()
     return next((choice for choice in choices if choice.casefold() == normalized), None)
+
+
+def _is_host_capture_target(value: str) -> bool:
+    return value.strip().casefold() in {"internal ram", "sdram"}
+
+
+def _is_card_capture_target(value: str) -> bool:
+    return value.strip().casefold() in {"memory card", "card"}
 
 
 def _feature_for_setting(key: str) -> CameraFeature:

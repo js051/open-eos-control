@@ -2,6 +2,11 @@
 
 All notable release-level changes to Open EOS Control are documented here.
 
+## [Unreleased]
+
+- Added a capability-gated Desktop Bridge Capture Target control. Canon USB host-RAM captures now use gPhoto2's capture-and-download lifecycle, atomically enter a persistent local media library, and support bounded thumbnails, streaming download, and exact deletion across native and WSL runners.
+- Added English and Traditional Chinese Capture Target labels to the PC, Android, and iOS control interfaces.
+
 ## [0.1.0] - 2026-07-26
 
 Initial development preview.
