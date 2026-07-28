@@ -207,6 +207,10 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert capabilities.live_view.max_fps == 30
     assert "/main/imgsettings/iso" in capabilities.evidence.writable_settings
 
+    status = session.status()
+    assert status.media.free_images == 46_822
+    assert status.raw["remainingShotsSource"] == "gphoto2-config:/main/status/availableshots"
+
     status = session.set_setting("iso", "800")
     assert status.exposure.iso == "800"
 
@@ -287,6 +291,17 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= observed
+
+
+def test_session_falls_back_to_storage_info_when_available_shots_is_unknown() -> None:
+    runner = FakeRunner()
+    runner.values["/main/status/availableshots"] = "4294967295"
+    session = GPhoto2Engine(runner).open()
+
+    status = session.status()
+
+    assert status.media.free_images == 3210
+    assert status.raw["remainingShotsSource"] == "gphoto2-storage-info"
 
 
 def test_capture_refuses_unhandled_host_ram_target_without_a_card_choice() -> None:

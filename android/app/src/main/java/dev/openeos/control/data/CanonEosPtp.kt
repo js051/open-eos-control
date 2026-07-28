@@ -30,6 +30,7 @@ object CanonEosPropertyCode {
     const val COLOR_SPACE = 0xD10F
     const val PICTURE_STYLE = 0xD110
     const val AUTO_POWER_OFF = 0xD114
+    const val AVAILABLE_SHOTS = 0xD11B
     const val CAPTURE_DESTINATION = 0xD11C
     const val IMAGE_FORMAT = 0xD120
     const val IMAGE_FORMAT_CF = 0xD121
@@ -188,6 +189,9 @@ object CanonEosPtp {
     fun captureDestinationCardValue(availableValues: List<Long>): Long? =
         availableValues.distinct().firstOrNull { it != CAPTURE_DESTINATION_HOST }
 
+    fun availableShots(value: Long?): Long? =
+        value?.takeIf { it in 0L..0xFFFF_FFFEL }
+
     fun focusDriveAmount(direction: FocusDriveDirection, step: FocusDriveStep): Long {
         val magnitude = when (step) {
             FocusDriveStep.SMALL -> 1L
@@ -312,6 +316,7 @@ object CanonEosPtp {
 
     fun propertyLabel(propertyCode: Int, value: Long): String = when {
         propertyCode in imageFormatPropertyCodes -> imageFormatLabel(value)
+        propertyCode == CanonEosPropertyCode.AVAILABLE_SHOTS -> value.toString()
         propertyCode == CanonEosPropertyCode.CAPTURE_DESTINATION ->
             if (value == CAPTURE_DESTINATION_HOST) "Internal RAM" else "Memory card"
         else -> propertySpecs[propertyCode]?.labels?.get(value)
@@ -784,6 +789,7 @@ object CanonEosPtp {
             labels = autoPowerOffLabels,
             selectableValues = autoPowerOffLabels.keys,
         ),
+        CanonEosPropertyCode.AVAILABLE_SHOTS to CanonEosPropertySpec(4, emptyMap()),
         CanonEosPropertyCode.CAPTURE_DESTINATION to CanonEosPropertySpec(4, emptyMap()),
         CanonEosPropertyCode.PICTURE_STYLE to CanonEosPropertySpec(1, pictureStyleLabels),
         CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION to CanonEosPropertySpec(2, highIsoNoiseReductionLabels),

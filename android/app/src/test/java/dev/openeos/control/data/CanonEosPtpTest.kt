@@ -111,6 +111,22 @@ class CanonEosPtpTest {
         )
     }
 
+    @Test
+    fun availableShotsUsesCanonUint32ValueAndRejectsUnknownSentinel() {
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.AVAILABLE_SHOTS, 46_822),
+        ) + block(type = 0, bytes = byteArrayOf())
+
+        val currentValue = CanonEosPtp.propertyUpdates(payload).single().currentValue
+
+        assertEquals(46_822L, CanonEosPtp.availableShots(currentValue))
+        assertEquals("46822", CanonEosPtp.propertyLabel(CanonEosPropertyCode.AVAILABLE_SHOTS, 46_822L))
+        assertEquals(0L, CanonEosPtp.availableShots(0L))
+        assertEquals(null, CanonEosPtp.availableShots(0xFFFF_FFFFL))
+        assertEquals(null, CanonEosPtp.availableShots(-1L))
+    }
+
     @Test(expected = PtpProtocolException::class)
     fun eosPropertyParserRejectsTruncatedAvailableValueList() {
         CanonEosPtp.propertyUpdates(
