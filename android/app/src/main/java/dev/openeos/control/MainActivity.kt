@@ -15,13 +15,14 @@ import androidx.core.view.WindowCompat
 import dev.openeos.control.ui.OpenEosControlApp
 import dev.openeos.control.ui.nearestEquivalentCameraRotation
 import dev.openeos.control.ui.resolveCameraControlRotation
+import dev.openeos.control.ui.snapCameraDeviceRotation
 
 class MainActivity : AppCompatActivity() {
     private val controlRotationDegrees = mutableFloatStateOf(0f)
     private lateinit var orientationListener: OrientationEventListener
     private lateinit var autoRotationObserver: ContentObserver
     private var latestSensorDegrees = OrientationEventListener.ORIENTATION_UNKNOWN
-    private var systemAutoRotationEnabled = false
+    private var snappedSensorDegrees = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,6 +31,7 @@ class MainActivity : AppCompatActivity() {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN) return
                 latestSensorDegrees = orientation
+                snappedSensorDegrees = snapCameraDeviceRotation(snappedSensorDegrees, orientation)
                 updateControlRotation()
             }
         }
@@ -66,18 +68,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshSystemAutoRotationSetting() {
-        systemAutoRotationEnabled = Settings.System.getInt(
-            contentResolver,
-            Settings.System.ACCELEROMETER_ROTATION,
-            0,
-        ) == 1
         updateControlRotation()
     }
 
     private fun updateControlRotation() {
         val target = resolveCameraControlRotation(
-            autoRotationEnabled = systemAutoRotationEnabled,
-            sensorDegrees = latestSensorDegrees,
+            autoRotationEnabled = isSystemAutoRotationEnabled(),
+            sensorDegrees = if (latestSensorDegrees == OrientationEventListener.ORIENTATION_UNKNOWN) {
+                latestSensorDegrees
+            } else {
+                snappedSensorDegrees
+            },
             displayRotationDegrees = currentDisplayRotationDegrees(),
         )
         controlRotationDegrees.floatValue = nearestEquivalentCameraRotation(
@@ -85,6 +86,12 @@ class MainActivity : AppCompatActivity() {
             targetDegrees = target,
         )
     }
+
+    private fun isSystemAutoRotationEnabled(): Boolean = Settings.System.getInt(
+        contentResolver,
+        Settings.System.ACCELEROMETER_ROTATION,
+        0,
+    ) == 1
 
     @Suppress("DEPRECATION")
     private fun currentDisplayRotationDegrees(): Int = when (windowManager.defaultDisplay.rotation) {

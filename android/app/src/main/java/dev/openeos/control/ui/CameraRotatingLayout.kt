@@ -41,9 +41,7 @@ fun Modifier.cameraLayoutRotation(): Modifier {
 }
 
 internal fun cameraRotationSwapsDimensions(rotationDegrees: Float): Boolean {
-    val normalized = ((rotationDegrees % 360f) + 360f) % 360f
-    val quadrant = ((normalized + 45f) / 90f).toInt() % 4
-    return quadrant % 2 == 1
+    return cameraRotationQuadrant(rotationDegrees) % 2 == 1
 }
 
 private fun Constraints.swapAxes(): Constraints = Constraints(

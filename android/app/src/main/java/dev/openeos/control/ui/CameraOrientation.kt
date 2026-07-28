@@ -2,6 +2,23 @@ package dev.openeos.control.ui
 
 import androidx.compose.runtime.staticCompositionLocalOf
 
+private const val CAMERA_ORIENTATION_HYSTERESIS_DEGREES = 5
+
+fun snapCameraDeviceRotation(previousDegrees: Int, sensorDegrees: Int): Int {
+    if (sensorDegrees < 0) return previousDegrees.floorMod(360)
+    val previous = previousDegrees.floorMod(360)
+    val sensor = sensorDegrees.floorMod(360)
+    val directDistance = kotlin.math.abs(previous - sensor)
+    val circularDistance = minOf(directDistance, 360 - directDistance)
+    if (circularDistance < 45 + CAMERA_ORIENTATION_HYSTERESIS_DEGREES) return previous
+    return when (sensor) {
+        in 45..134 -> 90
+        in 135..224 -> 180
+        in 225..314 -> 270
+        else -> 0
+    }
+}
+
 fun resolveCameraControlRotation(
     autoRotationEnabled: Boolean,
     sensorDegrees: Int,
