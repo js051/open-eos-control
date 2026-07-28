@@ -1,5 +1,6 @@
 package dev.openeos.control.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -12,8 +13,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,30 +35,20 @@ fun CameraSettingsSurface(
         return
     }
 
-    Dialog(
-        onDismissRequest = onDismissRequest,
-        properties = DialogProperties(
-            dismissOnBackPress = true,
-            dismissOnClickOutside = false,
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        ),
+    BackHandler(onBack = onDismissRequest)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(AppSurface)
+            .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
-        DarkSheetSystemBarsEffect()
         Box(
             Modifier
                 .fillMaxSize()
-                .background(AppSurface)
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .cameraLayoutRotation()
+                .testTag("rotated-settings-surface"),
         ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .cameraLayoutRotation()
-                    .testTag("rotated-settings-surface"),
-            ) {
-                content()
-            }
+            content()
         }
     }
 }

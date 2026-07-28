@@ -20,7 +20,7 @@ internal fun DarkSheetSystemBarsEffect() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
-            show(WindowInsetsCompat.Type.systemBars())
+            hide(WindowInsetsCompat.Type.systemBars())
         }
     }
 

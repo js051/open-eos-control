@@ -227,8 +227,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
     val batteryValue = state.status?.batteryLevel?.let { "$it%" } ?: "-"
     val fullCameraName = state.info?.model?.toCompactCameraName() ?: stringResource(R.string.unknown)
     val fullStorage = cameraStorageLabel(state.status)
-    val quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
-    val cameraName = if (quarterTurn) fullCameraName.toQuarterTurnCameraName() else fullCameraName
+    val cameraName = fullCameraName.toCameraHudName()
     val storageValue = cameraStorageCompactLabel(state.status)
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
@@ -407,7 +406,7 @@ private fun cameraStorageCompactLabel(status: CameraStatus?): String {
 private fun String.toCompactCameraName(): String =
     removePrefix("Canon EOS ").ifBlank { this }
 
-private fun String.toQuarterTurnCameraName(): String =
+internal fun String.toCameraHudName(): String =
     replace(" Mark ", " ")
 
 @Composable
