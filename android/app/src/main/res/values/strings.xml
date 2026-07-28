@@ -201,6 +201,7 @@
     <string name="setting_aspect_ratio">Aspect ratio</string>
     <string name="setting_power_zoom_speed">Power zoom speed</string>
     <string name="setting_auto_power_off">Auto power off</string>
+    <string name="setting_capture_target">Capture target</string>
     <string name="setting_high_iso_noise_reduction">High ISO noise reduction</string>
     <string name="setting_aeb">Auto exposure bracketing (AEB)</string>
     <string name="setting_ae_mode">AE mode</string>
@@ -271,6 +272,8 @@
     <string name="camera_value_10_minutes">10 min.</string>
     <string name="camera_value_30_minutes">30 min.</string>
     <string name="camera_value_disable">Disable</string>
+    <string name="camera_value_internal_ram">Computer</string>
+    <string name="camera_value_memory_card">Memory card</string>
     <string name="camera_value_low">Low</string>
     <string name="camera_value_normal">Normal</string>
     <string name="camera_value_high">High</string>

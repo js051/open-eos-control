@@ -58,9 +58,18 @@ final class CameraAppTests: XCTestCase {
             CameraSetting(key: "drivemode", label: "Drive", value: "single", values: ["single"]),
             CameraSetting(key: "moviequality", label: "Movie", value: "4K", values: ["4K"]),
             CameraSetting(key: "meteringmode", label: "Metering", value: "eval", values: ["eval"]),
+            CameraSetting(
+                key: "capturetarget",
+                label: "Capture target",
+                value: "Internal RAM",
+                values: ["Internal RAM", "Memory card"]
+            ),
         ]
 
-        XCTAssertEqual(advancedSettingsForMode(settings, mode: .photo).map(\.key), ["drivemode", "meteringmode"])
+        XCTAssertEqual(
+            advancedSettingsForMode(settings, mode: .photo).map(\.key),
+            ["drivemode", "meteringmode", "capturetarget"]
+        )
         XCTAssertEqual(advancedSettingsForMode(settings, mode: .video).map(\.key), ["moviequality", "meteringmode"])
     }
 
@@ -73,6 +82,7 @@ final class CameraAppTests: XCTestCase {
             "aspectratio": "setting_aspect_ratio",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
+            "capturetarget": "setting_capture_target",
             "stillimagequality.raw": "setting_image_quality_raw",
             "stillimagequality.jpeg": "setting_image_quality_jpeg",
             "stillimagequalitysd": "setting_image_quality_sd",
@@ -87,6 +97,14 @@ final class CameraAppTests: XCTestCase {
             "camera_value_30_minutes"
         )
         XCTAssertNil(settingValueLocalizationKey(key: "autopoweroff", value: "4294967295"))
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "capturetarget", value: "Internal RAM"),
+            "camera_value_internal_ram"
+        )
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "capturetarget", value: "Memory card"),
+            "camera_value_memory_card"
+        )
         XCTAssertEqual(
             settingValueLocalizationKey(key: "stillimagequalitycf", value: "cRAW + Large Fine JPEG"),
             "camera_value_craw_large_fine_jpeg"

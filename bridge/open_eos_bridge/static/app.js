@@ -141,6 +141,7 @@
       aspectratio: "Aspect ratio",
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
+      capturetarget: "Capture target",
       highisonr: "High ISO noise reduction",
       continuousaf: "Continuous AF",
       movieservoaf: "Movie Servo AF",
@@ -152,6 +153,8 @@
       valueNormal: "Normal",
       valueHigh: "High",
       valueDisable: "Disable",
+      valueInternalRam: "Computer",
+      valueMemoryCard: "Memory card",
       duration15Seconds: "15 seconds",
       duration30Seconds: "30 seconds",
       duration1Minute: "1 minute",
@@ -316,6 +319,7 @@
       aspectratio: "畫面比例",
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
+      capturetarget: "拍攝儲存位置",
       highisonr: "高 ISO 降噪",
       continuousaf: "連續自動對焦",
       movieservoaf: "短片伺服自動對焦",
@@ -327,6 +331,8 @@
       valueNormal: "標準",
       valueHigh: "高",
       valueDisable: "停用",
+      valueInternalRam: "電腦",
+      valueMemoryCard: "記憶卡",
       duration15Seconds: "15 秒",
       duration30Seconds: "30 秒",
       duration1Minute: "1 分鐘",
@@ -421,6 +427,12 @@
     "RAW + Smaller JPEG": "imageQualityRawSmallerJpeg",
     RAW: "imageQualityRaw",
     cRAW: "imageQualityCraw",
+  };
+  const captureTargetValueKeys = {
+    "internal ram": "valueInternalRam",
+    sdram: "valueInternalRam",
+    "memory card": "valueMemoryCard",
+    card: "valueMemoryCard",
   };
 
   function readLanguagePreference() {
@@ -957,6 +969,7 @@
     const rawValue = String(value);
     let messageKey = commonSettingValueKeys[rawValue.toLowerCase()];
     if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue];
+    if (key === "capturetarget") messageKey = captureTargetValueKeys[rawValue.toLowerCase()];
     if (
       [
         "stillimagequality",
@@ -1026,7 +1039,9 @@
 
   function renderAdvancedSettings() {
     ui.advancedSettings.replaceChildren();
-    const settings = (state.capabilities?.settings || []).filter((setting) => !CORE_SETTINGS.includes(setting.key));
+    const settings = (state.capabilities?.settings || []).filter(
+      (setting) => !CORE_SETTINGS.includes(setting.key) && settingMatchesCaptureMode(setting),
+    );
     if (!settings.length) {
       const empty = document.createElement("p");
       empty.className = "supporting";
@@ -1051,6 +1066,14 @@
       label.append(text, select);
       ui.advancedSettings.append(label);
     });
+  }
+
+  function settingMatchesCaptureMode(setting) {
+    const key = setting.key.toLowerCase();
+    const videoTokens = ["movie", "video", "frame", "codec", "record", "sound"];
+    const photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget"];
+    if (state.captureMode === "photo") return !videoTokens.some((token) => key.includes(token));
+    return !photoTokens.some((token) => key.includes(token));
   }
 
   function openSettingDialog(setting) {
@@ -1122,6 +1145,7 @@
     if (state.status?.recording && mode !== "video") return;
     state.captureMode = mode;
     renderCaptureMode();
+    renderAdvancedSettings();
     renderAvailability();
   }
 

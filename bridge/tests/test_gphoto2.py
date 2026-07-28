@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,7 @@ from open_eos_bridge.gphoto2 import (
     MjpegFrameParser,
     SubprocessGPhotoRunner,
     WslHostState,
+    _windows_path_to_wsl,
     parse_abilities,
     parse_auto_detect,
     parse_config_dump,
@@ -20,6 +22,7 @@ from open_eos_bridge.gphoto2 import (
     parse_storage_info,
     resolve_gphoto_command,
 )
+from open_eos_bridge.local_media import default_capture_directory
 from open_eos_bridge.models import CameraFeature, LiveViewStartRequest
 
 from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, THUMBNAIL, FakeRunner
@@ -61,6 +64,37 @@ def test_gphoto_command_resolution_prefers_native_and_supports_wsl_distribution(
         "Ubuntu-24.04",
     )
     assert explicit == GPhotoCommand(("D:\\Tools\\gphoto2.exe",), "native")
+
+
+def test_capture_paths_map_to_wsl_without_using_a_shell() -> None:
+    assert _windows_path_to_wsl(r"D:\OpenEOSControl\Camera Captures") == (
+        "/mnt/d/OpenEOSControl/Camera Captures"
+    )
+
+    with pytest.raises(BridgeError) as rejected:
+        _windows_path_to_wsl(r"\\server\share\Captures")
+
+    assert rejected.value.code == "UNSUPPORTED_CAPTURE_DIRECTORY"
+
+
+def test_default_capture_directory_is_platform_scoped_and_requires_absolute_override(tmp_path: Path) -> None:
+    assert default_capture_directory(
+        environment={"LOCALAPPDATA": str(tmp_path)},
+        platform_name="win32",
+        home=tmp_path,
+    ) == tmp_path / "OpenEOSControl" / "Captures"
+    assert default_capture_directory(environment={}, platform_name="linux", home=tmp_path) == (
+        tmp_path / ".local" / "share" / "open-eos-control" / "captures"
+    )
+
+    with pytest.raises(BridgeError) as rejected:
+        default_capture_directory(
+            environment={"OPEN_EOS_CAPTURE_DIR": "relative-captures"},
+            platform_name="linux",
+            home=tmp_path,
+        )
+
+    assert rejected.value.code == "INVALID_CAPTURE_DIRECTORY"
 
 
 def test_wsl_runner_health_is_actionable_and_decodes_windows_utf16() -> None:
@@ -178,9 +212,9 @@ def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
     assert media[0].capture_time == "2026-07-21T02:13:21Z"
 
 
-def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None:
+def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path: Path) -> None:
     runner = FakeRunner()
-    session = GPhoto2Engine(runner).open()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
 
     capabilities = session.capabilities()
     assert CameraFeature.STILL_CAPTURE in capabilities.supported
@@ -202,6 +236,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     assert capabilities.evidence.source == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_PREVIEW" in capabilities.evidence.advertised_commands
     assert "CAPTURE_MOVIE_STDOUT" in capabilities.evidence.advertised_commands
+    assert "CAPTURE_IMAGE_AND_DOWNLOAD" in capabilities.evidence.advertised_commands
     assert "AUTOFOCUS_DRIVE_CANCEL" in capabilities.evidence.advertised_commands
     assert "SHUTTER_HALF_PRESS" in capabilities.evidence.advertised_commands
     assert capabilities.live_view.max_fps == 30
@@ -217,15 +252,9 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands() -> None
     status = session.set_setting("whitebalance", "daylight")
     assert status.exposure.white_balance == "Daylight"
 
-    session.capture_still()
+    session.set_setting("capturetarget", "Memory card")
     assert runner.values["/main/settings/capturetarget"] == "Memory card"
-    capture_target_write = next(
-        index
-        for index, command in enumerate(runner.commands)
-        if "/main/settings/capturetarget=Memory card" in command
-    )
-    shutter_command = next(index for index, command in enumerate(runner.commands) if "--trigger-capture" in command)
-    assert capture_target_write < shutter_command
+    session.capture_still()
     session.half_press_shutter()
     session.autofocus()
     assert runner.values["/main/actions/eosremoterelease"] == "Release Half"
@@ -304,20 +333,128 @@ def test_session_falls_back_to_storage_info_when_available_shots_is_unknown() ->
     assert status.raw["remainingShotsSource"] == "gphoto2-storage-info"
 
 
-def test_capture_refuses_unhandled_host_ram_target_without_a_card_choice() -> None:
+def test_capture_downloads_host_ram_and_exposes_local_media_lifecycle(tmp_path: Path) -> None:
     class HostOnlyRunner(FakeRunner):
         def _config_dump(self) -> str:
             return super()._config_dump().replace("Choice: 1 Memory card\n", "")
 
     runner = HostOnlyRunner()
-    session = GPhoto2Engine(runner).open()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+
+    session.capture_still()
+
+    assert runner.values["/main/settings/capturetarget"] == "Internal RAM"
+    assert any("--capture-image-and-download" in command for command in runner.commands)
+    assert not any("--trigger-capture" in command for command in runner.commands)
+    local_item = next(item for item in session.list_media() if item.id.startswith("gphoto2-host:"))
+    assert local_item.name.startswith("OEC_")
+    assert local_item.content_type == "image/jpeg"
+    thumbnail, thumbnail_type = session.media_thumbnail(local_item.id)
+    downloaded_item, chunks = session.download_media(local_item.id)
+    assert thumbnail.startswith(b"\xff\xd8")
+    assert thumbnail_type == "image/jpeg"
+    assert downloaded_item == local_item
+    assert b"".join(chunks).startswith(b"\xff\xd8")
+
+    session.delete_media(local_item.id)
+
+    assert not any(item.id.startswith("gphoto2-host:") for item in session.list_media())
+    assert not list(tmp_path.glob("*.JPG"))
+    assert "CAPTURE_IMAGE_AND_DOWNLOAD" in session.capabilities().evidence.advertised_commands
+
+
+def test_host_capture_promotes_multiple_downloaded_files(tmp_path: Path) -> None:
+    class RawAndJpegRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            output = super().run(arguments, timeout=timeout)
+            command = self._without_camera(arguments)
+            if "--capture-image-and-download" in command:
+                pattern = command[command.index("--filename") + 1]
+                raw_target = Path(
+                    pattern.replace("%%", "%").replace("%04n", "0002").replace("%C", "CR3")
+                )
+                raw_target.write_bytes(b"test-canon-raw")
+            return output
+
+    session = GPhoto2Engine(RawAndJpegRunner(), capture_directory=tmp_path).open()
+
+    session.capture_still()
+
+    host_items = [item for item in session.list_media() if item.id.startswith("gphoto2-host:")]
+    assert {Path(item.name).suffix for item in host_items} == {".JPG", ".CR3"}
+    assert next(item for item in host_items if item.name.endswith(".CR3")).content_type == "image/x-canon-cr3"
+
+
+def test_failed_host_capture_discards_staged_partial_media(tmp_path: Path) -> None:
+    class FailingDownloadRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            command = self._without_camera(arguments)
+            if "--capture-image-and-download" in command:
+                pattern = command[command.index("--filename") + 1]
+                partial = Path(
+                    pattern.replace("%%", "%").replace("%04n", "0001").replace("%C", "JPG")
+                )
+                partial.parent.mkdir(parents=True, exist_ok=True)
+                partial.write_bytes(b"partial")
+                raise BridgeError(
+                    "ENGINE_COMMAND_FAILED",
+                    f"Download failed while writing {pattern}",
+                    status_code=502,
+                )
+            return super().run(arguments, timeout=timeout)
+
+    session = GPhoto2Engine(FailingDownloadRunner(), capture_directory=tmp_path).open()
+
+    with pytest.raises(BridgeError, match="Download failed") as rejected:
+        session.capture_still()
+
+    assert str(tmp_path) not in rejected.value.message
+    assert "<capture-directory>" in rejected.value.message
+    assert not [path for path in tmp_path.iterdir() if path.is_file()]
+    assert not list((tmp_path / ".staging").glob("capture-*"))
+    assert not any(item.id.startswith("gphoto2-host:") for item in session.list_media())
+
+
+def test_capture_refuses_host_ram_without_capture_image_ability(tmp_path: Path) -> None:
+    class TriggerOnlyHostRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            if arguments[-1:] == ["--abilities"]:
+                output = ABILITIES.replace("                                 : Image\n", "")
+                return CommandOutput(output.encode())
+            return super().run(arguments, timeout=timeout)
+
+        def _config_dump(self) -> str:
+            return super()._config_dump().replace("Choice: 1 Memory card\n", "")
+
+    runner = TriggerOnlyHostRunner()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
 
     with pytest.raises(BridgeError) as rejected:
         session.capture_still()
 
     assert rejected.value.code == "UNSAFE_CAPTURE_TARGET"
+    assert CameraFeature.STILL_CAPTURE not in session.capabilities().supported
     assert CameraFeature.STILL_CAPTURE not in session.capabilities().evidence.observed_features
     assert not any("--trigger-capture" in command for command in runner.commands)
+
+
+def test_trigger_only_capture_falls_back_from_host_ram_to_advertised_card(tmp_path: Path) -> None:
+    class TriggerOnlyRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            if arguments[-1:] == ["--abilities"]:
+                return CommandOutput(ABILITIES.replace("                                 : Image\n", "").encode())
+            return super().run(arguments, timeout=timeout)
+
+    runner = TriggerOnlyRunner()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+
+    capabilities = session.capabilities()
+    session.capture_still()
+
+    assert CameraFeature.STILL_CAPTURE in capabilities.supported
+    assert not any(setting.key == "capturetarget" for setting in capabilities.settings)
+    assert runner.values["/main/settings/capturetarget"] == "Memory card"
+    assert any("--trigger-capture" in command for command in runner.commands)
 
 
 def test_autofocus_falls_back_to_half_press_without_a_complete_action_pair() -> None:
@@ -391,6 +528,7 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
         "autopoweroff",
         "stillimagequalitysd",
         "stillimagequalitycf",
+        "capturetarget",
     }
     assert expected <= settings.keys()
     assert settings["autopoweroff"].values == ["15", "30", "60", "180", "300", "600", "1800", "0"]
@@ -403,6 +541,7 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
         "autopoweroff": ("1800", "/main/settings/autopoweroff"),
         "stillimagequalitysd": ("cRAW", "/main/imgsettings/imageformatsd"),
         "stillimagequalitycf": ("Large Fine JPEG", "/main/imgsettings/imageformatcf"),
+        "capturetarget": ("Memory card", "/main/settings/capturetarget"),
     }
     for key, (value, path) in writes.items():
         session.set_setting(key, value)
@@ -422,8 +561,15 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
     assert unsafe_current.value == "-"
 
 
-def test_media_thumbnail_requires_gphoto2_advertised_ability() -> None:
+def test_media_thumbnail_requires_gphoto2_advertised_ability(tmp_path: Path) -> None:
     class NoThumbnailRunner(FakeRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.values["/main/settings/capturetarget"] = "Memory card"
+
+        def _config_dump(self) -> str:
+            return super()._config_dump().replace("Choice: 0 Internal RAM\n", "")
+
         def run(self, arguments: list[str], *, timeout: float = 30.0):
             if arguments[-1:] == ["--abilities"]:
                 output = ABILITIES.replace(
@@ -434,7 +580,7 @@ def test_media_thumbnail_requires_gphoto2_advertised_ability() -> None:
             return super().run(arguments, timeout=timeout)
 
     runner = NoThumbnailRunner()
-    session = GPhoto2Engine(runner).open()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
     item = session.list_media()[0]
 
     with pytest.raises(BridgeError) as failure:
@@ -445,8 +591,15 @@ def test_media_thumbnail_requires_gphoto2_advertised_ability() -> None:
     assert not any("--get-thumbnail" in command for command in runner.commands)
 
 
-def test_media_delete_requires_gphoto2_advertised_ability() -> None:
+def test_media_delete_requires_gphoto2_advertised_ability(tmp_path: Path) -> None:
     class NoDeleteRunner(FakeRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.values["/main/settings/capturetarget"] = "Memory card"
+
+        def _config_dump(self) -> str:
+            return super()._config_dump().replace("Choice: 0 Internal RAM\n", "")
+
         def run(self, arguments: list[str], *, timeout: float = 30.0):
             if arguments[-1:] == ["--abilities"]:
                 output = ABILITIES.replace(
@@ -457,7 +610,7 @@ def test_media_delete_requires_gphoto2_advertised_ability() -> None:
             return super().run(arguments, timeout=timeout)
 
     runner = NoDeleteRunner()
-    session = GPhoto2Engine(runner).open()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
     item = session.list_media()[0]
 
     with pytest.raises(BridgeError) as failure:

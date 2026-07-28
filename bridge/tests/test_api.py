@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from open_eos_bridge.app import create_app
@@ -104,6 +106,34 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert download.headers["content-type"].startswith("image/jpeg")
     assert media_deleted.status_code == 204
     assert deleted.status_code == 204
+
+
+def test_host_ram_capture_runs_end_to_end_through_media_api(tmp_path: Path) -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    engine = GPhoto2Engine(FakeRunner(), capture_directory=tmp_path)
+
+    with TestClient(create_app(engine=engine, token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        captured = client.post(f"/v1/session/{session_id}/capture/still", headers=headers)
+        media = client.get(f"/v1/session/{session_id}/media", headers=headers)
+        local_item = next(item for item in media.json()["items"] if item["id"].startswith("gphoto2-host:"))
+        thumbnail = client.get(
+            f"/v1/session/{session_id}/media/{local_item['id']}/thumbnail",
+            headers=headers,
+        )
+        download = client.get(f"/v1/session/{session_id}/media/{local_item['id']}", headers=headers)
+        deleted = client.delete(f"/v1/session/{session_id}/media/{local_item['id']}", headers=headers)
+
+    assert captured.status_code == 200
+    assert local_item["contentType"] == "image/jpeg"
+    assert thumbnail.status_code == 200
+    assert thumbnail.content.startswith(b"\xff\xd8")
+    assert download.status_code == 200
+    assert download.content.startswith(b"\xff\xd8")
+    assert download.headers["content-length"] == str(local_item["sizeBytes"])
+    assert deleted.status_code == 204
+    assert not [path for path in tmp_path.iterdir() if path.is_file()]
 
 
 def test_camera_cannot_be_opened_by_two_bridge_sessions() -> None:

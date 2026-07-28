@@ -143,7 +143,9 @@ private fun String.cameraModeToken(): String =
 
 fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): List<CameraSettingControl> {
     val videoTokens = listOf("movie", "video", "frame", "codec", "record", "sound")
-    val photoTokens = listOf("still", "photo", "drive", "imagequality", "colorspace", "highisonr", "aeb", "aspect")
+    val photoTokens = listOf(
+        "still", "photo", "drive", "imagequality", "colorspace", "highisonr", "aeb", "aspect", "capturetarget",
+    )
     return settings.filter { it.values.distinct().size > 1 }.filter { setting ->
         val key = setting.key.lowercase()
         val isVideo = videoTokens.any(key::contains)
