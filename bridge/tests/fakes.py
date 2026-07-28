@@ -110,6 +110,7 @@ class FakeRunner:
             "/main/actions/autofocusdrive": "0",
             "/main/actions/autofocuscancel": "0",
             "/main/actions/viewfinder": "0",
+            "/main/actions/eoszoom": "0",
             "/main/actions/eosremoterelease": "None",
             "/main/settings/movierecordtarget": "SDRAM",
             "/main/settings/autopoweroff": "30",
@@ -256,6 +257,7 @@ class FakeRunner:
                 self._toggle("/main/actions/autofocusdrive", "Drive Canon DSLR Autofocus"),
                 self._toggle("/main/actions/autofocuscancel", "Cancel Canon DSLR Autofocus"),
                 self._toggle("/main/actions/viewfinder", "Canon EOS Viewfinder"),
+                self._text("/main/actions/eoszoom", "Canon EOS Zoom", readonly=False),
                 self._radio(
                     "/main/actions/eosremoterelease",
                     "Canon EOS Remote Release",

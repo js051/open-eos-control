@@ -16,6 +16,7 @@ import dev.openeos.control.data.CameraSession
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewRequest
+import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.NativeLiveViewEvent
@@ -441,6 +442,7 @@ class CameraViewModel(
                 liveViewSource = nativeSession?.source ?: it.liveViewSource,
                 liveViewBitmap = null,
                 liveViewFrameUrl = null,
+                liveViewMagnification = null,
                 liveViewDiagnostics = LiveViewDiagnostics(),
             )
         }
@@ -589,6 +591,21 @@ class CameraViewModel(
             clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
             refreshLiveViewFrameInternal(reportErrors = false)
             startLiveViewLoopIfNeeded()
+        }
+    }
+
+    fun setLiveViewMagnification(magnification: LiveViewMagnification) {
+        if (_uiState.value.previewMode) {
+            _uiState.update { it.copy(liveViewMagnification = magnification) }
+            return
+        }
+        runCamera(CameraOperation.LIVE_VIEW) {
+            val result = repository.setLiveViewMagnification(magnification)
+            if (result.ok) {
+                _uiState.update { it.copy(liveViewMagnification = result.magnification) }
+                refreshLiveViewFrameInternal(reportErrors = false)
+                startLiveViewLoopIfNeeded()
+            }
         }
     }
 
@@ -1085,6 +1102,7 @@ class CameraViewModel(
         liveViewFrameUrl = null,
         liveViewBitmap = null,
         nativeLiveViewSession = null,
+        liveViewMagnification = null,
         liveViewDiagnostics = LiveViewDiagnostics(),
         liveViewAspectRatio = 16f / 9f,
         networkDiagnostics = CameraNetworkDiagnostics.Empty,

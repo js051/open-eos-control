@@ -29,6 +29,7 @@ from .models import (
     ExposureState,
     FocusResult,
     LiveViewCapabilities,
+    LiveViewMagnificationResult,
     LiveViewStartRequest,
     MediaItem,
     StorageStatus,
@@ -731,6 +732,14 @@ class CcapiSession:
             self._command_ok(operation, {"value": f"{normalized_direction.lower()}{step_number}"})
             self._observed.add(CameraFeature.FOCUS_DRIVE)
             return FocusResult(accepted=True, direction=normalized_direction, step=normalized_step)
+
+    def set_live_view_magnification(self, value: int) -> LiveViewMagnificationResult:
+        del value
+        raise unsupported(
+            CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+            self.engine_name,
+            "Canon EOS CCAPI does not advertise a Live View focus-magnification command.",
+        )
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
         with self._lock:

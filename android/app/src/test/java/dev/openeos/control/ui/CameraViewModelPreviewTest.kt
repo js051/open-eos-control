@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.LiveViewSize
+import dev.openeos.control.data.LiveViewMagnification
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -36,18 +37,21 @@ class CameraViewModelPreviewTest {
         viewModel.enterOfflinePreview()
         viewModel.setIso("1600")
         viewModel.setLiveViewSize(LiveViewSize.LARGE)
+        viewModel.setLiveViewMagnification(LiveViewMagnification.X5)
         viewModel.toggleRecording()
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.previewMode)
         assertEquals("1600", viewModel.uiState.value.status?.exposure?.iso)
         assertEquals(LiveViewSize.LARGE, viewModel.uiState.value.liveViewSize)
+        assertEquals(LiveViewMagnification.X5, viewModel.uiState.value.liveViewMagnification)
         assertEquals(true, viewModel.uiState.value.status?.recording)
 
         viewModel.disconnect()
 
         assertFalse(viewModel.uiState.value.connected)
         assertFalse(viewModel.uiState.value.previewMode)
+        assertEquals(null, viewModel.uiState.value.liveViewMagnification)
     }
 
     @Test

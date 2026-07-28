@@ -601,6 +601,36 @@ input:disabled {
   background: var(--record-strong);
 }
 
+.viewfinder-action {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 4;
+  display: inline-grid;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 4px;
+  color: var(--accent);
+  background: rgb(4 6 7 / 76%);
+}
+
+.viewfinder-action .icon {
+  width: 22px;
+  height: 22px;
+}
+
+.viewfinder-action span:last-child {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
 .capture-flash {
   position: absolute;
   inset: 0;

@@ -314,6 +314,22 @@ public actor DesktopBridgeClient {
         )
     }
 
+    public func setLiveViewMagnification(
+        _ magnification: LiveViewMagnification
+    ) async throws -> LiveViewMagnificationResult {
+        let body = try await postJSON(
+            sessionEndpoint(["liveview", "magnification"]),
+            payload: ["value": magnification.rawValue]
+        )
+        guard let value = body.int("value"), let returned = LiveViewMagnification(rawValue: value) else {
+            throw DesktopBridgeError.invalidResponse("Bridge returned an invalid Live View magnification.")
+        }
+        return LiveViewMagnificationResult(
+            accepted: body.optionalBool("accepted") ?? false,
+            magnification: returned
+        )
+    }
+
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
         _ = try await postJSON(
             sessionEndpoint(["liveview", "start"]),

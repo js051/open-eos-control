@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,6 +29,7 @@ class CameraFeature(StrEnum):
     LIVE_VIEW = "LIVE_VIEW"
     LIVE_VIEW_JPEG_POLLING = "LIVE_VIEW_JPEG_POLLING"
     LIVE_VIEW_RTP = "LIVE_VIEW_RTP"
+    LIVE_VIEW_MAGNIFICATION = "LIVE_VIEW_MAGNIFICATION"
     STILL_CAPTURE = "STILL_CAPTURE"
     AUTOFOCUS = "AUTOFOCUS"
     SHUTTER_HALF_PRESS = "SHUTTER_HALF_PRESS"
@@ -183,6 +184,15 @@ class LiveViewState(ApiModel):
     active: bool
     requested_fps: int | None = None
     source: str | None = None
+
+
+class LiveViewMagnificationRequest(ApiModel):
+    value: Literal[1, 5]
+
+
+class LiveViewMagnificationResult(ApiModel):
+    accepted: bool
+    value: Literal[1, 5]
 
 
 class FocusDriveRequest(ApiModel):

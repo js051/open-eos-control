@@ -61,6 +61,35 @@ struct LiveViewSurface: View {
                 if camera.shutterFlash {
                     Color.white.ignoresSafeArea()
                 }
+
+                if camera.supports(.liveViewMagnification) {
+                    let target: LiveViewMagnification = camera.liveViewMagnification == .x5 ? .x1 : .x5
+                    Button {
+                        Task { await camera.setLiveViewMagnification(target) }
+                    } label: {
+                        ZStack(alignment: .bottomTrailing) {
+                            Image(systemName: target == .x5 ? "plus.magnifyingglass" : "minus.magnifyingglass")
+                                .font(.system(size: 20, weight: .semibold))
+                            Text("\(target.rawValue)\u{00D7}")
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .offset(x: 4, y: 5)
+                        }
+                        .frame(width: 44, height: 44)
+                        .foregroundStyle(Color.cameraAccent)
+                        .background(Color.black.opacity(0.72))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(camera.isBusy(.liveView))
+                    .accessibilityLabel(
+                        String(
+                            format: NSLocalizedString("live_view_magnify_to", comment: ""),
+                            target.rawValue
+                        )
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(12)
+                }
             }
             .contentShape(Rectangle())
             .gesture(

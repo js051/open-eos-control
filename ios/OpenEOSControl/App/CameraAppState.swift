@@ -41,6 +41,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var activeLiveViewSource: LiveViewSource?
     @Published private(set) var nativeLiveViewSize: CGSize?
     @Published private(set) var liveViewData: Data?
+    @Published private(set) var liveViewMagnification: LiveViewMagnification?
     @Published private(set) var observedFPS = 0.0
     @Published private(set) var frameBytes = 0
     @Published private(set) var frameContentType: String?
@@ -237,6 +238,7 @@ final class CameraAppState: ObservableObject {
             }
             session = newSession
             snapshot = newSnapshot
+            liveViewMagnification = nil
             isPreview = false
             screen = .control
             mediaItems = []
@@ -265,6 +267,7 @@ final class CameraAppState: ObservableObject {
         deletedMediaName = nil
         lastError = nil
         liveViewData = nil
+        liveViewMagnification = nil
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
         resetLiveViewMetrics()
@@ -285,6 +288,7 @@ final class CameraAppState: ObservableObject {
         removeDownloadedFile()
         deletedMediaName = nil
         liveViewData = nil
+        liveViewMagnification = nil
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
         focusMarker = nil
@@ -378,6 +382,7 @@ final class CameraAppState: ObservableObject {
         if let session { await session.stopLiveView() }
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
+        liveViewMagnification = nil
         await startLiveView()
     }
 
@@ -506,6 +511,25 @@ final class CameraAppState: ObservableObject {
         do {
             let result = try await session.driveFocus(direction: direction, step: step)
             showFocusMarker(x: result.direction == .near ? 0.4 : 0.6, y: 0.5, accepted: result.accepted)
+            lastError = nil
+        } catch {
+            record(error)
+        }
+    }
+
+    func setLiveViewMagnification(_ magnification: LiveViewMagnification) async {
+        guard supports(.liveViewMagnification), begin(.liveView) else { return }
+        defer { end(.liveView) }
+        if isPreview {
+            liveViewMagnification = magnification
+            return
+        }
+        guard let session, activeLiveViewSource != nil else { return }
+        do {
+            let result = try await session.setLiveViewMagnification(magnification)
+            if result.accepted {
+                liveViewMagnification = result.magnification
+            }
             lastError = nil
         } catch {
             record(error)
@@ -836,6 +860,7 @@ final class CameraAppState: ObservableObject {
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
             .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
+            .liveViewMagnification,
             .exposureControl, .whiteBalanceControl, .advancedSettings, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]

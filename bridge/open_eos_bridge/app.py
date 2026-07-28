@@ -27,6 +27,8 @@ from .models import (
     FocusDriveRequest,
     FocusResult,
     HealthResponse,
+    LiveViewMagnificationRequest,
+    LiveViewMagnificationResult,
     LiveViewStartRequest,
     LiveViewState,
     MediaList,
@@ -229,6 +231,16 @@ def create_app(
     def stop_live_view(session_id: str) -> LiveViewState:
         manager.get(session_id).stop_live_view()
         return LiveViewState(active=False)
+
+    @router.post(
+        "/session/{session_id}/liveview/magnification",
+        response_model=LiveViewMagnificationResult,
+    )
+    def set_live_view_magnification(
+        session_id: str,
+        payload: LiveViewMagnificationRequest,
+    ) -> LiveViewMagnificationResult:
+        return manager.get(session_id).set_live_view_magnification(payload.value)
 
     @router.get("/session/{session_id}/liveview/frame")
     def live_view_frame(session_id: str) -> Response:

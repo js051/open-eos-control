@@ -287,6 +287,22 @@ class DesktopBridgeClient(
         ).also { if (it.ok) observedFeatures.add(CameraFeature.FOCUS_DRIVE) }
     }
 
+    suspend fun setLiveViewMagnification(
+        magnification: LiveViewMagnification,
+    ): LiveViewMagnificationResult {
+        val body = postJson(
+            sessionEndpoint("liveview", "magnification"),
+            JSONObject().put("value", magnification.value),
+        )
+        val returned = LiveViewMagnification.entries.firstOrNull {
+            it.value == body.optInt("value", -1)
+        } ?: error("Desktop Bridge returned an invalid Live View magnification value.")
+        return LiveViewMagnificationResult(
+            ok = body.optBoolean("accepted"),
+            magnification = returned,
+        ).also { if (it.ok) observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION) }
+    }
+
     suspend fun startLiveView(request: LiveViewRequest) {
         postJson(
             sessionEndpoint("liveview", "start"),

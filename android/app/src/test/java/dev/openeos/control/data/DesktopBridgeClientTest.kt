@@ -55,6 +55,7 @@ class DesktopBridgeClientTest {
         val clickWhiteBalanceStatus = client.clickWhiteBalance(0.4, 0.6)
         client.startLiveView(LiveViewRequest(fps = 5, size = LiveViewSize.MEDIUM))
         val frame = client.liveViewFrame(9)
+        val magnification = client.setLiveViewMagnification(LiveViewMagnification.X5)
         val focus = client.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.LARGE)
         val media = client.listMedia()
         val thumbnail = client.mediaThumbnail(media.single())
@@ -83,6 +84,7 @@ class DesktopBridgeClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.DESKTOP_BRIDGE))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
         assertTrue(capabilities.matrix.supports(CameraFeature.CLICK_WHITE_BALANCE))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
@@ -108,6 +110,7 @@ class DesktopBridgeClientTest {
                     CameraFeature.VIDEO_RECORDING,
                     CameraFeature.CLICK_WHITE_BALANCE,
                     CameraFeature.FOCUS_DRIVE,
+                    CameraFeature.LIVE_VIEW_MAGNIFICATION,
                     CameraFeature.LIVE_VIEW,
                     CameraFeature.LIVE_VIEW_JPEG_POLLING,
                     CameraFeature.MEDIA_BROWSER,
@@ -120,6 +123,7 @@ class DesktopBridgeClientTest {
         assertArrayEquals(JPEG, frame.bytes)
         assertTrue(frame.sourceUrl.endsWith("/liveview/frame?t=9"))
         assertTrue(focus.ok)
+        assertEquals(LiveViewMagnification.X5, magnification.magnification)
         assertEquals("IMG_0001.JPG", media.single().name)
         assertArrayEquals(THUMBNAIL, thumbnail.bytes)
         assertEquals("image/jpeg", thumbnail.contentType)
@@ -252,6 +256,10 @@ class DesktopBridgeClientTest {
                 path.endsWith("/liveview/frame") -> MockResponse()
                     .setHeader("content-type", "image/jpeg")
                     .setBody(okio.Buffer().write(JPEG))
+                path.endsWith("/liveview/magnification") -> {
+                    val value = JSONObject(request.body.readUtf8()).getInt("value")
+                    json("""{"accepted":true,"value":$value}""")
+                }
                 path.endsWith("/focus/drive") -> json("""{"accepted":true,"direction":"FAR","step":"LARGE"}""")
                 path.endsWith("/media") -> json(MEDIA_JSON)
                 path.endsWith("/thumbnail") -> MockResponse()
@@ -351,6 +359,7 @@ class DesktopBridgeClientTest {
               "supported": [
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
                 "STILL_CAPTURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
+                "LIVE_VIEW_MAGNIFICATION",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
                 "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
               ],

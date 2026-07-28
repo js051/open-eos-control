@@ -223,6 +223,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert CameraFeature.AUTOFOCUS in capabilities.supported
     assert CameraFeature.VIDEO_RECORDING in capabilities.supported
     assert CameraFeature.FOCUS_DRIVE in capabilities.supported
+    assert CameraFeature.LIVE_VIEW_MAGNIFICATION in capabilities.supported
     assert CameraFeature.MEDIA_DELETE in capabilities.supported
     assert CameraFeature.MEDIA_THUMBNAIL in capabilities.supported
     assert CameraFeature.TAP_FOCUS in capabilities.planned
@@ -281,6 +282,10 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert session.live_view_frame() == JPEG
     assert any("--capture-movie" in command for command in runner.commands)
     assert not any("--capture-preview" in command for command in runner.commands)
+    magnification = session.set_live_view_magnification(5)
+    assert magnification.accepted is True
+    assert magnification.value == 5
+    assert runner.values["/main/actions/eoszoom"] == "5"
     focus = session.drive_focus("far", "large")
     assert focus.accepted is True
     assert runner.values["/main/actions/manualfocusdrive"] == "Far 3"
@@ -301,6 +306,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     session.delete_media(media[0].id)
     observed = set(session.capabilities().evidence.observed_features)
     assert any("/main/imgsettings/iso=800" in command for command in runner.commands)
+    assert any("/main/actions/eoszoom=5" in command for command in runner.commands)
     assert any("--trigger-capture" in command for command in runner.commands)
     assert any("--delete-file" in command for command in runner.commands)
     assert {
@@ -313,6 +319,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.SHUTTER_HALF_PRESS,
         CameraFeature.VIDEO_RECORDING,
         CameraFeature.FOCUS_DRIVE,
+        CameraFeature.LIVE_VIEW_MAGNIFICATION,
         CameraFeature.LIVE_VIEW,
         CameraFeature.LIVE_VIEW_JPEG_POLLING,
         CameraFeature.MEDIA_BROWSER,
@@ -320,6 +327,30 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= observed
+
+
+def test_live_view_magnification_requires_active_live_view_and_writable_eoszoom() -> None:
+    session = GPhoto2Engine(FakeRunner()).open()
+
+    with pytest.raises(BridgeError) as inactive:
+        session.set_live_view_magnification(5)
+
+    assert inactive.value.code == "LIVE_VIEW_REQUIRED"
+
+    class NoEosZoomRunner(FakeRunner):
+        def _config_dump(self) -> str:
+            zoom = self._text("/main/actions/eoszoom", "Canon EOS Zoom", readonly=False)
+            return super()._config_dump().replace(f"\n{zoom}", "")
+
+    unavailable = GPhoto2Engine(NoEosZoomRunner()).open()
+    assert CameraFeature.LIVE_VIEW_MAGNIFICATION not in unavailable.capabilities().supported
+    unavailable.start_live_view(LiveViewStartRequest())
+
+    with pytest.raises(BridgeError) as missing:
+        unavailable.set_live_view_magnification(5)
+
+    assert missing.value.code == "UNSUPPORTED_FEATURE"
+    unavailable.stop_live_view()
 
 
 def test_session_falls_back_to_storage_info_when_available_shots_is_unknown() -> None:

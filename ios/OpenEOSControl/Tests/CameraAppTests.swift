@@ -150,8 +150,22 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveViewMagnification))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
+    }
+
+    func testOfflinePreviewLiveViewMagnificationUpdatesLocally() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        await state.setLiveViewMagnification(.x5)
+
+        XCTAssertEqual(state.liveViewMagnification, .x5)
+        XCTAssertNil(state.lastError)
     }
 
     func testOfflinePreviewClickWhiteBalanceUpdatesTheVisibleValue() async {

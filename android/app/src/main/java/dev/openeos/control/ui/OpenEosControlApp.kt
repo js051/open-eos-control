@@ -23,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
+import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
@@ -83,6 +84,7 @@ fun OpenEosControlApp(
         autofocus = viewModel::autofocus,
         halfPressShutter = viewModel::halfPressShutter,
         driveFocus = viewModel::driveFocus,
+        setLiveViewMagnification = viewModel::setLiveViewMagnification,
         toggleRecording = viewModel::toggleRecording,
         tapFocus = viewModel::tapFocus,
         clickWhiteBalance = viewModel::clickWhiteBalance,
@@ -195,6 +197,7 @@ data class CameraActions(
     val autofocus: () -> Unit,
     val halfPressShutter: () -> Unit,
     val driveFocus: (FocusDriveDirection, FocusDriveStep) -> Unit,
+    val setLiveViewMagnification: (LiveViewMagnification) -> Unit,
     val toggleRecording: () -> Unit,
     val tapFocus: (Double, Double) -> Unit,
     val clickWhiteBalance: (Double, Double) -> Unit,

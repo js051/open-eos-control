@@ -9,6 +9,7 @@ from .models import (
     CameraInfo,
     CameraStatus,
     FocusResult,
+    LiveViewMagnificationResult,
     LiveViewStartRequest,
     MediaItem,
 )
@@ -47,6 +48,8 @@ class CameraEngineSession(Protocol):
     def start_live_view(self, request: LiveViewStartRequest) -> None: ...
 
     def stop_live_view(self) -> None: ...
+
+    def set_live_view_magnification(self, value: int) -> LiveViewMagnificationResult: ...
 
     def live_view_frame(self) -> bytes: ...
 
