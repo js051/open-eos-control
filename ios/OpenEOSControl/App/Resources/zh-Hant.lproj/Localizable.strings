@@ -225,3 +225,4 @@
 "source_jpeg" = "JPEG";
 "source_bridge" = "電腦橋接";
 "source_simulator" = "模擬器";
+"live_view_magnify_to" = "將 Live View 對焦放大設為 %d 倍";

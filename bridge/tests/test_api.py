@@ -59,6 +59,16 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
             json={"fps": 15, "size": "MEDIUM", "source": "DESKTOP_BRIDGE_STREAM"},
         )
         live_frame = client.get(f"/v1/session/{session_id}/liveview/frame", headers=headers)
+        magnification = client.post(
+            f"/v1/session/{session_id}/liveview/magnification",
+            headers=headers,
+            json={"value": 5},
+        )
+        invalid_magnification = client.post(
+            f"/v1/session/{session_id}/liveview/magnification",
+            headers=headers,
+            json={"value": 2},
+        )
         focus = client.post(
             f"/v1/session/{session_id}/focus/drive",
             headers=headers,
@@ -86,6 +96,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert "LIVE_VIEW" in capabilities.json()["supported"]
     assert "MEDIA_DELETE" in capabilities.json()["supported"]
     assert "MEDIA_THUMBNAIL" in capabilities.json()["supported"]
+    assert "LIVE_VIEW_MAGNIFICATION" in capabilities.json()["supported"]
     assert capabilities.json()["evidence"]["source"] == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert setting.json()["exposure"]["iso"] == "800"
@@ -96,6 +107,8 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
         "source": "DESKTOP_BRIDGE_STREAM",
     }
     assert live_frame.content == JPEG
+    assert magnification.json() == {"accepted": True, "value": 5}
+    assert invalid_magnification.status_code == 422
     assert focus.json()["accepted"] is True
     assert unsupported_tap.status_code == 409
     assert unsupported_tap.json()["error"]["code"] == "UNSUPPORTED_FEATURE"

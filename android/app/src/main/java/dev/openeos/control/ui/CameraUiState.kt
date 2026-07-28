@@ -14,6 +14,7 @@ import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
+import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.NativeLiveViewSession
 import dev.openeos.control.data.UsbPtpDiagnostics
 import java.util.Locale
@@ -77,6 +78,7 @@ data class CameraUiState(
     val liveViewSize: LiveViewSize = LiveViewSize.MEDIUM,
     val liveViewSource: LiveViewSource = LiveViewSource.AUTO,
     val liveViewAspectRatio: Float = 16f / 9f,
+    val liveViewMagnification: LiveViewMagnification? = null,
     val liveViewDiagnostics: LiveViewDiagnostics = LiveViewDiagnostics(),
     val uiMode: UiMode = UiMode.CONTROL,
     val captureMode: CaptureMode = CaptureMode.PHOTO,

@@ -84,6 +84,9 @@ interface CameraControlBackend {
         direction: FocusDriveDirection,
         step: FocusDriveStep,
     ): FocusDriveResult = unsupported(CameraFeature.FOCUS_DRIVE)
+    suspend fun setLiveViewMagnification(
+        magnification: LiveViewMagnification,
+    ): LiveViewMagnificationResult = unsupported(CameraFeature.LIVE_VIEW_MAGNIFICATION)
     suspend fun listMedia(): List<CameraMediaItem> = unsupported(CameraFeature.MEDIA_BROWSER)
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail =
         unsupported(CameraFeature.MEDIA_THUMBNAIL)
@@ -236,6 +239,10 @@ class DesktopBridgeCameraBackend(
 
     override suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusDriveResult =
         client.driveFocus(direction, step)
+
+    override suspend fun setLiveViewMagnification(
+        magnification: LiveViewMagnification,
+    ): LiveViewMagnificationResult = client.setLiveViewMagnification(magnification)
 
     override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
 

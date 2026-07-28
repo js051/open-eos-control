@@ -69,6 +69,7 @@ enum class CameraFeature(
     LIVE_VIEW("Live view"),
     LIVE_VIEW_JPEG_POLLING("Live view JPEG polling"),
     LIVE_VIEW_RTP("Live view RTP"),
+    LIVE_VIEW_MAGNIFICATION("Live view magnification"),
     STILL_CAPTURE("Still capture"),
     AUTOFOCUS("Autofocus"),
     SHUTTER_HALF_PRESS("Shutter half-press"),
@@ -152,6 +153,7 @@ data class CapabilityMatrix(
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.LIVE_VIEW,
+                CameraFeature.LIVE_VIEW_MAGNIFICATION,
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.CLICK_WHITE_BALANCE,
                 CameraFeature.FOCUS_DRIVE,
@@ -179,6 +181,7 @@ data class CapabilityMatrix(
                 CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.VIDEO_RECORDING,
                 CameraFeature.LIVE_VIEW,
+                CameraFeature.LIVE_VIEW_MAGNIFICATION,
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.CLICK_WHITE_BALANCE,
                 CameraFeature.FOCUS_DRIVE,
@@ -336,6 +339,18 @@ data class FocusDriveResult(
     val ok: Boolean,
     val direction: FocusDriveDirection,
     val step: FocusDriveStep,
+)
+
+enum class LiveViewMagnification(
+    val value: Int,
+) {
+    X1(1),
+    X5(5),
+}
+
+data class LiveViewMagnificationResult(
+    val ok: Boolean,
+    val magnification: LiveViewMagnification,
 )
 
 data class CameraMediaItem(

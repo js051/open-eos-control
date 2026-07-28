@@ -187,6 +187,10 @@ class CameraRepository(
         step: FocusDriveStep,
     ): FocusDriveResult = backend.driveFocus(direction, step)
 
+    suspend fun setLiveViewMagnification(
+        magnification: LiveViewMagnification,
+    ): LiveViewMagnificationResult = backend.setLiveViewMagnification(magnification)
+
     suspend fun listMedia(): List<CameraMediaItem> = backend.listMedia()
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = backend.mediaThumbnail(item)

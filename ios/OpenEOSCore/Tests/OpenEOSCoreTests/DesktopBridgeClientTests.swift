@@ -6,7 +6,7 @@ import XCTest
 final class DesktopBridgeClientTests: XCTestCase {
     private let health = #"{"ok":true,"service":"open-eos-control-bridge","version":"0.1.0","authRequired":true,"loopbackOnly":false,"engines":{}}"#
     private let status = #"{"connected":true,"battery":{"level":82,"status":"good"},"recording":false,"mode":"Manual","media":{"available":true,"totalBytes":1000,"freeBytes":800,"freeImages":123,"devices":1},"exposure":{"iso":"400","shutter":"1/50","aperture":"2.8","whiteBalance":"Auto"},"raw":{"transport":"usb"}}"#
-    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","STILL_CAPTURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_DOWNLOAD","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso"],"observedFeatures":["BATTERY_STATUS"],"truncated":false}}"#
+    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_DOWNLOAD","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso"],"observedFeatures":["BATTERY_STATUS"],"truncated":false}}"#
 
     func testDiscoveryValidatesServiceAndUsesBearerAuthentication() async throws {
         let transport = MockCameraHTTPTransport()
@@ -72,6 +72,11 @@ final class DesktopBridgeClientTests: XCTestCase {
             path: "/v1/session/session_123/liveview/start",
             body: #"{"active":true,"requestedFps":12}"#
         )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session/session_123/liveview/magnification",
+            body: #"{"accepted":true,"value":5}"#
+        )
         let jpeg = Data([0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9])
         await transport.enqueue(
             path: "/v1/session/session_123/liveview/frame?t=9",
@@ -118,6 +123,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.desktopBridge))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.usbDiagnostics))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusDrive))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveViewMagnification))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaThumbnail))
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.stillCapture))
@@ -142,6 +148,11 @@ final class DesktopBridgeClientTests: XCTestCase {
             FocusDriveResult(accepted: true, direction: .near, step: .large)
         )
         try await client.startLiveView(LiveViewRequest(fps: 12, size: .large, source: .desktopBridgeStream))
+        let magnification = try await client.setLiveViewMagnification(.x5)
+        XCTAssertEqual(
+            magnification,
+            LiveViewMagnificationResult(accepted: true, magnification: .x5)
+        )
         let frame = try await client.liveViewFrame(cacheKey: 9)
         XCTAssertEqual(frame.data, jpeg)
 
@@ -177,6 +188,13 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(liveViewJSON["fps"] as? Int, 12)
         XCTAssertEqual(liveViewJSON["size"] as? String, "LARGE")
         XCTAssertEqual(liveViewJSON["source"] as? String, "DESKTOP_BRIDGE_STREAM")
+        let magnificationBody = try XCTUnwrap(
+            requests.first { $0.path.hasSuffix("/liveview/magnification") }?.body
+        )
+        let magnificationJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: magnificationBody) as? [String: Any]
+        )
+        XCTAssertEqual(magnificationJSON["value"] as? Int, 5)
         let clickBody = try XCTUnwrap(requests.first { $0.path.hasSuffix("/whitebalance/click") }?.body)
         let clickJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: clickBody) as? [String: Any])
         XCTAssertEqual(clickJSON["x"] as? Double, 0.4)

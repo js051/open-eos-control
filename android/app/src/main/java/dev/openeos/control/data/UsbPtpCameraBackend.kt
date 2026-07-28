@@ -186,6 +186,7 @@ class UsbPtpCameraBackend(
         val supportsCanonAutofocus = CanonEosPtp.supportsAutofocus(info)
         val supportsCanonLiveView = CanonEosPtp.supportsLiveView(info)
         val supportsCanonFocusDrive = CanonEosPtp.supportsFocusDrive(info)
+        val supportsCanonLiveViewMagnification = CanonEosPtp.supportsLiveViewMagnification(info)
         val supportsCanonMovieRecording = CanonEosPtp.supportsMovieRecording(
             info,
             canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).availableValues,
@@ -212,6 +213,7 @@ class UsbPtpCameraBackend(
                 add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
             }
             if (supportsCanonFocusDrive) add(CameraFeature.FOCUS_DRIVE)
+            if (supportsCanonLiveViewMagnification) add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
             if (supportsCanonMovieRecording) add(CameraFeature.VIDEO_RECORDING)
             if (iso.isNotEmpty() || shutter.isNotEmpty() || aperture.isNotEmpty()) {
                 add(CameraFeature.EXPOSURE_CONTROL)
@@ -230,6 +232,7 @@ class UsbPtpCameraBackend(
             CameraFeature.CLICK_WHITE_BALANCE,
             CameraFeature.LIVE_VIEW,
             CameraFeature.LIVE_VIEW_JPEG_POLLING,
+            CameraFeature.LIVE_VIEW_MAGNIFICATION,
             CameraFeature.FOCUS_DRIVE,
             CameraFeature.EXPOSURE_CONTROL,
             CameraFeature.WHITE_BALANCE_CONTROL,
@@ -271,6 +274,8 @@ class UsbPtpCameraBackend(
                         "Prefers advertised Canon EOS DoAf/AfCancel and falls back to a balanced half-press sequence.",
                     CameraFeature.FOCUS_DRIVE to
                         "Uses Canon EOS DriveLens with the Near/Far 1-3 values documented by libgphoto2.",
+                    CameraFeature.LIVE_VIEW_MAGNIFICATION to
+                        "Uses the advertised Canon EOS Zoom operation with the libgphoto2-verified 1x and 5x values.",
                     CameraFeature.CLICK_WHITE_BALANCE to
                         "No verified Canon USB/PTP Live View coordinate Click WB command is implemented.",
                     CameraFeature.VIDEO_RECORDING to
@@ -413,6 +418,24 @@ class UsbPtpCameraBackend(
         drainCanonEvents()
         observedFeatures.add(CameraFeature.FOCUS_DRIVE)
         return FocusDriveResult(ok = true, direction = direction, step = step)
+    }
+
+    override suspend fun setLiveViewMagnification(
+        magnification: LiveViewMagnification,
+    ): LiveViewMagnificationResult {
+        if (!CanonEosPtp.supportsLiveViewMagnification(requireDeviceInfo())) {
+            unsupported<Unit>(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+        }
+        if (!canonLiveViewActive) {
+            throw PtpProtocolException("Canon EOS Live View magnification requires an active Live View session.")
+        }
+        requireSession().executeOperation(
+            CanonEosOperationCode.ZOOM,
+            listOf(magnification.value.toLong()),
+        )
+        drainCanonEvents()
+        observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+        return LiveViewMagnificationResult(ok = true, magnification = magnification)
     }
 
     override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus {

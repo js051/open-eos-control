@@ -6,6 +6,7 @@
 
   const FEATURES = {
     LIVE_VIEW: "LIVE_VIEW",
+    LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION",
     STILL_CAPTURE: "STILL_CAPTURE",
     AUTOFOCUS: "AUTOFOCUS",
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
@@ -72,6 +73,8 @@
       halfPress: "Half-press",
       liveView: "Live View",
       manualFocus: "Manual focus",
+      liveViewMagnification: "Set Live View magnification to {value}x",
+      liveViewMagnificationChanged: "Live View magnification set to {value}x",
       near: "Near",
       far: "Far",
       liveViewSettings: "Live View",
@@ -250,6 +253,8 @@
       halfPress: "半按快門",
       liveView: "即時預覽",
       manualFocus: "手動對焦",
+      liveViewMagnification: "將即時預覽對焦放大設為 {value} 倍",
+      liveViewMagnificationChanged: "即時預覽對焦放大已設為 {value} 倍",
       near: "近",
       far: "遠",
       liveViewSettings: "即時預覽",
@@ -482,6 +487,7 @@
     activeView: "live",
     captureMode: "photo",
     liveActive: false,
+    liveMagnification: 1,
     liveGeneration: 0,
     requestedFps: 1,
     liveSource: "AUTO",
@@ -541,6 +547,8 @@
     modeIndicator: byId("mode-indicator"),
     frameIndicator: byId("frame-indicator"),
     recordIndicator: byId("record-indicator"),
+    liveMagnificationButton: byId("live-magnification-button"),
+    liveMagnificationLabel: byId("live-magnification-label"),
     focusReticle: byId("focus-reticle"),
     captureFlash: byId("capture-flash"),
     exposureStrip: byId("exposure-strip"),
@@ -941,6 +949,7 @@
     state.captureMode = "photo";
     state.liveSource = "AUTO";
     state.activeLiveSource = null;
+    state.liveMagnification = 1;
     state.busy = false;
     state.token = "";
     ui.connectionView.hidden = false;
@@ -1333,6 +1342,7 @@
       state.requestedFps = response.requestedFps || clampFps(state.requestedFps);
       state.activeLiveSource = response.source || state.liveSource;
       state.liveActive = true;
+      state.liveMagnification = 1;
       state.frameTimes = [];
       state.observedFps = 0;
       state.liveGeneration += 1;
@@ -1382,6 +1392,7 @@
     state.frameBytes = 0;
     state.frameContentType = null;
     state.activeLiveSource = null;
+    state.liveMagnification = 1;
     state.lastFrameAt = null;
     if (state.liveObjectUrl) URL.revokeObjectURL(state.liveObjectUrl);
     state.liveObjectUrl = null;
@@ -1466,7 +1477,49 @@
       replaceButtonIcon(button, state.liveActive ? "square" : "play");
     });
     if (!state.liveActive) ui.focusReticle.hidden = true;
+    renderLiveMagnification();
     renderFrameIndicator();
+  }
+
+  function renderLiveMagnification() {
+    const supported = featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION);
+    const target = state.liveMagnification === 5 ? 1 : 5;
+    ui.liveMagnificationButton.hidden = !supported;
+    ui.liveMagnificationButton.disabled = state.busy || !state.liveActive || !supported;
+    ui.liveMagnificationLabel.textContent = `${target}x`;
+    const description = t("liveViewMagnification", { value: target });
+    ui.liveMagnificationButton.setAttribute("aria-label", description);
+    ui.liveMagnificationButton.title = description;
+    replaceButtonIcon(ui.liveMagnificationButton, target === 5 ? "zoom-in" : "zoom-out");
+  }
+
+  async function setLiveViewMagnification() {
+    if (
+      !state.session || state.busy || !state.liveActive ||
+      !featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)
+    ) return;
+    const target = state.liveMagnification === 5 ? 1 : 5;
+    state.busy = true;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      const result = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/liveview/magnification`,
+        { method: "POST", json: { value: target } },
+      );
+      if (result.accepted) state.liveMagnification = result.value;
+      const message = t("liveViewMagnificationChanged", { value: state.liveMagnification });
+      setOperationState(message);
+      showToast(message);
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderAvailability();
+      renderLiveMagnification();
+    }
   }
 
   function renderFrameIndicator() {
@@ -1606,6 +1659,7 @@
     ui.fpsSelect.disabled = state.busy || !liveSupported;
     ui.liveSourceSelect.disabled = state.busy || !liveSupported;
     ui.tapActionSelect.disabled = state.busy || !state.liveActive;
+    renderLiveMagnification();
     document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
       button.disabled = state.busy || !settingByKey(button.dataset.settingKey);
     });
@@ -2006,6 +2060,7 @@
     ui.halfPressButton.addEventListener("click", halfPressShutter);
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
     ui.railLiveButton.addEventListener("click", toggleLiveView);
+    ui.liveMagnificationButton.addEventListener("click", setLiveViewMagnification);
     ui.fpsSelect.addEventListener("change", changeFps);
     ui.liveSourceSelect.addEventListener("change", changeLiveSource);
     ui.tapActionSelect.addEventListener("change", () => {

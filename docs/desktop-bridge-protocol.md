@@ -28,6 +28,7 @@ GET  /v1/session/{id}/capabilities
 POST /v1/session/{id}/liveview/start
 POST /v1/session/{id}/liveview/stop
 GET  /v1/session/{id}/liveview/frame
+POST /v1/session/{id}/liveview/magnification
 POST /v1/session/{id}/settings/{key}
 POST /v1/session/{id}/capture/still
 POST /v1/session/{id}/shutter/half-press
@@ -136,6 +137,8 @@ The bridge should mirror the app-side capability model:
 
 The response includes the effective `source`, so clients can distinguish an `AUTO` request that selected `CCAPI_RTP` from one that fell back to `CCAPI_JPEG_POLLING`.
 
+`POST /liveview/magnification` accepts `{"value":1}` or `{"value":5}` and returns the accepted value. It is capability-gated and requires active Live View. The libgphoto2 engine exposes it only when a writable `eoszoom` runtime widget exists; the direct CCAPI engine does not map Canon's PowerShot-only optical-zoom endpoint to this EOS feature.
+
 The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --stdout` process and incrementally extracts bounded JPEG frames from its concatenated MJPEG output. It accepts a 1-30 FPS output cap but does not claim the camera and USB link delivered that rate. Commands that need exclusive camera access stop the movie process first; the next frame request automatically starts a fresh process. Startup, early termination, malformed-frame, size-limit, or frame-timeout failures switch the session to bounded `--capture-preview --stdout` transactions and reduce effective `requestedFps` to at most 5. `CameraStatus.raw.liveViewTransport` and `liveViewFallbackReason` distinguish these paths.
 
 `GET /v1/session/{id}/media/{itemId}/thumbnail` returns a bounded JPEG or PNG with `Cache-Control: private, no-store`. Camera-resident libgphoto2 media uses the documented `--folder ... --get-thumbnail ... --stdout` command only when `gphoto2 --abilities` reports file-preview support. Host-RAM captures use the Bridge's bounded Pillow decoder for supported local image formats; unsupported RAW preview formats return a real error while the original remains downloadable. The direct CCAPI engine does not advertise this capability because no verified camera-advertised thumbnail resource is available; clients keep their file-type fallback.
@@ -174,6 +177,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - independent autofocus: paired writable `autofocusdrive=1` and guaranteed `autofocuscancel=1` actions when both exist, falling back to the balanced half-press path
 - recording: advertised `movierecordtarget` Card/None values
 - focus drive: advertised `manualfocusdrive` Near/Far values while Live View is active
+- Live View focus magnification: advertised writable `eoszoom` with only the R6 Mark III-backed values 1 and 5 while Live View is active
 - Live View: advertised `viewfinder` lifecycle plus cancellable `--capture-movie --stdout` MJPEG, command-safe restart and bounded `--capture-preview --stdout` fallback, with cleanup on stop, failed start, and session close
 - media: merge camera-resident recursive `--list-files` items with opaque-ID host captures; camera items use streamed `--get-file ... --stdout` and ability-gated exact deletion, while host items use bounded local thumbnails, chunked download, and exact store-confined deletion
 

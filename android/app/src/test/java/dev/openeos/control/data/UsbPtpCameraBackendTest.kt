@@ -255,6 +255,7 @@ class UsbPtpCameraBackendTest {
         val whiteBalanceStatus = backend.setWhiteBalance("Daylight")
         backend.startLiveView(LiveViewRequest(fps = 30, size = LiveViewSize.MEDIUM))
         val frame = backend.liveViewFrame(cacheKey = 27)
+        val magnification = backend.setLiveViewMagnification(LiveViewMagnification.X5)
         backend.autofocus()
         backend.halfPressShutter()
         val focusDrive = backend.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.MEDIUM)
@@ -268,6 +269,7 @@ class UsbPtpCameraBackendTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
         assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
         assertTrue(capabilities.matrix.supports(CameraFeature.WHITE_BALANCE_CONTROL))
         assertFalse(capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
@@ -354,6 +356,7 @@ class UsbPtpCameraBackendTest {
         assertEquals(FocusDriveDirection.FAR, focusDrive.direction)
         assertEquals(FocusDriveStep.MEDIUM, focusDrive.step)
         assertTrue(focusDrive.ok)
+        assertEquals(LiveViewMagnification.X5, magnification.magnification)
 
         val autofocusStart = transport.sentContainers.indexOfFirst { container ->
             container.type == PtpContainerType.COMMAND && container.code == CanonEosOperationCode.DO_AF
@@ -373,6 +376,13 @@ class UsbPtpCameraBackendTest {
                 it.type == PtpContainerType.COMMAND &&
                     it.code == CanonEosOperationCode.DRIVE_LENS &&
                     it.parameters() == listOf(0x8002L)
+            }
+        )
+        assertTrue(
+            transport.sentContainers.any {
+                it.type == PtpContainerType.COMMAND &&
+                    it.code == CanonEosOperationCode.ZOOM &&
+                    it.parameters() == listOf(5L)
             }
         )
         assertTrue(
@@ -568,6 +578,38 @@ class UsbPtpCameraBackendTest {
 
         assertEquals(1_234L, status.storageFreeImages)
         backend.close()
+    }
+
+    @Test
+    fun canonLiveViewMagnificationRequiresAdvertisedOperationAndActiveLiveView() = runTest {
+        val unavailableBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory {
+                CanonEosScriptedTransport(advertiseLiveViewMagnification = false)
+            },
+        )
+        unavailableBackend.initialize()
+
+        assertFalse(unavailableBackend.capabilities().matrix.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION))
+        assertTrue(
+            runCatching {
+                unavailableBackend.setLiveViewMagnification(LiveViewMagnification.X5)
+            }.exceptionOrNull() is UnsupportedOperationException
+        )
+        unavailableBackend.close()
+
+        val availableBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { CanonEosScriptedTransport() },
+        )
+        availableBackend.initialize()
+
+        assertTrue(
+            runCatching {
+                availableBackend.setLiveViewMagnification(LiveViewMagnification.X5)
+            }.exceptionOrNull() is PtpProtocolException
+        )
+        availableBackend.close()
     }
 
     @Test
@@ -1165,6 +1207,7 @@ class UsbPtpCameraBackendTest {
         private val advertiseCardCaptureDestination: Boolean = true,
         private val advertiseDedicatedAutofocus: Boolean = true,
         private val advertiseRemoteRelease: Boolean = true,
+        private val advertiseLiveViewMagnification: Boolean = true,
         private val rejectOperationCode: Int? = null,
         private val availableShots: Int = 46_822,
         private val hostCaptureObjects: List<HostCaptureObject> = emptyList(),
@@ -1191,6 +1234,7 @@ class UsbPtpCameraBackendTest {
                             advertiseDedicatedAutofocus,
                             advertiseRemoteRelease,
                             advertiseHostTransferOperations,
+                            advertiseLiveViewMagnification,
                         ),
                     )
                     incoming += ok(transaction)
@@ -1202,6 +1246,7 @@ class UsbPtpCameraBackendTest {
                 CanonEosOperationCode.SET_EVENT_MODE,
                 CanonEosOperationCode.REMOTE_RELEASE_OFF,
                 CanonEosOperationCode.DRIVE_LENS,
+                CanonEosOperationCode.ZOOM,
                 CanonEosOperationCode.DO_AF,
                 CanonEosOperationCode.AF_CANCEL,
                 CanonEosOperationCode.TRANSFER_COMPLETE,
@@ -1628,6 +1673,7 @@ class UsbPtpCameraBackendTest {
             advertiseDedicatedAutofocus: Boolean,
             advertiseRemoteRelease: Boolean,
             advertiseHostTransferOperations: Boolean = false,
+            advertiseLiveViewMagnification: Boolean = true,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
@@ -1658,6 +1704,9 @@ class UsbPtpCameraBackendTest {
                     if (advertiseDedicatedAutofocus) {
                         add(CanonEosOperationCode.DO_AF)
                         add(CanonEosOperationCode.AF_CANCEL)
+                    }
+                    if (advertiseLiveViewMagnification) {
+                        add(CanonEosOperationCode.ZOOM)
                     }
                     if (advertiseHostTransferOperations) {
                         add(PtpOperationCode.GET_PARTIAL_OBJECT)

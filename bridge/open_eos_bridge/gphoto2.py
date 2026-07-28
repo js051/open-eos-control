@@ -32,6 +32,7 @@ from .models import (
     ExposureState,
     FocusResult,
     LiveViewCapabilities,
+    LiveViewMagnificationResult,
     LiveViewStartRequest,
     MediaItem,
     StorageStatus,
@@ -929,6 +930,7 @@ class GPhoto2Session:
         self._live_view_stream: GPhotoMjpegSession | None = None
         self._live_view_transport: str | None = None
         self._live_view_fallback_reason: str | None = None
+        self._live_view_magnification: int | None = None
         self._requested_fps = 1
         self._last_error: str | None = None
         self._summary_text = ""
@@ -1074,6 +1076,8 @@ class GPhoto2Session:
                 supported.add(CameraFeature.VIDEO_RECORDING)
             if self._focus_drive_config() is not None:
                 supported.add(CameraFeature.FOCUS_DRIVE)
+            if self._abilities.capture_preview and self._live_view_magnification_config() is not None:
+                supported.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
 
             planned = {
                 feature
@@ -1081,6 +1085,7 @@ class GPhoto2Session:
                     CameraFeature.TAP_FOCUS,
                     CameraFeature.CLICK_WHITE_BALANCE,
                     CameraFeature.LIVE_VIEW_RTP,
+                    CameraFeature.LIVE_VIEW_MAGNIFICATION,
                 )
                 if feature not in supported
             }
@@ -1096,6 +1101,9 @@ class GPhoto2Session:
                     ),
                     CameraFeature.CLICK_WHITE_BALANCE.value: (
                         "The libgphoto2 CLI engine has no verified Live View coordinate Click WB command."
+                    ),
+                    CameraFeature.LIVE_VIEW_MAGNIFICATION.value: (
+                        "Requires an advertised writable Canon EOS eoszoom action and active Live View."
                     ),
                     CameraFeature.LIVE_VIEW.value: (
                         "The CLI adapter uses persistent gphoto2 --capture-movie --stdout MJPEG and "
@@ -1287,6 +1295,32 @@ class GPhoto2Session:
             self._observed.add(CameraFeature.FOCUS_DRIVE)
             return FocusResult(accepted=True, direction=normalized_direction, step=normalized_step)
 
+    def set_live_view_magnification(self, value: int) -> LiveViewMagnificationResult:
+        with self._lock:
+            if not self._live_view_active:
+                raise BridgeError(
+                    "LIVE_VIEW_REQUIRED",
+                    "Live View magnification requires an active Live View session.",
+                    status_code=409,
+                    feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+                    engine=self.engine_name,
+                )
+            config = self._live_view_magnification_config()
+            if config is None:
+                raise unsupported(CameraFeature.LIVE_VIEW_MAGNIFICATION.value, self.engine_name)
+            if value not in {1, 5}:
+                raise BridgeError(
+                    "INVALID_LIVE_VIEW_MAGNIFICATION",
+                    "Canon EOS Live View magnification must be 1x or 5x.",
+                    status_code=422,
+                    feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+                    engine=self.engine_name,
+                )
+            self._set_config_value(config, str(value), refresh=False)
+            self._live_view_magnification = value
+            self._observed.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            return LiveViewMagnificationResult(accepted=True, value=value)
+
     def tap_focus(self, x: float, y: float) -> FocusResult:
         del x, y
         raise unsupported(
@@ -1337,6 +1371,7 @@ class GPhoto2Session:
                 raise
             self._cached_live_view_frame = frame
             self._live_view_active = True
+            self._live_view_magnification = None
             self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
 
     def stop_live_view(self) -> None:
@@ -1351,6 +1386,7 @@ class GPhoto2Session:
             finally:
                 self._cached_live_view_frame = None
                 self._live_view_transport = None
+                self._live_view_magnification = None
 
     def live_view_frame(self) -> bytes:
         with self._lock:
@@ -1622,6 +1658,9 @@ class GPhoto2Session:
             return config
         return None
 
+    def _live_view_magnification_config(self) -> GPhotoConfig | None:
+        return self._find_config(("eoszoom",), writable=True)
+
     def _set_viewfinder(self, enabled: bool) -> bool:
         config = self._find_config(("viewfinder",), writable=True)
         if config is None:
@@ -1676,6 +1715,8 @@ class GPhoto2Session:
             commands.append("AUTOFOCUS_DRIVE_CANCEL")
         if self._half_press_values() is not None:
             commands.append("SHUTTER_HALF_PRESS")
+        if self._abilities.capture_preview and self._live_view_magnification_config() is not None:
+            commands.append("LIVE_VIEW_MAGNIFICATION_1X_5X")
         writable_settings = sorted(
             {
                 config.path.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]

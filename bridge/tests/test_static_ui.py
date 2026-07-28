@@ -50,6 +50,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "ccapi-password-input",
         "connect-button",
         "live-image",
+        "live-magnification-button",
         "exposure-strip",
         "shutter-button",
         "half-press-button",
@@ -129,6 +130,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "/whitebalance/click",
         "/liveview/start",
         "/liveview/frame",
+        "/liveview/magnification",
         "/media",
         "/thumbnail",
     }
@@ -139,6 +141,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE"' in script
     assert 'SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS"' in script
+    assert 'LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION"' in script
+    assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
     assert "URL.revokeObjectURL" in script
     assert script.count("deleteConfirm:") == 2

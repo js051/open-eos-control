@@ -75,6 +75,7 @@ import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraStatus
+import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.NativeLiveViewSession
 import java.text.NumberFormat
 import kotlinx.coroutines.delay
@@ -416,6 +417,7 @@ private fun String.toCompactCameraName(): String =
 internal fun String.toCameraHudName(): String =
     replace(" Mark ", " ")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val bitmap = state.liveViewBitmap
@@ -442,26 +444,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     BoxWithConstraints(
         modifier = modifier
             .testTag("live-view-frame")
-            .background(Color.Black)
-            .pointerInput(canTap, tapAction, sourceAspectRatio) {
-                detectTapGestures { offset ->
-                    if (canTap) {
-                        mapLiveViewTap(
-                            tapX = offset.x,
-                            tapY = offset.y,
-                            containerWidth = size.width.toFloat(),
-                            containerHeight = size.height.toFloat(),
-                            sourceAspectRatio = sourceAspectRatio,
-                        )?.let { point ->
-                            when (tapAction) {
-                                LiveViewTapAction.FOCUS -> actions.tapFocus(point.x, point.y)
-                                LiveViewTapAction.WHITE_BALANCE -> actions.clickWhiteBalance(point.x, point.y)
-                                null -> Unit
-                            }
-                        }
-                    }
-                }
-            },
+            .background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
         when {
@@ -528,6 +511,30 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             }
         }
 
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(canTap, tapAction, sourceAspectRatio) {
+                    detectTapGestures { offset ->
+                        if (canTap) {
+                            mapLiveViewTap(
+                                tapX = offset.x,
+                                tapY = offset.y,
+                                containerWidth = size.width.toFloat(),
+                                containerHeight = size.height.toFloat(),
+                                sourceAspectRatio = sourceAspectRatio,
+                            )?.let { point ->
+                                when (tapAction) {
+                                    LiveViewTapAction.FOCUS -> actions.tapFocus(point.x, point.y)
+                                    LiveViewTapAction.WHITE_BALANCE -> actions.clickWhiteBalance(point.x, point.y)
+                                    null -> Unit
+                                }
+                            }
+                        }
+                    }
+                }
+        )
+
         if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
         if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
             val bottomPadding = if (state.hudVisible) 188.dp else 12.dp
@@ -562,6 +569,58 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPadding)
                     .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp)),
             )
+        }
+        if (state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION)) {
+            val bottomPadding = if (state.hudVisible) 188.dp else 12.dp
+            val target = if (state.liveViewMagnification == LiveViewMagnification.X5) {
+                LiveViewMagnification.X1
+            } else {
+                LiveViewMagnification.X5
+            }
+            val description = stringResource(R.string.live_view_magnify_to, target.value)
+            val enabled = !state.isBusy(CameraOperation.LIVE_VIEW)
+            TooltipBox(
+                positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                tooltip = { PlainTooltip { Text(description) } },
+                state = rememberTooltipState(),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPadding),
+            ) {
+                CameraRotatingSlot(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("live-view-magnification")
+                        .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp))
+                        .clickable(enabled = enabled) { actions.setLiveViewMagnification(target) }
+                        .semantics {
+                            contentDescription = description
+                            role = Role.Button
+                        },
+                ) {
+                    Icon(
+                        painterResource(
+                            if (target == LiveViewMagnification.X5) {
+                                LucideR.drawable.lucide_ic_zoom_in
+                            } else {
+                                LucideR.drawable.lucide_ic_zoom_out
+                            }
+                        ),
+                        contentDescription = null,
+                        tint = if (enabled) AppAccent else AppMutedText,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Text(
+                        text = "${target.value}\u00d7",
+                        color = if (enabled) AppText else AppMutedText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 3.dp, bottom = 2.dp),
+                    )
+                }
+            }
         }
         if (state.showGrid) GridOverlay(sourceAspectRatio)
         FocusIndicator(state.focusPoint, state.focusFeedback, sourceAspectRatio)

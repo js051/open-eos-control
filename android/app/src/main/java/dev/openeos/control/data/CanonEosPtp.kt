@@ -12,6 +12,7 @@ object CanonEosOperationCode {
     const val GET_VIEWFINDER_DATA = 0x9153
     const val DO_AF = 0x9154
     const val DRIVE_LENS = 0x9155
+    const val ZOOM = 0x9158
     const val TOUCH_AF_POSITION = 0x915B
     const val AF_CANCEL = 0x9160
 }
@@ -193,6 +194,9 @@ object CanonEosPtp {
 
     fun supportsFocusDrive(info: PtpDeviceInfo): Boolean =
         supportsRemotePreparation(info) && info.supports(CanonEosOperationCode.DRIVE_LENS)
+
+    fun supportsLiveViewMagnification(info: PtpDeviceInfo): Boolean =
+        supportsLiveView(info) && info.supports(CanonEosOperationCode.ZOOM)
 
     fun supportsPropertyControl(info: PtpDeviceInfo): Boolean =
         supportsRemotePreparation(info) && info.supports(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX)

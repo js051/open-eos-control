@@ -33,11 +33,13 @@ import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
+import dev.openeos.control.data.CapabilityMatrix
 import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewCapabilities
+import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.UsbCameraDevice
 import dev.openeos.control.data.UsbCameraInterface
@@ -795,6 +797,40 @@ class CameraScreensTest {
     }
 
     @Test
+    fun liveViewMagnificationControlAppearsOnlyWhenAdvertisedAndSendsFiveTimes() {
+        var selected: LiveViewMagnification? = null
+        val base = connectedState()
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    base.copy(
+                        capabilities = base.capabilities?.copy(
+                            matrix = CapabilityMatrix(
+                                supported = base.capabilities.matrix.supported +
+                                    CameraFeature.LIVE_VIEW_MAGNIFICATION,
+                            ),
+                        ),
+                        liveViewMagnification = LiveViewMagnification.X1,
+                    ),
+                    noOpActions().copy(setLiveViewMagnification = { selected = it }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("live-view-magnification").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(LiveViewMagnification.X5, selected) }
+    }
+
+    @Test
+    fun liveViewMagnificationControlIsHiddenWhenNotAdvertised() {
+        val base = connectedState()
+        compose.setContent {
+            MaterialTheme { CameraControlScreen(base, noOpActions()) }
+        }
+        compose.onAllNodesWithTag("live-view-magnification").assertCountEquals(0)
+    }
+
+    @Test
     fun languageSheetOffersAutomaticEnglishAndTraditionalChinese() {
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
@@ -857,7 +893,8 @@ class CameraScreensTest {
         setUiMode = {}, setCaptureMode = {}, setHudVisible = {}, setGridVisible = {}, setLiveViewTapAction = {},
         openPicker = {}, closePicker = {},
         setIso = {}, setShutter = {}, setAperture = {}, setWhiteBalance = {}, setCameraSetting = { _, _ -> },
-        captureStill = {}, autofocus = {}, driveFocus = { _, _ -> }, toggleRecording = {}, tapFocus = { _, _ -> },
+        captureStill = {}, autofocus = {}, driveFocus = { _, _ -> }, setLiveViewMagnification = {},
+        toggleRecording = {}, tapFocus = { _, _ -> },
         halfPressShutter = {},
         clickWhiteBalance = { _, _ -> },
         refreshMedia = {}, loadMediaThumbnail = {}, downloadMedia = { _, _ -> }, deleteMedia = {},

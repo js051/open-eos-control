@@ -225,3 +225,4 @@
 "source_jpeg" = "JPEG";
 "source_bridge" = "Bridge";
 "source_simulator" = "Simulator";
+"live_view_magnify_to" = "Set Live View magnification to %dx";
