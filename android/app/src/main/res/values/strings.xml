@@ -95,6 +95,10 @@
     <string name="advertised_commands">Advertised commands</string>
     <string name="writable_settings">Writable settings</string>
     <string name="observed_features">Observed this session</string>
+    <string name="validation_coverage">Validated advertised features</string>
+    <string name="validation_coverage_value">%1$d / %2$d</string>
+    <string name="unverified_advertised_features">Advertised, not yet observed</string>
+    <string name="observed_without_advertisement">Observed without advertisement</string>
     <string name="evidence_truncated">Evidence truncated</string>
     <string name="battery_raw">Battery raw JSON</string>
     <string name="storage_raw">Storage raw JSON</string>

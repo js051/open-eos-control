@@ -667,6 +667,10 @@ class CameraScreensTest {
         compose.onNodeWithText("POST /ccapi/ver100/shooting/control/shutterbutton")
             .performScrollTo()
             .assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.validation_coverage)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.unverified_advertised_features))
+            .performScrollTo()
+            .assertIsDisplayed()
         compose.onNodeWithText("CCAPI").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("USB / PTP").performScrollTo().assertIsDisplayed()
     }

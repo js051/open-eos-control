@@ -27,6 +27,7 @@
 "dismiss" = "關閉";
 "done" = "完成";
 "unknown" = "未知";
+"redacted" = "[已遮蔽]";
 "none" = "無";
 
 "language" = "語言";
@@ -183,6 +184,9 @@
 "advertised_commands" = "相機公告命令";
 "writable_settings" = "可寫設定";
 "observed_features" = "本次工作階段已成功";
+"validation_coverage" = "已驗證的公告功能";
+"unverified_advertised_features" = "已公告但尚未實測";
+"observed_without_advertisement" = "未公告卻已觀察到";
 "evidence_truncated" = "證據清單已截短";
 "yes" = "是";
 "no" = "否";

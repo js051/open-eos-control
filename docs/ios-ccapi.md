@@ -11,7 +11,7 @@
 - Canon RTP H.264 Live View only when discovery advertises `GET rtpsessiondesc` and `POST rtp` and the App supplies a same-subnet camera-Wi-Fi IPv4 receiver; the core validates SDP, RFC 3550 packets and RFC 6184 single NAL/STAP-A/FU-A access units, owns exact start/stop cleanup, and falls back to JPEG for AUTO startup failures
 - Bounded, same-origin media traversal and file-backed downloads with Canon main-file query fallbacks; text/JSON metadata is rejected even when returned with HTTP 2xx
 - Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
-- Basic Authentication held by the client instance and redacted diagnostic output
+- Basic Authentication held by the client instance and versioned diagnostic output that redacts credentials and camera serials
 - Simulator mode and injectable HTTP transport for deterministic tests
 - Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, settings, capture, independent autofocus, half-press, recording, tap/drive focus when advertised, bounded JPEG frames and media thumbnails, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
 

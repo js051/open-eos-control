@@ -90,6 +90,7 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
             }
             DebugSection(stringResource(R.string.capability_evidence)) {
                 val evidence = state.capabilities?.evidence
+                val validation = diagnosticValidationSummary(state)
                 DebugValue(stringResource(R.string.capability_source), evidence?.source ?: unknown, mono = true)
                 DebugValue(
                     stringResource(R.string.protocol_versions),
@@ -110,6 +111,30 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
                     stringResource(R.string.observed_features),
                     evidence?.observedFeatures.orEmpty().sortedBy { it.name }.joinToString { it.name }.ifBlank { none },
                     mono = true,
+                )
+                DebugValue(
+                    stringResource(R.string.validation_coverage),
+                    stringResource(
+                        R.string.validation_coverage_value,
+                        validation.validatedAdvertisedFeatures.size,
+                        validation.advertisedFeatures.size,
+                    ),
+                )
+                DebugValue(
+                    stringResource(R.string.unverified_advertised_features),
+                    validation.unverifiedAdvertisedFeatures.sortedBy { it.name }
+                        .joinToString { it.name }
+                        .ifBlank { none },
+                    mono = true,
+                    warning = validation.unverifiedAdvertisedFeatures.isNotEmpty(),
+                )
+                DebugValue(
+                    stringResource(R.string.observed_without_advertisement),
+                    validation.observedWithoutAdvertisement.sortedBy { it.name }
+                        .joinToString { it.name }
+                        .ifBlank { none },
+                    mono = true,
+                    warning = validation.observedWithoutAdvertisement.isNotEmpty(),
                 )
                 DebugValue(
                     stringResource(R.string.evidence_truncated),
@@ -199,7 +224,13 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
             }
             Button(
                 onClick = {
-                    val report = buildDiagnosticReport(state)
+                    val productVersion = runCatching {
+                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                    }.getOrNull() ?: "unknown"
+                    val report = buildDiagnosticReport(
+                        state,
+                        DiagnosticReportMetadata(productVersion = productVersion),
+                    )
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Open EOS Control diagnostic", report))
                     Toast.makeText(context, context.getString(R.string.diagnostic_copied), Toast.LENGTH_SHORT).show()

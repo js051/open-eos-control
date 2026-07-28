@@ -1,5 +1,47 @@
 import Foundation
 
+let diagnosticReportSchema = 1
+
+public struct DiagnosticReportMetadata: Equatable, Sendable {
+    public let productVersion: String
+    public let generatedAt: String
+
+    public init(productVersion: String, generatedAt: String) {
+        self.productVersion = productVersion
+        self.generatedAt = generatedAt
+    }
+
+    public static func current() -> DiagnosticReportMetadata {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return DiagnosticReportMetadata(
+            productVersion: version?.nilIfDiagnosticBlank ?? "unknown",
+            generatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+    }
+}
+
+public struct DiagnosticValidationSummary: Equatable, Sendable {
+    public let advertisedFeatures: Set<CameraFeature>
+    public let observedFeatures: Set<CameraFeature>
+
+    public var validatedAdvertisedFeatures: Set<CameraFeature> {
+        advertisedFeatures.intersection(observedFeatures)
+    }
+
+    public var unverifiedAdvertisedFeatures: Set<CameraFeature> {
+        advertisedFeatures.subtracting(observedFeatures)
+    }
+
+    public var observedWithoutAdvertisement: Set<CameraFeature> {
+        observedFeatures.subtracting(advertisedFeatures)
+    }
+
+    public init(capabilities: CameraCapabilities?) {
+        advertisedFeatures = capabilities?.matrix.supported ?? []
+        observedFeatures = capabilities?.evidence.observedFeatures ?? []
+    }
+}
+
 public struct CCAPILiveViewMetrics: Equatable, Sendable {
     public let requestedFPS: Int
     public let observedFPS: Double
@@ -35,7 +77,8 @@ public enum CCAPIDiagnosticReport {
         versions: [String],
         snapshot: CameraSnapshot?,
         liveView: CCAPILiveViewMetrics = CCAPILiveViewMetrics(),
-        lastError: String? = nil
+        lastError: String? = nil,
+        metadata: DiagnosticReportMetadata = .current()
     ) -> String {
         let supported = snapshot?.capabilities.matrix.supported.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
         let planned = snapshot?.capabilities.matrix.planned.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
@@ -44,22 +87,31 @@ public enum CCAPIDiagnosticReport {
         let observedText = observed.flatMap { $0.isEmpty ? nil : $0 } ?? "none"
         let date = ISO8601DateFormatter().string(from: liveView.lastFrameAt ?? Date(timeIntervalSince1970: 0))
         let source = sanitized(liveView.sourceURL)?.absoluteString ?? "none"
-        return [
+        let validation = DiagnosticValidationSummary(capabilities: snapshot?.capabilities)
+        let report = [
             "Open EOS Control iOS diagnostic report",
+            "reportSchema=\(diagnosticReportSchema)",
+            "generatedAt=\(metadata.generatedAt)",
+            "productVersion=\(metadata.productVersion)",
             "camera=\(snapshot?.info.model ?? "unknown")",
-            "serial=\(snapshot?.info.serial ?? "unknown")",
+            "serial=\(diagnosticSerial(snapshot?.info.serial))",
             "transport=CCAPI_NETWORK",
             "baseUrl=\(sanitized(baseURL)?.absoluteString ?? "invalid")",
             "mode=\(mode.rawValue)",
             "apiVersions=\(versions.joined(separator: ", "))",
             "supported=\(supported)",
             "planned=\(planned)",
-            "capabilitySource=\(redact(evidence?.source ?? "unknown"))",
+            "capabilitySource=\(evidence?.source ?? "unknown")",
             "protocolVersions=\(evidence?.protocolVersions.joined(separator: ", ") ?? "none")",
             "advertisedCommandCount=\(evidence?.advertisedCommands.count ?? 0)",
-            "advertisedCommands=\(redact(evidence?.advertisedCommands.joined(separator: " | ") ?? "none"))",
+            "advertisedCommands=\(evidence?.advertisedCommands.joined(separator: " | ") ?? "none")",
             "writableSettings=\(evidence?.writableSettings.joined(separator: ", ") ?? "none")",
             "observedFeatures=\(observedText)",
+            "advertisedFeatureCount=\(validation.advertisedFeatures.count)",
+            "observedFeatureCount=\(validation.observedFeatures.count)",
+            "validatedAdvertisedFeatureCount=\(validation.validatedAdvertisedFeatures.count)",
+            "unverifiedAdvertisedFeatures=\(diagnosticFeatureList(validation.unverifiedAdvertisedFeatures))",
+            "observedWithoutAdvertisement=\(diagnosticFeatureList(validation.observedWithoutAdvertisement))",
             "capabilityEvidenceTruncated=\(evidence?.truncated ?? false)",
             "battery=\(snapshot?.status.rawBatteryJSON ?? "null")",
             "storage=\(snapshot?.status.rawStorageJSON ?? "null")",
@@ -75,8 +127,9 @@ public enum CCAPIDiagnosticReport {
             "liveViewSource=\(liveView.source?.rawValue ?? "none")",
             "source=\(source)",
             "lastFrameAt=\(liveView.lastFrameAt == nil ? "none" : date)",
-            "lastError=\(redact(lastError ?? "none"))",
+            "lastError=\(lastError ?? "none")",
         ].joined(separator: "\n")
+        return redactDiagnosticText(report, sensitiveValues: [snapshot?.info.serial])
     }
 
     private static func sanitized(_ value: URL?) -> URL? {
@@ -86,17 +139,49 @@ public enum CCAPIDiagnosticReport {
         return components.url
     }
 
-    private static func redact(_ value: String) -> String {
-        value
-            .replacingOccurrences(
-                of: #"(?i)authorization\s*:\s*[^\r\n]+"#,
-                with: "Authorization: [redacted]",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"(?i)(password|token)=([^\s&]+)"#,
-                with: "$1=[redacted]",
-                options: .regularExpression
-            )
+}
+
+func diagnosticSerial(_ value: String?) -> String {
+    value.isDiagnosticUnknown ? "unknown" : "[redacted]"
+}
+
+func diagnosticFeatureList(_ features: Set<CameraFeature>) -> String {
+    let value = features.map(\.rawValue).sorted().joined(separator: ", ")
+    return value.isEmpty ? "none" : value
+}
+
+func redactDiagnosticText(_ value: String, sensitiveValues: [String?] = []) -> String {
+    var redacted = value
+        .replacingOccurrences(
+            of: #"(?i)(authorization\s*:\s*(?:bearer|basic)?\s*)[^\s\r\n]+"#,
+            with: "$1[redacted]",
+            options: .regularExpression
+        )
+        .replacingOccurrences(
+            of: #"(?i)((?:password|token)=)[^\s&]+"#,
+            with: "$1[redacted]",
+            options: .regularExpression
+        )
+        .replacingOccurrences(
+            of: #"(?i)(\"(?:password|token)\"\s*:\s*\")[^\"]+"#,
+            with: "$1[redacted]",
+            options: .regularExpression
+        )
+    for sensitiveValue in sensitiveValues.compactMap({ $0 }).filter({ !$0.isDiagnosticUnknown }) {
+        redacted = redacted.replacingOccurrences(of: sensitiveValue, with: "[redacted]")
     }
+    return redacted
+}
+
+private extension Optional where Wrapped == String {
+    var isDiagnosticUnknown: Bool {
+        guard let value = self else { return true }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty || normalized == "unknown" || normalized == "none"
+    }
+}
+
+private extension String {
+    var isDiagnosticUnknown: Bool { Optional(self).isDiagnosticUnknown }
+    var nilIfDiagnosticBlank: String? { isEmpty ? nil : self }
 }

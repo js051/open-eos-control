@@ -3,7 +3,24 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraTransport
 import java.net.URI
+import java.time.Instant
 import java.util.Locale
+
+private const val DIAGNOSTIC_REPORT_SCHEMA = 1
+
+data class DiagnosticValidationSummary(
+    val advertisedFeatures: Set<CameraFeature>,
+    val observedFeatures: Set<CameraFeature>,
+) {
+    val validatedAdvertisedFeatures: Set<CameraFeature> = advertisedFeatures intersect observedFeatures
+    val unverifiedAdvertisedFeatures: Set<CameraFeature> = advertisedFeatures - observedFeatures
+    val observedWithoutAdvertisement: Set<CameraFeature> = observedFeatures - advertisedFeatures
+}
+
+data class DiagnosticReportMetadata(
+    val productVersion: String = "unknown",
+    val generatedAt: String = Instant.now().toString(),
+)
 
 fun rollingFps(frameTimesMillis: List<Long>): Double {
     if (frameTimesMillis.size < 2) return 0.0
@@ -12,7 +29,15 @@ fun rollingFps(frameTimesMillis: List<Long>): Double {
     return (frameTimesMillis.size - 1) * 1_000.0 / elapsed
 }
 
-fun buildDiagnosticReport(state: CameraUiState): String {
+fun diagnosticValidationSummary(state: CameraUiState): DiagnosticValidationSummary = DiagnosticValidationSummary(
+    advertisedFeatures = state.capabilities?.matrix?.supported.orEmpty(),
+    observedFeatures = state.capabilities?.evidence?.observedFeatures.orEmpty(),
+)
+
+fun buildDiagnosticReport(
+    state: CameraUiState,
+    metadata: DiagnosticReportMetadata = DiagnosticReportMetadata(),
+): String {
     val activeBaseUrl = when (state.transport) {
         CameraTransport.DESKTOP_BRIDGE -> state.bridgeBaseUrl
         else -> state.baseUrl
@@ -34,11 +59,15 @@ fun buildDiagnosticReport(state: CameraUiState): String {
     val live = state.liveViewDiagnostics
     val network = state.networkDiagnostics
     val evidence = state.capabilities?.evidence
+    val validation = diagnosticValidationSummary(state)
 
-    return buildString {
+    val report = buildString {
         appendLine("Open EOS Control diagnostic report")
+        appendLine("reportSchema=$DIAGNOSTIC_REPORT_SCHEMA")
+        appendLine("generatedAt=${metadata.generatedAt}")
+        appendLine("productVersion=${metadata.productVersion}")
         appendLine("camera=${state.info?.model ?: "unknown"}")
-        appendLine("serial=${state.info?.serial ?: "unknown"}")
+        appendLine("serial=${diagnosticSerial(state.info?.serial)}")
         appendLine("transport=${if (state.previewMode) "OFFLINE_PREVIEW" else state.transport?.name ?: "disconnected"}")
         appendLine("baseUrl=$safeUrl")
         appendLine("api=${state.info?.api ?: "unknown"}")
@@ -69,6 +98,15 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine(
             "observedFeatures=${evidence?.observedFeatures.orEmpty().sortedBy(CameraFeature::name).joinToString { it.name }.ifBlank { "none" }}"
         )
+        appendLine("advertisedFeatureCount=${validation.advertisedFeatures.size}")
+        appendLine("observedFeatureCount=${validation.observedFeatures.size}")
+        appendLine("validatedAdvertisedFeatureCount=${validation.validatedAdvertisedFeatures.size}")
+        appendLine(
+            "unverifiedAdvertisedFeatures=${validation.unverifiedAdvertisedFeatures.sortedBy(CameraFeature::name).joinToString { it.name }.ifBlank { "none" }}"
+        )
+        appendLine(
+            "observedWithoutAdvertisement=${validation.observedWithoutAdvertisement.sortedBy(CameraFeature::name).joinToString { it.name }.ifBlank { "none" }}"
+        )
         appendLine("capabilityEvidenceTruncated=${evidence?.truncated ?: false}")
         appendLine("battery=${state.status?.rawBatteryJson?.ifBlank { state.status?.batteryStatus } ?: "unknown"}")
         appendLine("storage=${state.status?.rawStorageJson?.ifBlank { state.status?.mediaAvailable?.toString() } ?: "unknown"}")
@@ -91,6 +129,7 @@ fun buildDiagnosticReport(state: CameraUiState): String {
         appendLine("usbDevices=${state.usbDiagnostics.devices.size}")
         append("lastError=${state.error?.let { redactDiagnosticText(it, state) } ?: "none"}")
     }
+    return redactDiagnosticText(report, state)
 }
 
 private fun redactDiagnosticText(value: String, state: CameraUiState): String {
@@ -99,5 +138,16 @@ private fun redactDiagnosticText(value: String, state: CameraUiState): String {
         .replace(Regex("(https?://)[^/@\\s]+@"), "\$1")
     if (state.password.isNotBlank()) redacted = redacted.replace(state.password, "[redacted]")
     if (state.bridgeToken.isNotBlank()) redacted = redacted.replace(state.bridgeToken, "[redacted]")
+    state.info?.serial?.takeUnless { it.isDiagnosticUnknown() }?.let { serial ->
+        redacted = redacted.replace(serial, "[redacted]")
+    }
     return redacted
 }
+
+private fun diagnosticSerial(serial: String?): String = when {
+    serial.isDiagnosticUnknown() -> "unknown"
+    else -> "[redacted]"
+}
+
+private fun String?.isDiagnosticUnknown(): Boolean =
+    isNullOrBlank() || equals("unknown", ignoreCase = true) || equals("none", ignoreCase = true)

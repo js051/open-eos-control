@@ -66,6 +66,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
     assert parser.inline_script_text == []
     assert parser.assets
     assert all(asset.startswith("/app/") for asset in parser.assets)
+    assert "/app/diagnostics.js" in parser.assets
 
 
 def test_static_labels_exist_in_both_supported_languages() -> None:
@@ -150,4 +151,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "CCAPI_RTP" in script
     assert "engine?.detail" in script
     report_source = script.split("function diagnosticReport()", 1)[1].split("\n  function ", 1)[0]
-    assert "token" not in report_source.casefold()
+    assert "reportSchema: 1" in report_source
+    assert "productVersion: state.health?.version" in report_source
+    assert "validation: diagnostics.featureSummary(state.capabilities)" in report_source
+    assert "return diagnostics.safeValue(report" in report_source
+    assert "secrets: [state.token, ui.ccapiPasswordInput?.value, state.info?.serial]" in report_source

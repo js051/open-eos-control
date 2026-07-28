@@ -815,7 +815,7 @@ final class CCAPIClientTests: XCTestCase {
     func testDiagnosticReportIncludesCapabilityEvidence() throws {
         let capabilities = CameraCapabilities(
             settings: [],
-            matrix: CapabilityMatrix(),
+            matrix: CapabilityMatrix(supported: [.cameraIdentity, .liveView, .stillCapture]),
             liveView: LiveViewCapabilities(),
             profile: CameraProfile.from(modelName: "Canon EOS R6 Mark III"),
             evidence: CameraCapabilityEvidence(
@@ -827,7 +827,7 @@ final class CCAPIClientTests: XCTestCase {
             )
         )
         let snapshot = CameraSnapshot(
-            info: CameraInfo(model: "Canon EOS R6 Mark III", serial: "redacted", api: "ccapi"),
+            info: CameraInfo(model: "Canon EOS R6 Mark III", serial: "PRIVATE-CAMERA-SERIAL", api: "ccapi"),
             status: CameraStatus(
                 mediaAvailable: true,
                 storageTotalBytes: 64_000,
@@ -842,14 +842,29 @@ final class CCAPIClientTests: XCTestCase {
             baseURL: try XCTUnwrap(URL(string: "http://192.168.1.2:8080")),
             mode: .camera,
             versions: ["/ccapi/ver100"],
-            snapshot: snapshot
+            snapshot: snapshot,
+            lastError: "Camera PRIVATE-CAMERA-SERIAL rejected a request",
+            metadata: DiagnosticReportMetadata(
+                productVersion: "9.8.7-test",
+                generatedAt: "2026-07-29T00:00:00Z"
+            )
         )
 
+        XCTAssertTrue(report.contains("reportSchema=1"))
+        XCTAssertTrue(report.contains("generatedAt=2026-07-29T00:00:00Z"))
+        XCTAssertTrue(report.contains("productVersion=9.8.7-test"))
+        XCTAssertTrue(report.contains("serial=[redacted]"))
+        XCTAssertFalse(report.contains("PRIVATE-CAMERA-SERIAL"))
         XCTAssertTrue(report.contains("capabilitySource=GET /ccapi"))
         XCTAssertTrue(report.contains("advertisedCommandCount=1"))
         XCTAssertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
         XCTAssertTrue(report.contains("writableSettings=iso, tv"))
         XCTAssertTrue(report.contains("observedFeatures=CAMERA_IDENTITY, LIVE_VIEW"))
+        XCTAssertTrue(report.contains("advertisedFeatureCount=3"))
+        XCTAssertTrue(report.contains("observedFeatureCount=2"))
+        XCTAssertTrue(report.contains("validatedAdvertisedFeatureCount=2"))
+        XCTAssertTrue(report.contains("unverifiedAdvertisedFeatures=STILL_CAPTURE"))
+        XCTAssertTrue(report.contains("observedWithoutAdvertisement=none"))
         XCTAssertTrue(report.contains("storageTotalBytes=64000"))
         XCTAssertTrue(report.contains("storageFreeBytes=32000"))
         XCTAssertTrue(report.contains("storageFreeImages=1234"))

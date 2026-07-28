@@ -180,7 +180,9 @@ jobs:
       - name: Check desktop control scripts
         run: |
           node --check open_eos_bridge/static/icons.js
+          node --check open_eos_bridge/static/diagnostics.js
           node --check open_eos_bridge/static/app.js
+          node tests/diagnostics.test.js
 
       - name: Test desktop bridge contract
         run: pytest -q -p no:cacheprovider
