@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import coil.ImageLoader
 import coil.compose.AsyncImage
@@ -223,13 +224,14 @@ fun CameraHeader(state: CameraUiState, actions: CameraActions) {
 
 @Composable
 fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
-    val battery = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
+    val batteryDescription = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
         ?: stringResource(R.string.unknown)
+    val batteryValue = state.status?.batteryLevel?.let { "$it%" } ?: "-"
     val fullCameraName = state.info?.model?.toCompactCameraName() ?: stringResource(R.string.unknown)
     val fullStorage = cameraStorageLabel(state.status)
     val quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
     val cameraName = if (quarterTurn) fullCameraName.toQuarterTurnCameraName() else fullCameraName
-    val storage = if (quarterTurn) cameraStorageCompactLabel(state.status) else fullStorage
+    val storageValue = cameraStorageCompactLabel(state.status)
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
@@ -255,15 +257,17 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
                     .semantics { contentDescription = fullCameraName },
             )
         }
-        Text(battery, Modifier.cameraLayoutRotation(), color = AppSubtleText, maxLines = 1)
-        Text(
-            storage,
-            Modifier
-                .cameraLayoutRotation()
-                .testTag("storage-status")
-                .semantics { contentDescription = fullStorage },
-            color = AppSubtleText,
-            maxLines = 1,
+        CameraStatusIndicator(
+            icon = batteryStatusIcon(state.status?.batteryLevel),
+            value = batteryValue,
+            description = batteryDescription,
+            testTag = "battery-status",
+        )
+        CameraStatusIndicator(
+            icon = LucideR.drawable.lucide_ic_memory_stick,
+            value = storageValue,
+            description = fullStorage,
+            testTag = "storage-status",
         )
         ToolIconButton(
             if (state.captureMode == CaptureMode.PHOTO) LucideR.drawable.lucide_ic_camera else LucideR.drawable.lucide_ic_video,
@@ -325,6 +329,51 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             }
         }
     }
+}
+
+@Composable
+private fun CameraStatusIndicator(
+    @DrawableRes icon: Int,
+    value: String,
+    description: String,
+    testTag: String,
+) {
+    Box(
+        Modifier
+            .size(48.dp)
+            .testTag(testTag)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.cameraControlRotation(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                painterResource(icon),
+                contentDescription = null,
+                tint = AppSubtleText,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                value,
+                color = AppSubtleText,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@DrawableRes
+private fun batteryStatusIcon(level: Int?): Int = when {
+    level == null -> LucideR.drawable.lucide_ic_battery_warning
+    level <= 20 -> LucideR.drawable.lucide_ic_battery_low
+    level >= 85 -> LucideR.drawable.lucide_ic_battery_full
+    else -> LucideR.drawable.lucide_ic_battery_medium
 }
 
 @Composable

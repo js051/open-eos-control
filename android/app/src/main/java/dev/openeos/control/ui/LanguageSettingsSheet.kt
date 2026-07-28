@@ -4,14 +4,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,28 +18,32 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.openeos.control.R
+import com.composables.icons.lucide.R as LucideR
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LanguageSettingsSheet(state: CameraUiState, actions: CameraActions) {
     if (state.activeSettingPicker != SettingPicker.LANGUAGE) return
     val current = AppLanguageManager.current()
-    ModalBottomSheet(
+    CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
-        containerColor = AppSurface,
-        contentWindowInsets = { WindowInsets.safeDrawing },
     ) {
-        DarkSheetSystemBarsEffect()
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                stringResource(R.string.language),
-                color = AppText,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
+            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.language),
+                    color = AppText,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_x,
+                    stringResource(R.string.dismiss),
+                    actions.closePicker,
+                )
+            }
             LanguageOption(
                 label = stringResource(R.string.language_system),
                 selected = current == AppLanguage.SYSTEM,

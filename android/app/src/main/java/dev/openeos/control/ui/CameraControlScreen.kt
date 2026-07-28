@@ -32,12 +32,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -208,12 +206,9 @@ private fun ExposureSettingsSheet(state: CameraUiState, actions: CameraActions) 
         }
         else -> return
     }
-    ModalBottomSheet(
+    CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
-        containerColor = AppSurface,
-        contentWindowInsets = { WindowInsets.safeDrawing },
     ) {
-        DarkSheetSystemBarsEffect()
         ExposurePickerTabs(state, picker, actions)
         key(picker) {
             ExposureDial(title, valueKey, values, current, state.isBusy(CameraOperation.SETTING), onSelect)
@@ -360,19 +355,16 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
         mutableFloatStateOf(state.liveViewFrameRateFps.toFloat())
     }
     val displayedFps = pendingFps.roundToInt().coerceIn(minFps, maxFps)
-    ModalBottomSheet(
+    CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
-        containerColor = AppSurface,
-        contentWindowInsets = { WindowInsets.safeDrawing },
     ) {
-        DarkSheetSystemBarsEffect()
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp)) {
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp).padding(bottom = 28.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(stringResource(R.string.live_view_settings), color = AppText, fontWeight = FontWeight.Bold)
+                SettingsSheetTitle(stringResource(R.string.live_view_settings), actions.closePicker)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.auto_refresh), color = AppText, modifier = Modifier.weight(1f))
                     Switch(state.liveViewAutoRefresh, actions.setAutoRefresh)
@@ -493,21 +485,17 @@ private fun liveViewSourceLabel(source: LiveViewSource): String = stringResource
 @Composable
 private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
+    CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
-        sheetState = sheetState,
-        containerColor = AppSurface,
-        contentWindowInsets = { WindowInsets.safeDrawing },
+        skipPartiallyExpanded = true,
     ) {
-        DarkSheetSystemBarsEffect()
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp)) {
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp).padding(bottom = 28.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(stringResource(R.string.more_settings), color = AppText, fontWeight = FontWeight.Bold)
+                SettingsSheetTitle(stringResource(R.string.more_settings), actions.closePicker)
                 if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
                     LiveViewTapActionControls(state, actions)
                 }
@@ -567,6 +555,17 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 settings.forEach { setting -> AdvancedSettingRow(setting, actions) }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsSheetTitle(title: String, onDismiss: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, Modifier.weight(1f), color = AppText, fontWeight = FontWeight.Bold)
+        ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), onDismiss)
     }
 }
 

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -155,7 +156,7 @@ class CameraScreensTest {
         compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
-        compose.onNodeWithText(
+        compose.onNodeWithContentDescription(
             compose.activity.resources.getQuantityString(R.plurals.storage_shots_remaining, 2_418, 2_418L)
         ).assertIsDisplayed()
     }
@@ -330,6 +331,44 @@ class CameraScreensTest {
                 isoContentBounds.right <= isoCellBounds.right &&
                 isoContentBounds.bottom <= isoCellBounds.bottom,
         )
+    }
+
+    @Test
+    fun quarterTurnRemeasuresLiveViewSettingsAsAFullCameraPanel() {
+        val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
+        val actions = noOpActions().copy(closePicker = { picker.value = null })
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                CompositionLocalProvider(
+                    LocalCameraControlRotation provides -90f,
+                    LocalCameraControlTargetRotation provides -90f,
+                ) {
+                    MaterialTheme(colorScheme = OpenEosColorScheme) {
+                        CameraControlScreen(
+                            connectedState().copy(activeSettingPicker = picker.value),
+                            actions,
+                        )
+                    }
+                }
+            }
+        }
+
+        compose.onNodeWithTag("rotated-settings-surface").assertIsDisplayed()
+        val titleBounds = compose
+            .onNodeWithText(resourceText(R.string.live_view_settings))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "Quarter-turn settings title should be upright when the device is held sideways: $titleBounds",
+            titleBounds.height > titleBounds.width,
+        )
+        compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.composition_grid)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
+        compose.runOnIdle { assertEquals(null, picker.value) }
+        compose.onAllNodesWithTag("rotated-settings-surface").assertCountEquals(0)
     }
 
     @Test
