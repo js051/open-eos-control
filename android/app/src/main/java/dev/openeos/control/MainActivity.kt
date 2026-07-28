@@ -2,6 +2,7 @@ package dev.openeos.control
 
 import android.content.res.Configuration
 import android.database.ContentObserver
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -37,6 +38,10 @@ class MainActivity : AppCompatActivity() {
             override fun onChange(selfChange: Boolean) {
                 refreshSystemAutoRotationSetting()
             }
+
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                refreshSystemAutoRotationSetting()
+            }
         }
         setContent {
             OpenEosControlApp(controlRotationDegrees = controlRotationDegrees.floatValue)
@@ -52,6 +57,19 @@ class MainActivity : AppCompatActivity() {
             autoRotationObserver,
         )
         refreshSystemAutoRotationSetting()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshSystemAutoRotationSetting()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && ::orientationListener.isInitialized) {
+            // The quick-settings shade can change rotation lock without pausing this Activity.
+            refreshSystemAutoRotationSetting()
+        }
     }
 
     override fun onStop() {
