@@ -94,4 +94,10 @@ class CameraOrientationTest {
         assertEquals(720f, nearestEquivalentCameraRotation(currentDegrees = 720f, targetDegrees = 0f))
         assertEquals(720f, nearestEquivalentCameraRotation(currentDegrees = 630f, targetDegrees = 0f))
     }
+
+    @Test
+    fun cameraHudNameKeepsModelGenerationInACompactSlot() {
+        assertEquals("R6 III", "R6 Mark III".toCameraHudName())
+        assertEquals("R5", "R5".toCameraHudName())
+    }
 }

@@ -153,7 +153,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
-        compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
+        compose.onNodeWithText("R6 III").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
         compose.onNodeWithContentDescription(
