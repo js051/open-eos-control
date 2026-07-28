@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from open_eos_bridge.app import create_app
 from open_eos_bridge.ccapi import (
+    MAX_MEDIA_THUMBNAIL_BYTES,
     CcapiEngine,
     CcapiResponse,
     CcapiStreamResponse,
@@ -82,11 +83,15 @@ class FakeCcapiTransport:
         external_media: bool = False,
         reject_autofocus_start: bool = False,
         reject_rtp_start: bool = False,
+        thumbnail_body: bytes = JPEG,
+        thumbnail_content_type: str = "image/jpeg",
     ) -> None:
         self.discovery = discovery or DISCOVERY
         self.external_media = external_media
         self.reject_autofocus_start = reject_autofocus_start
         self.reject_rtp_start = reject_rtp_start
+        self.thumbnail_body = thumbnail_body
+        self.thumbnail_content_type = thumbnail_content_type
         self.requests: list[RecordedRequest] = []
         self.settings = {
             "iso": {"value": "800", "ability": ["100", "800", "1600"]},
@@ -186,6 +191,8 @@ class FakeCcapiTransport:
                 else "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG"
             )
             return _json_response({"path": [media_path]})
+        if method == "GET" and path.endswith("IMG_0001.JPG?kind=thumbnail"):
+            return CcapiResponse(200, {"content-type": self.thumbnail_content_type}, self.thumbnail_body)
         if method == "DELETE" and path.startswith("/ccapi/ver100/contents/"):
             return CcapiResponse(204, {}, b"")
         if (
@@ -301,11 +308,11 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.TAP_FOCUS,
         CameraFeature.CLICK_WHITE_BALANCE,
         CameraFeature.FOCUS_DRIVE,
+        CameraFeature.MEDIA_THUMBNAIL,
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= set(capabilities.supported)
-    assert CameraFeature.MEDIA_THUMBNAIL not in capabilities.supported
-    assert CameraFeature.MEDIA_THUMBNAIL in capabilities.planned
+    assert CameraFeature.MEDIA_THUMBNAIL not in capabilities.planned
     assert next(item for item in capabilities.settings if item.key == "shutter").values == ["1/50", "1/100"]
     assert next(item for item in capabilities.settings if item.key == "stillimagequality.raw").values == [
         "none",
@@ -371,6 +378,9 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     media = session.list_media()
     assert media[0].name == "IMG_0001.JPG"
     assert "/" not in media[0].id
+    thumbnail, thumbnail_type = session.media_thumbnail(media[0].id)
+    assert thumbnail == JPEG
+    assert thumbnail_type == "image/jpeg"
     item, chunks = session.download_media(media[0].id)
     assert item.size_bytes == len(MEDIA)
     assert b"".join(chunks) == MEDIA
@@ -393,6 +403,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.LIVE_VIEW,
         CameraFeature.LIVE_VIEW_JPEG_POLLING,
         CameraFeature.MEDIA_BROWSER,
+        CameraFeature.MEDIA_THUMBNAIL,
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= observed
@@ -767,6 +778,29 @@ def test_ccapi_media_rejects_cross_origin_camera_paths() -> None:
     assert failure.value.code == "INVALID_CAMERA_RESOURCE"
 
 
+@pytest.mark.parametrize(
+    ("body", "content_type", "expected_code"),
+    [
+        (b'{"message":"not an image"}', "application/json", "INVALID_MEDIA_THUMBNAIL"),
+        (b"x" * (MAX_MEDIA_THUMBNAIL_BYTES + 1), "image/jpeg", "CCAPI_RESPONSE_TOO_LARGE"),
+    ],
+    ids=["text", "oversized"],
+)
+def test_ccapi_thumbnail_rejects_text_and_oversized_payloads(
+    body: bytes,
+    content_type: str,
+    expected_code: str,
+) -> None:
+    transport = FakeCcapiTransport(thumbnail_body=body, thumbnail_content_type=content_type)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+    item = session.list_media()[0]
+
+    with pytest.raises(BridgeError) as failure:
+        session.media_thumbnail(item.id)
+
+    assert failure.value.code == expected_code
+
+
 def test_ccapi_url_validation_rejects_credentials_and_non_origin_paths() -> None:
     assert normalize_base_url(" HTTP://192.168.1.2:8080/ ") == "http://192.168.1.2:8080"
     with pytest.raises(BridgeError, match="credentials"):
@@ -814,6 +848,9 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
         )
         session_id = created.json()["id"]
         capabilities = client.get(f"/v1/session/{session_id}/capabilities", headers=headers)
+        media = client.get(f"/v1/session/{session_id}/media", headers=headers)
+        media_id = media.json()["items"][0]["id"]
+        thumbnail = client.get(f"/v1/session/{session_id}/media/{media_id}/thumbnail", headers=headers)
         live_started = client.post(
             f"/v1/session/{session_id}/liveview/start",
             headers=headers,
@@ -849,6 +886,10 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert "TAP_FOCUS" in capabilities.json()["supported"]
     assert "CLICK_WHITE_BALANCE" in capabilities.json()["supported"]
     assert "FOCUS_DRIVE" in capabilities.json()["supported"]
+    assert "MEDIA_THUMBNAIL" in capabilities.json()["supported"]
+    assert thumbnail.content == JPEG
+    assert thumbnail.headers["content-type"].startswith("image/jpeg")
+    assert thumbnail.headers["cache-control"] == "private, no-store, max-age=0"
     assert focused.json() == {"accepted": True, "x": 0.4, "y": 0.6}
     assert white_balanced.json()["connected"] is True
     assert driven.json() == {"accepted": True, "direction": "NEAR", "step": "MEDIUM"}

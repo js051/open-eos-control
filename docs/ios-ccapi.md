@@ -9,7 +9,7 @@
 - Still capture, independent AF-ON through advertised Canon start/stop or a balanced half-press fallback, explicit timed half-press, recording, Tap AF, and Click White Balance only when supported
 - JPEG Live View only when discovery advertises a complete start/frame/stop lifecycle, with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
 - Canon RTP H.264 Live View only when discovery advertises `GET rtpsessiondesc` and `POST rtp` and the App supplies a same-subnet camera-Wi-Fi IPv4 receiver; the core validates SDP, RFC 3550 packets and RFC 6184 single NAL/STAP-A/FU-A access units, owns exact start/stop cleanup, and falls back to JPEG for AUTO startup failures
-- Bounded, same-origin media traversal and file-backed downloads with Canon main-file query fallbacks; text/JSON metadata is rejected even when returned with HTTP 2xx
+- Bounded, same-origin media traversal, Canon sample-backed `?kind=thumbnail` previews, and file-backed downloads with Canon main-file query fallbacks; text/JSON metadata is rejected even when returned with HTTP 2xx
 - Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
 - Basic Authentication held by the client instance and versioned diagnostic output that redacts credentials and camera serials
 - Simulator mode and injectable HTTP transport for deterministic tests

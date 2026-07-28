@@ -138,7 +138,6 @@ data class CapabilityMatrix(
                 CameraFeature.AUTOFOCUS to
                     "The camera must advertise CCAPI POST autofocus or a verified manual half-press operation.",
                 CameraFeature.FOCUS_DRIVE to "The camera must advertise the verified CCAPI POST drivefocus operation.",
-                CameraFeature.MEDIA_THUMBNAIL to "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
             ),
         )
 

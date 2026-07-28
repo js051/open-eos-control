@@ -12,7 +12,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import BinaryIO, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from .errors import BridgeError, unsupported
@@ -54,6 +54,7 @@ MAX_RTP_SESSION_DESCRIPTION_BYTES = 64 * 1024
 MAX_MEDIA_ITEMS = 500
 MAX_MEDIA_PAGES = 100
 MAX_MEDIA_TREE_DEPTH = 4
+MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 TRANSFER_CHUNK_BYTES = 64 * 1024
@@ -528,7 +529,13 @@ class CcapiSession:
             if self._operation("POST", "/shooting/control/drivefocus"):
                 supported.add(CameraFeature.FOCUS_DRIVE)
             if self._supports("GET", "/contents"):
-                supported.update({CameraFeature.MEDIA_BROWSER, CameraFeature.MEDIA_DOWNLOAD})
+                supported.update(
+                    {
+                        CameraFeature.MEDIA_BROWSER,
+                        CameraFeature.MEDIA_THUMBNAIL,
+                        CameraFeature.MEDIA_DOWNLOAD,
+                    }
+                )
             if self._supports_media_delete():
                 supported.add(CameraFeature.MEDIA_DELETE)
 
@@ -573,9 +580,6 @@ class CcapiSession:
                     ),
                     CameraFeature.CLICK_WHITE_BALANCE.value: (
                         "The camera must advertise POST clickwb and detailed Live View metadata for Click WB."
-                    ),
-                    CameraFeature.MEDIA_THUMBNAIL.value: (
-                        "No verified Canon CCAPI thumbnail resource is advertised by this camera."
                     ),
                 },
                 live_view=(
@@ -1077,12 +1081,51 @@ class CcapiSession:
             )
 
     def media_thumbnail(self, media_id: str) -> tuple[bytes, str]:
-        del media_id
-        raise unsupported(
-            CameraFeature.MEDIA_THUMBNAIL.value,
-            self.engine_name,
-            "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
-        )
+        with self._lock:
+            self._ensure_initialized()
+            if not self._supports("GET", "/contents"):
+                raise unsupported(CameraFeature.MEDIA_THUMBNAIL.value, self.engine_name)
+            path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+            parsed = urlsplit(path)
+            thumbnail_path = urlunsplit(("", "", parsed.path, urlencode({"kind": "thumbnail"}), ""))
+            response = self._request(
+                "GET",
+                thumbnail_path,
+                headers={"Accept": "image/*,application/octet-stream;q=0.5", "Cache-Control": "no-cache"},
+                max_bytes=MAX_MEDIA_THUMBNAIL_BYTES,
+            )
+            if len(response.body) > MAX_MEDIA_THUMBNAIL_BYTES:
+                raise BridgeError(
+                    "CCAPI_RESPONSE_TOO_LARGE",
+                    f"The camera thumbnail exceeded the {MAX_MEDIA_THUMBNAIL_BYTES}-byte safety limit.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_THUMBNAIL.value,
+                    engine=self.engine_name,
+                )
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
+            detected_type = _image_content_type(response.body)
+            if not response.body:
+                raise BridgeError(
+                    "INVALID_MEDIA_THUMBNAIL",
+                    "Camera returned an empty media thumbnail.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_THUMBNAIL.value,
+                    engine=self.engine_name,
+                )
+            if (
+                _is_text_content_type(content_type)
+                or _looks_like_text_payload(response.body)
+                or (not content_type.startswith("image/") and detected_type is None)
+            ):
+                raise BridgeError(
+                    "INVALID_MEDIA_THUMBNAIL",
+                    "Camera did not return a recognized image thumbnail.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_THUMBNAIL.value,
+                    engine=self.engine_name,
+                )
+            self._observed.add(CameraFeature.MEDIA_THUMBNAIL)
+            return response.body, content_type if content_type.startswith("image/") else detected_type or "image/jpeg"
 
     def delete_media(self, media_id: str) -> None:
         with self._lock:
@@ -1524,7 +1567,10 @@ class CcapiSession:
                     status_code=502,
                     engine=self.engine_name,
                 )
-        if parsed.fragment or not parsed.path.startswith("/ccapi/"):
+        decoded_segments = unquote(parsed.path).split("/")
+        if parsed.fragment or any(segment in {".", ".."} for segment in decoded_segments) or not parsed.path.startswith(
+            "/ccapi/"
+        ):
             raise BridgeError(
                 "INVALID_CAMERA_RESOURCE",
                 "Camera returned an invalid CCAPI media path.",
@@ -1954,3 +2000,20 @@ def _media_kind(path: str) -> str:
 def _is_text_content_type(value: str) -> bool:
     normalized = value.casefold()
     return normalized.startswith("text/") or "json" in normalized or "html" in normalized
+
+
+def _image_content_type(value: bytes) -> str | None:
+    if value.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if value.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if value.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(value) >= 12 and value.startswith(b"RIFF") and value[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _looks_like_text_payload(value: bytes) -> bool:
+    first = value.lstrip()[:1]
+    return first in {b"{", b"[", b"<"}

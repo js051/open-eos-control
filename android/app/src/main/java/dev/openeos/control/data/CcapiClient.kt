@@ -11,6 +11,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -453,6 +454,7 @@ class CcapiClient(
             }
             if (supportsApi("GET", "/contents")) {
                 supportedFeatures.add(CameraFeature.MEDIA_BROWSER)
+                supportedFeatures.add(CameraFeature.MEDIA_THUMBNAIL)
                 supportedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
             }
             if (supportsMediaDelete()) supportedFeatures.add(CameraFeature.MEDIA_DELETE)
@@ -727,6 +729,53 @@ class CcapiClient(
         val items = if (isRealCamera) listRealMedia() else listSimulatorMedia()
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
         return items
+    }
+
+    suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = withContext(Dispatchers.IO) {
+        if (isRealCamera && !supportsApi("GET", "/contents")) {
+            error("Camera did not advertise CCAPI media browsing.")
+        }
+        val path = if (isRealCamera) {
+            normalizeCameraResource(item.id).substringBefore('?')
+        } else {
+            val encodedId = URLEncoder.encode(item.id, StandardCharsets.UTF_8.name()).replace("+", "%20")
+            "/ccapi/media/$encodedId"
+        }
+        val thumbnailUrl = "$baseUrl$path".toHttpUrl().newBuilder()
+            .query(null)
+            .addQueryParameter("kind", "thumbnail")
+            .build()
+        val request = Request.Builder()
+            .url(thumbnailUrl)
+            .header("Accept", "image/*,application/octet-stream;q=0.5")
+            .header("Cache-Control", "no-cache")
+            .get()
+            .build()
+
+        httpClient.newCall(request).execute().use { response ->
+            val body = requireNotNull(response.body) { "Camera returned an empty thumbnail response." }
+            if (!response.isSuccessful) {
+                val preview = body.string().take(MAX_ERROR_BODY_CHARS)
+                error("Camera thumbnail request failed: HTTP ${response.code}: $preview")
+            }
+            val contentLength = body.contentLength()
+            check(contentLength < 0L || contentLength <= MAX_MEDIA_THUMBNAIL_BYTES) {
+                "Camera thumbnail exceeded $MAX_MEDIA_THUMBNAIL_BYTES bytes."
+            }
+            val bytes = body.byteStream().readBounded(MAX_MEDIA_THUMBNAIL_BYTES)
+            check(bytes.isNotEmpty()) { "Camera returned an empty thumbnail." }
+            val responseContentType = response.header("content-type")?.substringBefore(';')?.trim()
+            check(!responseContentType.isTextLikeContentType() && !bytes.looksLikeTextPayload()) {
+                "Camera returned text instead of an image thumbnail."
+            }
+            val contentType = responseContentType
+                ?.takeIf { it.startsWith("image/", ignoreCase = true) }
+                ?: bytes.detectImageContentType()
+                ?: error("Camera did not return a recognized image thumbnail.")
+            CameraMediaThumbnail(item = item, bytes = bytes, contentType = contentType).also {
+                observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL)
+            }
+        }
     }
 
     suspend fun downloadMedia(
@@ -1261,6 +1310,9 @@ class CcapiClient(
 
     private fun normalizeCameraResource(value: String): String {
         val parsed = URI(value)
+        require(parsed.fragment == null && !parsed.path.hasTraversalSegment()) {
+            "Camera returned an invalid media path: $value"
+        }
         val normalized = if (parsed.isAbsolute) {
             val camera = URI(baseUrl)
             require(parsed.hasSameOriginAs(camera)) {
@@ -1882,10 +1934,34 @@ class CcapiClient(
         const val MAX_MEDIA_ITEMS = 500
         const val MAX_MEDIA_PAGES = 100
         const val MAX_MEDIA_TREE_DEPTH = 4
+        const val MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
         const val MEDIA_TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
         const val MEDIA_SNIFF_BYTES = 64L
     }
+}
+
+private fun InputStream.readBounded(maxBytes: Int): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(64 * 1024)
+    while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        check(output.size() <= maxBytes - count) {
+            "Camera thumbnail exceeded $maxBytes bytes."
+        }
+        output.write(buffer, 0, count)
+    }
+    return output.toByteArray()
+}
+
+private fun ByteArray.detectImageContentType(): String? = when {
+    size >= 3 && this[0] == 0xFF.toByte() && this[1] == 0xD8.toByte() && this[2] == 0xFF.toByte() -> "image/jpeg"
+    size >= 8 && copyOfRange(0, 8).contentEquals(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)) -> "image/png"
+    size >= 6 && String(this, 0, 6, StandardCharsets.US_ASCII) in setOf("GIF87a", "GIF89a") -> "image/gif"
+    size >= 12 && String(this, 0, 4, StandardCharsets.US_ASCII) == "RIFF" &&
+        String(this, 8, 4, StandardCharsets.US_ASCII) == "WEBP" -> "image/webp"
+    else -> null
 }
 
 private fun URI.effectivePort(): Int = when {
@@ -1957,6 +2033,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
             CameraFeature.AUTOFOCUS,
             CameraFeature.SHUTTER_HALF_PRESS,
             CameraFeature.MEDIA_BROWSER,
+            CameraFeature.MEDIA_THUMBNAIL,
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
         ),
