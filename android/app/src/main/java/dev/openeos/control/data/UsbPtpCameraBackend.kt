@@ -111,6 +111,13 @@ class UsbPtpCameraBackend(
             observedFeatures.add(CameraFeature.BATTERY_STATUS)
         }
         if (storageResult?.isSuccess == true) observedFeatures.add(CameraFeature.STORAGE_STATUS)
+        val standardFreeImages = storageSnapshot.mapNotNull {
+            it.freeSpaceImages.takeIf { value -> value >= 0 && value != 0xFFFF_FFFFL }
+        }
+            .takeIf(List<Long>::isNotEmpty)?.sum()
+        val freeImages = CanonEosPtp.availableShots(
+            canonPropertyState(CanonEosPropertyCode.AVAILABLE_SHOTS).currentValue,
+        ) ?: standardFreeImages
         return CameraStatus(
             connected = true,
             batteryLevel = batteryLevel,
@@ -138,10 +145,7 @@ class UsbPtpCameraBackend(
             ),
             storageTotalBytes = storageSnapshot.sumUnsignedBytesOrNull(PtpStorageInfo::maxCapacityBytes),
             storageFreeBytes = storageSnapshot.sumUnsignedBytesOrNull(PtpStorageInfo::freeSpaceBytes),
-            storageFreeImages = storageSnapshot.mapNotNull {
-                it.freeSpaceImages.takeIf { value -> value >= 0 && value != 0xFFFF_FFFFL }
-            }
-                .takeIf(List<Long>::isNotEmpty)?.sum(),
+            storageFreeImages = freeImages,
             storageDeviceCount = storageSnapshot.size,
             rawBatteryJson = batteryPropertyJson(batteryLevel),
             rawStorageJson = storageError?.let(::storageErrorJson) ?: storageSnapshot.toStorageJson(),

@@ -167,7 +167,7 @@ Basic Auth is sent preemptively when a username is supplied. The Authorization v
 The adapter derives capabilities from `--abilities` and `--list-all-config` instead of assuming every EOS body supports every command:
 
 - discovery: `--auto-detect`
-- identity and status: `--summary`, `--list-all-config`, `--storage-info`
+- identity and status: `--summary`, `--list-all-config`, `--storage-info`; remaining shots prefer the read-only `/main/status/availableshots` value and fall back to a valid storage summary count
 - settings: camera-advertised values through `--set-config-value`; the R6 Mark III mapping includes WB A/B shifts, SD and CF/CFexpress image quality, aspect ratio, power-zoom speed, and Auto Power Off in addition to the existing exposure, AF, drive, metering, Picture Style, color, noise-reduction, AEB and movie controls
 - still capture: select an advertised writable `Memory card` capture target first, then run `--trigger-capture`, falling back to `--capture-image` only when advertised
 - half-press: advertised `eosremoterelease` press/release values with guaranteed release

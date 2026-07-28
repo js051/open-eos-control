@@ -948,6 +948,8 @@ class GPhoto2Session:
             battery_text = self._config_value("batterylevel")
             battery_level = _battery_level(battery_text)
             storage = self._storage
+            available_shots = _parse_available_shots(self._config_value("availableshots"))
+            free_images = available_shots if available_shots is not None else storage.free_images
             recording_config = self._recording_config()
             if self._find_config(("batterylevel",)):
                 self._observed.add(CameraFeature.BATTERY_STATUS)
@@ -964,7 +966,7 @@ class GPhoto2Session:
                     available=storage.available,
                     total_bytes=storage.total_bytes,
                     free_bytes=storage.free_bytes,
-                    free_images=storage.free_images,
+                    free_images=free_images,
                     devices=storage.devices,
                 ),
                 exposure=ExposureState(
@@ -981,6 +983,11 @@ class GPhoto2Session:
                     "lastError": self._last_error,
                     "liveViewTransport": self._live_view_transport,
                     "liveViewFallbackReason": self._live_view_fallback_reason,
+                    "remainingShotsSource": (
+                        "gphoto2-config:/main/status/availableshots"
+                        if available_shots is not None
+                        else "gphoto2-storage-info" if storage.free_images is not None else None
+                    ),
                 },
             )
 
@@ -1653,6 +1660,16 @@ def _parse_float(value: str) -> float | None:
         return float(value)
     except ValueError:
         return None
+
+
+def _parse_available_shots(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value.strip(), 10)
+    except ValueError:
+        return None
+    return parsed if 0 <= parsed < 0xFFFF_FFFF else None
 
 
 def _format_number(value: float) -> str:

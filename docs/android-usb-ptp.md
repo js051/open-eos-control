@@ -7,7 +7,7 @@ The Android wired backend is split into a standards-based core, a small Android 
 1. Android's Canon USB attach filter can launch the app with temporary permission; `UsbPtpDiagnosticScanner` also enumerates already-attached devices and requests permission explicitly.
 2. `AndroidUsbPtpTransport` selects a USB Still Image interface with class/subclass/protocol `06/01/01`, requires bulk IN and OUT endpoints, opens the device, and claims the interface.
 3. `PtpSession` sends `GetDeviceInfo`, opens session ID 1, and assigns monotonically increasing transaction IDs to subsequent operations.
-4. The backend maps standard DeviceInfo, storage and object datasets into the shared camera models, preserving per-session card count, total/free bytes and remaining-shot estimates while leaving PTP unknown sentinels unset.
+4. The backend maps standard DeviceInfo, storage and object datasets into the shared camera models, preserving per-session card count and total/free bytes. Remaining shots prefer Canon EOS `AvailableShots (0xD11B, UINT32)` when emitted by the camera and otherwise fall back to valid standard storage values; PTP and Canon unknown sentinels remain unset.
 5. Advertised standard device properties are decoded from `GetDevicePropDesc (0x1014)`, refreshed with `GetDevicePropValue (0x1015)`, and written through the command/data/response form of `SetDevicePropValue (0x1016)`.
 6. Media downloads use `GetObject` and stream each USB chunk directly to the caller's `OutputStream`; deletion uses the standard `DeleteObject` command only when DeviceInfo advertises it.
 7. Generic no-data, data-in, and data-out operation helpers preserve the same mutex, transaction-ID and response validation rules for vendor operations.
@@ -26,6 +26,7 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 
 - Identity and USB diagnostics are available after a valid DeviceInfo response.
 - Storage requires both `GetStorageIDs (0x1004)` and `GetStorageInfo (0x1005)`.
+- Canon EOS `AvailableShots (0xD11B)` is read-only status evidence, not a writable setting. A valid event value takes precedence because the pinned R6 Mark III snapshot reports `-1` for standard per-card image counts while exposing the camera's remaining-shot count through this property.
 - Media browsing requires `GetStorageIDs`, `GetObjectHandles (0x1007)`, and `GetObjectInfo (0x1008)`.
 - Media download requires `GetObject (0x1009)`.
 - Media deletion requires `DeleteObject (0x100B)` and a user confirmation; the list changes only after the exact object handle succeeds.

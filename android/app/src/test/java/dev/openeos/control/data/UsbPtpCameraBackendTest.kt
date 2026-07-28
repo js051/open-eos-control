@@ -275,6 +275,8 @@ class UsbPtpCameraBackendTest {
         assertTrue("movierecordtarget" in capabilities.evidence.writableSettings)
         assertTrue(CanonEosPtp.settingSpecs.all { it.key in capabilities.evidence.writableSettings })
         assertEquals("Manual", initialStatus.mode)
+        assertEquals(46_822L, initialStatus.storageFreeImages)
+        assertTrue(initialStatus.rawTransportJson.contains("\"code\":\"0xD11B\""))
         assertEquals(listOf("100", "400", "800"), capabilities.iso)
         assertEquals(listOf("1/30", "1/50"), capabilities.shutter)
         assertEquals(listOf("2.8", "4"), capabilities.aperture)
@@ -550,6 +552,21 @@ class UsbPtpCameraBackendTest {
             }
         )
         assertTrue(transport.closed)
+    }
+
+    @Test
+    fun canonAvailableShotsUnknownSentinelFallsBackToStandardStorageCount() = runTest {
+        val transport = CanonEosScriptedTransport(availableShots = -1)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val status = backend.status()
+
+        assertEquals(1_234L, status.storageFreeImages)
+        backend.close()
     }
 
     @Test
@@ -998,6 +1015,7 @@ class UsbPtpCameraBackendTest {
         private val advertiseDedicatedAutofocus: Boolean = true,
         private val advertiseRemoteRelease: Boolean = true,
         private val rejectOperationCode: Int? = null,
+        private val availableShots: Int = 46_822,
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
         val sentContainers = mutableListOf<PtpContainer>()
@@ -1047,6 +1065,7 @@ class UsbPtpCameraBackendTest {
                             advertiseAdvancedSettings,
                             captureDestination,
                             advertiseCardCaptureDestination,
+                            availableShots,
                         ).also {
                             initialPropertyEventsPending = false
                         }
@@ -1155,6 +1174,7 @@ class UsbPtpCameraBackendTest {
         advertiseAdvancedSettings: Boolean,
         captureDestination: Int,
         advertiseCardCaptureDestination: Boolean,
+        availableShots: Int,
     ): ByteArray {
         var payload = eosPropertyValue(CanonEosPropertyCode.ISO_SPEED, 0x58) +
             eosAvailableValues(CanonEosPropertyCode.ISO_SPEED, 0x48, 0x58, 0x60) +
@@ -1164,6 +1184,7 @@ class UsbPtpCameraBackendTest {
             eosAvailableValues(CanonEosPropertyCode.APERTURE, 0x20, 0x28) +
             eosPropertyValue(CanonEosPropertyCode.WHITE_BALANCE, 0) +
             eosAvailableValues(CanonEosPropertyCode.WHITE_BALANCE, 0, 1, 8)
+        payload += eosPropertyValue(CanonEosPropertyCode.AVAILABLE_SHOTS, availableShots)
         payload += eosPropertyValue(CanonEosPropertyCode.CAPTURE_DESTINATION, captureDestination)
         payload += eosAvailableValues(
             CanonEosPropertyCode.CAPTURE_DESTINATION,
