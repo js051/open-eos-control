@@ -85,8 +85,8 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
-        XCTAssertFalse(snapshot.capabilities.matrix.supports(.mediaThumbnail))
-        XCTAssertTrue(snapshot.capabilities.matrix.planned.contains(.mediaThumbnail))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaThumbnail))
+        XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.mediaThumbnail))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.evidence.source, "GET /ccapi")
         XCTAssertEqual(snapshot.capabilities.evidence.protocolVersions, ["ver100"])
@@ -154,19 +154,60 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(remainingResponses, 0)
     }
 
-    func testDirectCCAPIThumbnailIsExplicitlyUnsupportedWithoutARequest() async throws {
+    func testDirectCCAPIThumbnailUsesCanonKindQueryAndSniffsImageType() async throws {
         let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let path = "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG"
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0x01, 0xFF, 0xD9])
+        await transport.enqueue(
+            path: "\(path)?kind=thumbnail",
+            headers: ["content-type": "application/octet-stream"],
+            body: jpeg
+        )
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
-        let item = CameraMediaItem(id: "ccapi:invalid", name: "IMG_0001.JPG", kind: "image")
+        let item = CameraMediaItem(id: "\(path)?kind=main", name: "IMG_0001.JPG", kind: "image")
+
+        let thumbnail = try await client.mediaThumbnail(item)
+
+        XCTAssertEqual(thumbnail.data, jpeg)
+        XCTAssertEqual(thumbnail.contentType, "image/jpeg")
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi", "\(path)?kind=thumbnail"])
+    }
+
+    func testDirectCCAPIThumbnailRejectsOversizedResponse() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let path = "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG"
+        await transport.enqueue(
+            path: "\(path)?kind=thumbnail",
+            headers: ["content-type": "image/jpeg"],
+            body: Data(repeating: 0x01, count: 8 * 1024 * 1024 + 1)
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
         do {
-            _ = try await client.mediaThumbnail(item)
-            XCTFail("Expected unsupported media thumbnail")
+            _ = try await client.mediaThumbnail(CameraMediaItem(id: path, name: "IMG_0001.JPG", kind: "image"))
+            XCTFail("Expected bounded thumbnail failure")
         } catch {
-            XCTAssertEqual(error as? CCAPIError, .unsupported(.mediaThumbnail))
+            XCTAssertTrue(error.localizedDescription.contains("exceeded"))
         }
-        let requestCount = await transport.requests().count
-        XCTAssertEqual(requestCount, 0)
+    }
+
+    func testDirectCCAPIThumbnailRejectsCrossOriginBeforeFetching() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+        let value = "http://attacker.invalid/ccapi/ver100/contents/IMG_0001.JPG"
+
+        do {
+            _ = try await client.mediaThumbnail(CameraMediaItem(id: value, name: "IMG_0001.JPG", kind: "image"))
+            XCTFail("Expected same-origin validation")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .outsideCameraOrigin(value))
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi"])
     }
 
     func testStillCaptureUsesAdvertisedPostAndAutofocusPayload() async throws {

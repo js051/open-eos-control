@@ -50,6 +50,7 @@ public actor CCAPIClient {
     private static let maximumMediaItems = 500
     private static let maximumMediaPages = 100
     private static let maximumMediaTreeDepth = 4
+    private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
     private static let maximumCapabilityEvidenceItems = 256
     private static let maximumCapabilityEvidenceItemCharacters = 512
     private static let maximumRTPSessionDescriptionBytes = 64 * 1024
@@ -285,7 +286,7 @@ public actor CCAPIClient {
         if supportsCoordinateClickWhiteBalance() { supported.insert(.clickWhiteBalance) }
         if focusDriveOperation() != nil { supported.insert(.focusDrive) }
         if supports(.get, suffix: "/contents") {
-            supported.formUnion([.mediaBrowser, .mediaDownload])
+            supported.formUnion([.mediaBrowser, .mediaThumbnail, .mediaDownload])
         }
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
 
@@ -307,7 +308,6 @@ public actor CCAPIClient {
                     .tapFocus: "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
                     .clickWhiteBalance: "The camera must advertise POST clickwb and detailed Live View metadata for Click WB.",
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
-                    .mediaThumbnail: "No verified Canon CCAPI thumbnail resource is advertised by this camera.",
                 ]
             ),
             liveView: LiveViewCapabilities(
@@ -763,8 +763,51 @@ public actor CCAPIClient {
     }
 
     public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
-        _ = item
-        throw CCAPIError.unsupported(.mediaThumbnail)
+        try await ensureInitialized()
+        let basePath: String
+        if resolvedMode == .simulator {
+            basePath = "/ccapi/media/\(Self.encodePathComponent(item.id))"
+        } else {
+            guard supports(.get, suffix: "/contents") else {
+                throw CCAPIError.unsupported(.mediaThumbnail)
+            }
+            basePath = try normalizeCameraResource(item.id).components(separatedBy: "?")[0]
+        }
+        guard var components = URLComponents(string: basePath) else {
+            throw CCAPIError.invalidResponse("Invalid camera media path: \(basePath)")
+        }
+        components.queryItems = [URLQueryItem(name: "kind", value: "thumbnail")]
+        guard let thumbnailPath = components.string else {
+            throw CCAPIError.invalidResponse("Could not build the camera thumbnail path.")
+        }
+        var thumbnailRequest = try request(path: thumbnailPath, method: .get)
+        thumbnailRequest.setValue("image/*,application/octet-stream;q=0.5", forHTTPHeaderField: "Accept")
+        thumbnailRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let response = try await transport.send(thumbnailRequest)
+        try validate(response, request: thumbnailRequest)
+        guard !response.body.isEmpty else {
+            throw CCAPIError.invalidResponse("Camera returned an empty media thumbnail.")
+        }
+        guard response.body.count <= Self.maximumMediaThumbnailBytes else {
+            throw CCAPIError.invalidResponse(
+                "Camera thumbnail exceeded \(Self.maximumMediaThumbnailBytes) bytes."
+            )
+        }
+        let responseContentType = response.header("content-type")?
+            .components(separatedBy: ";")[0]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let detectedContentType = Self.imageContentType(response.body)
+        guard !Self.isTextContentType(responseContentType),
+              !Self.looksLikeTextPayload(response.body),
+              responseContentType?.hasPrefix("image/") == true || detectedContentType != nil else {
+            throw CCAPIError.invalidResponse("Camera did not return a recognized image thumbnail.")
+        }
+        let contentType = responseContentType?.hasPrefix("image/") == true
+            ? responseContentType
+            : detectedContentType
+        observedFeatures.insert(.mediaThumbnail)
+        return CameraMediaThumbnail(item: item, data: response.body, contentType: contentType)
     }
 
     public func deleteMedia(_ item: CameraMediaItem) async throws {
@@ -1468,7 +1511,7 @@ public actor CCAPIClient {
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
             .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
-            .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaDownload,
+            .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaDownload,
             .mediaDelete,
         ]
         return CameraCapabilities(
@@ -1616,6 +1659,9 @@ public actor CCAPIClient {
             guard var components = URLComponents(url: absolute, resolvingAgainstBaseURL: false) else {
                 throw CCAPIError.invalidResponse("Camera returned an invalid media URL: \(value)")
             }
+            guard components.fragment == nil, !Self.hasTraversalSegment(components.path) else {
+                throw CCAPIError.invalidResponse("Invalid media path: \(value)")
+            }
             components.scheme = nil
             components.host = nil
             components.port = nil
@@ -1625,7 +1671,12 @@ public actor CCAPIClient {
             guard normalized.hasPrefix("/ccapi/") else { throw CCAPIError.invalidResponse("Invalid media path: \(value)") }
             return normalized
         }
-        guard value.hasPrefix("/ccapi/") else { throw CCAPIError.invalidResponse("Invalid media path: \(value)") }
+        guard let components = URLComponents(string: value),
+              components.fragment == nil,
+              !Self.hasTraversalSegment(components.path),
+              value.hasPrefix("/ccapi/") else {
+            throw CCAPIError.invalidResponse("Invalid media path: \(value)")
+        }
         return value
     }
 
@@ -1780,6 +1831,29 @@ public actor CCAPIClient {
         guard let text = String(data: data, encoding: .utf8) else { return false }
         guard let first = text.first(where: { !$0.isWhitespace }) else { return false }
         return first == "{" || first == "[" || first == "<"
+    }
+
+    private static func imageContentType(_ data: Data) -> String? {
+        let bytes = [UInt8](data.prefix(12))
+        if bytes.count >= 3, bytes[0] == 0xFF, bytes[1] == 0xD8, bytes[2] == 0xFF { return "image/jpeg" }
+        if bytes.count >= 8,
+           bytes[0] == 0x89, bytes[1] == 0x50, bytes[2] == 0x4E, bytes[3] == 0x47,
+           bytes[4] == 0x0D, bytes[5] == 0x0A, bytes[6] == 0x1A, bytes[7] == 0x0A {
+            return "image/png"
+        }
+        if bytes.count >= 6, [UInt8](bytes[0..<6]) == Array("GIF87a".utf8) || [UInt8](bytes[0..<6]) == Array("GIF89a".utf8) {
+            return "image/gif"
+        }
+        if bytes.count >= 12,
+           [UInt8](bytes[0..<4]) == Array("RIFF".utf8),
+           [UInt8](bytes[8..<12]) == Array("WEBP".utf8) {
+            return "image/webp"
+        }
+        return nil
+    }
+
+    private static func hasTraversalSegment(_ path: String) -> Bool {
+        path.split(separator: "/", omittingEmptySubsequences: false).contains { $0 == "." || $0 == ".." }
     }
 
     private static func isMediaPath(_ value: String) -> Bool {

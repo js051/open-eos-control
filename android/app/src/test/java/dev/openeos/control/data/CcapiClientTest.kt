@@ -426,8 +426,8 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
         assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
-        assertTrue(!capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
-        assertTrue(capabilities.matrix.isPlanned(CameraFeature.MEDIA_THUMBNAIL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
+        assertTrue(!capabilities.matrix.isPlanned(CameraFeature.MEDIA_THUMBNAIL))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DOWNLOAD))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
@@ -1116,6 +1116,70 @@ class CcapiClientTest {
         assertEquals(0L, progress.first().bytesTransferred)
         assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
         assertEquals(bytes.size.toLong(), progress.last().totalBytes)
+    }
+
+    @Test
+    fun mediaThumbnailUsesCanonKindQueryAndReturnsBoundedImage() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0x01, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(binaryResponse(jpeg, "application/octet-stream"))
+        client.initialize()
+        server.takeRequest()
+        val item = CameraMediaItem(
+            "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG?kind=main",
+            "IMG_0001.JPG",
+            "image",
+        )
+
+        val thumbnail = client.mediaThumbnail(item)
+
+        assertEquals("/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG?kind=thumbnail", server.takeRequest().path)
+        assertArrayEquals(jpeg, thumbnail.bytes)
+        assertEquals("image/jpeg", thumbnail.contentType)
+        assertTrue(CameraFeature.MEDIA_THUMBNAIL in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun mediaThumbnailRejectsOversizedOrNonImageResponses() = runTest {
+        val item = CameraMediaItem("SIM_0001.PNG", "SIM_0001.PNG", "image")
+        server.enqueue(binaryResponse(ByteArray(8 * 1024 * 1024 + 1), "image/png"))
+
+        val oversized = runCatching { client.mediaThumbnail(item) }.exceptionOrNull()
+
+        assertTrue(oversized is IllegalStateException)
+        assertTrue(oversized?.message.orEmpty().contains("exceeded"))
+
+        server.enqueue(jsonResponse("""{"message":"not a thumbnail"}"""))
+        val text = runCatching { client.mediaThumbnail(item) }.exceptionOrNull()
+
+        assertTrue(text is IllegalStateException)
+        assertTrue(text?.message.orEmpty().contains("text instead of an image"))
+    }
+
+    @Test
+    fun mediaThumbnailRejectsCrossOriginAndTraversalPathsBeforeFetching() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
+        client.initialize()
+        server.takeRequest()
+        val outside = CameraMediaItem(
+            "http://attacker.invalid/ccapi/ver110/contents/IMG_0001.JPG",
+            "IMG_0001.JPG",
+            "image",
+        )
+        val traversal = CameraMediaItem(
+            "/ccapi/ver110/contents/%2e%2e/deviceinformation",
+            "deviceinformation",
+            "other",
+        )
+
+        val outsideFailure = runCatching { client.mediaThumbnail(outside) }.exceptionOrNull()
+        val traversalFailure = runCatching { client.mediaThumbnail(traversal) }.exceptionOrNull()
+
+        assertTrue(outsideFailure is IllegalArgumentException)
+        assertTrue(traversalFailure is IllegalArgumentException)
+        assertEquals(1, server.requestCount)
     }
 
     @Test

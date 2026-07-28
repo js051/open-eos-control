@@ -70,6 +70,14 @@ def test_unknown_media_returns_not_found() -> None:
     assert response.status_code == 404
 
 
+def test_media_thumbnail_uses_canon_kind_query() -> None:
+    response = client.get("/ccapi/media/SIM_0001.PNG?kind=thumbnail")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_media_delete_removes_only_the_requested_item() -> None:
     response = client.delete("/ccapi/media/SIM_0002.PNG")
     media = client.get("/ccapi/media")

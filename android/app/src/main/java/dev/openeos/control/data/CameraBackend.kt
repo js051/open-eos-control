@@ -166,6 +166,8 @@ class CcapiCameraBackend(
 
     override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
 
+    override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
+
     override suspend fun downloadMedia(
         item: CameraMediaItem,
         destination: OutputStream,
