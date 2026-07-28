@@ -5,6 +5,8 @@ object CanonEosOperationCode {
     const val SET_REMOTE_MODE = 0x9114
     const val SET_EVENT_MODE = 0x9115
     const val GET_EVENT = 0x9116
+    const val TRANSFER_COMPLETE = 0x9117
+    const val PC_HDD_CAPACITY = 0x911A
     const val REMOTE_RELEASE_ON = 0x9128
     const val REMOTE_RELEASE_OFF = 0x9129
     const val GET_VIEWFINDER_DATA = 0x9153
@@ -62,6 +64,14 @@ data class CanonEosPropertyUpdate(
     val propertyCode: Int,
     val currentValue: Long? = null,
     val availableValues: List<Long>? = null,
+)
+
+data class CanonEosObjectTransferRequest(
+    val eventCode: Int,
+    val handle: Long,
+    val objectFormat: Int,
+    val sizeBytes: Long,
+    val filename: String?,
 )
 
 data class CanonEosPropertyOption(
@@ -149,6 +159,18 @@ object CanonEosPtp {
         CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64_LFN,
     )
 
+    private val cardCapturedObjectEvents = setOf(
+        CanonEosEventCode.OBJECT_ADDED_EX,
+        CanonEosEventCode.OBJECT_ADDED_EX_64,
+        CanonEosEventCode.OBJECT_ADDED_EX_64_LFN,
+    )
+
+    private val objectTransferEvents = setOf(
+        CanonEosEventCode.REQUEST_OBJECT_TRANSFER,
+        CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64,
+        CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64_LFN,
+    )
+
     fun isCanonEos(info: PtpDeviceInfo): Boolean = info.vendorExtensionId == VENDOR_EXTENSION_ID
 
     fun supportsRemotePreparation(info: PtpDeviceInfo): Boolean =
@@ -229,6 +251,41 @@ object CanonEosPtp {
 
     fun containsCapturedObjectEvent(payload: ByteArray): Boolean =
         eventCodes(payload).any { it in capturedObjectEvents }
+
+    fun containsCardCapturedObjectEvent(payload: ByteArray): Boolean =
+        eventCodes(payload).any { it in cardCapturedObjectEvents }
+
+    fun objectTransferRequests(payload: ByteArray): List<CanonEosObjectTransferRequest> = buildList {
+        eventBlocks(payload).forEach { block ->
+            if (block.code !in objectTransferEvents) return@forEach
+            val minimumLength = if (block.code == CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64_LFN) {
+                OBJECT_TRANSFER_64_LFN_MIN_BYTES
+            } else {
+                OBJECT_TRANSFER_NAME_OFFSET + 1
+            }
+            if (block.length < minimumLength) {
+                malformedObjectTransferEvent(block, "object metadata")
+            }
+            val sizeBytes = payload.u32Le(block.offset + OBJECT_TRANSFER_SIZE_OFFSET)
+            val filename = if (block.code == CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64_LFN) {
+                null
+            } else {
+                payload.nullTerminatedAscii(
+                    offset = block.offset + OBJECT_TRANSFER_NAME_OFFSET,
+                    limit = block.offset + block.length,
+                )
+            }
+            add(
+                CanonEosObjectTransferRequest(
+                    eventCode = block.code,
+                    handle = payload.u32Le(block.offset + OBJECT_TRANSFER_HANDLE_OFFSET),
+                    objectFormat = payload.u16Le(block.offset + OBJECT_TRANSFER_FORMAT_OFFSET),
+                    sizeBytes = sizeBytes,
+                    filename = filename?.takeIf(String::isNotBlank),
+                )
+            )
+        }
+    }
 
     fun propertyUpdates(payload: ByteArray): List<CanonEosPropertyUpdate> = buildList {
         eventBlocks(payload).forEach { block ->
@@ -469,6 +526,12 @@ object CanonEosPtp {
                 "has an invalid $field payload (${block.length} bytes)."
         )
 
+    private fun malformedObjectTransferEvent(block: CanonEosEventBlock, field: String): Nothing =
+        throw PtpProtocolException(
+            "Canon EOS object-transfer event 0x${block.code.toString(16)} at byte ${block.offset} " +
+                "has invalid $field (${block.length} bytes)."
+        )
+
     private data class CanonEosEventBlock(
         val code: Int,
         val offset: Int,
@@ -481,6 +544,12 @@ object CanonEosPtp {
         val signed: Boolean = false,
         val selectableValues: Set<Long>? = null,
     )
+
+    private const val OBJECT_TRANSFER_HANDLE_OFFSET = 0x08
+    private const val OBJECT_TRANSFER_FORMAT_OFFSET = 0x0C
+    private const val OBJECT_TRANSFER_SIZE_OFFSET = 0x14
+    private const val OBJECT_TRANSFER_NAME_OFFSET = 0x1C
+    private const val OBJECT_TRANSFER_64_LFN_MIN_BYTES = 0x25
 
     private val isoLabels = mapOf(
         0x0000L to "Auto", 0x0001L to "Auto ISO", 0x0028L to "6", 0x0030L to "12",
@@ -811,6 +880,17 @@ private fun ByteArray.u32Le(offset: Int): Long =
         (this[offset + 1].toUByte().toLong() shl 8) or
         (this[offset + 2].toUByte().toLong() shl 16) or
         (this[offset + 3].toUByte().toLong() shl 24)
+
+private fun ByteArray.u16Le(offset: Int): Int =
+    this[offset].toUByte().toInt() or (this[offset + 1].toUByte().toInt() shl 8)
+
+private fun ByteArray.nullTerminatedAscii(offset: Int, limit: Int): String {
+    val end = (offset until limit).firstOrNull { this[it] == 0.toByte() }
+        ?: throw PtpProtocolException("Canon EOS object-transfer filename is not null terminated.")
+    return buildString(end - offset) {
+        for (index in offset until end) append(this@nullTerminatedAscii[index].toInt().and(0xFF).toChar())
+    }
+}
 
 private fun ByteArray.unsignedLe(offset: Int, size: Int): Long {
     require(size in 1..4)

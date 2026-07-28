@@ -63,6 +63,51 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun objectTransferParserMatchesPinnedCanonEosEventOffsets() {
+        val request = objectTransferBlock(
+            eventCode = CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64,
+            handle = 0xA1B2C3D4L,
+            objectFormat = PtpObjectFormat.CANON_CR3,
+            sizeBytes = 0x0123_4567L,
+            filename = "IMG_0042.CR3",
+        )
+
+        val parsed = CanonEosPtp.objectTransferRequests(request + block(type = 0, bytes = byteArrayOf())).single()
+
+        assertEquals(CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64, parsed.eventCode)
+        assertEquals(0xA1B2C3D4L, parsed.handle)
+        assertEquals(PtpObjectFormat.CANON_CR3, parsed.objectFormat)
+        assertEquals(0x0123_4567L, parsed.sizeBytes)
+        assertEquals("IMG_0042.CR3", parsed.filename)
+        assertFalse(CanonEosPtp.containsCardCapturedObjectEvent(request))
+    }
+
+    @Test
+    fun objectTransfer64LfnUsesMetadataWithoutGuessingAFilename() {
+        val bytes = ByteArray(29)
+        putU32(bytes, 0, 0x42)
+        putU16(bytes, 4, PtpObjectFormat.EXIF_JPEG)
+        putU32(bytes, 12, 4096)
+
+        val parsed = CanonEosPtp.objectTransferRequests(
+            block(CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64_LFN, bytes)
+        ).single()
+
+        assertEquals(0x42L, parsed.handle)
+        assertEquals(4096L, parsed.sizeBytes)
+        assertEquals(null, parsed.filename)
+    }
+
+    @Test(expected = PtpProtocolException::class)
+    fun objectTransferParserRejectsAnUnterminatedFilename() {
+        val bytes = ByteArray(24) { 1 }
+        putU32(bytes, 0, 0x42)
+        putU16(bytes, 4, PtpObjectFormat.EXIF_JPEG)
+        putU32(bytes, 12, 4)
+        CanonEosPtp.objectTransferRequests(block(CanonEosEventCode.REQUEST_OBJECT_TRANSFER, bytes))
+    }
+
+    @Test
     fun eosPropertyEventsExposeCurrentValueAndCameraAdvertisedChoices() {
         val payload = block(
             type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
@@ -509,11 +554,31 @@ class CanonEosPtpTest {
         values.forEachIndexed { index, value -> putU32(bytes, index * 4, value) }
     }
 
+    private fun objectTransferBlock(
+        eventCode: Int,
+        handle: Long,
+        objectFormat: Int,
+        sizeBytes: Long,
+        filename: String,
+    ): ByteArray {
+        val name = filename.encodeToByteArray() + byteArrayOf(0)
+        return block(eventCode, ByteArray(20 + name.size).also { bytes ->
+            putU32(bytes, 0, handle.toInt())
+            putU16(bytes, 4, objectFormat)
+            putU32(bytes, 12, sizeBytes.toInt())
+            name.copyInto(bytes, destinationOffset = 20)
+        })
+    }
+
     private fun imageFormatData(propertyCode: Int, value: Int): ByteArray =
         CanonEosPtp.propertyPayload(propertyCode, value.toLong()).let { it.copyOfRange(8, it.size) }
 
     private fun putU32(destination: ByteArray, offset: Int, value: Int) {
         repeat(4) { index -> destination[offset + index] = (value ushr (index * 8)).toByte() }
+    }
+
+    private fun putU16(destination: ByteArray, offset: Int, value: Int) {
+        repeat(2) { index -> destination[offset + index] = (value ushr (index * 8)).toByte() }
     }
 
     private fun deviceInfo(operations: Set<Int>) = PtpDeviceInfo(

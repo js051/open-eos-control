@@ -20,6 +20,7 @@ object PtpOperationCode {
     const val GET_DEVICE_PROP_DESC = 0x1014
     const val GET_DEVICE_PROP_VALUE = 0x1015
     const val SET_DEVICE_PROP_VALUE = 0x1016
+    const val GET_PARTIAL_OBJECT = 0x101B
 }
 
 object PtpResponseCode {
@@ -59,6 +60,9 @@ object PtpObjectFormat {
     const val TIFF_EP = 0x3802
     const val PNG = 0x380B
     const val DNG = 0x3811
+    const val CANON_CRW = 0xB101
+    const val CANON_CRW3 = 0xB103
+    const val CANON_CR3 = 0xB108
     const val MP4 = 0xB982
 }
 
@@ -534,6 +538,27 @@ class PtpSession(
         }
         @Suppress("UNREACHABLE_CODE")
         0L
+    }
+
+    suspend fun partialObject(
+        handle: Long,
+        offset: Long,
+        maxBytes: Int,
+    ): ByteArray {
+        require(offset in 0L..UINT32_MAX) { "PTP partial-object offset $offset exceeds UINT32." }
+        require(maxBytes > 0) { "PTP partial-object size must be positive." }
+        return transaction(
+            operationCode = PtpOperationCode.GET_PARTIAL_OBJECT,
+            parameters = listOf(handle, offset, maxBytes.toLong()),
+            maxPayloadBytes = maxBytes,
+        ) { payload ->
+            if (payload.isEmpty()) {
+                throw PtpProtocolException(
+                    "GetPartialObject returned no data for handle 0x${handle.toHex(8)} at offset $offset."
+                )
+            }
+            payload
+        }
     }
 
     suspend fun shutdown() {

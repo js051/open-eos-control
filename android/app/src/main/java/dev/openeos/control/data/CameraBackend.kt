@@ -340,12 +340,13 @@ class PlannedCameraBackend(
 class CameraBackendFactory(
     private val httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
     private val ptpTransportFactory: PtpTransportFactory? = null,
+    private val usbHostCaptureStore: UsbHostCaptureStore? = null,
 ) {
     fun create(connection: CameraConnection): CameraControlBackend =
         when (connection) {
             is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection, httpTransportFactory)
             is CameraConnection.AndroidUsbPtp -> ptpTransportFactory
-                ?.let { UsbPtpCameraBackend(connection, it) }
+                ?.let { UsbPtpCameraBackend(connection, it, usbHostCaptureStore) }
                 ?: PlannedCameraBackend(connection)
             is CameraConnection.DesktopBridge -> DesktopBridgeCameraBackend(connection, httpTransportFactory)
         }

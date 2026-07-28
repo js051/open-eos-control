@@ -27,6 +27,7 @@ class CameraRepository(
         backendFactory = CameraBackendFactory(
             httpTransportFactory = AndroidCameraHttpTransportFactory(context.applicationContext),
             ptpTransportFactory = AndroidUsbPtpTransportFactory(context.applicationContext),
+            usbHostCaptureStore = AndroidUsbHostCaptureStore(context.applicationContext),
         )
     }
 
