@@ -945,7 +945,7 @@ final class CameraAppState: ObservableObject {
                     clampLiveViewRequest()
                     if screen == .media,
                        event.changedKeys.contains(where: { $0.lowercased().contains("content") }) {
-                        await refreshMedia()
+                        await loadMedia()
                     }
                 } catch is CancellationError {
                     break
