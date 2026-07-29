@@ -360,6 +360,48 @@ class CameraScreensTest {
     }
 
     @Test
+    fun quarterTurnKeepsLargeLocalizedCopyInsideTheLiveViewViewport() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                    CompositionLocalProvider(
+                        LocalCameraControlRotation provides -90f,
+                        LocalCameraControlTargetRotation provides -90f,
+                    ) {
+                        MaterialTheme(colorScheme = OpenEosColorScheme) {
+                            CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                        }
+                    }
+                }
+            }
+        }
+
+        val viewport = compose
+            .onNodeWithTag("offline-preview-viewport", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val content = compose
+            .onNodeWithTag("offline-preview-content", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val hint = compose
+            .onNodeWithText(resourceText(R.string.offline_preview_hint))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        listOf(content, hint).forEach { bounds ->
+            assertTrue(
+                "Rotated large text $bounds must stay inside the orientation-aware viewport $viewport",
+                bounds.left >= viewport.left &&
+                    bounds.top >= viewport.top &&
+                    bounds.right <= viewport.right &&
+                    bounds.bottom <= viewport.bottom,
+            )
+        }
+    }
+
+    @Test
     fun quarterTurnRemeasuresLiveViewSettingsAsAFullCameraPanel() {
         val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
         val actions = noOpActions().copy(closePicker = { picker.value = null })
@@ -395,6 +437,31 @@ class CameraScreensTest {
         compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
         compose.runOnIdle { assertEquals(null, picker.value) }
         compose.onAllNodesWithTag("rotated-settings-surface").assertCountEquals(0)
+    }
+
+    @Test
+    fun upsideDownSettingsUseTheSameRotatedCameraPanel() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                CompositionLocalProvider(
+                    LocalCameraControlRotation provides 180f,
+                    LocalCameraControlTargetRotation provides 180f,
+                ) {
+                    MaterialTheme(colorScheme = OpenEosColorScheme) {
+                        CameraControlScreen(
+                            connectedState().copy(activeSettingPicker = SettingPicker.LIVE_VIEW),
+                            noOpActions(),
+                        )
+                    }
+                }
+            }
+        }
+
+        compose.onNodeWithTag("rotated-settings-surface").assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
     }
 
     @Test

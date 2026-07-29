@@ -12,7 +12,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -443,28 +442,28 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         ImageLoader.Builder(context).build()
     }
 
-    BoxWithConstraints(
+    Box(
         modifier = modifier
             .testTag("live-view-frame")
             .background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
         when {
-            state.previewMode -> BoxWithConstraints(
+            state.previewMode -> Box(
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
-                val quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
-                val slotWidth = minOf(maxWidth, if (quarterTurn) 184.dp else 360.dp)
-                val slotHeight = minOf(maxHeight, if (quarterTurn) 520.dp else 220.dp)
                 CameraRotatingSlot(
                     Modifier
-                        .width(slotWidth)
-                        .height(slotHeight)
-                        .testTag("offline-preview-content"),
+                        .fillMaxSize()
+                        .testTag("offline-preview-viewport"),
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                        modifier = Modifier
+                            .fillMaxWidth(0.84f)
+                            .widthIn(max = 520.dp)
+                            .padding(horizontal = 20.dp)
+                            .testTag("offline-preview-content"),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -485,7 +484,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                         Text(
                             stringResource(R.string.offline_preview_hint),
                             color = AppSubtleText,
-                            maxLines = 2,
+                            maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
                         )

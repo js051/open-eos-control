@@ -15,10 +15,14 @@ internal class CameraOrientationPolicy {
     fun setSystemAutoRotation(enabled: Boolean) {
         if (systemAutoRotationEnabled == enabled) return
         systemAutoRotationEnabled = enabled
+        if (!enabled) {
+            latestSensorDegrees = ORIENTATION_UNKNOWN
+            snappedSensorDegrees = 0
+        }
     }
 
     fun onSensorOrientation(sensorDegrees: Int) {
-        if (sensorDegrees < 0) return
+        if (!systemAutoRotationEnabled || sensorDegrees < 0) return
         latestSensorDegrees = sensorDegrees
         snappedSensorDegrees = snapCameraDeviceRotation(snappedSensorDegrees, sensorDegrees)
     }
@@ -29,7 +33,7 @@ internal class CameraOrientationPolicy {
     }
 
     fun shouldListen(activityStarted: Boolean, canDetectOrientation: Boolean): Boolean =
-        activityStarted && canDetectOrientation
+        activityStarted && canDetectOrientation && systemAutoRotationEnabled
 
     fun resolveControlRotation(displayRotationDegrees: Int): Float = resolveCameraControlRotation(
         autoRotationEnabled = systemAutoRotationEnabled,
