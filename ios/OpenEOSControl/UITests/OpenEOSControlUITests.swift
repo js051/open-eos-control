@@ -79,11 +79,11 @@ final class OpenEOSControlUITests: XCTestCase {
         let item = app.staticTexts["R6M3_0001.JPG"]
         let delete = app.buttons["delete-media-preview-002"]
         XCTAssertTrue(item.waitForExistence(timeout: 5))
-        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForInteraction(delete, timeout: 5))
         delete.tap()
 
         let alert = app.alerts["Delete from camera?"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 3))
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
         XCTAssertTrue(item.exists)
         alert.buttons["Delete"].tap()
         XCTAssertTrue(item.waitForNonExistence(timeout: 3))
@@ -138,6 +138,15 @@ final class OpenEOSControlUITests: XCTestCase {
         ]
         app.launch()
         return app
+    }
+
+    private func waitForInteraction(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate { value, _ in
+            guard let element = value as? XCUIElement else { return false }
+            return element.exists && element.isEnabled && element.isHittable
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
     private func addScreenshot(name: String) {
