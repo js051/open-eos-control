@@ -59,6 +59,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.painterResource
@@ -74,6 +75,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -92,6 +94,8 @@ import dev.openeos.control.data.NativeLiveViewSession
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.text.NumberFormat
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -235,6 +239,8 @@ fun CameraHeader(state: CameraUiState, actions: CameraActions) {
     }
 }
 
+private val CAMERA_OVERLAY_HEADER_HEIGHT = 64.dp
+
 @Composable
 fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val batteryDescription = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
@@ -243,13 +249,13 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
     val fullCameraName = state.info?.model ?: stringResource(R.string.unknown)
     val cameraHudName = fullCameraName.toCameraHudName()
     val fullStorage = cameraStorageLabel(state.status)
-    val storageValue = cameraStorageCompactLabel(state.status)
+    val storageValue = cameraStorageHudValue(state.status)
     var menuExpanded by remember { mutableStateOf(false) }
     var statusExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(CAMERA_OVERLAY_HEADER_HEIGHT)
             .testTag("camera-overlay-header")
             .background(Color(0xB8000000))
             .padding(start = 8.dp),
@@ -261,7 +267,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             value = cameraHudName,
             description = fullCameraName,
             onClick = { statusExpanded = true },
-            modifier = Modifier.width(64.dp).height(48.dp),
+            modifier = Modifier.width(76.dp).height(CAMERA_OVERLAY_HEADER_HEIGHT),
         )
         Box(Modifier.weight(1f))
         CameraStatusIndicator(
@@ -270,7 +276,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             description = batteryDescription,
             testTag = "battery-status",
             onClick = { statusExpanded = true },
-            modifier = Modifier.width(52.dp).height(48.dp),
+            modifier = Modifier.width(48.dp).height(CAMERA_OVERLAY_HEADER_HEIGHT),
         )
         CameraStatusIndicator(
             icon = LucideR.drawable.lucide_ic_memory_stick,
@@ -278,7 +284,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             description = fullStorage,
             testTag = "storage-status",
             onClick = { statusExpanded = true },
-            modifier = Modifier.width(62.dp).height(48.dp),
+            modifier = Modifier.width(58.dp).height(CAMERA_OVERLAY_HEADER_HEIGHT),
         )
         ToolIconButton(
             LucideR.drawable.lucide_ic_eye_off,
@@ -352,15 +358,13 @@ private fun CameraModelIndicator(
             .clickable(onClick = onClick)
             .semantics { contentDescription = description; role = Role.Button },
     ) {
-        Text(
-            value,
+        CameraHudText(
+            value = value,
             color = AppText,
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
+            maxFontSize = 11.sp,
+            minFontSize = 6.sp,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 2.dp)
@@ -378,14 +382,13 @@ private fun CameraStatusIndicator(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sideways = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
     CameraRotatingSlot(
         modifier
             .testTag(testTag)
             .clickable(onClick = onClick)
             .semantics { contentDescription = description; role = Role.Button },
     ) {
-        CameraStatusIndicatorContent(icon, value, testTag, sideways)
+        CameraStatusIndicatorContent(icon, value, testTag)
     }
 }
 
@@ -394,51 +397,69 @@ private fun CameraStatusIndicatorContent(
     @DrawableRes icon: Int,
     value: String,
     testTag: String,
-    sideways: Boolean,
 ) {
-    val content: @Composable () -> Unit = {
-        Icon(
-            painterResource(icon),
-            contentDescription = null,
-            tint = AppSubtleText,
-            modifier = Modifier.size(14.dp),
-        )
-        Text(
-            value,
-            color = AppSubtleText,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-    if (sideways) {
-        Box(
-            Modifier.testTag("$testTag-sideways-stack"),
-            contentAlignment = Alignment.Center,
+    Box(
+        Modifier.testTag("$testTag-inline-row"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier.testTag("$testTag-content"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
         ) {
-            Column(
-                Modifier.testTag("$testTag-content"),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
-            ) {
-                content()
-            }
-        }
-    } else {
-        Box(
-            Modifier.testTag("$testTag-inline-row"),
-            contentAlignment = Alignment.Center,
-        ) {
-            Row(
-                Modifier.testTag("$testTag-content"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
-            ) {
-                content()
-            }
+            Icon(
+                painterResource(icon),
+                contentDescription = null,
+                tint = AppSubtleText,
+                modifier = Modifier.size(14.dp),
+            )
+            CameraHudText(
+                value = value,
+                color = AppSubtleText,
+                fontWeight = FontWeight.SemiBold,
+                maxFontSize = 11.sp,
+                minFontSize = 7.sp,
+            )
         }
     }
+}
+
+@Composable
+private fun CameraHudText(
+    value: String,
+    color: Color,
+    fontWeight: FontWeight,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign? = null,
+    maxFontSize: TextUnit = 11.sp,
+    minFontSize: TextUnit = 7.sp,
+) {
+    val configuration = LocalConfiguration.current
+    val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
+    var fontSize by remember(
+        value,
+        maxFontSize,
+        minFontSize,
+        configuration.fontScale,
+        rotationQuadrant,
+    ) { mutableStateOf(maxFontSize) }
+    Text(
+        text = value,
+        color = color,
+        fontSize = fontSize,
+        lineHeight = fontSize,
+        fontWeight = fontWeight,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        textAlign = textAlign,
+        modifier = modifier,
+        onTextLayout = { result ->
+            if ((result.didOverflowWidth || result.didOverflowHeight) && fontSize > minFontSize) {
+                fontSize = (fontSize.value - 0.5f).coerceAtLeast(minFontSize.value).sp
+            }
+        },
+    )
 }
 
 @Composable
@@ -670,10 +691,11 @@ private fun cameraStorageLabel(status: CameraStatus?): String {
 }
 
 @Composable
-private fun cameraStorageCompactLabel(status: CameraStatus?): String {
+private fun cameraStorageHudValue(status: CameraStatus?): String {
     val context = LocalContext.current
+    val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
     return when {
-        status?.storageFreeImages != null -> compactCameraCount(status.storageFreeImages)
+        status?.storageFreeImages != null -> exactCameraCount(status.storageFreeImages, locale)
         status?.storageFreeBytes != null -> Formatter.formatShortFileSize(context, status.storageFreeBytes)
         status?.mediaAvailable == true -> stringResource(R.string.storage_ready)
         else -> "-"
@@ -683,24 +705,12 @@ private fun cameraStorageCompactLabel(status: CameraStatus?): String {
 internal fun String.toCameraHudName(): String {
     val compact = removePrefix("Canon ")
         .removePrefix("EOS ")
-        .replace(" Mark ", " ")
         .trim()
     return compact.ifBlank { this }
 }
 
-internal fun compactCameraCount(value: Long): String = when {
-    value < 1_000L -> value.coerceAtLeast(0L).toString()
-    value < 10_000L -> compactCameraUnit(value, 1_000L, "K")
-    value < 1_000_000L -> "${value / 1_000L}K"
-    value < 10_000_000L -> compactCameraUnit(value, 1_000_000L, "M")
-    else -> "${value / 1_000_000L}M"
-}
-
-private fun compactCameraUnit(value: Long, divisor: Long, suffix: String): String {
-    val whole = value / divisor
-    val tenths = (value % divisor) * 10L / divisor
-    return if (tenths > 0L) "$whole.$tenths$suffix" else "$whole$suffix"
-}
+internal fun exactCameraCount(value: Long, locale: Locale): String =
+    NumberFormat.getIntegerInstance(locale).format(value.coerceAtLeast(0L))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
