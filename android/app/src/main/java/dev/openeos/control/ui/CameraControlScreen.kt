@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -38,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -66,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
@@ -114,6 +118,19 @@ private fun StableCameraControls(state: CameraUiState, actions: CameraActions) {
         LiveViewFrame(state, actions, Modifier.fillMaxSize())
         if (state.hudVisible) {
             CameraOverlayHeader(state, actions)
+            if (!state.supports(activeCaptureFeature(state))) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            top = CAMERA_OVERLAY_HEADER_HEIGHT,
+                            bottom = cameraHudHeight(),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CaptureCapabilityWarning(state = state)
+                }
+            }
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xE6101214)),
             ) {
@@ -133,12 +150,6 @@ private fun StableCameraControls(state: CameraUiState, actions: CameraActions) {
 
 @Composable
 private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
-    val feature = when {
-        state.bulbMode -> CameraFeature.BULB_EXPOSURE
-        state.captureMode == CaptureMode.PHOTO -> CameraFeature.STILL_CAPTURE
-        else -> CameraFeature.VIDEO_RECORDING
-    }
-    var capabilityDetailVisible by remember { mutableStateOf(false) }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
             Modifier.fillMaxWidth().height(CAPTURE_CONTROL_HEIGHT).padding(horizontal = 20.dp),
@@ -149,69 +160,90 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
             CaptureButton(state, actions)
             LiveViewFpsButton(state, { actions.openPicker(SettingPicker.LIVE_VIEW) })
         }
-        if (!state.supports(feature)) {
-            val capabilityMessage = stringResource(
-                when {
-                    state.bulbMode -> R.string.bulb_not_supported
-                    state.captureMode == CaptureMode.PHOTO -> R.string.capture_not_supported
-                    else -> R.string.recording_not_supported
-                },
-            )
-            val sideways = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
-            Box(
-                Modifier.fillMaxWidth().height(CAMERA_CAPABILITY_WARNING_HEIGHT).padding(horizontal = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                CameraRotatingSlot(
-                    Modifier
-                        .fillMaxSize()
-                        .testTag("capability-warning-rotation")
-                        .clickable(enabled = sideways) { capabilityDetailVisible = true }
-                        .semantics {
-                            contentDescription = capabilityMessage
-                            if (sideways) role = Role.Button
-                        },
-                    animateRotation = false,
-                ) {
-                    if (sideways) {
-                        Icon(
-                            painterResource(LucideR.drawable.lucide_ic_triangle_alert),
-                            contentDescription = null,
-                            tint = AppWarning,
-                            modifier = Modifier.size(20.dp).testTag("capability-warning-compact"),
-                        )
-                    } else {
-                        Text(
-                            capabilityMessage,
-                            color = AppWarning,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
-            }
-        }
         CaptureModeSelector(state, actions)
-    }
-    if (capabilityDetailVisible) {
-        CameraRotatingMessageDialog(
-            title = stringResource(R.string.feature_unavailable),
-            message = stringResource(
-                when {
-                    state.bulbMode -> R.string.bulb_not_supported
-                    state.captureMode == CaptureMode.PHOTO -> R.string.capture_not_supported
-                    else -> R.string.recording_not_supported
-                },
-            ),
-            onDismissRequest = { capabilityDetailVisible = false },
-        )
     }
 }
 
-internal val CAMERA_CAPABILITY_WARNING_HEIGHT = 40.dp
 private val CAPTURE_CONTROL_HEIGHT = 88.dp
 private val CAPTURE_MODE_SELECTOR_HEIGHT = 48.dp
+
+private fun activeCaptureFeature(state: CameraUiState): CameraFeature = when {
+    state.bulbMode -> CameraFeature.BULB_EXPOSURE
+    state.captureMode == CaptureMode.PHOTO -> CameraFeature.STILL_CAPTURE
+    else -> CameraFeature.VIDEO_RECORDING
+}
+
+@Composable
+private fun CaptureCapabilityWarning(
+    state: CameraUiState,
+    modifier: Modifier = Modifier,
+) {
+    val message = stringResource(
+        when {
+            state.bulbMode -> R.string.bulb_not_supported
+            state.captureMode == CaptureMode.PHOTO -> R.string.capture_not_supported
+            else -> R.string.recording_not_supported
+        },
+    )
+    val configuration = LocalConfiguration.current
+    val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
+    val warningHeight = if (configuration.fontScale >= 1.3f) 176.dp else 144.dp
+    var fontSize by remember(message, configuration.fontScale, rotationQuadrant) { mutableStateOf(14.sp) }
+    var hasVisualOverflow by remember(message, configuration.fontScale, rotationQuadrant) {
+        mutableStateOf(false)
+    }
+    CameraRotatingSlot(
+        modifier = modifier
+            .fillMaxWidth(0.84f)
+            .widthIn(max = 304.dp)
+            .height(warningHeight)
+            .testTag("capability-warning-rotation")
+            .semantics { contentDescription = message },
+        animateRotation = false,
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize().testTag("capability-warning-surface"),
+            shape = RoundedCornerShape(6.dp),
+            color = Color.Black.copy(alpha = 0.78f),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    painterResource(LucideR.drawable.lucide_ic_triangle_alert),
+                    contentDescription = null,
+                    tint = AppWarning,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    text = message,
+                    color = AppWarning,
+                    fontSize = fontSize,
+                    lineHeight = fontSize * 1.2f,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 5,
+                    overflow = TextOverflow.Clip,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag(
+                        if (hasVisualOverflow) {
+                            "capability-warning-message-overflow"
+                        } else {
+                            "capability-warning-message"
+                        },
+                    ),
+                    onTextLayout = { result ->
+                        hasVisualOverflow = result.hasVisualOverflow
+                        if (result.hasVisualOverflow && fontSize > 11.sp) {
+                            fontSize = (fontSize.value - 0.5f).coerceAtLeast(11f).sp
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun CaptureModeSelector(state: CameraUiState, actions: CameraActions) {
@@ -288,14 +320,8 @@ private fun CaptureModeOption(
     }
 }
 
-internal fun cameraHudHeight(state: CameraUiState): Dp {
-    val feature = when {
-        state.bulbMode -> CameraFeature.BULB_EXPOSURE
-        state.captureMode == CaptureMode.PHOTO -> CameraFeature.STILL_CAPTURE
-        else -> CameraFeature.VIDEO_RECORDING
-    }
-    return 84.dp + CAPTURE_CONTROL_HEIGHT + CAPTURE_MODE_SELECTOR_HEIGHT +
-        if (state.supports(feature)) 0.dp else CAMERA_CAPABILITY_WARNING_HEIGHT
+internal fun cameraHudHeight(): Dp {
+    return 84.dp + CAPTURE_CONTROL_HEIGHT + CAPTURE_MODE_SELECTOR_HEIGHT
 }
 
 
