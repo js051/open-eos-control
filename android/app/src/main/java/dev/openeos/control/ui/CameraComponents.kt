@@ -378,31 +378,65 @@ private fun CameraStatusIndicator(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val sideways = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
     CameraRotatingSlot(
         modifier
             .testTag(testTag)
             .clickable(onClick = onClick)
             .semantics { contentDescription = description; role = Role.Button },
     ) {
-        Row(
-            Modifier.testTag("$testTag-content"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        CameraStatusIndicatorContent(icon, value, testTag, sideways)
+    }
+}
+
+@Composable
+private fun CameraStatusIndicatorContent(
+    @DrawableRes icon: Int,
+    value: String,
+    testTag: String,
+    sideways: Boolean,
+) {
+    val content: @Composable () -> Unit = {
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = AppSubtleText,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            value,
+            color = AppSubtleText,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+    if (sideways) {
+        Box(
+            Modifier.testTag("$testTag-sideways-stack"),
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                painterResource(icon),
-                contentDescription = null,
-                tint = AppSubtleText,
-                modifier = Modifier.size(14.dp),
-            )
-            Text(
-                value,
-                color = AppSubtleText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(
+                Modifier.testTag("$testTag-content"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
+            ) {
+                content()
+            }
+        }
+    } else {
+        Box(
+            Modifier.testTag("$testTag-inline-row"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                Modifier.testTag("$testTag-content"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
+            ) {
+                content()
+            }
         }
     }
 }

@@ -345,6 +345,10 @@ class CameraScreensTest {
                     statusBounds.bottom <= headerBounds.bottom,
             )
         }
+        compose.onNodeWithTag("battery-status-sideways-stack", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("storage-status-sideways-stack", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithTag("battery-status-inline-row", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("storage-status-inline-row", useUnmergedTree = true).assertCountEquals(0)
         val stableSlots = listOf(
             "camera-model-status" to "camera-name",
             "exposure-control-ISO" to "exposure-content-ISO",
@@ -420,6 +424,8 @@ class CameraScreensTest {
             )
         }
         compose.onNodeWithText("R6 III").assertIsDisplayed()
+        compose.onNodeWithText("82%").assertIsDisplayed()
+        compose.onNodeWithText("2.4K").assertIsDisplayed()
         compose.onNodeWithContentDescription("Canon EOS R6 Mark III").assertIsDisplayed()
         assertTrue(
             "The compact rotated model name $modelText must stay inside its stable HUD slot $modelSlot",
