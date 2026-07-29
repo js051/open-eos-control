@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
@@ -863,10 +864,33 @@ class CameraScreensTest {
     }
 
     @Test
-    fun photoStateExplainsMissingStillCaptureCapability() {
-        compose.setContent { MaterialTheme { CameraControlScreen(connectedState(), noOpActions()) } }
-        compose.onNodeWithContentDescription(resourceText(R.string.switch_to_video)).assertIsDisplayed()
+    fun photoStateShowsModeSelectorAndExplainsMissingStillCaptureCapability() {
+        var selectedMode: CaptureMode? = null
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState(),
+                    noOpActions().copy(setCaptureMode = { selectedMode = it }),
+                )
+            }
+        }
+        compose.onNodeWithTag("capture-mode-PHOTO").assertIsDisplayed().assertIsSelected()
+        compose.onNodeWithTag("capture-mode-VIDEO").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(CaptureMode.VIDEO, selectedMode) }
         compose.onNodeWithText(resourceText(R.string.capture_not_supported)).assertIsDisplayed()
+    }
+
+    @Test
+    fun recordingDisablesCaptureModeSelector() {
+        val base = connectedState()
+        val state = base.copy(
+            captureMode = CaptureMode.VIDEO,
+            status = base.status?.copy(recording = true),
+        )
+        compose.setContent { MaterialTheme { CameraControlScreen(state, noOpActions()) } }
+
+        compose.onNodeWithTag("capture-mode-PHOTO").assertIsNotEnabled()
+        compose.onNodeWithTag("capture-mode-VIDEO").assertIsSelected().assertIsNotEnabled()
     }
 
     @Test
@@ -946,6 +970,32 @@ class CameraScreensTest {
         compose.onNodeWithText("1/60").performClick()
         compose.runOnIdle { assertEquals("1/60", selectedShutter) }
         compose.onNodeWithTag("exposure-picker-ISO").assertIsDisplayed()
+    }
+
+    @Test
+    fun exposureDialLocksDuringWriteAndReturnsToConfirmedValueAfterFailure() {
+        val state = mutableStateOf(connectedState().copy(activeSettingPicker = SettingPicker.ISO))
+        var selectedIso: String? = null
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    state.value,
+                    noOpActions().copy(setIso = { selectedIso = it }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("exposure-option-3").assertIsSelected()
+        compose.onNodeWithTag("exposure-option-4").performClick().assertIsSelected()
+        compose.runOnIdle {
+            assertEquals("1600", selectedIso)
+            state.value = state.value.copy(pendingOperations = setOf(CameraOperation.SETTING))
+        }
+        compose.onNodeWithTag("exposure-option-4").assertIsSelected().assertIsNotEnabled()
+
+        compose.runOnIdle { state.value = state.value.copy(pendingOperations = emptySet()) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("exposure-option-3").assertIsSelected()
     }
 
     @Test
@@ -1216,6 +1266,7 @@ class CameraScreensTest {
         compose.onNodeWithTag("exposure-control-SHUTTER").assertIsDisplayed()
         compose.onNodeWithTag("exposure-control-APERTURE").assertIsDisplayed()
         compose.onNodeWithTag("exposure-control-WHITE_BALANCE").assertIsDisplayed()
+        compose.onNodeWithTag("capture-mode-selector").assertIsDisplayed()
     }
 
     private fun noOpActions() = CameraActions(

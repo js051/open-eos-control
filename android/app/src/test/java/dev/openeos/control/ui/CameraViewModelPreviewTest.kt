@@ -79,6 +79,22 @@ class CameraViewModelPreviewTest {
     }
 
     @Test
+    fun captureModeCannotChangeWhilePreviewRecordingIsActive() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+        viewModel.setCaptureMode(CaptureMode.VIDEO)
+        advanceUntilIdle()
+        viewModel.toggleRecording()
+        advanceUntilIdle()
+
+        viewModel.setCaptureMode(CaptureMode.PHOTO)
+        advanceUntilIdle()
+
+        assertEquals(CaptureMode.VIDEO, viewModel.uiState.value.captureMode)
+        assertEquals(true, viewModel.uiState.value.status?.recording)
+    }
+
+    @Test
     fun previewMediaDeleteRemovesOnlyConfirmedItemLocally() = runTest(dispatcher) {
         val viewModel = CameraViewModel()
         viewModel.enterOfflinePreview()

@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -138,7 +139,7 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
-            Modifier.fillMaxWidth().height(92.dp).padding(horizontal = 20.dp),
+            Modifier.fillMaxWidth().height(CAPTURE_CONTROL_HEIGHT).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -166,10 +167,88 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
                 )
             }
         }
+        CaptureModeSelector(state, actions)
     }
 }
 
 internal val CAMERA_CAPABILITY_WARNING_HEIGHT = 40.dp
+private val CAPTURE_CONTROL_HEIGHT = 88.dp
+private val CAPTURE_MODE_SELECTOR_HEIGHT = 48.dp
+
+@Composable
+private fun CaptureModeSelector(state: CameraUiState, actions: CameraActions) {
+    val enabled = captureModeSwitchEnabled(state)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(CAPTURE_MODE_SELECTOR_HEIGHT)
+            .testTag("capture-mode-selector"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier
+                .width(208.dp)
+                .fillMaxSize()
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            CaptureModeOption(
+                label = stringResource(R.string.photo),
+                mode = CaptureMode.PHOTO,
+                selected = state.captureMode == CaptureMode.PHOTO,
+                enabled = enabled,
+                onSelect = actions.setCaptureMode,
+                modifier = Modifier.weight(1f),
+            )
+            CaptureModeOption(
+                label = stringResource(R.string.video),
+                mode = CaptureMode.VIDEO,
+                selected = state.captureMode == CaptureMode.VIDEO,
+                enabled = enabled,
+                onSelect = actions.setCaptureMode,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CaptureModeOption(
+    label: String,
+    mode: CaptureMode,
+    selected: Boolean,
+    enabled: Boolean,
+    onSelect: (CaptureMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .fillMaxSize()
+            .testTag("capture-mode-${mode.name}")
+            .background(if (selected) AppBorder else Color.Transparent, RoundedCornerShape(4.dp))
+            .selectable(
+                selected = selected,
+                enabled = enabled,
+                role = Role.Tab,
+                onClick = { onSelect(mode) },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        CameraRotatingSlot(Modifier.fillMaxSize()) {
+            Text(
+                label,
+                color = when {
+                    !enabled -> AppMutedText
+                    selected && mode == CaptureMode.VIDEO -> AppRecord
+                    selected -> AppText
+                    else -> AppSubtleText
+                },
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
+    }
+}
 
 internal fun cameraHudHeight(state: CameraUiState): Dp {
     val feature = when {
@@ -177,7 +256,8 @@ internal fun cameraHudHeight(state: CameraUiState): Dp {
         state.captureMode == CaptureMode.PHOTO -> CameraFeature.STILL_CAPTURE
         else -> CameraFeature.VIDEO_RECORDING
     }
-    return 176.dp + if (state.supports(feature)) 0.dp else CAMERA_CAPABILITY_WARNING_HEIGHT
+    return 84.dp + CAPTURE_CONTROL_HEIGHT + CAPTURE_MODE_SELECTOR_HEIGHT +
+        if (state.supports(feature)) 0.dp else CAMERA_CAPABILITY_WARNING_HEIGHT
 }
 
 
@@ -308,6 +388,16 @@ private fun ExposureDial(
     val scope = rememberCoroutineScope()
     var selectedIndex by remember(values, current) { mutableIntStateOf(initialIndex) }
 
+    LaunchedEffect(isApplying, current, values) {
+        if (!isApplying) {
+            val confirmedIndex = values.indexOf(current)
+            if (confirmedIndex >= 0 && confirmedIndex != selectedIndex) {
+                selectedIndex = confirmedIndex
+                listState.animateScrollToItem(confirmedIndex)
+            }
+        }
+    }
+
     LaunchedEffect(listState, values) {
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
@@ -339,9 +429,11 @@ private fun ExposureDial(
             val itemWidth = 112.dp
             val edgePadding = ((maxWidth - itemWidth) / 2).coerceAtLeast(0.dp)
             LazyRow(
+                modifier = Modifier.selectableGroup(),
                 state = listState,
                 contentPadding = PaddingValues(horizontal = edgePadding),
                 flingBehavior = rememberSnapFlingBehavior(lazyListState = listState),
+                userScrollEnabled = !isApplying,
             ) {
                 items(values.size, key = { values[it] }) { index ->
                     val selected = index == selectedIndex
@@ -349,11 +441,17 @@ private fun ExposureDial(
                         Modifier
                             .width(itemWidth)
                             .height(88.dp)
-                            .clickable(enabled = !isApplying) {
-                                selectedIndex = index
-                                onSelect(values[index])
-                                scope.launch { listState.animateScrollToItem(index) }
-                            },
+                            .testTag("exposure-option-$index")
+                            .selectable(
+                                selected = selected,
+                                enabled = !isApplying,
+                                role = Role.RadioButton,
+                                onClick = {
+                                    selectedIndex = index
+                                    onSelect(values[index])
+                                    scope.launch { listState.animateScrollToItem(index) }
+                                },
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(

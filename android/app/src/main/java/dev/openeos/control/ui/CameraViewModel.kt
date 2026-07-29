@@ -88,7 +88,9 @@ class CameraViewModel(
     }
 
     fun setCaptureMode(mode: CaptureMode) {
-        val setting = _uiState.value.capabilities?.shootingModeSetting()
+        val state = _uiState.value
+        if (state.captureMode == mode || !captureModeSwitchEnabled(state)) return
+        val setting = state.capabilities?.shootingModeSetting()
         if (setting?.currentCaptureMode() == CaptureMode.PHOTO) {
             lastPhotoShootingMode = setting.value
         }
