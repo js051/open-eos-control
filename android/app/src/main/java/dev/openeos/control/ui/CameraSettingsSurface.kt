@@ -8,10 +8,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -30,14 +29,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 private val CameraSettingsMaxWidth = 680.dp
-private const val CameraSettingsMaxHeightFraction = 0.92f
+private const val CameraSettingsHeightFraction = 0.68f
 
 @Composable
 fun CameraSettingsSurface(
     onDismissRequest: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val useRotatedSurface = cameraSettingsUsesRotatedSurface(LocalCameraControlTargetRotation.current)
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
@@ -48,22 +46,18 @@ fun CameraSettingsSurface(
         DarkSheetSystemBarsEffect()
         BackHandler(onBack = onDismissRequest)
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            if (useRotatedSurface) {
-                RotatedSettingsPanel(content)
-            } else {
-                NaturalSettingsPanel(
-                    maxHeight = maxHeight * CameraSettingsMaxHeightFraction,
-                    onDismissRequest = onDismissRequest,
-                    content = content,
-                )
-            }
+            StableSettingsPanel(
+                panelHeight = maxHeight * CameraSettingsHeightFraction,
+                onDismissRequest = onDismissRequest,
+                content = content,
+            )
         }
     }
 }
 
 @Composable
-private fun NaturalSettingsPanel(
-    maxHeight: Dp,
+private fun StableSettingsPanel(
+    panelHeight: Dp,
     onDismissRequest: () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -84,39 +78,22 @@ private fun NaturalSettingsPanel(
         Box(
             Modifier
                 .fillMaxWidth()
-                .heightIn(max = maxHeight)
+                .height(panelHeight)
                 .align(Alignment.BottomCenter)
                 .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                 .background(AppSurface)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }
-                .testTag("camera-settings-sheet"),
+                .testTag("camera-settings-panel"),
         ) {
-            SettingsContentViewport(content = content)
-        }
-    }
-}
-
-@Composable
-private fun RotatedSettingsPanel(content: @Composable () -> Unit) {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(AppSurface)
-            .windowInsetsPadding(WindowInsets.safeDrawing),
-    ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .cameraLayoutRotation()
-                .testTag("rotated-settings-surface"),
-            contentAlignment = Alignment.TopCenter,
-        ) {
-            SettingsContentViewport(
-                modifier = Modifier.fillMaxHeight(),
-                fillAvailableHeight = true,
-                content = content,
-            )
+            CameraRotatingSlot(
+                Modifier
+                    .fillMaxSize()
+                    .testTag("settings-content-rotation"),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                SettingsContentViewport(content = content)
+            }
         }
     }
 }
@@ -124,7 +101,6 @@ private fun RotatedSettingsPanel(content: @Composable () -> Unit) {
 @Composable
 private fun SettingsContentViewport(
     modifier: Modifier = Modifier,
-    fillAvailableHeight: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     Box(
@@ -135,16 +111,13 @@ private fun SettingsContentViewport(
             Modifier
                 .widthIn(max = CameraSettingsMaxWidth)
                 .fillMaxWidth()
-                .then(if (fillAvailableHeight) Modifier.fillMaxHeight() else Modifier)
+                .fillMaxSize()
                 .testTag("settings-content-viewport"),
         ) {
             content()
         }
     }
 }
-
-internal fun cameraSettingsUsesRotatedSurface(rotationDegrees: Float): Boolean =
-    cameraRotationQuadrant(rotationDegrees) != 0
 
 internal fun cameraRotationQuadrant(rotationDegrees: Float): Int {
     val normalized = ((rotationDegrees % 360f) + 360f) % 360f

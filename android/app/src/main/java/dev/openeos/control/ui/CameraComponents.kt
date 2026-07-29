@@ -528,7 +528,20 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(stringResource(R.string.live_view_unavailable), color = AppMutedText)
+                CameraRotatingSlot(
+                    Modifier
+                        .fillMaxSize()
+                        .testTag("live-view-unavailable-rotation"),
+                ) {
+                    Text(
+                        stringResource(R.string.live_view_unavailable),
+                        color = AppMutedText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(0.8f),
+                    )
+                }
             }
         }
 
