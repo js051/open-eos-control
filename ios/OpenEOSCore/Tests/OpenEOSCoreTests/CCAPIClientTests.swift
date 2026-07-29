@@ -234,7 +234,10 @@ final class CCAPIClientTests: XCTestCase {
             _ = try await client.mediaPreview(CameraMediaItem(id: path, name: "MVI_0001.MP4", kind: "video"))
             XCTFail("Expected video preview rejection")
         } catch {
-            XCTAssertTrue(error.localizedDescription.contains("only for image"))
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidResponse("Display preview is available only for camera image items.")
+            )
         }
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.path), ["/ccapi", "\(path)?kind=display"])
