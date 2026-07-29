@@ -1,6 +1,6 @@
 # Open EOS Control Desktop Bridge
 
-This package provides the PC camera backend and browser control surface for Open EOS Control 0.1.1.
+This package provides the PC camera backend and browser control surface for Open EOS Control 0.1.2.
 
 It can connect to Canon cameras through native HTTP CCAPI or through a system-installed `gphoto2`/libgphoto2 USB stack. Camera commands and settings are exposed only when the selected backend advertises support.
 
@@ -11,7 +11,7 @@ Camera media downloads are consumed as cancellable Fetch streams with visible by
 ## Install
 
 ```bash
-python -m pip install open_eos_control_bridge-0.1.1-py3-none-any.whl
+python -m pip install open_eos_control_bridge-0.1.2-py3-none-any.whl
 ```
 
 USB control requires `gphoto2` to be available on `PATH`. CCAPI control does not require `gphoto2`.
