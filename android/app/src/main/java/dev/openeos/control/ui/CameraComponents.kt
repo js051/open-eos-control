@@ -238,7 +238,6 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
     val batteryValue = state.status?.batteryLevel?.let { "$it%" } ?: "-"
     val fullCameraName = state.info?.model?.toCompactCameraName() ?: stringResource(R.string.unknown)
     val fullStorage = cameraStorageLabel(state.status)
-    val cameraName = fullCameraName.toCameraHudName()
     val storageValue = cameraStorageCompactLabel(state.status)
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
@@ -247,24 +246,28 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             .height(48.dp)
             .testTag("camera-overlay-header")
             .background(Color(0xB8000000))
-            .padding(start = 12.dp),
+            .padding(start = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Box(Modifier.size(8.dp).background(AppSuccess, CircleShape))
-        CameraModelIndicator(cameraName, fullCameraName)
-        Box(Modifier.weight(1f))
+        CameraModelIndicator(
+            value = fullCameraName,
+            modifier = Modifier.weight(1f).height(48.dp),
+        )
         CameraStatusIndicator(
             icon = batteryStatusIcon(state.status?.batteryLevel),
             value = batteryValue,
             description = batteryDescription,
             testTag = "battery-status",
+            modifier = Modifier.width(52.dp).height(48.dp),
         )
         CameraStatusIndicator(
             icon = LucideR.drawable.lucide_ic_memory_stick,
             value = storageValue,
             description = fullStorage,
             testTag = "storage-status",
+            modifier = Modifier.width(62.dp).height(48.dp),
         )
         ToolIconButton(
             LucideR.drawable.lucide_ic_eye_off,
@@ -318,21 +321,25 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
 }
 
 @Composable
-private fun CameraModelIndicator(value: String, description: String) {
+private fun CameraModelIndicator(value: String, modifier: Modifier = Modifier) {
     CameraRotatingSlot(
-        Modifier
-            .size(48.dp)
+        modifier
             .testTag("camera-model-status")
-            .semantics { contentDescription = description },
+            .semantics { contentDescription = value },
     ) {
         Text(
             value,
             color = AppText,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.testTag("camera-name"),
+            maxLines = 3,
+            overflow = TextOverflow.Clip,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp)
+                .testTag("camera-name"),
         )
     }
 }
@@ -343,28 +350,28 @@ private fun CameraStatusIndicator(
     value: String,
     description: String,
     testTag: String,
+    modifier: Modifier = Modifier,
 ) {
     CameraRotatingSlot(
-        Modifier
-            .size(48.dp)
+        modifier
             .testTag(testTag)
             .semantics { contentDescription = description },
     ) {
-        Column(
+        Row(
             Modifier.testTag("$testTag-content"),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Icon(
                 painterResource(icon),
                 contentDescription = null,
                 tint = AppSubtleText,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(14.dp),
             )
             Text(
                 value,
                 color = AppSubtleText,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -412,9 +419,6 @@ private fun cameraStorageCompactLabel(status: CameraStatus?): String {
 
 private fun String.toCompactCameraName(): String =
     removePrefix("Canon EOS ").ifBlank { this }
-
-internal fun String.toCameraHudName(): String =
-    replace(" Mark ", " ")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -158,7 +158,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
-        compose.onNodeWithText("R6 III").assertIsDisplayed()
+        compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
         compose.onNodeWithContentDescription(
@@ -401,6 +401,14 @@ class CameraScreensTest {
             .onNodeWithText(resourceText(R.string.offline_preview_hint))
             .fetchSemanticsNode()
             .boundsInRoot
+        val modelSlot = compose
+            .onNodeWithTag("camera-model-status")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val modelText = compose
+            .onNodeWithTag("camera-name", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
         listOf(content, hint).forEach { bounds ->
             assertTrue(
                 "Rotated large text $bounds must stay inside the orientation-aware viewport $viewport",
@@ -410,6 +418,14 @@ class CameraScreensTest {
                     bounds.bottom <= viewport.bottom,
             )
         }
+        compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
+        assertTrue(
+            "The complete rotated model name $modelText must stay inside its stable HUD slot $modelSlot",
+            modelText.left >= modelSlot.left &&
+                modelText.top >= modelSlot.top &&
+                modelText.right <= modelSlot.right &&
+                modelText.bottom <= modelSlot.bottom,
+        )
     }
 
     @Test
@@ -462,7 +478,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun upsideDownSettingsMoveToThePhysicalBottomEdge() {
+    fun upsideDownSettingsKeepTheSameBottomAnchoredLayout() {
         compose.setContent {
             CompositionLocalProvider(
                 LocalCameraControlRotation provides 180f,
@@ -482,8 +498,8 @@ class CameraScreensTest {
         val spaceAbove = panel.top - root.top
         val spaceBelow = root.bottom - panel.bottom
         assertTrue(
-            "Upside-down settings must stay closer to the safe top edge than the bottom: $panel, $root",
-            spaceAbove < spaceBelow,
+            "Upside-down settings must keep the panel anchored to the layout bottom: $panel, $root",
+            spaceBelow < spaceAbove,
         )
         compose.onNodeWithTag("settings-content-rotation").fetchSemanticsNode()
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
@@ -530,9 +546,7 @@ class CameraScreensTest {
             .boundsInRoot
         assertTrue(naturalTitle.width > naturalTitle.height)
         assertTrue(sidewaysPanel.height > sidewaysPanel.width)
-        assertTrue(naturalPanel.width > sidewaysPanel.width)
-        assertTrue(naturalPanel.height < sidewaysPanel.height)
-        assertTrue(sidewaysPanel != naturalPanel)
+        assertEquals(sidewaysPanel, naturalPanel)
 
         compose.runOnIdle { controlRotation.floatValue = -90f }
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
