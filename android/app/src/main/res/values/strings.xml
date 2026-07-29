@@ -278,6 +278,7 @@
     <string name="camera_value_30_minutes">30 min.</string>
     <string name="camera_value_disable">Disable</string>
     <string name="camera_value_internal_ram">Computer</string>
+    <string name="camera_value_phone">Phone</string>
     <string name="camera_value_memory_card">Memory card</string>
     <string name="camera_value_low">Low</string>
     <string name="camera_value_normal">Normal</string>

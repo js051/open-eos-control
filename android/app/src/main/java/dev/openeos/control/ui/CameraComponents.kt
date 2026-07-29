@@ -65,8 +65,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import coil.ImageLoader
 import coil.compose.AsyncImage
@@ -449,7 +451,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     ) {
         when {
             state.previewMode -> BoxWithConstraints(
-                modifier = Modifier.fillMaxSize().cameraPreviewViewport(state.hudVisible),
+                modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
                 val quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
@@ -510,7 +512,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 onSuccess = { result -> lastFramePainter = result.painter },
             )
             else -> Box(
-                modifier = Modifier.fillMaxSize().cameraPreviewViewport(state.hudVisible),
+                modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(stringResource(R.string.live_view_unavailable), color = AppMutedText)
@@ -543,7 +545,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
 
         if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
         if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
-            val bottomPadding = if (state.hudVisible) 188.dp else 12.dp
+            val bottomPadding = liveViewOverlayBottomPadding(state)
             val focusAvailable = state.supports(CameraFeature.TAP_FOCUS)
             val description = stringResource(
                 if (tapAction == LiveViewTapAction.WHITE_BALANCE) {
@@ -572,12 +574,13 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 tint = if (tapAction == LiveViewTapAction.WHITE_BALANCE) AppWarning else AppAccent,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
+                    .zIndex(1f)
                     .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPadding)
                     .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp)),
             )
         }
         if (state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION)) {
-            val bottomPadding = if (state.hudVisible) 188.dp else 12.dp
+            val bottomPadding = liveViewOverlayBottomPadding(state)
             val target = if (state.liveViewMagnification == LiveViewMagnification.X5) {
                 LiveViewMagnification.X1
             } else {
@@ -588,6 +591,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
+                    .zIndex(1f)
                     .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPadding),
             ) {
                 TooltipBox(
@@ -637,11 +641,14 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     }
 }
 
-private fun Modifier.cameraPreviewViewport(hudVisible: Boolean): Modifier = if (hudVisible) {
-    this.padding(top = 48.dp, bottom = 176.dp)
+private fun Modifier.cameraPreviewViewport(state: CameraUiState): Modifier = if (state.hudVisible) {
+    this.padding(top = 48.dp, bottom = cameraHudHeight(state))
 } else {
     this
 }
+
+private fun liveViewOverlayBottomPadding(state: CameraUiState): Dp =
+    if (state.hudVisible) cameraHudHeight(state) + 12.dp else 12.dp
 
 @Composable
 private fun NativeRtpLiveView(

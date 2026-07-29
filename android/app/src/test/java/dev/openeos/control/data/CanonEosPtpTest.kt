@@ -226,6 +226,7 @@ class CanonEosPtpTest {
             ),
             CanonEosPtp.settingSpecs.map(CanonEosSettingSpec::key),
         )
+        assertEquals("capturetarget", CanonEosPtp.settingKey(CanonEosPropertyCode.CAPTURE_DESTINATION))
         assertEquals("AI Servo", CanonEosPtp.propertyLabel(CanonEosPropertyCode.FOCUS_MODE, 1))
         assertEquals("WholeAreaAF", CanonEosPtp.propertyLabel(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, 14))
         assertEquals("Continuous high speed", CanonEosPtp.propertyLabel(CanonEosPropertyCode.DRIVE_MODE, 4))

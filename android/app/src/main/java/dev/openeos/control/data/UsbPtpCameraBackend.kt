@@ -31,6 +31,7 @@ class UsbPtpCameraBackend(
     private val canonProperties = mutableMapOf<Int, CanonEosPropertyState>()
     private var canonPropertyDiscoveryAttempted = false
     private var canonPropertyError: String? = null
+    private var selectedCaptureDestination: Long? = null
     private val observedFeatures = mutableSetOf<CameraFeature>()
 
     override fun observedFeatures(): Set<CameraFeature> = observedFeatures.toSet()
@@ -77,6 +78,7 @@ class UsbPtpCameraBackend(
         synchronized(canonProperties) { canonProperties.clear() }
         canonPropertyDiscoveryAttempted = false
         canonPropertyError = null
+        selectedCaptureDestination = null
         observedFeatures.clear()
         current?.shutdown()
     }
@@ -179,6 +181,7 @@ class UsbPtpCameraBackend(
             canSetProperties,
         )
         val advancedSettings = advancedPropertyControls(
+            info = info,
             canSetStandardProperties = canSetProperties,
             canSetCanonProperties = CanonEosPtp.supportsPropertyControl(info),
         )
@@ -481,6 +484,11 @@ class UsbPtpCameraBackend(
     override suspend fun setSetting(key: String, value: String): CameraStatus {
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
+        if (key == USB_CAPTURE_TARGET_KEY) {
+            setCanonCaptureTarget(info, value)
+            observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
+            return status()
+        }
         val canonSpec = CanonEosPtp.settingSpecs.firstOrNull { it.key == key }
         if (canonSpec != null && setAdvertisedCanonProperty(canonSpec.propertyCode, value)) {
             observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
@@ -706,6 +714,14 @@ class UsbPtpCameraBackend(
         if (updates.isEmpty()) return
         synchronized(canonProperties) {
             updates.forEach { update ->
+                if (
+                    update.propertyCode == CanonEosPropertyCode.CAPTURE_DESTINATION &&
+                    update.currentValue != null &&
+                    selectedCaptureDestination != null &&
+                    update.currentValue != selectedCaptureDestination
+                ) {
+                    selectedCaptureDestination = null
+                }
                 val previous = canonProperties[update.propertyCode] ?: CanonEosPropertyState()
                 canonProperties[update.propertyCode] = previous.copy(
                     currentValue = update.currentValue ?: previous.currentValue,
@@ -792,11 +808,14 @@ class UsbPtpCameraBackend(
         val state = canonPropertyState(CanonEosPropertyCode.CAPTURE_DESTINATION)
         if (state.currentValue != CanonEosPtp.CAPTURE_DESTINATION_HOST) return false
         val info = requireDeviceInfo()
-        val hostTransferReady = hostCaptureStore != null &&
-            info.supports(PtpOperationCode.GET_PARTIAL_OBJECT) &&
-            info.supports(CanonEosOperationCode.TRANSFER_COMPLETE) &&
+        val hostTransferReady = supportsCanonHostCaptureTarget(info) &&
             prepareCanonHostCapacity(info)
         if (hostTransferReady) return true
+        if (selectedCaptureDestination == CanonEosPtp.CAPTURE_DESTINATION_HOST) {
+            throw PtpProtocolException(
+                "Canon EOS cannot prepare the explicitly selected phone capture destination."
+            )
+        }
         ensureCanonCaptureDestinationOnCard()
         return false
     }
@@ -836,6 +855,31 @@ class UsbPtpCameraBackend(
         synchronized(canonProperties) {
             canonProperties[CanonEosPropertyCode.CAPTURE_DESTINATION] = state.copy(currentValue = cardTarget)
         }
+        selectedCaptureDestination = null
+    }
+
+    private suspend fun setCanonCaptureTarget(info: PtpDeviceInfo, label: String) {
+        val control = captureTargetControl(info)
+            ?: unsupported<CameraSettingControl>(CameraFeature.ADVANCED_SETTINGS)
+        if (label !in control.values) {
+            throw PtpProtocolException("Value '$label' is not an available Android USB capture target.")
+        }
+        val state = canonPropertyState(CanonEosPropertyCode.CAPTURE_DESTINATION)
+        val target = when (label) {
+            USB_CAPTURE_TARGET_PHONE -> CanonEosPtp.CAPTURE_DESTINATION_HOST
+            USB_CAPTURE_TARGET_CARD -> CanonEosPtp.captureDestinationCardValue(state.availableValues)
+                ?: throw PtpProtocolException("Canon EOS did not advertise a memory-card capture destination.")
+            else -> throw PtpProtocolException("Value '$label' is not an available Android USB capture target.")
+        }
+        ensureCanonRemoteMode()
+        requireSession().executeDataOutOperation(
+            operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+            payload = CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.CAPTURE_DESTINATION, target),
+        )
+        synchronized(canonProperties) {
+            canonProperties[CanonEosPropertyCode.CAPTURE_DESTINATION] = state.copy(currentValue = target)
+        }
+        selectedCaptureDestination = target
     }
 
     private suspend fun setCanonMovieRecording(recording: Boolean): CameraStatus {
@@ -995,6 +1039,7 @@ class UsbPtpCameraBackend(
     }
 
     private fun advancedPropertyControls(
+        info: PtpDeviceInfo,
         canSetStandardProperties: Boolean,
         canSetCanonProperties: Boolean,
     ): List<CameraSettingControl> {
@@ -1012,6 +1057,7 @@ class UsbPtpCameraBackend(
                     )
                 }
             }
+            captureTargetControl(info)?.let { controls[it.key] = it }
         }
         if (!canSetStandardProperties) return controls.values.toList()
         PtpStandardProperties.advancedProperties.forEach { spec ->
@@ -1027,6 +1073,36 @@ class UsbPtpCameraBackend(
             }
         }
         return controls.values.toList()
+    }
+
+    private fun captureTargetControl(info: PtpDeviceInfo): CameraSettingControl? {
+        if (!CanonEosPtp.supportsRemoteRelease(info) || !supportsCanonHostCaptureTarget(info)) return null
+        val state = canonPropertyState(CanonEosPropertyCode.CAPTURE_DESTINATION)
+        if (CanonEosPtp.CAPTURE_DESTINATION_HOST !in state.availableValues) return null
+        if (CanonEosPtp.captureDestinationCardValue(state.availableValues) == null) return null
+        val current = when {
+            state.currentValue == CanonEosPtp.CAPTURE_DESTINATION_HOST -> USB_CAPTURE_TARGET_PHONE
+            state.currentValue != null && state.currentValue in state.availableValues -> USB_CAPTURE_TARGET_CARD
+            else -> "-"
+        }
+        return CameraSettingControl(
+            key = USB_CAPTURE_TARGET_KEY,
+            label = "Capture target",
+            value = current,
+            values = listOf(USB_CAPTURE_TARGET_PHONE, USB_CAPTURE_TARGET_CARD),
+        )
+    }
+
+    private fun supportsCanonHostCaptureTarget(info: PtpDeviceInfo): Boolean {
+        val availableShots = CanonEosPtp.availableShots(
+            canonPropertyState(CanonEosPropertyCode.AVAILABLE_SHOTS).currentValue,
+        )
+        val capacityCanBePrepared = availableShots?.let { it >= CANON_HOST_MIN_AVAILABLE_SHOTS } == true ||
+            info.supports(CanonEosOperationCode.PC_HDD_CAPACITY)
+        return hostCaptureStore != null &&
+            info.supports(PtpOperationCode.GET_PARTIAL_OBJECT) &&
+            info.supports(CanonEosOperationCode.TRANSFER_COMPLETE) &&
+            capacityCanBePrepared
     }
 
     private fun propertyDisplay(propertyCode: Int): String = propertyValues[propertyCode]
@@ -1278,6 +1354,9 @@ private const val CANON_CAPTURE_EVENT_TIMEOUT_MILLIS = 90_000L
 private const val CANON_HOST_TRANSFER_QUIET_MILLIS = 1_000L
 private const val CANON_HOST_TRANSFER_CHUNK_BYTES = 1 * 1024 * 1024
 private const val CANON_HOST_MIN_AVAILABLE_SHOTS = 100L
+private const val USB_CAPTURE_TARGET_KEY = "capturetarget"
+private const val USB_CAPTURE_TARGET_PHONE = "Phone"
+private const val USB_CAPTURE_TARGET_CARD = "Memory card"
 private const val CANON_HOST_CAPACITY_CLUSTERS = 0x0FFF_FFFFL
 private const val CANON_HOST_CAPACITY_CLUSTER_BYTES = 0x0000_1000L
 private const val CANON_LIVE_VIEW_READY_TIMEOUT_MILLIS = 3_000L
