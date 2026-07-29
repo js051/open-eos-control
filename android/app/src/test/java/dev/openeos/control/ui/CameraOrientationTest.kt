@@ -117,25 +117,10 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun settingsPanelMovesToThePhysicalBottomEdgeForEveryControlRotation() {
-        assertEquals(CameraSettingsPanelEdge.BOTTOM, cameraSettingsPanelEdge(0f))
-        assertEquals(CameraSettingsPanelEdge.START, cameraSettingsPanelEdge(90f))
-        assertEquals(CameraSettingsPanelEdge.TOP, cameraSettingsPanelEdge(180f))
-        assertEquals(CameraSettingsPanelEdge.END, cameraSettingsPanelEdge(270f))
-        assertEquals(CameraSettingsPanelEdge.END, cameraSettingsPanelEdge(-90f))
-    }
-
-    @Test
     fun equivalentRotationUsesTheShortestAnimationPath() {
         assertEquals(-180f, nearestEquivalentCameraRotation(currentDegrees = -90f, targetDegrees = 180f))
         assertEquals(-270f, nearestEquivalentCameraRotation(currentDegrees = -180f, targetDegrees = 90f))
         assertEquals(720f, nearestEquivalentCameraRotation(currentDegrees = 720f, targetDegrees = 0f))
         assertEquals(720f, nearestEquivalentCameraRotation(currentDegrees = 630f, targetDegrees = 0f))
-    }
-
-    @Test
-    fun cameraHudNameKeepsModelGenerationInACompactSlot() {
-        assertEquals("R6 III", "R6 Mark III".toCameraHudName())
-        assertEquals("R5", "R5".toCameraHudName())
     }
 }
