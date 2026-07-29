@@ -168,6 +168,61 @@ class DesktopBridgeClientTest {
     }
 
     @Test
+    fun bridgeEventPollingUsesAdvertisedLifecycle() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        server.enqueue(
+            jsonResponse(
+                CAPABILITIES_JSON.replace(
+                    "\"supported\": [",
+                    "\"supported\": [\"EVENT_POLLING\",",
+                ),
+            ),
+        )
+        server.enqueue(jsonResponse("""{"changedKeys":["shootingsettings","contents"]}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val client = DesktopBridgeClient(server.url("/").toString())
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val event = client.pollEvent()
+        client.stopEventPolling()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.EVENT_POLLING))
+        assertEquals(setOf("shootingsettings", "contents"), event.changedKeys)
+        assertEquals("/health", server.takeRequest().path)
+        assertEquals("/v1/session", server.takeRequest().path)
+        assertEquals("/v1/session/session-1/capabilities", server.takeRequest().path)
+        assertEquals("/v1/session/session-1/events", server.takeRequest().path)
+        val stop = server.takeRequest()
+        assertEquals("DELETE", stop.method)
+        assertEquals("/v1/session/session-1/events", stop.path)
+    }
+
+    @Test
+    fun bridgeEventPollingRejectsOversizedResponseBeforeParsing() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        server.enqueue(
+            jsonResponse(
+                CAPABILITIES_JSON.replace(
+                    "\"supported\": [",
+                    "\"supported\": [\"EVENT_POLLING\",",
+                ),
+            ),
+        )
+        server.enqueue(jsonResponse("""{"changedKeys":["${"x".repeat(270_000)}"]}"""))
+        val client = DesktopBridgeClient(server.url("/").toString())
+
+        client.initialize()
+        client.capabilities()
+        val failure = runCatching { client.pollEvent() }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("event response was too large"))
+    }
+
+    @Test
     fun bridgeErrorsPreserveStableCodeFeatureAndEngine() = runTest {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(

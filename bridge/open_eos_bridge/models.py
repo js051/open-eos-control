@@ -26,6 +26,7 @@ class CameraFeature(StrEnum):
     CAMERA_IDENTITY = "CAMERA_IDENTITY"
     BATTERY_STATUS = "BATTERY_STATUS"
     STORAGE_STATUS = "STORAGE_STATUS"
+    EVENT_POLLING = "EVENT_POLLING"
     LIVE_VIEW = "LIVE_VIEW"
     LIVE_VIEW_JPEG_POLLING = "LIVE_VIEW_JPEG_POLLING"
     LIVE_VIEW_RTP = "LIVE_VIEW_RTP"
@@ -130,6 +131,10 @@ class CameraStatus(ApiModel):
     media: StorageStatus
     exposure: ExposureState
     raw: dict[str, Any] = Field(default_factory=dict)
+
+
+class CameraEvent(ApiModel):
+    changed_keys: list[str] = Field(default_factory=list, max_length=64)
 
 
 class CameraProfile(ApiModel):

@@ -104,6 +104,97 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(remainingResponses, 0)
     }
 
+    func testEventPollingRequiresAdvertisedGetDeleteLifecycle() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver110":[{"path":"/event/polling","get":true,"delete":true}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver110/event/polling?timeout=long",
+            body: #"{"shootingsettings":{"iso":{"value":"1600"}}}"#
+        )
+        await transport.enqueue(
+            method: "DELETE",
+            path: "/ccapi/ver110/event/polling",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        try await client.initialize()
+        let capabilities = try await client.capabilities()
+        let event = try await client.pollEvent()
+        await client.stopEventPolling()
+
+        XCTAssertTrue(capabilities.matrix.supports(.eventPolling))
+        XCTAssertEqual(event.changedKeys, ["shootingsettings"])
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), [
+            "/ccapi",
+            "/ccapi/ver110/event/polling?timeout=long",
+            "/ccapi/ver110/event/polling",
+        ])
+        XCTAssertEqual(requests[1].timeoutInterval, 40)
+        XCTAssertEqual(requests[2].timeoutInterval, 5)
+    }
+
+    func testIncompleteEventLifecycleIsPlannedButUnsupported() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver110":[{"path":"/event/polling","get":true}]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        try await client.initialize()
+        let capabilities = try await client.capabilities()
+
+        XCTAssertFalse(capabilities.matrix.supports(.eventPolling))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.eventPolling))
+        do {
+            _ = try await client.pollEvent()
+            XCTFail("Expected unsupported event polling")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.eventPolling))
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi"])
+    }
+
+    func testSimulatorEventPollingAdvancesSequence() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/events?after=0",
+            body: #"{"sequence":2,"keys":["contents","shootingsettings"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/events?after=2",
+            body: #"{"sequence":2,"keys":[]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let first = try await client.pollEvent()
+        let second = try await client.pollEvent()
+
+        XCTAssertEqual(first.changedKeys, ["contents", "shootingsettings"])
+        XCTAssertTrue(second.changedKeys.isEmpty)
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi/events?after=0", "/ccapi/events?after=2"])
+    }
+
     func testDiscoveryAcceptsSameOriginURLEntriesAndRejectsUnsafeOperations() async throws {
         let transport = MockCameraHTTPTransport()
         let fullURLDiscovery = """

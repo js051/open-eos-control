@@ -67,6 +67,8 @@ interface CameraControlBackend {
     suspend fun info(): CameraInfo
     suspend fun status(): CameraStatus
     suspend fun capabilities(): CameraCapabilities
+    suspend fun pollEvent(): CameraEvent = unsupported(CameraFeature.EVENT_POLLING)
+    suspend fun stopEventPolling() = Unit
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest())
     suspend fun stopLiveView()
     suspend fun setExposure(iso: String? = null, shutter: String? = null, aperture: String? = null): CameraStatus
@@ -140,6 +142,10 @@ class CcapiCameraBackend(
     override suspend fun status(): CameraStatus = client.status()
 
     override suspend fun capabilities(): CameraCapabilities = client.capabilities()
+
+    override suspend fun pollEvent(): CameraEvent = client.pollEvent()
+
+    override suspend fun stopEventPolling() = client.stopEventPolling()
 
     override suspend fun startLiveView(request: LiveViewRequest) = client.startLiveView(request)
 
@@ -224,6 +230,10 @@ class DesktopBridgeCameraBackend(
     override suspend fun status(): CameraStatus = client.status()
 
     override suspend fun capabilities(): CameraCapabilities = client.capabilities()
+
+    override suspend fun pollEvent(): CameraEvent = client.pollEvent()
+
+    override suspend fun stopEventPolling() = client.stopEventPolling()
 
     override suspend fun startLiveView(request: LiveViewRequest) = client.startLiveView(request)
 

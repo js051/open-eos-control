@@ -6,6 +6,7 @@ from typing import Protocol
 from .models import (
     CameraCapabilities,
     CameraDescriptor,
+    CameraEvent,
     CameraInfo,
     CameraStatus,
     FocusResult,
@@ -26,6 +27,10 @@ class CameraEngineSession(Protocol):
     def status(self) -> CameraStatus: ...
 
     def capabilities(self) -> CameraCapabilities: ...
+
+    def poll_event(self) -> CameraEvent: ...
+
+    def stop_event_polling(self) -> None: ...
 
     def set_setting(self, key: str, value: str) -> CameraStatus: ...
 

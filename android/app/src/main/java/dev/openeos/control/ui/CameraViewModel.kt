@@ -26,6 +26,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +43,8 @@ class CameraViewModel(
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
     private var liveViewJob: Job? = null
+    private var eventPollingJob: Job? = null
+    private var eventPollingGeneration = 0L
     private var mediaDownloadJob: Job? = null
     private val mediaThumbnailJobs = mutableMapOf<String, Job>()
     private val unavailableMediaThumbnailIds = mutableSetOf<String>()
@@ -210,6 +213,7 @@ class CameraViewModel(
 
     fun enterOfflinePreview() {
         stopLiveViewLoop()
+        stopEventPollingLoop()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -233,6 +237,7 @@ class CameraViewModel(
     }
 
     fun connect() = runCamera(CameraOperation.CONNECT) {
+        stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
         cancelMediaThumbnailLoads()
@@ -253,6 +258,7 @@ class CameraViewModel(
     }
 
     fun connectUsb(deviceName: String, vendorId: Int, productId: Int) = runCamera(CameraOperation.CONNECT) {
+        stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
         cancelMediaThumbnailLoads()
@@ -290,6 +296,7 @@ class CameraViewModel(
     }
 
     fun connectBridge() = runCamera(CameraOperation.CONNECT) {
+        stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
         cancelMediaThumbnailLoads()
@@ -350,6 +357,7 @@ class CameraViewModel(
                 startLiveViewLoopIfNeeded()
             }
         }
+        startEventPollingIfSupported()
     }
 
     fun rememberConnection(context: Context) {
@@ -365,6 +373,7 @@ class CameraViewModel(
 
     fun disconnect() {
         stopLiveViewLoop()
+        stopEventPollingLoop()
         detachNativeLiveViewListener()
         cancelMediaDownload()
         cancelMediaThumbnailLoads()
@@ -1184,6 +1193,64 @@ class CameraViewModel(
         liveViewJob = null
     }
 
+    private fun startEventPollingIfSupported() {
+        stopEventPollingLoop()
+        val state = _uiState.value
+        if (
+            !state.connected ||
+            state.previewMode ||
+            !state.supports(CameraFeature.EVENT_POLLING)
+        ) return
+
+        val generation = eventPollingGeneration
+        eventPollingJob = viewModelScope.launch {
+            var consecutiveFailures = 0
+            while (isActive && generation == eventPollingGeneration) {
+                try {
+                    val event = repository.pollEvent()
+                    consecutiveFailures = 0
+                    if (event.changedKeys.isEmpty()) continue
+                    val status = repository.refreshStatus()
+                    val capabilities = repository.refreshCapabilities()
+                    val captureMode = captureModeFrom(capabilities)
+                    _uiState.update { current ->
+                        if (
+                            generation == eventPollingGeneration &&
+                            current.connected &&
+                            !current.previewMode
+                        ) {
+                            current.copy(
+                                status = status,
+                                capabilities = capabilities,
+                                captureMode = captureMode ?: current.captureMode,
+                            )
+                        } else {
+                            current
+                        }
+                    }
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    consecutiveFailures += 1
+                    delay(EVENT_RETRY_DELAYS_MILLIS[(consecutiveFailures - 1).coerceAtMost(EVENT_RETRY_DELAYS_MILLIS.lastIndex)])
+                }
+            }
+        }
+    }
+
+    private fun stopEventPollingLoop() {
+        eventPollingGeneration += 1
+        eventPollingJob?.cancel()
+        eventPollingJob = null
+    }
+
+    private suspend fun stopEventPollingLoopAndJoin() {
+        eventPollingGeneration += 1
+        val job = eventPollingJob
+        eventPollingJob = null
+        job?.cancelAndJoin()
+    }
+
     private fun pauseLiveViewForBulb() {
         stopLiveViewLoop()
         repository.setNativeLiveViewRenderingEnabled(false)
@@ -1198,6 +1265,7 @@ class CameraViewModel(
 
     override fun onCleared() {
         stopLiveViewLoop()
+        stopEventPollingLoop()
         detachNativeLiveViewListener()
         cancelMediaDownload()
         cancelMediaThumbnailLoads()
@@ -1336,6 +1404,7 @@ class CameraViewModel(
         const val CAPTURE_FLASH_MILLIS = 120L
         const val FOCUS_FEEDBACK_MILLIS = 1_200L
         const val FPS_WINDOW_SIZE = 30
+        val EVENT_RETRY_DELAYS_MILLIS = longArrayOf(1_000L, 2_000L, 5_000L)
         val CAPABILITY_EVIDENCE_OPERATIONS = setOf(
             CameraOperation.SETTING,
             CameraOperation.CAPTURE,

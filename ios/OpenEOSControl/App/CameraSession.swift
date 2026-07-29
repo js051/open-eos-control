@@ -19,6 +19,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func pollEvent() async throws -> CameraEvent {
+        switch self {
+        case let .ccapi(client): return try await client.pollEvent()
+        case let .desktopBridge(client): return try await client.pollEvent()
+        }
+    }
+
+    func stopEventPolling() async {
+        switch self {
+        case let .ccapi(client): await client.stopEventPolling()
+        case let .desktopBridge(client): await client.stopEventPolling()
+        }
+    }
+
     func setSetting(key: String, value: String) async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.setSetting(key: key, value: value)

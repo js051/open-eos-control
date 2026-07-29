@@ -446,6 +446,91 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realEventPollingRequiresAdvertisedGetAndDeleteLifecycle() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/event/polling","get":true,"delete":true}]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"shootingsettings":{"iso":{"value":"1600"}}}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val event = client.pollEvent()
+        client.stopEventPolling()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.EVENT_POLLING))
+        assertEquals(setOf("shootingsettings"), event.changedKeys)
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/event/polling?timeout=long", server.takeRequest().path)
+        val stop = server.takeRequest()
+        assertEquals("DELETE", stop.method)
+        assertEquals("/ccapi/ver110/event/polling", stop.path)
+    }
+
+    @Test
+    fun realEventPollingIsNotAdvertisedForIncompleteLifecycle() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/event/polling","get":true}]}""",
+            ),
+        )
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val failure = runCatching { client.pollEvent() }.exceptionOrNull()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.EVENT_POLLING))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.EVENT_POLLING))
+        assertTrue(failure is UnsupportedOperationException)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun version100EventPollingUsesContinueMode() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[{"path":"/event/polling","get":true,"delete":true}]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+
+        client.initialize()
+        val event = client.pollEvent()
+
+        assertTrue(event.changedKeys.isEmpty())
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/event/polling?continue=on", server.takeRequest().path)
+    }
+
+    @Test
+    fun simulatorEventPollingTracksSequence() = runTest {
+        server.enqueue(jsonResponse("""{"sequence":3,"keys":["shootingsettings","contents"]}"""))
+        server.enqueue(jsonResponse("""{"sequence":3,"keys":[]}"""))
+
+        val first = client.pollEvent()
+        val second = client.pollEvent()
+
+        assertEquals(setOf("shootingsettings", "contents"), first.changedKeys)
+        assertTrue(second.changedKeys.isEmpty())
+        assertEquals("/ccapi/events?after=0", server.takeRequest().path)
+        assertEquals("/ccapi/events?after=3", server.takeRequest().path)
+    }
+
+    @Test
     fun canonRtpLiveViewUsesAdvertisedSdpStartAndStopContract() = runTest {
         lateinit var nativeSession: FakeNativeLiveViewSession
         client = CcapiClient(

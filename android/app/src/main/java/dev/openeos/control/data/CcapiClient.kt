@@ -11,6 +11,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
+import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -24,7 +25,15 @@ import java.net.URI
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.TimeUnit
 import kotlin.math.floor
+
+private const val MAX_CCAPI_EVENT_BODY_BYTES = 256 * 1024
+private const val MAX_CCAPI_EVENT_KEYS = 64
+private const val MAX_CCAPI_EVENT_KEY_CHARS = 128
+private const val CCAPI_EVENT_READ_TIMEOUT_SECONDS = 40L
+private const val CCAPI_EVENT_CALL_TIMEOUT_SECONDS = 45L
 
 private data class CcapiApiOperation(
     val method: String,
@@ -78,6 +87,11 @@ class CcapiClient(
         }
     }.build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val eventHttpClient = this.httpClient.newBuilder()
+        .readTimeout(CCAPI_EVENT_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(CCAPI_EVENT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+    private val activeEventCall = AtomicReference<Call?>(null)
 
     var isRealCamera = false
         private set
@@ -101,6 +115,7 @@ class CcapiClient(
     private var activeLiveViewSize = LiveViewSize.MEDIUM
     private var latestLiveViewGeometry: CcapiLiveViewGeometry? = null
     private var activeLiveViewSource: LiveViewSource? = null
+    private var simulatorEventSequence = 0L
 
     var nativeLiveViewSession: NativeLiveViewSession? = null
         private set
@@ -108,6 +123,7 @@ class CcapiClient(
     fun observedFeatureSnapshot(): Set<CameraFeature> = observedFeatures.toSet()
 
     suspend fun close() {
+        runCatching { stopEventPolling() }
         if (bulbExposureActive) {
             runCatching { stopBulbExposure() }
         }
@@ -469,6 +485,9 @@ class CcapiClient(
                 supportedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
             }
             if (supportsMediaDelete()) supportedFeatures.add(CameraFeature.MEDIA_DELETE)
+            if (eventPollingOperations() != null) {
+                supportedFeatures.add(CameraFeature.EVENT_POLLING)
+            }
 
             val liveViewCapabilities = ccapiLiveViewCapabilities().let { capabilities ->
                 if (liveViewSizeControlSupported) {
@@ -497,6 +516,60 @@ class CcapiClient(
                     observedFeatures = observedFeatures.toSet(),
                 ),
             )
+        }
+    }
+
+    suspend fun pollEvent(): CameraEvent {
+        val event = if (isRealCamera) {
+            val operations = eventPollingOperations()
+                ?: throw UnsupportedOperationException(
+                    "${CameraFeature.EVENT_POLLING.label} is not supported by this camera's advertised CCAPI.",
+                )
+            val pollOperation = operations.first
+            val timeoutParameter = if (pollOperation.apiVersionNumber() >= 110) {
+                "timeout" to "long"
+            } else {
+                "continue" to "on"
+            }
+            val url = "$baseUrl${pollOperation.path}".toHttpUrl().newBuilder()
+                .addQueryParameter(timeoutParameter.first, timeoutParameter.second)
+                .build()
+            val json = requestEventJson(
+                Request.Builder()
+                    .url(url)
+                    .get()
+                    .header("Accept", "application/json")
+                    .header("Cache-Control", "no-cache")
+                    .build(),
+            )
+            CameraEvent(changedKeys = json.safeTopLevelKeys())
+        } else {
+            val url = "$baseUrl/ccapi/events".toHttpUrl().newBuilder()
+                .addQueryParameter("after", simulatorEventSequence.toString())
+                .build()
+            val json = requestEventJson(Request.Builder().url(url).get().build())
+            simulatorEventSequence = json.optLong("sequence", simulatorEventSequence)
+                .coerceAtLeast(simulatorEventSequence)
+            CameraEvent(
+                changedKeys = json.optJSONArray("keys")?.toStringList()
+                    .orEmpty()
+                    .asSequence()
+                    .map(String::safeEventKey)
+                    .filter(String::isNotBlank)
+                    .take(MAX_CCAPI_EVENT_KEYS)
+                    .toSet(),
+            )
+        }
+        observedFeatures.add(CameraFeature.EVENT_POLLING)
+        return event
+    }
+
+    suspend fun stopEventPolling() {
+        activeEventCall.getAndSet(null)?.cancel()
+        if (!isRealCamera) return
+        val (_, stopOperation) = eventPollingOperations() ?: return
+        withContext(NonCancellable) {
+            runCatching { deleteOk(stopOperation.path) }
         }
     }
 
@@ -1133,6 +1206,21 @@ class CcapiClient(
 
     private fun directShutterOperation(): CcapiApiOperation? =
         apiOperation("POST", "/shooting/control/shutterbutton")
+
+    private fun eventPollingOperations(): Pair<CcapiApiOperation, CcapiApiOperation>? {
+        val pollingGets = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith("/event/polling") }
+            .sortedByDescending { it.apiVersionNumber() }
+        return pollingGets.firstNotNullOfOrNull { get ->
+            val prefix = get.path.substringBeforeLast("/event/polling")
+            apiOperations.firstOrNull {
+                it.method == "DELETE" && it.path == "$prefix/event/polling"
+            }?.let { delete -> get to delete }
+        }
+    }
+
+    private fun CcapiApiOperation.apiVersionNumber(): Int =
+        path.substringBefore("/event/polling").apiVersionNumber()
 
     private fun manualShutterOperation(): CcapiApiOperation? =
         apiOperation("PUT", "/shooting/control/shutterbutton/manual")
@@ -1807,6 +1895,39 @@ class CcapiClient(
         }
     }
 
+    private suspend fun requestEventJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
+        val call = eventHttpClient.newCall(request)
+        check(activeEventCall.compareAndSet(null, call)) { "A camera event polling request is already active." }
+        val cancelCall = AtomicBoolean(true)
+        val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                if (cancelCall.get()) call.cancel()
+            }
+        }
+        try {
+            call.execute().use { response ->
+                val payload = response.body?.byteStream()?.readBoundedEventPayload() ?: ByteArray(0)
+                val body = payload.toString(StandardCharsets.UTF_8)
+                if (!response.isSuccessful) {
+                    throw CcapiHttpException(
+                        statusCode = response.code,
+                        message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\n" +
+                            "Body: ${body.take(MAX_ERROR_BODY_CHARS)}",
+                    )
+                }
+                runCatching { JSONObject(body) }.getOrElse {
+                    error("Camera event polling returned invalid JSON.")
+                }
+            }
+        } finally {
+            cancelCall.set(false)
+            cancellationWatcher.cancel()
+            activeEventCall.compareAndSet(call, null)
+        }
+    }
+
     private suspend fun requestOk(request: Request): Unit = withContext(Dispatchers.IO) {
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
@@ -2149,10 +2270,37 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
             CameraFeature.MEDIA_PREVIEW,
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
+            CameraFeature.EVENT_POLLING,
         ),
     ),
     liveView = LiveViewCapabilities.simulator(),
 )
+
+private fun JSONObject.safeTopLevelKeys(): Set<String> {
+    val result = linkedSetOf<String>()
+    val iterator = keys()
+    while (iterator.hasNext() && result.size < MAX_CCAPI_EVENT_KEYS) {
+        iterator.next().safeEventKey().takeIf(String::isNotBlank)?.let(result::add)
+    }
+    return result
+}
+
+private fun String.safeEventKey(): String =
+    replace("\r", "").replace("\n", "").trim().take(MAX_CCAPI_EVENT_KEY_CHARS)
+
+private fun InputStream.readBoundedEventPayload(): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        check(output.size() <= MAX_CCAPI_EVENT_BODY_BYTES - count) {
+            "Camera event response exceeded $MAX_CCAPI_EVENT_BODY_BYTES bytes."
+        }
+        output.write(buffer, 0, count)
+    }
+    return output.toByteArray()
+}
 
 private fun JSONObject.toAdvancedSettingControls(writableKeys: Set<String>): List<CameraSettingControl> {
     val controls = mutableListOf<CameraSettingControl>()

@@ -114,6 +114,21 @@ class CameraRepositoryTest {
     }
 
     @Test
+    fun cameraEventsRunThroughRepositoryBackendBoundary() = runTest {
+        server.enqueue(jsonResponse(INFO_JSON))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        server.enqueue(jsonResponse("""{"sequence":4,"keys":["shootingsettings"]}"""))
+        repository.connect(server.url("/").toString())
+
+        val event = repository.pollEvent()
+
+        repeat(3) { server.takeRequest() }
+        assertEquals("/ccapi/events?after=0", server.takeRequest().path)
+        assertEquals(setOf("shootingsettings"), event.changedKeys)
+    }
+
+    @Test
     fun mediaDownloadStreamsThroughRepositoryBackendBoundary() = runTest {
         server.enqueue(jsonResponse(INFO_JSON))
         server.enqueue(jsonResponse(STATUS_JSON))

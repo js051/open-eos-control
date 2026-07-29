@@ -29,6 +29,7 @@ from .models import (
     BatteryStatus,
     CameraCapabilities,
     CameraDescriptor,
+    CameraEvent,
     CameraFeature,
     CameraInfo,
     CameraProfile,
@@ -1105,6 +1106,7 @@ class GPhoto2Session:
             planned = {
                 feature
                 for feature in (
+                    CameraFeature.EVENT_POLLING,
                     CameraFeature.TAP_FOCUS,
                     CameraFeature.CLICK_WHITE_BALANCE,
                     CameraFeature.LIVE_VIEW_RTP,
@@ -1118,6 +1120,9 @@ class GPhoto2Session:
                 supported=sorted(supported, key=str),
                 planned=sorted(planned, key=str),
                 reasons={
+                    CameraFeature.EVENT_POLLING.value: (
+                        "The libgphoto2 engine does not yet expose a verified nonblocking camera event lifecycle."
+                    ),
                     CameraFeature.TAP_FOCUS.value: (
                         "gphoto2 exposes autofocus and relative lens drive for this camera, but not a verified "
                         "normalized image-coordinate AF point command."
@@ -1147,6 +1152,12 @@ class GPhoto2Session:
                 settings=settings,
                 evidence=self._capability_evidence(),
             )
+
+    def poll_event(self) -> CameraEvent:
+        raise unsupported(CameraFeature.EVENT_POLLING.value, self.engine_name)
+
+    def stop_event_polling(self) -> None:
+        raise unsupported(CameraFeature.EVENT_POLLING.value, self.engine_name)
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:

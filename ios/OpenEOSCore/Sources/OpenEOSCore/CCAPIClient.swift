@@ -54,6 +54,9 @@ public actor CCAPIClient {
     private static let maximumMediaPreviewBytes = 32 * 1024 * 1024
     private static let maximumCapabilityEvidenceItems = 256
     private static let maximumCapabilityEvidenceItemCharacters = 512
+    private static let maximumEventBytes = 256 * 1024
+    private static let maximumEventKeys = 64
+    private static let maximumEventKeyCharacters = 128
     private static let maximumRTPSessionDescriptionBytes = 64 * 1024
     private static let halfPressNanoseconds: UInt64 = 350_000_000
     private static let imageQualitySettingKey = "stillimagequality"
@@ -89,6 +92,7 @@ public actor CCAPIClient {
     private var rtpSession: (any CCAPIRTPSession)?
     private var nativeGeometryCacheKey: Int64 = 0
     private var latestLiveViewGeometry: CCAPILiveViewGeometry?
+    private var simulatorEventSequence: Int64 = 0
 
     public init(
         baseURL value: String,
@@ -186,6 +190,7 @@ public actor CCAPIClient {
     }
 
     public func close() async {
+        await stopEventPolling()
         if bulbExposureActive {
             _ = try? await stopBulbExposure()
         }
@@ -300,9 +305,11 @@ public actor CCAPIClient {
             supported.formUnion([.mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload])
         }
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
+        if eventPollingOperations() != nil { supported.insert(.eventPolling) }
 
         let allPlanned: Set<CameraFeature> = [
-            .liveViewRTP, .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
+            .eventPolling, .liveViewRTP, .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress,
+            .videoRecording, .tapFocus,
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete,
@@ -314,6 +321,7 @@ public actor CCAPIClient {
                 supported: supported,
                 planned: allPlanned.subtracting(supported),
                 reasons: [
+                    .eventPolling: "The camera must advertise both GET and DELETE for the Canon event polling endpoint.",
                     .liveViewRTP: "Canon RTP needs advertised SDP/start endpoints and a reachable camera-Wi-Fi IPv4 address.",
                     .autofocus: "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation.",
                     .tapFocus: "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
@@ -331,6 +339,39 @@ public actor CCAPIClient {
             profile: CameraProfile.from(modelName: cachedModel),
             evidence: capabilityEvidence()
         )
+    }
+
+    public func pollEvent() async throws -> CameraEvent {
+        try await ensureInitialized()
+        let changedKeys: [String]
+        if resolvedMode == .simulator {
+            let value = try await requestJSON(
+                path: "/ccapi/events?after=\(simulatorEventSequence)",
+                timeoutInterval: 40,
+                maximumBytes: Self.maximumEventBytes
+            )
+            simulatorEventSequence = max(simulatorEventSequence, value.integer64("sequence") ?? simulatorEventSequence)
+            changedKeys = Self.safeEventKeys(value.array("keys")?.strings ?? [])
+        } else {
+            guard let operations = eventPollingOperations() else {
+                throw CCAPIError.unsupported(.eventPolling)
+            }
+            let parameter = Self.pathVersion(operations.poll.path) >= 110 ? "timeout=long" : "continue=on"
+            let separator = operations.poll.path.contains("?") ? "&" : "?"
+            let value = try await requestJSON(
+                path: "\(operations.poll.path)\(separator)\(parameter)",
+                timeoutInterval: 40,
+                maximumBytes: Self.maximumEventBytes
+            )
+            changedKeys = Self.safeEventKeys(Array(value.keys))
+        }
+        observedFeatures.insert(.eventPolling)
+        return CameraEvent(changedKeys: changedKeys)
+    }
+
+    public func stopEventPolling() async {
+        guard resolvedMode != .simulator, let operations = eventPollingOperations() else { return }
+        try? await requestOK(path: operations.stop.path, method: .delete, timeoutInterval: 5)
     }
 
     public func setSetting(key: String, value: String) async throws -> CameraStatus {
@@ -1052,6 +1093,18 @@ public actor CCAPIClient {
         operation(.post, suffix: "/shooting/control/shutterbutton")
     }
 
+    private func eventPollingOperations() -> (poll: CCAPIOperation, stop: CCAPIOperation)? {
+        let gets = operations
+            .filter { $0.method == .get && $0.path.hasSuffix("/event/polling") }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for get in gets {
+            let prefix = String(get.path.dropLast("/event/polling".count))
+            let stop = CCAPIOperation(method: .delete, path: "\(prefix)/event/polling")
+            if operations.contains(stop) { return (get, stop) }
+        }
+        return nil
+    }
+
     private func manualShutterOperation() -> CCAPIOperation? {
         operation(.put, suffix: "/shooting/control/shutterbutton/manual")
             ?? operation(.post, suffix: "/shooting/control/shutterbutton/manual")
@@ -1620,7 +1673,7 @@ public actor CCAPIClient {
             ),
         ]
         let supported: Set<CameraFeature> = [
-            .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
+            .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
             .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete,
@@ -1811,11 +1864,16 @@ public actor CCAPIClient {
     private func requestJSON(
         path: String,
         method: HTTPMethod = .get,
-        json: JSONDictionary? = nil
+        json: JSONDictionary? = nil,
+        timeoutInterval: TimeInterval = 10,
+        maximumBytes: Int? = nil
     ) async throws -> JSONDictionary {
-        let request = try request(path: path, method: method, json: json)
+        let request = try request(path: path, method: method, json: json, timeoutInterval: timeoutInterval)
         let response = try await transport.send(request)
         try validate(response, request: request)
+        if let maximumBytes, response.body.count > maximumBytes {
+            throw CCAPIError.invalidResponse("Camera response at \(path) exceeded the \(maximumBytes)-byte limit.")
+        }
         do {
             return try decodeJSONObject(response.body)
         } catch let error as CCAPIError {
@@ -1843,18 +1901,24 @@ public actor CCAPIClient {
     private func requestOK(
         path: String,
         method: HTTPMethod,
-        json: JSONDictionary? = nil
+        json: JSONDictionary? = nil,
+        timeoutInterval: TimeInterval = 10
     ) async throws {
-        let request = try request(path: path, method: method, json: json)
+        let request = try request(path: path, method: method, json: json, timeoutInterval: timeoutInterval)
         let response = try await transport.send(request)
         try validate(response, request: request)
     }
 
-    private func request(path: String, method: HTTPMethod, json: JSONDictionary? = nil) throws -> URLRequest {
+    private func request(
+        path: String,
+        method: HTTPMethod,
+        json: JSONDictionary? = nil,
+        timeoutInterval: TimeInterval = 10
+    ) throws -> URLRequest {
         guard let url = URL(string: baseURLString + path) else {
             throw CCAPIError.invalidResponse("Invalid camera request path: \(path)")
         }
-        var value = request(url: url, method: method)
+        var value = request(url: url, method: method, timeoutInterval: timeoutInterval)
         if let json {
             value.httpBody = try encodeJSONObject(json)
             value.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -1862,11 +1926,11 @@ public actor CCAPIClient {
         return value
     }
 
-    private func request(url: URL, method: HTTPMethod) -> URLRequest {
+    private func request(url: URL, method: HTTPMethod, timeoutInterval: TimeInterval = 10) -> URLRequest {
         var value = URLRequest(url: url)
         value.httpMethod = method.rawValue
         value.cachePolicy = .reloadIgnoringLocalCacheData
-        value.timeoutInterval = 10
+        value.timeoutInterval = timeoutInterval
         value.setValue("application/json", forHTTPHeaderField: "Accept")
         if let authorization { value.setValue(authorization, forHTTPHeaderField: "Authorization") }
         return value
@@ -1918,6 +1982,23 @@ public actor CCAPIClient {
         case .some: true
         case .none: false
         }
+    }
+
+    private static func safeEventKeys(_ keys: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for key in keys {
+            let safe = String(
+                key.replacingOccurrences(of: "\r", with: "")
+                    .replacingOccurrences(of: "\n", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .prefix(maximumEventKeyCharacters)
+            )
+            guard !safe.isEmpty, seen.insert(safe).inserted else { continue }
+            result.append(safe)
+            if result.count >= maximumEventKeys { break }
+        }
+        return result
     }
 
     private static func settingLabel(_ key: String) -> String {
