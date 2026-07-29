@@ -177,6 +177,19 @@
 "media_preview_content" = "Preview of %@";
 "media_preview_unavailable" = "The camera preview could not be displayed.";
 
+"monitoring_assists" = "Monitoring assists";
+"monitoring_assists_rtp_unavailable" = "Histogram, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.";
+"histogram" = "Histogram";
+"zebra" = "Zebra";
+"zebra_threshold" = "%d%%";
+"false_color" = "False color";
+"focus_peaking" = "Focus peaking";
+"frame_guide" = "Frame guide";
+"safe_area" = "Action and title safe areas";
+"anamorphic_desqueeze" = "Anamorphic desqueeze";
+"desqueeze_value" = "%.2f×";
+"off" = "Off";
+
 "overview" = "Overview";
 "camera_profile" = "Camera profile";
 "transport" = "Transport";

@@ -33,6 +33,7 @@ final class CameraAppState: ObservableObject {
     @Published var activeSheet: CameraSheet?
     @Published var hudVisible = true
     @Published var showGrid = false
+    @Published var monitorSettings = LiveViewMonitorSettings()
     @Published var liveViewTapAction = LiveViewTapAction.focus
     @Published var autoRefresh = true
     @Published private(set) var requestedFPS: Int
@@ -807,26 +808,37 @@ final class CameraAppState: ObservableObject {
             sourceURL: frameSourceURL,
             lastFrameAt: lastFrameAt
         )
+        let report: String
         if let session {
-            return await session.diagnosticReport(snapshot: snapshot, liveView: metrics, lastError: lastError)
-        }
-        if connectionMode == .desktopBridge, let url = URL(string: bridgeURL) {
-            return DesktopBridgeDiagnosticReport.make(
+            report = await session.diagnosticReport(snapshot: snapshot, liveView: metrics, lastError: lastError)
+        } else if connectionMode == .desktopBridge, let url = URL(string: bridgeURL) {
+            report = DesktopBridgeDiagnosticReport.make(
                 baseURL: url,
                 snapshot: snapshot,
                 liveView: metrics,
                 lastError: lastError
             )
+        } else {
+            let url = URL(string: baseURL) ?? URL(string: Self.defaultCameraURL)!
+            report = CCAPIDiagnosticReport.make(
+                baseURL: url,
+                mode: isPreview ? .simulator : .automatic,
+                versions: isPreview ? ["offline-preview"] : [],
+                snapshot: snapshot,
+                liveView: metrics,
+                lastError: lastError
+            )
         }
-        let url = URL(string: baseURL) ?? URL(string: Self.defaultCameraURL)!
-        return CCAPIDiagnosticReport.make(
-            baseURL: url,
-            mode: isPreview ? .simulator : .automatic,
-            versions: isPreview ? ["offline-preview"] : [],
-            snapshot: snapshot,
-            liveView: metrics,
-            lastError: lastError
-        )
+        let monitoring = [
+            "monitorHistogram=\(monitorSettings.histogramVisible)",
+            "monitorZebra=\(monitorSettings.zebraThresholdPercent.map { String($0) } ?? "off")",
+            "monitorFalseColor=\(monitorSettings.falseColorEnabled)",
+            "monitorFocusPeaking=\(monitorSettings.focusPeakingEnabled)",
+            "monitorFrameGuide=\(monitorSettings.frameGuide.rawValue)",
+            "monitorSafeArea=\(monitorSettings.safeAreaVisible)",
+            "monitorDesqueeze=\(monitorSettings.desqueeze.rawValue)",
+        ].joined(separator: "\n")
+        return "\(report)\n\(monitoring)"
     }
 
     func clearError() {

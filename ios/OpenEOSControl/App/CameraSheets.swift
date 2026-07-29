@@ -10,6 +10,8 @@ struct CameraSheetHost: View {
             ExposureSettingsView(selectedSheet: sheet)
         case .liveView:
             LiveViewSettingsView()
+        case .monitoring:
+            MonitoringAssistView()
         case .more:
             MoreSettingsView()
         case .focusDrive:
@@ -248,6 +250,16 @@ private struct LiveViewSettingsView: View {
                     Toggle("composition_grid", isOn: $camera.showGrid)
                         .tint(Color.cameraAccent)
                         .frame(minHeight: 48)
+                    Button {
+                        camera.activeSheet = .monitoring
+                    } label: {
+                        Label("monitoring_assists", systemImage: "waveform.path.ecg")
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle(radius: 5))
+                    .tint(Color.cameraAccent)
+                    .accessibilityIdentifier("monitoring-assists-button")
                 }
                 .padding(20)
             }
@@ -353,6 +365,151 @@ private struct LiveViewSettingsView: View {
         case .simulatorFrame: "source_simulator"
         case .auto: "source_auto"
         }
+    }
+}
+
+private struct MonitoringAssistView: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
+    @Environment(\.dismiss) private var dismiss
+
+    private let zebraValues = [0, 70, 75, 80, 85, 90, 95, 100]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if !pixelAnalysisAvailable {
+                        Label("monitoring_assists_rtp_unavailable", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(Color.cameraWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    monitorToggle(
+                        "histogram",
+                        value: Binding(
+                            get: { camera.monitorSettings.histogramVisible },
+                            set: { camera.monitorSettings.histogramVisible = $0 }
+                        ),
+                        enabled: pixelAnalysisAvailable,
+                        identifier: "monitor-histogram"
+                    )
+                    monitorPickerRow("zebra") {
+                        Picker("zebra", selection: Binding(
+                            get: { camera.monitorSettings.zebraThresholdPercent ?? 0 },
+                            set: { camera.monitorSettings.zebraThresholdPercent = $0 == 0 ? nil : $0 }
+                        )) {
+                            ForEach(zebraValues, id: \.self) { value in
+                                Text(value == 0 ? language.string("off") : language.format("zebra_threshold", value))
+                                    .tag(value)
+                            }
+                        }
+                        .disabled(!pixelAnalysisAvailable)
+                        .accessibilityIdentifier("monitor-zebra")
+                    }
+                    monitorToggle(
+                        "false_color",
+                        value: Binding(
+                            get: { camera.monitorSettings.falseColorEnabled },
+                            set: { camera.monitorSettings.falseColorEnabled = $0 }
+                        ),
+                        enabled: pixelAnalysisAvailable,
+                        identifier: "monitor-false-color"
+                    )
+                    monitorToggle(
+                        "focus_peaking",
+                        value: Binding(
+                            get: { camera.monitorSettings.focusPeakingEnabled },
+                            set: { camera.monitorSettings.focusPeakingEnabled = $0 }
+                        ),
+                        enabled: pixelAnalysisAvailable,
+                        identifier: "monitor-focus-peaking"
+                    )
+                    Divider().overlay(Color.cameraBorder)
+                    monitorPickerRow("frame_guide") {
+                        Picker("frame_guide", selection: $camera.monitorSettings.frameGuide) {
+                            ForEach(LiveViewFrameGuide.allCases) { guide in
+                                Text(frameGuideLabel(guide)).tag(guide)
+                            }
+                        }
+                        .accessibilityIdentifier("monitor-frame-guide")
+                    }
+                    monitorToggle(
+                        "safe_area",
+                        value: $camera.monitorSettings.safeAreaVisible,
+                        enabled: true,
+                        identifier: "monitor-safe-area"
+                    )
+                    monitorPickerRow("anamorphic_desqueeze") {
+                        Picker("anamorphic_desqueeze", selection: $camera.monitorSettings.desqueeze) {
+                            ForEach(LiveViewDesqueeze.allCases) { desqueeze in
+                                Text(desqueezeLabel(desqueeze)).tag(desqueeze)
+                            }
+                        }
+                        .accessibilityIdentifier("monitor-desqueeze")
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color.cameraSurface)
+            .navigationTitle(Text("monitoring_assists"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var pixelAnalysisAvailable: Bool {
+        !camera.isPreview
+            && camera.activeLiveViewSource != nil
+            && camera.activeLiveViewSource != .ccapiRTP
+    }
+
+    private func monitorToggle(
+        _ title: LocalizedStringKey,
+        value: Binding<Bool>,
+        enabled: Bool,
+        identifier: String
+    ) -> some View {
+        Toggle(title, isOn: value)
+            .tint(Color.cameraAccent)
+            .frame(minHeight: 48)
+            .disabled(!enabled)
+            .accessibilityIdentifier(identifier)
+    }
+
+    private func monitorPickerRow<Content: View>(
+        _ title: LocalizedStringKey,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .foregroundStyle(Color.cameraText)
+            Spacer(minLength: 8)
+            content().pickerStyle(.menu)
+        }
+        .frame(minHeight: 48)
+    }
+
+    private func frameGuideLabel(_ guide: LiveViewFrameGuide) -> String {
+        switch guide {
+        case .off: language.string("off")
+        case .ratio16x9: "16:9"
+        case .ratio2x39: "2.39:1"
+        case .ratio1x1: "1:1"
+        case .ratio4x3: "4:3"
+        }
+    }
+
+    private func desqueezeLabel(_ desqueeze: LiveViewDesqueeze) -> String {
+        desqueeze == .off
+            ? language.string("off")
+            : language.format("desqueeze_value", Double(desqueeze.horizontalScale))
     }
 }
 
