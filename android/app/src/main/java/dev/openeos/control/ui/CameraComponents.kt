@@ -452,9 +452,14 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state.hudVisible),
                 contentAlignment = Alignment.Center,
             ) {
-                val slotSize = minOf(maxWidth, maxHeight).coerceAtMost(320.dp)
+                val quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
+                val slotWidth = minOf(maxWidth, if (quarterTurn) 184.dp else 360.dp)
+                val slotHeight = minOf(maxHeight, if (quarterTurn) 520.dp else 220.dp)
                 CameraRotatingSlot(
-                    Modifier.size(slotSize).testTag("offline-preview-content"),
+                    Modifier
+                        .width(slotWidth)
+                        .height(slotHeight)
+                        .testTag("offline-preview-content"),
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
@@ -471,8 +476,9 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                             stringResource(R.string.offline_preview),
                             color = AppText,
                             fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
                         )
                         Text(
                             stringResource(R.string.offline_preview_hint),
@@ -579,46 +585,49 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             }
             val description = stringResource(R.string.live_view_magnify_to, target.value)
             val enabled = !state.isBusy(CameraOperation.LIVE_VIEW)
-            TooltipBox(
-                positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
-                tooltip = { PlainTooltip { Text(description) } },
-                state = rememberTooltipState(),
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = bottomPadding),
             ) {
-                CameraRotatingSlot(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("live-view-magnification")
-                        .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp))
-                        .clickable(enabled = enabled) { actions.setLiveViewMagnification(target) }
-                        .semantics {
-                            contentDescription = description
-                            role = Role.Button
-                        },
+                TooltipBox(
+                    positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                    tooltip = { PlainTooltip { Text(description) } },
+                    state = rememberTooltipState(),
                 ) {
-                    Icon(
-                        painterResource(
-                            if (target == LiveViewMagnification.X5) {
-                                LucideR.drawable.lucide_ic_zoom_in
-                            } else {
-                                LucideR.drawable.lucide_ic_zoom_out
-                            }
-                        ),
-                        contentDescription = null,
-                        tint = if (enabled) AppAccent else AppMutedText,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Text(
-                        text = "${target.value}\u00d7",
-                        color = if (enabled) AppText else AppMutedText,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
+                    CameraRotatingSlot(
                         modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(end = 3.dp, bottom = 2.dp),
-                    )
+                            .size(48.dp)
+                            .testTag("live-view-magnification")
+                            .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp))
+                            .clickable(enabled = enabled) { actions.setLiveViewMagnification(target) }
+                            .semantics {
+                                contentDescription = description
+                                role = Role.Button
+                            },
+                    ) {
+                        Icon(
+                            painterResource(
+                                if (target == LiveViewMagnification.X5) {
+                                    LucideR.drawable.lucide_ic_zoom_in
+                                } else {
+                                    LucideR.drawable.lucide_ic_zoom_out
+                                }
+                            ),
+                            contentDescription = null,
+                            tint = if (enabled) AppAccent else AppMutedText,
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Text(
+                            text = "${target.value}\u00d7",
+                            color = if (enabled) AppText else AppMutedText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 3.dp, bottom = 2.dp),
+                        )
+                    }
                 }
             }
         }

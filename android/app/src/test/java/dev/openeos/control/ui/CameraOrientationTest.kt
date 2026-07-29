@@ -5,7 +5,14 @@ import org.junit.Test
 
 class CameraOrientationTest {
     @Test
-    fun systemRotationLockStopsAndResetsCameraOrientation() {
+    fun everyNonZeroSystemSettingMeansAutoRotationIsEnabled() {
+        assertEquals(false, isSystemAutoRotationSettingEnabled(0))
+        assertEquals(true, isSystemAutoRotationSettingEnabled(1))
+        assertEquals(true, isSystemAutoRotationSettingEnabled(2))
+    }
+
+    @Test
+    fun systemRotationLockAlignsControlsButKeepsPhysicalPosture() {
         val policy = CameraOrientationPolicy()
 
         policy.setSystemAutoRotation(true)
@@ -14,11 +21,14 @@ class CameraOrientationTest {
         assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.onSensorOrientation(270)
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.setSystemAutoRotation(true)
+        assertEquals(90f, policy.resolveControlRotation(displayRotationDegrees = 0))
     }
 
     @Test
@@ -36,12 +46,14 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun orientationListenerOnlyRunsWhileActivityAndSystemRotationAreEnabled() {
+    fun orientationListenerTracksPostureWhileActivityIsStarted() {
         val policy = CameraOrientationPolicy()
 
-        policy.setSystemAutoRotation(true)
         assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
         assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = false))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+
+        policy.setSystemAutoRotation(false)
         assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
     }
 
@@ -99,6 +111,15 @@ class CameraOrientationTest {
         assertEquals(3, cameraRotationQuadrant(270f))
         assertEquals(3, cameraRotationQuadrant(-90f))
         assertEquals(0, cameraRotationQuadrant(720f))
+    }
+
+    @Test
+    fun complexSettingsUseWideSurfaceOnlyForQuarterTurns() {
+        assertEquals(false, cameraSettingsUsesLandscapeSurface(0f))
+        assertEquals(true, cameraSettingsUsesLandscapeSurface(90f))
+        assertEquals(false, cameraSettingsUsesLandscapeSurface(180f))
+        assertEquals(true, cameraSettingsUsesLandscapeSurface(270f))
+        assertEquals(true, cameraSettingsUsesLandscapeSurface(-90f))
     }
 
     @Test
