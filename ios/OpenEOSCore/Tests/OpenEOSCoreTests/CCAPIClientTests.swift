@@ -1081,6 +1081,8 @@ final class CCAPIClientTests: XCTestCase {
     }
 
     func testDiagnosticReportIncludesCapabilityEvidence() throws {
+        let windowsHome = "C:/" + "Users/private/capture.jpg"
+        let networkHome = "\\\\" + "PRIVATE-SERVER\\private\\capture.jpg"
         let capabilities = CameraCapabilities(
             settings: [],
             matrix: CapabilityMatrix(supported: [.cameraIdentity, .liveView, .stillCapture]),
@@ -1111,7 +1113,7 @@ final class CCAPIClientTests: XCTestCase {
             mode: .camera,
             versions: ["/ccapi/ver100"],
             snapshot: snapshot,
-            lastError: "Camera PRIVATE-CAMERA-SERIAL rejected a request",
+            lastError: "Camera PRIVATE-CAMERA-SERIAL failed at \(windowsHome), \(networkHome) and /private/var/mobile/frame.jpg",
             metadata: DiagnosticReportMetadata(
                 productVersion: "9.8.7-test",
                 generatedAt: "2026-07-29T00:00:00Z"
@@ -1123,6 +1125,10 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(report.contains("productVersion=9.8.7-test"))
         XCTAssertTrue(report.contains("serial=[redacted]"))
         XCTAssertFalse(report.contains("PRIVATE-CAMERA-SERIAL"))
+        XCTAssertFalse(report.contains("C:/" + "Users"))
+        XCTAssertFalse(report.contains("PRIVATE-SERVER"))
+        XCTAssertFalse(report.contains("/private/var"))
+        XCTAssertTrue(report.contains("[local-path]"))
         XCTAssertTrue(report.contains("capabilitySource=GET /ccapi"))
         XCTAssertTrue(report.contains("advertisedCommandCount=1"))
         XCTAssertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))

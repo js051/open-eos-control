@@ -26,6 +26,9 @@ jobs:
       - name: Verify tag and product versions
         run: python3 scripts/release/verify-version.py --tag "$GITHUB_REF_NAME"
 
+      - name: Test physical-camera evidence verifier
+        run: python3 -m unittest discover -s scripts/validation/tests -p "test_*.py"
+
       - name: Require a release commit from main
         shell: bash
         run: |
@@ -165,7 +168,7 @@ jobs:
 
       - name: Lint and test Desktop Bridge
         run: |
-          ruff check --no-cache .
+          ruff check --no-cache . ../scripts/validation
           pytest -q -p no:cacheprovider
           node --check open_eos_bridge/static/icons.js
           node --check open_eos_bridge/static/diagnostics.js

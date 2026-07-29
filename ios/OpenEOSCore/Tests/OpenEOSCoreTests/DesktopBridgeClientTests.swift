@@ -325,6 +325,8 @@ final class DesktopBridgeClientTests: XCTestCase {
     }
 
     func testDesktopBridgeReportRedactsSerialAndCarriesValidationMetadata() throws {
+        let windowsHome = "C:" + "\\Users\\private\\capture.jpg"
+        let networkHome = "\\\\" + "PRIVATE-SERVER\\private\\capture.jpg"
         let snapshot = CameraSnapshot(
             info: CameraInfo(
                 model: "Canon EOS R6 Mark III",
@@ -346,7 +348,7 @@ final class DesktopBridgeClientTests: XCTestCase {
             bridgeVersion: "0.1.0",
             engine: "libgphoto2",
             snapshot: snapshot,
-            lastError: "Camera PRIVATE-BRIDGE-CAMERA-SERIAL was busy",
+            lastError: "Camera PRIVATE-BRIDGE-CAMERA-SERIAL failed at \(windowsHome) and \(networkHome)",
             metadata: DiagnosticReportMetadata(
                 productVersion: "9.8.7-test",
                 generatedAt: "2026-07-29T00:00:00Z"
@@ -358,6 +360,9 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(report.contains("productVersion=9.8.7-test"))
         XCTAssertTrue(report.contains("serial=[redacted]"))
         XCTAssertFalse(report.contains("PRIVATE-BRIDGE-CAMERA-SERIAL"))
+        XCTAssertFalse(report.contains("C:" + "\\Users"))
+        XCTAssertFalse(report.contains("PRIVATE-SERVER"))
+        XCTAssertTrue(report.contains("[local-path]"))
         XCTAssertTrue(report.contains("validatedAdvertisedFeatureCount=1"))
         XCTAssertTrue(report.contains("unverifiedAdvertisedFeatures=STILL_CAPTURE"))
     }
