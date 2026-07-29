@@ -28,6 +28,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoRotationObserver: ContentObserver
     private var activityStarted = false
     private var orientationListenerEnabled = false
+    private val rotationPolicySyncRefresh = Runnable {
+        if (activityStarted) refreshSystemAutoRotationSetting()
+    }
     private val rotationSettingPoller = object : Runnable {
         override fun run() {
             if (!activityStarted) return
@@ -46,11 +49,11 @@ class MainActivity : AppCompatActivity() {
         }
         autoRotationObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
-                refreshSystemAutoRotationSetting()
+                onSystemRotationPolicyChanged()
             }
 
             override fun onChange(selfChange: Boolean, uri: Uri?) {
-                refreshSystemAutoRotationSetting()
+                onSystemRotationPolicyChanged()
             }
         }
         setContent {
@@ -75,6 +78,14 @@ class MainActivity : AppCompatActivity() {
             true,
             autoRotationObserver,
         )
+        // Android 13+ can keep a separate lock preference per fold/device posture.
+        // WindowManager mirrors the active posture back to ACCELEROMETER_ROTATION,
+        // so this observer only triggers an immediate and a delayed reconciliation.
+        contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor(DEVICE_STATE_ROTATION_LOCK_SETTING),
+            false,
+            autoRotationObserver,
+        )
         refreshSystemAutoRotationSetting()
         mainHandler.removeCallbacks(rotationSettingPoller)
         mainHandler.postDelayed(rotationSettingPoller, ROTATION_SETTING_POLL_INTERVAL_MILLIS)
@@ -96,6 +107,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         activityStarted = false
         mainHandler.removeCallbacks(rotationSettingPoller)
+        mainHandler.removeCallbacks(rotationPolicySyncRefresh)
         setOrientationListenerEnabled(false)
         contentResolver.unregisterContentObserver(autoRotationObserver)
         super.onStop()
@@ -129,12 +141,21 @@ class MainActivity : AppCompatActivity() {
         updateControlRotation()
     }
 
+    internal fun isOrientationListenerRunning(): Boolean = orientationListenerEnabled
+
     internal fun currentControlRotationDegrees(): Float = controlRotationDegrees.floatValue
 
     private fun setOrientationListenerEnabled(enabled: Boolean) {
         if (orientationListenerEnabled == enabled) return
         orientationListenerEnabled = enabled
         if (enabled) orientationListener.enable() else orientationListener.disable()
+    }
+
+    private fun onSystemRotationPolicyChanged() {
+        refreshSystemAutoRotationSetting()
+        // Device-state rotation lock is synchronized asynchronously by WindowManager.
+        mainHandler.removeCallbacks(rotationPolicySyncRefresh)
+        mainHandler.postDelayed(rotationPolicySyncRefresh, ROTATION_POLICY_SYNC_DELAY_MILLIS)
     }
 
     private fun updateControlRotation() {
@@ -160,6 +181,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val DEVICE_STATE_ROTATION_LOCK_SETTING = "device_state_rotation_lock"
+        private const val ROTATION_POLICY_SYNC_DELAY_MILLIS = 250L
         private const val ROTATION_SETTING_POLL_INTERVAL_MILLIS = 750L
     }
 }

@@ -25,8 +25,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +36,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.rememberTooltipState
@@ -73,6 +76,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import coil.ImageLoader
@@ -240,6 +245,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
     val fullStorage = cameraStorageLabel(state.status)
     val storageValue = cameraStorageCompactLabel(state.status)
     var menuExpanded by remember { mutableStateOf(false) }
+    var statusExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -254,6 +260,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
         CameraModelIndicator(
             value = cameraHudName,
             description = fullCameraName,
+            onClick = { statusExpanded = true },
             modifier = Modifier.width(64.dp).height(48.dp),
         )
         Box(Modifier.weight(1f))
@@ -262,6 +269,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             value = batteryValue,
             description = batteryDescription,
             testTag = "battery-status",
+            onClick = { statusExpanded = true },
             modifier = Modifier.width(52.dp).height(48.dp),
         )
         CameraStatusIndicator(
@@ -269,6 +277,7 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             value = storageValue,
             description = fullStorage,
             testTag = "storage-status",
+            onClick = { statusExpanded = true },
             modifier = Modifier.width(62.dp).height(48.dp),
         )
         ToolIconButton(
@@ -320,14 +329,28 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             }
         }
     }
+    if (statusExpanded) {
+        CameraStatusDetailsDialog(
+            cameraName = fullCameraName,
+            battery = batteryDescription,
+            storage = fullStorage,
+            onDismissRequest = { statusExpanded = false },
+        )
+    }
 }
 
 @Composable
-private fun CameraModelIndicator(value: String, description: String, modifier: Modifier = Modifier) {
+private fun CameraModelIndicator(
+    value: String,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     CameraRotatingSlot(
         modifier
             .testTag("camera-model-status")
-            .semantics { contentDescription = description },
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description; role = Role.Button },
     ) {
         Text(
             value,
@@ -352,12 +375,14 @@ private fun CameraStatusIndicator(
     value: String,
     description: String,
     testTag: String,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     CameraRotatingSlot(
         modifier
             .testTag(testTag)
-            .semantics { contentDescription = description },
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description; role = Role.Button },
     ) {
         Row(
             Modifier.testTag("$testTag-content"),
@@ -378,6 +403,208 @@ private fun CameraStatusIndicator(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun CameraStatusDetailsDialog(
+    cameraName: String,
+    battery: String,
+    storage: String,
+    onDismissRequest: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.58f))
+                .clickable(onClick = onDismissRequest)
+                .testTag("camera-status-dialog"),
+            contentAlignment = Alignment.Center,
+        ) {
+            CameraRotatingSlot(
+                modifier = Modifier
+                    .width(312.dp)
+                    .height(240.dp)
+                    .testTag("camera-status-dialog-rotation"),
+                animateRotation = false,
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures(onTap = {}) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = AppSurface,
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.camera_status),
+                                color = AppText,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = onDismissRequest,
+                                modifier = Modifier.size(48.dp),
+                            ) {
+                                Icon(
+                                    painterResource(LucideR.drawable.lucide_ic_x),
+                                    stringResource(R.string.dismiss),
+                                    tint = AppSubtleText,
+                                )
+                            }
+                        }
+                        CameraStatusDetail(
+                            icon = LucideR.drawable.lucide_ic_camera,
+                            label = stringResource(R.string.camera_profile),
+                            value = cameraName,
+                            testTag = "camera-status-model-detail",
+                        )
+                        CameraStatusDetail(
+                            icon = LucideR.drawable.lucide_ic_battery_medium,
+                            label = stringResource(R.string.battery),
+                            value = battery,
+                            testTag = "camera-status-battery-detail",
+                        )
+                        CameraStatusDetail(
+                            icon = LucideR.drawable.lucide_ic_memory_stick,
+                            label = stringResource(R.string.storage),
+                            value = storage,
+                            testTag = "camera-status-storage-detail",
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CameraStatusDetail(
+    @DrawableRes icon: Int,
+    label: String,
+    value: String,
+    testTag: String,
+) {
+    Row(
+        Modifier.fillMaxWidth().testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = AppAccent,
+            modifier = Modifier.size(22.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(label, color = AppMutedText, fontSize = 12.sp)
+            Text(
+                value,
+                color = AppText,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+fun CameraRotatingMessageDialog(
+    title: String,
+    message: String,
+    onDismissRequest: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.58f))
+                .clickable(onClick = onDismissRequest)
+                .testTag("camera-message-dialog"),
+            contentAlignment = Alignment.Center,
+        ) {
+            CameraRotatingSlot(
+                modifier = Modifier
+                    .width(312.dp)
+                    .height(208.dp)
+                    .testTag("camera-message-dialog-rotation"),
+                animateRotation = false,
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures(onTap = {}) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = AppSurface,
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                painterResource(LucideR.drawable.lucide_ic_triangle_alert),
+                                contentDescription = null,
+                                tint = AppWarning,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Text(
+                                title,
+                                color = AppText,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                modifier = Modifier.weight(1f).padding(start = 12.dp),
+                            )
+                            IconButton(onClick = onDismissRequest, modifier = Modifier.size(48.dp)) {
+                                Icon(
+                                    painterResource(LucideR.drawable.lucide_ic_x),
+                                    stringResource(R.string.dismiss),
+                                    tint = AppSubtleText,
+                                )
+                            }
+                        }
+                        Text(
+                            message,
+                            color = AppSubtleText,
+                            fontSize = 16.sp,
+                            lineHeight = 22.sp,
+                            modifier = Modifier.testTag("camera-message-dialog-text"),
+                        )
+                    }
+                }
+            }
         }
     }
 }

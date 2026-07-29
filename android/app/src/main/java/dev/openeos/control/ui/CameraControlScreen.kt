@@ -45,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -137,6 +138,7 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
         state.captureMode == CaptureMode.PHOTO -> CameraFeature.STILL_CAPTURE
         else -> CameraFeature.VIDEO_RECORDING
     }
+    var capabilityDetailVisible by remember { mutableStateOf(false) }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
             Modifier.fillMaxWidth().height(CAPTURE_CONTROL_HEIGHT).padding(horizontal = 20.dp),
@@ -164,7 +166,11 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
                     Modifier
                         .fillMaxSize()
                         .testTag("capability-warning-rotation")
-                        .semantics { contentDescription = capabilityMessage },
+                        .clickable(enabled = sideways) { capabilityDetailVisible = true }
+                        .semantics {
+                            contentDescription = capabilityMessage
+                            if (sideways) role = Role.Button
+                        },
                     animateRotation = false,
                 ) {
                     if (sideways) {
@@ -187,6 +193,19 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
             }
         }
         CaptureModeSelector(state, actions)
+    }
+    if (capabilityDetailVisible) {
+        CameraRotatingMessageDialog(
+            title = stringResource(R.string.feature_unavailable),
+            message = stringResource(
+                when {
+                    state.bulbMode -> R.string.bulb_not_supported
+                    state.captureMode == CaptureMode.PHOTO -> R.string.capture_not_supported
+                    else -> R.string.recording_not_supported
+                },
+            ),
+            onDismissRequest = { capabilityDetailVisible = false },
+        )
     }
 }
 

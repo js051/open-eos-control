@@ -22,7 +22,7 @@ class CameraOrientationTest {
         assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(true)
@@ -46,18 +46,18 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun orientationListenerOnlyRunsWhileSystemAutoRotationIsEnabled() {
+    fun orientationListenerStaysActiveSoEveryPostureCanReconcileTheSystemSetting() {
         val policy = CameraOrientationPolicy()
 
         assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
         assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = false))
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(true)
         assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
     }
 
     @Test
