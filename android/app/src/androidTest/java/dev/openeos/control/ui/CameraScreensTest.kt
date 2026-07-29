@@ -158,7 +158,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
-        compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
+        compose.onNodeWithText("R6\nMark III").assertIsDisplayed()
         compose.onNodeWithContentDescription("Canon EOS R6 Mark III").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
@@ -423,7 +423,7 @@ class CameraScreensTest {
                     bounds.bottom <= viewport.bottom,
             )
         }
-        compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
+        compose.onNodeWithText("R6\nMark III").assertIsDisplayed()
         compose.onNodeWithText("82%").assertIsDisplayed()
         compose.onNodeWithText("2,418").assertIsDisplayed()
         compose.onNodeWithContentDescription("Canon EOS R6 Mark III").assertIsDisplayed()
@@ -1000,24 +1000,71 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnCapabilityWarningOpensItsFullOrientationAwareExplanation() {
+    fun quarterTurnCapabilityWarningKeepsItsFullMessageVisibleInTheViewfinder() {
         val message = resourceText(R.string.capture_not_supported)
+        val base = connectedState()
+        val state = base.copy(
+            capabilities = base.capabilities?.copy(
+                matrix = CapabilityMatrix(
+                    supported = base.capabilities.matrix.supported +
+                        CameraFeature.LIVE_VIEW_MAGNIFICATION,
+                ),
+            ),
+        )
         compose.setContent {
-            CompositionLocalProvider(
-                LocalCameraControlRotation provides -90f,
-                LocalCameraControlTargetRotation provides -90f,
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
             ) {
-                MaterialTheme { CameraControlScreen(connectedState(), noOpActions()) }
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                    CompositionLocalProvider(
+                        LocalCameraControlRotation provides -90f,
+                        LocalCameraControlTargetRotation provides -90f,
+                    ) {
+                        MaterialTheme { CameraControlScreen(state, noOpActions()) }
+                    }
+                }
             }
         }
 
-        compose.onNodeWithTag("capability-warning-compact", useUnmergedTree = true).assertIsDisplayed()
-        compose.onAllNodesWithText(message).assertCountEquals(0)
-        compose.onNodeWithContentDescription(message).assertIsDisplayed().performClick()
-        compose.onNodeWithText(resourceText(R.string.feature_unavailable)).assertIsDisplayed()
+        compose.onNodeWithTag("capability-warning-surface", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText(message).assertIsDisplayed()
-        compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
-        compose.onAllNodesWithTag("camera-message-dialog").assertCountEquals(0)
+        compose.onNodeWithTag("capability-warning-message", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithTag("capability-warning-message-overflow", useUnmergedTree = true)
+            .assertCountEquals(0)
+        val warningBounds = compose
+            .onNodeWithTag("capability-warning-surface", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val liveViewBounds = compose
+            .onNodeWithTag("live-view-frame")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val exposureBounds = compose
+            .onNodeWithTag("exposure-control-ISO")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val magnificationBounds = compose
+            .onNodeWithTag("live-view-magnification")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "Full rotated warning $warningBounds must stay inside the viewfinder $liveViewBounds",
+            warningBounds.left >= liveViewBounds.left &&
+                warningBounds.top >= liveViewBounds.top &&
+                warningBounds.right <= liveViewBounds.right &&
+                warningBounds.bottom <= liveViewBounds.bottom,
+        )
+        assertTrue(
+            "Capability warning must not move or overlap the fixed exposure rail",
+            warningBounds.bottom <= exposureBounds.top,
+        )
+        assertTrue(
+            "Capability warning $warningBounds must not cover magnification $magnificationBounds",
+            warningBounds.right <= magnificationBounds.left ||
+                warningBounds.left >= magnificationBounds.right ||
+                warningBounds.bottom <= magnificationBounds.top ||
+                warningBounds.top >= magnificationBounds.bottom,
+        )
     }
 
     @Test

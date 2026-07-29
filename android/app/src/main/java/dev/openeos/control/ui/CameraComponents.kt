@@ -239,7 +239,7 @@ fun CameraHeader(state: CameraUiState, actions: CameraActions) {
     }
 }
 
-private val CAMERA_OVERLAY_HEADER_HEIGHT = 64.dp
+internal val CAMERA_OVERLAY_HEADER_HEIGHT = 64.dp
 
 @Composable
 fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
@@ -364,7 +364,9 @@ private fun CameraModelIndicator(
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
             maxFontSize = 11.sp,
-            minFontSize = 6.sp,
+            minFontSize = 9.sp,
+            maxLines = 2,
+            softWrap = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 2.dp)
@@ -433,6 +435,8 @@ private fun CameraHudText(
     textAlign: TextAlign? = null,
     maxFontSize: TextUnit = 11.sp,
     minFontSize: TextUnit = 7.sp,
+    maxLines: Int = 1,
+    softWrap: Boolean = false,
 ) {
     val configuration = LocalConfiguration.current
     val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
@@ -447,10 +451,10 @@ private fun CameraHudText(
         text = value,
         color = color,
         fontSize = fontSize,
-        lineHeight = fontSize,
+        lineHeight = fontSize * 1.15f,
         fontWeight = fontWeight,
-        maxLines = 1,
-        softWrap = false,
+        maxLines = maxLines,
+        softWrap = softWrap,
         overflow = TextOverflow.Clip,
         textAlign = textAlign,
         modifier = modifier,
@@ -706,7 +710,9 @@ internal fun String.toCameraHudName(): String {
     val compact = removePrefix("Canon ")
         .removePrefix("EOS ")
         .trim()
-    return compact.ifBlank { this }
+    return compact
+        .replace(" Mark ", "\nMark ")
+        .ifBlank { this }
 }
 
 internal fun exactCameraCount(value: Long, locale: Locale): String =
@@ -1088,13 +1094,13 @@ private fun MonitorGuidesOverlay(settings: LiveViewMonitorSettings, displayAspec
 }
 
 private fun Modifier.cameraPreviewViewport(state: CameraUiState): Modifier = if (state.hudVisible) {
-    this.padding(top = 48.dp, bottom = cameraHudHeight(state))
+    this.padding(top = CAMERA_OVERLAY_HEADER_HEIGHT, bottom = cameraHudHeight())
 } else {
     this
 }
 
 private fun liveViewOverlayBottomPadding(state: CameraUiState): Dp =
-    if (state.hudVisible) cameraHudHeight(state) + 12.dp else 12.dp
+    if (state.hudVisible) cameraHudHeight() + 12.dp else 12.dp
 
 @Composable
 private fun NativeRtpLiveView(

@@ -142,9 +142,9 @@ class CameraOrientationTest {
 
     @Test
     fun cameraHudRemovesBrandPrefixesWithoutAbbreviatingTheModelGeneration() {
-        assertEquals("R6 Mark III", "Canon EOS R6 Mark III".toCameraHudName())
-        assertEquals("R5 Mark II", "EOS R5 Mark II".toCameraHudName())
-        assertEquals("PowerShot G7 X Mark III", "Canon PowerShot G7 X Mark III".toCameraHudName())
+        assertEquals("R6\nMark III", "Canon EOS R6 Mark III".toCameraHudName())
+        assertEquals("R5\nMark II", "EOS R5 Mark II".toCameraHudName())
+        assertEquals("PowerShot G7 X\nMark III", "Canon PowerShot G7 X Mark III".toCameraHudName())
     }
 
     @Test
