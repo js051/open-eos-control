@@ -44,7 +44,7 @@ The app currently includes:
 - Canon Click White Balance through advertised `POST clickwb`, using the same detailed Live View geometry and a Focus/White Balance tap-action selector
 - Independent AF-ON through camera-advertised CCAPI autofocus or Canon USB `DoAf`/`AfCancel`, with a balanced half-press fallback when the dedicated USB pair is unavailable
 - Advertised manual shutter half-press with guaranteed release
-- Paged camera media browser with lazy thumbnails where advertised, streaming download through Android's document picker, and confirmation-gated deletion
+- Paged camera media browser with lazy thumbnails and full-screen CCAPI image/RAW display previews where advertised, streaming download through Android's document picker, and confirmation-gated deletion
 
 Default direct camera presets:
 

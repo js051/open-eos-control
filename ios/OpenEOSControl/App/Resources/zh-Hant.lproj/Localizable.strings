@@ -169,6 +169,10 @@
 "delete" = "刪除";
 "cancel" = "取消";
 "media_deleted" = "已刪除 %@";
+"preview_media" = "預覽 %@";
+"close_media_preview" = "關閉媒體預覽";
+"media_preview_content" = "%@ 的預覽";
+"media_preview_unavailable" = "無法顯示相機提供的預覽影像。";
 
 "overview" = "總覽";
 "camera_profile" = "相機 Profile";

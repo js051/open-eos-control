@@ -87,6 +87,8 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaThumbnail))
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.mediaThumbnail))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaPreview))
+        XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.mediaPreview))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.evidence.source, "GET /ccapi")
         XCTAssertEqual(snapshot.capabilities.evidence.protocolVersions, ["ver100"])
@@ -208,6 +210,56 @@ final class CCAPIClientTests: XCTestCase {
         }
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.path), ["/ccapi"])
+    }
+
+    func testDirectCCAPIPreviewUsesCanonDisplayQueryAndRejectsVideo() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let path = "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG"
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0x02, 0xFF, 0xD9])
+        await transport.enqueue(
+            path: "\(path)?kind=display",
+            headers: ["content-type": "application/octet-stream"],
+            body: jpeg
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let preview = try await client.mediaPreview(
+            CameraMediaItem(id: "\(path)?kind=main", name: "IMG_0001.CR3", kind: "raw")
+        )
+        XCTAssertEqual(preview.data, jpeg)
+        XCTAssertEqual(preview.contentType, "image/jpeg")
+
+        do {
+            _ = try await client.mediaPreview(CameraMediaItem(id: path, name: "MVI_0001.MP4", kind: "video"))
+            XCTFail("Expected video preview rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidResponse("Display preview is available only for camera image items.")
+            )
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi", "\(path)?kind=display"])
+    }
+
+    func testDirectCCAPIPreviewRejectsOversizedResponse() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let path = "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG"
+        await transport.enqueue(
+            path: "\(path)?kind=display",
+            headers: ["content-type": "image/jpeg"],
+            body: Data(repeating: 0x01, count: 32 * 1024 * 1024 + 1)
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        do {
+            _ = try await client.mediaPreview(CameraMediaItem(id: path, name: "IMG_0001.JPG", kind: "image"))
+            XCTFail("Expected bounded preview failure")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("exceeded"))
+        }
     }
 
     func testStillCaptureUsesAdvertisedPostAndAutofocusPayload() async throws {

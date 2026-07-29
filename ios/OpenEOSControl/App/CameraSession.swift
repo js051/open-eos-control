@@ -151,6 +151,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func mediaPreview(_ item: CameraMediaItem) async throws -> CameraMediaPreview {
+        switch self {
+        case let .ccapi(client): return try await client.mediaPreview(item)
+        case let .desktopBridge(client): return try await client.mediaPreview(item)
+        }
+    }
+
     func downloadMedia(_ item: CameraMediaItem, to destination: URL) async throws -> CameraMediaDownload {
         switch self {
         case let .ccapi(client): return try await client.downloadMedia(item, to: destination)

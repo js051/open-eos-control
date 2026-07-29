@@ -4,7 +4,7 @@ The desktop bridge is a local service that exposes the same camera-control conce
 
 ## Implementation Status
 
-`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and provides two open engines: `libgphoto2` for USB cameras and a native Python HTTP `ccapi` engine for direct wireless camera control. The gPhoto adapter invokes argument arrays, never a shell. Android and iOS implement the bridge protocol behind their shared camera sessions, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, bounded media thumbnails, and streamed media. Deterministic tests cover both PC engines and the mobile contracts. Physical R6 Mark III validation is still required and must not be inferred from those tests.
+`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and provides two open engines: `libgphoto2` for USB cameras and a native Python HTTP `ccapi` engine for direct wireless camera control. The gPhoto adapter invokes argument arrays, never a shell. Android and iOS implement the bridge protocol behind their shared camera sessions, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, bounded media thumbnails, separately advertised display previews, and streamed media. Deterministic tests cover both PC engines and the mobile contracts. Physical R6 Mark III validation is still required and must not be inferred from those tests.
 
 ## Goals
 
@@ -40,6 +40,7 @@ POST /v1/session/{id}/whitebalance/click
 POST /v1/session/{id}/focus/drive
 GET  /v1/session/{id}/media
 GET  /v1/session/{id}/media/{itemId}/thumbnail
+GET  /v1/session/{id}/media/{itemId}/preview
 GET  /v1/session/{id}/media/{itemId}
 DELETE /v1/session/{id}/media/{itemId}
 DELETE /v1/session/{id}
@@ -142,6 +143,8 @@ The response includes the effective `source`, so clients can distinguish an `AUT
 The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --stdout` process and incrementally extracts bounded JPEG frames from its concatenated MJPEG output. It accepts a 1-30 FPS output cap but does not claim the camera and USB link delivered that rate. Commands that need exclusive camera access stop the movie process first; the next frame request automatically starts a fresh process. Startup, early termination, malformed-frame, size-limit, or frame-timeout failures switch the session to bounded `--capture-preview --stdout` transactions and reduce effective `requestedFps` to at most 5. `CameraStatus.raw.liveViewTransport` and `liveViewFallbackReason` distinguish these paths.
 
 `GET /v1/session/{id}/media/{itemId}/thumbnail` returns a bounded JPEG or PNG with `Cache-Control: private, no-store`. Camera-resident libgphoto2 media uses the documented `--folder ... --get-thumbnail ... --stdout` command only when `gphoto2 --abilities` reports file-preview support. Host-RAM captures use the Bridge's bounded Pillow decoder for supported local image formats; unsupported RAW preview formats return a real error while the original remains downloadable. The direct CCAPI engine follows Canon's official Android sample by adding the structured `kind=thumbnail` query to the exact same-origin content URL, bounds the response to 8 MiB, and rejects empty, textual or unrecognized payloads.
+
+`GET /v1/session/{id}/media/{itemId}/preview` is separately capability-gated and returns a private, non-cacheable display image up to 32 MiB. The direct CCAPI engine uses Canon's sample-backed structured `kind=display` query on the exact same-origin content path and accepts only image/RAW media. libgphoto2 and Android USB thumbnail support do not imply this capability.
 
 The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. When coordinate Tap AF or Click White Balance is advertised, `flipdetail?kind=both` is preferred so the same bounded response supplies the JPEG and Canon image-position metadata. Requested FPS controls client polling; observed FPS remains a separate UI metric.
 

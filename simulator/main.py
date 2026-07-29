@@ -187,7 +187,7 @@ async def media_list() -> dict[str, list[dict[str, object]]]:
 async def media_download(item_id: str, kind: str | None = None) -> Response:
     if not any(item["id"] == item_id for item in state["media"]):
         raise HTTPException(status_code=404, detail="Media item not found")
-    if kind not in {None, "main", "thumbnail"}:
+    if kind not in {None, "main", "thumbnail", "display"}:
         raise HTTPException(status_code=422, detail="Unsupported media representation")
     return Response(content=camera_frame_png(), media_type="image/png")
 

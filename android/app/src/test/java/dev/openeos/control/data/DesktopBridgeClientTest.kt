@@ -59,6 +59,7 @@ class DesktopBridgeClientTest {
         val focus = client.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.LARGE)
         val media = client.listMedia()
         val thumbnail = client.mediaThumbnail(media.single())
+        val preview = client.mediaPreview(media.single())
         val destination = ByteArrayOutputStream()
         val progress = mutableListOf<CameraMediaTransferProgress>()
         val download = client.downloadMedia(media.single(), destination, progress::add)
@@ -86,6 +87,7 @@ class DesktopBridgeClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_PREVIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.CLICK_WHITE_BALANCE))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
         assertFalse(capabilities.matrix.supports(CameraFeature.USB_DIAGNOSTICS))
@@ -115,6 +117,7 @@ class DesktopBridgeClientTest {
                     CameraFeature.LIVE_VIEW_JPEG_POLLING,
                     CameraFeature.MEDIA_BROWSER,
                     CameraFeature.MEDIA_THUMBNAIL,
+                    CameraFeature.MEDIA_PREVIEW,
                     CameraFeature.MEDIA_DOWNLOAD,
                     CameraFeature.MEDIA_DELETE,
                 ),
@@ -127,6 +130,8 @@ class DesktopBridgeClientTest {
         assertEquals("IMG_0001.JPG", media.single().name)
         assertArrayEquals(THUMBNAIL, thumbnail.bytes)
         assertEquals("image/jpeg", thumbnail.contentType)
+        assertArrayEquals(PREVIEW, preview.bytes)
+        assertEquals("image/jpeg", preview.contentType)
         assertArrayEquals(MEDIA_BYTES, destination.toByteArray())
         assertEquals(MEDIA_BYTES.size.toLong(), download.bytesTransferred)
         assertEquals(0L, progress.first().bytesTransferred)
@@ -265,6 +270,9 @@ class DesktopBridgeClientTest {
                 path.endsWith("/thumbnail") -> MockResponse()
                     .setHeader("content-type", "image/jpeg")
                     .setBody(okio.Buffer().write(THUMBNAIL))
+                path.endsWith("/preview") -> MockResponse()
+                    .setHeader("content-type", "image/jpeg")
+                    .setBody(okio.Buffer().write(PREVIEW))
                 path.contains("/media/") && request.method == "DELETE" -> MockResponse().setResponseCode(204)
                 path.contains("/media/") -> MockResponse()
                     .setHeader("content-type", "image/jpeg")
@@ -302,6 +310,7 @@ class DesktopBridgeClientTest {
     private companion object {
         val JPEG = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2, 3, 0xFF.toByte(), 0xD9.toByte())
         val THUMBNAIL = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 4, 2, 0xFF.toByte(), 0xD9.toByte())
+        val PREVIEW = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 8, 6, 0xFF.toByte(), 0xD9.toByte())
         val MEDIA_BYTES = byteArrayOf(9, 8, 7, 6, 5)
 
         const val HEALTH_JSON = """
@@ -361,7 +370,7 @@ class DesktopBridgeClientTest {
                 "STILL_CAPTURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "LIVE_VIEW_MAGNIFICATION",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
-                "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
+                "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
               ],
               "planned": ["TAP_FOCUS", "LIVE_VIEW_RTP"],
               "reasons": {"LIVE_VIEW_RTP": "Persistent stream is not implemented."},

@@ -75,7 +75,15 @@ class CameraViewModel(
     }
 
     fun setUiMode(mode: UiMode) {
-        _uiState.update { it.copy(uiMode = mode, activeSettingPicker = null) }
+        _uiState.update {
+            it.copy(
+                uiMode = mode,
+                activeSettingPicker = null,
+                mediaPreviewItem = if (mode == UiMode.MEDIA) it.mediaPreviewItem else null,
+                mediaPreviewBytes = if (mode == UiMode.MEDIA) it.mediaPreviewBytes else null,
+                mediaPreviewLoading = mode == UiMode.MEDIA && it.mediaPreviewLoading,
+            )
+        }
         if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
     }
 
@@ -612,7 +620,15 @@ class CameraViewModel(
     fun refreshMedia() {
         if (!_uiState.value.connected || _uiState.value.previewMode) return
         cancelMediaThumbnailLoads()
-        _uiState.update { it.copy(mediaThumbnails = emptyMap(), mediaThumbnailLoadingIds = emptySet()) }
+        _uiState.update {
+            it.copy(
+                mediaThumbnails = emptyMap(),
+                mediaThumbnailLoadingIds = emptySet(),
+                mediaPreviewItem = null,
+                mediaPreviewBytes = null,
+                mediaPreviewLoading = false,
+            )
+        }
         runCamera(CameraOperation.MEDIA) {
             val items = repository.listMedia()
             _uiState.update {
@@ -663,6 +679,42 @@ class CameraViewModel(
                     }
                 }
             }
+        }
+    }
+
+    fun openMediaPreview(item: CameraMediaItem) {
+        val state = _uiState.value
+        if (
+            state.previewMode ||
+            state.isBusy(CameraOperation.MEDIA) ||
+            !state.supports(CameraFeature.MEDIA_PREVIEW) ||
+            (!item.kind.equals("image", ignoreCase = true) && !item.kind.equals("raw", ignoreCase = true))
+        ) return
+        _uiState.update {
+            it.copy(mediaPreviewItem = item, mediaPreviewBytes = null, mediaPreviewLoading = true)
+        }
+        runCamera(
+            operation = CameraOperation.MEDIA,
+            onError = {
+                _uiState.update { current ->
+                    if (current.mediaPreviewItem?.id == item.id) current.copy(mediaPreviewLoading = false) else current
+                }
+            },
+        ) {
+            val preview = repository.mediaPreview(item)
+            _uiState.update { current ->
+                if (current.mediaPreviewItem?.id == item.id) {
+                    current.copy(mediaPreviewBytes = preview.bytes, mediaPreviewLoading = false)
+                } else {
+                    current
+                }
+            }
+        }
+    }
+
+    fun closeMediaPreview() {
+        _uiState.update {
+            it.copy(mediaPreviewItem = null, mediaPreviewBytes = null, mediaPreviewLoading = false)
         }
     }
 
@@ -1095,6 +1147,9 @@ class CameraViewModel(
         mediaItems = emptyList(),
         mediaThumbnails = emptyMap(),
         mediaThumbnailLoadingIds = emptySet(),
+        mediaPreviewItem = null,
+        mediaPreviewBytes = null,
+        mediaPreviewLoading = false,
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
@@ -1115,13 +1170,19 @@ class CameraViewModel(
     private fun fpsToFrameIntervalMillis(fps: Int): Long =
         (1_000L / fps.coerceIn(MIN_LIVE_VIEW_FPS, MAX_LIVE_VIEW_FPS)).coerceAtLeast(1L)
 
-    private fun CameraUiState.withDeletedMedia(item: CameraMediaItem): CameraUiState = copy(
-        mediaItems = mediaItems.filterNot { it.id == item.id },
-        mediaThumbnails = mediaThumbnails - item.id,
-        mediaThumbnailLoadingIds = mediaThumbnailLoadingIds - item.id,
-        lastDownloadedMediaName = lastDownloadedMediaName.takeUnless { it == item.name },
-        lastDeletedMediaName = item.name,
-    )
+    private fun CameraUiState.withDeletedMedia(item: CameraMediaItem): CameraUiState {
+        val deletesOpenPreview = mediaPreviewItem?.id == item.id
+        return copy(
+            mediaItems = mediaItems.filterNot { it.id == item.id },
+            mediaThumbnails = mediaThumbnails - item.id,
+            mediaThumbnailLoadingIds = mediaThumbnailLoadingIds - item.id,
+            mediaPreviewItem = mediaPreviewItem.takeUnless { deletesOpenPreview },
+            mediaPreviewBytes = mediaPreviewBytes.takeUnless { deletesOpenPreview },
+            mediaPreviewLoading = mediaPreviewLoading && !deletesOpenPreview,
+            lastDownloadedMediaName = lastDownloadedMediaName.takeUnless { it == item.name },
+            lastDeletedMediaName = item.name,
+        )
+    }
 
     private fun cancelMediaThumbnailLoads() {
         mediaThumbnailGeneration += 1

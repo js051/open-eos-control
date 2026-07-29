@@ -62,6 +62,7 @@ public actor DesktopBridgeClient {
     private static let serviceName = "open-eos-control-bridge"
     private static let maximumLiveViewFrameBytes = 12 * 1024 * 1024
     private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
+    private static let maximumMediaPreviewBytes = 32 * 1024 * 1024
     private static let maximumErrorBodyBytes = 2_000
     private static let maximumEvidenceItems = 256
     private static let maximumEvidenceItemCharacters = 512
@@ -384,22 +385,50 @@ public actor DesktopBridgeClient {
     }
 
     public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
-        let url = try sessionEndpoint(["media", item.id, "thumbnail"])
+        let response = try await mediaImageRepresentation(
+            item,
+            endpoint: "thumbnail",
+            maximumBytes: Self.maximumMediaThumbnailBytes,
+            label: "thumbnail"
+        )
+        return CameraMediaThumbnail(item: item, data: response.data, contentType: response.contentType)
+    }
+
+    public func mediaPreview(_ item: CameraMediaItem) async throws -> CameraMediaPreview {
+        guard ["image", "raw"].contains(item.kind.lowercased()) else {
+            throw DesktopBridgeError.invalidResponse("Display preview is available only for camera image items.")
+        }
+        let response = try await mediaImageRepresentation(
+            item,
+            endpoint: "preview",
+            maximumBytes: Self.maximumMediaPreviewBytes,
+            label: "display preview"
+        )
+        return CameraMediaPreview(item: item, data: response.data, contentType: response.contentType)
+    }
+
+    private func mediaImageRepresentation(
+        _ item: CameraMediaItem,
+        endpoint: String,
+        maximumBytes: Int,
+        label: String
+    ) async throws -> (data: Data, contentType: String?) {
+        let url = try sessionEndpoint(["media", item.id, endpoint])
         let response = try await transport.send(makeRequest(url: url, method: "GET", accept: "image/*"))
         guard (200..<300).contains(response.statusCode) else {
             throw Self.httpError(response: response, method: "GET", url: url)
         }
-        guard response.body.count <= Self.maximumMediaThumbnailBytes else {
+        guard response.body.count <= maximumBytes else {
             throw DesktopBridgeError.invalidResponse(
-                "Desktop Bridge thumbnail exceeded \(Self.maximumMediaThumbnailBytes) bytes."
+                "Desktop Bridge \(label) exceeded \(maximumBytes) bytes."
             )
         }
         let contentType = response.header("content-type")?.components(separatedBy: ";").first
         let supportedImage = Self.isCompleteJPEG(response.body) || response.body.starts(with: Self.pngSignature)
         guard !response.body.isEmpty, contentType?.hasPrefix("image/") == true, supportedImage else {
-            throw DesktopBridgeError.invalidResponse("Desktop Bridge did not return a supported image thumbnail.")
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge did not return a supported image \(label).")
         }
-        return CameraMediaThumbnail(item: item, data: response.body, contentType: contentType)
+        return (response.body, contentType)
     }
 
     public func downloadMedia(_ item: CameraMediaItem, to destination: URL) async throws -> CameraMediaDownload {

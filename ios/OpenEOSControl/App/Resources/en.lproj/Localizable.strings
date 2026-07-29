@@ -169,6 +169,10 @@
 "delete" = "Delete";
 "cancel" = "Cancel";
 "media_deleted" = "Deleted %@";
+"preview_media" = "Preview %@";
+"close_media_preview" = "Close media preview";
+"media_preview_content" = "Preview of %@";
+"media_preview_unavailable" = "The camera preview could not be displayed.";
 
 "overview" = "Overview";
 "camera_profile" = "Camera profile";

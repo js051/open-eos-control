@@ -455,6 +455,7 @@ class CcapiClient(
             if (supportsApi("GET", "/contents")) {
                 supportedFeatures.add(CameraFeature.MEDIA_BROWSER)
                 supportedFeatures.add(CameraFeature.MEDIA_THUMBNAIL)
+                supportedFeatures.add(CameraFeature.MEDIA_PREVIEW)
                 supportedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
             }
             if (supportsMediaDelete()) supportedFeatures.add(CameraFeature.MEDIA_DELETE)
@@ -731,7 +732,37 @@ class CcapiClient(
         return items
     }
 
-    suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = withContext(Dispatchers.IO) {
+    suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        val (bytes, contentType) = mediaImageRepresentation(
+            item = item,
+            kind = "thumbnail",
+            maxBytes = MAX_MEDIA_THUMBNAIL_BYTES,
+            label = "thumbnail",
+        )
+        observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL)
+        return CameraMediaThumbnail(item = item, bytes = bytes, contentType = contentType)
+    }
+
+    suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
+        require(item.kind.equals("image", ignoreCase = true) || item.kind.equals("raw", ignoreCase = true)) {
+            "Display preview is available only for camera image items."
+        }
+        val (bytes, contentType) = mediaImageRepresentation(
+            item = item,
+            kind = "display",
+            maxBytes = MAX_MEDIA_PREVIEW_BYTES,
+            label = "display preview",
+        )
+        observedFeatures.add(CameraFeature.MEDIA_PREVIEW)
+        return CameraMediaPreview(item = item, bytes = bytes, contentType = contentType)
+    }
+
+    private suspend fun mediaImageRepresentation(
+        item: CameraMediaItem,
+        kind: String,
+        maxBytes: Int,
+        label: String,
+    ): Pair<ByteArray, String> = withContext(Dispatchers.IO) {
         if (isRealCamera && !supportsApi("GET", "/contents")) {
             error("Camera did not advertise CCAPI media browsing.")
         }
@@ -741,40 +772,38 @@ class CcapiClient(
             val encodedId = URLEncoder.encode(item.id, StandardCharsets.UTF_8.name()).replace("+", "%20")
             "/ccapi/media/$encodedId"
         }
-        val thumbnailUrl = "$baseUrl$path".toHttpUrl().newBuilder()
+        val representationUrl = "$baseUrl$path".toHttpUrl().newBuilder()
             .query(null)
-            .addQueryParameter("kind", "thumbnail")
+            .addQueryParameter("kind", kind)
             .build()
         val request = Request.Builder()
-            .url(thumbnailUrl)
+            .url(representationUrl)
             .header("Accept", "image/*,application/octet-stream;q=0.5")
             .header("Cache-Control", "no-cache")
             .get()
             .build()
 
         httpClient.newCall(request).execute().use { response ->
-            val body = requireNotNull(response.body) { "Camera returned an empty thumbnail response." }
+            val body = requireNotNull(response.body) { "Camera returned an empty $label response." }
             if (!response.isSuccessful) {
                 val preview = body.string().take(MAX_ERROR_BODY_CHARS)
-                error("Camera thumbnail request failed: HTTP ${response.code}: $preview")
+                error("Camera $label request failed: HTTP ${response.code}: $preview")
             }
             val contentLength = body.contentLength()
-            check(contentLength < 0L || contentLength <= MAX_MEDIA_THUMBNAIL_BYTES) {
-                "Camera thumbnail exceeded $MAX_MEDIA_THUMBNAIL_BYTES bytes."
+            check(contentLength < 0L || contentLength <= maxBytes) {
+                "Camera $label exceeded $maxBytes bytes."
             }
-            val bytes = body.byteStream().readBounded(MAX_MEDIA_THUMBNAIL_BYTES)
-            check(bytes.isNotEmpty()) { "Camera returned an empty thumbnail." }
+            val bytes = body.byteStream().readBounded(maxBytes)
+            check(bytes.isNotEmpty()) { "Camera returned an empty $label." }
             val responseContentType = response.header("content-type")?.substringBefore(';')?.trim()
             check(!responseContentType.isTextLikeContentType() && !bytes.looksLikeTextPayload()) {
-                "Camera returned text instead of an image thumbnail."
+                "Camera returned text instead of an image $label."
             }
             val contentType = responseContentType
                 ?.takeIf { it.startsWith("image/", ignoreCase = true) }
                 ?: bytes.detectImageContentType()
-                ?: error("Camera did not return a recognized image thumbnail.")
-            CameraMediaThumbnail(item = item, bytes = bytes, contentType = contentType).also {
-                observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL)
-            }
+                ?: error("Camera did not return a recognized image $label.")
+            bytes to contentType
         }
     }
 
@@ -1935,6 +1964,7 @@ class CcapiClient(
         const val MAX_MEDIA_PAGES = 100
         const val MAX_MEDIA_TREE_DEPTH = 4
         const val MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
+        const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
         const val MEDIA_TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
         const val MEDIA_SNIFF_BYTES = 64L
@@ -2034,6 +2064,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
             CameraFeature.SHUTTER_HALF_PRESS,
             CameraFeature.MEDIA_BROWSER,
             CameraFeature.MEDIA_THUMBNAIL,
+            CameraFeature.MEDIA_PREVIEW,
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
         ),

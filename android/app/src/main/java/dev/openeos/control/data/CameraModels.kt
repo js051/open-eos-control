@@ -82,6 +82,7 @@ enum class CameraFeature(
     ADVANCED_SETTINGS("Advanced camera settings"),
     MEDIA_BROWSER("Media browser"),
     MEDIA_THUMBNAIL("Media thumbnail"),
+    MEDIA_PREVIEW("Media preview"),
     MEDIA_DOWNLOAD("Media download"),
     MEDIA_DELETE("Media deletion"),
     USB_DIAGNOSTICS("USB/PTP diagnostics"),
@@ -125,6 +126,7 @@ data class CapabilityMatrix(
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
+                CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
             ) - supported,
@@ -187,6 +189,7 @@ data class CapabilityMatrix(
                 CameraFeature.EXPOSURE_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
+                CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
             ),
@@ -361,6 +364,12 @@ data class CameraMediaItem(
 )
 
 data class CameraMediaThumbnail(
+    val item: CameraMediaItem,
+    val bytes: ByteArray,
+    val contentType: String?,
+)
+
+data class CameraMediaPreview(
     val item: CameraMediaItem,
     val bytes: ByteArray,
     val contentType: String?,

@@ -195,6 +195,8 @@ class CameraRepository(
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = backend.mediaThumbnail(item)
 
+    suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview = backend.mediaPreview(item)
+
     suspend fun downloadMedia(
         item: CameraMediaItem,
         destination: OutputStream,

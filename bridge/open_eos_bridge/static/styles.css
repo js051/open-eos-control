@@ -968,6 +968,17 @@ input:disabled {
   background: var(--surface);
 }
 
+button.media-thumbnail {
+  padding: 0;
+  cursor: pointer;
+}
+
+button.media-thumbnail:hover:not(:disabled),
+button.media-thumbnail:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid transparent;
+}
+
 .media-thumbnail img {
   width: 100%;
   height: 100%;
@@ -1032,6 +1043,63 @@ input:disabled {
 
 .setting-dialog::backdrop {
   background: rgb(0 0 0 / 72%);
+}
+
+.media-preview-dialog {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  color: var(--text);
+  background: #000;
+}
+
+.media-preview-dialog::backdrop {
+  background: #000;
+}
+
+.media-preview-heading {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: grid;
+  min-height: 64px;
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  background: rgb(0 0 0 / 72%);
+}
+
+.media-preview-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-preview-stage {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  padding: max(72px, calc(64px + env(safe-area-inset-top))) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  place-items: center;
+}
+
+.media-preview-stage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.media-preview-message {
+  color: var(--muted);
+  text-align: center;
 }
 
 .dialog-heading {
@@ -1253,7 +1321,7 @@ input:disabled {
   }
 
   .media-row {
-    grid-template-columns: 48px minmax(0, 1fr) 48px;
+    grid-template-columns: 48px minmax(0, 1fr) max-content;
   }
 
   .media-thumbnail {

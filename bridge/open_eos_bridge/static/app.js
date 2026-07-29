@@ -16,6 +16,7 @@
     FOCUS_DRIVE: "FOCUS_DRIVE",
     MEDIA_BROWSER: "MEDIA_BROWSER",
     MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL",
+    MEDIA_PREVIEW: "MEDIA_PREVIEW",
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
     MEDIA_DELETE: "MEDIA_DELETE",
   };
@@ -24,6 +25,7 @@
   const CCAPI_URL_KEY = "open-eos-control-ccapi-url";
   const CCAPI_USERNAME_KEY = "open-eos-control-ccapi-username";
   const MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024;
+  const MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024;
 
   const messages = {
     en: {
@@ -191,6 +193,10 @@
       mediaCount: "{count} media item(s)",
       mediaEmpty: "No media was reported by the camera",
       mediaThumbnail: "Thumbnail for {name}",
+      previewMedia: "Preview {name}",
+      closeMediaPreview: "Close media preview",
+      loadingPreview: "Loading camera preview",
+      previewUnavailable: "The camera preview could not be displayed.",
       download: "Download",
       downloaded: "Downloaded {name}",
       delete: "Delete",
@@ -371,6 +377,10 @@
       mediaCount: "共 {count} 個媒體檔案",
       mediaEmpty: "相機未回報任何媒體檔案",
       mediaThumbnail: "{name} 的縮圖",
+      previewMedia: "預覽 {name}",
+      closeMediaPreview: "關閉媒體預覽",
+      loadingPreview: "正在載入相機預覽",
+      previewUnavailable: "無法顯示相機提供的預覽影像。",
       download: "下載",
       downloaded: "已下載 {name}",
       delete: "刪除",
@@ -506,6 +516,9 @@
     mediaThumbnailLoads: new Set(),
     mediaThumbnailFailures: new Set(),
     mediaGeneration: 0,
+    mediaPreviewUrl: null,
+    mediaPreviewItem: null,
+    mediaPreviewGeneration: 0,
     busy: false,
     lastError: null,
     toastTimer: null,
@@ -571,6 +584,13 @@
     mediaRefreshButton: byId("media-refresh-button"),
     mediaSummary: byId("media-summary"),
     mediaList: byId("media-list"),
+    mediaPreviewDialog: byId("media-preview-dialog"),
+    mediaPreviewClose: byId("media-preview-close"),
+    mediaPreviewTitle: byId("media-preview-title"),
+    mediaPreviewKind: byId("media-preview-kind"),
+    mediaPreviewImage: byId("media-preview-image"),
+    mediaPreviewLoading: byId("media-preview-loading"),
+    mediaPreviewUnavailable: byId("media-preview-unavailable"),
     diagnosticsRefreshButton: byId("diagnostics-refresh-button"),
     copyDiagnosticsButton: byId("copy-diagnostics-button"),
     diagnosticsOutput: byId("diagnostics-output"),
@@ -940,6 +960,7 @@
   function resetSession() {
     stopLiveLoop();
     clearMediaThumbnails();
+    closeMediaPreview();
     state.session = null;
     state.info = null;
     state.status = null;
@@ -1712,6 +1733,7 @@
   async function refreshMedia() {
     if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return;
     ui.mediaRefreshButton.disabled = true;
+    closeMediaPreview();
     try {
       const response = await api(`/v1/session/${encodeURIComponent(state.session.id)}/media`);
       clearMediaThumbnails();
@@ -1741,9 +1763,16 @@
     state.media.forEach((item) => {
       const row = document.createElement("div");
       row.className = "media-row";
-      const thumbnail = document.createElement("span");
+      const previewable = ["image", "raw"].includes(String(item.kind).toLowerCase());
+      const previewSupported = previewable && featureSupported(FEATURES.MEDIA_PREVIEW);
+      const thumbnail = document.createElement(previewSupported ? "button" : "span");
       thumbnail.className = "media-thumbnail";
       thumbnail.dataset.mediaId = item.id;
+      if (previewSupported) {
+        thumbnail.type = "button";
+        thumbnail.setAttribute("aria-label", t("previewMedia", { name: item.name }));
+        thumbnail.addEventListener("click", () => openMediaPreview(item));
+      }
       renderMediaThumbnail(thumbnail, item, state.mediaThumbnailUrls.get(item.id));
       const copy = document.createElement("div");
       copy.className = "media-copy";
@@ -1879,6 +1908,61 @@
     state.mediaGeneration += 1;
   }
 
+  function clearMediaPreview() {
+    state.mediaPreviewGeneration += 1;
+    if (state.mediaPreviewUrl) URL.revokeObjectURL(state.mediaPreviewUrl);
+    state.mediaPreviewUrl = null;
+    state.mediaPreviewItem = null;
+    ui.mediaPreviewImage.removeAttribute("src");
+    ui.mediaPreviewImage.alt = "";
+    ui.mediaPreviewImage.hidden = true;
+    ui.mediaPreviewLoading.hidden = false;
+    ui.mediaPreviewUnavailable.hidden = true;
+  }
+
+  function closeMediaPreview() {
+    if (ui.mediaPreviewDialog.open) ui.mediaPreviewDialog.close();
+    clearMediaPreview();
+  }
+
+  async function openMediaPreview(item) {
+    const previewable = ["image", "raw"].includes(String(item.kind).toLowerCase());
+    if (!state.session || !previewable || !featureSupported(FEATURES.MEDIA_PREVIEW)) return;
+    clearMediaPreview();
+    const generation = state.mediaPreviewGeneration;
+    state.mediaPreviewItem = item;
+    ui.mediaPreviewTitle.textContent = item.name;
+    ui.mediaPreviewKind.textContent = String(item.kind).toUpperCase();
+    ui.mediaPreviewDialog.showModal();
+    try {
+      const blob = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/preview`,
+        { responseType: "blob" },
+      );
+      if (!blob.type.startsWith("image/") || blob.size <= 0 || blob.size > MAX_MEDIA_PREVIEW_BYTES) {
+        throw new ApiError("Invalid media preview", { code: "INVALID_MEDIA_PREVIEW" });
+      }
+      if (generation !== state.mediaPreviewGeneration || state.mediaPreviewItem?.id !== item.id) return;
+      state.mediaPreviewUrl = URL.createObjectURL(blob);
+      ui.mediaPreviewImage.src = state.mediaPreviewUrl;
+      ui.mediaPreviewImage.alt = t("previewMedia", { name: item.name });
+      await ui.mediaPreviewImage.decode();
+      if (generation !== state.mediaPreviewGeneration || state.mediaPreviewItem?.id !== item.id) return;
+      ui.mediaPreviewImage.hidden = false;
+      ui.mediaPreviewLoading.hidden = true;
+    } catch (error) {
+      if (generation !== state.mediaPreviewGeneration) return;
+      if (state.mediaPreviewUrl) URL.revokeObjectURL(state.mediaPreviewUrl);
+      state.mediaPreviewUrl = null;
+      ui.mediaPreviewImage.removeAttribute("src");
+      ui.mediaPreviewImage.hidden = true;
+      const normalized = captureError(error);
+      ui.mediaPreviewLoading.hidden = true;
+      ui.mediaPreviewUnavailable.hidden = false;
+      showToast(normalized.message, true);
+    }
+  }
+
   async function downloadMedia(item, button) {
     if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD)) return;
     button.disabled = true;
@@ -1919,6 +2003,7 @@
       state.mediaThumbnailUrls.delete(item.id);
       state.mediaThumbnailLoads.delete(item.id);
       state.mediaThumbnailFailures.delete(item.id);
+      if (state.mediaPreviewItem?.id === item.id) closeMediaPreview();
       renderMedia();
       showToast(t("deleted", { name: item.name }));
     } catch (error) {
@@ -2086,6 +2171,11 @@
       });
     });
     ui.mediaRefreshButton.addEventListener("click", refreshMedia);
+    ui.mediaPreviewClose.addEventListener("click", closeMediaPreview);
+    ui.mediaPreviewDialog.addEventListener("close", clearMediaPreview);
+    ui.mediaPreviewDialog.addEventListener("click", (event) => {
+      if (event.target === ui.mediaPreviewDialog) closeMediaPreview();
+    });
     ui.diagnosticsRefreshButton.addEventListener("click", () => refreshSession({ quiet: true }));
     ui.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
     ui.settingDialogClose.addEventListener("click", () => ui.settingDialog.close());
@@ -2094,6 +2184,7 @@
     });
     window.addEventListener("beforeunload", () => {
       clearMediaThumbnails();
+      closeMediaPreview();
       if (!state.session) return;
       api(`/v1/session/${encodeURIComponent(state.session.id)}`, { method: "DELETE", keepalive: true }).catch(() => {});
     });
