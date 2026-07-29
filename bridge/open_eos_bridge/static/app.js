@@ -1102,7 +1102,13 @@
           const event = await api(`/v1/session/${sessionId}/events`, { signal: controller.signal });
           failures = 0;
           if (event?.changedKeys?.length && generation === state.eventGeneration) {
+            const contentsChanged = event.changedKeys.some((key) =>
+              String(key).toLowerCase().includes("content"),
+            );
             await refreshSession({ quiet: true });
+            if (contentsChanged && state.mediaLoaded && generation === state.eventGeneration) {
+              await refreshMedia();
+            }
           }
         } catch (error) {
           if (mediaTransfer.isAbortError(error) || generation !== state.eventGeneration) break;

@@ -4,6 +4,8 @@ This package provides the PC camera backend and browser control surface for Open
 
 It can connect to Canon cameras through native HTTP CCAPI or through a system-installed `gphoto2`/libgphoto2 USB stack. Camera commands and settings are exposed only when the selected backend advertises support.
 
+USB camera events are exposed only after a bounded `gphoto2 --wait-event` probe succeeds. Body-property and file events refresh PC, Android, and iOS Bridge clients. Event waits pause while the exclusive persistent USB Live View process or a Bulb exposure is active, so synchronization never interrupts capture merely to simulate notifications.
+
 The built-in browser control surface includes decoded-frame monitoring assists for CCAPI JPEG, decoded RTP, and libgphoto2 USB preview: a bounded luminance histogram, configurable zebra, false color, focus peaking, frame guides, action/title safe areas, and anamorphic desqueeze. These overlays are local display tools and never imply that the camera accepted a control command.
 
 Camera media downloads are consumed as cancellable Fetch streams with visible byte progress. Files below 64 MiB use a cross-browser Blob download after the streamed transfer completes. Unknown-size and larger files prefer the browser File System Access writer, whose temporary file is committed only after the camera stream completes; unsupported browsers retain the Blob fallback. Disconnecting, closing the page, or pressing cancel aborts the request and does not report a successful download.

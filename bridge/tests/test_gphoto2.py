@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from open_eos_bridge.gphoto2 import (
     parse_config_dump,
     parse_media_list,
     parse_storage_info,
+    parse_wait_event_keys,
     resolve_gphoto_command,
 )
 from open_eos_bridge.local_media import default_capture_directory, preview_content_type
@@ -223,6 +225,100 @@ def test_media_preview_validation_requires_complete_jpeg_or_png_markers() -> Non
     assert preview_content_type(b"\xff\xd8truncated") is None
 
 
+def test_wait_event_parser_maps_stable_gphoto2_markers_to_refresh_hints() -> None:
+    assert parse_wait_event_keys(
+        "Waiting for events from camera.\n"
+        "UNKNOWN PTP Property d105 changed\n"
+        "FILEADDED IMG_0002.JPG /store_00010001/DCIM/100CANON\n"
+        "FOLDERADDED 101CANON /store_00010001/DCIM\n"
+        "FILECHANGED IMG_0001.JPG /store_00010001/DCIM/100CANON\n"
+        "CAPTURECOMPLETE\n"
+    ) == ["shooting", "contents", "storage"]
+    assert parse_wait_event_keys("Waiting for 250 milliseconds for events from camera.\n") == []
+
+
+def test_gphoto2_event_probe_preserves_events_and_gates_the_runtime_capability() -> None:
+    class EventRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            command = self._without_camera(arguments)
+            if command == ["--wait-event", "1ms"]:
+                self.commands.append(tuple(arguments))
+                return CommandOutput(b"FILEADDED IMG_0002.JPG /store_00010001/DCIM/100CANON\n")
+            if command == ["--wait-event", "250ms"]:
+                self.commands.append(tuple(arguments))
+                return CommandOutput(b"UNKNOWN PTP Property d105 changed\nCAPTURECOMPLETE\n")
+            return super().run(arguments, timeout=timeout)
+
+    session = GPhoto2Engine(EventRunner()).open()
+
+    assert CameraFeature.EVENT_POLLING in session.capabilities().supported
+    assert session.poll_event().changed_keys == ["contents", "storage"]
+    assert session.poll_event().changed_keys == ["shooting", "contents", "storage"]
+    assert CameraFeature.EVENT_POLLING in session.capabilities().evidence.observed_features
+
+    class NoEventRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            if self._without_camera(arguments) == ["--wait-event", "1ms"]:
+                self.commands.append(tuple(arguments))
+                raise BridgeError("ENGINE_COMMAND_FAILED", "wait-event is not supported")
+            return super().run(arguments, timeout=timeout)
+
+    unavailable = GPhoto2Engine(NoEventRunner()).open()
+    capabilities = unavailable.capabilities()
+    assert CameraFeature.EVENT_POLLING not in capabilities.supported
+    assert CameraFeature.EVENT_POLLING in capabilities.planned
+    assert "wait-event probe failed" in capabilities.reasons[CameraFeature.EVENT_POLLING.value]
+    with pytest.raises(BridgeError) as rejected:
+        unavailable.poll_event()
+    assert rejected.value.code == "UNSUPPORTED_FEATURE"
+    unavailable.stop_event_polling()
+
+
+def test_stop_event_polling_suppresses_an_inflight_gphoto2_result() -> None:
+    class BlockingEventRunner(FakeRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            if self._without_camera(arguments) == ["--wait-event", "250ms"]:
+                self.commands.append(tuple(arguments))
+                self.started.set()
+                assert self.release.wait(timeout=2.0)
+                return CommandOutput(b"FILEADDED IMG_0002.JPG /store_00010001/DCIM/100CANON\n")
+            return super().run(arguments, timeout=timeout)
+
+    runner = BlockingEventRunner()
+    session = GPhoto2Engine(runner).open()
+    result: list[list[str]] = []
+    poller = threading.Thread(target=lambda: result.append(session.poll_event().changed_keys))
+    poller.start()
+    assert runner.started.wait(timeout=1.0)
+
+    session.stop_event_polling()
+    runner.release.set()
+    poller.join(timeout=2.0)
+
+    assert not poller.is_alive()
+    assert result == [[]]
+    assert session.poll_event().changed_keys == ["contents", "storage"]
+
+
+def test_event_polling_pauses_without_interrupting_gphoto2_live_view() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+    session.start_live_view(LiveViewStartRequest(fps=15))
+    stream = runner.movie_streams[-1]
+    wait_commands_before = sum("--wait-event" in command for command in runner.commands)
+
+    assert session.poll_event().changed_keys == []
+
+    assert sum("--wait-event" in command for command in runner.commands) == wait_commands_before
+    assert stream.closed is False
+    session.stop_live_view()
+
+
 def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path: Path) -> None:
     runner = FakeRunner()
     session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
@@ -239,6 +335,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert CameraFeature.MEDIA_DELETE in capabilities.supported
     assert CameraFeature.MEDIA_THUMBNAIL in capabilities.supported
     assert CameraFeature.MEDIA_PREVIEW in capabilities.supported
+    assert CameraFeature.EVENT_POLLING in capabilities.supported
     assert CameraFeature.TAP_FOCUS in capabilities.planned
     assert CameraFeature.CLICK_WHITE_BALANCE in capabilities.planned
     assert next(setting for setting in capabilities.settings if setting.key == "iso").values == [
@@ -247,18 +344,21 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         "400",
         "800",
     ]
-    assert capabilities.evidence.source == "gphoto2 --abilities + --list-all-config"
+    assert capabilities.evidence.source == "gphoto2 --abilities + --list-all-config + --wait-event probe"
     assert "CAPTURE_PREVIEW" in capabilities.evidence.advertised_commands
     assert "CAPTURE_MOVIE_STDOUT" in capabilities.evidence.advertised_commands
     assert "CAPTURE_IMAGE_AND_DOWNLOAD" in capabilities.evidence.advertised_commands
     assert "AUTOFOCUS_DRIVE_CANCEL" in capabilities.evidence.advertised_commands
     assert "SHUTTER_HALF_PRESS" in capabilities.evidence.advertised_commands
+    assert "GPHOTO2_WAIT_EVENT" in capabilities.evidence.advertised_commands
     assert capabilities.live_view.max_fps == 30
     assert "/main/imgsettings/iso" in capabilities.evidence.writable_settings
 
     status = session.status()
     assert status.media.free_images == 46_822
     assert status.raw["remainingShotsSource"] == "gphoto2-config:/main/status/availableshots"
+    assert status.raw["eventPollingTransport"] == "GPHOTO2_WAIT_EVENT"
+    assert session.poll_event().changed_keys == []
 
     status = session.set_setting("iso", "800")
     assert status.exposure.iso == "800"
@@ -349,6 +449,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.MEDIA_PREVIEW,
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
+        CameraFeature.EVENT_POLLING,
     } <= observed
 
 

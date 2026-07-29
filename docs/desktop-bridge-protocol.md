@@ -126,11 +126,11 @@ The bridge should mirror the app-side capability model:
 }
 ```
 
-`evidence` is immutable diagnostic context for the active engine. CCAPI reports method/path pairs from discovery; libgphoto2 reports abilities and writable configuration paths. It does not enable a capability by itself. Producers de-duplicate and sort evidence, remove URL queries and line breaks, limit each list to 256 items and each item to 512 characters, and set `truncated` when data was omitted. The browser diagnostic report includes this object plus schema/version/time metadata and the advertised/observed set difference. A separately tested recursive sanitizer removes credentials, authorization values and camera serials before display or clipboard copy.
+`evidence` is immutable diagnostic context for the active engine. CCAPI reports method/path pairs from discovery; libgphoto2 reports abilities, writable configuration paths, and the successful bounded `--wait-event` probe when available. It does not enable any unrelated capability by itself. Producers de-duplicate and sort evidence, remove URL queries and line breaks, limit each list to 256 items and each item to 512 characters, and set `truncated` when data was omitted. The browser diagnostic report includes this object plus schema/version/time metadata and the advertised/observed set difference. A separately tested recursive sanitizer removes credentials, authorization values and camera serials before display or clipboard copy.
 
 ## Camera Events
 
-`EVENT_POLLING` is advertised only by a direct CCAPI session whose discovery response contains both `GET` and `DELETE /event/polling`. `GET /v1/session/{id}/events` blocks until Canon returns an event or its bounded long timeout expires, then returns only sanitized top-level change keys:
+For direct CCAPI, `EVENT_POLLING` requires both advertised `GET` and `DELETE /event/polling`. `GET /v1/session/{id}/events` blocks until Canon returns an event or its bounded long timeout expires. For libgphoto2, the session runs `gphoto2 --wait-event=1ms` once and advertises the capability only when that real command succeeds. Any event received during the probe is retained. Product polls use `--wait-event=250ms`; the parser accepts only gPhoto2's stable `UNKNOWN`, `CAPTURECOMPLETE`, `FILEADDED`, `FOLDERADDED`, and `FILECHANGED` markers and maps them to bounded `shooting`, `contents`, and `storage` refresh hints. Both engines return only sanitized change keys:
 
 ```json
 {
@@ -138,7 +138,7 @@ The bridge should mirror the app-side capability model:
 }
 ```
 
-The event payload is partial and never replaces `CameraStatus`. Android, iOS, and the browser re-read status and capabilities after a non-empty result. `DELETE /v1/session/{id}/events` stops Canon polling without taking the normal camera-control lock, so it remains callable while the GET is waiting. Session close also performs this cleanup. The current libgphoto2 engine marks event polling as planned and returns a structured unsupported error instead of emulating notifications.
+The event payload is partial and never replaces `CameraStatus`. Android, iOS, and the browser re-read status and capabilities after a non-empty result; clients also refresh an already-open media view after a `contents` hint. `DELETE /v1/session/{id}/events` invalidates an in-flight result without waiting for the normal camera-control lock, and session close performs the same cleanup. The CLI event wait and camera commands share exclusive USB access, so each wait is deliberately short. While persistent libgphoto2 Live View or Bulb is active, the endpoint returns an empty bounded poll instead of stopping capture; `CameraStatus.raw.eventPollingPaused` and `eventPollingTransport` expose that state. A failed runtime probe keeps the feature planned and the product does not start a fake status polling loop.
 
 ## Live View
 
@@ -210,6 +210,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - independent autofocus: paired writable `autofocusdrive=1` and guaranteed `autofocuscancel=1` actions when both exist, falling back to the balanced half-press path
 - recording: advertised `movierecordtarget` Card/None values
 - focus drive: advertised `manualfocusdrive` Near/Far values while Live View is active
+- camera events: successful `--wait-event=1ms` runtime probe followed by bounded `--wait-event=250ms` property/capture/media hints; event waits pause rather than taking the camera away from persistent Live View or Bulb
 - Live View focus magnification: advertised writable `eoszoom` with only the R6 Mark III-backed values 1 and 5 while Live View is active
 - Live View: advertised `viewfinder` lifecycle plus cancellable `--capture-movie --stdout` MJPEG, command-safe restart and bounded `--capture-preview --stdout` fallback, with cleanup on stop, failed start, and session close
 - media: merge camera-resident recursive `--list-files` items with opaque-ID host captures; camera JPEG/PNG items use bounded `--get-file ... --stdout` display previews plus the existing streamed download and ability-gated exact deletion, while host items use bounded local previews/thumbnails, chunked download, and exact store-confined deletion. Per-item `previewAvailable` prevents unsupported RAW/HEIF/video actions.
