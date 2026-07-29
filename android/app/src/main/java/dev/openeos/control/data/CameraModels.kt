@@ -71,6 +71,7 @@ enum class CameraFeature(
     LIVE_VIEW_RTP("Live view RTP"),
     LIVE_VIEW_MAGNIFICATION("Live view magnification"),
     STILL_CAPTURE("Still capture"),
+    BULB_EXPOSURE("Bulb exposure"),
     AUTOFOCUS("Autofocus"),
     SHUTTER_HALF_PRESS("Shutter half-press"),
     VIDEO_RECORDING("Video recording"),
@@ -118,6 +119,7 @@ data class CapabilityMatrix(
             planned = setOf(
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
+                CameraFeature.BULB_EXPOSURE,
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.VIDEO_RECORDING,
@@ -151,6 +153,7 @@ data class CapabilityMatrix(
                 CameraFeature.BATTERY_STATUS,
                 CameraFeature.STORAGE_STATUS,
                 CameraFeature.STILL_CAPTURE,
+                CameraFeature.BULB_EXPOSURE,
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.LIVE_VIEW,
@@ -178,6 +181,7 @@ data class CapabilityMatrix(
                 CameraFeature.BATTERY_STATUS,
                 CameraFeature.STORAGE_STATUS,
                 CameraFeature.STILL_CAPTURE,
+                CameraFeature.BULB_EXPOSURE,
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.VIDEO_RECORDING,
@@ -292,6 +296,7 @@ data class CameraStatus(
     val rawBatteryJson: String = "",
     val rawStorageJson: String = "",
     val rawTransportJson: String = "",
+    val bulbExposureActive: Boolean? = null,
 )
 
 data class CameraCapabilityEvidence(

@@ -147,6 +147,7 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(snapshot.info.model, "Canon EOS R6 Mark III")
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveView))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.stillCapture))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.bulbExposure))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
@@ -180,6 +181,26 @@ final class CameraAppTests: XCTestCase {
 
         XCTAssertEqual(state.snapshot?.status.exposure.whiteBalance, "click")
         XCTAssertEqual(state.focusMarker, FocusMarker(x: 0.4, y: 0.6, accepted: true))
+        XCTAssertNil(state.lastError)
+    }
+
+    func testOfflinePreviewBulbModeStartsAndStopsFromTheCaptureState() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        await state.setSetting(key: "shootingmode", value: "Bulb")
+        XCTAssertTrue(state.bulbMode)
+
+        await state.toggleBulbExposure()
+        XCTAssertTrue(state.bulbExposureActive)
+        XCTAssertNotNil(state.bulbStartedAt)
+
+        await state.toggleBulbExposure()
+        XCTAssertFalse(state.bulbExposureActive)
+        XCTAssertNil(state.bulbStartedAt)
         XCTAssertNil(state.lastError)
     }
 

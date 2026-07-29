@@ -8,6 +8,7 @@ client = TestClient(app)
 def setup_function() -> None:
     state["capture_count"] = 0
     state["half_pressed"] = False
+    state["bulb_exposure_active"] = False
     state["click_wb_count"] = 0
     state["exposure"]["white_balance"] = "auto"
     state["media"] = [
@@ -35,6 +36,17 @@ def test_half_press_and_release_are_stateful() -> None:
     assert release.status_code == 200
     assert release.json()["half_pressed"] is False
     assert state["half_pressed"] is False
+
+
+def test_bulb_start_and_stop_are_stateful() -> None:
+    started = client.post("/ccapi/bulb/start", json={})
+    active_status = client.get("/ccapi/status")
+    stopped = client.post("/ccapi/bulb/stop", json={})
+
+    assert started.status_code == 200
+    assert active_status.json()["bulb_exposure_active"] is True
+    assert stopped.status_code == 200
+    assert state["bulb_exposure_active"] is False
 
 
 def test_click_white_balance_records_the_point_and_updates_status() -> None:

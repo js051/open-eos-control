@@ -44,6 +44,7 @@ open-eos-control/
 - Canon 點選白平衡：只有相機公告 `POST clickwb` 且詳細 Live View 提供影像座標時才開放，取景畫面可切換點選對焦／點選白平衡
 - 獨立 AF-ON：CCAPI 使用相機公告的自動對焦命令；Canon USB 優先使用 `DoAf`／`AfCancel`，沒有這組專用操作時才以確實釋放的半按流程作為後備
 - 依相機公告能力執行手動快門半按，並保證送出釋放命令
+- CCAPI、Android USB/PTP、Desktop Bridge、PC 與 iOS 共用依能力開放的 Bulb 長曝光：只有相機公告 Bulb 模式與完整按壓／釋放路徑時，中央快門才切換成可計時的開始／停止控制；曝光期間暫停主動 JPEG 輪詢，失敗可重試釋放，結束工作階段也會盡力釋放快門
 - 支援分頁、按需縮圖與相機公告時的 CCAPI 相片／RAW 全螢幕預覽、透過 Android 文件選擇器串流下載大型檔案，以及需確認後才執行的刪除
 
 預設直連相機 URL：
@@ -99,7 +100,7 @@ iOS App 會在 iPhone Simulator 完成編譯與測試，但 Release 不會附上
 
 ## iOS App 與相機 Core
 
-`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；除了完整 JPEG Live View 生命週期，也會在相機公告兩個 RTP operation 時驗證 Canon SDP、RFC 3550 與 RFC 6184 H.264 access unit，並負責精確清理 RTP start／stop。Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、Live View、拍照、獨立自動對焦、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及含版本、產生時間、公告／實測差異與有界能力證據的診斷報告；帳密與相機序號都會遮蔽。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
+`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；除了完整 JPEG Live View 生命週期，也會在相機公告兩個 RTP operation 時驗證 Canon SDP、RFC 3550 與 RFC 6184 H.264 access unit，並負責精確清理 RTP start／stop。Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、Live View、拍照、Bulb 計時開始／停止、獨立自動對焦、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及含版本、產生時間、公告／實測差異與有界能力證據的診斷報告；帳密與相機序號都會遮蔽。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
 
 ```bash
 cd ios/OpenEOSCore
@@ -121,7 +122,7 @@ GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系
 
 ## Desktop Bridge
 
-Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、AF-ON、半按快門、錄影、焦點前後移動、座標 Tap AF 或點選白平衡、JPEG 或相機公告的 RTP H.264 Live View、需身分驗證的按需媒體縮圖、串流下載、需確認後執行的刪除，以及含版本、時間與公告／實測差異且不包含帳密或相機序號的診斷。libgphoto2 設定映射包含 R6 Mark III 白平衡偏移、各卡槽影像畫質、畫面比例、電動變焦速度、自動關閉電源與拍攝儲存位置；仍須相機實際公告可寫 choices，未記載的 `0xFFFFFFFF` 電源值會被拒絕，只有單一選項的進階控制不會顯示。選擇「記憶卡」時沿用相機端拍攝；選擇「電腦（Internal RAM／SDRAM）」時，必須由相機公告 image capture，並使用 gPhoto2 的 capture-and-download 生命週期。檔案在下載並刪除相機端暫存物件前只存在同磁碟 staging，命令成功後才原子移入 Bridge 媒體庫，供縮圖、串流下載與刪除。PC RTP 會驗證 Canon SDP，以 RFC 3550／RFC 6184 接收與重組 H.264，由 PyAV／FFmpeg 解碼，再透過既有 Bridge endpoint 輸出受 FPS 上限控制的 JPEG。直接 CCAPI 的 AF-ON 使用相機公告的 `POST /shooting/control/af` start/stop；libgphoto2 USB 優先使用 runtime 的 `autofocusdrive`／`autofocuscancel` action pair，缺少時才退回確實釋放的半按流程。座標 Tap AF 與點選白平衡會先用 Canon `flipdetail` 的影像幾何資訊換算，再分別送出整數 `PUT afframeposition` 或 `POST clickwb`。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
+Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、Bulb 計時開始／停止、AF-ON、半按快門、錄影、焦點前後移動、座標 Tap AF 或點選白平衡、JPEG 或相機公告的 RTP H.264 Live View、需身分驗證的按需媒體縮圖、串流下載、需確認後執行的刪除，以及含版本、時間與公告／實測差異且不包含帳密或相機序號的診斷。libgphoto2 設定映射包含 R6 Mark III 白平衡偏移、各卡槽影像畫質、畫面比例、電動變焦速度、自動關閉電源與拍攝儲存位置；仍須相機實際公告可寫 choices，未記載的 `0xFFFFFFFF` 電源值會被拒絕，只有單一選項的進階控制不會顯示。選擇「記憶卡」時沿用相機端拍攝；選擇「電腦（Internal RAM／SDRAM）」時，必須由相機公告 image capture，並使用 gPhoto2 的 capture-and-download 生命週期。檔案在下載並刪除相機端暫存物件前只存在同磁碟 staging，命令成功後才原子移入 Bridge 媒體庫，供縮圖、串流下載與刪除。PC RTP 會驗證 Canon SDP，以 RFC 3550／RFC 6184 接收與重組 H.264，由 PyAV／FFmpeg 解碼，再透過既有 Bridge endpoint 輸出受 FPS 上限控制的 JPEG。直接 CCAPI 的 AF-ON 使用相機公告的 `POST /shooting/control/af` start/stop；libgphoto2 USB 優先使用 runtime 的 `autofocusdrive`／`autofocuscancel` action pair，缺少時才退回確實釋放的半按流程。座標 Tap AF 與點選白平衡會先用 Canon `flipdetail` 的影像幾何資訊換算，再分別送出整數 `PUT afframeposition` 或 `POST clickwb`。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
 
 先建立下列環境；只有使用 USB 相機時才需要在電腦安裝 `gphoto2`：
 

@@ -90,6 +90,7 @@ data class CameraUiState(
     val liveViewTapAction: LiveViewTapAction = LiveViewTapAction.FOCUS,
     val activeSettingPicker: SettingPicker? = null,
     val captureFeedback: CaptureFeedback? = null,
+    val bulbStartedAtMillis: Long? = null,
     val focusPoint: FocusPoint? = null,
     val focusFeedback: FocusFeedback? = null,
     val error: String? = null,
@@ -103,9 +104,17 @@ data class CameraUiState(
         capabilities?.matrix?.supports(feature) ?: false
 
     val busy: Boolean
-        get() = pendingOperations.isNotEmpty()
+        get() = pendingOperations.isNotEmpty() || bulbExposureActive
 
-    fun isBusy(operation: CameraOperation): Boolean = operation in pendingOperations
+    val bulbExposureActive: Boolean
+        get() = status?.bulbExposureActive == true
+
+    val bulbMode: Boolean
+        get() = captureMode == CaptureMode.PHOTO &&
+            (capabilities?.shootingModeSetting()?.value ?: status?.mode).orEmpty().isBulbModeValue()
+
+    fun isBusy(operation: CameraOperation): Boolean =
+        operation in pendingOperations || (bulbExposureActive && operation != CameraOperation.CAPTURE)
 }
 
 data class FocusPoint(
@@ -145,6 +154,8 @@ internal fun String.isShootingModeKey(): Boolean =
 
 private fun String.cameraModeToken(): String =
     lowercase(Locale.ROOT).filter(Char::isLetterOrDigit)
+
+internal fun String.isBulbModeValue(): Boolean = cameraModeToken() == "bulb"
 
 fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): List<CameraSettingControl> {
     val videoTokens = listOf("movie", "video", "frame", "codec", "record", "sound")

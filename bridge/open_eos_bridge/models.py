@@ -31,6 +31,7 @@ class CameraFeature(StrEnum):
     LIVE_VIEW_RTP = "LIVE_VIEW_RTP"
     LIVE_VIEW_MAGNIFICATION = "LIVE_VIEW_MAGNIFICATION"
     STILL_CAPTURE = "STILL_CAPTURE"
+    BULB_EXPOSURE = "BULB_EXPOSURE"
     AUTOFOCUS = "AUTOFOCUS"
     SHUTTER_HALF_PRESS = "SHUTTER_HALF_PRESS"
     VIDEO_RECORDING = "VIDEO_RECORDING"
@@ -124,6 +125,7 @@ class CameraStatus(ApiModel):
     connected: bool = True
     battery: BatteryStatus
     recording: bool | None = None
+    bulb_exposure_active: bool | None = None
     mode: str = "unknown"
     media: StorageStatus
     exposure: ExposureState

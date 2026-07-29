@@ -358,7 +358,7 @@ private struct CaptureBar: View {
             .padding(.horizontal, compact ? 0 : 18)
 
             if !captureSupported {
-                Text(LocalizedStringKey(camera.captureMode == .photo ? "capture_not_supported" : "recording_not_supported"))
+                Text(LocalizedStringKey(camera.bulbMode ? "bulb_not_supported" : camera.captureMode == .photo ? "capture_not_supported" : "recording_not_supported"))
                     .font(.caption)
                     .foregroundStyle(Color.cameraWarning)
                     .multilineTextAlignment(.center)
@@ -369,7 +369,7 @@ private struct CaptureBar: View {
     }
 
     private var captureSupported: Bool {
-        camera.supports(camera.captureMode == .photo ? .stillCapture : .videoRecording)
+        camera.supports(camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording)
     }
 
     @ViewBuilder
@@ -377,7 +377,11 @@ private struct CaptureBar: View {
         Button {
             Task {
                 if camera.captureMode == .photo {
-                    await camera.captureStill()
+                    if camera.bulbMode {
+                        await camera.toggleBulbExposure()
+                    } else {
+                        await camera.captureStill()
+                    }
                 } else {
                     await camera.toggleRecording()
                 }
@@ -393,9 +397,14 @@ private struct CaptureBar: View {
                             .fill(Color.cameraRecording)
                             .frame(width: camera.recording ? 28 : 54, height: camera.recording ? 28 : 54)
                     } else {
-                        Circle()
-                            .fill(Color.cameraText)
-                            .frame(width: compact ? 49 : 58, height: compact ? 49 : 58)
+                        Group {
+                            if camera.bulbMode && camera.bulbExposureActive {
+                                RoundedRectangle(cornerRadius: 5).fill(Color.cameraWarning)
+                            } else {
+                                Circle().fill(camera.bulbMode ? Color.cameraWarning : Color.cameraText)
+                            }
+                        }
+                        .frame(width: compact ? 49 : 58, height: compact ? 49 : 58)
                     }
                     if camera.isBusy(camera.captureMode == .photo ? .capture : .recording) {
                         ProgressView().tint(camera.captureMode == .photo ? Color.cameraBackground : Color.cameraText)
@@ -404,7 +413,9 @@ private struct CaptureBar: View {
                 .accessibilityLabel(
                     Text(
                         LocalizedStringKey(
-                            camera.captureMode == .photo ? "capture_photo" : camera.recording ? "stop_recording" : "start_recording"
+                            camera.bulbMode
+                                ? camera.bulbExposureActive ? "stop_bulb_exposure" : "start_bulb_exposure"
+                                : camera.captureMode == .photo ? "capture_photo" : camera.recording ? "stop_recording" : "start_recording"
                         )
                     )
                 )

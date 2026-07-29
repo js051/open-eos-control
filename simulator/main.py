@@ -33,6 +33,7 @@ state = {
     "recording": False,
     "capture_count": 0,
     "half_pressed": False,
+    "bulb_exposure_active": False,
     "focus_x": 0.5,
     "focus_y": 0.5,
     "click_wb_x": 0.5,
@@ -66,6 +67,7 @@ def camera_status() -> dict[str, object]:
         "connected": True,
         "battery": {"level": 82, "status": "normal"},
         "recording": state["recording"],
+        "bulb_exposure_active": state["bulb_exposure_active"],
         "capture_count": state["capture_count"],
         "mode": "movie",
         "media": {
@@ -145,6 +147,18 @@ async def capture_still() -> dict[str, bool | int]:
         0, {"id": name, "name": name, "kind": "image", "capture_time": None}
     )
     return {"ok": True, "capture_count": state["capture_count"]}
+
+
+@app.post("/ccapi/bulb/start")
+async def bulb_start() -> dict[str, bool]:
+    state["bulb_exposure_active"] = True
+    return {"ok": True, "bulb_exposure_active": True}
+
+
+@app.post("/ccapi/bulb/stop")
+async def bulb_stop() -> dict[str, bool]:
+    state["bulb_exposure_active"] = False
+    return {"ok": True, "bulb_exposure_active": False}
 
 
 @app.post("/ccapi/shutter/half-press")

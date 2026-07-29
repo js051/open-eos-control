@@ -342,6 +342,7 @@ class CcapiSession:
         self._setting_paths: dict[str, str] = {}
         self._discovery_source = "unknown"
         self._recording: bool | None = None
+        self._bulb_exposure_active = False
         self._live_view_active = False
         self._active_live_view_source: str | None = None
         self._rtp_session: RtpLiveViewSession | None = None
@@ -408,6 +409,16 @@ class CcapiSession:
         with self._lock:
             if self._closed:
                 return
+            if self._bulb_exposure_active:
+                manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
+                    "POST", "/shooting/control/shutterbutton/manual"
+                )
+                if manual is not None:
+                    try:
+                        self._command_ok(manual, {"af": False, "action": "release"})
+                        self._bulb_exposure_active = False
+                    except BridgeError as error:
+                        self._last_error = error.message
             if self._live_view_active:
                 try:
                     self._stop_live_view_locked()
@@ -462,6 +473,7 @@ class CcapiSession:
             return CameraStatus(
                 battery=battery_status,
                 recording=self._recording,
+                bulb_exposure_active=self._bulb_exposure_active,
                 mode=_setting_value(settings, "shootingmode") or "unknown",
                 media=storage_status,
                 exposure=ExposureState(
@@ -517,6 +529,7 @@ class CcapiSession:
                 "POST", "/shooting/control/shutterbutton/manual"
             ):
                 supported.add(CameraFeature.SHUTTER_HALF_PRESS)
+                supported.add(CameraFeature.BULB_EXPOSURE)
             if (
                 self._operation("POST", "/shooting/control/af")
                 or self._operation("PUT", "/shooting/control/shutterbutton/manual")
@@ -544,6 +557,7 @@ class CcapiSession:
             candidates = {
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
+                CameraFeature.BULB_EXPOSURE,
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
                 CameraFeature.VIDEO_RECORDING,
@@ -693,6 +707,41 @@ class CcapiSession:
                 hold=HALF_PRESS_SECONDS,
             )
             self._observed.add(CameraFeature.SHUTTER_HALF_PRESS)
+            return self.status()
+
+    def start_bulb_exposure(self) -> CameraStatus:
+        with self._lock:
+            if self._bulb_exposure_active:
+                return self.status()
+            manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
+                "POST", "/shooting/control/shutterbutton/manual"
+            )
+            if manual is None:
+                raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
+            baseline = self.status()
+            try:
+                self._command_ok(manual, {"af": False, "action": "full_press"})
+            except BridgeError as error:
+                try:
+                    self._command_ok(manual, {"af": False, "action": "release"})
+                except BridgeError as release_error:
+                    error.add_note(f"Bulb cleanup failed: {release_error.message}")
+                raise
+            self._bulb_exposure_active = True
+            return baseline.model_copy(update={"bulb_exposure_active": True})
+
+    def stop_bulb_exposure(self) -> CameraStatus:
+        with self._lock:
+            if not self._bulb_exposure_active:
+                return self.status()
+            manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
+                "POST", "/shooting/control/shutterbutton/manual"
+            )
+            if manual is None:
+                raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
+            self._command_ok(manual, {"af": False, "action": "release"})
+            self._bulb_exposure_active = False
+            self._observed.add(CameraFeature.BULB_EXPOSURE)
             return self.status()
 
     def autofocus(self) -> CameraStatus:
@@ -1145,9 +1194,7 @@ class CcapiSession:
             content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
             detected_type = _image_content_type(response.body)
             invalid_code = (
-                "INVALID_MEDIA_THUMBNAIL"
-                if feature == CameraFeature.MEDIA_THUMBNAIL
-                else "INVALID_MEDIA_PREVIEW"
+                "INVALID_MEDIA_THUMBNAIL" if feature == CameraFeature.MEDIA_THUMBNAIL else "INVALID_MEDIA_PREVIEW"
             )
             if not response.body:
                 raise BridgeError(
@@ -1613,8 +1660,10 @@ class CcapiSession:
                     engine=self.engine_name,
                 )
         decoded_segments = unquote(parsed.path).split("/")
-        if parsed.fragment or any(segment in {".", ".."} for segment in decoded_segments) or not parsed.path.startswith(
-            "/ccapi/"
+        if (
+            parsed.fragment
+            or any(segment in {".", ".."} for segment in decoded_segments)
+            or not parsed.path.startswith("/ccapi/")
         ):
             raise BridgeError(
                 "INVALID_CAMERA_RESOURCE",
@@ -1894,11 +1943,7 @@ def _structured_image_quality_controls(raw: dict[str, object]) -> list[CameraSet
     for field in IMAGE_QUALITY_FIELDS:
         value = _string_value(current.get(field))
         raw_values = ability.get(field)
-        values = (
-            list(dict.fromkeys(_string_value(item) for item in raw_values))
-            if isinstance(raw_values, list)
-            else []
-        )
+        values = list(dict.fromkeys(_string_value(item) for item in raw_values)) if isinstance(raw_values, list) else []
         values = [item for item in values if item]
         if value and len(values) >= 2:
             key = f"{IMAGE_QUALITY_SETTING_KEY}.{field}"
@@ -1912,8 +1957,7 @@ def _structured_wb_shift_controls(raw: dict[str, object]) -> list[CameraSetting]
     if not isinstance(current, dict) or not isinstance(ability, dict):
         return []
     if any(
-        isinstance(current.get(field), bool) or not isinstance(current.get(field), int)
-        for field in WB_SHIFT_FIELDS
+        isinstance(current.get(field), bool) or not isinstance(current.get(field), int) for field in WB_SHIFT_FIELDS
     ):
         return []
     controls: list[CameraSetting] = []

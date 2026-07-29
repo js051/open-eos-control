@@ -79,6 +79,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(snapshot.capabilities.setting("wbshift.ba")?.values, (-9...9).map(String.init))
         XCTAssertNil(snapshot.capabilities.setting("readonly"))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.stillCapture))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.bulbExposure))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.shutterHalfPress))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.videoRecording))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.tapFocus))
@@ -419,6 +420,83 @@ final class CCAPIClientTests: XCTestCase {
             return try XCTUnwrap(json["action"] as? String)
         }
         XCTAssertEqual(actions, ["half_press", "release"])
+    }
+
+    func testBulbExposureUsesManualPressAndReleaseWithoutPollingWhilePressed() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        await enqueueStatus(on: transport)
+        await transport.enqueue(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/control/shutterbutton/manual",
+            status: 204,
+            body: Data()
+        )
+        await transport.enqueue(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/control/shutterbutton/manual",
+            status: 204,
+            body: Data()
+        )
+        await enqueueStatus(on: transport)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let started = try await client.startBulbExposure()
+        XCTAssertEqual(started.bulbExposureActive, true)
+        let startRequests = await transport.requests()
+        XCTAssertEqual(startRequests.last?.path, "/ccapi/ver100/shooting/control/shutterbutton/manual")
+
+        let stopped = try await client.stopBulbExposure()
+        XCTAssertEqual(stopped.bulbExposureActive, false)
+
+        let commands = await transport.requests().filter { $0.path.contains("shutterbutton/manual") }
+        XCTAssertEqual(commands.map(\.method), ["PUT", "PUT"])
+        let payloads = try commands.map { request -> [String: Any] in
+            let body = try XCTUnwrap(request.body)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        }
+        XCTAssertEqual(payloads[0]["action"] as? String, "full_press")
+        XCTAssertEqual(payloads[0]["af"] as? Bool, false)
+        XCTAssertEqual(payloads[1]["action"] as? String, "release")
+        XCTAssertEqual(payloads[1]["af"] as? Bool, false)
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
+    func testFailedBulbPressStillAttemptsRelease() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        await enqueueStatus(on: transport)
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/control/shutterbutton/manual",
+            status: 503,
+            body: #"{"message":"press response lost"}"#
+        )
+        await transport.enqueue(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/control/shutterbutton/manual",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        do {
+            _ = try await client.startBulbExposure()
+            XCTFail("Expected Bulb press failure")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("503"))
+        }
+
+        let commands = await transport.requests().filter { $0.path.contains("shutterbutton/manual") }
+        let actions = try commands.map { request -> String in
+            let body = try XCTUnwrap(request.body)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            return try XCTUnwrap(json["action"] as? String)
+        }
+        XCTAssertEqual(actions, ["full_press", "release"])
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
     }
 
     func testAutofocusUsesAdvertisedCanonStartAndStopActions() async throws {

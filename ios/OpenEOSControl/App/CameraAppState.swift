@@ -48,6 +48,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var frameSourceURL: URL?
     @Published private(set) var lastFrameAt: Date?
     @Published private(set) var shutterFlash = false
+    @Published private(set) var bulbStartedAt: Date?
     @Published private(set) var focusMarker: FocusMarker?
     @Published private(set) var mediaItems: [CameraMediaItem] = []
     @Published private(set) var mediaThumbnails: [String: Data] = [:]
@@ -72,6 +73,15 @@ final class CameraAppState: ObservableObject {
 
     var connected: Bool { snapshot?.status.connected == true }
     var recording: Bool { snapshot?.status.recording == true }
+    var bulbExposureActive: Bool { snapshot?.status.bulbExposureActive == true }
+    var bulbMode: Bool {
+        guard captureMode == .photo else { return false }
+        let setting = capabilities?.settings.first { ["shootingmode", "autoexposuremode", "ae"].contains($0.key.lowercased()) }
+        return (setting?.value ?? status?.mode ?? "")
+            .lowercased()
+            .filter { $0.isLetter }
+            == "bulb"
+    }
     var capabilities: CameraCapabilities? { snapshot?.capabilities }
     var status: CameraStatus? { snapshot?.status }
     var info: CameraInfo? { snapshot?.info }
@@ -138,7 +148,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func isBusy(_ operation: CameraOperation) -> Bool {
-        busyOperations.contains(operation)
+        busyOperations.contains(operation) || (bulbExposureActive && operation != .capture)
     }
 
     func setBaseURL(_ value: String) {
@@ -273,6 +283,7 @@ final class CameraAppState: ObservableObject {
         lastError = nil
         liveViewData = nil
         liveViewMagnification = nil
+        bulbStartedAt = nil
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
         resetLiveViewMetrics()
@@ -298,6 +309,7 @@ final class CameraAppState: ObservableObject {
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
         focusMarker = nil
+        bulbStartedAt = nil
         lastError = nil
         busyOperations.removeAll()
         resetLiveViewMetrics()
@@ -405,6 +417,34 @@ final class CameraAppState: ObservableObject {
             showShutterFlash()
             lastError = nil
         } catch {
+            record(error)
+        }
+    }
+
+    func toggleBulbExposure() async {
+        guard bulbMode, supports(.bulbExposure), begin(.capture) else { return }
+        defer { end(.capture) }
+        let wasActive = bulbExposureActive
+        if isPreview {
+            guard let snapshot else { return }
+            updateStatus(snapshot.status.withBulbExposureActive(!wasActive))
+            if wasActive { showShutterFlash() }
+            return
+        }
+        guard let session else { return }
+        pauseLiveViewForBulb()
+        do {
+            let newStatus = wasActive
+                ? try await session.stopBulbExposure()
+                : try await session.startBulbExposure()
+            updateStatus(newStatus)
+            if wasActive && newStatus.bulbExposureActive != true {
+                showShutterFlash()
+                resumeLiveViewAfterBulb(session: session)
+            }
+            lastError = nil
+        } catch {
+            if !wasActive { resumeLiveViewAfterBulb(session: session) }
             record(error)
         }
     }
@@ -548,7 +588,11 @@ final class CameraAppState: ObservableObject {
         if isPreview {
             guard let snapshot else { return }
             let exposure = snapshot.status.exposure.replacing(key: key, value: value)
-            self.snapshot = snapshot.replacing(status: snapshot.status.replacing(exposure: exposure))
+            self.snapshot = CameraSnapshot(
+                info: snapshot.info,
+                status: snapshot.status.replacing(exposure: exposure),
+                capabilities: snapshot.capabilities.replacingSetting(key: key, value: value)
+            )
             return
         }
         guard let session else { return }
@@ -735,6 +779,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {
+        if bulbExposureActive && operation != .capture { return false }
         busyOperations.insert(operation).inserted
     }
 
@@ -745,6 +790,11 @@ final class CameraAppState: ObservableObject {
     private func updateStatus(_ status: CameraStatus) {
         guard let snapshot else { return }
         self.snapshot = snapshot.replacing(status: status)
+        if status.bulbExposureActive == true {
+            bulbStartedAt = bulbStartedAt ?? Date()
+        } else {
+            bulbStartedAt = nil
+        }
     }
 
     private func clampLiveViewRequest() {
@@ -803,6 +853,19 @@ final class CameraAppState: ObservableObject {
     private func stopLiveViewLoop() {
         liveViewTask?.cancel()
         liveViewTask = nil
+    }
+
+    private func pauseLiveViewForBulb() {
+        stopLiveViewLoop()
+        rtpController.setRenderingEnabled(false)
+    }
+
+    private func resumeLiveViewAfterBulb(session: CameraSession) {
+        rtpController.setRenderingEnabled(autoRefresh)
+        guard autoRefresh, activeLiveViewSource != nil else { return }
+        if activeLiveViewSource != .ccapiRTP {
+            beginLiveViewLoop(session: session)
+        }
     }
 
     private func resetLiveViewMetrics() {
@@ -895,6 +958,7 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "shutter", label: "Shutter speed", value: "1/125", values: ["1/30", "1/50", "1/60", "1/100", "1/125", "1/250", "1/500", "1/1000"]),
             CameraSetting(key: "aperture", label: "Aperture", value: "2.8", values: ["1.8", "2.0", "2.8", "4.0", "5.6", "8.0", "11"]),
             CameraSetting(key: "whitebalance", label: "White balance", value: "auto", values: ["auto", "daylight", "shade", "cloudy", "tungsten", "fluorescent", "flash"]),
+            CameraSetting(key: "shootingmode", label: "Shooting mode", value: "Manual", values: ["P", "TV", "AV", "Manual", "Bulb", "Movie", "Fv"]),
             CameraSetting(key: "afmethod", label: "AF method", value: "face+tracking", values: ["face+tracking", "1-point", "zone"]),
             CameraSetting(key: "afoperation", label: "AF operation", value: "servo", values: ["one-shot", "servo"]),
             CameraSetting(key: "drivemode", label: "Drive mode", value: "single", values: ["single", "high-speed", "timer"]),
@@ -906,7 +970,7 @@ final class CameraAppState: ObservableObject {
         ]
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
-            .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
+            .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
             .liveViewMagnification,
             .exposureControl, .whiteBalanceControl, .advancedSettings, .mediaBrowser, .mediaDownload,
             .mediaDelete,

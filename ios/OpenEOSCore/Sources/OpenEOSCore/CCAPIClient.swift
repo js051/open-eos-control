@@ -82,6 +82,7 @@ public actor CCAPIClient {
     private var discoverySource = "unknown"
     private var cachedModel = "Canon Camera"
     private var recording: Bool?
+    private var bulbExposureActive = false
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.medium
     private var activeLiveViewSource: LiveViewSource?
@@ -184,6 +185,13 @@ public actor CCAPIClient {
         return CameraSnapshot(info: cameraInfo, status: cameraStatus, capabilities: cameraCapabilities)
     }
 
+    public func close() async {
+        if bulbExposureActive {
+            _ = try? await stopBulbExposure()
+        }
+        await stopLiveView()
+    }
+
     public func info() async throws -> CameraInfo {
         try await ensureInitialized()
         if resolvedMode == .simulator {
@@ -237,6 +245,7 @@ public actor CCAPIClient {
             batteryLevel: batteryState.level,
             batteryStatus: batteryState.status,
             recording: recording,
+            bulbExposureActive: bulbExposureActive,
             mode: settingObject(in: settings, aliases: ["shootingmode"])?.string("value", default: "unknown") ?? "unknown",
             mediaAvailable: storageState?.available,
             exposure: exposureState(settings),
@@ -279,6 +288,7 @@ public actor CCAPIClient {
         }
         if manualShutterOperation() != nil {
             supported.insert(.shutterHalfPress)
+            supported.insert(.bulbExposure)
         }
         if autofocusOperation() != nil || manualShutterOperation() != nil {
             supported.insert(.autofocus)
@@ -292,7 +302,7 @@ public actor CCAPIClient {
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
 
         let allPlanned: Set<CameraFeature> = [
-            .liveViewRTP, .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
+            .liveViewRTP, .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete,
@@ -404,6 +414,48 @@ public actor CCAPIClient {
             holdNanoseconds: Self.halfPressNanoseconds
         )
         observedFeatures.insert(.shutterHalfPress)
+        return try await status()
+    }
+
+    public func startBulbExposure() async throws -> CameraStatus {
+        try await ensureInitialized()
+        if bulbExposureActive { return try await status() }
+        let baseline = try await status()
+        if resolvedMode == .simulator {
+            do {
+                _ = try await requestJSON(path: "/ccapi/bulb/start", method: .post, json: [:])
+            } catch {
+                _ = try? await requestJSON(path: "/ccapi/bulb/stop", method: .post, json: [:])
+                throw error
+            }
+        } else {
+            guard let manual = manualShutterOperation() else {
+                throw CCAPIError.unsupported(.bulbExposure)
+            }
+            do {
+                try await commandOK(operation: manual, json: ["af": false, "action": "full_press"])
+            } catch {
+                try? await commandOK(operation: manual, json: ["af": false, "action": "release"])
+                throw error
+            }
+        }
+        bulbExposureActive = true
+        return baseline.withBulbExposureActive(true)
+    }
+
+    public func stopBulbExposure() async throws -> CameraStatus {
+        try await ensureInitialized()
+        if !bulbExposureActive { return try await status() }
+        if resolvedMode == .simulator {
+            _ = try await requestJSON(path: "/ccapi/bulb/stop", method: .post, json: [:])
+        } else {
+            guard let manual = manualShutterOperation() else {
+                throw CCAPIError.unsupported(.bulbExposure)
+            }
+            try await commandOK(operation: manual, json: ["af": false, "action": "release"])
+        }
+        bulbExposureActive = false
+        observedFeatures.insert(.bulbExposure)
         return try await status()
     }
 
@@ -1576,6 +1628,7 @@ public actor CCAPIClient {
             batteryLevel: battery.integer("level"),
             batteryStatus: battery.string("status", default: "unknown"),
             recording: value.bool("recording"),
+            bulbExposureActive: value.bool("bulb_exposure_active") ?? value.bool("bulbExposureActive"),
             mode: value.string("mode", default: "unknown"),
             mediaAvailable: media.bool("available"),
             remainingMinutes: media.integer("remaining_minutes"),

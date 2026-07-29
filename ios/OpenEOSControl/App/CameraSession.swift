@@ -33,6 +33,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func startBulbExposure() async throws -> CameraStatus {
+        switch self {
+        case let .ccapi(client): return try await client.startBulbExposure()
+        case let .desktopBridge(client): return try await client.startBulbExposure()
+        }
+    }
+
+    func stopBulbExposure() async throws -> CameraStatus {
+        switch self {
+        case let .ccapi(client): return try await client.stopBulbExposure()
+        case let .desktopBridge(client): return try await client.stopBulbExposure()
+        }
+    }
+
     func autofocus() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.autofocus()
@@ -187,7 +201,7 @@ enum CameraSession: Sendable {
 
     func close() async {
         switch self {
-        case let .ccapi(client): await client.stopLiveView()
+        case let .ccapi(client): await client.close()
         case let .desktopBridge(client): await client.close()
         }
     }

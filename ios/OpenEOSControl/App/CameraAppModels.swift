@@ -95,6 +95,7 @@ extension CameraStatus {
             batteryLevel: batteryLevel,
             batteryStatus: batteryStatus,
             recording: recording ?? self.recording,
+            bulbExposureActive: bulbExposureActive,
             mode: mode,
             mediaAvailable: mediaAvailable,
             remainingMinutes: remainingMinutes,
@@ -105,6 +106,21 @@ extension CameraStatus {
             storageDeviceCount: storageDeviceCount,
             rawBatteryJSON: rawBatteryJSON,
             rawStorageJSON: rawStorageJSON
+        )
+    }
+}
+
+extension CameraCapabilities {
+    func replacingSetting(key: String, value: String) -> CameraCapabilities {
+        CameraCapabilities(
+            settings: settings.map { setting in
+                guard setting.key == key else { return setting }
+                return CameraSetting(key: setting.key, label: setting.label, value: value, values: setting.values)
+            },
+            matrix: matrix,
+            liveView: liveView,
+            profile: profile,
+            evidence: evidence
         )
     }
 }

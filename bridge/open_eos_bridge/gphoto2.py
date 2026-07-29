@@ -517,11 +517,7 @@ class GPhotoMjpegSession:
     def read_frame(self, timeout: float = LIVE_VIEW_FRAME_TIMEOUT_SECONDS) -> bytes:
         deadline = time.monotonic() + timeout
         with self._condition:
-            while (
-                not self._closed
-                and self._frame_generation <= self._delivered_generation
-                and self._error is None
-            ):
+            while not self._closed and self._frame_generation <= self._delivered_generation and self._error is None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
@@ -859,9 +855,7 @@ class GPhoto2Engine:
         environment: Mapping[str, str] | None = None,
     ) -> None:
         self.runner = runner or SubprocessGPhotoRunner()
-        self.capture_store = LocalCaptureStore(
-            capture_directory or default_capture_directory(environment=environment)
-        )
+        self.capture_store = LocalCaptureStore(capture_directory or default_capture_directory(environment=environment))
 
     def health(self) -> tuple[bool, str | None, str | None]:
         return self.runner.health()
@@ -931,6 +925,7 @@ class GPhoto2Session:
         self._live_view_transport: str | None = None
         self._live_view_fallback_reason: str | None = None
         self._live_view_magnification: int | None = None
+        self._bulb_exposure_active = False
         self._requested_fps = 1
         self._last_error: str | None = None
         self._summary_text = ""
@@ -953,6 +948,15 @@ class GPhoto2Session:
         with self._lock:
             if self._closed:
                 return
+            if self._bulb_exposure_active:
+                bulb_values = self._bulb_values()
+                if bulb_values is not None:
+                    try:
+                        config, _, release_value = bulb_values
+                        self._set_config_value(config, release_value, refresh=False)
+                        self._bulb_exposure_active = False
+                    except BridgeError as error:
+                        self._last_error = error.message
             was_live_view_active = self._live_view_active
             self._live_view_active = False
             self._stop_movie_stream()
@@ -1007,6 +1011,7 @@ class GPhoto2Session:
                     status=_battery_status(battery_level, battery_text),
                 ),
                 recording=(recording_config.current.casefold() == "card") if recording_config else None,
+                bulb_exposure_active=self._bulb_exposure_active,
                 mode=self._config_value("autoexposuremode") or "unknown",
                 media=StorageStatus(
                     available=storage.available,
@@ -1032,7 +1037,9 @@ class GPhoto2Session:
                     "remainingShotsSource": (
                         "gphoto2-config:/main/status/availableshots"
                         if available_shots is not None
-                        else "gphoto2-storage-info" if storage.free_images is not None else None
+                        else "gphoto2-storage-info"
+                        if storage.free_images is not None
+                        else None
                     ),
                 },
             )
@@ -1070,6 +1077,8 @@ class GPhoto2Session:
             autofocus_configs = self._autofocus_configs()
             if half_press_values is not None:
                 supported.add(CameraFeature.SHUTTER_HALF_PRESS)
+            if self._bulb_values() is not None:
+                supported.add(CameraFeature.BULB_EXPOSURE)
             if autofocus_configs is not None or half_press_values is not None:
                 supported.add(CameraFeature.AUTOFOCUS)
             if self._recording_values() is not None:
@@ -1232,6 +1241,39 @@ class GPhoto2Session:
                 if pressed:
                     self._set_config_value(config, release_value, refresh=False)
             self._observed.add(CameraFeature.SHUTTER_HALF_PRESS)
+            return self.status()
+
+    def start_bulb_exposure(self) -> CameraStatus:
+        with self._lock:
+            if self._bulb_exposure_active:
+                return self.status()
+            values = self._bulb_values()
+            if values is None:
+                raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
+            baseline = self.status()
+            config, press_value, release_value = values
+            try:
+                self._set_config_value(config, press_value, refresh=False)
+            except BridgeError as error:
+                try:
+                    self._set_config_value(config, release_value, refresh=False)
+                except BridgeError as release_error:
+                    error.add_note(f"Bulb cleanup failed: {release_error.message}")
+                raise
+            self._bulb_exposure_active = True
+            return baseline.model_copy(update={"bulb_exposure_active": True})
+
+    def stop_bulb_exposure(self) -> CameraStatus:
+        with self._lock:
+            if not self._bulb_exposure_active:
+                return self.status()
+            values = self._bulb_values()
+            if values is None:
+                raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
+            config, _, release_value = values
+            self._set_config_value(config, release_value, refresh=False)
+            self._bulb_exposure_active = False
+            self._observed.add(CameraFeature.BULB_EXPOSURE)
             return self.status()
 
     def autofocus(self) -> CameraStatus:
@@ -1602,8 +1644,7 @@ class GPhoto2Session:
             return [
                 value
                 for value in values
-                if _is_card_capture_target(value)
-                or (_is_host_capture_target(value) and self._abilities.capture_image)
+                if _is_card_capture_target(value) or (_is_host_capture_target(value) and self._abilities.capture_image)
             ]
         return values
 
@@ -1638,6 +1679,14 @@ class GPhoto2Session:
             return None
         press = _first_choice(config.choices, "Press Half AF", "Press Half", "Press Half MF")
         release = _first_choice(config.choices, "Release Half", "Release")
+        return (config, press, release) if press and release else None
+
+    def _bulb_values(self) -> tuple[GPhotoConfig, str, str] | None:
+        config = self._find_config(("eosremoterelease",), writable=True)
+        if config is None:
+            return None
+        press = _first_choice(config.choices, "Press Full AF", "Press Full", "Press Full MF")
+        release = _first_choice(config.choices, "Release Full", "Release")
         return (config, press, release) if press and release else None
 
     def _autofocus_configs(self) -> tuple[GPhotoConfig, GPhotoConfig] | None:
@@ -1719,6 +1768,8 @@ class GPhoto2Session:
             commands.append("AUTOFOCUS_DRIVE_CANCEL")
         if self._half_press_values() is not None:
             commands.append("SHUTTER_HALF_PRESS")
+        if self._bulb_values() is not None:
+            commands.append("BULB_PRESS_RELEASE")
         if self._abilities.capture_preview and self._live_view_magnification_config() is not None:
             commands.append("LIVE_VIEW_MAGNIFICATION_1X_5X")
         writable_settings = sorted(

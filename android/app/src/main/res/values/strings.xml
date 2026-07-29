@@ -407,4 +407,8 @@
     <string name="camera_value_flexible_priority_ae">Fv: Flexible-priority AE</string>
     <string name="camera_value_creative">Creative</string>
     <string name="camera_value_action">Action</string>
+    <string name="start_bulb_exposure">Start Bulb exposure</string>
+    <string name="stop_bulb_exposure">Stop Bulb exposure</string>
+    <string name="bulb_exposure_time">BULB %1$s</string>
+    <string name="bulb_not_supported">This connection cannot hold and release the shutter for Bulb exposure.</string>
 </resources>

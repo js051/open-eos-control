@@ -17,6 +17,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -422,6 +423,7 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_JPEG_POLLING))
         assertTrue(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
         assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.BULB_EXPOSURE))
         assertTrue(!capabilities.matrix.isPlanned(CameraFeature.STILL_CAPTURE))
         assertTrue(capabilities.matrix.supports(CameraFeature.SHUTTER_HALF_PRESS))
         assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
@@ -959,6 +961,72 @@ class CcapiClientTest {
         assertEquals("full_press", JSONObject(press.body.readUtf8()).getString("action"))
         assertEquals("PUT", release.method)
         assertEquals("release", JSONObject(release.body.readUtf8()).getString("action"))
+    }
+
+    @Test
+    fun bulbExposureUsesAdvertisedManualPressAndReleaseWithoutStatusPollingWhilePressed() = runTest {
+        fun takeRequest() = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/shooting/control/shutterbutton/manual","put":true}]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+
+        client.initialize()
+        val started = client.startBulbExposure()
+
+        assertTrue(started.bulbExposureActive == true)
+        assertTrue(CameraFeature.BULB_EXPOSURE !in client.observedFeatureSnapshot())
+        assertEquals("/ccapi", takeRequest().path)
+        repeat(2) { takeRequest() }
+        val press = takeRequest()
+        val pressBody = JSONObject(press.body.readUtf8())
+        assertEquals("PUT", press.method)
+        assertEquals("full_press", pressBody.getString("action"))
+        assertFalse(pressBody.getBoolean("af"))
+        assertEquals(4, server.requestCount)
+
+        val stopped = client.stopBulbExposure()
+        val release = takeRequest()
+        val releaseBody = JSONObject(release.body.readUtf8())
+        assertEquals("release", releaseBody.getString("action"))
+        assertFalse(releaseBody.getBoolean("af"))
+        repeat(2) { takeRequest() }
+        assertTrue(stopped.bulbExposureActive == false)
+        assertTrue(CameraFeature.BULB_EXPOSURE in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun failedBulbPressStillAttemptsShutterRelease() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/shooting/control/shutterbutton/manual","put":true}]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(MockResponse().setResponseCode(503).setBody("press response lost"))
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        val failure = runCatching { client.startBulbExposure() }.exceptionOrNull()
+
+        server.takeRequest()
+        repeat(2) { server.takeRequest() }
+        val press = server.takeRequest()
+        val release = server.takeRequest()
+        assertTrue(failure is IllegalStateException)
+        assertEquals("full_press", JSONObject(press.body.readUtf8()).getString("action"))
+        assertEquals("release", JSONObject(release.body.readUtf8()).getString("action"))
+        assertTrue(CameraFeature.BULB_EXPOSURE !in client.observedFeatureSnapshot())
     }
 
     @Test

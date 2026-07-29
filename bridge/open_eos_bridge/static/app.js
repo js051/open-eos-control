@@ -8,6 +8,7 @@
     LIVE_VIEW: "LIVE_VIEW",
     LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION",
     STILL_CAPTURE: "STILL_CAPTURE",
+    BULB_EXPOSURE: "BULB_EXPOSURE",
     AUTOFOCUS: "AUTOFOCUS",
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
     VIDEO_RECORDING: "VIDEO_RECORDING",
@@ -101,6 +102,10 @@
       refreshing: "Refreshing camera state",
       disconnected: "Camera disconnected",
       captureComplete: "Photo captured",
+      startBulb: "Start Bulb exposure",
+      stopBulb: "Stop Bulb exposure",
+      bulbStarted: "Bulb exposure started",
+      bulbStopped: "Bulb exposure stopped",
       autofocusComplete: "Autofocus complete",
       halfPressComplete: "Shutter half-press complete",
       recordingStarted: "Recording started",
@@ -285,6 +290,10 @@
       refreshing: "正在更新相機狀態",
       disconnected: "相機已中斷連線",
       captureComplete: "拍攝完成",
+      startBulb: "開始 Bulb 長曝光",
+      stopBulb: "停止 Bulb 長曝光",
+      bulbStarted: "Bulb 長曝光已開始",
+      bulbStopped: "Bulb 長曝光已停止",
       autofocusComplete: "自動對焦完成",
       halfPressComplete: "快門半按完成",
       recordingStarted: "已開始錄影",
@@ -508,6 +517,9 @@
     frameContentType: null,
     lastFrameAt: null,
     liveObjectUrl: null,
+    livePollingSuspended: false,
+    bulbStartedAt: null,
+    bulbTimer: null,
     focusStep: "MEDIUM",
     tapAction: "focus",
     media: [],
@@ -560,6 +572,7 @@
     modeIndicator: byId("mode-indicator"),
     frameIndicator: byId("frame-indicator"),
     recordIndicator: byId("record-indicator"),
+    bulbIndicator: byId("bulb-indicator"),
     liveMagnificationButton: byId("live-magnification-button"),
     liveMagnificationLabel: byId("live-magnification-label"),
     focusReticle: byId("focus-reticle"),
@@ -971,6 +984,7 @@
     state.liveSource = "AUTO";
     state.activeLiveSource = null;
     state.liveMagnification = 1;
+    clearBulbTimer();
     state.busy = false;
     state.token = "";
     ui.connectionView.hidden = false;
@@ -1025,6 +1039,50 @@
     return state.status?.exposure?.[exposureKey] || setting.value || "-";
   }
 
+  function isBulbMode() {
+    const setting = settingByKey("shootingmode") || settingByKey("autoexposuremode");
+    const value = setting?.value || state.status?.mode || "";
+    return String(value).trim().toLowerCase().replace(/[^a-z0-9]/g, "") === "bulb";
+  }
+
+  function clearBulbTimer() {
+    if (state.bulbTimer != null) window.clearInterval(state.bulbTimer);
+    state.bulbTimer = null;
+    state.bulbStartedAt = null;
+    if (ui.bulbIndicator) ui.bulbIndicator.hidden = true;
+  }
+
+  function formatBulbElapsed(milliseconds) {
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const clock = [minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+    return hours > 0 ? `${hours}:${clock}` : clock;
+  }
+
+  function renderBulbIndicator() {
+    const active = Boolean(state.status?.bulbExposureActive);
+    ui.bulbIndicator.hidden = !active;
+    if (active) {
+      const startedAt = state.bulbStartedAt || Date.now();
+      ui.bulbIndicator.textContent = `BULB ${formatBulbElapsed(Date.now() - startedAt)}`;
+    }
+  }
+
+  function syncBulbTimer() {
+    const active = Boolean(state.status?.bulbExposureActive);
+    if (!active) {
+      clearBulbTimer();
+      return;
+    }
+    if (state.bulbStartedAt == null) state.bulbStartedAt = Date.now();
+    if (state.bulbTimer == null) {
+      state.bulbTimer = window.setInterval(renderBulbIndicator, 250);
+    }
+    renderBulbIndicator();
+  }
+
   function renderSession() {
     if (!state.session || !state.capabilities || !state.status) return;
     ui.cameraName.textContent = state.info?.model || state.session.camera?.model || "Canon EOS";
@@ -1043,6 +1101,7 @@
     renderFps();
     renderTapAction();
     renderCaptureMode();
+    syncBulbTimer();
     renderAvailability();
     renderDiagnostics();
   }
@@ -1156,6 +1215,8 @@
 
   function renderCaptureMode() {
     const recording = Boolean(state.status?.recording);
+    const bulb = state.captureMode === "photo" && isBulbMode();
+    const bulbActive = bulb && Boolean(state.status?.bulbExposureActive);
     if (!featureSupported(FEATURES.VIDEO_RECORDING) && state.captureMode === "video") state.captureMode = "photo";
     ui.photoModeButton.classList.toggle("active", state.captureMode === "photo");
     ui.videoModeButton.classList.toggle("active", state.captureMode === "video");
@@ -1163,11 +1224,18 @@
     ui.videoModeButton.setAttribute("aria-pressed", String(state.captureMode === "video"));
     ui.shutterButton.classList.toggle("video", state.captureMode === "video");
     ui.shutterButton.classList.toggle("recording", state.captureMode === "video" && recording);
+    ui.shutterButton.classList.toggle("bulb", bulb);
+    ui.shutterButton.classList.toggle("bulb-active", bulbActive);
     ui.recordIndicator.hidden = !recording;
-    const labelKey = state.captureMode === "photo" ? "capture" : recording ? "stopRecording" : "record";
+    const labelKey = bulb
+      ? (bulbActive ? "stopBulb" : "startBulb")
+      : state.captureMode === "photo" ? "capture" : recording ? "stopRecording" : "record";
     ui.shutterLabel.textContent = t(labelKey);
     ui.shutterButton.setAttribute("aria-label", t(labelKey));
-    replaceButtonIcon(ui.shutterButton, state.captureMode === "video" ? (recording ? "square" : "circle") : "camera");
+    replaceButtonIcon(
+      ui.shutterButton,
+      bulbActive ? "square" : state.captureMode === "video" ? (recording ? "square" : "circle") : "camera",
+    );
   }
 
   function selectCaptureMode(mode) {
@@ -1182,8 +1250,11 @@
   async function operateShutter() {
     if (!state.session || state.busy) return;
     const isPhoto = state.captureMode === "photo";
-    const supported = isPhoto
-      ? featureSupported(FEATURES.STILL_CAPTURE)
+    const bulb = isPhoto && isBulbMode();
+    const bulbWasActive = bulb && Boolean(state.status?.bulbExposureActive);
+    const supported = bulb
+      ? featureSupported(FEATURES.BULB_EXPOSURE)
+      : isPhoto ? featureSupported(FEATURES.STILL_CAPTURE)
       : featureSupported(FEATURES.VIDEO_RECORDING);
     if (!supported) return;
     state.busy = true;
@@ -1191,7 +1262,21 @@
     setOperationState(t("busy"));
     renderAvailability();
     try {
-      if (isPhoto) {
+      if (bulb) {
+        if (!bulbWasActive) pauseLivePolling();
+        const bulbPath = bulbWasActive ? "/bulb/stop" : "/bulb/start";
+        state.status = await api(
+          `/v1/session/${encodeURIComponent(state.session.id)}${bulbPath}`,
+          { method: "POST" },
+        );
+        const result = bulbWasActive ? t("bulbStopped") : t("bulbStarted");
+        if (bulbWasActive && state.status?.bulbExposureActive !== true) {
+          flashCapture();
+          resumeLivePolling();
+        }
+        setOperationState(result);
+        showToast(result);
+      } else if (isPhoto) {
         state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/capture/still`, {
           method: "POST",
         });
@@ -1209,6 +1294,7 @@
         showToast(result);
       }
     } catch (error) {
+      if (bulb && !bulbWasActive) resumeLivePolling();
       const normalized = captureError(error);
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
@@ -1363,6 +1449,7 @@
       state.requestedFps = response.requestedFps || clampFps(state.requestedFps);
       state.activeLiveSource = response.source || state.liveSource;
       state.liveActive = true;
+      state.livePollingSuspended = false;
       state.liveMagnification = 1;
       state.frameTimes = [];
       state.observedFps = 0;
@@ -1407,6 +1494,7 @@
 
   function stopLiveLoop() {
     state.liveActive = false;
+    state.livePollingSuspended = false;
     state.liveGeneration += 1;
     state.frameTimes = [];
     state.observedFps = 0;
@@ -1422,13 +1510,16 @@
   }
 
   async function pollLiveView(generation) {
-    while (state.liveActive && generation === state.liveGeneration && state.session) {
+    while (
+      state.liveActive && !state.livePollingSuspended &&
+      generation === state.liveGeneration && state.session
+    ) {
       const started = performance.now();
       try {
         const blob = await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/frame`, {
           responseType: "blob",
         });
-        if (!state.liveActive || generation !== state.liveGeneration) return;
+        if (!state.liveActive || state.livePollingSuspended || generation !== state.liveGeneration) return;
         const url = URL.createObjectURL(blob);
         const previous = state.liveObjectUrl;
         state.liveObjectUrl = url;
@@ -1464,6 +1555,22 @@
       const delay = Math.max(0, 1000 / state.requestedFps - elapsed);
       if (delay > 0) await sleep(delay);
     }
+  }
+
+  function pauseLivePolling() {
+    if (!state.liveActive) return;
+    state.livePollingSuspended = true;
+    state.liveGeneration += 1;
+    state.frameTimes = [];
+    state.observedFps = 0;
+    renderFrameIndicator();
+  }
+
+  function resumeLivePolling() {
+    if (!state.liveActive || !state.livePollingSuspended || !state.session) return;
+    state.livePollingSuspended = false;
+    state.liveGeneration += 1;
+    pollLiveView(state.liveGeneration);
   }
 
   async function changeFps() {
@@ -1504,9 +1611,10 @@
 
   function renderLiveMagnification() {
     const supported = featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION);
+    const bulbActive = Boolean(state.status?.bulbExposureActive);
     const target = state.liveMagnification === 5 ? 1 : 5;
     ui.liveMagnificationButton.hidden = !supported;
-    ui.liveMagnificationButton.disabled = state.busy || !state.liveActive || !supported;
+    ui.liveMagnificationButton.disabled = state.busy || bulbActive || !state.liveActive || !supported;
     ui.liveMagnificationLabel.textContent = `${target}x`;
     const description = t("liveViewMagnification", { value: target });
     ui.liveMagnificationButton.setAttribute("aria-label", description);
@@ -1517,6 +1625,7 @@
   async function setLiveViewMagnification() {
     if (
       !state.session || state.busy || !state.liveActive ||
+      state.status?.bulbExposureActive ||
       !featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)
     ) return;
     const target = state.liveMagnification === 5 ? 1 : 5;
@@ -1643,31 +1752,33 @@
 
   function renderAvailability() {
     const connected = Boolean(state.session);
+    const bulbActive = Boolean(state.status?.bulbExposureActive);
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
     ui.scanButton.disabled = state.busy;
     const connectionReady = state.connectionMode === "ccapi" ? validCcapiUrl() : Boolean(ui.cameraSelect.value);
     ui.connectButton.disabled = state.busy || !connectionReady;
-    ui.refreshButton.disabled = !connected || state.busy;
+    ui.refreshButton.disabled = !connected || state.busy || bulbActive;
     ui.disconnectButton.disabled = !connected || state.busy;
-    ui.photoModeButton.disabled = state.busy || Boolean(state.status?.recording);
-    ui.videoModeButton.disabled = state.busy || !videoSupported;
+    ui.photoModeButton.disabled = state.busy || bulbActive || Boolean(state.status?.recording);
+    ui.videoModeButton.disabled = state.busy || bulbActive || !videoSupported;
     ui.videoModeButton.hidden = !videoSupported;
     ui.videoModeButton.parentElement.classList.toggle("single", !videoSupported);
-    const shutterSupported = state.captureMode === "photo"
-      ? featureSupported(FEATURES.STILL_CAPTURE)
+    const shutterSupported = state.captureMode === "photo" && isBulbMode()
+      ? featureSupported(FEATURES.BULB_EXPOSURE)
+      : state.captureMode === "photo" ? featureSupported(FEATURES.STILL_CAPTURE)
       : videoSupported;
     ui.shutterButton.disabled = state.busy || !shutterSupported;
     ui.shutterButton.title = shutterSupported ? ui.shutterLabel.textContent : t("unsupported");
     const autofocusSupported = featureSupported(FEATURES.AUTOFOCUS);
     ui.autofocusButton.hidden = !autofocusSupported;
-    ui.autofocusButton.disabled = state.busy || !autofocusSupported;
+    ui.autofocusButton.disabled = state.busy || bulbActive || !autofocusSupported;
     const halfPressSupported = featureSupported(FEATURES.SHUTTER_HALF_PRESS);
     ui.halfPressButton.hidden = !halfPressSupported;
-    ui.halfPressButton.disabled = state.busy || !halfPressSupported;
+    ui.halfPressButton.disabled = state.busy || bulbActive || !halfPressSupported;
     const liveSupported = featureSupported(FEATURES.LIVE_VIEW);
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       button.hidden = !liveSupported;
-      button.disabled = state.busy || !liveSupported;
+      button.disabled = state.busy || bulbActive || !liveSupported;
     });
     const quickActionCount = [autofocusSupported, halfPressSupported, liveSupported].filter(Boolean).length;
     ui.railLiveButton.parentElement.classList.toggle("single", quickActionCount === 1);
@@ -1675,23 +1786,23 @@
     document.querySelector(".live-settings").hidden = !liveSupported;
     const focusSupported = featureSupported(FEATURES.FOCUS_DRIVE);
     ui.focusSection.hidden = !focusSupported;
-    ui.focusNearButton.disabled = state.busy || !state.liveActive;
-    ui.focusFarButton.disabled = state.busy || !state.liveActive;
-    ui.fpsSelect.disabled = state.busy || !liveSupported;
-    ui.liveSourceSelect.disabled = state.busy || !liveSupported;
-    ui.tapActionSelect.disabled = state.busy || !state.liveActive;
+    ui.focusNearButton.disabled = state.busy || bulbActive || !state.liveActive;
+    ui.focusFarButton.disabled = state.busy || bulbActive || !state.liveActive;
+    ui.fpsSelect.disabled = state.busy || bulbActive || !liveSupported;
+    ui.liveSourceSelect.disabled = state.busy || bulbActive || !liveSupported;
+    ui.tapActionSelect.disabled = state.busy || bulbActive || !state.liveActive;
     renderLiveMagnification();
     document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
-      button.disabled = state.busy || !settingByKey(button.dataset.settingKey);
+      button.disabled = state.busy || bulbActive || !settingByKey(button.dataset.settingKey);
     });
     document.querySelectorAll("#advanced-settings select").forEach((select) => {
-      select.disabled = state.busy;
+      select.disabled = state.busy || bulbActive;
     });
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
-      button.disabled = state.busy || !state.liveActive;
+      button.disabled = state.busy || bulbActive || !state.liveActive;
     });
     const tapAction = effectiveTapAction();
-    const tapFocusEnabled = Boolean(tapAction) && state.liveActive && !state.busy;
+    const tapFocusEnabled = Boolean(tapAction) && state.liveActive && !state.busy && !bulbActive;
     ui.viewfinder.classList.toggle("tap-focus-enabled", tapFocusEnabled);
     const tapDescription = tapAction === "whiteBalance" ? t("tapToWhiteBalance") : t("tapToFocus");
     ui.viewfinder.title = tapFocusEnabled ? tapDescription : "";
