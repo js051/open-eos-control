@@ -51,6 +51,8 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
         info = client.get(f"/v1/session/{session_id}/info", headers=headers)
         status = client.get(f"/v1/session/{session_id}/status", headers=headers)
         capabilities = client.get(f"/v1/session/{session_id}/capabilities", headers=headers)
+        event = client.get(f"/v1/session/{session_id}/events", headers=headers)
+        event_stopped = client.delete(f"/v1/session/{session_id}/events", headers=headers)
         setting = client.post(
             f"/v1/session/{session_id}/settings/iso",
             headers=headers,
@@ -105,9 +107,15 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert "MEDIA_THUMBNAIL" in capabilities.json()["supported"]
     assert "MEDIA_PREVIEW" in capabilities.json()["supported"]
     assert "LIVE_VIEW_MAGNIFICATION" in capabilities.json()["supported"]
+    assert "EVENT_POLLING" in capabilities.json()["supported"]
     assert media.json()["items"][0]["previewAvailable"] is True
-    assert capabilities.json()["evidence"]["source"] == "gphoto2 --abilities + --list-all-config"
+    assert capabilities.json()["evidence"]["source"] == (
+        "gphoto2 --abilities + --list-all-config + --wait-event probe"
+    )
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
+    assert "GPHOTO2_WAIT_EVENT" in capabilities.json()["evidence"]["advertisedCommands"]
+    assert event.json() == {"changedKeys": []}
+    assert event_stopped.status_code == 204
     assert setting.json()["exposure"]["iso"] == "800"
     assert bulb_started.json()["bulbExposureActive"] is True
     assert bulb_stopped.json()["bulbExposureActive"] is False

@@ -167,6 +167,9 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "function startEventLoop()" in script
     assert "function cancelEventLoop()" in script
     assert "await refreshSession({ quiet: true })" in script
+    assert 'String(key).toLowerCase().includes("content")' in script
+    assert "contentsChanged && state.mediaLoaded" in script
+    assert "await refreshMedia()" in script
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script
     assert "MAX_MEDIA_PREVIEW_BYTES" in script

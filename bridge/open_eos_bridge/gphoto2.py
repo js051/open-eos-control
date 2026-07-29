@@ -60,6 +60,10 @@ MAX_LIVE_VIEW_BUFFER_BYTES = MAX_LIVE_VIEW_FRAME_BYTES + 64 * 1024
 LIVE_VIEW_FIRST_FRAME_TIMEOUT_SECONDS = 10.0
 LIVE_VIEW_FRAME_TIMEOUT_SECONDS = 10.0
 LIVE_VIEW_STREAM_TIMEOUT_SECONDS = 24 * 60 * 60
+GPHOTO_EVENT_PROBE_ARGUMENT = "1ms"
+GPHOTO_EVENT_WAIT_ARGUMENT = "250ms"
+GPHOTO_EVENT_IDLE_SECONDS = 0.25
+GPHOTO_EVENT_COMMAND_TIMEOUT_SECONDS = 8.0
 
 
 @dataclass(frozen=True)
@@ -853,6 +857,19 @@ def parse_media_list(output: str) -> list[MediaItem]:
     return list(reversed(items[-MAX_MEDIA_ITEMS:]))
 
 
+def parse_wait_event_keys(output: str) -> list[str]:
+    changed: set[str] = set()
+    for raw_line in output.splitlines():
+        line = raw_line.strip().upper()
+        if line == "CAPTURECOMPLETE":
+            changed.update(("shooting", "contents", "storage"))
+        elif line.startswith(("FILEADDED ", "FOLDERADDED ", "FILECHANGED ")):
+            changed.update(("contents", "storage"))
+        elif line == "UNKNOWN" or line.startswith("UNKNOWN "):
+            changed.add("shooting")
+    return [key for key in ("shooting", "contents", "storage") if key in changed]
+
+
 class GPhoto2Engine:
     name = ENGINE_NAME
 
@@ -927,6 +944,9 @@ class GPhoto2Session:
         self._sleep = sleeper
         self._capture_store = capture_store or LocalCaptureStore(default_capture_directory())
         self._lock = threading.RLock()
+        self._event_lock = threading.Lock()
+        self._event_state_lock = threading.Lock()
+        self._event_generation = 0
         self._closed = False
         self._live_view_active = False
         self._cached_live_view_frame: bytes | None = None
@@ -944,6 +964,9 @@ class GPhoto2Session:
         self._camera_media_supported = False
         self._media_cache: dict[str, MediaItem] = {}
         self._observed: set[CameraFeature] = {CameraFeature.DESKTOP_BRIDGE}
+        self._event_polling_supported = False
+        self._event_polling_reason: str | None = None
+        self._pending_event_keys: list[str] = []
 
         with self._lock:
             self._summary_text = self._optional_text(["--summary"], timeout=20.0)
@@ -952,8 +975,10 @@ class GPhoto2Session:
             self._refresh_configs(force=True)
             self._refresh_storage()
             self._camera_media_supported = self._probe(["--folder", "/", "--no-recurse", "--list-files"])
+            self._probe_event_polling()
 
     def close(self) -> None:
+        self.stop_event_polling()
         with self._lock:
             if self._closed:
                 return
@@ -1050,6 +1075,10 @@ class GPhoto2Session:
                         if storage.free_images is not None
                         else None
                     ),
+                    "eventPollingTransport": (
+                        "GPHOTO2_WAIT_EVENT" if self._event_polling_supported else None
+                    ),
+                    "eventPollingPaused": self._live_view_active or self._bulb_exposure_active,
                 },
             )
 
@@ -1102,6 +1131,8 @@ class GPhoto2Session:
                 supported.add(CameraFeature.FOCUS_DRIVE)
             if self._abilities.capture_preview and self._live_view_magnification_config() is not None:
                 supported.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            if self._event_polling_supported:
+                supported.add(CameraFeature.EVENT_POLLING)
 
             planned = {
                 feature
@@ -1120,8 +1151,13 @@ class GPhoto2Session:
                 supported=sorted(supported, key=str),
                 planned=sorted(planned, key=str),
                 reasons={
-                    CameraFeature.EVENT_POLLING.value: (
-                        "The libgphoto2 engine does not yet expose a verified nonblocking camera event lifecycle."
+                    **(
+                        {
+                            CameraFeature.EVENT_POLLING.value: self._event_polling_reason
+                            or "The camera rejected the bounded gphoto2 --wait-event probe."
+                        }
+                        if CameraFeature.EVENT_POLLING not in supported
+                        else {}
                     ),
                     CameraFeature.TAP_FOCUS.value: (
                         "gphoto2 exposes autofocus and relative lens drive for this camera, but not a verified "
@@ -1154,10 +1190,43 @@ class GPhoto2Session:
             )
 
     def poll_event(self) -> CameraEvent:
-        raise unsupported(CameraFeature.EVENT_POLLING.value, self.engine_name)
+        if not self._event_polling_supported:
+            raise unsupported(CameraFeature.EVENT_POLLING.value, self.engine_name)
+        with self._event_state_lock:
+            generation = self._event_generation
+        with self._event_lock:
+            with self._event_state_lock:
+                if generation != self._event_generation:
+                    return CameraEvent()
+            paused = False
+            with self._lock:
+                self._require_open()
+                if self._pending_event_keys:
+                    changed_keys = self._pending_event_keys
+                    self._pending_event_keys = []
+                elif self._live_view_active or self._bulb_exposure_active:
+                    changed_keys = []
+                    paused = True
+                else:
+                    output = self._run(
+                        ["--wait-event", GPHOTO_EVENT_WAIT_ARGUMENT],
+                        timeout=GPHOTO_EVENT_COMMAND_TIMEOUT_SECONDS,
+                    )
+                    changed_keys = parse_wait_event_keys(output.text)
+            if paused:
+                self._sleep(GPHOTO_EVENT_IDLE_SECONDS)
+                return CameraEvent()
+            with self._event_state_lock:
+                if generation != self._event_generation:
+                    return CameraEvent()
+            with self._lock:
+                if not self._closed:
+                    self._observed.add(CameraFeature.EVENT_POLLING)
+            return CameraEvent(changed_keys=changed_keys)
 
     def stop_event_polling(self) -> None:
-        raise unsupported(CameraFeature.EVENT_POLLING.value, self.engine_name)
+        with self._event_state_lock:
+            self._event_generation += 1
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
@@ -1823,6 +1892,8 @@ class GPhoto2Session:
             commands.append("BULB_PRESS_RELEASE")
         if self._abilities.capture_preview and self._live_view_magnification_config() is not None:
             commands.append("LIVE_VIEW_MAGNIFICATION_1X_5X")
+        if self._event_polling_supported:
+            commands.append("GPHOTO2_WAIT_EVENT")
         writable_settings = sorted(
             {
                 config.path.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
@@ -1831,7 +1902,7 @@ class GPhoto2Session:
             }
         )
         return CapabilityEvidence(
-            source="gphoto2 --abilities + --list-all-config",
+            source="gphoto2 --abilities + --list-all-config + --wait-event probe",
             protocol_versions=(
                 [self.engine_version[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]] if self.engine_version else []
             ),
@@ -1865,6 +1936,20 @@ class GPhoto2Session:
             self._last_error = None
         except BridgeError as error:
             self._last_error = error.message
+
+    def _probe_event_polling(self) -> None:
+        try:
+            output = self._run(
+                ["--wait-event", GPHOTO_EVENT_PROBE_ARGUMENT],
+                timeout=GPHOTO_EVENT_COMMAND_TIMEOUT_SECONDS,
+            )
+            self._event_polling_supported = True
+            self._event_polling_reason = None
+            self._pending_event_keys = parse_wait_event_keys(output.text)
+        except BridgeError as error:
+            self._event_polling_supported = False
+            self._event_polling_reason = f"gphoto2 --wait-event probe failed: {error.message}"
+            self._pending_event_keys = []
 
     def _find_config(self, suffixes: tuple[str, ...], *, writable: bool = False) -> GPhotoConfig | None:
         candidates = [

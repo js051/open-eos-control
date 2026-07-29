@@ -140,6 +140,8 @@ class FakeRunner:
             return CommandOutput(STORAGE.encode())
         if command == ["--folder", "/", "--no-recurse", "--list-files"]:
             return CommandOutput(b"There are no files in folder '/'.\n")
+        if command in (["--wait-event", "1ms"], ["--wait-event", "250ms"]):
+            return CommandOutput(b"")
         if command == ["--recurse", "--list-files"]:
             return CommandOutput(MEDIA.encode())
         if command == ["--capture-preview", "--stdout"]:
