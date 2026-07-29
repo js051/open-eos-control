@@ -1213,17 +1213,28 @@ class CameraViewModel(
                     val status = repository.refreshStatus()
                     val capabilities = repository.refreshCapabilities()
                     val captureMode = captureModeFrom(capabilities)
+                    val mediaItems = if ("contents" in event.changedKeys) {
+                        if (capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER)) {
+                            runCatching { repository.listMedia() }.getOrNull()
+                        } else {
+                            emptyList()
+                        }
+                    } else {
+                        null
+                    }
+                    if (mediaItems != null) cancelMediaThumbnailLoads()
                     _uiState.update { current ->
                         if (
                             generation == eventPollingGeneration &&
                             current.connected &&
                             !current.previewMode
                         ) {
-                            current.copy(
+                            val refreshed = current.copy(
                                 status = status,
                                 capabilities = capabilities,
                                 captureMode = captureMode ?: current.captureMode,
                             )
+                            if (mediaItems != null) refreshed.withEventMediaItems(mediaItems) else refreshed
                         } else {
                             current
                         }
@@ -1322,6 +1333,19 @@ class CameraViewModel(
             mediaPreviewLoading = mediaPreviewLoading && !deletesOpenPreview,
             lastDownloadedMediaName = lastDownloadedMediaName.takeUnless { it == item.name },
             lastDeletedMediaName = item.name,
+        )
+    }
+
+    internal fun CameraUiState.withEventMediaItems(items: List<CameraMediaItem>): CameraUiState {
+        val itemIds = items.mapTo(hashSetOf(), CameraMediaItem::id)
+        val previewStillExists = mediaPreviewItem?.id in itemIds
+        return copy(
+            mediaItems = items,
+            mediaThumbnails = mediaThumbnails.filterKeys(itemIds::contains),
+            mediaThumbnailLoadingIds = emptySet(),
+            mediaPreviewItem = mediaPreviewItem.takeIf { previewStillExists },
+            mediaPreviewBytes = mediaPreviewBytes.takeIf { previewStillExists },
+            mediaPreviewLoading = mediaPreviewLoading && previewStillExists,
         )
     }
 
