@@ -21,8 +21,8 @@ fun CameraSettingsSurface(
     skipPartiallyExpanded: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val rotated = cameraRotationQuadrant(LocalCameraControlTargetRotation.current) != 0
-    if (!rotated) {
+    val useLandscapeSurface = cameraSettingsUsesLandscapeSurface(LocalCameraControlTargetRotation.current)
+    if (!useLandscapeSurface) {
         ModalBottomSheet(
             onDismissRequest = onDismissRequest,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = skipPartiallyExpanded),
@@ -52,6 +52,9 @@ fun CameraSettingsSurface(
         }
     }
 }
+
+internal fun cameraSettingsUsesLandscapeSurface(rotationDegrees: Float): Boolean =
+    cameraRotationSwapsDimensions(rotationDegrees)
 
 internal fun cameraRotationQuadrant(rotationDegrees: Float): Int {
     val normalized = ((rotationDegrees % 360f) + 360f) % 360f

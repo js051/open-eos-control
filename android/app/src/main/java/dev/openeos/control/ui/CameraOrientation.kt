@@ -5,6 +5,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 private const val CAMERA_ORIENTATION_HYSTERESIS_DEGREES = 5
 private const val ORIENTATION_UNKNOWN = -1
 
+internal fun isSystemAutoRotationSettingEnabled(value: Int): Boolean = value != 0
+
 internal class CameraOrientationPolicy {
     private var systemAutoRotationEnabled = false
     private var latestSensorDegrees = ORIENTATION_UNKNOWN
@@ -13,12 +15,10 @@ internal class CameraOrientationPolicy {
     fun setSystemAutoRotation(enabled: Boolean) {
         if (systemAutoRotationEnabled == enabled) return
         systemAutoRotationEnabled = enabled
-        latestSensorDegrees = ORIENTATION_UNKNOWN
-        snappedSensorDegrees = 0
     }
 
     fun onSensorOrientation(sensorDegrees: Int) {
-        if (!systemAutoRotationEnabled || sensorDegrees < 0) return
+        if (sensorDegrees < 0) return
         latestSensorDegrees = sensorDegrees
         snappedSensorDegrees = snapCameraDeviceRotation(snappedSensorDegrees, sensorDegrees)
     }
@@ -29,7 +29,7 @@ internal class CameraOrientationPolicy {
     }
 
     fun shouldListen(activityStarted: Boolean, canDetectOrientation: Boolean): Boolean =
-        activityStarted && systemAutoRotationEnabled && canDetectOrientation
+        activityStarted && canDetectOrientation
 
     fun resolveControlRotation(displayRotationDegrees: Int): Float = resolveCameraControlRotation(
         autoRotationEnabled = systemAutoRotationEnabled,

@@ -15,14 +15,24 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.core.view.WindowCompat
 import dev.openeos.control.ui.CameraOrientationPolicy
 import dev.openeos.control.ui.OpenEosControlApp
+import dev.openeos.control.ui.isSystemAutoRotationSettingEnabled
 import dev.openeos.control.ui.nearestEquivalentCameraRotation
 
 class MainActivity : AppCompatActivity() {
     private val controlRotationDegrees = mutableFloatStateOf(0f)
     private val orientationPolicy = CameraOrientationPolicy()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var orientationListener: OrientationEventListener
     private lateinit var autoRotationObserver: ContentObserver
     private var activityStarted = false
+    private var orientationListenerEnabled = false
+    private val rotationSettingPoller = object : Runnable {
+        override fun run() {
+            if (!activityStarted) return
+            refreshSystemAutoRotationSetting()
+            mainHandler.postDelayed(this, ROTATION_SETTING_POLL_INTERVAL_MILLIS)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,7 +42,6 @@ class MainActivity : AppCompatActivity() {
                 if (orientation == ORIENTATION_UNKNOWN) return
                 val autoRotationEnabled = isSystemAutoRotationEnabled()
                 orientationPolicy.onSensorOrientation(orientation, autoRotationEnabled)
-                if (!autoRotationEnabled) orientationListener.disable()
                 updateControlRotation()
             }
         }
@@ -58,7 +67,15 @@ class MainActivity : AppCompatActivity() {
             false,
             autoRotationObserver,
         )
+        // Some vendor quick-settings implementations only notify the parent settings URI.
+        contentResolver.registerContentObserver(
+            Settings.System.CONTENT_URI,
+            true,
+            autoRotationObserver,
+        )
         refreshSystemAutoRotationSetting()
+        mainHandler.removeCallbacks(rotationSettingPoller)
+        mainHandler.postDelayed(rotationSettingPoller, ROTATION_SETTING_POLL_INTERVAL_MILLIS)
     }
 
     override fun onResume() {
@@ -76,7 +93,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         activityStarted = false
-        orientationListener.disable()
+        mainHandler.removeCallbacks(rotationSettingPoller)
+        setOrientationListenerEnabled(false)
         contentResolver.unregisterContentObserver(autoRotationObserver)
         super.onStop()
     }
@@ -89,12 +107,16 @@ class MainActivity : AppCompatActivity() {
     private fun refreshSystemAutoRotationSetting() {
         val enabled = isSystemAutoRotationEnabled()
         orientationPolicy.setSystemAutoRotation(enabled)
-        if (orientationPolicy.shouldListen(activityStarted, orientationListener.canDetectOrientation())) {
-            orientationListener.enable()
-        } else {
-            orientationListener.disable()
-        }
+        setOrientationListenerEnabled(
+            orientationPolicy.shouldListen(activityStarted, orientationListener.canDetectOrientation()),
+        )
         updateControlRotation()
+    }
+
+    private fun setOrientationListenerEnabled(enabled: Boolean) {
+        if (orientationListenerEnabled == enabled) return
+        orientationListenerEnabled = enabled
+        if (enabled) orientationListener.enable() else orientationListener.disable()
     }
 
     private fun updateControlRotation() {
@@ -109,7 +131,7 @@ class MainActivity : AppCompatActivity() {
         contentResolver,
         Settings.System.ACCELEROMETER_ROTATION,
         0,
-    ) == 1
+    ).let(::isSystemAutoRotationSettingEnabled)
 
     @Suppress("DEPRECATION")
     private fun currentDisplayRotationDegrees(): Int = when (windowManager.defaultDisplay.rotation) {
@@ -117,5 +139,9 @@ class MainActivity : AppCompatActivity() {
         Surface.ROTATION_180 -> 180
         Surface.ROTATION_270 -> 270
         else -> 0
+    }
+
+    companion object {
+        private const val ROTATION_SETTING_POLL_INTERVAL_MILLIS = 750L
     }
 }

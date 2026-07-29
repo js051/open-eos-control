@@ -181,6 +181,10 @@ class CameraScreensTest {
             .onNodeWithText(resourceText(R.string.offline_preview))
             .fetchSemanticsNode()
             .boundsInRoot
+        val magnificationBounds = compose
+            .onNodeWithTag("live-view-magnification")
+            .fetchSemanticsNode()
+            .boundsInRoot
         val settingsBounds = compose
             .onNodeWithContentDescription(resourceText(R.string.more_settings))
             .fetchSemanticsNode()
@@ -193,6 +197,10 @@ class CameraScreensTest {
         assertFalse(
             "Tap action $tapActionBounds overlaps settings $settingsBounds",
             tapActionBounds.overlaps(settingsBounds),
+        )
+        assertFalse(
+            "Magnification $magnificationBounds overlaps empty state $emptyStateBounds",
+            magnificationBounds.overlaps(emptyStateBounds),
         )
     }
 
@@ -249,7 +257,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun layoutAwareRotationKeepsLongCameraTextWithinViewport() {
+    fun quarterTurnRemeasuresLongCopyAsWideLandscapeContent() {
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
@@ -267,6 +275,10 @@ class CameraScreensTest {
 
         val previewHintBounds = compose
             .onNodeWithText(resourceText(R.string.offline_preview_hint))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val previewTitleBounds = compose
+            .onNodeWithText(resourceText(R.string.offline_preview))
             .fetchSemanticsNode()
             .boundsInRoot
         val previewBounds = compose
@@ -294,7 +306,11 @@ class CameraScreensTest {
             .fetchSemanticsNode()
             .boundsInRoot
         assertTrue(
-            "Long preview guidance should rotate with the camera controls: $previewHintBounds",
+            "Preview title should rotate with the camera controls: $previewTitleBounds",
+            previewTitleBounds.height > previewTitleBounds.width,
+        )
+        assertTrue(
+            "Wide landscape guidance should remain readable after rotation: $previewHintBounds",
             previewHintBounds.height > previewHintBounds.width,
         )
         assertTrue(
