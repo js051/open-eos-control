@@ -5,6 +5,7 @@
 ## Implemented Core
 
 - CCAPI discovery through `/ccapi`, including Canon's same-origin full `url` entries and relative `path` fixtures, versioned operation parsing, and `ver110`/`ver100` fallback; query data and unsafe origins/paths are never promoted to capabilities
+- Capability-gated Canon event polling through a bounded long request and explicit stop lifecycle; partial event JSON is reduced to safe change keys and triggers a complete status/capability refresh without blocking Live View or controls
 - Camera identity, battery, storage, exposure, white balance, and dynamic settings; writable controls require the exact setting-specific `PUT` operation and a value from camera `ability`. Object-valued `stillimagequality` is presented as separate RAW/JPEG/HEIF controls, while `wbshift` uses bounded B/A and M/G ranges. Both write Canon's complete nested value while preserving companion fields.
 - Still capture, independent AF-ON through advertised Canon start/stop or a balanced half-press fallback, explicit timed half-press, recording, Tap AF, and Click White Balance only when supported
 - JPEG Live View only when discovery advertises a complete start/frame/stop lifecycle, with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
@@ -14,7 +15,7 @@
 - Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
 - Basic Authentication held by the client instance and versioned diagnostic output that redacts credentials and camera serials
 - Simulator mode and injectable HTTP transport for deterministic tests
-- Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, settings, capture, independent autofocus, half-press, recording, tap/drive focus when advertised, bounded JPEG frames, thumbnails and advertised display previews, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
+- Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, event polling, settings, capture, independent autofocus, half-press, recording, tap/drive focus when advertised, bounded JPEG frames, thumbnails and advertised display previews, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
 
 Focus drive without a camera/engine-advertised operation and direct iOS USB/PTP are not presented as implemented features. Desktop Bridge is the implemented iPhone/iPad route to a camera attached to a PC by USB. RTP AAC LATM audio remains unsupported; PC RTP H.264 video is implemented separately by the Bridge through PyAV and still requires physical-camera validation.
 
