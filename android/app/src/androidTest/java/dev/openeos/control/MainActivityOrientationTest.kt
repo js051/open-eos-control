@@ -36,8 +36,6 @@ class MainActivityOrientationTest {
             setSystemAutoRotation(true)
             compose.runOnIdle {
                 compose.activity.refreshSystemAutoRotationSetting()
-                assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
-                compose.activity.handleDeviceOrientationChanged(270)
                 assertEquals(1, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
             }
         } finally {

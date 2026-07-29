@@ -2,40 +2,103 @@ package dev.openeos.control.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
-@OptIn(ExperimentalMaterial3Api::class)
+private val CameraSettingsMaxWidth = 680.dp
+private const val CameraSettingsMaxHeightFraction = 0.92f
+
 @Composable
 fun CameraSettingsSurface(
     onDismissRequest: () -> Unit,
-    skipPartiallyExpanded: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val useRotatedSurface = cameraSettingsUsesRotatedSurface(LocalCameraControlTargetRotation.current)
-    if (!useRotatedSurface) {
-        ModalBottomSheet(
-            onDismissRequest = onDismissRequest,
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = skipPartiallyExpanded),
-            containerColor = AppSurface,
-            contentWindowInsets = { WindowInsets.safeDrawing },
-        ) {
-            DarkSheetSystemBarsEffect()
-            content()
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        DarkSheetSystemBarsEffect()
+        BackHandler(onBack = onDismissRequest)
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            if (useRotatedSurface) {
+                RotatedSettingsPanel(content)
+            } else {
+                NaturalSettingsPanel(
+                    maxHeight = maxHeight * CameraSettingsMaxHeightFraction,
+                    onDismissRequest = onDismissRequest,
+                    content = content,
+                )
+            }
         }
-        return
     }
+}
 
-    BackHandler(onBack = onDismissRequest)
+@Composable
+private fun NaturalSettingsPanel(
+    maxHeight: Dp,
+    onDismissRequest: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val scrimInteractionSource = remember { MutableInteractionSource() }
+    Box(
+        Modifier.fillMaxSize(),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.52f))
+                .clickable(
+                    interactionSource = scrimInteractionSource,
+                    indication = null,
+                    onClick = onDismissRequest,
+                ),
+        )
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxHeight)
+                .align(Alignment.BottomCenter)
+                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                .background(AppSurface)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .pointerInput(Unit) { detectTapGestures(onTap = {}) }
+                .testTag("camera-settings-sheet"),
+        ) {
+            SettingsContentViewport(content = content)
+        }
+    }
+}
+
+@Composable
+private fun RotatedSettingsPanel(content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
@@ -47,6 +110,33 @@ fun CameraSettingsSurface(
                 .fillMaxSize()
                 .cameraLayoutRotation()
                 .testTag("rotated-settings-surface"),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            SettingsContentViewport(
+                modifier = Modifier.fillMaxHeight(),
+                fillAvailableHeight = true,
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsContentViewport(
+    modifier: Modifier = Modifier,
+    fillAvailableHeight: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Box(
+            Modifier
+                .widthIn(max = CameraSettingsMaxWidth)
+                .fillMaxWidth()
+                .then(if (fillAvailableHeight) Modifier.fillMaxHeight() else Modifier)
+                .testTag("settings-content-viewport"),
         ) {
             content()
         }

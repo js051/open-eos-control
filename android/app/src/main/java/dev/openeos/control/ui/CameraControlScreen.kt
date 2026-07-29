@@ -516,7 +516,6 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
     CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
-        skipPartiallyExpanded = true,
     ) {
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp)) {
             Column(

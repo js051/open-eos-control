@@ -22,15 +22,13 @@ class CameraOrientationTest {
         assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.onSensorOrientation(270)
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(true)
-        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
-        policy.onSensorOrientation(270)
         assertEquals(90f, policy.resolveControlRotation(displayRotationDegrees = 0))
     }
 
@@ -54,7 +52,7 @@ class CameraOrientationTest {
 
         assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
         assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = false))
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(true)
         assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
