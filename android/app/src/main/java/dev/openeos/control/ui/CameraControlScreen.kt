@@ -148,24 +148,41 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
             LiveViewFpsButton(state, { actions.openPicker(SettingPicker.LIVE_VIEW) })
         }
         if (!state.supports(feature)) {
+            val capabilityMessage = stringResource(
+                when {
+                    state.bulbMode -> R.string.bulb_not_supported
+                    state.captureMode == CaptureMode.PHOTO -> R.string.capture_not_supported
+                    else -> R.string.recording_not_supported
+                },
+            )
+            val sideways = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
             Box(
                 Modifier.fillMaxWidth().height(CAMERA_CAPABILITY_WARNING_HEIGHT).padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                CameraRotatingSlot(Modifier.fillMaxSize().testTag("capability-warning-rotation")) {
-                    Text(
-                        stringResource(
-                            when {
-                                state.bulbMode -> R.string.bulb_not_supported
-                                state.captureMode == CaptureMode.PHOTO -> R.string.capture_not_supported
-                                else -> R.string.recording_not_supported
-                            }
-                        ),
-                        color = AppWarning,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                    )
+                CameraRotatingSlot(
+                    Modifier
+                        .fillMaxSize()
+                        .testTag("capability-warning-rotation")
+                        .semantics { contentDescription = capabilityMessage },
+                    animateRotation = false,
+                ) {
+                    if (sideways) {
+                        Icon(
+                            painterResource(LucideR.drawable.lucide_ic_triangle_alert),
+                            contentDescription = null,
+                            tint = AppWarning,
+                            modifier = Modifier.size(20.dp).testTag("capability-warning-compact"),
+                        )
+                    } else {
+                        Text(
+                            capabilityMessage,
+                            color = AppWarning,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
         }

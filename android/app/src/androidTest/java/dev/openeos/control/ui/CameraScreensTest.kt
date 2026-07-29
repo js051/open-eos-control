@@ -158,7 +158,8 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
-        compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
+        compose.onNodeWithText("R6 III").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Canon EOS R6 Mark III").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
         compose.onNodeWithContentDescription(
@@ -418,9 +419,10 @@ class CameraScreensTest {
                     bounds.bottom <= viewport.bottom,
             )
         }
-        compose.onNodeWithText("R6 Mark III").assertIsDisplayed()
+        compose.onNodeWithText("R6 III").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Canon EOS R6 Mark III").assertIsDisplayed()
         assertTrue(
-            "The complete rotated model name $modelText must stay inside its stable HUD slot $modelSlot",
+            "The compact rotated model name $modelText must stay inside its stable HUD slot $modelSlot",
             modelText.left >= modelSlot.left &&
                 modelText.top >= modelSlot.top &&
                 modelText.right <= modelSlot.right &&
@@ -942,6 +944,23 @@ class CameraScreensTest {
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(CaptureMode.VIDEO, selectedMode) }
         compose.onNodeWithText(resourceText(R.string.capture_not_supported)).assertIsDisplayed()
+    }
+
+    @Test
+    fun quarterTurnUsesCompactCapabilityWarningWithoutLosingItsDescription() {
+        val message = resourceText(R.string.capture_not_supported)
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalCameraControlRotation provides -90f,
+                LocalCameraControlTargetRotation provides -90f,
+            ) {
+                MaterialTheme { CameraControlScreen(connectedState(), noOpActions()) }
+            }
+        }
+
+        compose.onNodeWithTag("capability-warning-compact", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithText(message).assertCountEquals(0)
+        compose.onNodeWithContentDescription(message).assertIsDisplayed()
     }
 
     @Test

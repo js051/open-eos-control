@@ -91,6 +91,7 @@ private fun StableSettingsPanel(
                     .fillMaxSize()
                     .testTag("settings-content-rotation"),
                 contentAlignment = Alignment.TopCenter,
+                animateRotation = false,
             ) {
                 SettingsContentViewport(content = content)
             }

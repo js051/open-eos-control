@@ -25,13 +25,14 @@ fun Modifier.cameraControlRotation(): Modifier {
 fun CameraRotatingSlot(
     modifier: Modifier = Modifier,
     contentAlignment: Alignment = Alignment.Center,
+    animateRotation: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(modifier, contentAlignment = contentAlignment) {
         Box(
             Modifier
                 .fillMaxSize()
-                .cameraLayoutRotation(),
+                .cameraLayoutRotation(animateRotation),
             contentAlignment = contentAlignment,
             content = content,
         )
@@ -39,10 +40,11 @@ fun CameraRotatingSlot(
 }
 
 @Composable
-fun Modifier.cameraLayoutRotation(): Modifier {
+fun Modifier.cameraLayoutRotation(animateRotation: Boolean = true): Modifier {
     val animatedRotation = LocalCameraControlRotation.current
     val targetRotation = LocalCameraControlTargetRotation.current
     val swapDimensions = cameraRotationSwapsDimensions(targetRotation)
+    val displayedRotation = if (animateRotation) animatedRotation else targetRotation
 
     return layout { measurable, constraints ->
         val placeable = measurable.measure(
@@ -58,8 +60,9 @@ fun Modifier.cameraLayoutRotation(): Modifier {
                 x = (width - placeable.width) / 2,
                 y = (height - placeable.height) / 2,
             ) {
-                rotationZ = animatedRotation
+                rotationZ = displayedRotation
                 transformOrigin = TransformOrigin.Center
+                clip = true
             }
         }
     }
