@@ -73,6 +73,11 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "tap-action-select",
         "live-source-select",
         "media-list",
+        "media-transfer",
+        "media-transfer-name",
+        "media-transfer-status",
+        "media-transfer-progress",
+        "media-transfer-cancel",
         "diagnostics-output",
     }
     assert required_ids <= set(parser.ids)
@@ -82,6 +87,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
     assert all(asset.startswith("/app/") for asset in parser.assets)
     assert "/app/diagnostics.js" in parser.assets
     assert "/app/monitoring.js" in parser.assets
+    assert "/app/media-transfer.js" in parser.assets
 
 
 def test_static_labels_exist_in_both_supported_languages() -> None:
@@ -172,6 +178,15 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "function pauseLivePolling()" in script
     assert "function resumeLivePolling()" in script
     assert "URL.revokeObjectURL" in script
+    assert "mediaTransfer.readResponse" in script
+    assert "new AbortController()" in script
+    assert "mediaTransfer.shouldUseDirectWriter" in script
+    assert "window.showSaveFilePicker" in script
+    assert "await writable.abort(error)" in script
+    assert "cancelMediaDownload({ silent: true })" in script
+    assert "cameraInteractionBusy()" in script
+    assert "scheduleMediaTransferRender()" in script
+    assert script.count("cancelDownload:") == 2
     assert script.count("deleteConfirm:") == 2
     assert '{ method: "DELETE" }' in script
     assert "Bearer ${state.token}" in script

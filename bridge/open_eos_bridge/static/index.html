@@ -258,6 +258,17 @@
             <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span><span data-i18n="refresh">Refresh</span>
           </button>
         </div>
+        <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
+          <span class="media-transfer-icon icon" data-icon="download" aria-hidden="true"></span>
+          <div class="media-transfer-copy">
+            <strong id="media-transfer-name"></strong>
+            <span id="media-transfer-status" class="supporting"></span>
+            <progress id="media-transfer-progress" max="1"></progress>
+          </div>
+          <button id="media-transfer-cancel" class="icon-button" type="button" data-i18n-aria="cancelDownload">
+            <span class="icon" data-icon="x" aria-hidden="true"></span>
+          </button>
+        </section>
         <div id="media-list" class="media-list"></div>
       </main>
 
@@ -368,6 +379,7 @@
   <script src="/app/icons.js"></script>
   <script src="/app/diagnostics.js"></script>
   <script src="/app/monitoring.js"></script>
+  <script src="/app/media-transfer.js"></script>
   <script src="/app/app.js"></script>
 </body>
 </html>

@@ -5,6 +5,8 @@
   if (!diagnostics) throw new Error("Open EOS diagnostics module is unavailable.");
   const monitoring = globalThis.OpenEOSMonitoring;
   if (!monitoring) throw new Error("Open EOS monitoring module is unavailable.");
+  const mediaTransfer = globalThis.OpenEOSMediaTransfer;
+  if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
 
   const FEATURES = {
     LIVE_VIEW: "LIVE_VIEW",
@@ -214,6 +216,13 @@
       loadingPreview: "Loading camera preview",
       previewUnavailable: "The camera preview could not be displayed.",
       download: "Download",
+      preparingDownload: "Preparing camera download",
+      downloading: "Downloading {name}",
+      downloadProgress: "{transferred} of {total} ({percent}%)",
+      downloadProgressUnknown: "{transferred} transferred",
+      cancelDownload: "Cancel download",
+      cancellingDownload: "Cancelling download",
+      downloadCancelled: "Download cancelled",
       downloaded: "Downloaded {name}",
       delete: "Delete",
       deleteConfirm: "Permanently delete {name} from the camera card? This cannot be undone.",
@@ -411,6 +420,13 @@
       loadingPreview: "正在載入相機預覽",
       previewUnavailable: "無法顯示相機提供的預覽影像。",
       download: "下載",
+      preparingDownload: "正在準備相機檔案下載",
+      downloading: "正在下載 {name}",
+      downloadProgress: "已傳輸 {transferred}／{total}（{percent}%）",
+      downloadProgressUnknown: "已傳輸 {transferred}",
+      cancelDownload: "取消下載",
+      cancellingDownload: "正在取消下載",
+      downloadCancelled: "已取消下載",
       downloaded: "已下載 {name}",
       delete: "刪除",
       deleteConfirm: "確定要從相機儲存卡永久刪除「{name}」嗎？此操作無法復原。",
@@ -561,11 +577,14 @@
     mediaPreviewUrl: null,
     mediaPreviewItem: null,
     mediaPreviewGeneration: 0,
+    mediaDownloadPreparing: false,
+    mediaDownload: null,
     busy: false,
     lastError: null,
     toastTimer: null,
   };
   let mediaThumbnailObserver = null;
+  let mediaTransferRenderTimer = null;
 
   const byId = (id) => document.getElementById(id);
   const ui = {
@@ -640,6 +659,11 @@
     mediaRefreshButton: byId("media-refresh-button"),
     mediaSummary: byId("media-summary"),
     mediaList: byId("media-list"),
+    mediaTransfer: byId("media-transfer"),
+    mediaTransferName: byId("media-transfer-name"),
+    mediaTransferStatus: byId("media-transfer-status"),
+    mediaTransferProgress: byId("media-transfer-progress"),
+    mediaTransferCancel: byId("media-transfer-cancel"),
     mediaPreviewDialog: byId("media-preview-dialog"),
     mediaPreviewClose: byId("media-preview-close"),
     mediaPreviewTitle: byId("media-preview-title"),
@@ -713,10 +737,14 @@
     renderSession();
     renderLiveState();
     renderMedia();
+    renderMediaTransfer();
     renderDiagnostics();
   }
 
-  async function api(path, { method = "GET", json, responseType = "json", keepalive = false } = {}) {
+  async function api(
+    path,
+    { method = "GET", json, responseType = "json", keepalive = false, signal = null } = {},
+  ) {
     const headers = new Headers();
     if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
     if (json !== undefined) headers.set("Content-Type", "application/json");
@@ -728,8 +756,10 @@
         body: json === undefined ? undefined : JSON.stringify(json),
         cache: "no-store",
         keepalive,
+        signal,
       });
     } catch (error) {
+      if (mediaTransfer.isAbortError(error)) throw error;
       throw new ApiError(error instanceof Error ? error.message : t("bridgeError"), { code: "NETWORK_ERROR" });
     }
     if (!response.ok) {
@@ -748,6 +778,7 @@
       });
     }
     if (response.status === 204) return null;
+    if (responseType === "response") return response;
     if (responseType === "blob") return response.blob();
     if (responseType === "text") return response.text();
     return response.json();
@@ -1002,6 +1033,7 @@
     if (!state.session) return;
     const sessionId = state.session.id;
     state.busy = true;
+    cancelMediaDownload({ silent: true });
     renderAvailability();
     stopLiveLoop();
     try {
@@ -1015,6 +1047,8 @@
 
   function resetSession() {
     stopLiveLoop();
+    cancelMediaDownload({ silent: true });
+    clearScheduledMediaTransferRender();
     clearMediaThumbnails();
     closeMediaPreview();
     state.session = null;
@@ -1023,6 +1057,8 @@
     state.capabilities = null;
     state.media = [];
     state.mediaLoaded = false;
+    state.mediaDownloadPreparing = false;
+    state.mediaDownload = null;
     state.captureMode = "photo";
     state.liveSource = "AUTO";
     state.activeLiveSource = null;
@@ -1040,6 +1076,14 @@
 
   function featureSupported(feature) {
     return Boolean(state.capabilities?.supported?.includes(feature));
+  }
+
+  function mediaTransferActive() {
+    return state.mediaDownloadPreparing || Boolean(state.mediaDownload);
+  }
+
+  function cameraInteractionBusy() {
+    return state.busy || mediaTransferActive();
   }
 
   function settingByKey(key) {
@@ -1157,7 +1201,7 @@
       button.type = "button";
       button.className = "exposure-control";
       button.dataset.settingKey = key;
-      button.disabled = !setting || state.busy;
+      button.disabled = !setting || cameraInteractionBusy();
       button.title = setting ? settingLabel(setting) : t("unsupported");
       const label = document.createElement("span");
       label.textContent = settingLabel(setting || key);
@@ -1186,7 +1230,7 @@
       const text = document.createElement("span");
       text.textContent = settingLabel(setting);
       const select = document.createElement("select");
-      select.disabled = state.busy;
+      select.disabled = cameraInteractionBusy();
       setting.values.forEach((value) => {
         const option = document.createElement("option");
         option.value = value;
@@ -1231,7 +1275,7 @@
   }
 
   async function updateSetting(setting, value, source) {
-    if (!state.session || state.busy) return;
+    if (!state.session || cameraInteractionBusy()) return;
     state.busy = true;
     state.lastError = null;
     source.disabled = true;
@@ -1291,7 +1335,7 @@
   }
 
   async function operateShutter() {
-    if (!state.session || state.busy) return;
+    if (!state.session || cameraInteractionBusy()) return;
     const isPhoto = state.captureMode === "photo";
     const bulb = isPhoto && isBulbMode();
     const bulbWasActive = bulb && Boolean(state.status?.bulbExposureActive);
@@ -1348,7 +1392,7 @@
   }
 
   async function autofocus() {
-    if (!state.session || state.busy || !featureSupported(FEATURES.AUTOFOCUS)) return;
+    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.AUTOFOCUS)) return;
     state.busy = true;
     setOperationState(t("busy"));
     renderAvailability();
@@ -1369,7 +1413,7 @@
   }
 
   async function halfPressShutter() {
-    if (!state.session || state.busy || !featureSupported(FEATURES.SHUTTER_HALF_PRESS)) return;
+    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.SHUTTER_HALF_PRESS)) return;
     state.busy = true;
     setOperationState(t("busy"));
     renderAvailability();
@@ -1422,7 +1466,7 @@
       ui.fpsSelect.append(option);
     });
     ui.fpsSelect.value = String(state.requestedFps);
-    ui.fpsSelect.disabled = state.busy || !featureSupported(FEATURES.LIVE_VIEW);
+    ui.fpsSelect.disabled = cameraInteractionBusy() || !featureSupported(FEATURES.LIVE_VIEW);
   }
 
   function renderLiveSource() {
@@ -1445,7 +1489,7 @@
     if (sources.length === 1) state.liveSource = sources[0];
     ui.liveSourceSelect.value = state.liveSource;
     ui.liveSourceRow.hidden = sources.length <= 1;
-    ui.liveSourceSelect.disabled = state.busy || !featureSupported(FEATURES.LIVE_VIEW);
+    ui.liveSourceSelect.disabled = cameraInteractionBusy() || !featureSupported(FEATURES.LIVE_VIEW);
   }
 
   function effectiveTapAction() {
@@ -1465,7 +1509,7 @@
     const effective = effectiveTapAction();
     if (effective) state.tapAction = effective;
     ui.tapActionSelect.value = state.tapAction;
-    ui.tapActionSelect.disabled = state.busy || !state.liveActive;
+    ui.tapActionSelect.disabled = cameraInteractionBusy() || !state.liveActive;
   }
 
   async function toggleLiveView() {
@@ -1474,7 +1518,7 @@
   }
 
   async function startLiveView({ announce = true } = {}) {
-    if (!state.session || state.busy || !featureSupported(FEATURES.LIVE_VIEW)) return;
+    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.LIVE_VIEW)) return;
     state.busy = true;
     state.lastError = null;
     setOperationState(t("busy"));
@@ -1862,7 +1906,7 @@
     const bulbActive = Boolean(state.status?.bulbExposureActive);
     const target = state.liveMagnification === 5 ? 1 : 5;
     ui.liveMagnificationButton.hidden = !supported;
-    ui.liveMagnificationButton.disabled = state.busy || bulbActive || !state.liveActive || !supported;
+    ui.liveMagnificationButton.disabled = cameraInteractionBusy() || bulbActive || !state.liveActive || !supported;
     ui.liveMagnificationLabel.textContent = `${target}x`;
     const description = t("liveViewMagnification", { value: target });
     ui.liveMagnificationButton.setAttribute("aria-label", description);
@@ -1872,7 +1916,7 @@
 
   async function setLiveViewMagnification() {
     if (
-      !state.session || state.busy || !state.liveActive ||
+      !state.session || cameraInteractionBusy() || !state.liveActive ||
       state.status?.bulbExposureActive ||
       !featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)
     ) return;
@@ -1907,7 +1951,7 @@
   }
 
   async function driveFocus(direction) {
-    if (!state.session || state.busy || !featureSupported(FEATURES.FOCUS_DRIVE)) return;
+    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.FOCUS_DRIVE)) return;
     if (!state.liveActive) {
       showToast(t("liveViewRequired"), true);
       return;
@@ -1954,7 +1998,7 @@
   async function tapFocus(point) {
     const action = effectiveTapAction();
     if (
-      !point || !state.session || state.busy || !state.liveActive ||
+      !point || !state.session || cameraInteractionBusy() || !state.liveActive ||
       !action
     ) return;
     state.busy = true;
@@ -1999,32 +2043,33 @@
   function renderAvailability() {
     const connected = Boolean(state.session);
     const bulbActive = Boolean(state.status?.bulbExposureActive);
+    const interactionBusy = cameraInteractionBusy();
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
     ui.scanButton.disabled = state.busy;
     const connectionReady = state.connectionMode === "ccapi" ? validCcapiUrl() : Boolean(ui.cameraSelect.value);
     ui.connectButton.disabled = state.busy || !connectionReady;
-    ui.refreshButton.disabled = !connected || state.busy || bulbActive;
+    ui.refreshButton.disabled = !connected || interactionBusy || bulbActive;
     ui.disconnectButton.disabled = !connected || state.busy;
-    ui.photoModeButton.disabled = state.busy || bulbActive || Boolean(state.status?.recording);
-    ui.videoModeButton.disabled = state.busy || bulbActive || !videoSupported;
+    ui.photoModeButton.disabled = interactionBusy || bulbActive || Boolean(state.status?.recording);
+    ui.videoModeButton.disabled = interactionBusy || bulbActive || !videoSupported;
     ui.videoModeButton.hidden = !videoSupported;
     ui.videoModeButton.parentElement.classList.toggle("single", !videoSupported);
     const shutterSupported = state.captureMode === "photo" && isBulbMode()
       ? featureSupported(FEATURES.BULB_EXPOSURE)
       : state.captureMode === "photo" ? featureSupported(FEATURES.STILL_CAPTURE)
       : videoSupported;
-    ui.shutterButton.disabled = state.busy || !shutterSupported;
+    ui.shutterButton.disabled = interactionBusy || !shutterSupported;
     ui.shutterButton.title = shutterSupported ? ui.shutterLabel.textContent : t("unsupported");
     const autofocusSupported = featureSupported(FEATURES.AUTOFOCUS);
     ui.autofocusButton.hidden = !autofocusSupported;
-    ui.autofocusButton.disabled = state.busy || bulbActive || !autofocusSupported;
+    ui.autofocusButton.disabled = interactionBusy || bulbActive || !autofocusSupported;
     const halfPressSupported = featureSupported(FEATURES.SHUTTER_HALF_PRESS);
     ui.halfPressButton.hidden = !halfPressSupported;
-    ui.halfPressButton.disabled = state.busy || bulbActive || !halfPressSupported;
+    ui.halfPressButton.disabled = interactionBusy || bulbActive || !halfPressSupported;
     const liveSupported = featureSupported(FEATURES.LIVE_VIEW);
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       button.hidden = !liveSupported;
-      button.disabled = state.busy || bulbActive || !liveSupported;
+      button.disabled = interactionBusy || bulbActive || !liveSupported;
     });
     const quickActionCount = [autofocusSupported, halfPressSupported, liveSupported].filter(Boolean).length;
     ui.railLiveButton.parentElement.classList.toggle("single", quickActionCount === 1);
@@ -2032,24 +2077,24 @@
     document.querySelector(".live-settings").hidden = !liveSupported;
     const focusSupported = featureSupported(FEATURES.FOCUS_DRIVE);
     ui.focusSection.hidden = !focusSupported;
-    ui.focusNearButton.disabled = state.busy || bulbActive || !state.liveActive;
-    ui.focusFarButton.disabled = state.busy || bulbActive || !state.liveActive;
-    ui.fpsSelect.disabled = state.busy || bulbActive || !liveSupported;
-    ui.liveSourceSelect.disabled = state.busy || bulbActive || !liveSupported;
-    ui.tapActionSelect.disabled = state.busy || bulbActive || !state.liveActive;
+    ui.focusNearButton.disabled = interactionBusy || bulbActive || !state.liveActive;
+    ui.focusFarButton.disabled = interactionBusy || bulbActive || !state.liveActive;
+    ui.fpsSelect.disabled = interactionBusy || bulbActive || !liveSupported;
+    ui.liveSourceSelect.disabled = interactionBusy || bulbActive || !liveSupported;
+    ui.tapActionSelect.disabled = interactionBusy || bulbActive || !state.liveActive;
     ui.monitoringButton.disabled = !connected;
     renderLiveMagnification();
     document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
-      button.disabled = state.busy || bulbActive || !settingByKey(button.dataset.settingKey);
+      button.disabled = interactionBusy || bulbActive || !settingByKey(button.dataset.settingKey);
     });
     document.querySelectorAll("#advanced-settings select").forEach((select) => {
-      select.disabled = state.busy || bulbActive;
+      select.disabled = interactionBusy || bulbActive;
     });
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
-      button.disabled = state.busy || bulbActive || !state.liveActive;
+      button.disabled = interactionBusy || bulbActive || !state.liveActive;
     });
     const tapAction = effectiveTapAction();
-    const tapFocusEnabled = Boolean(tapAction) && state.liveActive && !state.busy && !bulbActive;
+    const tapFocusEnabled = Boolean(tapAction) && state.liveActive && !interactionBusy && !bulbActive;
     ui.viewfinder.classList.toggle("tap-focus-enabled", tapFocusEnabled);
     const tapDescription = tapAction === "whiteBalance" ? t("tapToWhiteBalance") : t("tapToFocus");
     ui.viewfinder.title = tapFocusEnabled ? tapDescription : "";
@@ -2064,6 +2109,8 @@
     }
     const mediaTab = document.querySelector('.tab[data-view="media"]');
     mediaTab.hidden = !featureSupported(FEATURES.MEDIA_BROWSER);
+    ui.mediaRefreshButton.disabled = !connected || interactionBusy;
+    renderMediaTransfer();
   }
 
   function setOperationState(message, error = false) {
@@ -2089,7 +2136,7 @@
   }
 
   async function refreshMedia() {
-    if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return;
+    if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER) || cameraInteractionBusy()) return;
     ui.mediaRefreshButton.disabled = true;
     closeMediaPreview();
     try {
@@ -2102,7 +2149,7 @@
       const normalized = captureError(error);
       showToast(normalized.message, true);
     } finally {
-      ui.mediaRefreshButton.disabled = false;
+      renderAvailability();
     }
   }
 
@@ -2153,6 +2200,7 @@
         removeIcon.className = "icon";
         removeIcon.dataset.icon = "trash-2";
         remove.append(removeIcon);
+        remove.disabled = cameraInteractionBusy();
         remove.addEventListener("click", () => deleteMedia(item, remove));
         actions.append(remove);
       }
@@ -2165,8 +2213,8 @@
       downloadIcon.className = "icon";
       downloadIcon.dataset.icon = "download";
       download.append(downloadIcon);
-      download.disabled = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
-      download.addEventListener("click", () => downloadMedia(item, download));
+      download.disabled = !featureSupported(FEATURES.MEDIA_DOWNLOAD) || cameraInteractionBusy();
+      download.addEventListener("click", () => downloadMedia(item));
       actions.append(download);
       row.append(thumbnail, copy, size, actions);
       ui.mediaList.append(row);
@@ -2319,33 +2367,170 @@
     }
   }
 
-  async function downloadMedia(item, button) {
-    if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD)) return;
-    button.disabled = true;
+  function scheduleMediaTransferRender() {
+    if (mediaTransferRenderTimer !== null) return;
+    mediaTransferRenderTimer = window.setTimeout(() => {
+      mediaTransferRenderTimer = null;
+      renderMediaTransfer();
+    }, 150);
+  }
+
+  function clearScheduledMediaTransferRender() {
+    if (mediaTransferRenderTimer === null) return;
+    window.clearTimeout(mediaTransferRenderTimer);
+    mediaTransferRenderTimer = null;
+  }
+
+  function renderMediaTransfer() {
+    const transfer = state.mediaDownload;
+    ui.mediaTransfer.hidden = !transfer;
+    ui.mediaRefreshButton.disabled = !state.session || cameraInteractionBusy();
+    if (!transfer) return;
+    ui.mediaTransferName.textContent = transfer.name;
+    if (transfer.cancelling) {
+      ui.mediaTransferStatus.textContent = t("cancellingDownload");
+    } else {
+      const transferred = formatBytes(transfer.bytesTransferred);
+      const total = transfer.totalBytes;
+      ui.mediaTransferStatus.textContent = total
+        ? t("downloadProgress", {
+          transferred,
+          total: formatBytes(total),
+          percent: Math.min(100, Math.floor((transfer.bytesTransferred / total) * 100)),
+        })
+        : t("downloadProgressUnknown", { transferred });
+    }
+    if (transfer.totalBytes) {
+      ui.mediaTransferProgress.value = Math.min(1, transfer.bytesTransferred / transfer.totalBytes);
+    } else {
+      ui.mediaTransferProgress.removeAttribute("value");
+    }
+    ui.mediaTransferCancel.disabled = transfer.cancelling;
+  }
+
+  async function chooseMediaWritable(item) {
+    const pickerAvailable = typeof window.showSaveFilePicker === "function";
+    if (!mediaTransfer.shouldUseDirectWriter(item.sizeBytes, pickerAvailable)) {
+      return { writable: null, cancelled: false };
+    }
     try {
-      const blob = await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}`,
-        { responseType: "blob" },
-      );
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = item.name;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      showToast(t("downloaded", { name: item.name }));
+      const handle = await window.showSaveFilePicker({
+        suggestedName: mediaTransfer.safeDownloadName(item.name),
+      });
+      return { writable: await handle.createWritable(), cancelled: false };
     } catch (error) {
-      const normalized = captureError(error);
-      showToast(normalized.message, true);
-    } finally {
-      button.disabled = false;
+      if (mediaTransfer.isAbortError(error)) return { writable: null, cancelled: true };
+      throw error;
     }
   }
 
+  function saveMediaBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = mediaTransfer.safeDownloadName(name);
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function downloadMedia(item) {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD) || cameraInteractionBusy()) return;
+    state.mediaDownloadPreparing = true;
+    setOperationState(t("preparingDownload"));
+    renderMedia();
+    renderAvailability();
+    let writable = null;
+    let writableClosed = false;
+    let transfer = null;
+    try {
+      const destination = await chooseMediaWritable(item);
+      if (destination.cancelled) {
+        setOperationState(t("ready"));
+        return;
+      }
+      writable = destination.writable;
+      const controller = new AbortController();
+      state.mediaDownloadPreparing = false;
+      transfer = {
+        itemId: item.id,
+        name: item.name,
+        bytesTransferred: 0,
+        totalBytes: Number(item.sizeBytes) > 0 ? Number(item.sizeBytes) : null,
+        destination: writable ? "FILE_SYSTEM_ACCESS" : "BLOB_FALLBACK",
+        controller,
+        cancelling: false,
+        silent: false,
+      };
+      state.mediaDownload = transfer;
+      setOperationState(t("downloading", { name: item.name }));
+      renderMedia();
+      renderMediaTransfer();
+      const response = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}`,
+        { responseType: "response", signal: controller.signal },
+      );
+      const result = await mediaTransfer.readResponse(response, {
+        signal: controller.signal,
+        expectedBytes: item.sizeBytes,
+        writeChunk: writable ? (chunk) => writable.write(chunk) : null,
+        onProgress: (progress) => {
+          if (state.mediaDownload !== transfer) return;
+          transfer.bytesTransferred = progress.bytesTransferred;
+          transfer.totalBytes = progress.totalBytes;
+          scheduleMediaTransferRender();
+        },
+      });
+      if (controller.signal.aborted) throw mediaTransfer.cancellationError();
+      if (writable) {
+        await writable.close();
+        writableClosed = true;
+      } else if (result.blob) {
+        saveMediaBlob(result.blob, item.name);
+      } else {
+        throw new Error("Media download completed without a file destination.");
+      }
+      showToast(t("downloaded", { name: item.name }));
+      setOperationState(t("ready"));
+    } catch (error) {
+      if (writable && !writableClosed) {
+        try {
+          await writable.abort(error);
+        } catch (_) {
+          // The browser may already have closed or discarded the temporary file.
+        }
+      }
+      if (mediaTransfer.isAbortError(error) || transfer?.controller.signal.aborted) {
+        if (!transfer?.silent) {
+          showToast(t("downloadCancelled"));
+          setOperationState(t("ready"));
+        }
+      } else {
+        const normalized = captureError(error);
+        setOperationState(normalized.message, true);
+        showToast(normalized.message, true);
+      }
+    } finally {
+      clearScheduledMediaTransferRender();
+      state.mediaDownloadPreparing = false;
+      if (state.mediaDownload === transfer) state.mediaDownload = null;
+      renderMedia();
+      renderAvailability();
+    }
+  }
+
+  function cancelMediaDownload({ silent = false } = {}) {
+    const transfer = state.mediaDownload;
+    if (!transfer || transfer.controller.signal.aborted) return;
+    transfer.silent = silent;
+    transfer.cancelling = true;
+    transfer.controller.abort();
+    renderMediaTransfer();
+  }
+
   async function deleteMedia(item, button) {
-    if (!state.session || !featureSupported(FEATURES.MEDIA_DELETE)) return;
+    if (!state.session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy()) return;
     if (!window.confirm(t("deleteConfirm", { name: item.name }))) return;
     button.disabled = true;
     try {
@@ -2395,6 +2580,13 @@
           analysisError: state.monitorAnalysisError,
         },
       },
+      mediaTransfer: state.mediaDownload ? {
+        active: true,
+        bytesTransferred: state.mediaDownload.bytesTransferred,
+        totalBytes: state.mediaDownload.totalBytes,
+        destination: state.mediaDownload.destination,
+        cancelling: state.mediaDownload.cancelling,
+      } : { active: false },
       lastError: state.lastError,
     };
     return diagnostics.safeValue(report, {
@@ -2545,6 +2737,7 @@
       });
     });
     ui.mediaRefreshButton.addEventListener("click", refreshMedia);
+    ui.mediaTransferCancel.addEventListener("click", () => cancelMediaDownload());
     ui.mediaPreviewClose.addEventListener("click", closeMediaPreview);
     ui.mediaPreviewDialog.addEventListener("close", clearMediaPreview);
     ui.mediaPreviewDialog.addEventListener("click", (event) => {
@@ -2560,6 +2753,7 @@
       if (state.liveActive) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      cancelMediaDownload({ silent: true });
       clearMediaThumbnails();
       closeMediaPreview();
       if (!state.session) return;

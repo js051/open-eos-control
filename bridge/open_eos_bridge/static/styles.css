@@ -1001,6 +1001,46 @@ input:disabled {
   border-top: 1px solid var(--line);
 }
 
+.media-transfer {
+  display: grid;
+  min-height: 76px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  grid-template-columns: 32px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-high);
+}
+
+.media-transfer[hidden] {
+  display: none;
+}
+
+.media-transfer-icon {
+  color: var(--accent-strong);
+}
+
+.media-transfer-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.media-transfer-copy strong,
+.media-transfer-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-transfer progress {
+  width: 100%;
+  height: 5px;
+  accent-color: var(--accent);
+}
+
 .media-row {
   display: grid;
   min-height: 84px;
