@@ -95,7 +95,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         )
         await transport.enqueueJSON(
             path: "/v1/session/session_123/media",
-            body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg"}]}"#
+            body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true}]}"#
         )
         let thumbnailJPEG = Data([0xFF, 0xD8, 0x04, 0x02, 0xFF, 0xD9])
         await transport.enqueue(
@@ -180,6 +180,7 @@ final class DesktopBridgeClientTests: XCTestCase {
 
         let media = try await client.listMedia()
         let item = try XCTUnwrap(media.first)
+        XCTAssertTrue(item.previewAvailable)
         let thumbnail = try await client.mediaThumbnail(item)
         XCTAssertEqual(thumbnail.data, thumbnailJPEG)
         XCTAssertEqual(thumbnail.contentType, "image/jpeg")

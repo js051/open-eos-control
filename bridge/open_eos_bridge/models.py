@@ -223,6 +223,7 @@ class MediaItem(ApiModel):
     size_bytes: int = Field(default=0, ge=0)
     capture_time: str | None = None
     content_type: str = "application/octet-stream"
+    preview_available: bool = False
 
 
 class MediaList(ApiModel):

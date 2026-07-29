@@ -380,6 +380,7 @@ class DesktopBridgeClient(
                     kind = item.optString("kind", "other"),
                     sizeBytes = item.optNullableLong("sizeBytes"),
                     captureTime = item.optNullableString("captureTime"),
+                    previewAvailable = item.optBoolean("previewAvailable", false),
                 )
             }
         }

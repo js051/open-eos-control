@@ -392,13 +392,22 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     public let kind: String
     public let sizeBytes: Int64?
     public let captureTime: String?
+    public let previewAvailable: Bool
 
-    public init(id: String, name: String, kind: String, sizeBytes: Int64? = nil, captureTime: String? = nil) {
+    public init(
+        id: String,
+        name: String,
+        kind: String,
+        sizeBytes: Int64? = nil,
+        captureTime: String? = nil,
+        previewAvailable: Bool = false
+    ) {
         self.id = id
         self.name = name
         self.kind = kind
         self.sizeBytes = sizeBytes
         self.captureTime = captureTime
+        self.previewAvailable = previewAvailable
     }
 }
 

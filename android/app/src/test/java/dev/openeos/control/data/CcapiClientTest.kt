@@ -1145,6 +1145,7 @@ class CcapiClientTest {
 
         assertEquals(listOf("IMG_0002.JPG", "IMG_0001.CR3"), items.map { it.name })
         assertEquals(listOf("image", "raw"), items.map { it.kind })
+        assertTrue(items.all { it.previewAvailable })
         assertEquals("/ccapi/ver110/contents?kind=number", server.takeRequest().path)
         assertEquals("/ccapi/ver110/contents?page=1&order=desc", server.takeRequest().path)
     }
@@ -1176,6 +1177,7 @@ class CcapiClientTest {
         val progress = mutableListOf<CameraMediaTransferProgress>()
 
         val item = client.listMedia().single()
+        assertTrue(item.previewAvailable)
         val result = client.downloadMedia(item, output, progress::add)
 
         assertEquals("/ccapi/media", server.takeRequest().path)

@@ -4,7 +4,7 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It targets Canon EOS R6 Mark III first and is structured around PC, iOS, and Android clients that share the same camera-control concepts.
 
-The current development preview is [v0.1.0](docs/releases/v0.1.0.md). It is intended for testing and contributor feedback, not production camera workflows.
+The current development preview is [v0.1.1](docs/releases/v0.1.1.md). It is intended for testing and contributor feedback, not production camera workflows.
 
 The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend and capability-gated Canon EOS controls. Android and iOS can both use the executable Desktop Bridge to control a camera connected to a PC by USB through the same camera contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge provides a tested API and responsive control UI through either open-source `gphoto2` USB or native HTTP CCAPI. Native Swift CCAPI and Desktop Bridge clients plus an iOS 17 SwiftUI app are implemented with English/Traditional Chinese UI and iPhone Simulator coverage; physical iPhone and camera validation remains.
 
@@ -45,7 +45,7 @@ The app currently includes:
 - Independent AF-ON through camera-advertised CCAPI autofocus or Canon USB `DoAf`/`AfCancel`, with a balanced half-press fallback when the dedicated USB pair is unavailable
 - Advertised manual shutter half-press with guaranteed release
 - Capability-gated Bulb long exposure on CCAPI, Android USB/PTP, Desktop Bridge, PC, and iOS: the central shutter switches to timed start/stop only in a camera-advertised Bulb mode, suspends active JPEG polling while held, and retries or performs best-effort release during cleanup
-- Paged camera media browser with lazy thumbnails and full-screen CCAPI image/RAW display previews where advertised, streaming download through Android's document picker, and confirmation-gated deletion
+- Paged camera media browser with lazy thumbnails; full-screen CCAPI image/RAW display previews; capability-gated Android USB/PTP and Desktop Bridge JPEG/PNG previews up to 32 MiB; streaming download through Android's document picker; and confirmation-gated deletion. Wired RAW, HEIF, and video items remain downloadable but do not expose a fake preview action.
 
 Default direct camera presets:
 

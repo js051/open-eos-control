@@ -730,7 +730,8 @@ public actor CCAPIClient {
                     name: $0.string("name"),
                     kind: $0.string("kind", default: "other"),
                     sizeBytes: $0.integer64("size_bytes"),
-                    captureTime: $0.string("capture_time").nilIfEmpty
+                    captureTime: $0.string("capture_time").nilIfEmpty,
+                    previewAvailable: ["image", "raw"].contains($0.string("kind", default: "other").lowercased())
                 )
             } ?? []
             observedFeatures.insert(.mediaBrowser)
@@ -756,7 +757,12 @@ public actor CCAPIClient {
         }
         observedFeatures.insert(.mediaBrowser)
         return mediaPaths.prefix(Self.maximumMediaItems).map {
-            CameraMediaItem(id: $0, name: ($0 as NSString).lastPathComponent, kind: Self.mediaKind($0))
+            CameraMediaItem(
+                id: $0,
+                name: ($0 as NSString).lastPathComponent,
+                kind: Self.mediaKind($0),
+                previewAvailable: ["image", "raw"].contains(Self.mediaKind($0))
+            )
         }
     }
 

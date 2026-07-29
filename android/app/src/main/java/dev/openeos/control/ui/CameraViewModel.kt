@@ -727,7 +727,7 @@ class CameraViewModel(
             state.previewMode ||
             state.isBusy(CameraOperation.MEDIA) ||
             !state.supports(CameraFeature.MEDIA_PREVIEW) ||
-            (!item.kind.equals("image", ignoreCase = true) && !item.kind.equals("raw", ignoreCase = true))
+            !item.previewAvailable
         ) return
         _uiState.update {
             it.copy(mediaPreviewItem = item, mediaPreviewBytes = null, mediaPreviewLoading = true)

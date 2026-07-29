@@ -30,6 +30,7 @@ class UsbPtpCameraBackendTest {
         val whiteBalanceStatus = backend.setWhiteBalance("daylight")
         val media = backend.listMedia()
         val thumbnail = backend.mediaThumbnail(media.single())
+        val preview = backend.mediaPreview(media.single())
         val output = ByteArrayOutputStream()
         val progress = mutableListOf<CameraMediaTransferProgress>()
         val download = backend.downloadMedia(media.single(), output, progress::add)
@@ -55,6 +56,7 @@ class UsbPtpCameraBackendTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.STORAGE_STATUS))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_PREVIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DOWNLOAD))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
@@ -81,6 +83,7 @@ class UsbPtpCameraBackendTest {
                     CameraFeature.WHITE_BALANCE_CONTROL,
                     CameraFeature.MEDIA_BROWSER,
                     CameraFeature.MEDIA_THUMBNAIL,
+                    CameraFeature.MEDIA_PREVIEW,
                     CameraFeature.MEDIA_DOWNLOAD,
                     CameraFeature.MEDIA_DELETE,
                     CameraFeature.STILL_CAPTURE,
@@ -91,6 +94,9 @@ class UsbPtpCameraBackendTest {
         assertEquals("2026-07-21 14:30:25", media.single().captureTime)
         assertArrayEquals(THUMBNAIL_BYTES, thumbnail.bytes)
         assertEquals("image/jpeg", thumbnail.contentType)
+        assertTrue(media.single().previewAvailable)
+        assertArrayEquals(OBJECT_BYTES, preview.bytes)
+        assertEquals("image/jpeg", preview.contentType)
         assertArrayEquals(OBJECT_BYTES, output.toByteArray())
         assertEquals(OBJECT_BYTES.size.toLong(), download.bytesTransferred)
         assertEquals(OBJECT_BYTES.size.toLong(), progress.last().bytesTransferred)
@@ -1073,6 +1079,27 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun mediaPreviewRejectsOversizedObjectMetadataBeforeGetObject() = runTest {
+        val transport = ScriptedTransport(
+            advertiseCapture = false,
+            advertisedObjectSize = 32L * 1024L * 1024L + 1L,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        val item = backend.listMedia().single()
+
+        val failure = runCatching { backend.mediaPreview(item) }.exceptionOrNull()
+
+        assertFalse(item.previewAvailable)
+        assertTrue(failure is PtpProtocolException)
+        assertFalse(PtpOperationCode.GET_OBJECT in transport.sentOperations)
+        backend.close()
+    }
+
+    @Test
     fun canonBulbExposureUsesBalancedHalfAndFullRemoteReleaseSequence() = runTest {
         val transport = CanonEosScriptedTransport(captureDestination = 2)
         val backend = UsbPtpCameraBackend(
@@ -1288,6 +1315,7 @@ class UsbPtpCameraBackendTest {
         private val advertiseDelete: Boolean = true,
         private val advertiseThumbnail: Boolean = true,
         private val advertisedThumbnailSize: Long = THUMBNAIL_BYTES.size.toLong(),
+        private val advertisedObjectSize: Long = OBJECT_BYTES.size.toLong(),
         private val descriptorFailureCode: Int? = null,
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
@@ -1344,7 +1372,11 @@ class UsbPtpCameraBackendTest {
                 }
 
                 PtpOperationCode.GET_OBJECT_INFO -> {
-                    incoming += data(container.code, transaction, objectInfoPayload(advertisedThumbnailSize))
+                    incoming += data(
+                        container.code,
+                        transaction,
+                        objectInfoPayload(advertisedThumbnailSize, advertisedObjectSize),
+                    )
                     incoming += ok(transaction)
                 }
 
@@ -1637,7 +1669,14 @@ class UsbPtpCameraBackendTest {
             assertEquals(expectedSizeBytes, written)
             assertEquals(expectedSizeBytes, output.size().toLong())
             val id = "memory-host:${items.size}:$filename"
-            val item = CameraMediaItem(id, filename, kind, written, "test")
+            val item = CameraMediaItem(
+                id,
+                filename,
+                kind,
+                written,
+                "test",
+                previewAvailable = kind == "image" && filename.endsWith(".jpg", ignoreCase = true),
+            )
             items[id] = item to output.toByteArray()
             return item
         }
@@ -1649,6 +1688,14 @@ class UsbPtpCameraBackendTest {
             bytes = requireEntry(item).second,
             contentType = "image/jpeg",
         )
+
+        override suspend fun preview(item: CameraMediaItem): CameraMediaPreview {
+            val bytes = requireEntry(item).second
+            check(item.previewAvailable)
+            check(bytes.size >= 4 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte())
+            check(bytes[bytes.lastIndex - 1] == 0xFF.toByte() && bytes.last() == 0xD9.toByte())
+            return CameraMediaPreview(item, bytes, "image/jpeg")
+        }
 
         override suspend fun download(
             item: CameraMediaItem,
@@ -1894,7 +1941,7 @@ class UsbPtpCameraBackendTest {
     companion object {
         private const val STORAGE_ID = 0x00010001L
         private const val OBJECT_HANDLE = 0x42L
-        private val OBJECT_BYTES = byteArrayOf(1, 3, 3, 7, 9)
+        private val OBJECT_BYTES = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 3, 3, 7, 9, 0xFF.toByte(), 0xD9.toByte())
         private val THUMBNAIL_BYTES = byteArrayOf(
             0xFF.toByte(), 0xD8.toByte(), 4, 2, 0xFF.toByte(), 0xD9.toByte(),
         )
@@ -2039,11 +2086,11 @@ class UsbPtpCameraBackendTest {
             string("EOS_CARD")
         }.bytes()
 
-        private fun objectInfoPayload(thumbnailSize: Long): ByteArray = Writer().apply {
+        private fun objectInfoPayload(thumbnailSize: Long, objectSize: Long = OBJECT_BYTES.size.toLong()): ByteArray = Writer().apply {
             u32(STORAGE_ID)
             u16(PtpObjectFormat.EXIF_JPEG)
             u16(0)
-            u32(OBJECT_BYTES.size)
+            u32(objectSize)
             u16(PtpObjectFormat.EXIF_JPEG)
             u32(thumbnailSize)
             u32(160)

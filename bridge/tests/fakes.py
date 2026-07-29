@@ -152,6 +152,14 @@ class FakeRunner:
             "--stdout",
         ]:
             return CommandOutput(THUMBNAIL)
+        if command == [
+            "--folder",
+            "/store_00010001/DCIM/100CANON",
+            "--get-file",
+            "IMG_0001.JPG",
+            "--stdout",
+        ]:
+            return CommandOutput(JPEG)
         if command in (["--trigger-capture"], ["--capture-image"]):
             return CommandOutput(b"New file is in location /store_00010001/DCIM/100CANON/IMG_0002.JPG\n")
         if "--capture-image-and-download" in command:

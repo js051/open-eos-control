@@ -27,6 +27,8 @@ interface UsbHostCaptureStore {
 
     suspend fun thumbnail(item: CameraMediaItem): CameraMediaThumbnail
 
+    suspend fun preview(item: CameraMediaItem): CameraMediaPreview
+
     suspend fun download(
         item: CameraMediaItem,
         destination: OutputStream,
@@ -118,6 +120,22 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
         }
     }
 
+    override suspend fun preview(item: CameraMediaItem): CameraMediaPreview = withContext(Dispatchers.IO) {
+        val file = requireFile(item)
+        if (!item.previewAvailable || file.length() !in 1..MAX_HOST_PREVIEW_BYTES) {
+            throw PtpProtocolException("${item.name} does not have a bounded Android-decodable image preview.")
+        }
+        val bytes = file.inputStream().buffered().use { input ->
+            input.readNBytes((MAX_HOST_PREVIEW_BYTES + 1L).toInt())
+        }
+        if (bytes.size.toLong() > MAX_HOST_PREVIEW_BYTES) {
+            throw PtpProtocolException("${item.name} exceeds the bounded image preview limit.")
+        }
+        val contentType = hostPreviewContentType(item.name, bytes)
+            ?: throw PtpProtocolException("${item.name} is not a complete JPEG or PNG image.")
+        CameraMediaPreview(item = item, bytes = bytes, contentType = contentType)
+    }
+
     override suspend fun download(
         item: CameraMediaItem,
         destination: OutputStream,
@@ -183,6 +201,7 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
         kind = kind,
         sizeBytes = length(),
         captureTime = Instant.ofEpochMilli(lastModified()).toString(),
+        previewAvailable = kind == "image" && length() in 1..MAX_HOST_PREVIEW_BYTES && hasHostPreviewExtension(name),
     )
 }
 
@@ -213,6 +232,30 @@ private fun hostContentType(filename: String, kind: String): String =
         else -> if (kind == "video") "video/*" else "application/octet-stream"
     }
 
+private fun hasHostPreviewExtension(filename: String): Boolean =
+    filename.substringAfterLast('.', "").lowercase(Locale.ROOT) in setOf("jpg", "jpeg", "png")
+
+private fun hostPreviewContentType(filename: String, bytes: ByteArray): String? = when {
+    filename.endsWith(".png", ignoreCase = true) && bytes.hasCompletePngMarkers() -> "image/png"
+    filename.substringAfterLast('.', "").lowercase(Locale.ROOT) in setOf("jpg", "jpeg") &&
+        bytes.hasCompleteJpegMarkers() -> "image/jpeg"
+    else -> null
+}
+
+private fun ByteArray.hasCompleteJpegMarkers(): Boolean =
+    size >= 4 && this[0] == 0xFF.toByte() && this[1] == 0xD8.toByte() &&
+        this[lastIndex - 1] == 0xFF.toByte() && this[lastIndex] == 0xD9.toByte()
+
+private fun ByteArray.hasPngSignature(): Boolean =
+    size >= 8 && copyOfRange(0, 8).contentEquals(
+        byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A),
+    )
+
+private fun ByteArray.hasCompletePngMarkers(): Boolean =
+    hasPngSignature() && size >= 20 && copyOfRange(size - 12, size).contentEquals(
+        byteArrayOf(0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE.toByte(), 0x42, 0x60, 0x82.toByte()),
+    )
+
 private fun scaleToFit(bitmap: Bitmap, maxEdge: Int): Bitmap {
     val largest = maxOf(bitmap.width, bitmap.height)
     if (largest <= maxEdge) return bitmap
@@ -232,4 +275,5 @@ private const val MAX_CAPTURE_FILENAME_CHARS = 160
 private const val MAX_FILENAME_COLLISIONS = 9_999
 private const val HOST_THUMBNAIL_EDGE = 512
 private const val HOST_THUMBNAIL_QUALITY = 85
+private const val MAX_HOST_PREVIEW_BYTES = 32L * 1024L * 1024L
 private const val FILE_COPY_BUFFER_BYTES = 64 * 1024

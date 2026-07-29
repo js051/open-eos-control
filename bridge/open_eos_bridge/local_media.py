@@ -22,6 +22,7 @@ MAX_CAPTURE_FILES_PER_SHOT = 8
 MAX_CAPTURE_FILE_BYTES = 4 * 1024**3
 MAX_LOCAL_MEDIA_ITEMS = 500
 MAX_LOCAL_THUMBNAIL_BYTES = 8 * 1024 * 1024
+MAX_LOCAL_PREVIEW_BYTES = 32 * 1024 * 1024
 LOCAL_THUMBNAIL_SIZE = (960, 960)
 
 
@@ -197,6 +198,22 @@ class LocalCaptureStore:
             )
         return content, "image/jpeg"
 
+    def preview(self, media_id: str) -> tuple[bytes, str]:
+        item, path = self.item(media_id)
+        if not item.preview_available:
+            raise _preview_unavailable()
+        try:
+            with path.open("rb") as source:
+                content = source.read(MAX_LOCAL_PREVIEW_BYTES + 1)
+        except FileNotFoundError as error:
+            raise BridgeError("MEDIA_NOT_FOUND", "Local captured media was not found.", status_code=404) from error
+        except OSError as error:
+            raise _store_error("read local media preview", error) from error
+        content_type = preview_content_type(content)
+        if not content_type:
+            raise _preview_unavailable()
+        return content, content_type
+
     def delete(self, media_id: str) -> None:
         _, path = self.item(media_id)
         try:
@@ -219,6 +236,7 @@ class LocalCaptureStore:
             size_bytes=stat.st_size,
             capture_time=datetime.fromtimestamp(stat.st_mtime, UTC).isoformat().replace("+00:00", "Z"),
             content_type=content_type,
+            preview_available=is_previewable_media(path.name, content_type, stat.st_size),
         )
 
     def _unique_target(self, name: str) -> Path:
@@ -251,6 +269,33 @@ class LocalCaptureStore:
 
 def is_host_media_id(media_id: str) -> bool:
     return media_id.startswith(HOST_MEDIA_PREFIX)
+
+
+def is_previewable_media(name: str, content_type: str, size_bytes: int) -> bool:
+    extension = Path(name).suffix.casefold()
+    supported_type = content_type.casefold() in {"image/jpeg", "image/png"}
+    supported_extension = extension in {".jpg", ".jpeg", ".png"}
+    return 0 <= size_bytes <= MAX_LOCAL_PREVIEW_BYTES and supported_type and supported_extension
+
+
+def preview_content_type(content: bytes) -> str | None:
+    if len(content) < 4 or len(content) > MAX_LOCAL_PREVIEW_BYTES:
+        return None
+    if content.startswith(b"\xff\xd8") and content.endswith(b"\xff\xd9"):
+        return "image/jpeg"
+    if content.startswith(b"\x89PNG\r\n\x1a\n") and content.endswith(b"\x00\x00\x00\x00IEND\xaeB`\x82"):
+        return "image/png"
+    return None
+
+
+def _preview_unavailable() -> BridgeError:
+    return BridgeError(
+        "MEDIA_PREVIEW_UNAVAILABLE",
+        "This media item is not a complete JPEG or PNG image within the 32 MiB preview limit.",
+        status_code=422,
+        feature=CameraFeature.MEDIA_PREVIEW.value,
+        engine=ENGINE_NAME,
+    )
 
 
 def _host_media_id(name: str) -> str:

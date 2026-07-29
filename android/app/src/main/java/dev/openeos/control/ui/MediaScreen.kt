@@ -203,8 +203,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                         thumbnailLoading = item.id in state.mediaThumbnailLoadingIds,
                         previewEnabled = !state.previewMode &&
                             state.supports(CameraFeature.MEDIA_PREVIEW) &&
-                            (item.kind.equals("image", ignoreCase = true) ||
-                                item.kind.equals("raw", ignoreCase = true)) &&
+                            item.previewAvailable &&
                             !state.isBusy(CameraOperation.MEDIA),
                         deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
                         deleteEnabled = !state.isBusy(CameraOperation.MEDIA),

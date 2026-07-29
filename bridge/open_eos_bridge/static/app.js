@@ -1874,8 +1874,7 @@
     state.media.forEach((item) => {
       const row = document.createElement("div");
       row.className = "media-row";
-      const previewable = ["image", "raw"].includes(String(item.kind).toLowerCase());
-      const previewSupported = previewable && featureSupported(FEATURES.MEDIA_PREVIEW);
+      const previewSupported = item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW);
       const thumbnail = document.createElement(previewSupported ? "button" : "span");
       thumbnail.className = "media-thumbnail";
       thumbnail.dataset.mediaId = item.id;
@@ -2037,8 +2036,7 @@
   }
 
   async function openMediaPreview(item) {
-    const previewable = ["image", "raw"].includes(String(item.kind).toLowerCase());
-    if (!state.session || !previewable || !featureSupported(FEATURES.MEDIA_PREVIEW)) return;
+    if (!state.session || item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)) return;
     clearMediaPreview();
     const generation = state.mediaPreviewGeneration;
     state.mediaPreviewItem = item;

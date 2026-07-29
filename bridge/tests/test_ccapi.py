@@ -409,6 +409,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     media = session.list_media()
     assert media[0].name == "IMG_0001.JPG"
     assert "/" not in media[0].id
+    assert media[0].preview_available is True
     thumbnail, thumbnail_type = session.media_thumbnail(media[0].id)
     assert thumbnail == JPEG
     assert thumbnail_type == "image/jpeg"

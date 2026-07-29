@@ -4,7 +4,7 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-目前的開發預覽版為 [v0.1.0](docs/releases/v0.1.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
+目前的開發預覽版為 [v0.1.1](docs/releases/v0.1.1.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
 
 這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已有標準 USB/PTP backend 與依能力開放的 Canon EOS 控制。Android 與 iOS 現在都能透過同一套 camera contract 使用可執行的 Desktop Bridge，控制以 USB 接在電腦上的相機。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI／Desktop Bridge client 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
 
@@ -45,7 +45,7 @@ open-eos-control/
 - 獨立 AF-ON：CCAPI 使用相機公告的自動對焦命令；Canon USB 優先使用 `DoAf`／`AfCancel`，沒有這組專用操作時才以確實釋放的半按流程作為後備
 - 依相機公告能力執行手動快門半按，並保證送出釋放命令
 - CCAPI、Android USB/PTP、Desktop Bridge、PC 與 iOS 共用依能力開放的 Bulb 長曝光：只有相機公告 Bulb 模式與完整按壓／釋放路徑時，中央快門才切換成可計時的開始／停止控制；曝光期間暫停主動 JPEG 輪詢，失敗可重試釋放，結束工作階段也會盡力釋放快門
-- 支援分頁、按需縮圖與相機公告時的 CCAPI 相片／RAW 全螢幕預覽、透過 Android 文件選擇器串流下載大型檔案，以及需確認後才執行的刪除
+- 支援分頁與按需縮圖；相機公告時的 CCAPI 相片／RAW 全螢幕預覽；依單筆能力開放、上限 32 MiB 的 Android USB/PTP 與 Desktop Bridge JPEG／PNG 預覽；透過 Android 文件選擇器串流下載大型檔案；以及需確認後才執行的刪除。有線 RAW、HEIF 與影片仍可下載，但不顯示無法執行的預覽按鈕。
 
 預設直連相機 URL：
 

@@ -18,7 +18,13 @@ from pathlib import Path, PureWindowsPath
 from typing import Protocol
 
 from .errors import BridgeError, unsupported
-from .local_media import LocalCaptureStore, default_capture_directory, is_host_media_id
+from .local_media import (
+    LocalCaptureStore,
+    default_capture_directory,
+    is_host_media_id,
+    is_previewable_media,
+    preview_content_type,
+)
 from .models import (
     BatteryStatus,
     CameraCapabilities,
@@ -41,6 +47,7 @@ from .models import (
 ENGINE_NAME = "libgphoto2"
 MAX_COMMAND_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
+MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 MAX_MEDIA_ITEMS = 500
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
@@ -839,6 +846,7 @@ def parse_media_list(output: str) -> list[MediaItem]:
                 size_bytes=size,
                 capture_time=capture_time,
                 content_type=content_type,
+                preview_available=is_previewable_media(name, content_type, size),
             )
         )
     return list(reversed(items[-MAX_MEDIA_ITEMS:]))
@@ -1062,7 +1070,13 @@ class GPhoto2Session:
             if self._abilities.capture_preview:
                 supported.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
             if media_supported:
-                supported.update({CameraFeature.MEDIA_BROWSER, CameraFeature.MEDIA_DOWNLOAD})
+                supported.update(
+                    {
+                        CameraFeature.MEDIA_BROWSER,
+                        CameraFeature.MEDIA_PREVIEW,
+                        CameraFeature.MEDIA_DOWNLOAD,
+                    }
+                )
                 if self._abilities.file_preview or host_media_supported:
                     supported.add(CameraFeature.MEDIA_THUMBNAIL)
                 if self._abilities.delete_files or host_media_supported:
@@ -1531,8 +1545,33 @@ class GPhoto2Session:
             return thumbnail, content_type
 
     def media_preview(self, media_id: str) -> tuple[bytes, str]:
-        del media_id
-        raise unsupported(CameraFeature.MEDIA_PREVIEW.value, self.engine_name)
+        if is_host_media_id(media_id):
+            with self._lock:
+                self._require_open()
+                preview = self._capture_store.preview(media_id)
+                self._observed.add(CameraFeature.MEDIA_PREVIEW)
+                return preview
+
+        folder, name = _decode_media_id(media_id)
+        with self._lock:
+            self._require_open()
+            if not self._camera_media_supported:
+                raise unsupported(CameraFeature.MEDIA_PREVIEW.value, self.engine_name)
+            cached = self._media_cache.get(media_id)
+            content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+            if cached is not None and not cached.preview_available:
+                raise _media_preview_unavailable()
+            if cached is None and not is_previewable_media(name, content_type, 0):
+                raise _media_preview_unavailable()
+            output = self._run(
+                ["--folder", folder, "--get-file", name, "--stdout"],
+                timeout=60.0,
+            ).stdout
+            preview_type = preview_content_type(output)
+            if preview_type is None:
+                raise _media_preview_unavailable()
+            self._observed.add(CameraFeature.MEDIA_PREVIEW)
+            return output, preview_type
 
     def delete_media(self, media_id: str) -> None:
         if is_host_media_id(media_id):
@@ -1755,11 +1794,12 @@ class GPhoto2Session:
                     "HOST_MEDIA_LIST",
                     "HOST_MEDIA_DOWNLOAD",
                     "HOST_MEDIA_THUMBNAIL",
+                    "HOST_MEDIA_PREVIEW",
                     "HOST_MEDIA_DELETE",
                 )
             )
         if self._camera_media_supported:
-            commands.extend(("MEDIA_LIST", "MEDIA_DOWNLOAD"))
+            commands.extend(("MEDIA_LIST", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD"))
             if self._abilities.file_preview:
                 commands.append("MEDIA_THUMBNAIL")
             if self._abilities.delete_files:
@@ -1954,6 +1994,16 @@ def _validated_thumbnail(output: bytes) -> tuple[bytes, str]:
         "gphoto2 did not return a supported JPEG or PNG thumbnail.",
         status_code=502,
         feature=CameraFeature.MEDIA_THUMBNAIL.value,
+        engine=ENGINE_NAME,
+    )
+
+
+def _media_preview_unavailable() -> BridgeError:
+    return BridgeError(
+        "MEDIA_PREVIEW_UNAVAILABLE",
+        f"This media item is not a complete JPEG or PNG image within the {MAX_MEDIA_PREVIEW_BYTES} byte limit.",
+        status_code=422,
+        feature=CameraFeature.MEDIA_PREVIEW.value,
         engine=ENGINE_NAME,
     )
 

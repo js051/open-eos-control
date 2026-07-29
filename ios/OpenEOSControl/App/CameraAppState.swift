@@ -665,11 +665,9 @@ final class CameraAppState: ObservableObject {
     }
 
     func openMediaPreview(_ item: CameraMediaItem) async {
-        let previewable = item.kind.caseInsensitiveCompare("image") == .orderedSame
-            || item.kind.caseInsensitiveCompare("raw") == .orderedSame
         guard
             !isPreview,
-            previewable,
+            item.previewAvailable,
             supports(.mediaPreview),
             let session,
             begin(.media)
@@ -1011,8 +1009,8 @@ final class CameraAppState: ObservableObject {
     }
 
     static let previewMedia = [
-        CameraMediaItem(id: "preview-001", name: "R6M3_0001.CR3", kind: "raw", sizeBytes: 31_457_280, captureTime: "2026-07-21T10:08:24+08:00"),
-        CameraMediaItem(id: "preview-002", name: "R6M3_0001.JPG", kind: "image", sizeBytes: 8_912_384, captureTime: "2026-07-21T10:08:24+08:00"),
+        CameraMediaItem(id: "preview-001", name: "R6M3_0001.CR3", kind: "raw", sizeBytes: 31_457_280, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true),
+        CameraMediaItem(id: "preview-002", name: "R6M3_0001.JPG", kind: "image", sizeBytes: 8_912_384, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true),
         CameraMediaItem(id: "preview-003", name: "R6M3_0002.MP4", kind: "video", sizeBytes: 128_450_560, captureTime: "2026-07-21T10:10:02+08:00"),
     ]
 }
