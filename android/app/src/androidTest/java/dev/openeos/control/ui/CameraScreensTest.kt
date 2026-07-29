@@ -477,8 +477,14 @@ class CameraScreensTest {
             }
         }
 
+        val root = compose.onNodeWithTag("camera-settings-root").fetchSemanticsNode().boundsInRoot
         val panel = compose.onNodeWithTag("camera-settings-panel").fetchSemanticsNode().boundsInRoot
-        assertEquals(0f, panel.top)
+        val spaceAbove = panel.top - root.top
+        val spaceBelow = root.bottom - panel.bottom
+        assertTrue(
+            "Upside-down settings must stay closer to the safe top edge than the bottom: $panel, $root",
+            spaceAbove < spaceBelow,
+        )
         compose.onNodeWithTag("settings-content-rotation").fetchSemanticsNode()
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()

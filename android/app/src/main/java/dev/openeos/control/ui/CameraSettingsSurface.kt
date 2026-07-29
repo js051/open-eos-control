@@ -47,7 +47,7 @@ fun CameraSettingsSurface(
     ) {
         DarkSheetSystemBarsEffect()
         BackHandler(onBack = onDismissRequest)
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+        BoxWithConstraints(Modifier.fillMaxSize().testTag("camera-settings-root")) {
             StableSettingsPanel(
                 availableWidth = maxWidth,
                 availableHeight = maxHeight,
