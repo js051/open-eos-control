@@ -4,6 +4,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case cameraIdentity = "CAMERA_IDENTITY"
     case batteryStatus = "BATTERY_STATUS"
     case storageStatus = "STORAGE_STATUS"
+    case eventPolling = "EVENT_POLLING"
     case liveView = "LIVE_VIEW"
     case liveViewJPEGPolling = "LIVE_VIEW_JPEG_POLLING"
     case liveViewRTP = "LIVE_VIEW_RTP"
@@ -195,6 +196,14 @@ public struct CameraStatus: Equatable, Sendable {
             rawBatteryJSON: rawBatteryJSON,
             rawStorageJSON: rawStorageJSON
         )
+    }
+}
+
+public struct CameraEvent: Equatable, Sendable {
+    public let changedKeys: [String]
+
+    public init(changedKeys: [String] = []) {
+        self.changedKeys = changedKeys
     }
 }
 

@@ -1,3 +1,4 @@
+import asyncio
 import struct
 import zlib
 
@@ -30,6 +31,8 @@ capabilities = {
 }
 
 state = {
+    "event_sequence": 0,
+    "event_history": [],
     "recording": False,
     "capture_count": 0,
     "half_pressed": False,
@@ -60,6 +63,14 @@ state = {
         },
     ],
 }
+
+
+def publish_event(*keys: str) -> None:
+    state["event_sequence"] += 1
+    state["event_history"].append(
+        {"sequence": state["event_sequence"], "keys": sorted(set(keys))}
+    )
+    del state["event_history"][:-64]
 
 
 def camera_status() -> dict[str, object]:
@@ -107,6 +118,19 @@ async def status() -> dict[str, object]:
     return camera_status()
 
 
+@app.get("/ccapi/events")
+async def events(after: int = 0) -> dict[str, object]:
+    for _ in range(20):
+        matching = [event for event in state["event_history"] if event["sequence"] > after]
+        if matching:
+            return {
+                "sequence": state["event_sequence"],
+                "keys": sorted({key for event in matching for key in event["keys"]}),
+            }
+        await asyncio.sleep(0.05)
+    return {"sequence": state["event_sequence"], "keys": []}
+
+
 @app.get("/ccapi/capabilities")
 async def get_capabilities() -> dict[str, list[str]]:
     return capabilities
@@ -117,6 +141,7 @@ async def update_exposure(payload: ExposureUpdate) -> dict[str, object]:
     for key, value in payload.model_dump(exclude_none=True).items():
         validate_setting(key, value)
         state["exposure"][key] = value
+    publish_event("shootingsettings")
     return camera_status()
 
 
@@ -124,18 +149,21 @@ async def update_exposure(payload: ExposureUpdate) -> dict[str, object]:
 async def update_white_balance(payload: WhiteBalanceUpdate) -> dict[str, object]:
     validate_setting("white_balance", payload.white_balance)
     state["exposure"]["white_balance"] = payload.white_balance
+    publish_event("shootingsettings")
     return camera_status()
 
 
 @app.post("/ccapi/record/start")
 async def record_start() -> dict[str, bool]:
     state["recording"] = True
+    publish_event("recbutton")
     return {"ok": True, "recording": True}
 
 
 @app.post("/ccapi/record/stop")
 async def record_stop() -> dict[str, bool]:
     state["recording"] = False
+    publish_event("recbutton")
     return {"ok": True, "recording": False}
 
 
@@ -146,30 +174,35 @@ async def capture_still() -> dict[str, bool | int]:
     state["media"].insert(
         0, {"id": name, "name": name, "kind": "image", "capture_time": None}
     )
+    publish_event("contents")
     return {"ok": True, "capture_count": state["capture_count"]}
 
 
 @app.post("/ccapi/bulb/start")
 async def bulb_start() -> dict[str, bool]:
     state["bulb_exposure_active"] = True
+    publish_event("shutterbutton")
     return {"ok": True, "bulb_exposure_active": True}
 
 
 @app.post("/ccapi/bulb/stop")
 async def bulb_stop() -> dict[str, bool]:
     state["bulb_exposure_active"] = False
+    publish_event("shutterbutton")
     return {"ok": True, "bulb_exposure_active": False}
 
 
 @app.post("/ccapi/shutter/half-press")
 async def shutter_half_press() -> dict[str, bool]:
     state["half_pressed"] = True
+    publish_event("shutterbutton")
     return {"ok": True, "half_pressed": True}
 
 
 @app.post("/ccapi/shutter/release")
 async def shutter_release() -> dict[str, bool]:
     state["half_pressed"] = False
+    publish_event("shutterbutton")
     return {"ok": True, "half_pressed": False}
 
 
@@ -177,6 +210,7 @@ async def shutter_release() -> dict[str, bool]:
 async def tap_focus(payload: FocusRequest) -> dict[str, float | bool]:
     state["focus_x"] = payload.x
     state["focus_y"] = payload.y
+    publish_event("afframeposition")
     return {"ok": True, "x": payload.x, "y": payload.y}
 
 
@@ -186,6 +220,7 @@ async def click_white_balance(payload: FocusRequest) -> dict[str, object]:
     state["click_wb_y"] = payload.y
     state["click_wb_count"] += 1
     state["exposure"]["white_balance"] = "click"
+    publish_event("shootingsettings")
     return camera_status()
 
 
@@ -214,6 +249,7 @@ async def media_delete(item_id: str) -> Response:
     if item is None:
         raise HTTPException(status_code=404, detail="Media item not found")
     state["media"].remove(item)
+    publish_event("contents")
     return Response(status_code=204)
 
 

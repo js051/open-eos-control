@@ -25,6 +25,8 @@ POST /v1/session
 GET  /v1/session/{id}/info
 GET  /v1/session/{id}/status
 GET  /v1/session/{id}/capabilities
+GET  /v1/session/{id}/events
+DELETE /v1/session/{id}/events
 POST /v1/session/{id}/liveview/start
 POST /v1/session/{id}/liveview/stop
 GET  /v1/session/{id}/liveview/frame
@@ -126,6 +128,18 @@ The bridge should mirror the app-side capability model:
 
 `evidence` is immutable diagnostic context for the active engine. CCAPI reports method/path pairs from discovery; libgphoto2 reports abilities and writable configuration paths. It does not enable a capability by itself. Producers de-duplicate and sort evidence, remove URL queries and line breaks, limit each list to 256 items and each item to 512 characters, and set `truncated` when data was omitted. The browser diagnostic report includes this object plus schema/version/time metadata and the advertised/observed set difference. A separately tested recursive sanitizer removes credentials, authorization values and camera serials before display or clipboard copy.
 
+## Camera Events
+
+`EVENT_POLLING` is advertised only by a direct CCAPI session whose discovery response contains both `GET` and `DELETE /event/polling`. `GET /v1/session/{id}/events` blocks until Canon returns an event or its bounded long timeout expires, then returns only sanitized top-level change keys:
+
+```json
+{
+  "changedKeys": ["shootingsettings", "batterylist"]
+}
+```
+
+The event payload is partial and never replaces `CameraStatus`. Android, iOS, and the browser re-read status and capabilities after a non-empty result. `DELETE /v1/session/{id}/events` stops Canon polling without taking the normal camera-control lock, so it remains callable while the GET is waiting. Session close also performs this cleanup. The current libgphoto2 engine marks event polling as planned and returns a structured unsupported error instead of emulating notifications.
+
 ## Live View
 
 `POST /liveview/start` accepts the same request shape as the app core:
@@ -176,6 +190,7 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - movie start/stop through `recbutton`
 - normalized UI Tap AF mapped through detailed Live View `image` geometry to integer `positionx`/`positiony`, then sent only through advertised `PUT /shooting/liveview/afframeposition`
 - normalized UI Click White Balance mapped through the same geometry, then sent only through advertised `POST /shooting/liveview/clickwb`
+- bounded `event/polling` on an independent wait path, with v1.0 `continue=on`, v1.1+ `timeout=long`, explicit `DELETE`, and authoritative state refresh by clients
 - bounded JPEG Live View lifecycle and frame extraction
 - advertised RTP H.264 lifecycle, UDP reception, RFC 3550/RFC 6184 depacketization and PyAV decode-to-JPEG output
 - bounded/paged storage traversal plus opaque same-origin media IDs, streamed downloads, and deletion only when the camera advertises a matching `DELETE` operation

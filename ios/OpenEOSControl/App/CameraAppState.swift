@@ -68,6 +68,8 @@ final class CameraAppState: ObservableObject {
     private let defaults: UserDefaults
     private var session: CameraSession?
     private var liveViewTask: Task<Void, Never>?
+    private var eventTask: Task<Void, Never>?
+    private var eventGeneration = UUID()
     private var mediaDownloadTask: Task<Void, Never>?
     private var mediaDownloadToken: UUID?
     private var rateTracker = LiveViewRateTracker()
@@ -267,6 +269,7 @@ final class CameraAppState: ObservableObject {
             deletedMediaName = nil
             lastError = nil
             clampLiveViewRequest()
+            beginEventLoop(session: newSession)
             if newSnapshot.capabilities.matrix.supports(.liveView), autoRefresh {
                 await startLiveView()
             }
@@ -277,6 +280,7 @@ final class CameraAppState: ObservableObject {
 
     func openOfflinePreview() {
         stopLiveViewLoop()
+        stopEventLoop()
         resetMediaDownloadState()
         session = nil
         snapshot = Self.makeOfflinePreviewSnapshot()
@@ -298,6 +302,7 @@ final class CameraAppState: ObservableObject {
 
     func disconnect() async {
         stopLiveViewLoop()
+        stopEventLoop()
         resetMediaDownloadState()
         if let session { await session.close() }
         session = nil
@@ -920,6 +925,44 @@ final class CameraAppState: ObservableObject {
     private func stopLiveViewLoop() {
         liveViewTask?.cancel()
         liveViewTask = nil
+    }
+
+    private func beginEventLoop(session: CameraSession) {
+        stopEventLoop()
+        guard supports(.eventPolling), !isPreview else { return }
+        let generation = eventGeneration
+        eventTask = Task { [weak self] in
+            guard let self else { return }
+            var failures = 0
+            while !Task.isCancelled, generation == eventGeneration {
+                do {
+                    let event = try await session.pollEvent()
+                    failures = 0
+                    guard !event.changedKeys.isEmpty else { continue }
+                    let refreshed = try await session.connectSnapshot()
+                    guard generation == eventGeneration, !Task.isCancelled else { break }
+                    snapshot = refreshed
+                    clampLiveViewRequest()
+                    if screen == .media,
+                       event.changedKeys.contains(where: { $0.lowercased().contains("content") }) {
+                        await loadMedia()
+                    }
+                } catch is CancellationError {
+                    break
+                } catch {
+                    guard generation == eventGeneration, !Task.isCancelled else { break }
+                    failures += 1
+                    let delays: [UInt64] = [1_000_000_000, 2_000_000_000, 5_000_000_000]
+                    try? await Task.sleep(nanoseconds: delays[min(failures - 1, delays.count - 1)])
+                }
+            }
+        }
+    }
+
+    private func stopEventLoop() {
+        eventGeneration = UUID()
+        eventTask?.cancel()
+        eventTask = nil
     }
 
     private func pauseLiveViewForBulb() {

@@ -67,6 +67,10 @@ RTP_DISCOVERY = {
         {"path": "/shooting/liveview/rtp", "post": True},
     ]
 }
+EVENT_DISCOVERY = {
+    "ver110": [{"path": "/event/polling", "get": True, "delete": True}],
+    "ver100": [*DISCOVERY["ver100"]],
+}
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,7 @@ class FakeCcapiTransport:
         external_media: bool = False,
         reject_autofocus_start: bool = False,
         reject_bulb_press: bool = False,
+        reject_event_stop: bool = False,
         reject_rtp_start: bool = False,
         thumbnail_body: bytes = JPEG,
         thumbnail_content_type: str = "image/jpeg",
@@ -94,6 +99,7 @@ class FakeCcapiTransport:
         self.external_media = external_media
         self.reject_autofocus_start = reject_autofocus_start
         self.reject_bulb_press = reject_bulb_press
+        self.reject_event_stop = reject_event_stop
         self.reject_rtp_start = reject_rtp_start
         self.thumbnail_body = thumbnail_body
         self.thumbnail_content_type = thumbnail_content_type
@@ -140,6 +146,12 @@ class FakeCcapiTransport:
         self.requests.append(RecordedRequest(method, path, payload))
         if method == "GET" and path == "/ccapi":
             return _json_response(self.discovery)
+        if method == "GET" and path == "/ccapi/ver110/event/polling?timeout=long":
+            return _json_response({"shootingsettings": {"iso": {"value": "1600"}}})
+        if method == "DELETE" and path == "/ccapi/ver110/event/polling":
+            if self.reject_event_stop:
+                return _json_response({"message": "event polling is still busy"}, status=503)
+            return CcapiResponse(204, {}, b"")
         if method == "GET" and path == "/ccapi/ver100/deviceinformation":
             return _json_response(
                 {
@@ -493,6 +505,71 @@ def test_ccapi_close_releases_an_active_bulb_exposure() -> None:
     ]
     assert manual_commands[-1] == {"af": False, "action": "release"}
     assert transport.closed is True
+
+
+def test_ccapi_event_polling_uses_advertised_lifecycle_without_control_lock() -> None:
+    transport = FakeCcapiTransport(discovery=EVENT_DISCOVERY)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080/"
+    )
+
+    capabilities = session.capabilities()
+    event = session.poll_event()
+    session.stop_event_polling()
+
+    assert CameraFeature.EVENT_POLLING in capabilities.supported
+    assert CameraFeature.EVENT_POLLING not in capabilities.planned
+    assert event.changed_keys == ["shootingsettings"]
+    assert RecordedRequest(
+        "GET",
+        "/ccapi/ver110/event/polling?timeout=long",
+        None,
+    ) in transport.requests
+    assert RecordedRequest(
+        "DELETE",
+        "/ccapi/ver110/event/polling",
+        None,
+    ) in transport.requests
+
+
+def test_bridge_api_exposes_ccapi_events_and_stop() -> None:
+    transport = FakeCcapiTransport(discovery=EVENT_DISCOVERY)
+    application = create_app(
+        engine=GPhoto2Engine(runner=FakeRunner()),
+        ccapi_engine=CcapiEngine(lambda _username, _password: transport),
+    )
+    with TestClient(application) as api:
+        created = api.post(
+            "/v1/session",
+            json={"engine": "ccapi", "ccapiUrl": "http://192.168.1.2:8080"},
+        )
+        session_id = created.json()["id"]
+
+        event = api.get(f"/v1/session/{session_id}/events")
+        stopped = api.delete(f"/v1/session/{session_id}/events")
+
+    assert event.status_code == 200
+    assert event.json() == {"changedKeys": ["shootingsettings"]}
+    assert stopped.status_code == 204
+
+
+def test_bridge_api_reports_ccapi_event_stop_failure() -> None:
+    transport = FakeCcapiTransport(discovery=EVENT_DISCOVERY, reject_event_stop=True)
+    application = create_app(
+        engine=GPhoto2Engine(runner=FakeRunner()),
+        ccapi_engine=CcapiEngine(lambda _username, _password: transport),
+    )
+    with TestClient(application) as api:
+        created = api.post(
+            "/v1/session",
+            json={"engine": "ccapi", "ccapiUrl": "http://192.168.1.2:8080"},
+        )
+        session_id = created.json()["id"]
+
+        stopped = api.delete(f"/v1/session/{session_id}/events")
+
+    assert stopped.status_code == 502
+    assert stopped.json()["error"]["code"] == "CCAPI_HTTP_ERROR"
 
 
 def test_failed_ccapi_bulb_press_still_attempts_release() -> None:

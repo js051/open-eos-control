@@ -16,6 +16,7 @@ struct RecordedRequest: Sendable {
     let path: String
     let headers: [String: String]
     let body: Data?
+    let timeoutInterval: TimeInterval
 }
 
 actor MockCameraHTTPTransport: CameraHTTPTransport {
@@ -110,7 +111,8 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
             method: request.httpMethod ?? "GET",
             path: path,
             headers: request.allHTTPHeaderFields ?? [:],
-            body: request.httpBody
+            body: request.httpBody,
+            timeoutInterval: request.timeoutInterval
         )
     }
 }

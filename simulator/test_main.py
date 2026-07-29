@@ -6,6 +6,8 @@ client = TestClient(app)
 
 
 def setup_function() -> None:
+    state["event_sequence"] = 0
+    state["event_history"] = []
     state["capture_count"] = 0
     state["half_pressed"] = False
     state["bulb_exposure_active"] = False
@@ -105,3 +107,22 @@ def test_media_delete_removes_only_the_requested_item() -> None:
     assert response.status_code == 204
     assert [item["id"] for item in media.json()["items"]] == ["SIM_0001.PNG"]
     assert client.delete("/ccapi/media/SIM_0002.PNG").status_code == 404
+
+
+def test_events_return_changes_after_sequence() -> None:
+    client.patch("/ccapi/exposure", json={"iso": "1600"})
+    first = client.get("/ccapi/events?after=0").json()
+    empty = client.get(f"/ccapi/events?after={first['sequence']}").json()
+
+    assert first == {"sequence": 1, "keys": ["shootingsettings"]}
+    assert empty == {"sequence": 1, "keys": []}
+
+
+def test_events_coalesce_multiple_camera_changes() -> None:
+    client.post("/ccapi/record/start", json={})
+    client.post("/ccapi/capture/still", json={"af": True})
+
+    response = client.get("/ccapi/events?after=0").json()
+
+    assert response["sequence"] == 2
+    assert response["keys"] == ["contents", "recbutton"]

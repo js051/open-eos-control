@@ -8,6 +8,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -19,6 +20,8 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.TimeUnit
 
 data class DesktopBridgeCamera(
     val id: String,
@@ -63,8 +66,14 @@ class DesktopBridgeClient(
             }
         }
     }.build()
+    private val eventHttpClient = this.httpClient.newBuilder()
+        .readTimeout(EVENT_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(EVENT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+    private val activeEventCall = AtomicReference<Call?>(null)
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var sessionId: String? = null
+    private var eventPollingSupported = false
     private val observedFeatures = mutableSetOf(CameraFeature.DESKTOP_BRIDGE)
 
     fun observedFeatureSnapshot(): Set<CameraFeature> = observedFeatures.toSet()
@@ -78,6 +87,7 @@ class DesktopBridgeClient(
         check(sessionId == null) { "Desktop bridge session is already initialized." }
         observedFeatures.clear()
         observedFeatures.add(CameraFeature.DESKTOP_BRIDGE)
+        eventPollingSupported = false
         validateService()
         val payload = JSONObject().put("engine", "auto")
         cameraId?.takeIf(String::isNotBlank)?.let { payload.put("cameraId", it) }
@@ -89,9 +99,11 @@ class DesktopBridgeClient(
     suspend fun close() {
         val id = sessionId ?: return
         try {
+            stopEventPolling()
             requestOk(Request.Builder().url(endpoint("v1", "session", id)).delete().build())
         } finally {
             sessionId = null
+            eventPollingSupported = false
         }
     }
 
@@ -109,6 +121,28 @@ class DesktopBridgeClient(
     }
 
     suspend fun status(): CameraStatus = parseStatus(getJson(sessionEndpoint("status")))
+
+    suspend fun pollEvent(): CameraEvent {
+        check(eventPollingSupported) { "Desktop Bridge did not advertise camera event polling." }
+        val body = requestEventJson(Request.Builder().url(sessionEndpoint("events")).get().build())
+        observedFeatures.add(CameraFeature.EVENT_POLLING)
+        return CameraEvent(
+            changedKeys = body.optJSONArray("changedKeys").strings()
+                .asSequence()
+                .map { it.replace("\r", "").replace("\n", "").trim().take(MAX_EVENT_KEY_CHARS) }
+                .filter(String::isNotBlank)
+                .take(MAX_EVENT_KEYS)
+                .toSet(),
+        )
+    }
+
+    suspend fun stopEventPolling() {
+        activeEventCall.getAndSet(null)?.cancel()
+        if (sessionId == null || !eventPollingSupported) return
+        runCatching {
+            requestOk(Request.Builder().url(sessionEndpoint("events")).delete().build())
+        }
+    }
 
     suspend fun capabilities(): CameraCapabilities {
         val body = getJson(sessionEndpoint("capabilities"))
@@ -129,6 +163,7 @@ class DesktopBridgeClient(
         val settingsByKey = settings.associateBy { it.key.lowercase() }
         val coreKeys = setOf("iso", "shutter", "aperture", "whitebalance")
         val supported = body.optJSONArray("supported").cameraFeatures()
+        eventPollingSupported = CameraFeature.EVENT_POLLING in supported
         val planned = body.optJSONArray("planned").cameraFeatures() - supported
         val reasonsObject = body.optJSONObject("reasons") ?: JSONObject()
         val reasons = buildMap {
@@ -605,6 +640,50 @@ class DesktopBridgeClient(
         }
     }
 
+    private suspend fun requestEventJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
+        val call = eventHttpClient.newCall(request)
+        check(activeEventCall.compareAndSet(null, call)) { "A Desktop Bridge event polling request is already active." }
+        val cancelCall = AtomicBoolean(true)
+        val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                if (cancelCall.get()) call.cancel()
+            }
+        }
+        try {
+            call.execute().use { response ->
+                val responseBody = response.body
+                val contentLength = responseBody?.contentLength() ?: 0L
+                check(contentLength < 0L || contentLength <= MAX_EVENT_BODY_BYTES) {
+                    "Desktop Bridge event response was too large."
+                }
+                val output = ByteArrayOutputStream()
+                responseBody?.byteStream()?.use { input ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        check(output.size() <= MAX_EVENT_BODY_BYTES - count) {
+                            "Desktop Bridge event response was too large."
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                }
+                val body = output.toByteArray().toString(Charsets.UTF_8)
+                if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath)
+                runCatching { JSONObject(body) }.getOrElse {
+                    throw IllegalStateException("Desktop Bridge returned invalid event JSON.", it)
+                }
+            }
+        } finally {
+            cancelCall.set(false)
+            cancellationWatcher.cancel()
+            activeEventCall.compareAndSet(call, null)
+        }
+    }
+
     private suspend fun requestOk(request: Request): Unit = withContext(Dispatchers.IO) {
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
@@ -640,6 +719,11 @@ class DesktopBridgeClient(
         const val BRIDGE_SERVICE_NAME = "open-eos-control-bridge"
         const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024L
         const val MAX_ERROR_BODY_CHARS = 2_000
+        const val MAX_EVENT_BODY_BYTES = 256 * 1024
+        const val MAX_EVENT_KEYS = 64
+        const val MAX_EVENT_KEY_CHARS = 128
+        const val EVENT_READ_TIMEOUT_SECONDS = 40L
+        const val EVENT_CALL_TIMEOUT_SECONDS = 45L
         const val MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024L
         const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024L
         const val TRANSFER_BUFFER_BYTES = 64 * 1024

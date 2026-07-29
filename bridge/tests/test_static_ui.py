@@ -142,6 +142,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     required_paths = {
         "/v1/cameras",
         "/v1/session",
+        "/events",
         "/capture/still",
         "/bulb/start",
         "/bulb/stop",
@@ -162,6 +163,10 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert all(path in script for path in required_paths)
     assert "featureSupported(FEATURES." in script
     assert 'MEDIA_DELETE: "MEDIA_DELETE"' in script
+    assert 'EVENT_POLLING: "EVENT_POLLING"' in script
+    assert "function startEventLoop()" in script
+    assert "function cancelEventLoop()" in script
+    assert "await refreshSession({ quiet: true })" in script
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script
     assert "MAX_MEDIA_PREVIEW_BYTES" in script

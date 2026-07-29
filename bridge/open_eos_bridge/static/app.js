@@ -9,6 +9,7 @@
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
 
   const FEATURES = {
+    EVENT_POLLING: "EVENT_POLLING",
     LIVE_VIEW: "LIVE_VIEW",
     LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION",
     STILL_CAPTURE: "STILL_CAPTURE",
@@ -544,6 +545,8 @@
     liveActive: false,
     liveMagnification: 1,
     liveGeneration: 0,
+    eventGeneration: 0,
+    eventController: null,
     requestedFps: 1,
     liveSource: "AUTO",
     activeLiveSource: null,
@@ -979,6 +982,7 @@
       ui.connectionView.hidden = true;
       ui.controlView.hidden = false;
       renderSession();
+      startEventLoop();
       showToast(t("connected"));
     } catch (error) {
       if (state.session?.id) {
@@ -1036,6 +1040,7 @@
     cancelMediaDownload({ silent: true });
     renderAvailability();
     stopLiveLoop();
+    await stopEventLoop(sessionId);
     try {
       await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
     } catch (error) {
@@ -1047,6 +1052,7 @@
 
   function resetSession() {
     stopLiveLoop();
+    cancelEventLoop();
     cancelMediaDownload({ silent: true });
     clearScheduledMediaTransferRender();
     clearMediaThumbnails();
@@ -1076,6 +1082,55 @@
 
   function featureSupported(feature) {
     return Boolean(state.capabilities?.supported?.includes(feature));
+  }
+
+  function startEventLoop() {
+    cancelEventLoop();
+    if (!state.session || !featureSupported(FEATURES.EVENT_POLLING)) return;
+    const generation = state.eventGeneration;
+    const sessionId = encodeURIComponent(state.session.id);
+    void (async () => {
+      let failures = 0;
+      while (
+        state.session &&
+        generation === state.eventGeneration &&
+        featureSupported(FEATURES.EVENT_POLLING)
+      ) {
+        const controller = new AbortController();
+        state.eventController = controller;
+        try {
+          const event = await api(`/v1/session/${sessionId}/events`, { signal: controller.signal });
+          failures = 0;
+          if (event?.changedKeys?.length && generation === state.eventGeneration) {
+            await refreshSession({ quiet: true });
+          }
+        } catch (error) {
+          if (mediaTransfer.isAbortError(error) || generation !== state.eventGeneration) break;
+          captureError(error);
+          failures += 1;
+          await sleep([1000, 2000, 5000][Math.min(failures - 1, 2)]);
+        } finally {
+          if (state.eventController === controller) state.eventController = null;
+        }
+      }
+    })();
+  }
+
+  function cancelEventLoop() {
+    state.eventGeneration += 1;
+    state.eventController?.abort();
+    state.eventController = null;
+  }
+
+  async function stopEventLoop(sessionId) {
+    const supported = featureSupported(FEATURES.EVENT_POLLING);
+    cancelEventLoop();
+    if (!supported) return;
+    try {
+      await api(`/v1/session/${encodeURIComponent(sessionId)}/events`, { method: "DELETE" });
+    } catch (error) {
+      captureError(error);
+    }
   }
 
   function mediaTransferActive() {
@@ -2757,6 +2812,13 @@
       clearMediaThumbnails();
       closeMediaPreview();
       if (!state.session) return;
+      cancelEventLoop();
+      if (featureSupported(FEATURES.EVENT_POLLING)) {
+        api(`/v1/session/${encodeURIComponent(state.session.id)}/events`, {
+          method: "DELETE",
+          keepalive: true,
+        }).catch(() => {});
+      }
       api(`/v1/session/${encodeURIComponent(state.session.id)}`, { method: "DELETE", keepalive: true }).catch(() => {});
     });
   }

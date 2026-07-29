@@ -18,6 +18,7 @@ from .errors import BridgeError
 from .gphoto2 import GPhoto2Engine
 from .models import (
     CameraCapabilities,
+    CameraEvent,
     CameraInfo,
     CameraList,
     CameraStatus,
@@ -182,6 +183,15 @@ def create_app(
     @router.get("/session/{session_id}/capabilities", response_model=CameraCapabilities)
     def camera_capabilities(session_id: str) -> CameraCapabilities:
         return manager.get(session_id).capabilities()
+
+    @router.get("/session/{session_id}/events", response_model=CameraEvent)
+    def camera_events(session_id: str) -> CameraEvent:
+        return manager.get(session_id).poll_event()
+
+    @router.delete("/session/{session_id}/events", status_code=204)
+    def stop_camera_events(session_id: str) -> Response:
+        manager.get(session_id).stop_event_polling()
+        return Response(status_code=204)
 
     @router.post("/session/{session_id}/settings/{key}", response_model=CameraStatus)
     def set_camera_setting(session_id: str, key: str, payload: SettingUpdate) -> CameraStatus:

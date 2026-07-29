@@ -165,6 +165,10 @@ class CameraRepository(
         activeInfo ?: backend.info().also { activeInfo = it }
     )
 
+    suspend fun pollEvent(): CameraEvent = backend.pollEvent()
+
+    suspend fun stopEventPolling() = backend.stopEventPolling()
+
     fun observedFeatures(): Set<CameraFeature> = backend.observedFeatures()
 
     fun refreshNetworkDiagnostics(): CameraNetworkDiagnostics = backend.networkDiagnostics

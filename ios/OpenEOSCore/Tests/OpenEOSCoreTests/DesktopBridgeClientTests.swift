@@ -240,6 +240,55 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(remainingResponses, 0)
     }
 
+    func testEventPollingUsesBridgeLifecycleAndBoundedResponse() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_events","engine":"ccapi","camera":{"id":"ccapi:test","model":"Canon EOS R6 Mark III","port":"network","engine":"ccapi"}}"#
+        )
+        let eventCapabilities = capabilities.replacingOccurrences(
+            of: #""supported":["#,
+            with: #""supported":["EVENT_POLLING","#
+        )
+        await transport.enqueueJSON(
+            path: "/v1/session/session_events/capabilities",
+            body: eventCapabilities
+        )
+        await transport.enqueueJSON(
+            path: "/v1/session/session_events/events",
+            body: #"{"changedKeys":["shootingsettings","contents"]}"#
+        )
+        await transport.enqueue(
+            method: "DELETE",
+            path: "/v1/session/session_events/events",
+            status: 204,
+            body: Data()
+        )
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "ccapi:test",
+            transport: transport
+        )
+
+        try await client.initialize()
+        let parsed = try await client.capabilities()
+        let event = try await client.pollEvent()
+        await client.stopEventPolling()
+
+        XCTAssertTrue(parsed.matrix.supports(.eventPolling))
+        XCTAssertEqual(event.changedKeys, ["shootingsettings", "contents"])
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.suffix(2).map(\.path), [
+            "/v1/session/session_events/events",
+            "/v1/session/session_events/events",
+        ])
+        XCTAssertEqual(requests[3].timeoutInterval, 40)
+        XCTAssertEqual(requests[4].timeoutInterval, 5)
+    }
+
     func testStructuredErrorAndDiagnosticsNeverExposeToken() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/health", body: health)

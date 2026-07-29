@@ -7,7 +7,7 @@ import re
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import BinaryIO, Protocol
@@ -20,6 +20,7 @@ from .models import (
     BatteryStatus,
     CameraCapabilities,
     CameraDescriptor,
+    CameraEvent,
     CameraFeature,
     CameraInfo,
     CameraProfile,
@@ -58,6 +59,9 @@ MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
+MAX_EVENT_BYTES = 256 * 1024
+MAX_EVENT_KEYS = 64
+MAX_EVENT_KEY_CHARS = 128
 TRANSFER_CHUNK_BYTES = 64 * 1024
 HALF_PRESS_SECONDS = 0.35
 HTTP_METHODS = ("GET", "PUT", "POST", "DELETE")
@@ -331,6 +335,7 @@ class CcapiSession:
         self._rtp_session_factory = rtp_session_factory
         self._rtp_destination_address = rtp_destination_address
         self._lock = threading.RLock()
+        self._event_lock = threading.Lock()
         self._closed = False
         self._initialized = False
         self._api_prefixes = ["/ccapi/ver100"]
@@ -409,6 +414,10 @@ class CcapiSession:
         with self._lock:
             if self._closed:
                 return
+            try:
+                self.stop_event_polling()
+            except BridgeError as error:
+                self._last_error = error.message
             if self._bulb_exposure_active:
                 manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
                     "POST", "/shooting/control/shutterbutton/manual"
@@ -553,8 +562,11 @@ class CcapiSession:
                 )
             if self._supports_media_delete():
                 supported.add(CameraFeature.MEDIA_DELETE)
+            if self._event_polling_operations() is not None:
+                supported.add(CameraFeature.EVENT_POLLING)
 
             candidates = {
+                CameraFeature.EVENT_POLLING,
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
                 CameraFeature.BULB_EXPOSURE,
@@ -584,6 +596,9 @@ class CcapiSession:
                 supported=sorted(supported, key=str),
                 planned=sorted(candidates - supported, key=str),
                 reasons={
+                    CameraFeature.EVENT_POLLING.value: (
+                        "The camera must advertise both GET and DELETE for the Canon event polling endpoint."
+                    ),
                     CameraFeature.LIVE_VIEW_RTP.value: (self._rtp_capability_reason()),
                     CameraFeature.FOCUS_DRIVE.value: (
                         "The camera did not advertise the verified CCAPI POST drivefocus operation."
@@ -618,6 +633,42 @@ class CcapiSession:
                 settings=controls,
                 evidence=self._capability_evidence(),
             )
+
+    def poll_event(self) -> CameraEvent:
+        with self._lock:
+            self._ensure_initialized()
+            operations = self._event_polling_operations()
+        if operations is None:
+            raise unsupported(CameraFeature.EVENT_POLLING.value, self.engine_name)
+        poll, _ = operations
+        parameter = "timeout=long" if _path_version(poll.path) >= 110 else "continue=on"
+        separator = "&" if "?" in poll.path else "?"
+        with self._event_lock:
+            value = self._request_json(
+                "GET",
+                f"{poll.path}{separator}{parameter}",
+                timeout=40.0,
+                max_bytes=MAX_EVENT_BYTES,
+            )
+        if not isinstance(value, dict):
+            raise BridgeError(
+                "INVALID_CCAPI_EVENT",
+                "Canon event polling did not return a JSON object.",
+                status_code=502,
+                engine=self.engine_name,
+            )
+        changed_keys = _safe_event_keys(value.keys())
+        with self._lock:
+            if not self._closed:
+                self._observed.add(CameraFeature.EVENT_POLLING)
+        return CameraEvent(changed_keys=changed_keys)
+
+    def stop_event_polling(self) -> None:
+        operations = self._event_polling_operations()
+        if operations is None or self._closed:
+            return
+        _, stop = operations
+        self._request_ok("DELETE", stop.path, timeout=5.0)
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
@@ -1463,8 +1514,16 @@ class CcapiSession:
             )
         return None
 
-    def _request_json(self, method: str, path: str, payload: dict[str, object] | None = None) -> object:
-        response = self._request(method, path, payload)
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, object] | None = None,
+        *,
+        timeout: float = 15.0,
+        max_bytes: int = MAX_JSON_BYTES,
+    ) -> object:
+        response = self._request(method, path, payload, timeout=timeout, max_bytes=max_bytes)
         try:
             return json.loads(response.body)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -1475,8 +1534,15 @@ class CcapiSession:
                 engine=self.engine_name,
             ) from error
 
-    def _request_ok(self, method: str, path: str, payload: dict[str, object] | None = None) -> None:
-        self._request(method, path, payload)
+    def _request_ok(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, object] | None = None,
+        *,
+        timeout: float = 15.0,
+    ) -> None:
+        self._request(method, path, payload, timeout=timeout)
 
     def _request(
         self,
@@ -1485,6 +1551,7 @@ class CcapiSession:
         payload: dict[str, object] | None = None,
         *,
         headers: Mapping[str, str] | None = None,
+        timeout: float = 15.0,
         max_bytes: int = MAX_JSON_BYTES,
     ) -> CcapiResponse:
         self._require_open()
@@ -1494,6 +1561,7 @@ class CcapiSession:
             self._url(path),
             body=body,
             headers=headers,
+            timeout=timeout,
             max_bytes=max_bytes,
         )
         if not 200 <= response.status < 300:
@@ -1514,6 +1582,23 @@ class CcapiSession:
         matches = [item for item in self._operations if item.method == method and item.path.endswith(suffix)]
         preferred = next((item for item in matches if item.path.startswith(self._preferred_prefix)), None)
         return preferred or max(matches, key=lambda item: _path_version(item.path), default=None)
+
+    def _event_polling_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
+        gets = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith("/event/polling")
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for get in gets:
+            prefix = get.path.removesuffix("/event/polling")
+            delete = CcapiOperation("DELETE", f"{prefix}/event/polling")
+            if delete in self._operations:
+                return get, delete
+        return None
 
     def _live_view_frame_paths(self) -> list[str]:
         candidates: list[str] = []
@@ -2055,6 +2140,20 @@ def _method_supported(value: object) -> bool:
     if isinstance(value, str):
         return bool(value) and value.casefold() not in {"false", "no", "none", "unsupported"}
     return True
+
+
+def _safe_event_keys(keys: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for key in keys:
+        safe = str(key).replace("\r", "").replace("\n", "").strip()[:MAX_EVENT_KEY_CHARS]
+        if not safe or safe in seen:
+            continue
+        seen.add(safe)
+        result.append(safe)
+        if len(result) >= MAX_EVENT_KEYS:
+            break
+    return result
 
 
 def _version_number(value: str) -> int:

@@ -66,6 +66,9 @@ public actor DesktopBridgeClient {
     private static let maximumErrorBodyBytes = 2_000
     private static let maximumEvidenceItems = 256
     private static let maximumEvidenceItemCharacters = 512
+    private static let maximumEventBytes = 256 * 1024
+    private static let maximumEventKeys = 64
+    private static let maximumEventKeyCharacters = 128
     private static let pathSegmentAllowed = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
     )
@@ -79,6 +82,7 @@ public actor DesktopBridgeClient {
     private var sessionID: String?
     private var sessionEngine: String?
     private var bridgeVersion: String?
+    private var eventPollingSupported = false
 
     public init(
         baseURL: String,
@@ -154,7 +158,9 @@ public actor DesktopBridgeClient {
         defer {
             self.sessionID = nil
             sessionEngine = nil
+            eventPollingSupported = false
         }
+        await stopEventPolling()
         try? await requestOK(endpoint(["v1", "session", sessionID]), method: "DELETE")
     }
 
@@ -184,10 +190,40 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
+    public func pollEvent() async throws -> CameraEvent {
+        guard eventPollingSupported else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge did not advertise camera event polling.")
+        }
+        let body = try await requestJSON(
+            url: sessionEndpoint(["events"]),
+            method: "GET",
+            payload: nil,
+            timeoutInterval: 40,
+            maximumBytes: Self.maximumEventBytes
+        )
+        var seen = Set<String>()
+        let keys = body.stringArray("changedKeys").compactMap { key -> String? in
+            let safe = String(
+                key.replacingOccurrences(of: "\r", with: "")
+                    .replacingOccurrences(of: "\n", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .prefix(Self.maximumEventKeyCharacters)
+            )
+            return !safe.isEmpty && seen.insert(safe).inserted ? safe : nil
+        }
+        return CameraEvent(changedKeys: Array(keys.prefix(Self.maximumEventKeys)))
+    }
+
+    public func stopEventPolling() async {
+        guard sessionID != nil, eventPollingSupported else { return }
+        try? await requestOK(sessionEndpoint(["events"]), method: "DELETE", timeoutInterval: 5)
+    }
+
     public func capabilities() async throws -> CameraCapabilities {
         let body = try await getJSON(sessionEndpoint(["capabilities"]))
         let settings = body.array("settings").compactMap(Self.parseSetting)
         let supported = Set(body.stringArray("supported").compactMap(CameraFeature.init(rawValue:)))
+        eventPollingSupported = supported.contains(.eventPolling)
         let planned = Set(body.stringArray("planned").compactMap(CameraFeature.init(rawValue:))).subtracting(supported)
         let reasons = body.dictionary("reasons").reduce(into: [CameraFeature: String]()) { result, entry in
             guard let feature = CameraFeature(rawValue: entry.key), let reason = entry.value as? String else { return }
@@ -562,8 +598,19 @@ public actor DesktopBridgeClient {
         try await requestJSON(url: url, method: "POST", payload: payload)
     }
 
-    private func requestJSON(url: URL, method: String, payload: BridgeJSON?) async throws -> BridgeJSON {
-        var request = makeRequest(url: url, method: method, accept: "application/json")
+    private func requestJSON(
+        url: URL,
+        method: String,
+        payload: BridgeJSON?,
+        timeoutInterval: TimeInterval = 10,
+        maximumBytes: Int? = nil
+    ) async throws -> BridgeJSON {
+        var request = makeRequest(
+            url: url,
+            method: method,
+            accept: "application/json",
+            timeoutInterval: timeoutInterval
+        )
         if let payload {
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -571,6 +618,11 @@ public actor DesktopBridgeClient {
         let response = try await transport.send(request)
         guard (200..<300).contains(response.statusCode) else {
             throw Self.httpError(response: response, method: method, url: url)
+        }
+        if let maximumBytes, response.body.count > maximumBytes {
+            throw DesktopBridgeError.invalidResponse(
+                "Desktop Bridge response at \(url.path) exceeded \(maximumBytes) bytes."
+            )
         }
         guard
             let value = try? JSONSerialization.jsonObject(with: response.body),
@@ -583,16 +635,28 @@ public actor DesktopBridgeClient {
         return object
     }
 
-    private func requestOK(_ url: URL, method: String) async throws {
-        let response = try await transport.send(makeRequest(url: url, method: method, accept: "application/json"))
+    private func requestOK(
+        _ url: URL,
+        method: String,
+        timeoutInterval: TimeInterval = 10
+    ) async throws {
+        let response = try await transport.send(
+            makeRequest(url: url, method: method, accept: "application/json", timeoutInterval: timeoutInterval)
+        )
         guard (200..<300).contains(response.statusCode) else {
             throw Self.httpError(response: response, method: method, url: url)
         }
     }
 
-    private func makeRequest(url: URL, method: String, accept: String) -> URLRequest {
+    private func makeRequest(
+        url: URL,
+        method: String,
+        accept: String,
+        timeoutInterval: TimeInterval = 10
+    ) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
+        request.timeoutInterval = timeoutInterval
         request.setValue(accept, forHTTPHeaderField: "Accept")
         if !bearerToken.isEmpty {
             request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")

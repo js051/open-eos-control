@@ -66,6 +66,7 @@ enum class CameraFeature(
     CAMERA_IDENTITY("Camera identity"),
     BATTERY_STATUS("Battery status"),
     STORAGE_STATUS("Storage status"),
+    EVENT_POLLING("Camera event polling"),
     LIVE_VIEW("Live view"),
     LIVE_VIEW_JPEG_POLLING("Live view JPEG polling"),
     LIVE_VIEW_RTP("Live view RTP"),
@@ -117,6 +118,7 @@ data class CapabilityMatrix(
         ): CapabilityMatrix = CapabilityMatrix(
             supported = supported,
             planned = setOf(
+                CameraFeature.EVENT_POLLING,
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
                 CameraFeature.BULB_EXPOSURE,
@@ -135,6 +137,8 @@ data class CapabilityMatrix(
             reasons = mapOf(
                 CameraFeature.LIVE_VIEW_RTP to
                     "Requires advertised Canon RTP SDP/start endpoints plus a camera Wi-Fi route for native H.264 decoding.",
+                CameraFeature.EVENT_POLLING to
+                    "The camera must advertise both GET and DELETE for the Canon event polling endpoint.",
                 CameraFeature.TAP_FOCUS to
                     "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
                 CameraFeature.CLICK_WHITE_BALANCE to
@@ -298,6 +302,10 @@ data class CameraStatus(
     val rawStorageJson: String = "",
     val rawTransportJson: String = "",
     val bulbExposureActive: Boolean? = null,
+)
+
+data class CameraEvent(
+    val changedKeys: Set<String> = emptySet(),
 )
 
 data class CameraCapabilityEvidence(
