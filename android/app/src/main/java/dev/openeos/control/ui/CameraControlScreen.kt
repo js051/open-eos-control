@@ -900,11 +900,16 @@ private fun LiveViewTapActionControls(state: CameraUiState, actions: CameraActio
                         contentColor = if (selectedAction == LiveViewTapAction.FOCUS) AppBackground else AppText,
                     ),
                     shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.weight(1f).height(48.dp),
+                    modifier = Modifier.weight(1f).height(64.dp).testTag("tap-action-focus"),
                 ) {
                     Icon(painterResource(LucideR.drawable.lucide_ic_focus), null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.tap_action_focus))
+                    Text(
+                        stringResource(R.string.tap_action_focus),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
             Button(
@@ -914,11 +919,16 @@ private fun LiveViewTapActionControls(state: CameraUiState, actions: CameraActio
                     contentColor = if (selectedAction == LiveViewTapAction.WHITE_BALANCE) AppBackground else AppText,
                 ),
                 shape = RoundedCornerShape(6.dp),
-                modifier = Modifier.weight(1f).height(48.dp),
+                modifier = Modifier.weight(1f).height(64.dp).testTag("tap-action-white-balance"),
             ) {
                 Icon(painterResource(LucideR.drawable.lucide_ic_pipette), null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.tap_action_white_balance))
+                Text(
+                    stringResource(R.string.tap_action_white_balance),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
             }
         }
     }

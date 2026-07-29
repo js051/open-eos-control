@@ -413,7 +413,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnRemeasuresLiveViewSettingsInsideTheStableSidePanel() {
+    fun quarterTurnRemeasuresLiveViewSettingsInsideAFullLengthSidePanel() {
         val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
         val actions = noOpActions().copy(closePicker = { picker.value = null })
         compose.setContent {
@@ -434,6 +434,10 @@ class CameraScreensTest {
             .onNodeWithTag("settings-content-viewport", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInRoot
+        val panelBounds = compose
+            .onNodeWithTag("camera-settings-panel")
+            .fetchSemanticsNode()
+            .boundsInRoot
         val titleBounds = compose
             .onNodeWithText(resourceText(R.string.live_view_settings))
             .fetchSemanticsNode()
@@ -446,6 +450,10 @@ class CameraScreensTest {
             "Sideways settings should retain a measurable constrained viewport: $viewportBounds",
             viewportBounds.width > 0f && viewportBounds.height > 0f,
         )
+        assertTrue(
+            "Quarter-turn settings should use a tall side panel in the fixed camera layout: $panelBounds",
+            panelBounds.height > panelBounds.width,
+        )
         compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.composition_grid)).assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
@@ -454,7 +462,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun upsideDownSettingsRotateInsideTheStableCameraPanel() {
+    fun upsideDownSettingsMoveToThePhysicalBottomEdge() {
         compose.setContent {
             CompositionLocalProvider(
                 LocalCameraControlRotation provides 180f,
@@ -469,7 +477,8 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithTag("camera-settings-panel").fetchSemanticsNode()
+        val panel = compose.onNodeWithTag("camera-settings-panel").fetchSemanticsNode().boundsInRoot
+        assertEquals(0f, panel.top)
         compose.onNodeWithTag("settings-content-rotation").fetchSemanticsNode()
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
@@ -514,7 +523,10 @@ class CameraScreensTest {
             .fetchSemanticsNode()
             .boundsInRoot
         assertTrue(naturalTitle.width > naturalTitle.height)
-        assertEquals(sidewaysPanel, naturalPanel)
+        assertTrue(sidewaysPanel.height > sidewaysPanel.width)
+        assertTrue(naturalPanel.width > sidewaysPanel.width)
+        assertTrue(naturalPanel.height < sidewaysPanel.height)
+        assertTrue(sidewaysPanel != naturalPanel)
 
         compose.runOnIdle { controlRotation.floatValue = -90f }
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
@@ -714,8 +726,26 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.live_view_tap_action))
             .performScrollTo()
             .assertIsDisplayed()
-        compose.onNodeWithText(resourceText(R.string.tap_action_white_balance))
+        val whiteBalanceLabel = compose.onNodeWithText(
+            resourceText(R.string.tap_action_white_balance),
+            useUnmergedTree = true,
+        )
+        whiteBalanceLabel
             .performScrollTo()
+            .assertIsDisplayed()
+        val buttonBounds = compose
+            .onNodeWithTag("tap-action-white-balance")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val labelBounds = whiteBalanceLabel.fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "The longest tap-action label must remain inside its button: $labelBounds, $buttonBounds",
+            labelBounds.left >= buttonBounds.left &&
+                labelBounds.top >= buttonBounds.top &&
+                labelBounds.right <= buttonBounds.right &&
+                labelBounds.bottom <= buttonBounds.bottom,
+        )
+        whiteBalanceLabel
             .performClick()
 
         compose.runOnIdle {
