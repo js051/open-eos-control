@@ -117,6 +117,7 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
 
 
 def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     script = (STATIC / "app.js").read_text(encoding="utf-8")
     required_paths = {
         "/v1/cameras",
@@ -133,12 +134,17 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "/liveview/magnification",
         "/media",
         "/thumbnail",
+        "/preview",
     }
 
     assert all(path in script for path in required_paths)
     assert "featureSupported(FEATURES." in script
     assert 'MEDIA_DELETE: "MEDIA_DELETE"' in script
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
+    assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script
+    assert "MAX_MEDIA_PREVIEW_BYTES" in script
+    assert "await ui.mediaPreviewImage.decode()" in script
+    assert 'data-view="media" data-i18n-aria="media"' in html
     assert 'CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE"' in script
     assert 'SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS"' in script
     assert 'LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION"' in script

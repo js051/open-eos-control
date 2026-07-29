@@ -618,6 +618,43 @@ class CameraScreensTest {
     }
 
     @Test
+    fun mediaPreviewOpensFromThumbnailOnlyWhenAdvertised() {
+        val item = CameraMediaItem("ccapi:image", "IMG_0042.JPG", "image")
+        val preview = CameraUiState().withOfflinePreview()
+        val capabilities = requireNotNull(preview.capabilities)
+        val state = mutableStateOf(
+            preview.copy(
+                previewMode = false,
+                mediaItems = listOf(item),
+                capabilities = capabilities.copy(
+                    matrix = capabilities.matrix.copy(
+                        supported = capabilities.matrix.supported + CameraFeature.MEDIA_PREVIEW,
+                    ),
+                ),
+            ),
+        )
+        var openedItem: CameraMediaItem? = null
+        val actions = noOpActions().copy(
+            openMediaPreview = {
+                openedItem = it
+                state.value = state.value.copy(mediaPreviewItem = it, mediaPreviewLoading = true)
+            },
+            closeMediaPreview = {
+                state.value = state.value.copy(mediaPreviewItem = null, mediaPreviewLoading = false)
+            },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state.value, actions) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.preview_media, item.name)).performClick()
+        compose.runOnIdle { assertEquals(item, openedItem) }
+        compose.onNodeWithContentDescription(resourceText(R.string.close_media_preview)).assertIsDisplayed()
+            .performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.close_media_preview)).assertDoesNotExist()
+    }
+
+    @Test
     fun mediaDeleteRequiresConfirmationBeforeDispatchingCameraAction() {
         var deletedName: String? = null
         val state = CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA)
@@ -897,7 +934,8 @@ class CameraScreensTest {
         toggleRecording = {}, tapFocus = { _, _ -> },
         halfPressShutter = {},
         clickWhiteBalance = { _, _ -> },
-        refreshMedia = {}, loadMediaThumbnail = {}, downloadMedia = { _, _ -> }, deleteMedia = {},
+        refreshMedia = {}, loadMediaThumbnail = {}, openMediaPreview = {}, closeMediaPreview = {},
+        downloadMedia = { _, _ -> }, deleteMedia = {},
         cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {},
         setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setLiveViewSource = {}, setAppLanguage = {}, clearError = {},

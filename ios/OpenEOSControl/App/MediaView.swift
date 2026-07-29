@@ -38,6 +38,17 @@ struct MediaView: View {
         .task {
             if camera.mediaItems.isEmpty { await camera.loadMedia() }
         }
+        .onDisappear { camera.closeMediaPreview() }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { camera.mediaPreviewItem != nil },
+                set: { if !$0 { camera.closeMediaPreview() } }
+            )
+        ) {
+            MediaPreviewView(controlRotation: controlRotation)
+                .environmentObject(camera)
+                .environmentObject(language)
+        }
         .alert(
             language.string("delete_media_title"),
             isPresented: Binding(
@@ -124,6 +135,24 @@ struct MediaView: View {
 
     @ViewBuilder
     private func mediaThumbnail(_ item: CameraMediaItem) -> some View {
+        let previewable = item.kind.caseInsensitiveCompare("image") == .orderedSame
+            || item.kind.caseInsensitiveCompare("raw") == .orderedSame
+        if previewable, camera.supports(.mediaPreview), !camera.isPreview {
+            Button {
+                Task { await camera.openMediaPreview(item) }
+            } label: {
+                mediaThumbnailContent(item)
+            }
+            .buttonStyle(.plain)
+            .disabled(camera.isBusy(.media))
+            .accessibilityLabel(Text(language.format("preview_media", item.name)))
+            .accessibilityIdentifier("preview-media-\(item.id)")
+        } else {
+            mediaThumbnailContent(item)
+        }
+    }
+
+    private func mediaThumbnailContent(_ item: CameraMediaItem) -> some View {
         ZStack {
             Color.cameraSurfaceRaised
             if let data = camera.mediaThumbnails[item.id], let image = UIImage(data: data) {
@@ -202,6 +231,57 @@ struct MediaView: View {
         case "video": "film"
         case "raw": "camera.aperture"
         default: "photo"
+        }
+    }
+}
+
+private struct MediaPreviewView: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
+    let controlRotation: Double
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let data = camera.mediaPreviewData, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(.vertical, 64)
+                    .accessibilityLabel(Text(language.format("media_preview_content", camera.mediaPreviewItem?.name ?? "")))
+            } else if camera.mediaPreviewLoading {
+                ProgressView().tint(Color.cameraAccent).controlSize(.large)
+            } else {
+                Text("media_preview_unavailable")
+                    .foregroundStyle(Color.cameraSecondaryText)
+                    .padding(24)
+            }
+
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Button { camera.closeMediaPreview() } label: {
+                        RotatingControl(degrees: controlRotation) {
+                            Image(systemName: "xmark")
+                                .frame(width: 48, height: 48)
+                                .accessibilityLabel(Text("close_media_preview"))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("close-media-preview")
+                    Text(camera.mediaPreviewItem?.name ?? "")
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Text(camera.mediaPreviewItem?.kind.uppercased() ?? "")
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraSecondaryText)
+                }
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 8)
+                .frame(minHeight: 56)
+                Spacer()
+            }
         }
     }
 }

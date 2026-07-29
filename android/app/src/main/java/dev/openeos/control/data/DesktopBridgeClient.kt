@@ -379,18 +379,48 @@ class DesktopBridgeClient(
         return items
     }
 
-    suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = withContext(Dispatchers.IO) {
+    suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        val (bytes, contentType) = mediaImageRepresentation(
+            item = item,
+            endpoint = "thumbnail",
+            maxBytes = MAX_MEDIA_THUMBNAIL_BYTES,
+            label = "thumbnail",
+        )
+        observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL)
+        return CameraMediaThumbnail(item = item, bytes = bytes, contentType = contentType)
+    }
+
+    suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
+        require(item.kind.equals("image", ignoreCase = true) || item.kind.equals("raw", ignoreCase = true)) {
+            "Display preview is available only for camera image items."
+        }
+        val (bytes, contentType) = mediaImageRepresentation(
+            item = item,
+            endpoint = "preview",
+            maxBytes = MAX_MEDIA_PREVIEW_BYTES,
+            label = "display preview",
+        )
+        observedFeatures.add(CameraFeature.MEDIA_PREVIEW)
+        return CameraMediaPreview(item = item, bytes = bytes, contentType = contentType)
+    }
+
+    private suspend fun mediaImageRepresentation(
+        item: CameraMediaItem,
+        endpoint: String,
+        maxBytes: Long,
+        label: String,
+    ): Pair<ByteArray, String> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url(sessionEndpoint("media", item.id, "thumbnail"))
+            .url(sessionEndpoint("media", item.id, endpoint))
             .header("Accept", "image/*")
             .get()
             .build()
         httpClient.newCall(request).execute().use { response ->
-            val body = response.body ?: error("Desktop Bridge returned an empty thumbnail response.")
-            if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media thumbnail")
+            val body = response.body ?: error("Desktop Bridge returned an empty $label response.")
+            if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media $label")
             val contentLength = body.contentLength()
-            check(contentLength <= MAX_MEDIA_THUMBNAIL_BYTES || contentLength < 0L) {
-                "Desktop Bridge thumbnail exceeded $MAX_MEDIA_THUMBNAIL_BYTES bytes."
+            check(contentLength <= maxBytes || contentLength < 0L) {
+                "Desktop Bridge $label exceeded $maxBytes bytes."
             }
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
@@ -400,19 +430,17 @@ class DesktopBridgeClient(
                     val count = input.read(buffer)
                     if (count < 0) break
                     output.write(buffer, 0, count)
-                    check(output.size().toLong() <= MAX_MEDIA_THUMBNAIL_BYTES) {
-                        "Desktop Bridge thumbnail exceeded $MAX_MEDIA_THUMBNAIL_BYTES bytes."
+                    check(output.size().toLong() <= maxBytes) {
+                        "Desktop Bridge $label exceeded $maxBytes bytes."
                     }
                 }
             }
             val bytes = output.toByteArray()
             val contentType = response.header("content-type")?.substringBefore(';')?.trim()
             check(bytes.isNotEmpty() && contentType?.startsWith("image/") == true) {
-                "Desktop Bridge did not return an image thumbnail."
+                "Desktop Bridge did not return an image $label."
             }
-            CameraMediaThumbnail(item = item, bytes = bytes, contentType = contentType).also {
-                observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL)
-            }
+            bytes to contentType
         }
     }
 
@@ -603,6 +631,7 @@ class DesktopBridgeClient(
         const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024L
         const val MAX_ERROR_BODY_CHARS = 2_000
         const val MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024L
+        const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024L
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
     }

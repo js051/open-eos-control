@@ -109,13 +109,13 @@
         </div>
 
         <nav class="view-tabs" aria-label="Views" data-i18n-aria="views">
-          <button class="tab active" type="button" data-view="live" aria-current="page">
+          <button class="tab active" type="button" data-view="live" aria-current="page" data-i18n-aria="control">
             <span class="icon" data-icon="camera" aria-hidden="true"></span><span data-i18n="control">Control</span>
           </button>
-          <button class="tab" type="button" data-view="media">
+          <button class="tab" type="button" data-view="media" data-i18n-aria="media">
             <span class="icon" data-icon="images" aria-hidden="true"></span><span data-i18n="media">Media</span>
           </button>
-          <button class="tab" type="button" data-view="diagnostics">
+          <button class="tab" type="button" data-view="diagnostics" data-i18n-aria="diagnostics">
             <span class="icon" data-icon="bug" aria-hidden="true"></span><span data-i18n="diagnostics">Diagnostics</span>
           </button>
         </nav>
@@ -278,6 +278,21 @@
       </button>
     </div>
     <div id="setting-options" class="setting-options"></div>
+  </dialog>
+
+  <dialog id="media-preview-dialog" class="media-preview-dialog" aria-labelledby="media-preview-title">
+    <div class="media-preview-heading">
+      <button id="media-preview-close" class="icon-button" type="button" data-i18n-aria="closeMediaPreview">
+        <span class="icon" data-icon="x" aria-hidden="true"></span>
+      </button>
+      <strong id="media-preview-title"></strong>
+      <span id="media-preview-kind" class="supporting"></span>
+    </div>
+    <div class="media-preview-stage">
+      <img id="media-preview-image" alt="" hidden>
+      <div id="media-preview-loading" class="media-preview-message" data-i18n="loadingPreview">Loading camera preview</div>
+      <div id="media-preview-unavailable" class="media-preview-message" data-i18n="previewUnavailable" hidden>The camera preview could not be displayed.</div>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

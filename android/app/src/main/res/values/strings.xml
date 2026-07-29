@@ -213,6 +213,10 @@
     <string name="back_to_camera">Back to camera</string>
     <string name="media_item_count">%1$d items</string>
     <string name="media_thumbnail">Thumbnail for %1$s</string>
+    <string name="preview_media">Preview %1$s</string>
+    <string name="close_media_preview">Close media preview</string>
+    <string name="media_preview_content">Preview of %1$s</string>
+    <string name="media_preview_unavailable">The camera preview could not be displayed.</string>
     <string name="refresh_media">Refresh camera media</string>
     <string name="media_downloaded">Saved %1$s</string>
     <string name="downloading_media">Downloading %1$s</string>

@@ -264,6 +264,15 @@ def create_app(
             headers={"Cache-Control": "private, no-store, max-age=0"},
         )
 
+    @router.get("/session/{session_id}/media/{media_id}/preview")
+    def media_preview(session_id: str, media_id: str) -> Response:
+        content, content_type = manager.get(session_id).media_preview(media_id)
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Cache-Control": "private, no-store, max-age=0"},
+        )
+
     @router.get("/session/{session_id}/media/{media_id}")
     def download_media(session_id: str, media_id: str) -> StreamingResponse:
         item, chunks = manager.get(session_id).download_media(media_id)

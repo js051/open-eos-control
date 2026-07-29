@@ -78,6 +78,14 @@ def test_media_thumbnail_uses_canon_kind_query() -> None:
     assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
+def test_media_display_preview_uses_canon_kind_query() -> None:
+    response = client.get("/ccapi/media/SIM_0001.PNG?kind=display")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_media_delete_removes_only_the_requested_item() -> None:
     response = client.delete("/ccapi/media/SIM_0002.PNG")
     media = client.get("/ccapi/media")

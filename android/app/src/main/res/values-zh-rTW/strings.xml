@@ -206,4 +206,8 @@
     <string name="camera_value_creative">創意</string>
     <string name="camera_value_action">動態</string>
     <string name="media_thumbnail">%1$s 的縮圖</string>
+    <string name="preview_media">預覽 %1$s</string>
+    <string name="close_media_preview">關閉媒體預覽</string>
+    <string name="media_preview_content">%1$s 的預覽</string>
+    <string name="media_preview_unavailable">無法顯示相機提供的預覽影像。</string>
 </resources>

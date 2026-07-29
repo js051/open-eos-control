@@ -51,6 +51,7 @@ public actor CCAPIClient {
     private static let maximumMediaPages = 100
     private static let maximumMediaTreeDepth = 4
     private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
+    private static let maximumMediaPreviewBytes = 32 * 1024 * 1024
     private static let maximumCapabilityEvidenceItems = 256
     private static let maximumCapabilityEvidenceItemCharacters = 512
     private static let maximumRTPSessionDescriptionBytes = 64 * 1024
@@ -286,14 +287,14 @@ public actor CCAPIClient {
         if supportsCoordinateClickWhiteBalance() { supported.insert(.clickWhiteBalance) }
         if focusDriveOperation() != nil { supported.insert(.focusDrive) }
         if supports(.get, suffix: "/contents") {
-            supported.formUnion([.mediaBrowser, .mediaThumbnail, .mediaDownload])
+            supported.formUnion([.mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload])
         }
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
 
         let allPlanned: Set<CameraFeature> = [
             .liveViewRTP, .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
             .clickWhiteBalance,
-            .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaDownload,
+            .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
@@ -763,34 +764,67 @@ public actor CCAPIClient {
     }
 
     public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
+        let response = try await mediaImageRepresentation(
+            item,
+            kind: "thumbnail",
+            maximumBytes: Self.maximumMediaThumbnailBytes,
+            label: "thumbnail",
+            feature: .mediaThumbnail
+        )
+        observedFeatures.insert(.mediaThumbnail)
+        return CameraMediaThumbnail(item: item, data: response.data, contentType: response.contentType)
+    }
+
+    public func mediaPreview(_ item: CameraMediaItem) async throws -> CameraMediaPreview {
+        guard ["image", "raw"].contains(item.kind.lowercased()) else {
+            throw CCAPIError.invalidResponse("Display preview is available only for camera image items.")
+        }
+        let response = try await mediaImageRepresentation(
+            item,
+            kind: "display",
+            maximumBytes: Self.maximumMediaPreviewBytes,
+            label: "display preview",
+            feature: .mediaPreview
+        )
+        observedFeatures.insert(.mediaPreview)
+        return CameraMediaPreview(item: item, data: response.data, contentType: response.contentType)
+    }
+
+    private func mediaImageRepresentation(
+        _ item: CameraMediaItem,
+        kind: String,
+        maximumBytes: Int,
+        label: String,
+        feature: CameraFeature
+    ) async throws -> (data: Data, contentType: String?) {
         try await ensureInitialized()
         let basePath: String
         if resolvedMode == .simulator {
             basePath = "/ccapi/media/\(Self.encodePathComponent(item.id))"
         } else {
             guard supports(.get, suffix: "/contents") else {
-                throw CCAPIError.unsupported(.mediaThumbnail)
+                throw CCAPIError.unsupported(feature)
             }
             basePath = try normalizeCameraResource(item.id).components(separatedBy: "?")[0]
         }
         guard var components = URLComponents(string: basePath) else {
             throw CCAPIError.invalidResponse("Invalid camera media path: \(basePath)")
         }
-        components.queryItems = [URLQueryItem(name: "kind", value: "thumbnail")]
-        guard let thumbnailPath = components.string else {
-            throw CCAPIError.invalidResponse("Could not build the camera thumbnail path.")
+        components.queryItems = [URLQueryItem(name: "kind", value: kind)]
+        guard let representationPath = components.string else {
+            throw CCAPIError.invalidResponse("Could not build the camera \(label) path.")
         }
-        var thumbnailRequest = try request(path: thumbnailPath, method: .get)
-        thumbnailRequest.setValue("image/*,application/octet-stream;q=0.5", forHTTPHeaderField: "Accept")
-        thumbnailRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        let response = try await transport.send(thumbnailRequest)
-        try validate(response, request: thumbnailRequest)
+        var representationRequest = try request(path: representationPath, method: .get)
+        representationRequest.setValue("image/*,application/octet-stream;q=0.5", forHTTPHeaderField: "Accept")
+        representationRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let response = try await transport.send(representationRequest)
+        try validate(response, request: representationRequest)
         guard !response.body.isEmpty else {
-            throw CCAPIError.invalidResponse("Camera returned an empty media thumbnail.")
+            throw CCAPIError.invalidResponse("Camera returned an empty media \(label).")
         }
-        guard response.body.count <= Self.maximumMediaThumbnailBytes else {
+        guard response.body.count <= maximumBytes else {
             throw CCAPIError.invalidResponse(
-                "Camera thumbnail exceeded \(Self.maximumMediaThumbnailBytes) bytes."
+                "Camera \(label) exceeded \(maximumBytes) bytes."
             )
         }
         let responseContentType = response.header("content-type")?
@@ -801,13 +835,12 @@ public actor CCAPIClient {
         guard !Self.isTextContentType(responseContentType),
               !Self.looksLikeTextPayload(response.body),
               responseContentType?.hasPrefix("image/") == true || detectedContentType != nil else {
-            throw CCAPIError.invalidResponse("Camera did not return a recognized image thumbnail.")
+            throw CCAPIError.invalidResponse("Camera did not return a recognized image \(label).")
         }
         let contentType = responseContentType?.hasPrefix("image/") == true
             ? responseContentType
             : detectedContentType
-        observedFeatures.insert(.mediaThumbnail)
-        return CameraMediaThumbnail(item: item, data: response.body, contentType: contentType)
+        return (response.body, contentType)
     }
 
     public func deleteMedia(_ item: CameraMediaItem) async throws {
@@ -1511,7 +1544,7 @@ public actor CCAPIClient {
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
             .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
-            .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaDownload,
+            .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete,
         ]
         return CameraCapabilities(

@@ -1488,6 +1488,10 @@ class GPhoto2Session:
             self._observed.add(CameraFeature.MEDIA_THUMBNAIL)
             return thumbnail, content_type
 
+    def media_preview(self, media_id: str) -> tuple[bytes, str]:
+        del media_id
+        raise unsupported(CameraFeature.MEDIA_PREVIEW.value, self.engine_name)
+
     def delete_media(self, media_id: str) -> None:
         if is_host_media_id(media_id):
             with self._lock:

@@ -55,6 +55,7 @@ MAX_MEDIA_ITEMS = 500
 MAX_MEDIA_PAGES = 100
 MAX_MEDIA_TREE_DEPTH = 4
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
+MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 TRANSFER_CHUNK_BYTES = 64 * 1024
@@ -533,6 +534,7 @@ class CcapiSession:
                     {
                         CameraFeature.MEDIA_BROWSER,
                         CameraFeature.MEDIA_THUMBNAIL,
+                        CameraFeature.MEDIA_PREVIEW,
                         CameraFeature.MEDIA_DOWNLOAD,
                     }
                 )
@@ -550,6 +552,7 @@ class CcapiSession:
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
+                CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
             }
@@ -1081,35 +1084,77 @@ class CcapiSession:
             )
 
     def media_thumbnail(self, media_id: str) -> tuple[bytes, str]:
+        content, content_type = self._media_image_representation(
+            media_id,
+            representation="thumbnail",
+            max_bytes=MAX_MEDIA_THUMBNAIL_BYTES,
+            feature=CameraFeature.MEDIA_THUMBNAIL,
+            label="thumbnail",
+        )
+        return content, content_type
+
+    def media_preview(self, media_id: str) -> tuple[bytes, str]:
+        path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+        if _media_kind(path) not in {"image", "raw"}:
+            raise BridgeError(
+                "INVALID_MEDIA_PREVIEW",
+                "Display preview is available only for camera image items.",
+                status_code=422,
+                feature=CameraFeature.MEDIA_PREVIEW.value,
+                engine=self.engine_name,
+            )
+        content, content_type = self._media_image_representation(
+            media_id,
+            representation="display",
+            max_bytes=MAX_MEDIA_PREVIEW_BYTES,
+            feature=CameraFeature.MEDIA_PREVIEW,
+            label="display preview",
+        )
+        return content, content_type
+
+    def _media_image_representation(
+        self,
+        media_id: str,
+        *,
+        representation: str,
+        max_bytes: int,
+        feature: CameraFeature,
+        label: str,
+    ) -> tuple[bytes, str]:
         with self._lock:
             self._ensure_initialized()
             if not self._supports("GET", "/contents"):
-                raise unsupported(CameraFeature.MEDIA_THUMBNAIL.value, self.engine_name)
+                raise unsupported(feature.value, self.engine_name)
             path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
             parsed = urlsplit(path)
-            thumbnail_path = urlunsplit(("", "", parsed.path, urlencode({"kind": "thumbnail"}), ""))
+            representation_path = urlunsplit(("", "", parsed.path, urlencode({"kind": representation}), ""))
             response = self._request(
                 "GET",
-                thumbnail_path,
+                representation_path,
                 headers={"Accept": "image/*,application/octet-stream;q=0.5", "Cache-Control": "no-cache"},
-                max_bytes=MAX_MEDIA_THUMBNAIL_BYTES,
+                max_bytes=max_bytes,
             )
-            if len(response.body) > MAX_MEDIA_THUMBNAIL_BYTES:
+            if len(response.body) > max_bytes:
                 raise BridgeError(
                     "CCAPI_RESPONSE_TOO_LARGE",
-                    f"The camera thumbnail exceeded the {MAX_MEDIA_THUMBNAIL_BYTES}-byte safety limit.",
+                    f"The camera {label} exceeded the {max_bytes}-byte safety limit.",
                     status_code=502,
-                    feature=CameraFeature.MEDIA_THUMBNAIL.value,
+                    feature=feature.value,
                     engine=self.engine_name,
                 )
             content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
             detected_type = _image_content_type(response.body)
+            invalid_code = (
+                "INVALID_MEDIA_THUMBNAIL"
+                if feature == CameraFeature.MEDIA_THUMBNAIL
+                else "INVALID_MEDIA_PREVIEW"
+            )
             if not response.body:
                 raise BridgeError(
-                    "INVALID_MEDIA_THUMBNAIL",
-                    "Camera returned an empty media thumbnail.",
+                    invalid_code,
+                    f"Camera returned an empty media {label}.",
                     status_code=502,
-                    feature=CameraFeature.MEDIA_THUMBNAIL.value,
+                    feature=feature.value,
                     engine=self.engine_name,
                 )
             if (
@@ -1118,13 +1163,13 @@ class CcapiSession:
                 or (not content_type.startswith("image/") and detected_type is None)
             ):
                 raise BridgeError(
-                    "INVALID_MEDIA_THUMBNAIL",
-                    "Camera did not return a recognized image thumbnail.",
+                    invalid_code,
+                    f"Camera did not return a recognized image {label}.",
                     status_code=502,
-                    feature=CameraFeature.MEDIA_THUMBNAIL.value,
+                    feature=feature.value,
                     engine=self.engine_name,
                 )
-            self._observed.add(CameraFeature.MEDIA_THUMBNAIL)
+            self._observed.add(feature)
             return response.body, content_type if content_type.startswith("image/") else detected_type or "image/jpeg"
 
     def delete_media(self, media_id: str) -> None:

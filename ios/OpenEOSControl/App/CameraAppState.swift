@@ -52,6 +52,9 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaItems: [CameraMediaItem] = []
     @Published private(set) var mediaThumbnails: [String: Data] = [:]
     @Published private(set) var loadingMediaThumbnailIDs = Set<String>()
+    @Published private(set) var mediaPreviewItem: CameraMediaItem?
+    @Published private(set) var mediaPreviewData: Data?
+    @Published private(set) var mediaPreviewLoading = false
     @Published private(set) var downloadedFileURL: URL?
     @Published private(set) var downloadedFileName: String?
     @Published private(set) var deletedMediaName: String?
@@ -243,6 +246,7 @@ final class CameraAppState: ObservableObject {
             screen = .control
             mediaItems = []
             resetMediaThumbnails()
+            resetMediaPreview()
             removeDownloadedFile()
             deletedMediaName = nil
             lastError = nil
@@ -263,6 +267,7 @@ final class CameraAppState: ObservableObject {
         screen = .control
         mediaItems = Self.previewMedia
         resetMediaThumbnails()
+        resetMediaPreview()
         removeDownloadedFile()
         deletedMediaName = nil
         lastError = nil
@@ -285,6 +290,7 @@ final class CameraAppState: ObservableObject {
         bridgeToken = ""
         mediaItems = []
         resetMediaThumbnails()
+        resetMediaPreview()
         removeDownloadedFile()
         deletedMediaName = nil
         liveViewData = nil
@@ -563,6 +569,7 @@ final class CameraAppState: ObservableObject {
         defer { end(.media) }
         deletedMediaName = nil
         resetMediaThumbnails()
+        resetMediaPreview()
         if isPreview {
             mediaItems = Self.previewMedia
             return
@@ -611,6 +618,39 @@ final class CameraAppState: ObservableObject {
                 unavailableMediaThumbnailIDs.insert(item.id)
             }
         }
+    }
+
+    func openMediaPreview(_ item: CameraMediaItem) async {
+        let previewable = item.kind.caseInsensitiveCompare("image") == .orderedSame
+            || item.kind.caseInsensitiveCompare("raw") == .orderedSame
+        guard
+            !isPreview,
+            previewable,
+            supports(.mediaPreview),
+            let session,
+            begin(.media)
+        else { return }
+
+        mediaPreviewItem = item
+        mediaPreviewData = nil
+        mediaPreviewLoading = true
+        defer {
+            end(.media)
+            if mediaPreviewItem?.id == item.id { mediaPreviewLoading = false }
+        }
+        do {
+            let preview = try await session.mediaPreview(item)
+            guard mediaPreviewItem?.id == item.id else { return }
+            mediaPreviewData = preview.data
+            lastError = nil
+        } catch {
+            guard mediaPreviewItem?.id == item.id else { return }
+            record(error)
+        }
+    }
+
+    func closeMediaPreview() {
+        resetMediaPreview()
     }
 
     func downloadMedia(_ item: CameraMediaItem) async {
@@ -832,6 +872,7 @@ final class CameraAppState: ObservableObject {
         mediaThumbnails.removeValue(forKey: item.id)
         loadingMediaThumbnailIDs.remove(item.id)
         unavailableMediaThumbnailIDs.remove(item.id)
+        if mediaPreviewItem?.id == item.id { resetMediaPreview() }
         deletedMediaName = item.name
     }
 
@@ -840,6 +881,12 @@ final class CameraAppState: ObservableObject {
         mediaThumbnails = [:]
         loadingMediaThumbnailIDs = []
         unavailableMediaThumbnailIDs = []
+    }
+
+    private func resetMediaPreview() {
+        mediaPreviewItem = nil
+        mediaPreviewData = nil
+        mediaPreviewLoading = false
     }
 
     static func makeOfflinePreviewSnapshot() -> CameraSnapshot {

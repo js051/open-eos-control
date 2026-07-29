@@ -428,6 +428,8 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
         assertTrue(!capabilities.matrix.isPlanned(CameraFeature.MEDIA_THUMBNAIL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_PREVIEW))
+        assertTrue(!capabilities.matrix.isPlanned(CameraFeature.MEDIA_PREVIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DOWNLOAD))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
@@ -1180,6 +1182,44 @@ class CcapiClientTest {
         assertTrue(outsideFailure is IllegalArgumentException)
         assertTrue(traversalFailure is IllegalArgumentException)
         assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun mediaPreviewUsesCanonDisplayQueryAndRejectsVideoBeforeFetching() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0x02, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(binaryResponse(jpeg, "application/octet-stream"))
+        client.initialize()
+        server.takeRequest()
+        val path = "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG"
+
+        val preview = client.mediaPreview(CameraMediaItem("$path?kind=main", "IMG_0001.JPG", "raw"))
+        val videoFailure = runCatching {
+            client.mediaPreview(CameraMediaItem("$path/MVI_0001.MP4", "MVI_0001.MP4", "video"))
+        }.exceptionOrNull()
+
+        assertEquals("$path?kind=display", server.takeRequest().path)
+        assertArrayEquals(jpeg, preview.bytes)
+        assertEquals("image/jpeg", preview.contentType)
+        assertTrue(CameraFeature.MEDIA_PREVIEW in client.observedFeatureSnapshot())
+        assertTrue(videoFailure is IllegalArgumentException)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun mediaPreviewRejectsTextAndOversizedResponses() = runTest {
+        val item = CameraMediaItem("SIM_0001.PNG", "SIM_0001.PNG", "image")
+        server.enqueue(jsonResponse("""{"message":"not a preview"}"""))
+        val textFailure = runCatching { client.mediaPreview(item) }.exceptionOrNull()
+
+        server.enqueue(binaryResponse(ByteArray(32 * 1024 * 1024 + 1), "image/png"))
+        val oversizedFailure = runCatching { client.mediaPreview(item) }.exceptionOrNull()
+
+        assertTrue(textFailure is IllegalStateException)
+        assertTrue(textFailure?.message.orEmpty().contains("text instead of an image"))
+        assertTrue(oversizedFailure is IllegalStateException)
+        assertTrue(oversizedFailure?.message.orEmpty().contains("exceeded"))
     }
 
     @Test

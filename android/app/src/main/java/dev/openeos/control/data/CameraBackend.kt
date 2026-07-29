@@ -90,6 +90,8 @@ interface CameraControlBackend {
     suspend fun listMedia(): List<CameraMediaItem> = unsupported(CameraFeature.MEDIA_BROWSER)
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail =
         unsupported(CameraFeature.MEDIA_THUMBNAIL)
+    suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview =
+        unsupported(CameraFeature.MEDIA_PREVIEW)
     suspend fun downloadMedia(
         item: CameraMediaItem,
         destination: OutputStream,
@@ -167,6 +169,8 @@ class CcapiCameraBackend(
     override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
+
+    override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview = client.mediaPreview(item)
 
     override suspend fun downloadMedia(
         item: CameraMediaItem,
@@ -249,6 +253,8 @@ class DesktopBridgeCameraBackend(
     override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
+
+    override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview = client.mediaPreview(item)
 
     override suspend fun downloadMedia(
         item: CameraMediaItem,
