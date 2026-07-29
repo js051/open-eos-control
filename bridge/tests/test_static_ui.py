@@ -50,6 +50,18 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "ccapi-password-input",
         "connect-button",
         "live-image",
+        "monitor-pixel-overlay",
+        "monitor-guides-overlay",
+        "monitor-histogram",
+        "monitoring-button",
+        "monitoring-dialog",
+        "monitor-histogram-toggle",
+        "monitor-zebra-select",
+        "monitor-false-color-toggle",
+        "monitor-focus-peaking-toggle",
+        "monitor-frame-guide-select",
+        "monitor-safe-area-toggle",
+        "monitor-desqueeze-select",
         "live-magnification-button",
         "exposure-strip",
         "shutter-button",
@@ -69,6 +81,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
     assert parser.assets
     assert all(asset.startswith("/app/") for asset in parser.assets)
     assert "/app/diagnostics.js" in parser.assets
+    assert "/app/monitoring.js" in parser.assets
 
 
 def test_static_labels_exist_in_both_supported_languages() -> None:
@@ -170,6 +183,10 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert all("password" not in line and "token" not in line for line in storage_lines)
     assert "ccapi_password_key" not in script.casefold()
     assert "Math.min(15, state.capabilities.liveView?.maxFps || 1)" in script
+    assert "monitoring.analysisDimensions" in script
+    assert "monitoring.analyzePixels" in script
+    assert "function liveImageDisplayRect()" in script
+    assert "const imageBounds = ui.liveImage.getBoundingClientRect()" in script
     assert 'source: state.liveSource || "AUTO"' in script
     assert "CCAPI_RTP" in script
     assert "engine?.detail" in script
@@ -177,5 +194,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "reportSchema: 1" in report_source
     assert "productVersion: state.health?.version" in report_source
     assert "validation: diagnostics.featureSummary(state.capabilities)" in report_source
+    assert "monitoring: {" in report_source
+    assert "analysisError: state.monitorAnalysisError" in report_source
     assert "return diagnostics.safeValue(report" in report_source
     assert "secrets: [state.token, ui.ccapiPasswordInput?.value, state.info?.serial]" in report_source

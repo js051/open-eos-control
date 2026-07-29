@@ -4,6 +4,8 @@ This package provides the PC camera backend and browser control surface for Open
 
 It can connect to Canon cameras through native HTTP CCAPI or through a system-installed `gphoto2`/libgphoto2 USB stack. Camera commands and settings are exposed only when the selected backend advertises support.
 
+The built-in browser control surface includes decoded-frame monitoring assists for CCAPI JPEG, decoded RTP, and libgphoto2 USB preview: a bounded luminance histogram, configurable zebra, false color, focus peaking, frame guides, action/title safe areas, and anamorphic desqueeze. These overlays are local display tools and never imply that the camera accepted a control command.
+
 ## Install
 
 ```bash

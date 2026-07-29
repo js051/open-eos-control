@@ -3,6 +3,8 @@
 
   const diagnostics = globalThis.OpenEOSDiagnostics;
   if (!diagnostics) throw new Error("Open EOS diagnostics module is unavailable.");
+  const monitoring = globalThis.OpenEOSMonitoring;
+  if (!monitoring) throw new Error("Open EOS monitoring module is unavailable.");
 
   const FEATURES = {
     LIVE_VIEW: "LIVE_VIEW",
@@ -87,6 +89,15 @@
       liveViewSourceJpeg: "JPEG polling",
       liveViewSourceBridge: "Desktop preview",
       frameRate: "Frame rate",
+      monitoringAssists: "Monitoring assists",
+      histogram: "Histogram",
+      zebra: "Zebra",
+      off: "Off",
+      falseColor: "False color",
+      focusPeaking: "Focus peaking",
+      frameGuide: "Frame guide",
+      safeArea: "Action and title safe areas",
+      anamorphicDesqueeze: "Anamorphic desqueeze",
       moreSettings: "More settings",
       diagnosticSafe: "Authentication secrets and camera serial are excluded",
       copy: "Copy",
@@ -275,6 +286,15 @@
       liveViewSourceJpeg: "JPEG 輪詢",
       liveViewSourceBridge: "電腦預覽",
       frameRate: "影格率",
+      monitoringAssists: "監看輔助",
+      histogram: "直方圖",
+      zebra: "斑馬紋",
+      off: "關閉",
+      falseColor: "偽色",
+      focusPeaking: "峰值對焦",
+      frameGuide: "畫幅框線",
+      safeArea: "動作與標題安全區域",
+      anamorphicDesqueeze: "變形鏡頭反擠壓",
       moreSettings: "更多設定",
       diagnosticSafe: "診斷內容不包含驗證機密與相機序號",
       copy: "複製",
@@ -518,6 +538,16 @@
     lastFrameAt: null,
     liveObjectUrl: null,
     livePollingSuspended: false,
+    monitorAnalysisError: null,
+    monitorSettings: {
+      histogramVisible: false,
+      zebraThresholdPercent: null,
+      falseColorEnabled: false,
+      focusPeakingEnabled: false,
+      frameGuide: "",
+      safeAreaVisible: false,
+      desqueeze: 1,
+    },
     bulbStartedAt: null,
     bulbTimer: null,
     focusStep: "MEDIUM",
@@ -566,6 +596,9 @@
     diagnosticsPanel: byId("diagnostics-panel"),
     viewfinder: byId("viewfinder"),
     liveImage: byId("live-image"),
+    monitorPixelOverlay: byId("monitor-pixel-overlay"),
+    monitorGuidesOverlay: byId("monitor-guides-overlay"),
+    monitorHistogram: byId("monitor-histogram"),
     viewfinderPlaceholder: byId("viewfinder-placeholder"),
     liveToggleButton: byId("live-toggle-button"),
     railLiveButton: byId("rail-live-button"),
@@ -593,6 +626,16 @@
     liveSourceSelect: byId("live-source-select"),
     tapActionRow: byId("tap-action-row"),
     tapActionSelect: byId("tap-action-select"),
+    monitoringButton: byId("monitoring-button"),
+    monitoringDialog: byId("monitoring-dialog"),
+    monitoringDialogClose: byId("monitoring-dialog-close"),
+    monitorHistogramToggle: byId("monitor-histogram-toggle"),
+    monitorZebraSelect: byId("monitor-zebra-select"),
+    monitorFalseColorToggle: byId("monitor-false-color-toggle"),
+    monitorFocusPeakingToggle: byId("monitor-focus-peaking-toggle"),
+    monitorFrameGuideSelect: byId("monitor-frame-guide-select"),
+    monitorSafeAreaToggle: byId("monitor-safe-area-toggle"),
+    monitorDesqueezeSelect: byId("monitor-desqueeze-select"),
     advancedSettings: byId("advanced-settings"),
     mediaRefreshButton: byId("media-refresh-button"),
     mediaSummary: byId("media-summary"),
@@ -1503,9 +1546,11 @@
     state.activeLiveSource = null;
     state.liveMagnification = 1;
     state.lastFrameAt = null;
+    state.monitorAnalysisError = null;
     if (state.liveObjectUrl) URL.revokeObjectURL(state.liveObjectUrl);
     state.liveObjectUrl = null;
     ui.liveImage.removeAttribute("src");
+    clearMonitoringLayers();
     renderLiveState();
   }
 
@@ -1522,11 +1567,19 @@
         if (!state.liveActive || state.livePollingSuspended || generation !== state.liveGeneration) return;
         const url = URL.createObjectURL(blob);
         const previous = state.liveObjectUrl;
-        state.liveObjectUrl = url;
         ui.liveImage.src = url;
+        await ui.liveImage.decode();
+        if (!state.liveActive || state.livePollingSuspended || generation !== state.liveGeneration) {
+          if (previous) ui.liveImage.src = previous;
+          else ui.liveImage.removeAttribute("src");
+          URL.revokeObjectURL(url);
+          return;
+        }
+        state.liveObjectUrl = url;
         ui.liveImage.hidden = false;
         ui.viewfinderPlaceholder.hidden = true;
         if (previous) window.setTimeout(() => URL.revokeObjectURL(previous), 1000);
+        renderMonitoringFrame();
         const now = performance.now();
         state.frameTimes.push(now);
         state.frameTimes = state.frameTimes.filter((time) => now - time <= 2000);
@@ -1594,6 +1647,7 @@
   function renderLiveState() {
     ui.liveImage.hidden = !state.liveActive || !state.liveObjectUrl;
     ui.viewfinderPlaceholder.hidden = state.liveActive && Boolean(state.liveObjectUrl);
+    if (ui.liveImage.hidden) clearMonitoringLayers();
     const labelKey = state.liveActive ? "stopLiveView" : "startLiveView";
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       const label = button.querySelector("span[data-i18n]");
@@ -1607,6 +1661,200 @@
     if (!state.liveActive) ui.focusReticle.hidden = true;
     renderLiveMagnification();
     renderFrameIndicator();
+  }
+
+  const monitorAnalysisCanvas = document.createElement("canvas");
+
+  function monitorNeedsPixelAnalysis() {
+    const settings = state.monitorSettings;
+    return settings.histogramVisible || settings.zebraThresholdPercent !== null ||
+      settings.falseColorEnabled || settings.focusPeakingEnabled;
+  }
+
+  function liveImageDisplayRect() {
+    const naturalWidth = ui.liveImage.naturalWidth;
+    const naturalHeight = ui.liveImage.naturalHeight;
+    const width = ui.viewfinder.clientWidth;
+    const height = ui.viewfinder.clientHeight;
+    if (!naturalWidth || !naturalHeight || !width || !height) return null;
+    return monitoring.fitRect(
+      naturalWidth * state.monitorSettings.desqueeze,
+      naturalHeight,
+      width,
+      height,
+    );
+  }
+
+  function positionMonitorLayer(element, rect) {
+    element.style.left = `${rect.left}px`;
+    element.style.top = `${rect.top}px`;
+    element.style.width = `${rect.width}px`;
+    element.style.height = `${rect.height}px`;
+  }
+
+  function applyLiveViewLayout() {
+    const rect = liveImageDisplayRect();
+    if (!rect) return null;
+    [ui.liveImage, ui.monitorPixelOverlay, ui.monitorGuidesOverlay].forEach((element) => {
+      positionMonitorLayer(element, rect);
+    });
+    drawMonitorGuides(rect);
+    positionHistogram(rect);
+    return rect;
+  }
+
+  function renderMonitoringFrame() {
+    const rect = applyLiveViewLayout();
+    if (!rect || !monitorNeedsPixelAnalysis()) {
+      ui.monitorPixelOverlay.hidden = true;
+      ui.monitorHistogram.hidden = true;
+      state.monitorAnalysisError = null;
+      return;
+    }
+    try {
+      const dimensions = monitoring.analysisDimensions(ui.liveImage.naturalWidth, ui.liveImage.naturalHeight);
+      monitorAnalysisCanvas.width = dimensions.width;
+      monitorAnalysisCanvas.height = dimensions.height;
+      const analysisContext = monitorAnalysisCanvas.getContext("2d", { willReadFrequently: true });
+      analysisContext.drawImage(ui.liveImage, 0, 0, dimensions.width, dimensions.height);
+      const frame = analysisContext.getImageData(0, 0, dimensions.width, dimensions.height);
+      const analysis = monitoring.analyzePixels(frame.data, dimensions.width, dimensions.height, {
+        zebraThresholdPercent: state.monitorSettings.zebraThresholdPercent,
+        falseColorEnabled: state.monitorSettings.falseColorEnabled,
+        focusPeakingEnabled: state.monitorSettings.focusPeakingEnabled,
+      });
+      renderMonitorPixelOverlay(analysis);
+      renderMonitorHistogram(analysis.histogram);
+      state.monitorAnalysisError = null;
+    } catch (error) {
+      state.monitorAnalysisError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      ui.monitorPixelOverlay.hidden = true;
+      ui.monitorHistogram.hidden = true;
+    }
+  }
+
+  function renderMonitorPixelOverlay(analysis) {
+    if (!analysis.overlay) {
+      ui.monitorPixelOverlay.hidden = true;
+      return;
+    }
+    ui.monitorPixelOverlay.width = analysis.width;
+    ui.monitorPixelOverlay.height = analysis.height;
+    const context = ui.monitorPixelOverlay.getContext("2d");
+    const image = context.createImageData(analysis.width, analysis.height);
+    image.data.set(analysis.overlay);
+    context.putImageData(image, 0, 0);
+    ui.monitorPixelOverlay.hidden = false;
+  }
+
+  function renderMonitorHistogram(histogram) {
+    if (!state.monitorSettings.histogramVisible) {
+      ui.monitorHistogram.hidden = true;
+      return;
+    }
+    const width = 160;
+    const height = 72;
+    const padding = 7;
+    ui.monitorHistogram.width = width;
+    ui.monitorHistogram.height = height;
+    const context = ui.monitorHistogram.getContext("2d");
+    context.clearRect(0, 0, width, height);
+    const peak = Math.max(1, ...histogram);
+    context.beginPath();
+    context.moveTo(padding, height - padding);
+    histogram.forEach((count, index) => {
+      const x = padding + (width - padding * 2) * index / (histogram.length - 1);
+      const y = height - padding - (height - padding * 2) * count / peak;
+      context.lineTo(x, y);
+    });
+    context.lineTo(width - padding, height - padding);
+    context.closePath();
+    context.fillStyle = "rgb(255 255 255 / 36%)";
+    context.fill();
+    context.strokeStyle = "rgb(255 255 255 / 92%)";
+    context.lineWidth = 1;
+    context.stroke();
+    ui.monitorHistogram.hidden = false;
+  }
+
+  function positionHistogram(rect) {
+    const width = Math.min(160, Math.max(120, rect.width * 0.34));
+    const height = width * 72 / 160;
+    ui.monitorHistogram.style.width = `${width}px`;
+    ui.monitorHistogram.style.height = `${height}px`;
+    ui.monitorHistogram.style.left = `${rect.left + 10}px`;
+    ui.monitorHistogram.style.top = `${Math.max(rect.top + 10, rect.top + rect.height - height - 10)}px`;
+  }
+
+  function drawMonitorGuides(rect) {
+    const hasGuides = Boolean(state.monitorSettings.frameGuide) || state.monitorSettings.safeAreaVisible;
+    if (!hasGuides) {
+      ui.monitorGuidesOverlay.hidden = true;
+      return;
+    }
+    const scale = Math.min(2, window.devicePixelRatio || 1);
+    ui.monitorGuidesOverlay.width = Math.max(1, Math.round(rect.width * scale));
+    ui.monitorGuidesOverlay.height = Math.max(1, Math.round(rect.height * scale));
+    const context = ui.monitorGuidesOverlay.getContext("2d");
+    context.setTransform(scale, 0, 0, scale, 0, 0);
+    context.clearRect(0, 0, rect.width, rect.height);
+    const guideRatios = { "16:9": 16 / 9, "2.39:1": 2.39, "1:1": 1, "4:3": 4 / 3 };
+    const guideRatio = guideRatios[state.monitorSettings.frameGuide];
+    if (guideRatio) {
+      const guide = monitoring.fitRect(guideRatio, 1, rect.width, rect.height);
+      context.strokeStyle = "rgb(255 255 255 / 85%)";
+      context.lineWidth = 1.2;
+      context.setLineDash([7, 5]);
+      context.strokeRect(guide.left + 1, guide.top + 1, guide.width - 2, guide.height - 2);
+    }
+    if (state.monitorSettings.safeAreaVisible) {
+      context.lineWidth = 1;
+      context.setLineDash([5, 4]);
+      context.strokeStyle = "rgb(51 198 216 / 76%)";
+      context.strokeRect(rect.width * 0.05, rect.height * 0.05, rect.width * 0.9, rect.height * 0.9);
+      context.setLineDash([3, 4]);
+      context.strokeStyle = "rgb(240 180 41 / 76%)";
+      context.strokeRect(rect.width * 0.1, rect.height * 0.1, rect.width * 0.8, rect.height * 0.8);
+    }
+    ui.monitorGuidesOverlay.hidden = false;
+  }
+
+  function clearMonitoringLayers() {
+    ui.monitorPixelOverlay.hidden = true;
+    ui.monitorGuidesOverlay.hidden = true;
+    ui.monitorHistogram.hidden = true;
+  }
+
+  function renderMonitoringControls() {
+    const settings = state.monitorSettings;
+    ui.monitorHistogramToggle.checked = settings.histogramVisible;
+    ui.monitorZebraSelect.value = settings.zebraThresholdPercent === null
+      ? ""
+      : String(settings.zebraThresholdPercent);
+    ui.monitorFalseColorToggle.checked = settings.falseColorEnabled;
+    ui.monitorFocusPeakingToggle.checked = settings.focusPeakingEnabled;
+    ui.monitorFrameGuideSelect.value = settings.frameGuide;
+    ui.monitorSafeAreaToggle.checked = settings.safeAreaVisible;
+    ui.monitorDesqueezeSelect.value = String(settings.desqueeze);
+  }
+
+  function openMonitoringDialog() {
+    renderMonitoringControls();
+    ui.monitoringDialog.showModal();
+  }
+
+  function changeMonitoringSettings() {
+    state.monitorSettings = {
+      histogramVisible: ui.monitorHistogramToggle.checked,
+      zebraThresholdPercent: ui.monitorZebraSelect.value ? Number(ui.monitorZebraSelect.value) : null,
+      falseColorEnabled: ui.monitorFalseColorToggle.checked,
+      focusPeakingEnabled: ui.monitorFocusPeakingToggle.checked,
+      frameGuide: ui.monitorFrameGuideSelect.value,
+      safeAreaVisible: ui.monitorSafeAreaToggle.checked,
+      desqueeze: Number(ui.monitorDesqueezeSelect.value) || 1,
+    };
+    renderMonitoringFrame();
+    renderDiagnostics();
   }
 
   function renderLiveMagnification() {
@@ -1685,14 +1933,12 @@
   }
 
   function focusPointFromClient(clientX, clientY) {
-    const bounds = ui.viewfinder.getBoundingClientRect();
-    const naturalWidth = ui.liveImage.naturalWidth || bounds.width;
-    const naturalHeight = ui.liveImage.naturalHeight || bounds.height;
-    const scale = Math.min(bounds.width / naturalWidth, bounds.height / naturalHeight);
-    const imageWidth = naturalWidth * scale;
-    const imageHeight = naturalHeight * scale;
-    const imageLeft = bounds.left + (bounds.width - imageWidth) / 2;
-    const imageTop = bounds.top + (bounds.height - imageHeight) / 2;
+    const imageBounds = ui.liveImage.getBoundingClientRect();
+    const imageWidth = imageBounds.width;
+    const imageHeight = imageBounds.height;
+    const imageLeft = imageBounds.left;
+    const imageTop = imageBounds.top;
+    if (!imageWidth || !imageHeight || ui.liveImage.hidden) return null;
     if (
       clientX < imageLeft || clientX > imageLeft + imageWidth ||
       clientY < imageTop || clientY > imageTop + imageHeight
@@ -1791,6 +2037,7 @@
     ui.fpsSelect.disabled = state.busy || bulbActive || !liveSupported;
     ui.liveSourceSelect.disabled = state.busy || bulbActive || !liveSupported;
     ui.tapActionSelect.disabled = state.busy || bulbActive || !state.liveActive;
+    ui.monitoringButton.disabled = !connected;
     renderLiveMagnification();
     document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
       button.disabled = state.busy || bulbActive || !settingByKey(button.dataset.settingKey);
@@ -2143,6 +2390,10 @@
         frameBytes: state.frameBytes,
         contentType: state.frameContentType,
         lastFrameAt: state.lastFrameAt,
+        monitoring: {
+          ...state.monitorSettings,
+          analysisError: state.monitorAnalysisError,
+        },
       },
       lastError: state.lastError,
     };
@@ -2261,6 +2512,20 @@
       state.tapAction = ui.tapActionSelect.value;
       renderAvailability();
     });
+    ui.monitoringButton.addEventListener("click", openMonitoringDialog);
+    ui.monitoringDialogClose.addEventListener("click", () => ui.monitoringDialog.close());
+    ui.monitoringDialog.addEventListener("click", (event) => {
+      if (event.target === ui.monitoringDialog) ui.monitoringDialog.close();
+    });
+    [
+      ui.monitorHistogramToggle,
+      ui.monitorZebraSelect,
+      ui.monitorFalseColorToggle,
+      ui.monitorFocusPeakingToggle,
+      ui.monitorFrameGuideSelect,
+      ui.monitorSafeAreaToggle,
+      ui.monitorDesqueezeSelect,
+    ].forEach((control) => control.addEventListener("change", changeMonitoringSettings));
     ui.focusNearButton.addEventListener("click", () => driveFocus("NEAR"));
     ui.focusFarButton.addEventListener("click", () => driveFocus("FAR"));
     ui.viewfinder.addEventListener("click", tapFocusFromPointer);
@@ -2291,6 +2556,9 @@
     ui.settingDialog.addEventListener("click", (event) => {
       if (event.target === ui.settingDialog) ui.settingDialog.close();
     });
+    window.addEventListener("resize", () => {
+      if (state.liveActive) applyLiveViewLayout();
+    });
     window.addEventListener("beforeunload", () => {
       clearMediaThumbnails();
       closeMediaPreview();
@@ -2304,6 +2572,7 @@
     ui.ccapiUrlInput.value = readCameraPreference(CCAPI_URL_KEY, "http://192.168.1.2:8080");
     ui.ccapiUsernameInput.value = readCameraPreference(CCAPI_USERNAME_KEY);
     bindEvents();
+    renderMonitoringControls();
     applyLanguage();
     renderLiveState();
     renderAvailability();
