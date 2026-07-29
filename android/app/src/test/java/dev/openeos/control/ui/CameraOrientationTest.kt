@@ -22,7 +22,7 @@ class CameraOrientationTest {
         assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(true)
@@ -46,18 +46,33 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun orientationListenerRunsForTheStartedActivitySoRotationLockCannotLeaveStaleControls() {
+    fun orientationListenerOnlyRunsWhileSystemAutoRotationIsEnabled() {
         val policy = CameraOrientationPolicy()
 
         assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
         assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = false))
-        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(true)
         assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+    }
+
+    @Test
+    fun lockingSystemRotationDiscardsThePreviousSensorPosture() {
+        val policy = CameraOrientationPolicy()
+
+        policy.setSystemAutoRotation(true)
+        policy.onSensorOrientation(180)
+        assertEquals(180f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.setSystemAutoRotation(false)
+        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.setSystemAutoRotation(true)
+        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
     }
 
     @Test
@@ -122,5 +137,22 @@ class CameraOrientationTest {
         assertEquals(-270f, nearestEquivalentCameraRotation(currentDegrees = -180f, targetDegrees = 90f))
         assertEquals(720f, nearestEquivalentCameraRotation(currentDegrees = 720f, targetDegrees = 0f))
         assertEquals(720f, nearestEquivalentCameraRotation(currentDegrees = 630f, targetDegrees = 0f))
+    }
+
+    @Test
+    fun cameraHudUsesACompactModelNameWithoutLosingTheModelGeneration() {
+        assertEquals("R6 III", "Canon EOS R6 Mark III".toCameraHudName())
+        assertEquals("R5 II", "EOS R5 Mark II".toCameraHudName())
+        assertEquals("PowerShot G7 X III", "Canon PowerShot G7 X Mark III".toCameraHudName())
+    }
+
+    @Test
+    fun cameraHudCompactsLargeRemainingShotCounts() {
+        assertEquals("0", compactCameraCount(-1))
+        assertEquals("999", compactCameraCount(999))
+        assertEquals("1K", compactCameraCount(1_000))
+        assertEquals("2.4K", compactCameraCount(2_418))
+        assertEquals("18K", compactCameraCount(18_900))
+        assertEquals("1.2M", compactCameraCount(1_250_000))
     }
 }

@@ -84,7 +84,6 @@ import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.NativeLiveViewSession
-import java.text.NumberFormat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -236,7 +235,8 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
     val batteryDescription = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
         ?: stringResource(R.string.unknown)
     val batteryValue = state.status?.batteryLevel?.let { "$it%" } ?: "-"
-    val fullCameraName = state.info?.model?.toCompactCameraName() ?: stringResource(R.string.unknown)
+    val fullCameraName = state.info?.model ?: stringResource(R.string.unknown)
+    val cameraHudName = fullCameraName.toCameraHudName()
     val fullStorage = cameraStorageLabel(state.status)
     val storageValue = cameraStorageCompactLabel(state.status)
     var menuExpanded by remember { mutableStateOf(false) }
@@ -252,9 +252,11 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
     ) {
         Box(Modifier.size(8.dp).background(AppSuccess, CircleShape))
         CameraModelIndicator(
-            value = fullCameraName,
-            modifier = Modifier.weight(1f).height(48.dp),
+            value = cameraHudName,
+            description = fullCameraName,
+            modifier = Modifier.width(64.dp).height(48.dp),
         )
+        Box(Modifier.weight(1f))
         CameraStatusIndicator(
             icon = batteryStatusIcon(state.status?.batteryLevel),
             value = batteryValue,
@@ -321,20 +323,20 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
 }
 
 @Composable
-private fun CameraModelIndicator(value: String, modifier: Modifier = Modifier) {
+private fun CameraModelIndicator(value: String, description: String, modifier: Modifier = Modifier) {
     CameraRotatingSlot(
         modifier
             .testTag("camera-model-status")
-            .semantics { contentDescription = value },
+            .semantics { contentDescription = description },
     ) {
         Text(
             value,
             color = AppText,
-            fontSize = 11.sp,
-            lineHeight = 12.sp,
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 3,
-            overflow = TextOverflow.Clip,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
@@ -410,15 +412,34 @@ private fun cameraStorageLabel(status: CameraStatus?): String {
 private fun cameraStorageCompactLabel(status: CameraStatus?): String {
     val context = LocalContext.current
     return when {
-        status?.storageFreeImages != null -> NumberFormat.getIntegerInstance().format(status.storageFreeImages)
+        status?.storageFreeImages != null -> compactCameraCount(status.storageFreeImages)
         status?.storageFreeBytes != null -> Formatter.formatShortFileSize(context, status.storageFreeBytes)
         status?.mediaAvailable == true -> stringResource(R.string.storage_ready)
         else -> "-"
     }
 }
 
-private fun String.toCompactCameraName(): String =
-    removePrefix("Canon EOS ").ifBlank { this }
+internal fun String.toCameraHudName(): String {
+    val compact = removePrefix("Canon ")
+        .removePrefix("EOS ")
+        .replace(" Mark ", " ")
+        .trim()
+    return compact.ifBlank { this }
+}
+
+internal fun compactCameraCount(value: Long): String = when {
+    value < 1_000L -> value.coerceAtLeast(0L).toString()
+    value < 10_000L -> compactCameraUnit(value, 1_000L, "K")
+    value < 1_000_000L -> "${value / 1_000L}K"
+    value < 10_000_000L -> compactCameraUnit(value, 1_000_000L, "M")
+    else -> "${value / 1_000_000L}M"
+}
+
+private fun compactCameraUnit(value: Long, divisor: Long, suffix: String): String {
+    val whole = value / divisor
+    val tenths = (value % divisor) * 10L / divisor
+    return if (tenths > 0L) "$whole.$tenths$suffix" else "$whole$suffix"
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -502,6 +523,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     Modifier
                         .fillMaxSize()
                         .testTag("offline-preview-viewport"),
+                    animateRotation = false,
                 ) {
                     OfflinePreviewCopy(useWideCopy)
                 }
@@ -536,6 +558,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     Modifier
                         .fillMaxSize()
                         .testTag("live-view-unavailable-rotation"),
+                    animateRotation = false,
                 ) {
                     Text(
                         stringResource(R.string.live_view_unavailable),
@@ -1048,6 +1071,8 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
             Text(
                 value,
                 color = if (enabled) AppText else AppMutedText,
+                fontSize = 17.sp,
+                lineHeight = 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
