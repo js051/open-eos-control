@@ -21,13 +21,15 @@ class CameraOrientationTest {
         assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.onSensorOrientation(270)
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(true)
+        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
+        policy.onSensorOrientation(270)
         assertEquals(90f, policy.resolveControlRotation(displayRotationDegrees = 0))
     }
 
@@ -51,9 +53,9 @@ class CameraOrientationTest {
 
         assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
         assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = false))
-        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
-        policy.setSystemAutoRotation(false)
+        policy.setSystemAutoRotation(true)
         assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
     }
 
@@ -114,12 +116,12 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun complexSettingsUseWideSurfaceOnlyForQuarterTurns() {
-        assertEquals(false, cameraSettingsUsesLandscapeSurface(0f))
-        assertEquals(true, cameraSettingsUsesLandscapeSurface(90f))
-        assertEquals(false, cameraSettingsUsesLandscapeSurface(180f))
-        assertEquals(true, cameraSettingsUsesLandscapeSurface(270f))
-        assertEquals(true, cameraSettingsUsesLandscapeSurface(-90f))
+    fun complexSettingsUseRotatedSurfaceForEveryNonNaturalPosture() {
+        assertEquals(false, cameraSettingsUsesRotatedSurface(0f))
+        assertEquals(true, cameraSettingsUsesRotatedSurface(90f))
+        assertEquals(true, cameraSettingsUsesRotatedSurface(180f))
+        assertEquals(true, cameraSettingsUsesRotatedSurface(270f))
+        assertEquals(true, cameraSettingsUsesRotatedSurface(-90f))
     }
 
     @Test

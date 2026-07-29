@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import android.app.Activity
 import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -32,12 +33,13 @@ import dev.openeos.control.data.FocusDriveStep
 fun OpenEosControlApp(
     viewModel: CameraViewModel = viewModel(),
     controlRotationDegrees: Float = 0f,
+    animateControlRotation: Boolean = true,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val animatedControlRotation by animateFloatAsState(
         targetValue = controlRotationDegrees,
-        animationSpec = tween(durationMillis = 180),
+        animationSpec = if (animateControlRotation) tween(durationMillis = 180) else snap(),
         label = "camera-control-rotation",
     )
     LaunchedEffect(viewModel) { viewModel.initialize(context) }
