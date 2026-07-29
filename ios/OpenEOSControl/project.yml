@@ -20,7 +20,7 @@ targets:
         INFOPLIST_FILE: App/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: dev.openeos.control
         PRODUCT_NAME: OpenEOSControl
-        MARKETING_VERSION: 0.1.1
+        MARKETING_VERSION: 0.1.2
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 5.10
         TARGETED_DEVICE_FAMILY: "1,2"

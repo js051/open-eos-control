@@ -1066,8 +1066,14 @@ class CameraScreensTest {
             }
         }
 
-        compose.waitForIdle()
-        compose.onNodeWithContentDescription(resourceText(R.string.histogram)).assertIsDisplayed()
+        val histogramDescription = resourceText(R.string.histogram)
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose
+                .onAllNodesWithContentDescription(histogramDescription)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        compose.onNodeWithContentDescription(histogramDescription).assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.monitor_guides)).assertIsDisplayed()
     }
 
