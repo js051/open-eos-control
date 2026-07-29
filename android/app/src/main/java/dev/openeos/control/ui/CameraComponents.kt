@@ -453,42 +453,13 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
+                val useWideCopy = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
                 CameraRotatingSlot(
                     Modifier
                         .fillMaxSize()
                         .testTag("offline-preview-viewport"),
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth(0.84f)
-                            .widthIn(max = 520.dp)
-                            .padding(horizontal = 20.dp)
-                            .testTag("offline-preview-content"),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            painterResource(LucideR.drawable.lucide_ic_camera),
-                            contentDescription = null,
-                            tint = AppAccent,
-                            modifier = Modifier.size(40.dp),
-                        )
-                        Text(
-                            stringResource(R.string.offline_preview),
-                            color = AppText,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                        )
-                        Text(
-                            stringResource(R.string.offline_preview_hint),
-                            color = AppSubtleText,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
+                    OfflinePreviewCopy(useWideCopy)
                 }
             }
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
@@ -784,6 +755,80 @@ private fun BulbExposureIndicator(startedAtMillis: Long?, modifier: Modifier = M
             )
         }
     }
+}
+
+@Composable
+private fun OfflinePreviewCopy(useWideLayout: Boolean) {
+    val title = stringResource(R.string.offline_preview)
+    val hint = stringResource(R.string.offline_preview_hint)
+    if (useWideLayout) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .widthIn(max = 680.dp)
+                .padding(horizontal = 24.dp)
+                .testTag("offline-preview-content"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            OfflinePreviewIcon(48.dp)
+            Column(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OfflinePreviewTitle(title, TextAlign.Start)
+                OfflinePreviewHint(hint, TextAlign.Start)
+            }
+        }
+        return
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth(0.84f)
+            .widthIn(max = 520.dp)
+            .padding(horizontal = 20.dp)
+            .testTag("offline-preview-content"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OfflinePreviewIcon(40.dp)
+        OfflinePreviewTitle(title, TextAlign.Center)
+        OfflinePreviewHint(hint, TextAlign.Center)
+    }
+}
+
+@Composable
+private fun OfflinePreviewIcon(size: Dp) {
+    Icon(
+        painterResource(LucideR.drawable.lucide_ic_camera),
+        contentDescription = null,
+        tint = AppAccent,
+        modifier = Modifier.size(size).testTag("offline-preview-icon"),
+    )
+}
+
+@Composable
+private fun OfflinePreviewTitle(value: String, textAlign: TextAlign) {
+    Text(
+        value,
+        color = AppText,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = textAlign,
+    )
+}
+
+@Composable
+private fun OfflinePreviewHint(value: String, textAlign: TextAlign) {
+    Text(
+        value,
+        color = AppSubtleText,
+        maxLines = 3,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = textAlign,
+    )
 }
 
 @Composable

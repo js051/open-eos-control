@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -282,6 +283,10 @@ class CameraScreensTest {
             .onNodeWithText(resourceText(R.string.offline_preview))
             .fetchSemanticsNode()
             .boundsInRoot
+        val previewIconBounds = compose
+            .onNodeWithTag("offline-preview-icon", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
         val previewBounds = compose
             .onNodeWithTag("live-view-frame")
             .fetchSemanticsNode()
@@ -313,6 +318,10 @@ class CameraScreensTest {
         assertTrue(
             "Wide landscape guidance should remain readable after rotation: $previewHintBounds",
             previewHintBounds.height > previewHintBounds.width,
+        )
+        assertTrue(
+            "Sideways guidance should use a wide icon-and-copy layout before rotation",
+            kotlin.math.abs(previewIconBounds.center.y - previewTitleBounds.center.y) > 24f,
         )
         assertTrue(
             "Rotated offline content $offlineContentBounds must stay inside live view $previewBounds",
@@ -407,24 +416,23 @@ class CameraScreensTest {
         val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
         val actions = noOpActions().copy(closePicker = { picker.value = null })
         compose.setContent {
-            DeviceConfigurationOverride(
-                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            CompositionLocalProvider(
+                LocalCameraControlRotation provides -90f,
+                LocalCameraControlTargetRotation provides -90f,
             ) {
-                CompositionLocalProvider(
-                    LocalCameraControlRotation provides -90f,
-                    LocalCameraControlTargetRotation provides -90f,
-                ) {
-                    MaterialTheme(colorScheme = OpenEosColorScheme) {
-                        CameraControlScreen(
-                            connectedState().copy(activeSettingPicker = picker.value),
-                            actions,
-                        )
-                    }
+                MaterialTheme(colorScheme = OpenEosColorScheme) {
+                    CameraControlScreen(
+                        connectedState().copy(activeSettingPicker = picker.value),
+                        actions,
+                    )
                 }
             }
         }
 
-        compose.onNodeWithTag("rotated-settings-surface").assertIsDisplayed()
+        val viewportBounds = compose
+            .onNodeWithTag("settings-content-viewport", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
         val titleBounds = compose
             .onNodeWithText(resourceText(R.string.live_view_settings))
             .fetchSemanticsNode()
@@ -433,36 +441,77 @@ class CameraScreensTest {
             "Quarter-turn settings title should be upright when the device is held sideways: $titleBounds",
             titleBounds.height > titleBounds.width,
         )
+        assertTrue(
+            "Sideways settings should retain a measurable constrained viewport: $viewportBounds",
+            viewportBounds.width > 0f && viewportBounds.height > 0f,
+        )
         compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.composition_grid)).assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
         compose.runOnIdle { assertEquals(null, picker.value) }
-        compose.onAllNodesWithTag("rotated-settings-surface").assertCountEquals(0)
+        compose.onAllNodesWithText(resourceText(R.string.live_view_settings)).assertCountEquals(0)
     }
 
     @Test
     fun upsideDownSettingsUseTheSameRotatedCameraPanel() {
         compose.setContent {
-            DeviceConfigurationOverride(
-                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            CompositionLocalProvider(
+                LocalCameraControlRotation provides 180f,
+                LocalCameraControlTargetRotation provides 180f,
             ) {
-                CompositionLocalProvider(
-                    LocalCameraControlRotation provides 180f,
-                    LocalCameraControlTargetRotation provides 180f,
-                ) {
-                    MaterialTheme(colorScheme = OpenEosColorScheme) {
-                        CameraControlScreen(
-                            connectedState().copy(activeSettingPicker = SettingPicker.LIVE_VIEW),
-                            noOpActions(),
-                        )
-                    }
+                MaterialTheme(colorScheme = OpenEosColorScheme) {
+                    CameraControlScreen(
+                        connectedState().copy(activeSettingPicker = SettingPicker.LIVE_VIEW),
+                        noOpActions(),
+                    )
                 }
             }
         }
 
-        compose.onNodeWithTag("rotated-settings-surface").assertIsDisplayed()
+        compose.onNodeWithTag("rotated-settings-surface").fetchSemanticsNode()
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
+    }
+
+    @Test
+    fun openSettingsRemainVisibleWhenSystemRotationLockChanges() {
+        val controlRotation = mutableFloatStateOf(-90f)
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalCameraControlRotation provides controlRotation.floatValue,
+                LocalCameraControlTargetRotation provides controlRotation.floatValue,
+            ) {
+                MaterialTheme(colorScheme = OpenEosColorScheme) {
+                    CameraControlScreen(
+                        connectedState().copy(activeSettingPicker = SettingPicker.LIVE_VIEW),
+                        noOpActions(),
+                    )
+                }
+            }
+        }
+
+        val sidewaysTitle = compose
+            .onNodeWithText(resourceText(R.string.live_view_settings))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(sidewaysTitle.height > sidewaysTitle.width)
+
+        compose.runOnIdle { controlRotation.floatValue = 0f }
+        compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
+        val naturalTitle = compose
+            .onNodeWithText(resourceText(R.string.live_view_settings))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(naturalTitle.width > naturalTitle.height)
+
+        compose.runOnIdle { controlRotation.floatValue = -90f }
+        compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
+        val restoredSidewaysTitle = compose
+            .onNodeWithText(resourceText(R.string.live_view_settings))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(restoredSidewaysTitle.height > restoredSidewaysTitle.width)
     }
 
     @Test
