@@ -413,7 +413,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnRemeasuresLiveViewSettingsAsAFullCameraPanel() {
+    fun quarterTurnRemeasuresLiveViewSettingsInsideTheStableSidePanel() {
         val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
         val actions = noOpActions().copy(closePicker = { picker.value = null })
         compose.setContent {
@@ -454,7 +454,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun upsideDownSettingsUseTheSameRotatedCameraPanel() {
+    fun upsideDownSettingsRotateInsideTheStableCameraPanel() {
         compose.setContent {
             CompositionLocalProvider(
                 LocalCameraControlRotation provides 180f,
@@ -469,7 +469,8 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithTag("rotated-settings-surface").fetchSemanticsNode()
+        compose.onNodeWithTag("camera-settings-panel").fetchSemanticsNode()
+        compose.onNodeWithTag("settings-content-rotation").fetchSemanticsNode()
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
     }
@@ -495,6 +496,10 @@ class CameraScreensTest {
             .onNodeWithText(resourceText(R.string.live_view_settings))
             .fetchSemanticsNode()
             .boundsInRoot
+        val sidewaysPanel = compose
+            .onNodeWithTag("camera-settings-panel")
+            .fetchSemanticsNode()
+            .boundsInRoot
         assertTrue(sidewaysTitle.height > sidewaysTitle.width)
 
         compose.runOnIdle { controlRotation.floatValue = 0f }
@@ -504,7 +509,12 @@ class CameraScreensTest {
             .onNodeWithText(resourceText(R.string.live_view_settings))
             .fetchSemanticsNode()
             .boundsInRoot
+        val naturalPanel = compose
+            .onNodeWithTag("camera-settings-panel")
+            .fetchSemanticsNode()
+            .boundsInRoot
         assertTrue(naturalTitle.width > naturalTitle.height)
+        assertEquals(sidewaysPanel, naturalPanel)
 
         compose.runOnIdle { controlRotation.floatValue = -90f }
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
@@ -513,6 +523,10 @@ class CameraScreensTest {
             .fetchSemanticsNode()
             .boundsInRoot
         assertTrue(restoredSidewaysTitle.height > restoredSidewaysTitle.width)
+        assertEquals(
+            sidewaysPanel,
+            compose.onNodeWithTag("camera-settings-panel").fetchSemanticsNode().boundsInRoot,
+        )
     }
 
     @Test

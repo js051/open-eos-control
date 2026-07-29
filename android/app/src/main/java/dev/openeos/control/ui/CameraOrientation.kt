@@ -13,6 +13,11 @@ internal class CameraOrientationPolicy {
     private var snappedSensorDegrees = 0
 
     fun setSystemAutoRotation(enabled: Boolean) {
+        if (enabled && !systemAutoRotationEnabled) {
+            // Wait for a fresh sensor sample instead of briefly restoring an old posture.
+            latestSensorDegrees = ORIENTATION_UNKNOWN
+            snappedSensorDegrees = 0
+        }
         systemAutoRotationEnabled = enabled
     }
 
@@ -28,7 +33,7 @@ internal class CameraOrientationPolicy {
     }
 
     fun shouldListen(activityStarted: Boolean, canDetectOrientation: Boolean): Boolean =
-        activityStarted && canDetectOrientation
+        activityStarted && canDetectOrientation && systemAutoRotationEnabled
 
     fun resolveControlRotation(displayRotationDegrees: Int): Float = resolveCameraControlRotation(
         autoRotationEnabled = systemAutoRotationEnabled,
