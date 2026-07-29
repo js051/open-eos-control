@@ -21,6 +21,7 @@ class CameraValueLabelsTest {
             Triple("autopoweroff", "30 minutes", R.string.camera_value_30_minutes),
             Triple("autopoweroff", "Disable", R.string.camera_value_disable),
             Triple("capturetarget", "Internal RAM", R.string.camera_value_internal_ram),
+            Triple("capturetarget", "Phone", R.string.camera_value_phone),
             Triple("capturetarget", "Memory card", R.string.camera_value_memory_card),
             Triple("aeb", "off", R.string.camera_value_off),
             Triple("stillimagequalitycf", "cRAW + Large Fine JPEG", R.string.camera_value_craw_large_fine_jpeg),

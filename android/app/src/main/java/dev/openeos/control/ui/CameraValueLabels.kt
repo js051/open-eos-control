@@ -206,6 +206,7 @@ private val autoPowerOffValueLabels = mapOf(
 )
 
 private val captureTargetValueLabels = mapOf(
+    "phone" to R.string.camera_value_phone,
     "internal ram" to R.string.camera_value_internal_ram,
     "sdram" to R.string.camera_value_internal_ram,
     "memory card" to R.string.camera_value_memory_card,

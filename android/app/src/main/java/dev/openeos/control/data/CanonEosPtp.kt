@@ -387,8 +387,10 @@ object CanonEosPtp {
     fun propertyValue(propertyCode: Int, values: List<Long>, label: String): Long? =
         propertyOptions(propertyCode, values).firstOrNull { it.label == label }?.value
 
-    fun settingKey(propertyCode: Int): String? =
-        settingSpecs.firstOrNull { it.propertyCode == propertyCode }?.key
+    fun settingKey(propertyCode: Int): String? = when (propertyCode) {
+        CanonEosPropertyCode.CAPTURE_DESTINATION -> "capturetarget"
+        else -> settingSpecs.firstOrNull { it.propertyCode == propertyCode }?.key
+    }
 
     fun propertyValueBytes(propertyCode: Int): Int? = propertySpecs[propertyCode]?.valueBytes
 

@@ -794,6 +794,139 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun canonUsbCaptureTargetSelectsPhoneOrCameraCardOnlyWhenBothPathsAreSafe() = runTest {
+        val captured = HostCaptureObject(
+            handle = 0x49,
+            objectFormat = PtpObjectFormat.EXIF_JPEG,
+            filename = "IMG_0049.JPG",
+            bytes = byteArrayOf(4, 9),
+        )
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            hostCaptureObjects = listOf(captured),
+        )
+        val store = MemoryHostCaptureStore()
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = store,
+        )
+        backend.initialize()
+
+        val initial = backend.capabilities()
+        val target = initial.advancedSettings.single { it.key == "capturetarget" }
+        assertEquals("Phone", target.value)
+        assertEquals(listOf("Phone", "Memory card"), target.values)
+        assertTrue("capturetarget" in initial.evidence.writableSettings)
+        assertTrue(backend.status().rawTransportJson.contains("\"setting\":\"capturetarget\""))
+
+        backend.setSetting("capturetarget", "Memory card")
+        assertEquals(
+            2L,
+            transport.sentContainers.last {
+                it.type == PtpContainerType.DATA &&
+                    it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
+                    it.parameters().getOrNull(1)?.toInt() == CanonEosPropertyCode.CAPTURE_DESTINATION
+            }.parameters()[2],
+        )
+        assertEquals(
+            "Memory card",
+            backend.capabilities().advancedSettings.single { it.key == "capturetarget" }.value,
+        )
+
+        backend.setSetting("capturetarget", "Phone")
+        backend.captureStill()
+
+        assertEquals(
+            CanonEosPtp.CAPTURE_DESTINATION_HOST,
+            transport.sentContainers.last {
+                it.type == PtpContainerType.DATA &&
+                    it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
+                    it.parameters().getOrNull(1)?.toInt() == CanonEosPropertyCode.CAPTURE_DESTINATION
+            }.parameters()[2],
+        )
+        assertEquals("IMG_0049.JPG", store.list().single().name)
+        assertTrue(transport.hasOperation(CanonEosOperationCode.TRANSFER_COMPLETE))
+        backend.close()
+    }
+
+    @Test
+    fun canonUsbCaptureTargetIsHiddenAndCannotWriteWithoutHostTransferSupport() = runTest {
+        val transport = CanonEosScriptedTransport()
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = MemoryHostCaptureStore(),
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        val failure = runCatching { backend.setSetting("capturetarget", "Phone") }.exceptionOrNull()
+
+        assertTrue(capabilities.advancedSettings.none { it.key == "capturetarget" })
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(transport.hasCanonPropertyWrite(CanonEosPropertyCode.CAPTURE_DESTINATION))
+        backend.close()
+    }
+
+    @Test
+    fun canonUsbCaptureTargetPreservesStateWhenCameraRejectsTheWrite() = runTest {
+        val transport = CanonEosScriptedTransport(
+            captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
+            hostCaptureObjects = listOf(
+                HostCaptureObject(0x4B, PtpObjectFormat.EXIF_JPEG, "IMG_0051.JPG", byteArrayOf(5, 1)),
+            ),
+            rejectPropertyCode = CanonEosPropertyCode.CAPTURE_DESTINATION,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = MemoryHostCaptureStore(),
+        )
+        backend.initialize()
+        assertEquals(
+            "Phone",
+            backend.capabilities().advancedSettings.single { it.key == "capturetarget" }.value,
+        )
+
+        val failure = runCatching { backend.setSetting("capturetarget", "Memory card") }.exceptionOrNull()
+
+        assertTrue(failure is PtpResponseException)
+        assertEquals(
+            "Phone",
+            backend.capabilities().advancedSettings.single { it.key == "capturetarget" }.value,
+        )
+        backend.close()
+    }
+
+    @Test
+    fun selectedPhoneCaptureTargetStopsBeforeShutterWhenCapacityPreparationFails() = runTest {
+        val transport = CanonEosScriptedTransport(
+            captureDestination = 2,
+            availableShots = 0,
+            hostCaptureObjects = listOf(
+                HostCaptureObject(0x4A, PtpObjectFormat.EXIF_JPEG, "IMG_0050.JPG", byteArrayOf(5, 0)),
+            ),
+            rejectOperationCode = CanonEosOperationCode.PC_HDD_CAPACITY,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = MemoryHostCaptureStore(),
+        )
+        backend.initialize()
+        assertTrue(backend.capabilities().advancedSettings.any { it.key == "capturetarget" })
+        backend.setSetting("capturetarget", "Phone")
+
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("explicitly selected phone"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        backend.close()
+    }
+
+    @Test
     fun canonHostCaptureCompletesEveryRawAndJpegTransferRequest() = runTest {
         val jpeg = HostCaptureObject(
             handle = 0x51,

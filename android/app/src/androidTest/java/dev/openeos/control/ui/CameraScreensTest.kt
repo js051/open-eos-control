@@ -468,6 +468,15 @@ class CameraScreensTest {
         compose.runOnIdle {
             assertEquals("drivemode" to "Super high speed continuous shooting", request)
         }
+        compose.onNodeWithTag("advanced-setting-capturetarget")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.camera_value_phone))
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle {
+            assertEquals("capturetarget" to "Phone", request)
+        }
     }
 
     @Test
