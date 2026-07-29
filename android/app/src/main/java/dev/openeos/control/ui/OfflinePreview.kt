@@ -95,8 +95,8 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
         profile = CameraProfile.R6_MARK_III,
     ),
     mediaItems = listOf(
-        CameraMediaItem("preview-001", "R6M3_0001.CR3", "raw", 31_457_280, "2026-07-21T10:08:24+08:00"),
-        CameraMediaItem("preview-002", "R6M3_0001.JPG", "image", 8_912_384, "2026-07-21T10:08:24+08:00"),
+        CameraMediaItem("preview-001", "R6M3_0001.CR3", "raw", 31_457_280, "2026-07-21T10:08:24+08:00", true),
+        CameraMediaItem("preview-002", "R6M3_0001.JPG", "image", 8_912_384, "2026-07-21T10:08:24+08:00", true),
         CameraMediaItem("preview-003", "R6M3_0002.MP4", "video", 128_450_560, "2026-07-21T10:10:02+08:00"),
     ),
     mediaThumbnails = emptyMap(),

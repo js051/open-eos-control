@@ -1067,6 +1067,7 @@ class CcapiSession:
                     name=path.rsplit("/", 1)[-1],
                     kind=_media_kind(path),
                     content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+                    preview_available=_media_kind(path) in {"image", "raw"},
                 )
                 for path in media_paths[:MAX_MEDIA_ITEMS]
             ]
@@ -1106,6 +1107,7 @@ class CcapiSession:
                         name=name,
                         kind=_media_kind(path),
                         content_type=content_type,
+                        preview_available=_media_kind(path) in {"image", "raw"},
                     )
                     item = item.model_copy(update={"size_bytes": size, "content_type": content_type})
 

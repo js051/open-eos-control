@@ -84,6 +84,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
         media = client.get(f"/v1/session/{session_id}/media", headers=headers)
         media_id = media.json()["items"][0]["id"]
         thumbnail = client.get(f"/v1/session/{session_id}/media/{media_id}/thumbnail", headers=headers)
+        preview = client.get(f"/v1/session/{session_id}/media/{media_id}/preview", headers=headers)
         download = client.get(f"/v1/session/{session_id}/media/{media_id}", headers=headers)
         media_deleted = client.delete(f"/v1/session/{session_id}/media/{media_id}", headers=headers)
         deleted = client.delete(f"/v1/session/{session_id}", headers=headers)
@@ -98,7 +99,9 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert "LIVE_VIEW" in capabilities.json()["supported"]
     assert "MEDIA_DELETE" in capabilities.json()["supported"]
     assert "MEDIA_THUMBNAIL" in capabilities.json()["supported"]
+    assert "MEDIA_PREVIEW" in capabilities.json()["supported"]
     assert "LIVE_VIEW_MAGNIFICATION" in capabilities.json()["supported"]
+    assert media.json()["items"][0]["previewAvailable"] is True
     assert capabilities.json()["evidence"]["source"] == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert setting.json()["exposure"]["iso"] == "800"
@@ -119,6 +122,9 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert thumbnail.content == THUMBNAIL
     assert thumbnail.headers["content-type"].startswith("image/jpeg")
     assert thumbnail.headers["cache-control"] == "private, no-store, max-age=0"
+    assert preview.content == JPEG
+    assert preview.headers["content-type"].startswith("image/jpeg")
+    assert preview.headers["cache-control"] == "private, no-store, max-age=0"
     assert download.content == MEDIA_BYTES
     assert download.headers["content-type"].startswith("image/jpeg")
     assert media_deleted.status_code == 204
@@ -139,13 +145,20 @@ def test_host_ram_capture_runs_end_to_end_through_media_api(tmp_path: Path) -> N
             f"/v1/session/{session_id}/media/{local_item['id']}/thumbnail",
             headers=headers,
         )
+        preview = client.get(
+            f"/v1/session/{session_id}/media/{local_item['id']}/preview",
+            headers=headers,
+        )
         download = client.get(f"/v1/session/{session_id}/media/{local_item['id']}", headers=headers)
         deleted = client.delete(f"/v1/session/{session_id}/media/{local_item['id']}", headers=headers)
 
     assert captured.status_code == 200
     assert local_item["contentType"] == "image/jpeg"
+    assert local_item["previewAvailable"] is True
     assert thumbnail.status_code == 200
     assert thumbnail.content.startswith(b"\xff\xd8")
+    assert preview.status_code == 200
+    assert preview.content.startswith(b"\xff\xd8")
     assert download.status_code == 200
     assert download.content.startswith(b"\xff\xd8")
     assert download.headers["content-length"] == str(local_item["sizeBytes"])

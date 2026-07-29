@@ -73,6 +73,7 @@ class DesktopBridgeClientTest {
         assertEquals("Canon EOS R6 Mark III", cameras.single().model)
         assertEquals("camera-r6m3", cameras.single().id)
         assertEquals("TEST-SERIAL-0001", info.serial)
+        assertTrue(media.single().previewAvailable)
         assertEquals("gphoto2 2.5.33", info.engineVersion)
         assertEquals(82, initialStatus.batteryLevel)
         assertEquals(2048L, initialStatus.storageTotalBytes)
@@ -424,7 +425,8 @@ class DesktopBridgeClientTest {
                   "kind": "image",
                   "sizeBytes": 5,
                   "captureTime": "2026-07-21T02:13:21Z",
-                  "contentType": "image/jpeg"
+                  "contentType": "image/jpeg",
+                  "previewAvailable": true
                 }
               ]
             }

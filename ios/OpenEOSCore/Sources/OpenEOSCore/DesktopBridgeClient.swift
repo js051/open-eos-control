@@ -389,7 +389,8 @@ public actor DesktopBridgeClient {
                 name: name,
                 kind: item.string("kind") ?? "other",
                 sizeBytes: item.int64("sizeBytes"),
-                captureTime: item.nonEmptyString("captureTime")
+                captureTime: item.nonEmptyString("captureTime"),
+                previewAvailable: item.bool("previewAvailable") ?? false
             )
         }
     }
@@ -405,8 +406,8 @@ public actor DesktopBridgeClient {
     }
 
     public func mediaPreview(_ item: CameraMediaItem) async throws -> CameraMediaPreview {
-        guard ["image", "raw"].contains(item.kind.lowercased()) else {
-            throw DesktopBridgeError.invalidResponse("Display preview is available only for camera image items.")
+        guard item.previewAvailable else {
+            throw DesktopBridgeError.invalidResponse("Display preview is unavailable for this media item.")
         }
         let response = try await mediaImageRepresentation(
             item,

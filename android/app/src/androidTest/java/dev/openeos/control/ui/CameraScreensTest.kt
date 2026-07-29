@@ -712,7 +712,7 @@ class CameraScreensTest {
 
     @Test
     fun mediaPreviewOpensFromThumbnailOnlyWhenAdvertised() {
-        val item = CameraMediaItem("ccapi:image", "IMG_0042.JPG", "image")
+        val item = CameraMediaItem("ccapi:image", "IMG_0042.JPG", "image", previewAvailable = true)
         val preview = CameraUiState().withOfflinePreview()
         val capabilities = requireNotNull(preview.capabilities)
         val state = mutableStateOf(
@@ -745,6 +745,28 @@ class CameraScreensTest {
         compose.onNodeWithContentDescription(resourceText(R.string.close_media_preview)).assertIsDisplayed()
             .performClick()
         compose.onNodeWithContentDescription(resourceText(R.string.close_media_preview)).assertDoesNotExist()
+    }
+
+    @Test
+    fun mediaPreviewButtonIsHiddenWhenTheItemHasNoDecodablePreview() {
+        val item = CameraMediaItem("ptp:raw", "IMG_0042.CR3", "raw", previewAvailable = false)
+        val preview = CameraUiState().withOfflinePreview()
+        val capabilities = requireNotNull(preview.capabilities)
+        val state = preview.copy(
+            previewMode = false,
+            mediaItems = listOf(item),
+            capabilities = capabilities.copy(
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported + CameraFeature.MEDIA_PREVIEW,
+                ),
+            ),
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.preview_media, item.name)).assertDoesNotExist()
+        compose.onNodeWithText(item.name).assertIsDisplayed()
     }
 
     @Test

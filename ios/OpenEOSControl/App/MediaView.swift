@@ -135,9 +135,7 @@ struct MediaView: View {
 
     @ViewBuilder
     private func mediaThumbnail(_ item: CameraMediaItem) -> some View {
-        let previewable = item.kind.caseInsensitiveCompare("image") == .orderedSame
-            || item.kind.caseInsensitiveCompare("raw") == .orderedSame
-        if previewable, camera.supports(.mediaPreview), !camera.isPreview {
+        if item.previewAvailable, camera.supports(.mediaPreview), !camera.isPreview {
             Button {
                 Task { await camera.openMediaPreview(item) }
             } label: {

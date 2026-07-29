@@ -22,7 +22,7 @@ from open_eos_bridge.gphoto2 import (
     parse_storage_info,
     resolve_gphoto_command,
 )
-from open_eos_bridge.local_media import default_capture_directory
+from open_eos_bridge.local_media import default_capture_directory, preview_content_type
 from open_eos_bridge.models import CameraFeature, LiveViewStartRequest
 
 from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, THUMBNAIL, FakeRunner
@@ -210,6 +210,17 @@ def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
     assert media[0].size_bytes == 6
     assert media[0].content_type == "image/jpeg"
     assert media[0].capture_time == "2026-07-21T02:13:21Z"
+    assert media[0].preview_available is True
+    assert media[1].preview_available is False
+
+
+def test_media_preview_validation_requires_complete_jpeg_or_png_markers() -> None:
+    complete_png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00IEND\xaeB`\x82"
+
+    assert preview_content_type(JPEG) == "image/jpeg"
+    assert preview_content_type(complete_png) == "image/png"
+    assert preview_content_type(complete_png[:-1]) is None
+    assert preview_content_type(b"\xff\xd8truncated") is None
 
 
 def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path: Path) -> None:
@@ -227,6 +238,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert CameraFeature.LIVE_VIEW_MAGNIFICATION in capabilities.supported
     assert CameraFeature.MEDIA_DELETE in capabilities.supported
     assert CameraFeature.MEDIA_THUMBNAIL in capabilities.supported
+    assert CameraFeature.MEDIA_PREVIEW in capabilities.supported
     assert CameraFeature.TAP_FOCUS in capabilities.planned
     assert CameraFeature.CLICK_WHITE_BALANCE in capabilities.planned
     assert next(setting for setting in capabilities.settings if setting.key == "iso").values == [
@@ -301,9 +313,15 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
 
     media = session.list_media()
     thumbnail, thumbnail_type = session.media_thumbnail(media[0].id)
+    preview, preview_type = session.media_preview(media[0].id)
+    with pytest.raises(BridgeError) as raw_preview:
+        session.media_preview(media[1].id)
     item, chunks = session.download_media(media[0].id)
     assert thumbnail == THUMBNAIL
     assert thumbnail_type == "image/jpeg"
+    assert preview == JPEG
+    assert preview_type == "image/jpeg"
+    assert raw_preview.value.code == "MEDIA_PREVIEW_UNAVAILABLE"
     assert item.name == "IMG_0001.JPG"
     assert b"".join(chunks) == MEDIA_BYTES
     session.delete_media(media[0].id)
@@ -328,6 +346,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.LIVE_VIEW_JPEG_POLLING,
         CameraFeature.MEDIA_BROWSER,
         CameraFeature.MEDIA_THUMBNAIL,
+        CameraFeature.MEDIA_PREVIEW,
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= observed
@@ -418,10 +437,14 @@ def test_capture_downloads_host_ram_and_exposes_local_media_lifecycle(tmp_path: 
     local_item = next(item for item in session.list_media() if item.id.startswith("gphoto2-host:"))
     assert local_item.name.startswith("OEC_")
     assert local_item.content_type == "image/jpeg"
+    assert local_item.preview_available is True
     thumbnail, thumbnail_type = session.media_thumbnail(local_item.id)
+    preview, preview_type = session.media_preview(local_item.id)
     downloaded_item, chunks = session.download_media(local_item.id)
     assert thumbnail.startswith(b"\xff\xd8")
     assert thumbnail_type == "image/jpeg"
+    assert preview.startswith(b"\xff\xd8") and preview.endswith(b"\xff\xd9")
+    assert preview_type == "image/jpeg"
     assert downloaded_item == local_item
     assert b"".join(chunks).startswith(b"\xff\xd8")
 

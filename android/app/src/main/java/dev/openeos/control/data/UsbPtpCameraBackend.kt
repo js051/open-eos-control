@@ -210,6 +210,7 @@ class UsbPtpCameraBackend(
             if ((supportsMediaBrowser(info) && info.supports(PtpOperationCode.GET_THUMB)) || supportsHostMedia) {
                 add(CameraFeature.MEDIA_THUMBNAIL)
             }
+            if (info.supports(PtpOperationCode.GET_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_PREVIEW)
             if (info.supports(PtpOperationCode.GET_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_DOWNLOAD)
             if (info.supports(PtpOperationCode.DELETE_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_DELETE)
             if (info.supports(PtpOperationCode.INITIATE_CAPTURE) || supportsCanonRelease) {
@@ -252,6 +253,7 @@ class UsbPtpCameraBackend(
             CameraFeature.ADVANCED_SETTINGS,
             CameraFeature.MEDIA_BROWSER,
             CameraFeature.MEDIA_THUMBNAIL,
+            CameraFeature.MEDIA_PREVIEW,
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
         )
@@ -299,6 +301,8 @@ class UsbPtpCameraBackend(
                         "Uses standard camera object operations plus completed Canon EOS host captures stored in app-private media.",
                     CameraFeature.MEDIA_THUMBNAIL to
                         "Uses advertised standard PTP GetThumb for card media or Android decoding for app-private host captures.",
+                    CameraFeature.MEDIA_PREVIEW to
+                        "Uses bounded standard PTP GetObject or app-private host files only for complete JPEG/PNG images up to 32 MiB.",
                     CameraFeature.MEDIA_DOWNLOAD to
                         "Uses standard GetObject with bounded USB reads or streams a completed app-private host capture.",
                     CameraFeature.MEDIA_DELETE to
@@ -628,6 +632,29 @@ class UsbPtpCameraBackend(
             bytes = bytes,
             contentType = thumbnailContentType(objectInfo.thumbnailFormat, bytes),
         ).also { observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL) }
+    }
+
+    override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
+        hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
+            return store.preview(item).also { observedFeatures.add(CameraFeature.MEDIA_PREVIEW) }
+        }
+        requireOperation(PtpOperationCode.GET_OBJECT, CameraFeature.MEDIA_PREVIEW)
+        val handle = item.ptpHandle()
+        val objectInfo = mediaInfo[handle] ?: requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
+        val mediaItem = objectInfo.toMediaItem()
+        if (!mediaItem.previewAvailable) {
+            throw PtpProtocolException("${item.name} does not advertise a bounded JPEG or PNG preview object.")
+        }
+        val output = BoundedByteArrayOutputStream(MAX_PTP_MEDIA_PREVIEW_BYTES)
+        requireSession().downloadObject(handle, output)
+        val bytes = output.toByteArray()
+        val contentType = mediaPreviewContentType(objectInfo.objectFormat, bytes)
+            ?: throw PtpProtocolException("${item.name} is not a complete JPEG or PNG image.")
+        return CameraMediaPreview(
+            item = mediaItem,
+            bytes = bytes,
+            contentType = contentType,
+        ).also { observedFeatures.add(CameraFeature.MEDIA_PREVIEW) }
     }
 
     override suspend fun downloadMedia(
@@ -1298,6 +1325,8 @@ private fun PtpObjectInfo.toMediaItem(): CameraMediaItem = CameraMediaItem(
     kind = mediaKind(filename, objectFormat),
     sizeBytes = sizeBytes,
     captureTime = captureDate.toDisplayPtpDate(),
+    previewAvailable = sizeBytes in 1..MAX_PTP_MEDIA_PREVIEW_BYTES.toLong() &&
+        (objectFormat == PtpObjectFormat.EXIF_JPEG || objectFormat == PtpObjectFormat.PNG),
 )
 
 private fun CameraMediaItem.ptpHandle(): Long {
@@ -1312,6 +1341,37 @@ private fun thumbnailContentType(format: Int, bytes: ByteArray): String? = when 
     else -> null
 }
 
+private fun mediaPreviewContentType(format: Int, bytes: ByteArray): String? = when {
+    format == PtpObjectFormat.EXIF_JPEG && bytes.hasJpegMarkers() -> "image/jpeg"
+    format == PtpObjectFormat.PNG && bytes.hasCompletePngMarkers() -> "image/png"
+    else -> null
+}
+
+private class BoundedByteArrayOutputStream(private val maxBytes: Int) : OutputStream() {
+    private val output = java.io.ByteArrayOutputStream()
+
+    override fun write(value: Int) {
+        ensureCapacity(1)
+        output.write(value)
+    }
+
+    override fun write(bytes: ByteArray, offset: Int, length: Int) {
+        require(offset >= 0 && length >= 0 && offset <= bytes.size - length) {
+            "Invalid media preview byte range."
+        }
+        ensureCapacity(length)
+        output.write(bytes, offset, length)
+    }
+
+    fun toByteArray(): ByteArray = output.toByteArray()
+
+    private fun ensureCapacity(additionalBytes: Int) {
+        if (output.size() > maxBytes - additionalBytes) {
+            throw PtpProtocolException("USB PTP media preview exceeded $maxBytes bytes.")
+        }
+    }
+}
+
 private fun ByteArray.hasJpegMarkers(): Boolean =
     size >= 4 &&
         this[0] == 0xFF.toByte() && this[1] == 0xD8.toByte() &&
@@ -1322,6 +1382,11 @@ private fun ByteArray.hasPngSignature(): Boolean =
         this[0] == 0x89.toByte() && this[1] == 0x50.toByte() && this[2] == 0x4E.toByte() &&
         this[3] == 0x47.toByte() && this[4] == 0x0D.toByte() && this[5] == 0x0A.toByte() &&
         this[6] == 0x1A.toByte() && this[7] == 0x0A.toByte()
+
+private fun ByteArray.hasCompletePngMarkers(): Boolean =
+    hasPngSignature() && size >= 20 && copyOfRange(size - 12, size).contentEquals(
+        byteArrayOf(0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE.toByte(), 0x42, 0x60, 0x82.toByte()),
+    )
 
 private fun List<PtpStorageInfo>.toStorageJson(): String {
     val array = JSONArray()
@@ -1413,6 +1478,7 @@ private fun formatPtpVersion(value: Int): String =
     "${value / 100}.${(value % 100).toString().padStart(2, '0')}"
 
 private const val MAX_USB_MEDIA_ITEMS = 500
+private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
 private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L

@@ -1347,6 +1347,7 @@ class CcapiClient(
                 kind = item.optString("kind", "other"),
                 sizeBytes = item.optLong("size_bytes").takeIf { item.has("size_bytes") },
                 captureTime = item.optString("capture_time").takeIf { it.isNotBlank() },
+                previewAvailable = item.optString("kind", "other").isCcapiPreviewKind(),
             )
         }
     }
@@ -1378,6 +1379,7 @@ class CcapiClient(
                 id = path,
                 name = path.substringAfterLast('/'),
                 kind = path.mediaKind(),
+                previewAvailable = path.mediaKind().isCcapiPreviewKind(),
             )
         }
     }
@@ -2093,6 +2095,9 @@ private fun String.mediaKind(): String = when (substringAfterLast('.', "").lower
     "mp4", "mov" -> "video"
     else -> "other"
 }
+
+private fun String.isCcapiPreviewKind(): Boolean =
+    equals("image", ignoreCase = true) || equals("raw", ignoreCase = true)
 
 private fun JSONObject.toCameraInfo(): CameraInfo = CameraInfo(
     connected = optBoolean("connected"),

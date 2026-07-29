@@ -146,7 +146,18 @@ The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --std
 
 `GET /v1/session/{id}/media/{itemId}/thumbnail` returns a bounded JPEG or PNG with `Cache-Control: private, no-store`. Camera-resident libgphoto2 media uses the documented `--folder ... --get-thumbnail ... --stdout` command only when `gphoto2 --abilities` reports file-preview support. Host-RAM captures use the Bridge's bounded Pillow decoder for supported local image formats; unsupported RAW preview formats return a real error while the original remains downloadable. The direct CCAPI engine follows Canon's official Android sample by adding the structured `kind=thumbnail` query to the exact same-origin content URL, bounds the response to 8 MiB, and rejects empty, textual or unrecognized payloads.
 
-`GET /v1/session/{id}/media/{itemId}/preview` is separately capability-gated and returns a private, non-cacheable display image up to 32 MiB. The direct CCAPI engine uses Canon's sample-backed structured `kind=display` query on the exact same-origin content path and accepts only image/RAW media. libgphoto2 and Android USB thumbnail support do not imply this capability.
+`GET /v1/session/{id}/media/{itemId}/preview` is separately capability-gated and returns a private, non-cacheable display image up to 32 MiB. Every media item includes `previewAvailable`; clients must require both that field and `MEDIA_PREVIEW` before exposing an action. The direct CCAPI engine uses Canon's sample-backed structured `kind=display` query on the exact same-origin content path and accepts image/RAW media. The libgphoto2 engine uses bounded `--folder ... --get-file ... --stdout` for camera-resident JPEG/PNG and bounded local reads for host captures, then validates a complete image. RAW, HEIF and video items report `previewAvailable: false` on wired paths.
+
+```json
+{
+  "id": "gphoto2:opaque-id",
+  "name": "IMG_0001.JPG",
+  "kind": "image",
+  "sizeBytes": 8912384,
+  "contentType": "image/jpeg",
+  "previewAvailable": true
+}
+```
 
 The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. When coordinate Tap AF or Click White Balance is advertised, `flipdetail?kind=both` is preferred so the same bounded response supplies the JPEG and Canon image-position metadata. Requested FPS controls client polling; observed FPS remains a separate UI metric.
 
@@ -186,7 +197,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - focus drive: advertised `manualfocusdrive` Near/Far values while Live View is active
 - Live View focus magnification: advertised writable `eoszoom` with only the R6 Mark III-backed values 1 and 5 while Live View is active
 - Live View: advertised `viewfinder` lifecycle plus cancellable `--capture-movie --stdout` MJPEG, command-safe restart and bounded `--capture-preview --stdout` fallback, with cleanup on stop, failed start, and session close
-- media: merge camera-resident recursive `--list-files` items with opaque-ID host captures; camera items use streamed `--get-file ... --stdout` and ability-gated exact deletion, while host items use bounded local thumbnails, chunked download, and exact store-confined deletion
+- media: merge camera-resident recursive `--list-files` items with opaque-ID host captures; camera JPEG/PNG items use bounded `--get-file ... --stdout` display previews plus the existing streamed download and ability-gated exact deletion, while host items use bounded local previews/thumbnails, chunked download, and exact store-confined deletion. Per-item `previewAvailable` prevents unsupported RAW/HEIF/video actions.
 
 Settings are exposed only when the runtime config is writable and has safe selectable values. The undocumented R6 Mark III Auto Power Off `0xFFFFFFFF` sentinel is rejected even if posted directly to the API, and one-choice advanced controls stay out of the product UI. Capture Target accepts only camera-advertised `Memory card`, `Card`, `Internal RAM`, or `SDRAM` values; host targets are hidden unless image capture is advertised. Host files are written into same-volume staging and become visible only after gPhoto2 reports that capture, download, and camera-side temporary deletion all succeeded; failure removes partial staging and never reports a fake capture. RAW+JPEG companion events share one unique template and are promoted together. The API never returns the storage path. Coordinate tap focus and Click White Balance remain unavailable because the public CLI surface does not provide verified normalized image-coordinate commands for this camera. Unsupported controls return an error and are never reported as accepted.
 

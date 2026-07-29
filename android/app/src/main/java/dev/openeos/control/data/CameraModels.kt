@@ -164,6 +164,7 @@ data class CapabilityMatrix(
                 CameraFeature.EXPOSURE_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
+                CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
             ),
@@ -366,6 +367,7 @@ data class CameraMediaItem(
     val kind: String,
     val sizeBytes: Long? = null,
     val captureTime: String? = null,
+    val previewAvailable: Boolean = false,
 )
 
 data class CameraMediaThumbnail(
