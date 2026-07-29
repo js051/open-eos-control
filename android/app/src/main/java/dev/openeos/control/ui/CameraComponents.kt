@@ -267,17 +267,6 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             testTag = "storage-status",
         )
         ToolIconButton(
-            if (state.captureMode == CaptureMode.PHOTO) LucideR.drawable.lucide_ic_camera else LucideR.drawable.lucide_ic_video,
-            stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.switch_to_video else R.string.switch_to_photo),
-            {
-                actions.setCaptureMode(
-                    if (state.captureMode == CaptureMode.PHOTO) CaptureMode.VIDEO else CaptureMode.PHOTO,
-                )
-            },
-            enabled = !state.isBusy(CameraOperation.SETTING),
-            tint = if (state.captureMode == CaptureMode.VIDEO) AppRecord else AppText,
-        )
-        ToolIconButton(
             LucideR.drawable.lucide_ic_eye_off,
             stringResource(R.string.hide_hud),
             { actions.setHudVisible(false) },

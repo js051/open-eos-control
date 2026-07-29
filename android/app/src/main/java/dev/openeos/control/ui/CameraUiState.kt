@@ -123,6 +123,13 @@ data class FocusPoint(
     val y: Double,
 )
 
+internal fun captureModeSwitchEnabled(state: CameraUiState): Boolean =
+    state.status?.recording != true &&
+        !state.bulbExposureActive &&
+        CameraOperation.SETTING !in state.pendingOperations &&
+        CameraOperation.CAPTURE !in state.pendingOperations &&
+        CameraOperation.RECORDING !in state.pendingOperations
+
 internal fun CameraCapabilities.shootingModeSetting(): CameraSettingControl? =
     advancedSettings.firstOrNull { it.key.isShootingModeKey() }
 

@@ -12,7 +12,7 @@
     <string name="scan_desktop_bridge">掃描橋接相機</string><string name="scanning_desktop_bridge">掃描中…</string><string name="connect_desktop_bridge">透過電腦連接</string>
     <string name="usb_camera">USB 相機</string><string name="usb_scan">掃描 USB</string>
     <plurals name="usb_devices_found"><item quantity="other">找到 %1$d 個裝置，%2$d 個 Canon</item></plurals>
-    <string name="control">控制</string><string name="debug">Debug</string><string name="photo">拍照</string><string name="video">錄影</string><string name="switch_to_photo">切換為拍照</string><string name="switch_to_video">切換為錄影</string><string name="hide_hud">隱藏控制介面</string><string name="show_hud">顯示控制介面</string><string name="more_actions">更多操作</string><string name="unknown">未知</string>
+    <string name="control">控制</string><string name="debug">Debug</string><string name="photo">拍照</string><string name="video">錄影</string><string name="hide_hud">隱藏控制介面</string><string name="show_hud">顯示控制介面</string><string name="more_actions">更多操作</string><string name="unknown">未知</string>
     <string name="disconnect">中斷連線</string><string name="refresh">重新整理</string><string name="more_settings">更多設定</string><string name="live_view_settings">Live View 設定</string><string name="live_view">Live View</string><string name="live_view_magnify_to">將 Live View 對焦放大設為 %1$d×</string>
     <string name="live_view_unavailable">無法使用 Live View</string><string name="tap_to_focus">點按對焦</string>
     <string name="iso">ISO</string><string name="shutter">Tv</string><string name="aperture">Av</string><string name="white_balance">WB</string>

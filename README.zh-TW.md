@@ -42,6 +42,7 @@ open-eos-control/
 - Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用 decoder 時才會出現
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質及有界 B/A／M/G 白平衡偏移，並依規格以完整物件寫回
 - 可選跟隨系統、英文或繁體中文；相機公告的設定值會本地化顯示，寫入時仍保留精確的協定原值
+- 固定於底部的拍照／錄影模式選擇器會在快門旁持續顯示目前操作情境；只有相機公告可寫且相符的機身模式時才同步寫入。曝光轉盤在寫入期間會鎖定，完成後再對齊相機確認值，因此遭拒或重疊的請求不會看起來像已套用。
 - 相機式方向行為：拍攝布局固定不換位，顯示旋轉嚴格跟隨 Android 系統自動旋轉偏好，同時在前景持續掌握目前姿態；手機橫拿或倒置時，文字與圖示會依整個可用取景範圍交換量測軸後獨立轉向，設定內容則共用同一個穩定視窗，在有寬度限制的底部面板與完整旋轉面板間切換，不會遺失已開啟的設定
 - REC 開始/停止
 - Canon 座標 Tap AF：只有相機公告 `PUT afframeposition` 且詳細 Live View 提供影像座標時才開放，不會把 0..1 座標直接猜測成機身命令
