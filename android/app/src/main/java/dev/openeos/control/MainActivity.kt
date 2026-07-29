@@ -118,6 +118,8 @@ class MainActivity : AppCompatActivity() {
 
     internal fun handleDeviceOrientationChanged(orientation: Int) {
         if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return
+        // Reconcile the public system setting for every sample. Some quick-settings
+        // implementations do not reliably notify observers while an immersive app is focused.
         val autoRotationEnabled = isSystemAutoRotationEnabled()
         animateControlRotation.value = autoRotationEnabled
         orientationPolicy.onSensorOrientation(orientation, autoRotationEnabled)
