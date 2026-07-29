@@ -780,7 +780,7 @@ final class CameraAppState: ObservableObject {
 
     private func begin(_ operation: CameraOperation) -> Bool {
         if bulbExposureActive && operation != .capture { return false }
-        busyOperations.insert(operation).inserted
+        return busyOperations.insert(operation).inserted
     }
 
     private func end(_ operation: CameraOperation) {
