@@ -2,6 +2,7 @@ package dev.openeos.control.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.Locale
 
 class CameraOrientationTest {
     @Test
@@ -140,19 +141,20 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun cameraHudUsesACompactModelNameWithoutLosingTheModelGeneration() {
-        assertEquals("R6 III", "Canon EOS R6 Mark III".toCameraHudName())
-        assertEquals("R5 II", "EOS R5 Mark II".toCameraHudName())
-        assertEquals("PowerShot G7 X III", "Canon PowerShot G7 X Mark III".toCameraHudName())
+    fun cameraHudRemovesBrandPrefixesWithoutAbbreviatingTheModelGeneration() {
+        assertEquals("R6 Mark III", "Canon EOS R6 Mark III".toCameraHudName())
+        assertEquals("R5 Mark II", "EOS R5 Mark II".toCameraHudName())
+        assertEquals("PowerShot G7 X Mark III", "Canon PowerShot G7 X Mark III".toCameraHudName())
     }
 
     @Test
-    fun cameraHudCompactsLargeRemainingShotCounts() {
-        assertEquals("0", compactCameraCount(-1))
-        assertEquals("999", compactCameraCount(999))
-        assertEquals("1K", compactCameraCount(1_000))
-        assertEquals("2.4K", compactCameraCount(2_418))
-        assertEquals("18K", compactCameraCount(18_900))
-        assertEquals("1.2M", compactCameraCount(1_250_000))
+    fun cameraHudKeepsTheExactLocalizedRemainingShotCount() {
+        assertEquals("0", exactCameraCount(-1, Locale.US))
+        assertEquals("999", exactCameraCount(999, Locale.US))
+        assertEquals("1,000", exactCameraCount(1_000, Locale.US))
+        assertEquals("2,418", exactCameraCount(2_418, Locale.US))
+        assertEquals("18,900", exactCameraCount(18_900, Locale.US))
+        assertEquals("1,250,000", exactCameraCount(1_250_000, Locale.US))
+        assertEquals("2,418", exactCameraCount(2_418, Locale.TAIWAN))
     }
 }
