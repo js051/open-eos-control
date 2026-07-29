@@ -1,0 +1,352 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const net = require("node:net");
+const os = require("node:os");
+const path = require("node:path");
+const { chromium } = require("playwright");
+
+const BRIDGE_ROOT = path.resolve(__dirname, "..");
+const RESULTS_DIR = path.join(BRIDGE_ROOT, "test-results");
+
+async function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close((error) => error ? reject(error) : resolve(address.port));
+    });
+  });
+}
+
+async function waitForServer(url, process, stderr, timeoutMillis = 20_000) {
+  const deadline = Date.now() + timeoutMillis;
+  while (Date.now() < deadline) {
+    if (process.exitCode !== null) {
+      throw new Error(`Browser test server exited early (${process.exitCode}): ${stderr()}`);
+    }
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch (_) {
+      // The server may still be binding its loopback socket.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Browser test server did not become ready: ${stderr()}`);
+}
+
+async function stopProcess(process) {
+  if (process.exitCode !== null) return;
+  process.kill();
+  await Promise.race([
+    new Promise((resolve) => process.once("exit", resolve)),
+    new Promise((resolve) => setTimeout(resolve, 5_000)),
+  ]);
+  if (process.exitCode === null) process.kill("SIGKILL");
+}
+
+async function run() {
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${port}`;
+  const captureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "open-eos-browser-test-"));
+  const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
+  const server = spawn(
+    python,
+    ["-m", "uvicorn", "tests.browser_server:app", "--host", "127.0.0.1", "--port", String(port), "--log-level", "warning"],
+    {
+      cwd: BRIDGE_ROOT,
+      env: { ...process.env, OPEN_EOS_BROWSER_CAPTURE_DIR: captureDirectory },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let serverError = "";
+  server.stderr.on("data", (chunk) => { serverError += chunk.toString(); });
+  let browser = null;
+  try {
+    await waitForServer(`${origin}/health`, server, () => serverError);
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1440, height: 900 },
+    });
+    await context.addInitScript(() => {
+      const testState = {
+        getUserMediaCalls: 0,
+        stoppedTracks: 0,
+        deliveredVideoFrameCallbacks: 0,
+        delayNextGetUserMedia: false,
+        pendingGetUserMedia: false,
+        rejectNextPlay: false,
+        lastConstraints: null,
+        currentTrack: null,
+      };
+      let videoFrameCallbackId = 0;
+      const videoFrameCallbacks = new Map();
+      Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+        configurable: true,
+        value(callback) {
+          const id = ++videoFrameCallbackId;
+          const timer = setTimeout(() => {
+            videoFrameCallbacks.delete(id);
+            testState.deliveredVideoFrameCallbacks += 1;
+            callback(performance.now(), { presentedFrames: id });
+          }, 1000 / 30);
+          videoFrameCallbacks.set(id, timer);
+          return id;
+        },
+      });
+      Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", {
+        configurable: true,
+        value(id) {
+          const timer = videoFrameCallbacks.get(id);
+          if (timer !== undefined) clearTimeout(timer);
+          videoFrameCallbacks.delete(id);
+        },
+      });
+      const deviceEvents = new EventTarget();
+      Object.defineProperty(globalThis, "__openEosLocalVideoTest", {
+        configurable: false,
+        value: testState,
+      });
+      const originalMediaPlay = HTMLMediaElement.prototype.play;
+      Object.defineProperty(HTMLMediaElement.prototype, "play", {
+        configurable: true,
+        value() {
+          if (this.id === "local-video" && testState.rejectNextPlay) {
+            testState.rejectNextPlay = false;
+            return Promise.reject(new DOMException("Autoplay rejected for test.", "NotAllowedError"));
+          }
+          return originalMediaPlay.call(this);
+        },
+      });
+      const mediaDevices = {
+        addEventListener: deviceEvents.addEventListener.bind(deviceEvents),
+        removeEventListener: deviceEvents.removeEventListener.bind(deviceEvents),
+        dispatchEvent: deviceEvents.dispatchEvent.bind(deviceEvents),
+        async enumerateDevices() {
+          return [
+            { kind: "audioinput", deviceId: "test-mic", label: "Test microphone" },
+            { kind: "videoinput", deviceId: "test-capture-card", label: "Test HDMI capture" },
+            { kind: "videoinput", deviceId: "test-usb-video", label: "Test USB video" },
+          ];
+        },
+        async getUserMedia(constraints) {
+          testState.getUserMediaCalls += 1;
+          testState.lastConstraints = JSON.parse(JSON.stringify(constraints));
+          const canvas = document.createElement("canvas");
+          canvas.width = 1280;
+          canvas.height = 720;
+          const context = canvas.getContext("2d");
+          let frame = 0;
+          const draw = () => {
+            context.fillStyle = frame % 2 ? "#20c4cb" : "#111416";
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.fillStyle = "#ffffff";
+            context.font = "48px sans-serif";
+            context.fillText(`Open EOS ${frame}`, 48, 80);
+            frame += 1;
+          };
+          draw();
+          const timer = setInterval(draw, 1000 / 30);
+          const stream = canvas.captureStream(30);
+          const track = stream.getVideoTracks()[0];
+          const originalStop = track.stop.bind(track);
+          let stopped = false;
+          Object.defineProperty(track, "getSettings", {
+            configurable: true,
+            value: () => ({
+              width: 1280,
+              height: 720,
+              frameRate: 30,
+              aspectRatio: 16 / 9,
+              deviceId: "private-test-device-id",
+              groupId: "private-test-group-id",
+            }),
+          });
+          track.stop = () => {
+            if (!stopped) {
+              stopped = true;
+              clearInterval(timer);
+              testState.stoppedTracks += 1;
+            }
+            originalStop();
+          };
+          testState.currentTrack = track;
+          if (testState.delayNextGetUserMedia) {
+            testState.delayNextGetUserMedia = false;
+            testState.pendingGetUserMedia = true;
+            await new Promise((resolve) => {
+              testState.releasePendingGetUserMedia = () => {
+                testState.pendingGetUserMedia = false;
+                resolve();
+              };
+            });
+          }
+          return stream;
+        },
+      };
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: mediaDevices,
+      });
+    });
+
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") pageErrors.push(message.text());
+    });
+    await page.goto(origin, { waitUntil: "networkidle" });
+    await page.waitForFunction(() => document.querySelectorAll("#camera-select option").length > 1);
+    await page.selectOption("#camera-select", { index: 1 });
+    await page.click("#connect-button");
+    await page.waitForSelector("#control-view:not([hidden])");
+    assert.match(await page.locator("#camera-name").innerText(), /R6 Mark III/);
+
+    await page.selectOption("#preview-input-select", "LOCAL_VIDEO");
+    await page.waitForSelector("#local-video-device-row:not([hidden])");
+    assert.equal(await page.locator("#local-video-device-select option").allTextContents().then((items) => items.includes("Test HDMI capture")), true);
+    await page.selectOption("#local-video-device-select", "test-capture-card");
+    await page.click("#live-toggle-button");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#local-video");
+      return !video.hidden && video.srcObject && video.videoWidth === 1280 && video.videoHeight === 720;
+    });
+    try {
+      await page.waitForFunction(
+        () => document.querySelector("#frame-indicator").textContent !== "-- FPS",
+        null,
+        { timeout: 5_000 },
+      );
+    } catch (error) {
+      const frameDebug = await page.evaluate(() => ({
+        callbacks: globalThis.__openEosLocalVideoTest.deliveredVideoFrameCallbacks,
+        indicator: document.querySelector("#frame-indicator").textContent,
+      }));
+      throw new Error(
+        `Local video FPS did not update: ${JSON.stringify(frameDebug)}; ` +
+        `pageErrors=${JSON.stringify(pageErrors)}; ${error.message}`,
+      );
+    }
+    assert.equal(await page.locator("#preview-source-indicator").innerText(), "UVC");
+    assert.match(await page.locator("#frame-indicator").innerText(), /^\d+\.\d FPS$/);
+    const mediaState = await page.evaluate(() => ({
+      calls: globalThis.__openEosLocalVideoTest.getUserMediaCalls,
+      constraints: globalThis.__openEosLocalVideoTest.lastConstraints,
+      trackState: globalThis.__openEosLocalVideoTest.currentTrack.readyState,
+    }));
+    assert.equal(mediaState.calls, 1);
+    assert.equal(mediaState.constraints.audio, false);
+    assert.deepEqual(mediaState.constraints.video.deviceId, { exact: "test-capture-card" });
+    assert.equal(mediaState.trackState, "live");
+
+    await page.click("#monitoring-button");
+    await page.waitForSelector("#monitoring-dialog[open]");
+    await page.check("#monitor-histogram-toggle");
+    await page.click("#monitoring-dialog-close");
+    await page.waitForFunction(() => {
+      const histogram = document.querySelector("#monitor-histogram");
+      return !histogram.hidden && histogram.width > 0 && histogram.height > 0;
+    });
+
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(RESULTS_DIR, "local-video-desktop.png") });
+    await page.setViewportSize({ width: 720, height: 900 });
+    await page.waitForFunction(() => {
+      const viewfinder = document.querySelector("#viewfinder").getBoundingClientRect();
+      const video = document.querySelector("#local-video").getBoundingClientRect();
+      return video.left >= viewfinder.left && video.top >= viewfinder.top &&
+        video.right <= viewfinder.right && video.bottom <= viewfinder.bottom;
+    });
+    const narrowLayout = await page.evaluate(() => {
+      const viewfinder = document.querySelector("#viewfinder").getBoundingClientRect();
+      const video = document.querySelector("#local-video").getBoundingClientRect();
+      return {
+        noPageOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        videoInsideViewfinder: video.left >= viewfinder.left && video.top >= viewfinder.top &&
+          video.right <= viewfinder.right && video.bottom <= viewfinder.bottom,
+      };
+    });
+    assert.deepEqual(narrowLayout, { noPageOverflow: true, videoInsideViewfinder: true });
+    await page.screenshot({ path: path.join(RESULTS_DIR, "local-video-narrow.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    await page.selectOption("#local-video-device-select", "test-usb-video");
+    await page.waitForFunction(() => (
+      globalThis.__openEosLocalVideoTest.getUserMediaCalls === 2 &&
+      globalThis.__openEosLocalVideoTest.stoppedTracks === 1 &&
+      !document.querySelector("#local-video").hidden
+    ));
+    assert.deepEqual(
+      await page.evaluate(() => globalThis.__openEosLocalVideoTest.lastConstraints.video.deviceId),
+      { exact: "test-usb-video" },
+    );
+
+    await page.click("#shutter-button");
+    await page.waitForFunction(() => document.querySelector("#operation-state").textContent === "Photo captured");
+    assert.equal(await page.locator("#local-video").isVisible(), true);
+
+    await page.click('.tab[data-view="diagnostics"]');
+    await page.waitForSelector("#diagnostics-panel:not([hidden])");
+    const reportText = await page.locator("#diagnostics-output").innerText();
+    const report = JSON.parse(reportText);
+    assert.equal(report.liveView.previewInput, "LOCAL_VIDEO");
+    assert.equal(report.liveView.localVideo.active, true);
+    assert.equal(report.liveView.localVideo.deviceCount, 2);
+    assert.equal(report.liveView.localVideo.selection, "explicit");
+    assert.equal(report.liveView.localVideo.settings.width, 1280);
+    assert.equal(report.liveView.monitoring.analysisError, null);
+    assert.equal(reportText.includes("private-test-device-id"), false);
+    assert.equal(reportText.includes("private-test-group-id"), false);
+    assert.equal(reportText.includes("Test HDMI capture"), false);
+    assert.equal(reportText.includes("Test USB video"), false);
+
+    await page.click('.tab[data-view="live"]');
+    await page.selectOption("#preview-input-select", "CAMERA");
+    await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.stoppedTracks === 2);
+    assert.equal(await page.locator("#local-video").isVisible(), false);
+    assert.equal(await page.locator("#preview-source-indicator").innerText(), "CAM");
+
+    await page.selectOption("#preview-input-select", "LOCAL_VIDEO");
+    await page.click("#live-toggle-button");
+    await page.waitForFunction(() => !document.querySelector("#local-video").hidden);
+    await page.evaluate(() => globalThis.__openEosLocalVideoTest.currentTrack.dispatchEvent(new Event("ended")));
+    await page.waitForFunction(() => document.querySelector("#operation-state").textContent === "The local video input was disconnected");
+    assert.equal(await page.locator("#local-video").isVisible(), false);
+    assert.equal(await page.evaluate(() => globalThis.__openEosLocalVideoTest.stoppedTracks), 3);
+
+    await page.evaluate(() => { globalThis.__openEosLocalVideoTest.rejectNextPlay = true; });
+    await page.click("#live-toggle-button");
+    await page.waitForFunction(() => (
+      document.querySelector("#operation-state").textContent ===
+      "The browser could not start local video playback."
+    ));
+    assert.equal(await page.evaluate(() => document.querySelector("#local-video").srcObject), null);
+    assert.equal(await page.evaluate(() => globalThis.__openEosLocalVideoTest.stoppedTracks), 4);
+
+    await page.evaluate(() => { globalThis.__openEosLocalVideoTest.delayNextGetUserMedia = true; });
+    await page.click("#live-toggle-button");
+    await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.pendingGetUserMedia === true);
+    await page.click("#disconnect-button");
+    await page.waitForSelector("#connection-view:not([hidden])");
+    await page.evaluate(() => globalThis.__openEosLocalVideoTest.releasePendingGetUserMedia());
+    await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.stoppedTracks === 5);
+    assert.equal(await page.evaluate(() => document.querySelector("#local-video").srcObject), null);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  } finally {
+    if (browser) await browser.close();
+    await stopProcess(server);
+    fs.rmSync(captureDirectory, { recursive: true, force: true });
+  }
+}
+
+run().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

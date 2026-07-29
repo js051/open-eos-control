@@ -6,6 +6,8 @@ The desktop bridge is a local service that exposes the same camera-control conce
 
 `bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and provides two open engines: `libgphoto2` for USB cameras and a native Python HTTP `ccapi` engine for direct wireless camera control. The gPhoto adapter invokes argument arrays, never a shell. Android and iOS implement the bridge protocol behind their shared camera sessions, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, bounded media thumbnails, separately advertised display previews, and streamed media. Deterministic tests cover both PC engines and the mobile contracts. Physical R6 Mark III validation is still required and must not be inferred from those tests.
 
+The built-in PC UI also supports a browser-owned local UVC/HDMI preview. This is intentionally not a Bridge endpoint or camera capability: it replaces only the page's viewfinder while the existing Bridge session continues to provide camera controls. Device identifiers stay in page memory, diagnostics contain only a count/selection mode and allowlisted track settings, and all tracks are stopped during source, device, session, or page teardown.
+
 ## Goals
 
 - Keep the bridge protocol open and testable.

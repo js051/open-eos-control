@@ -37,7 +37,7 @@ open-eos-control/
 - Live view 畫面，自動/手動更新與 FPS 控制
 - Android Live View 監看輔助會以有界 120x80 背景分析處理解碼後的 JPEG／USB／Bridge 影格，提供直方圖、可調斑馬紋、偽色、峰值對焦、16:9／2.39:1／1:1／4:3 畫幅框線、動作／標題安全區域，以及 1.33x／1.5x／1.8x／2x 變形鏡頭反擠壓；原生 RTP 保留零拷貝表面，因此只開放幾何型框線與反擠壓。
 - iOS Live View 監看輔助沿用相同的有界 120x80 分析契約，支援解碼後 JPEG／Bridge 影格的直方圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與反擠壓；RTP 保留原生 sample-buffer 顯示，因此只開放幾何型功能。
-- PC 控制介面會對每個已解碼的 Bridge 影格套用同一套有界 120x80 分析，涵蓋 CCAPI JPEG、解碼後 RTP 與 libgphoto2 USB 預覽。監看輔助視窗提供直方圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與變形鏡頭反擠壓，不會改動相機命令或偽造拍攝結果。相機媒體下載會顯示位元組進度並可取消；一般檔案使用串流式瀏覽器下載 fallback，未知大小或至少 64 MiB 的檔案則在瀏覽器支援時直接寫入具暫存保護的目的檔。
+- PC 控制介面會對 Bridge 解碼影格與本機 UVC／HDMI 視訊輸入套用同一套有界 120x80 分析。監看輔助視窗提供直方圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與變形鏡頭反擠壓，不會改動相機命令或偽造拍攝結果。本機視訊只替換取景畫面，Bridge session 仍持續控制相機；裝置 ID／名稱只留在記憶體且不會寫入診斷。相機媒體下載會顯示位元組進度並可取消；一般檔案使用串流式瀏覽器下載 fallback，未知大小或至少 64 MiB 的檔案則在瀏覽器支援時直接寫入具暫存保護的目的檔。
 - Android 對已解碼的 JPEG／USB／Bridge Live View 提供亮度直方圖、可調門檻斑馬紋、偽色、峰值對焦、16:9／2.39:1／1:1／4:3 畫幅框、動作／標題安全區域，以及 1.33x／1.5x／1.8x／2x 變形鏡頭反擠壓。原生 RTP 保留零拷貝顯示，因此不提供像素分析，但仍可使用幾何框線與反擠壓。
 - Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用 decoder 時才會出現
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質及有界 B/A／M/G 白平衡偏移，並依規格以完整物件寫回
@@ -152,6 +152,8 @@ Bridge health 會分別指出缺少 Linux distribution、WSL 內缺少 gphoto2�
 主機 RAM 拍攝預設保存在各平台的使用者資料目錄：Windows 為 `%LOCALAPPDATA%\OpenEOSControl\Captures`，macOS 為 `~/Library/Application Support/OpenEOSControl/Captures`，Linux 為 `${XDG_DATA_HOME:-~/.local/share}/open-eos-control/captures`。若要改位置，可把 `OPEN_EOS_CAPTURE_DIR` 設為絕對路徑。API 與診斷不會輸出這個本機路徑，只會提供不透明的媒體 ID。
 
 在電腦瀏覽器開啟 [http://127.0.0.1:18181/](http://127.0.0.1:18181/) 即可使用 PC 控制介面。選擇「USB 相機」會透過 `gphoto2` 掃描；選擇「無線 CCAPI」則輸入相機 origin，例如 `http://192.168.1.2:8080`，也可提供相機 Basic Auth 帳密。介面只會啟用相機有公告的操作；Bridge token 與相機密碼只留在記憶體且不會寫入診斷。語言、相機 URL 與使用者名稱可以保存在本機。
+
+建立相機控制 session 後，可在「監看輸入」把取景畫面切換成本機 UVC 相機或 HDMI 擷取卡。瀏覽器只要求視訊權限，第一次啟用時可能顯示相機權限提示；請使用預設 loopback URL 或 HTTPS，選擇「視訊裝置」後再啟動預覽。切換來源／裝置、中斷連線或關閉頁面時都會停止所有本機 media track。由於本機視訊不含 Canon Live View 幾何資訊，座標 Tap AF、點選白平衡與對焦放大不會在此來源開放；目前 libgphoto2 焦點前後移動也仍需要相機端 Live View。實作已有自動測試，但 R6 Mark III UVC 與 HDMI 擷取卡真機驗證仍待完成。
 
 服務預設只監聽 `127.0.0.1:18181`。Android 模擬器可在連線頁使用 `http://10.0.2.2:18181`；實體手機若要從區網連入，必須明確綁定 LAN 並設定 Bearer token：
 
