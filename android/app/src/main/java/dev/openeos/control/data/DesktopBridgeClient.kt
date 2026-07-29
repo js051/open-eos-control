@@ -240,6 +240,14 @@ class DesktopBridgeClient(
         postJson(sessionEndpoint("capture", "still"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }
 
+    suspend fun startBulbExposure(): CameraStatus = parseStatus(
+        postJson(sessionEndpoint("bulb", "start"), JSONObject())
+    )
+
+    suspend fun stopBulbExposure(): CameraStatus = parseStatus(
+        postJson(sessionEndpoint("bulb", "stop"), JSONObject())
+    ).also { observedFeatures.add(CameraFeature.BULB_EXPOSURE) }
+
     suspend fun autofocus(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("focus", "auto"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.AUTOFOCUS) }
@@ -572,6 +580,7 @@ class DesktopBridgeClient(
             rawBatteryJson = battery.toString(),
             rawStorageJson = media.toString(),
             rawTransportJson = raw.toString(),
+            bulbExposureActive = body.optNullableBoolean("bulbExposureActive"),
         )
     }
 

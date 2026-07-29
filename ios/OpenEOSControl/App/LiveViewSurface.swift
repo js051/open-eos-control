@@ -58,6 +58,23 @@ struct LiveViewSurface: View {
                     .position(x: imageRect.midX, y: imageRect.minY + 26)
                 }
 
+                if camera.bulbExposureActive {
+                    TimelineView(.periodic(from: .now, by: 0.25)) { context in
+                        let elapsed = max(0, Int(context.date.timeIntervalSince(camera.bulbStartedAt ?? context.date)))
+                        HStack(spacing: 7) {
+                            Circle().fill(Color.cameraWarning).frame(width: 9, height: 9)
+                            Text(String(format: NSLocalizedString("bulb_exposure_time", comment: ""), elapsed / 60, elapsed % 60))
+                                .font(.caption.bold())
+                        }
+                        .foregroundStyle(Color.cameraText)
+                        .padding(.horizontal, 10)
+                        .frame(height: 30)
+                        .background(Color.black.opacity(0.72))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .position(x: imageRect.midX, y: imageRect.minY + 26)
+                }
+
                 if camera.shutterFlash {
                     Color.white.ignoresSafeArea()
                 }

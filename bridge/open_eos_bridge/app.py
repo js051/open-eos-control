@@ -191,6 +191,14 @@ def create_app(
     def capture_still(session_id: str) -> CameraStatus:
         return manager.get(session_id).capture_still()
 
+    @router.post("/session/{session_id}/bulb/start", response_model=CameraStatus)
+    def start_bulb_exposure(session_id: str) -> CameraStatus:
+        return manager.get(session_id).start_bulb_exposure()
+
+    @router.post("/session/{session_id}/bulb/stop", response_model=CameraStatus)
+    def stop_bulb_exposure(session_id: str) -> CameraStatus:
+        return manager.get(session_id).stop_bulb_exposure()
+
     @router.post("/session/{session_id}/shutter/half-press", response_model=CameraStatus)
     def half_press_shutter(session_id: str) -> CameraStatus:
         return manager.get(session_id).half_press_shutter()

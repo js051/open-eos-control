@@ -574,7 +574,8 @@ input:disabled {
 }
 
 .overlay-label,
-.record-indicator {
+.record-indicator,
+.bulb-indicator {
   min-height: 28px;
   padding: 5px 8px;
   border: 1px solid rgb(255 255 255 / 20%);
@@ -592,6 +593,15 @@ input:disabled {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+}
+
+.bulb-indicator {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  color: #171205;
+  background: #f0b429;
+  border-color: #ffd66b;
 }
 
 .record-indicator span {
@@ -836,6 +846,21 @@ input:disabled {
 }
 
 .shutter-button.recording .shutter-inner {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+}
+
+.shutter-button.bulb {
+  border-color: #f0b429;
+}
+
+.shutter-button.bulb .shutter-inner {
+  color: #171205;
+  background: #f0b429;
+}
+
+.shutter-button.bulb-active .shutter-inner {
   width: 44px;
   height: 44px;
   border-radius: 6px;

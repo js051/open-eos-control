@@ -1073,6 +1073,97 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun canonBulbExposureUsesBalancedHalfAndFullRemoteReleaseSequence() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 2)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        assertTrue(backend.capabilities().matrix.supports(CameraFeature.BULB_EXPOSURE))
+        val started = backend.startBulbExposure()
+        val stopped = backend.stopBulbExposure()
+
+        val releaseCommands = transport.sentContainers.filter {
+            it.type == PtpContainerType.COMMAND &&
+                it.code in setOf(CanonEosOperationCode.REMOTE_RELEASE_ON, CanonEosOperationCode.REMOTE_RELEASE_OFF)
+        }.map { it.code to it.parameters() }
+        assertEquals(
+            listOf(
+                CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(1L, 0L),
+                CanonEosOperationCode.REMOTE_RELEASE_ON to listOf(2L, 0L),
+                CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(2L),
+                CanonEosOperationCode.REMOTE_RELEASE_OFF to listOf(1L),
+            ),
+            releaseCommands,
+        )
+        assertTrue(started.bulbExposureActive == true)
+        assertTrue(stopped.bulbExposureActive == false)
+        assertTrue(CameraFeature.BULB_EXPOSURE in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test
+    fun canonCloseReleasesAnActiveBulbExposure() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 2)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        backend.startBulbExposure()
+        backend.close()
+
+        val releaseCommands = transport.sentContainers.filter {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF
+        }.map { it.parameters() }
+        assertEquals(listOf(listOf(2L), listOf(1L)), releaseCommands)
+        assertTrue(transport.closed)
+    }
+
+    @Test
+    fun canonFailedFullBulbPressAttemptsFullAndHalfRelease() = runTest {
+        val transport = CanonEosScriptedTransport(rejectFullRemotePress = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.startBulbExposure() }.exceptionOrNull()
+
+        val releaseCommands = transport.sentContainers.filter {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF
+        }.map { it.parameters() }
+        assertTrue(failure is PtpResponseException)
+        assertEquals(listOf(listOf(2L), listOf(1L)), releaseCommands)
+        assertFalse(backend.status().bulbExposureActive == true)
+        backend.close()
+    }
+
+    @Test
+    fun canonFailedHalfBulbPressStillAttemptsFullAndHalfRelease() = runTest {
+        val transport = CanonEosScriptedTransport(rejectHalfRemotePress = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.startBulbExposure() }.exceptionOrNull()
+
+        val releaseCommands = transport.sentContainers.filter {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.REMOTE_RELEASE_OFF
+        }.map { it.parameters() }
+        assertTrue(failure is PtpResponseException)
+        assertEquals(listOf(listOf(2L), listOf(1L)), releaseCommands)
+        assertFalse(backend.status().bulbExposureActive == true)
+        backend.close()
+    }
+
+    @Test
     fun canonCaptureRefusesHostDestinationWhenNoCardTargetIsAdvertised() = runTest {
         val transport = CanonEosScriptedTransport(
             captureDestination = CanonEosPtp.CAPTURE_DESTINATION_HOST.toInt(),
@@ -1342,6 +1433,8 @@ class UsbPtpCameraBackendTest {
         private val advertiseRemoteRelease: Boolean = true,
         private val advertiseLiveViewMagnification: Boolean = true,
         private val rejectOperationCode: Int? = null,
+        private val rejectHalfRemotePress: Boolean = false,
+        private val rejectFullRemotePress: Boolean = false,
         private val availableShots: Int = 46_822,
         private val hostCaptureObjects: List<HostCaptureObject> = emptyList(),
         private val advertiseHostTransferOperations: Boolean = hostCaptureObjects.isNotEmpty(),
@@ -1392,7 +1485,14 @@ class UsbPtpCameraBackendTest {
 
                 CanonEosOperationCode.REMOTE_RELEASE_ON -> {
                     if (container.parameters().firstOrNull() == 2L) captureEventPending = true
-                    incoming += ok(transaction)
+                    incoming += if (
+                        (rejectHalfRemotePress && container.parameters().firstOrNull() == 1L) ||
+                            (rejectFullRemotePress && container.parameters().firstOrNull() == 2L)
+                    ) {
+                        response(PtpResponseCode.GENERAL_ERROR, transaction)
+                    } else {
+                        ok(transaction)
+                    }
                 }
 
                 CanonEosOperationCode.GET_EVENT -> {

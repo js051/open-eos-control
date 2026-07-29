@@ -5,10 +5,11 @@ import org.junit.Test
 
 class CameraOrientationTest {
     @Test
-    fun everyNonZeroSystemSettingMeansAutoRotationIsEnabled() {
+    fun onlyTheDocumentedSystemSettingValueEnablesAutoRotation() {
         assertEquals(false, isSystemAutoRotationSettingEnabled(0))
         assertEquals(true, isSystemAutoRotationSettingEnabled(1))
-        assertEquals(true, isSystemAutoRotationSettingEnabled(2))
+        assertEquals(false, isSystemAutoRotationSettingEnabled(2))
+        assertEquals(false, isSystemAutoRotationSettingEnabled(-1))
     }
 
     @Test

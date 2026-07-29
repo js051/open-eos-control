@@ -536,6 +536,45 @@ class CameraViewModel(
         startLiveViewLoopIfNeeded()
     }
 
+    fun toggleBulbExposure() = runCamera(CameraOperation.CAPTURE) {
+        if (!_uiState.value.bulbMode || !_uiState.value.supports(CameraFeature.BULB_EXPOSURE)) {
+            return@runCamera
+        }
+        val active = _uiState.value.bulbExposureActive
+        if (_uiState.value.previewMode) {
+            val status = requireNotNull(_uiState.value.status).copy(bulbExposureActive = !active)
+            _uiState.update {
+                it.copy(
+                    status = status,
+                    bulbStartedAtMillis = if (active) null else SystemClock.elapsedRealtime(),
+                )
+            }
+            if (active) showCaptureSuccess()
+            return@runCamera
+        }
+        pauseLiveViewForBulb()
+        try {
+            val status = if (active) repository.stopBulbExposure() else repository.startBulbExposure()
+            _uiState.update {
+                it.copy(
+                    status = status,
+                    bulbStartedAtMillis = if (status.bulbExposureActive == true) {
+                        it.bulbStartedAtMillis ?: SystemClock.elapsedRealtime()
+                    } else {
+                        null
+                    },
+                )
+            }
+            if (active && status.bulbExposureActive != true) {
+                showCaptureSuccess()
+                resumeLiveViewAfterBulb()
+            }
+        } catch (exception: Exception) {
+            if (!active) resumeLiveViewAfterBulb()
+            throw exception
+        }
+    }
+
     fun autofocus() {
         _uiState.update { it.copy(focusFeedback = FocusFeedback.FOCUSING) }
         if (_uiState.value.previewMode) {
@@ -1121,6 +1160,18 @@ class CameraViewModel(
     private fun stopLiveViewLoop() {
         liveViewJob?.cancel()
         liveViewJob = null
+    }
+
+    private fun pauseLiveViewForBulb() {
+        stopLiveViewLoop()
+        repository.setNativeLiveViewRenderingEnabled(false)
+    }
+
+    private suspend fun resumeLiveViewAfterBulb() {
+        repository.setNativeLiveViewRenderingEnabled(_uiState.value.liveViewAutoRefresh)
+        if (!_uiState.value.liveViewAutoRefresh) return
+        refreshLiveViewFrameInternal(reportErrors = false)
+        startLiveViewLoopIfNeeded()
     }
 
     override fun onCleared() {

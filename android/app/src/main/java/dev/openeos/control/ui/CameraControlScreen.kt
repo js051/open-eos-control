@@ -129,7 +129,11 @@ private fun StableCameraControls(state: CameraUiState, actions: CameraActions) {
 
 @Composable
 private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
-    val feature = if (state.captureMode == CaptureMode.PHOTO) CameraFeature.STILL_CAPTURE else CameraFeature.VIDEO_RECORDING
+    val feature = when {
+        state.bulbMode -> CameraFeature.BULB_EXPOSURE
+        state.captureMode == CaptureMode.PHOTO -> CameraFeature.STILL_CAPTURE
+        else -> CameraFeature.VIDEO_RECORDING
+    }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
             Modifier.fillMaxWidth().height(92.dp).padding(horizontal = 20.dp),
@@ -146,7 +150,13 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.capture_not_supported else R.string.recording_not_supported),
+                    stringResource(
+                        when {
+                            state.bulbMode -> R.string.bulb_not_supported
+                            state.captureMode == CaptureMode.PHOTO -> R.string.capture_not_supported
+                            else -> R.string.recording_not_supported
+                        }
+                    ),
                     color = AppWarning,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -160,10 +170,10 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
 internal val CAMERA_CAPABILITY_WARNING_HEIGHT = 40.dp
 
 internal fun cameraHudHeight(state: CameraUiState): Dp {
-    val feature = if (state.captureMode == CaptureMode.PHOTO) {
-        CameraFeature.STILL_CAPTURE
-    } else {
-        CameraFeature.VIDEO_RECORDING
+    val feature = when {
+        state.bulbMode -> CameraFeature.BULB_EXPOSURE
+        state.captureMode == CaptureMode.PHOTO -> CameraFeature.STILL_CAPTURE
+        else -> CameraFeature.VIDEO_RECORDING
     }
     return 176.dp + if (state.supports(feature)) 0.dp else CAMERA_CAPABILITY_WARNING_HEIGHT
 }

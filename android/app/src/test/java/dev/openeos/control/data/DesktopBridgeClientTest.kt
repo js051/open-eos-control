@@ -48,6 +48,8 @@ class DesktopBridgeClientTest {
         val exposureStatus = client.setExposure(iso = "800")
         val whiteBalanceStatus = client.setWhiteBalance("Daylight")
         client.captureStill()
+        val bulbStarted = client.startBulbExposure()
+        val bulbStopped = client.stopBulbExposure()
         client.autofocus()
         client.halfPressShutter()
         val recording = client.startRecording()
@@ -79,6 +81,8 @@ class DesktopBridgeClientTest {
         assertEquals(2, initialStatus.storageDeviceCount)
         assertEquals("800", exposureStatus.exposure.iso)
         assertEquals("Daylight", whiteBalanceStatus.exposure.whiteBalance)
+        assertTrue(bulbStarted.bulbExposureActive == true)
+        assertFalse(bulbStopped.bulbExposureActive == true)
         assertTrue(recording.recording == true)
         assertFalse(stopped.recording == true)
         assertEquals("click", clickWhiteBalanceStatus.exposure.whiteBalance)
@@ -107,6 +111,7 @@ class DesktopBridgeClientTest {
                     CameraFeature.EXPOSURE_CONTROL,
                     CameraFeature.WHITE_BALANCE_CONTROL,
                     CameraFeature.STILL_CAPTURE,
+                    CameraFeature.BULB_EXPOSURE,
                     CameraFeature.AUTOFOCUS,
                     CameraFeature.SHUTTER_HALF_PRESS,
                     CameraFeature.VIDEO_RECORDING,
@@ -146,6 +151,8 @@ class DesktopBridgeClientTest {
         assertEquals("camera-r6m3", sessionPayload.getString("cameraId"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/settings/iso") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/capture/still") == true })
+        assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/start") == true })
+        assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/stop") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/auto") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/shutter/half-press") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/drive") == true })
@@ -222,6 +229,7 @@ class DesktopBridgeClientTest {
         private var iso = "400"
         private var whiteBalance = "Auto"
         private var recording = false
+        private var bulbExposureActive = false
 
         override fun dispatch(request: RecordedRequest): MockResponse {
             requests += request
@@ -246,6 +254,14 @@ class DesktopBridgeClientTest {
                     json(statusJson())
                 }
                 path.endsWith("/capture/still") -> json(statusJson())
+                path.endsWith("/bulb/start") -> {
+                    bulbExposureActive = true
+                    json(statusJson())
+                }
+                path.endsWith("/bulb/stop") -> {
+                    bulbExposureActive = false
+                    json(statusJson())
+                }
                 path.endsWith("/focus/auto") -> json(statusJson())
                 path.endsWith("/shutter/half-press") -> json(statusJson())
                 path.endsWith("/recording/start") -> {
@@ -289,6 +305,7 @@ class DesktopBridgeClientTest {
               "connected": true,
               "battery": {"level": 82, "status": "normal"},
               "recording": $recording,
+              "bulbExposureActive": $bulbExposureActive,
               "mode": "Manual",
               "media": {"available": true, "totalBytes": 2048, "freeBytes": 1024, "freeImages": 123, "devices": 2},
               "exposure": {
@@ -367,7 +384,7 @@ class DesktopBridgeClientTest {
               "profile": {"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},
               "supported": [
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
-                "STILL_CAPTURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
+                "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "LIVE_VIEW_MAGNIFICATION",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
                 "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"

@@ -33,6 +33,7 @@ import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
+import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CapabilityMatrix
 import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.ExposureState
@@ -795,6 +796,39 @@ class CameraScreensTest {
         compose.setContent { MaterialTheme { CameraControlScreen(connectedState(), noOpActions()) } }
         compose.onNodeWithContentDescription(resourceText(R.string.switch_to_video)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.capture_not_supported)).assertIsDisplayed()
+    }
+
+    @Test
+    fun bulbModeUsesTheCentralShutterForStartAndStop() {
+        var toggleCount = 0
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities).copy(
+            advancedSettings = listOf(
+                CameraSettingControl("shootingmode", "Shooting mode", "Bulb", listOf("Manual", "Bulb")),
+            ),
+            matrix = CapabilityMatrix(supported = setOf(CameraFeature.BULB_EXPOSURE)),
+        )
+        val state = mutableStateOf(base.copy(capabilities = capabilities))
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    state.value,
+                    noOpActions().copy(toggleBulbExposure = { toggleCount += 1 }),
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.start_bulb_exposure)).performClick()
+        compose.runOnIdle {
+            assertEquals(1, toggleCount)
+            state.value = state.value.copy(
+                status = state.value.status?.copy(bulbExposureActive = true),
+                bulbStartedAtMillis = android.os.SystemClock.elapsedRealtime(),
+            )
+        }
+        compose.onNodeWithContentDescription(resourceText(R.string.stop_bulb_exposure)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.bulb_exposure_time, "00:00")).assertIsDisplayed()
+        compose.onNodeWithTag("exposure-control-ISO").assertIsNotEnabled()
     }
 
     @Test

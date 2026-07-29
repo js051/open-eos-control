@@ -9,6 +9,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case liveViewRTP = "LIVE_VIEW_RTP"
     case liveViewMagnification = "LIVE_VIEW_MAGNIFICATION"
     case stillCapture = "STILL_CAPTURE"
+    case bulbExposure = "BULB_EXPOSURE"
     case autofocus = "AUTOFOCUS"
     case shutterHalfPress = "SHUTTER_HALF_PRESS"
     case videoRecording = "VIDEO_RECORDING"
@@ -130,6 +131,7 @@ public struct CameraStatus: Equatable, Sendable {
     public let batteryLevel: Int?
     public let batteryStatus: String
     public let recording: Bool?
+    public let bulbExposureActive: Bool?
     public let mode: String
     public let mediaAvailable: Bool?
     public let remainingMinutes: Int?
@@ -146,6 +148,7 @@ public struct CameraStatus: Equatable, Sendable {
         batteryLevel: Int? = nil,
         batteryStatus: String = "unknown",
         recording: Bool? = nil,
+        bulbExposureActive: Bool? = nil,
         mode: String = "unknown",
         mediaAvailable: Bool? = nil,
         remainingMinutes: Int? = nil,
@@ -161,6 +164,7 @@ public struct CameraStatus: Equatable, Sendable {
         self.batteryLevel = batteryLevel
         self.batteryStatus = batteryStatus
         self.recording = recording
+        self.bulbExposureActive = bulbExposureActive
         self.mode = mode
         self.mediaAvailable = mediaAvailable
         self.remainingMinutes = remainingMinutes
@@ -171,6 +175,26 @@ public struct CameraStatus: Equatable, Sendable {
         self.storageDeviceCount = storageDeviceCount
         self.rawBatteryJSON = rawBatteryJSON
         self.rawStorageJSON = rawStorageJSON
+    }
+
+    public func withBulbExposureActive(_ active: Bool?) -> CameraStatus {
+        CameraStatus(
+            connected: connected,
+            batteryLevel: batteryLevel,
+            batteryStatus: batteryStatus,
+            recording: recording,
+            bulbExposureActive: active,
+            mode: mode,
+            mediaAvailable: mediaAvailable,
+            remainingMinutes: remainingMinutes,
+            exposure: exposure,
+            storageTotalBytes: storageTotalBytes,
+            storageFreeBytes: storageFreeBytes,
+            storageFreeImages: storageFreeImages,
+            storageDeviceCount: storageDeviceCount,
+            rawBatteryJSON: rawBatteryJSON,
+            rawStorageJSON: rawStorageJSON
+        )
     }
 }
 

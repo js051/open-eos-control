@@ -67,9 +67,7 @@ def test_gphoto_command_resolution_prefers_native_and_supports_wsl_distribution(
 
 
 def test_capture_paths_map_to_wsl_without_using_a_shell() -> None:
-    assert _windows_path_to_wsl(r"D:\OpenEOSControl\Camera Captures") == (
-        "/mnt/d/OpenEOSControl/Camera Captures"
-    )
+    assert _windows_path_to_wsl(r"D:\OpenEOSControl\Camera Captures") == ("/mnt/d/OpenEOSControl/Camera Captures")
 
     with pytest.raises(BridgeError) as rejected:
         _windows_path_to_wsl(r"\\server\share\Captures")
@@ -78,11 +76,14 @@ def test_capture_paths_map_to_wsl_without_using_a_shell() -> None:
 
 
 def test_default_capture_directory_is_platform_scoped_and_requires_absolute_override(tmp_path: Path) -> None:
-    assert default_capture_directory(
-        environment={"LOCALAPPDATA": str(tmp_path)},
-        platform_name="win32",
-        home=tmp_path,
-    ) == tmp_path / "OpenEOSControl" / "Captures"
+    assert (
+        default_capture_directory(
+            environment={"LOCALAPPDATA": str(tmp_path)},
+            platform_name="win32",
+            home=tmp_path,
+        )
+        == tmp_path / "OpenEOSControl" / "Captures"
+    )
     assert default_capture_directory(environment={}, platform_name="linux", home=tmp_path) == (
         tmp_path / ".local" / "share" / "open-eos-control" / "captures"
     )
@@ -113,8 +114,7 @@ def test_wsl_runner_health_is_actionable_and_decodes_windows_utf16() -> None:
     assert available is True
     assert version == "gphoto2 2.5.33"
     assert detail == (
-        "Using gphoto2 in WSL distribution 'Ubuntu'. "
-        "Install usbipd-win before attaching a Windows USB camera to WSL."
+        "Using gphoto2 in WSL distribution 'Ubuntu'. Install usbipd-win before attaching a Windows USB camera to WSL."
     )
     assert CommandOutput("Ubuntu\r\n".encode("utf-16-le")).text == "Ubuntu\r\n"
 
@@ -218,6 +218,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
 
     capabilities = session.capabilities()
     assert CameraFeature.STILL_CAPTURE in capabilities.supported
+    assert CameraFeature.BULB_EXPOSURE in capabilities.supported
     assert CameraFeature.LIVE_VIEW in capabilities.supported
     assert CameraFeature.SHUTTER_HALF_PRESS in capabilities.supported
     assert CameraFeature.AUTOFOCUS in capabilities.supported
@@ -256,20 +257,22 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     session.set_setting("capturetarget", "Memory card")
     assert runner.values["/main/settings/capturetarget"] == "Memory card"
     session.capture_still()
+    started_bulb = session.start_bulb_exposure()
+    assert started_bulb.bulb_exposure_active is True
+    assert runner.values["/main/actions/eosremoterelease"] == "Press Full"
+    stopped_bulb = session.stop_bulb_exposure()
+    assert stopped_bulb.bulb_exposure_active is False
+    assert runner.values["/main/actions/eosremoterelease"] == "Release Full"
     session.half_press_shutter()
     session.autofocus()
     assert runner.values["/main/actions/eosremoterelease"] == "Release Half"
     assert runner.values["/main/actions/autofocusdrive"] == "1"
     assert runner.values["/main/actions/autofocuscancel"] == "1"
     autofocus_drive = next(
-        index
-        for index, command in enumerate(runner.commands)
-        if "/main/actions/autofocusdrive=1" in command
+        index for index, command in enumerate(runner.commands) if "/main/actions/autofocusdrive=1" in command
     )
     autofocus_cancel = next(
-        index
-        for index, command in enumerate(runner.commands)
-        if "/main/actions/autofocuscancel=1" in command
+        index for index, command in enumerate(runner.commands) if "/main/actions/autofocuscancel=1" in command
     )
     assert autofocus_drive < autofocus_cancel
 
@@ -315,6 +318,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.EXPOSURE_CONTROL,
         CameraFeature.WHITE_BALANCE_CONTROL,
         CameraFeature.STILL_CAPTURE,
+        CameraFeature.BULB_EXPOSURE,
         CameraFeature.AUTOFOCUS,
         CameraFeature.SHUTTER_HALF_PRESS,
         CameraFeature.VIDEO_RECORDING,
@@ -327,6 +331,40 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= observed
+
+
+def test_gphoto2_close_releases_an_active_bulb_exposure(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+
+    session.start_bulb_exposure()
+    session.close()
+
+    assert runner.values["/main/actions/eosremoterelease"] == "Release Full"
+
+
+def test_failed_gphoto2_bulb_press_still_attempts_release(tmp_path: Path) -> None:
+    class RejectPressRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            if any(value.endswith("eosremoterelease=Press Full") for value in arguments):
+                self.commands.append(tuple(arguments))
+                raise BridgeError("CAMERA_COMMAND_FAILED", "press response lost")
+            return super().run(arguments, timeout=timeout)
+
+    runner = RejectPressRunner()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+
+    with pytest.raises(BridgeError):
+        session.start_bulb_exposure()
+
+    release_commands = [
+        command
+        for command in runner.commands
+        if any(value.endswith("eosremoterelease=Release Full") for value in command)
+    ]
+    assert len(release_commands) == 1
+    assert runner.values["/main/actions/eosremoterelease"] == "Release Full"
+    assert session.status().bulb_exposure_active is False
 
 
 def test_live_view_magnification_requires_active_live_view_and_writable_eoszoom() -> None:
@@ -401,9 +439,7 @@ def test_host_capture_promotes_multiple_downloaded_files(tmp_path: Path) -> None
             command = self._without_camera(arguments)
             if "--capture-image-and-download" in command:
                 pattern = command[command.index("--filename") + 1]
-                raw_target = Path(
-                    pattern.replace("%%", "%").replace("%04n", "0002").replace("%C", "CR3")
-                )
+                raw_target = Path(pattern.replace("%%", "%").replace("%04n", "0002").replace("%C", "CR3"))
                 raw_target.write_bytes(b"test-canon-raw")
             return output
 
@@ -422,9 +458,7 @@ def test_failed_host_capture_discards_staged_partial_media(tmp_path: Path) -> No
             command = self._without_camera(arguments)
             if "--capture-image-and-download" in command:
                 pattern = command[command.index("--filename") + 1]
-                partial = Path(
-                    pattern.replace("%%", "%").replace("%04n", "0001").replace("%C", "JPG")
-                )
+                partial = Path(pattern.replace("%%", "%").replace("%04n", "0001").replace("%C", "JPG"))
                 partial.parent.mkdir(parents=True, exist_ok=True)
                 partial.write_bytes(b"partial")
                 raise BridgeError(

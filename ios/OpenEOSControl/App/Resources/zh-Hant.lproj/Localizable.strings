@@ -230,3 +230,7 @@
 "source_bridge" = "電腦橋接";
 "source_simulator" = "模擬器";
 "live_view_magnify_to" = "將 Live View 對焦放大設為 %d 倍";
+"start_bulb_exposure" = "開始 Bulb 長曝光";
+"stop_bulb_exposure" = "停止 Bulb 長曝光";
+"bulb_exposure_time" = "BULB %02d:%02d";
+"bulb_not_supported" = "此連線無法持續按住並釋放快門，因此不支援 Bulb 長曝光。";

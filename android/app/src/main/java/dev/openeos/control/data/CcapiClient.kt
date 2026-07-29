@@ -86,6 +86,7 @@ class CcapiClient(
 
     private var apiVersionPrefixes = listOf("/ccapi/ver100")
     private var isRecording: Boolean? = null
+    private var bulbExposureActive = false
     private val settingPathsByKey = mutableMapOf<String, String>()
     private val settingValuesByKey = mutableMapOf<String, Set<String>>()
     private val structuredSettingPathsByKey = mutableMapOf<String, String>()
@@ -105,6 +106,13 @@ class CcapiClient(
         private set
 
     fun observedFeatureSnapshot(): Set<CameraFeature> = observedFeatures.toSet()
+
+    suspend fun close() {
+        if (bulbExposureActive) {
+            runCatching { stopBulbExposure() }
+        }
+        runCatching { stopLiveView() }
+    }
 
     suspend fun initialize() {
         val isLocalOrSim = try {
@@ -385,7 +393,8 @@ class CcapiClient(
                 storageFreeImages = storageInfo?.freeImages,
                 storageDeviceCount = storageInfo?.devices,
                 rawBatteryJson = batteryJson?.toString() ?: "null",
-                rawStorageJson = storageJson?.toString() ?: "null"
+                rawStorageJson = storageJson?.toString() ?: "null",
+                bulbExposureActive = bulbExposureActive,
             )
         } else {
             getJson("/ccapi/status").toCameraStatus().also {
@@ -439,6 +448,7 @@ class CcapiClient(
             }
             if (manualShutterOperation() != null) {
                 supportedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS)
+                supportedFeatures.add(CameraFeature.BULB_EXPOSURE)
             }
             if (autofocusOperation() != null || manualShutterOperation() != null) {
                 supportedFeatures.add(CameraFeature.AUTOFOCUS)
@@ -610,6 +620,70 @@ class CcapiClient(
             postJson("/ccapi/capture/still", JSONObject().put("af", true))
         }
         observedFeatures.add(CameraFeature.STILL_CAPTURE)
+        return status()
+    }
+
+    suspend fun startBulbExposure(): CameraStatus {
+        if (bulbExposureActive) return status()
+        val baseline = status()
+        if (isRealCamera) {
+            val operation = manualShutterOperation()
+            if (enforceAdvertisedOperations && operation == null) {
+                error("Camera did not advertise manual shutter control for Bulb exposure.")
+            }
+            try {
+                commandOk(
+                    pathSuffix = "/shooting/control/shutterbutton/manual",
+                    payload = JSONObject().put("af", false).put("action", "full_press"),
+                    operation = operation,
+                )
+            } catch (exception: Throwable) {
+                withContext(NonCancellable) {
+                    runCatching {
+                        commandOk(
+                            pathSuffix = "/shooting/control/shutterbutton/manual",
+                            payload = JSONObject().put("af", false).put("action", "release"),
+                            operation = operation,
+                        )
+                    }.exceptionOrNull()?.let(exception::addSuppressed)
+                }
+                throw exception
+            }
+        } else {
+            try {
+                postJson("/ccapi/bulb/start", JSONObject())
+            } catch (exception: Throwable) {
+                withContext(NonCancellable) {
+                    runCatching { postJson("/ccapi/bulb/stop", JSONObject()) }
+                        .exceptionOrNull()
+                        ?.let(exception::addSuppressed)
+                }
+                throw exception
+            }
+        }
+        bulbExposureActive = true
+        return baseline.copy(bulbExposureActive = true)
+    }
+
+    suspend fun stopBulbExposure(): CameraStatus {
+        if (!bulbExposureActive) return status()
+        if (isRealCamera) {
+            val operation = manualShutterOperation()
+            if (enforceAdvertisedOperations && operation == null) {
+                error("Camera no longer advertises manual shutter control for Bulb release.")
+            }
+            withContext(NonCancellable) {
+                commandOk(
+                    pathSuffix = "/shooting/control/shutterbutton/manual",
+                    payload = JSONObject().put("af", false).put("action", "release"),
+                    operation = operation,
+                )
+            }
+        } else {
+            withContext(NonCancellable) { postJson("/ccapi/bulb/stop", JSONObject()) }
+        }
+        bulbExposureActive = false
+        observedFeatures.add(CameraFeature.BULB_EXPOSURE)
         return status()
     }
 
@@ -2049,6 +2123,8 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
         storageFreeBytes = media.optNullableLong("free_bytes") ?: media.optNullableLong("freeBytes"),
         storageFreeImages = media.optNullableLong("free_images") ?: media.optNullableLong("freeImages"),
         storageDeviceCount = media.optNullableInt("devices"),
+        bulbExposureActive = optNullableBoolean("bulb_exposure_active")
+            ?: optNullableBoolean("bulbExposureActive"),
     )
 }
 
@@ -2060,6 +2136,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
     matrix = CapabilityMatrix.ccapiNetwork(
         CapabilityMatrix.ccapiNetwork().supported + setOf(
             CameraFeature.STILL_CAPTURE,
+            CameraFeature.BULB_EXPOSURE,
             CameraFeature.AUTOFOCUS,
             CameraFeature.SHUTTER_HALF_PRESS,
             CameraFeature.MEDIA_BROWSER,

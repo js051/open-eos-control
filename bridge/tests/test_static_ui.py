@@ -53,6 +53,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "live-magnification-button",
         "exposure-strip",
         "shutter-button",
+        "bulb-indicator",
         "half-press-button",
         "focus-reticle",
         "focus-section",
@@ -123,6 +124,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "/v1/cameras",
         "/v1/session",
         "/capture/still",
+        "/bulb/start",
+        "/bulb/stop",
         "/focus/auto",
         "/shutter/half-press",
         "/recording/",
@@ -147,9 +150,13 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'data-view="media" data-i18n-aria="media"' in html
     assert 'CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE"' in script
     assert 'SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS"' in script
+    assert 'BULB_EXPOSURE: "BULB_EXPOSURE"' in script
     assert 'LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION"' in script
     assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
+    assert "featureSupported(FEATURES.BULB_EXPOSURE)" in script
+    assert "function pauseLivePolling()" in script
+    assert "function resumeLivePolling()" in script
     assert "URL.revokeObjectURL" in script
     assert script.count("deleteConfirm:") == 2
     assert '{ method: "DELETE" }' in script

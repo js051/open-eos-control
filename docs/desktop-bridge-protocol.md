@@ -31,6 +31,8 @@ GET  /v1/session/{id}/liveview/frame
 POST /v1/session/{id}/liveview/magnification
 POST /v1/session/{id}/settings/{key}
 POST /v1/session/{id}/capture/still
+POST /v1/session/{id}/bulb/start
+POST /v1/session/{id}/bulb/stop
 POST /v1/session/{id}/shutter/half-press
 POST /v1/session/{id}/focus/auto
 POST /v1/session/{id}/recording/start
@@ -157,6 +159,7 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - identity, battery, storage, and merged versioned shooting settings
 - camera-advertised setting values and their discovered `PUT` paths
 - direct shutter or manual full press with guaranteed release
+- held Bulb exposure through manual `full_press` and explicit `release`; capability requires the advertised manual shutter operation and successful release is the observation point
 - timed half-press with guaranteed release
 - independent autofocus through advertised `POST /shooting/control/af` start/stop, falling back to the advertised balanced half-press operation
 - movie start/stop through `recbutton`
@@ -177,6 +180,7 @@ The adapter derives capabilities from `--abilities` and `--list-all-config` inst
 - settings: camera-advertised values through `--set-config-value`; the R6 Mark III mapping includes WB A/B shifts, SD and CF/CFexpress image quality, aspect ratio, power-zoom speed, and Auto Power Off in addition to the existing exposure, AF, drive, metering, Picture Style, color, noise-reduction, AEB and movie controls
 - still capture: expose only recognized writable Capture Target choices; `Memory card` runs `--trigger-capture` with advertised `--capture-image` fallback, while `Internal RAM`/`SDRAM` requires image-capture ability and runs `--capture-image-and-download` with a Bridge-owned unique filename template
 - half-press: advertised `eosremoterelease` press/release values with guaranteed release
+- Bulb: expose only when writable `eosremoterelease` includes both a full-press choice and a full-release choice; keep the session active until release succeeds and attempt release again during session teardown
 - independent autofocus: paired writable `autofocusdrive=1` and guaranteed `autofocuscancel=1` actions when both exist, falling back to the balanced half-press path
 - recording: advertised `movierecordtarget` Card/None values
 - focus drive: advertised `manualfocusdrive` Near/Far values while Live View is active

@@ -230,3 +230,7 @@
 "source_bridge" = "Bridge";
 "source_simulator" = "Simulator";
 "live_view_magnify_to" = "Set Live View magnification to %dx";
+"start_bulb_exposure" = "Start Bulb exposure";
+"stop_bulb_exposure" = "Stop Bulb exposure";
+"bulb_exposure_time" = "BULB %02d:%02d";
+"bulb_not_supported" = "This connection cannot hold and release the shutter for Bulb exposure.";

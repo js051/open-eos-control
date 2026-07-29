@@ -178,6 +178,10 @@ class CameraRepository(
 
     suspend fun captureStill(): CameraStatus = backend.captureStill()
 
+    suspend fun startBulbExposure(): CameraStatus = backend.startBulbExposure()
+
+    suspend fun stopBulbExposure(): CameraStatus = backend.stopBulbExposure()
+
     suspend fun autofocus(): CameraStatus = backend.autofocus()
 
     suspend fun halfPressShutter(): CameraStatus = backend.halfPressShutter()

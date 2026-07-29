@@ -52,6 +52,8 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
             headers=headers,
             json={"value": "800"},
         )
+        bulb_started = client.post(f"/v1/session/{session_id}/bulb/start", headers=headers)
+        bulb_stopped = client.post(f"/v1/session/{session_id}/bulb/stop", headers=headers)
         autofocus = client.post(f"/v1/session/{session_id}/focus/auto", headers=headers)
         live_start = client.post(
             f"/v1/session/{session_id}/liveview/start",
@@ -100,6 +102,8 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert capabilities.json()["evidence"]["source"] == "gphoto2 --abilities + --list-all-config"
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert setting.json()["exposure"]["iso"] == "800"
+    assert bulb_started.json()["bulbExposureActive"] is True
+    assert bulb_stopped.json()["bulbExposureActive"] is False
     assert autofocus.status_code == 200
     assert live_start.json() == {
         "active": True,

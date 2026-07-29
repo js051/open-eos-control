@@ -78,6 +78,8 @@ interface CameraControlBackend {
     suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus =
         unsupported(CameraFeature.CLICK_WHITE_BALANCE)
     suspend fun captureStill(): CameraStatus = unsupported(CameraFeature.STILL_CAPTURE)
+    suspend fun startBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
+    suspend fun stopBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
     suspend fun autofocus(): CameraStatus = unsupported(CameraFeature.AUTOFOCUS)
     suspend fun halfPressShutter(): CameraStatus = unsupported(CameraFeature.SHUTTER_HALF_PRESS)
     suspend fun driveFocus(
@@ -131,6 +133,8 @@ class CcapiCameraBackend(
 
     override suspend fun initialize() = client.initialize()
 
+    override suspend fun close() = client.close()
+
     override suspend fun info(): CameraInfo = client.info()
 
     override suspend fun status(): CameraStatus = client.status()
@@ -158,6 +162,10 @@ class CcapiCameraBackend(
         client.clickWhiteBalance(x, y)
 
     override suspend fun captureStill(): CameraStatus = client.captureStill()
+
+    override suspend fun startBulbExposure(): CameraStatus = client.startBulbExposure()
+
+    override suspend fun stopBulbExposure(): CameraStatus = client.stopBulbExposure()
 
     override suspend fun autofocus(): CameraStatus = client.autofocus()
 
@@ -238,6 +246,10 @@ class DesktopBridgeCameraBackend(
         client.clickWhiteBalance(x, y)
 
     override suspend fun captureStill(): CameraStatus = client.captureStill()
+
+    override suspend fun startBulbExposure(): CameraStatus = client.startBulbExposure()
+
+    override suspend fun stopBulbExposure(): CameraStatus = client.stopBulbExposure()
 
     override suspend fun autofocus(): CameraStatus = client.autofocus()
 

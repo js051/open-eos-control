@@ -263,6 +263,16 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
+    public func startBulbExposure() async throws -> CameraStatus {
+        let body = try await postJSON(sessionEndpoint(["bulb", "start"]), payload: [:])
+        return parseStatus(body)
+    }
+
+    public func stopBulbExposure() async throws -> CameraStatus {
+        let body = try await postJSON(sessionEndpoint(["bulb", "stop"]), payload: [:])
+        return parseStatus(body)
+    }
+
     public func autofocus() async throws -> CameraStatus {
         let body = try await postJSON(sessionEndpoint(["focus", "auto"]), payload: [:])
         return parseStatus(body)
@@ -504,6 +514,7 @@ public actor DesktopBridgeClient {
             batteryLevel: battery.int("level"),
             batteryStatus: battery.string("status") ?? "unknown",
             recording: body.optionalBool("recording"),
+            bulbExposureActive: body.optionalBool("bulbExposureActive"),
             mode: body.string("mode") ?? "unknown",
             mediaAvailable: media.optionalBool("available"),
             remainingMinutes: nil,

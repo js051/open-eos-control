@@ -543,6 +543,9 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         )
 
         if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
+        if (state.bulbExposureActive) {
+            BulbExposureIndicator(state.bulbStartedAtMillis, Modifier.align(Alignment.CenterStart).padding(12.dp))
+        }
         if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
             val bottomPadding = liveViewOverlayBottomPadding(state)
             val focusAvailable = state.supports(CameraFeature.TAP_FOCUS)
@@ -755,6 +758,35 @@ private fun RecordingIndicator(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun BulbExposureIndicator(startedAtMillis: Long?, modifier: Modifier = Modifier) {
+    var elapsedSeconds by remember(startedAtMillis) { mutableStateOf(0L) }
+    LaunchedEffect(startedAtMillis) {
+        val startedAt = startedAtMillis ?: SystemClock.elapsedRealtime()
+        while (true) {
+            elapsedSeconds = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L) / 1_000L
+            delay(250L)
+        }
+    }
+    val elapsed = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
+    CameraRotatingSlot(modifier.size(116.dp)) {
+        Row(
+            Modifier.background(Color(0xB8000000), RoundedCornerShape(4.dp))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(Modifier.size(8.dp).background(AppWarning, CircleShape))
+            Text(
+                stringResource(R.string.bulb_exposure_time, elapsed),
+                color = AppText,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
 fun ExposureStrip(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val exposure = state.status?.exposure
     val available = !state.isBusy(CameraOperation.SETTING)
@@ -803,13 +835,23 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
 @Composable
 fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     val photo = state.captureMode == CaptureMode.PHOTO
-    val supported = state.supports(if (photo) CameraFeature.STILL_CAPTURE else CameraFeature.VIDEO_RECORDING)
+    val bulb = photo && state.bulbMode
+    val bulbActive = bulb && state.bulbExposureActive
+    val supported = state.supports(
+        when {
+            bulb -> CameraFeature.BULB_EXPOSURE
+            photo -> CameraFeature.STILL_CAPTURE
+            else -> CameraFeature.VIDEO_RECORDING
+        }
+    )
     val description = when {
+        bulbActive -> stringResource(R.string.stop_bulb_exposure)
+        bulb -> stringResource(R.string.start_bulb_exposure)
         photo -> stringResource(R.string.capture_photo)
         state.status?.recording == true -> stringResource(R.string.stop_recording)
         else -> stringResource(R.string.start_recording)
     }
-    val color = if (photo) AppText else AppRecord
+    val color = if (bulb) AppWarning else if (photo) AppText else AppRecord
     val operation = if (photo) CameraOperation.CAPTURE else CameraOperation.RECORDING
     val processing = state.isBusy(operation)
     val haptic = LocalHapticFeedback.current
@@ -821,14 +863,25 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     Box(
         Modifier.size(76.dp)
             .background(AppBackground, CircleShape)
-            .clickable(enabled = supported && !processing) { if (photo) actions.captureStill() else actions.toggleRecording() }
+            .clickable(enabled = supported && !processing) {
+                when {
+                    bulb -> actions.toggleBulbExposure()
+                    photo -> actions.captureStill()
+                    else -> actions.toggleRecording()
+                }
+            }
             .semantics { contentDescription = description; role = Role.Button },
         contentAlignment = Alignment.Center,
     ) {
         if (processing) {
             CircularProgressIndicator(Modifier.size(48.dp), color = color, strokeWidth = 3.dp)
         } else {
-            Box(Modifier.size(if (photo) 58.dp else 52.dp).background(color, if (photo || state.status?.recording != true) CircleShape else RoundedCornerShape(8.dp)))
+            Box(
+                Modifier.size(if (photo) 58.dp else 52.dp).background(
+                    color,
+                    if (bulbActive || (!photo && state.status?.recording == true)) RoundedCornerShape(8.dp) else CircleShape,
+                )
+            )
         }
     }
 }

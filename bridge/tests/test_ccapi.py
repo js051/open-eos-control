@@ -83,6 +83,7 @@ class FakeCcapiTransport:
         discovery: dict[str, object] | None = None,
         external_media: bool = False,
         reject_autofocus_start: bool = False,
+        reject_bulb_press: bool = False,
         reject_rtp_start: bool = False,
         thumbnail_body: bytes = JPEG,
         thumbnail_content_type: str = "image/jpeg",
@@ -92,6 +93,7 @@ class FakeCcapiTransport:
         self.discovery = discovery or DISCOVERY
         self.external_media = external_media
         self.reject_autofocus_start = reject_autofocus_start
+        self.reject_bulb_press = reject_bulb_press
         self.reject_rtp_start = reject_rtp_start
         self.thumbnail_body = thumbnail_body
         self.thumbnail_content_type = thumbnail_content_type
@@ -208,6 +210,12 @@ class FakeCcapiTransport:
             and self.reject_autofocus_start
         ):
             return _json_response({"message": "focus failed"}, status=503)
+        if (
+            path == "/ccapi/ver100/shooting/control/shutterbutton/manual"
+            and payload == {"af": False, "action": "full_press"}
+            and self.reject_bulb_press
+        ):
+            return _json_response({"message": "press response lost"}, status=503)
         if path in {
             "/ccapi/ver100/shooting/control/shutterbutton",
             "/ccapi/ver100/shooting/control/shutterbutton/manual",
@@ -311,6 +319,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert capabilities.live_view.max_fps == 30
     assert {
         CameraFeature.STILL_CAPTURE,
+        CameraFeature.BULB_EXPOSURE,
         CameraFeature.AUTOFOCUS,
         CameraFeature.TAP_FOCUS,
         CameraFeature.CLICK_WHITE_BALANCE,
@@ -361,6 +370,19 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     with pytest.raises(BridgeError, match="not advertised"):
         session.set_setting("iso", "51200")
     session.capture_still()
+    started_bulb = session.start_bulb_exposure()
+    stopped_bulb = session.stop_bulb_exposure()
+    assert started_bulb.bulb_exposure_active is True
+    assert stopped_bulb.bulb_exposure_active is False
+    bulb_commands = [
+        request.body
+        for request in transport.requests
+        if request.path.endswith("/shooting/control/shutterbutton/manual")
+        and request.body is not None
+        and request.body.get("af") is False
+    ]
+    assert {"af": False, "action": "full_press"} in bulb_commands
+    assert {"af": False, "action": "release"} in bulb_commands
     session.autofocus()
     session.half_press_shutter()
     assert session.start_recording().recording is True
@@ -406,6 +428,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.CAMERA_IDENTITY,
         CameraFeature.EXPOSURE_CONTROL,
         CameraFeature.STILL_CAPTURE,
+        CameraFeature.BULB_EXPOSURE,
         CameraFeature.AUTOFOCUS,
         CameraFeature.SHUTTER_HALF_PRESS,
         CameraFeature.VIDEO_RECORDING,
@@ -420,9 +443,8 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
     } <= observed
-
     command_paths = [request.path for request in transport.requests]
-    assert command_paths.count("/ccapi/ver100/shooting/control/shutterbutton/manual") == 2
+    assert command_paths.count("/ccapi/ver100/shooting/control/shutterbutton/manual") == 4
     assert [request.body for request in transport.requests if request.path == "/ccapi/ver100/shooting/control/af"] == [
         {"action": "start"},
         {"action": "stop"},
@@ -452,6 +474,45 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         {"cameradisplay": "on", "liveviewsize": "large"},
         {"cameradisplay": "on"},
     ]
+
+
+def test_ccapi_close_releases_an_active_bulb_exposure() -> None:
+    transport = FakeCcapiTransport()
+    session = CcapiEngine(lambda _username, _password: transport, sleeper=lambda _: None).open_connection(
+        "http://192.168.1.2:8080/"
+    )
+
+    assert session.start_bulb_exposure().bulb_exposure_active is True
+    session.close()
+
+    manual_commands = [
+        request.body
+        for request in transport.requests
+        if request.path.endswith("/shooting/control/shutterbutton/manual")
+    ]
+    assert manual_commands[-1] == {"af": False, "action": "release"}
+    assert transport.closed is True
+
+
+def test_failed_ccapi_bulb_press_still_attempts_release() -> None:
+    transport = FakeCcapiTransport(reject_bulb_press=True)
+    session = CcapiEngine(lambda _username, _password: transport, sleeper=lambda _: None).open_connection(
+        "http://192.168.1.2:8080/"
+    )
+
+    with pytest.raises(BridgeError):
+        session.start_bulb_exposure()
+
+    manual_commands = [
+        request.body
+        for request in transport.requests
+        if request.path.endswith("/shooting/control/shutterbutton/manual")
+    ]
+    assert manual_commands == [
+        {"af": False, "action": "full_press"},
+        {"af": False, "action": "release"},
+    ]
+    assert session.status().bulb_exposure_active is False
 
 
 def test_ccapi_rtp_capability_and_exact_lifecycle_are_end_to_end() -> None:
