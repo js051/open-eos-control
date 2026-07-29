@@ -425,6 +425,23 @@ public struct CameraMediaDownload: Equatable, Sendable {
     }
 }
 
+public struct CameraMediaTransferProgress: Equatable, Sendable {
+    public let bytesTransferred: Int64
+    public let totalBytes: Int64?
+
+    public init(bytesTransferred: Int64, totalBytes: Int64?) {
+        self.bytesTransferred = max(0, bytesTransferred)
+        self.totalBytes = totalBytes.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    public var fractionCompleted: Double? {
+        guard let totalBytes else { return nil }
+        return min(1, Double(bytesTransferred) / Double(totalBytes))
+    }
+}
+
+public typealias CameraMediaProgressHandler = @Sendable (CameraMediaTransferProgress) -> Void
+
 public struct CameraMediaThumbnail: Equatable, Sendable {
     public let item: CameraMediaItem
     public let data: Data

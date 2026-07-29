@@ -90,6 +90,23 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "media-delete-confirmed")
     }
 
+    func testOfflineMediaDownloadCompletesFromTheRowAction() throws {
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))
+        app.buttons["offline-preview-button"].tap()
+        XCTAssertTrue(app.buttons["more-actions-button"].waitForExistence(timeout: 5))
+        app.buttons["more-actions-button"].tap()
+        XCTAssertTrue(app.buttons["Camera media"].waitForExistence(timeout: 3))
+        app.buttons["Camera media"].tap()
+
+        let download = app.buttons["download-media-preview-001"]
+        XCTAssertTrue(download.waitForExistence(timeout: 5))
+        download.tap()
+
+        XCTAssertTrue(app.images["download-complete-preview-001"].waitForExistence(timeout: 3))
+        addScreenshot(name: "media-download-complete")
+    }
+
     private func launch(appLanguage: String, appleLanguage: String, locale: String) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()

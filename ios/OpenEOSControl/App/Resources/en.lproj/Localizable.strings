@@ -161,6 +161,9 @@
 "refresh_media" = "Refresh camera media";
 "no_media" = "No media files were found on the camera.";
 "download_media" = "Download media";
+"cancel_media_download" = "Cancel media download";
+"media_download_progress_known" = "%@ / %@ (%d%%)";
+"media_download_progress_unknown" = "%@ downloaded";
 "download_complete" = "Download complete";
 "save_media" = "Save or share media";
 "delete_media" = "Delete media";

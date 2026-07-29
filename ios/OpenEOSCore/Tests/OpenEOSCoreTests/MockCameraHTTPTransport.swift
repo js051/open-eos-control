@@ -114,3 +114,20 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
         )
     }
 }
+
+final class DownloadProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [CameraMediaTransferProgress] = []
+
+    func record(_ progress: CameraMediaTransferProgress) {
+        lock.lock()
+        recorded.append(progress)
+        lock.unlock()
+    }
+
+    func values() -> [CameraMediaTransferProgress] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+}

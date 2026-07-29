@@ -126,6 +126,10 @@ struct MediaView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(Color.cameraSecondaryText)
+                if camera.activeMediaDownloadID == item.id,
+                   let progress = camera.mediaDownloadProgress {
+                    mediaDownloadProgress(progress)
+                }
             }
             Spacer(minLength: 4)
             mediaActions(item)
@@ -206,22 +210,64 @@ struct MediaView: View {
                     .foregroundStyle(Color.cameraStatus)
                     .frame(width: 48, height: 48)
                     .accessibilityLabel(Text("download_complete"))
+                    .accessibilityIdentifier("download-complete-\(item.id)")
+            } else if camera.activeMediaDownloadID == item.id {
+                Button {
+                    camera.cancelMediaDownload()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .frame(width: 48, height: 48)
+                        .accessibilityLabel(Text("cancel_media_download"))
+                }
+                .foregroundStyle(Color.cameraRecording)
+                .accessibilityIdentifier("cancel-media-download-\(item.id)")
             } else {
                 Button {
-                    Task { await camera.downloadMedia(item) }
+                    camera.startMediaDownload(item)
                 } label: {
-                    if camera.isBusy(.media) {
-                        ProgressView().tint(Color.cameraAccent).frame(width: 48, height: 48)
-                    } else {
-                        Image(systemName: "arrow.down.circle")
-                            .frame(width: 48, height: 48)
-                            .accessibilityLabel(Text("download_media"))
-                    }
+                    Image(systemName: "arrow.down.circle")
+                        .frame(width: 48, height: 48)
+                        .accessibilityLabel(Text("download_media"))
                 }
                 .foregroundStyle(Color.cameraAccent)
                 .disabled(camera.isBusy(.media))
+                .accessibilityIdentifier("download-media-\(item.id)")
             }
         }
+    }
+
+    private func mediaDownloadProgress(_ progress: CameraMediaTransferProgress) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let fraction = progress.fractionCompleted {
+                ProgressView(value: fraction)
+                    .progressViewStyle(.linear)
+                    .tint(Color.cameraAccent)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.cameraAccent)
+            }
+            Text(mediaDownloadProgressLabel(progress))
+                .font(.caption2)
+                .foregroundStyle(Color.cameraSecondaryText)
+                .lineLimit(1)
+                .accessibilityIdentifier("media-download-progress")
+        }
+        .padding(.top, 2)
+    }
+
+    private func mediaDownloadProgressLabel(_ progress: CameraMediaTransferProgress) -> String {
+        let transferred = ByteCountFormatter.string(fromByteCount: progress.bytesTransferred, countStyle: .file)
+        guard let total = progress.totalBytes, let fraction = progress.fractionCompleted else {
+            return language.format("media_download_progress_unknown", transferred)
+        }
+        let totalText = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+        return language.format(
+            "media_download_progress_known",
+            transferred,
+            totalText,
+            Int((fraction * 100).rounded())
+        )
     }
 
     private func mediaIcon(_ kind: String) -> String {
