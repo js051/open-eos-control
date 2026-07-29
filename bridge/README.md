@@ -6,6 +6,8 @@ It can connect to Canon cameras through native HTTP CCAPI or through a system-in
 
 The built-in browser control surface includes decoded-frame monitoring assists for CCAPI JPEG, decoded RTP, and libgphoto2 USB preview: a bounded luminance histogram, configurable zebra, false color, focus peaking, frame guides, action/title safe areas, and anamorphic desqueeze. These overlays are local display tools and never imply that the camera accepted a control command.
 
+Camera media downloads are consumed as cancellable Fetch streams with visible byte progress. Files below 64 MiB use a cross-browser Blob download after the streamed transfer completes. Unknown-size and larger files prefer the browser File System Access writer, whose temporary file is committed only after the camera stream completes; unsupported browsers retain the Blob fallback. Disconnecting, closing the page, or pressing cancel aborts the request and does not report a successful download.
+
 ## Install
 
 ```bash

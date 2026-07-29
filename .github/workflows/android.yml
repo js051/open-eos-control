@@ -182,9 +182,11 @@ jobs:
           node --check open_eos_bridge/static/icons.js
           node --check open_eos_bridge/static/diagnostics.js
           node --check open_eos_bridge/static/monitoring.js
+          node --check open_eos_bridge/static/media-transfer.js
           node --check open_eos_bridge/static/app.js
           node tests/diagnostics.test.js
           node tests/monitoring.test.js
+          node tests/media-transfer.test.js
 
       - name: Test desktop bridge contract
         run: pytest -q -p no:cacheprovider

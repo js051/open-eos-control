@@ -37,7 +37,7 @@ open-eos-control/
 - Live view 畫面，自動/手動更新與 FPS 控制
 - Android Live View 監看輔助會以有界 120x80 背景分析處理解碼後的 JPEG／USB／Bridge 影格，提供直方圖、可調斑馬紋、偽色、峰值對焦、16:9／2.39:1／1:1／4:3 畫幅框線、動作／標題安全區域，以及 1.33x／1.5x／1.8x／2x 變形鏡頭反擠壓；原生 RTP 保留零拷貝表面，因此只開放幾何型框線與反擠壓。
 - iOS Live View 監看輔助沿用相同的有界 120x80 分析契約，支援解碼後 JPEG／Bridge 影格的直方圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與反擠壓；RTP 保留原生 sample-buffer 顯示，因此只開放幾何型功能。
-- PC 控制介面會對每個已解碼的 Bridge 影格套用同一套有界 120x80 分析，涵蓋 CCAPI JPEG、解碼後 RTP 與 libgphoto2 USB 預覽。監看輔助視窗提供直方圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與變形鏡頭反擠壓，不會改動相機命令或偽造拍攝結果。
+- PC 控制介面會對每個已解碼的 Bridge 影格套用同一套有界 120x80 分析，涵蓋 CCAPI JPEG、解碼後 RTP 與 libgphoto2 USB 預覽。監看輔助視窗提供直方圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與變形鏡頭反擠壓，不會改動相機命令或偽造拍攝結果。相機媒體下載會顯示位元組進度並可取消；一般檔案使用串流式瀏覽器下載 fallback，未知大小或至少 64 MiB 的檔案則在瀏覽器支援時直接寫入具暫存保護的目的檔。
 - Android 對已解碼的 JPEG／USB／Bridge Live View 提供亮度直方圖、可調門檻斑馬紋、偽色、峰值對焦、16:9／2.39:1／1:1／4:3 畫幅框、動作／標題安全區域，以及 1.33x／1.5x／1.8x／2x 變形鏡頭反擠壓。原生 RTP 保留零拷貝顯示，因此不提供像素分析，但仍可使用幾何框線與反擠壓。
 - Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用 decoder 時才會出現
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質及有界 B/A／M/G 白平衡偏移，並依規格以完整物件寫回

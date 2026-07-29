@@ -15,6 +15,7 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     with TestClient(create_app(engine=GPhoto2Engine(FakeRunner()), token="test-token")) as client:
         page = client.get("/")
         script = client.get("/app/app.js")
+        media_transfer = client.get("/app/media-transfer.js")
         styles = client.get("/app/styles.css")
         icon = client.get("/app/app-icon.png")
         protected_api = client.get("/v1/cameras")
@@ -26,6 +27,9 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert script.status_code == 200
     assert script.headers["content-type"].startswith(("text/javascript", "application/javascript"))
     assert "Bearer ${state.token}" in script.text
+    assert media_transfer.status_code == 200
+    assert media_transfer.headers["content-type"].startswith(("text/javascript", "application/javascript"))
+    assert "readResponse" in media_transfer.text
     assert styles.status_code == 200
     assert styles.headers["content-type"].startswith("text/css")
     assert icon.status_code == 200
