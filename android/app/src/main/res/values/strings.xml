@@ -81,6 +81,10 @@
     <string name="copy_diagnostic">Copy diagnostic report</string>
     <string name="diagnostic_copied">Diagnostic report copied</string>
     <string name="camera_profile">Camera profile</string>
+    <string name="camera_status">Camera status</string>
+    <string name="feature_unavailable">Feature unavailable</string>
+    <string name="battery">Battery</string>
+    <string name="storage">Storage</string>
     <string name="transport">Transport</string>
     <string name="api_version">API</string>
     <string name="manufacturer">Manufacturer</string>

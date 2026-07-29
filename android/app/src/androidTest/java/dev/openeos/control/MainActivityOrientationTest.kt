@@ -27,15 +27,17 @@ class MainActivityOrientationTest {
             }
 
             setSystemAutoRotation(false)
+            Thread.sleep(1_000L)
             compose.runOnIdle {
-                compose.activity.refreshSystemAutoRotationSetting()
+                assertEquals(true, compose.activity.isOrientationListenerRunning())
+                assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
                 compose.activity.handleDeviceOrientationChanged(270)
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
             }
 
             setSystemAutoRotation(true)
+            Thread.sleep(1_000L)
             compose.runOnIdle {
-                compose.activity.refreshSystemAutoRotationSetting()
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
                 compose.activity.handleDeviceOrientationChanged(270)
                 assertEquals(1, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))

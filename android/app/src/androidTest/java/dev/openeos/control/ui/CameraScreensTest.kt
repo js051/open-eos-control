@@ -431,6 +431,53 @@ class CameraScreensTest {
     }
 
     @Test
+    fun quarterTurnKeepsExactCameraStatusAvailableInAnOrientationAwarePanel() {
+        val fullCameraName = "Canon EOS R6 Mark III"
+        val fullStorage = compose.activity.resources.getQuantityString(
+            R.plurals.storage_shots_remaining,
+            2_418,
+            2_418L,
+        )
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.3f)) {
+                    CompositionLocalProvider(
+                        LocalCameraControlRotation provides -90f,
+                        LocalCameraControlTargetRotation provides -90f,
+                    ) {
+                        MaterialTheme(colorScheme = OpenEosColorScheme) {
+                            CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                        }
+                    }
+                }
+            }
+        }
+
+        compose.onNodeWithContentDescription(fullCameraName).performClick()
+        compose.onNodeWithText(resourceText(R.string.camera_status)).assertIsDisplayed()
+        compose.onNodeWithText(fullCameraName).assertIsDisplayed()
+        compose.onNodeWithText(fullStorage).assertIsDisplayed()
+
+        val dialog = compose
+            .onNodeWithTag("camera-status-dialog-rotation", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        listOf("camera-status-model-detail", "camera-status-battery-detail", "camera-status-storage-detail")
+            .forEach { tag ->
+                val detail = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                assertTrue(
+                    "Full status detail $tag $detail must stay inside the rotated dialog $dialog",
+                    detail.left >= dialog.left && detail.top >= dialog.top &&
+                        detail.right <= dialog.right && detail.bottom <= dialog.bottom,
+                )
+            }
+        compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
+        compose.onAllNodesWithTag("camera-status-dialog").assertCountEquals(0)
+    }
+
+    @Test
     fun quarterTurnRemeasuresLiveViewSettingsInsideAFullLengthSidePanel() {
         val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
         val actions = noOpActions().copy(closePicker = { picker.value = null })
@@ -947,7 +994,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnUsesCompactCapabilityWarningWithoutLosingItsDescription() {
+    fun quarterTurnCapabilityWarningOpensItsFullOrientationAwareExplanation() {
         val message = resourceText(R.string.capture_not_supported)
         compose.setContent {
             CompositionLocalProvider(
@@ -960,7 +1007,11 @@ class CameraScreensTest {
 
         compose.onNodeWithTag("capability-warning-compact", useUnmergedTree = true).assertIsDisplayed()
         compose.onAllNodesWithText(message).assertCountEquals(0)
-        compose.onNodeWithContentDescription(message).assertIsDisplayed()
+        compose.onNodeWithContentDescription(message).assertIsDisplayed().performClick()
+        compose.onNodeWithText(resourceText(R.string.feature_unavailable)).assertIsDisplayed()
+        compose.onNodeWithText(message).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
+        compose.onAllNodesWithTag("camera-message-dialog").assertCountEquals(0)
     }
 
     @Test
