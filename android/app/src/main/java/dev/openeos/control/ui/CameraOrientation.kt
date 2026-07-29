@@ -5,7 +5,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 private const val CAMERA_ORIENTATION_HYSTERESIS_DEGREES = 5
 private const val ORIENTATION_UNKNOWN = -1
 
-internal fun isSystemAutoRotationSettingEnabled(value: Int): Boolean = value != 0
+internal fun isSystemAutoRotationSettingEnabled(value: Int): Boolean = value == 1
 
 internal class CameraOrientationPolicy {
     private var systemAutoRotationEnabled = false
