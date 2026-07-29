@@ -973,6 +973,106 @@ class CameraScreensTest {
     }
 
     @Test
+    fun decodedFrameRendersPixelAndGeometricMonitoringOverlays() {
+        val width = 160
+        val height = 90
+        val pixels = IntArray(width * height) { index ->
+            val x = index % width
+            val level = x * 255 / (width - 1)
+            0xff000000.toInt() or (level shl 16) or (level shl 8) or level
+        }
+        val frame = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(
+                        liveViewBitmap = frame,
+                        monitorSettings = LiveViewMonitorSettings(
+                            histogramVisible = true,
+                            zebraThresholdPercent = 90,
+                            falseColorEnabled = true,
+                            focusPeakingEnabled = true,
+                            frameGuide = LiveViewFrameGuide.RATIO_2_39,
+                            safeAreaVisible = true,
+                            desqueeze = LiveViewDesqueeze.X1_33,
+                        ),
+                    ),
+                    noOpActions(),
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription(resourceText(R.string.histogram)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.monitor_guides)).assertIsDisplayed()
+    }
+
+    @Test
+    fun monitoringAssistsExposeGuidesAndUpdateUserSelections() {
+        val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
+        var settings = LiveViewMonitorSettings()
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            setHistogramVisible = { settings = settings.copy(histogramVisible = it) },
+            setZebraThreshold = { settings = settings.copy(zebraThresholdPercent = it) },
+            setFalseColorEnabled = { settings = settings.copy(falseColorEnabled = it) },
+            setFrameGuide = { settings = settings.copy(frameGuide = it) },
+            setSafeAreaVisible = { settings = settings.copy(safeAreaVisible = it) },
+            setDesqueeze = { settings = settings.copy(desqueeze = it) },
+        )
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(activeSettingPicker = picker.value),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
+        compose.onNodeWithText(resourceText(R.string.histogram)).performScrollTo().performClick()
+        compose.onNodeWithTag("monitor-zebra-options").performScrollTo().performScrollToIndex(6)
+        compose.onNodeWithText(resourceText(R.string.zebra_threshold, 95)).performClick()
+        compose.onNodeWithText(resourceText(R.string.false_color)).performScrollTo().performClick()
+        compose.onNodeWithTag("monitor-frame-guide-options").performScrollTo().performScrollToIndex(2)
+        compose.onNodeWithText(resourceText(R.string.ratio_2_39)).performScrollTo().performClick()
+        compose.onNodeWithText(resourceText(R.string.safe_area)).performScrollTo().performClick()
+        compose.onNodeWithTag("monitor-desqueeze-options").performScrollTo().performScrollToIndex(4)
+        compose.onNodeWithText(resourceText(R.string.desqueeze_value, 2f)).performScrollTo().performClick()
+        compose.runOnIdle {
+            assertTrue(settings.histogramVisible)
+            assertEquals(95, settings.zebraThresholdPercent)
+            assertTrue(settings.falseColorEnabled)
+            assertEquals(LiveViewFrameGuide.RATIO_2_39, settings.frameGuide)
+            assertTrue(settings.safeAreaVisible)
+            assertEquals(LiveViewDesqueeze.X2, settings.desqueeze)
+        }
+    }
+
+    @Test
+    fun nativeRtpDisablesPixelAnalysisButKeepsGeometricAssists() {
+        val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
+        val actions = noOpActions().copy(openPicker = { picker.value = it })
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(
+                        activeSettingPicker = picker.value,
+                        liveViewSource = LiveViewSource.CCAPI_RTP,
+                    ),
+                    actions,
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
+        compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertExists()
+        compose.onNodeWithText(resourceText(R.string.histogram)).assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.frame_guide)).assertExists()
+        compose.onNodeWithText(resourceText(R.string.anamorphic_desqueeze)).assertExists()
+    }
+
+    @Test
     fun frameRateControlIsVisibleAndChangesThePollingRate() {
         val picker = mutableStateOf<SettingPicker?>(null)
         val fps = mutableIntStateOf(6)

@@ -1,0 +1,96 @@
+package dev.openeos.control.ui
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class LiveViewMonitoringTest {
+    @Test
+    fun histogramPlacesBlackAndWhiteInEndpointBuckets() {
+        val analysis = analyzeLiveViewPixels(
+            pixels = intArrayOf(0xff000000.toInt(), 0xffffffff.toInt()),
+            width = 2,
+            height = 1,
+            zebraThresholdPercent = null,
+            focusPeakingEnabled = false,
+        )
+
+        assertEquals(1, analysis.histogram.first())
+        assertEquals(1, analysis.histogram.last())
+        assertEquals(2, analysis.histogram.sum())
+        assertNull(analysis.overlayPixels)
+    }
+
+    @Test
+    fun zebraMarksOnlyPixelsAtOrAboveTheThreshold() {
+        val analysis = analyzeLiveViewPixels(
+            pixels = intArrayOf(0xffbfbfbf.toInt(), 0xfff5f5f5.toInt()),
+            width = 2,
+            height = 1,
+            zebraThresholdPercent = 90,
+            focusPeakingEnabled = false,
+        )
+
+        val overlay = requireNotNull(analysis.overlayPixels)
+        assertEquals(0, overlay[0])
+        assertTrue(overlay[1] != 0)
+    }
+
+    @Test
+    fun focusPeakingMarksAHighContrastEdge() {
+        val black = 0xff000000.toInt()
+        val white = 0xffffffff.toInt()
+        val pixels = intArrayOf(
+            black, black, white, white, white,
+            black, black, white, white, white,
+            black, black, white, white, white,
+        )
+
+        val analysis = analyzeLiveViewPixels(
+            pixels = pixels,
+            width = 5,
+            height = 3,
+            zebraThresholdPercent = null,
+            focusPeakingEnabled = true,
+        )
+
+        val overlay = requireNotNull(analysis.overlayPixels)
+        assertEquals(0xff28c5d9.toInt(), overlay[7])
+        assertEquals(0, overlay[8])
+    }
+
+    @Test
+    fun falseColorMapsDarkAndBrightPixelsToDifferentOpaqueColors() {
+        val analysis = analyzeLiveViewPixels(
+            pixels = intArrayOf(0xff000000.toInt(), 0xffffffff.toInt()),
+            width = 2,
+            height = 1,
+            zebraThresholdPercent = null,
+            focusPeakingEnabled = false,
+            falseColorEnabled = true,
+        )
+
+        val overlay = requireNotNull(analysis.overlayPixels)
+        assertTrue(overlay[0] != 0)
+        assertTrue(overlay[1] != 0)
+        assertTrue(overlay[0] != overlay[1])
+    }
+
+    @Test
+    fun settingsRequestPixelAnalysisOnlyForPixelBasedAssists() {
+        assertFalse(LiveViewMonitorSettings().needsPixelAnalysis)
+        assertFalse(
+            LiveViewMonitorSettings(
+                frameGuide = LiveViewFrameGuide.RATIO_2_39,
+                safeAreaVisible = true,
+                desqueeze = LiveViewDesqueeze.X2,
+            ).needsPixelAnalysis
+        )
+        assertTrue(LiveViewMonitorSettings(histogramVisible = true).needsPixelAnalysis)
+        assertTrue(LiveViewMonitorSettings(zebraThresholdPercent = 95).needsPixelAnalysis)
+        assertTrue(LiveViewMonitorSettings(falseColorEnabled = true).needsPixelAnalysis)
+        assertTrue(LiveViewMonitorSettings(focusPeakingEnabled = true).needsPixelAnalysis)
+    }
+}

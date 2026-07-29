@@ -411,4 +411,21 @@
     <string name="stop_bulb_exposure">Stop Bulb exposure</string>
     <string name="bulb_exposure_time">BULB %1$s</string>
     <string name="bulb_not_supported">This connection cannot hold and release the shutter for Bulb exposure.</string>
+    <string name="monitoring_assists">Monitoring assists</string>
+    <string name="monitoring_assists_rtp_unavailable">Histogram, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.</string>
+    <string name="histogram">Histogram</string>
+    <string name="zebra">Zebra</string>
+    <string name="zebra_threshold">%1$d%%</string>
+    <string name="false_color">False color</string>
+    <string name="focus_peaking">Focus peaking</string>
+    <string name="frame_guide">Frame guide</string>
+    <string name="safe_area">Action and title safe areas</string>
+    <string name="anamorphic_desqueeze">Anamorphic desqueeze</string>
+    <string name="desqueeze_value">%1$.2f×</string>
+    <string name="monitor_guides">Frame and safe-area guides</string>
+    <string name="off">Off</string>
+    <string name="ratio_16_9">16:9</string>
+    <string name="ratio_2_39">2.39:1</string>
+    <string name="ratio_1_1">1:1</string>
+    <string name="ratio_4_3">4:3</string>
 </resources>

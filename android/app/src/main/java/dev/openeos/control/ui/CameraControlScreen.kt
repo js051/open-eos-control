@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -189,6 +191,7 @@ private fun SettingSheets(state: CameraUiState, actions: CameraActions) {
         SettingPicker.WHITE_BALANCE,
         -> ExposureSettingsSheet(state, actions)
         SettingPicker.LIVE_VIEW -> LiveViewSettingsSheet(state, actions)
+        SettingPicker.MONITOR -> MonitoringAssistSheet(state, actions)
         SettingPicker.MORE -> MoreSettingsSheet(state, actions)
         SettingPicker.LANGUAGE -> Unit
         null -> Unit
@@ -402,6 +405,16 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
                     Text(stringResource(R.string.composition_grid), color = AppText, modifier = Modifier.weight(1f))
                     Switch(state.showGrid, actions.setGridVisible)
                 }
+                Button(
+                    onClick = { actions.openPicker(SettingPicker.MONITOR) },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) {
+                    Icon(painterResource(LucideR.drawable.lucide_ic_eye), null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.monitoring_assists))
+                }
                 Text(stringResource(R.string.live_view_source), color = AppText, fontWeight = FontWeight.SemiBold)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(state.capabilities?.liveView?.sources.orEmpty()) { source ->
@@ -487,6 +500,177 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
             }
         }
     }
+}
+
+@Composable
+private fun MonitoringAssistSheet(state: CameraUiState, actions: CameraActions) {
+    CameraSettingsSurface(onDismissRequest = actions.closePicker) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SettingsSheetTitle(stringResource(R.string.monitoring_assists), actions.closePicker)
+            MonitoringAssistSettings(state, actions)
+        }
+    }
+}
+
+@Composable
+private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraActions) {
+    val settings = state.monitorSettings
+    val pixelAnalysisAvailable = !state.previewMode &&
+        state.liveViewSource != LiveViewSource.CCAPI_RTP &&
+        state.nativeLiveViewSession == null
+    if (!pixelAnalysisAvailable) {
+        Text(stringResource(R.string.monitoring_assists_rtp_unavailable), color = AppWarning)
+    }
+    MonitorSwitchRow(
+        label = stringResource(R.string.histogram),
+        checked = settings.histogramVisible,
+        enabled = pixelAnalysisAvailable,
+        onCheckedChange = actions.setHistogramVisible,
+    )
+    MonitorChoiceRow(
+        label = stringResource(R.string.zebra),
+        testTag = "monitor-zebra-options",
+        values = listOf(null, 70, 75, 80, 85, 90, 95, 100),
+        selected = settings.zebraThresholdPercent,
+        enabled = pixelAnalysisAvailable,
+        labelFor = { value -> value?.let { stringResource(R.string.zebra_threshold, it) } ?: stringResource(R.string.off) },
+        onSelect = actions.setZebraThreshold,
+    )
+    MonitorSwitchRow(
+        label = stringResource(R.string.false_color),
+        checked = settings.falseColorEnabled,
+        enabled = pixelAnalysisAvailable,
+        onCheckedChange = actions.setFalseColorEnabled,
+    )
+    MonitorSwitchRow(
+        label = stringResource(R.string.focus_peaking),
+        checked = settings.focusPeakingEnabled,
+        enabled = pixelAnalysisAvailable,
+        onCheckedChange = actions.setFocusPeakingEnabled,
+    )
+    MonitorChoiceRow(
+        label = stringResource(R.string.frame_guide),
+        testTag = "monitor-frame-guide-options",
+        values = LiveViewFrameGuide.entries,
+        selected = settings.frameGuide,
+        labelFor = { guide -> frameGuideLabel(guide) },
+        onSelect = actions.setFrameGuide,
+    )
+    MonitorSwitchRow(
+        label = stringResource(R.string.safe_area),
+        checked = settings.safeAreaVisible,
+        onCheckedChange = actions.setSafeAreaVisible,
+    )
+    MonitorChoiceRow(
+        label = stringResource(R.string.anamorphic_desqueeze),
+        testTag = "monitor-desqueeze-options",
+        values = LiveViewDesqueeze.entries,
+        selected = settings.desqueeze,
+        labelFor = { desqueeze -> desqueezeLabel(desqueeze) },
+        onSelect = actions.setDesqueeze,
+    )
+}
+
+@Composable
+private fun MonitorSwitchRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = if (enabled) AppText else AppMutedText, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+    }
+}
+
+@Composable
+private fun <T> MonitorChoiceRow(
+    label: String,
+    testTag: String,
+    values: List<T>,
+    selected: T,
+    enabled: Boolean = true,
+    labelFor: @Composable (T) -> String,
+    onSelect: (T) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, color = if (enabled) AppText else AppMutedText)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.testTag(testTag),
+        ) {
+            items(values) { value ->
+                val selectedValue = value == selected
+                val valueLabel = labelFor(value)
+                Box(
+                    Modifier
+                        .height(48.dp)
+                        .background(
+                            if (selectedValue && enabled) AppAccent else AppSurfaceHigh,
+                            RoundedCornerShape(6.dp),
+                        )
+                        .selectable(
+                            selected = selectedValue,
+                            enabled = enabled,
+                            role = Role.RadioButton,
+                            onClick = { onSelect(value) },
+                        )
+                        .padding(horizontal = 14.dp)
+                        .semantics {
+                            contentDescription = "$label, $valueLabel"
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        valueLabel,
+                        color = when {
+                            !enabled -> AppMutedText
+                            selectedValue -> AppBackground
+                            else -> AppText
+                        },
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun frameGuideLabel(guide: LiveViewFrameGuide): String = stringResource(
+    when (guide) {
+        LiveViewFrameGuide.OFF -> R.string.off
+        LiveViewFrameGuide.RATIO_16_9 -> R.string.ratio_16_9
+        LiveViewFrameGuide.RATIO_2_39 -> R.string.ratio_2_39
+        LiveViewFrameGuide.RATIO_1_1 -> R.string.ratio_1_1
+        LiveViewFrameGuide.RATIO_4_3 -> R.string.ratio_4_3
+    }
+)
+
+@Composable
+private fun desqueezeLabel(desqueeze: LiveViewDesqueeze): String = when (desqueeze) {
+    LiveViewDesqueeze.OFF -> stringResource(R.string.off)
+    else -> stringResource(R.string.desqueeze_value, desqueeze.horizontalScale)
 }
 
 @Composable

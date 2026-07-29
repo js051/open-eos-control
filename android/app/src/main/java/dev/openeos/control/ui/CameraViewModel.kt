@@ -101,6 +101,26 @@ class CameraViewModel(
 
     fun setGridVisible(visible: Boolean) = _uiState.update { it.copy(showGrid = visible) }
 
+    fun setHistogramVisible(visible: Boolean) = updateMonitorSettings { copy(histogramVisible = visible) }
+
+    fun setZebraThreshold(thresholdPercent: Int?) = updateMonitorSettings {
+        copy(zebraThresholdPercent = thresholdPercent?.coerceIn(50, 100))
+    }
+
+    fun setFalseColorEnabled(enabled: Boolean) = updateMonitorSettings { copy(falseColorEnabled = enabled) }
+
+    fun setFocusPeakingEnabled(enabled: Boolean) = updateMonitorSettings { copy(focusPeakingEnabled = enabled) }
+
+    fun setFrameGuide(guide: LiveViewFrameGuide) = updateMonitorSettings { copy(frameGuide = guide) }
+
+    fun setSafeAreaVisible(visible: Boolean) = updateMonitorSettings { copy(safeAreaVisible = visible) }
+
+    fun setDesqueeze(desqueeze: LiveViewDesqueeze) = updateMonitorSettings { copy(desqueeze = desqueeze) }
+
+    private fun updateMonitorSettings(update: LiveViewMonitorSettings.() -> LiveViewMonitorSettings) {
+        _uiState.update { it.copy(monitorSettings = it.monitorSettings.update()) }
+    }
+
     fun openSettingPicker(picker: SettingPicker) = _uiState.update { it.copy(activeSettingPicker = picker) }
 
     fun closeSettingPicker() = _uiState.update { it.copy(activeSettingPicker = null) }

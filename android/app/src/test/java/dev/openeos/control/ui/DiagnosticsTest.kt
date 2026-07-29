@@ -137,6 +137,15 @@ class DiagnosticsTest {
             ),
             liveViewDiagnostics = LiveViewDiagnostics(lastFrameAtMillis = 1_000L),
             liveViewSource = LiveViewSource.CCAPI_RTP,
+            monitorSettings = LiveViewMonitorSettings(
+                histogramVisible = true,
+                zebraThresholdPercent = 95,
+                falseColorEnabled = true,
+                focusPeakingEnabled = true,
+                frameGuide = LiveViewFrameGuide.RATIO_2_39,
+                safeAreaVisible = true,
+                desqueeze = LiveViewDesqueeze.X1_33,
+            ),
         )
 
         val report = buildDiagnosticReport(state)
@@ -152,6 +161,13 @@ class DiagnosticsTest {
         assertTrue(report.contains("wifiCellularCoexistence=true"))
         assertTrue(report.contains("liveViewHealthy=true"))
         assertTrue(report.contains("liveViewSource=CCAPI_RTP"))
+        assertTrue(report.contains("monitorHistogram=true"))
+        assertTrue(report.contains("monitorZebra=95"))
+        assertTrue(report.contains("monitorFalseColor=true"))
+        assertTrue(report.contains("monitorFocusPeaking=true"))
+        assertTrue(report.contains("monitorFrameGuide=RATIO_2_39"))
+        assertTrue(report.contains("monitorSafeArea=true"))
+        assertTrue(report.contains("monitorDesqueeze=X1_33"))
         assertTrue(report.contains("capabilitySource=GET /ccapi"))
         assertTrue(report.contains("advertisedCommandCount=1"))
         assertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))

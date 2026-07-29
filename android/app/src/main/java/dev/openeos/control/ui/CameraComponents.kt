@@ -1,5 +1,7 @@
 package dev.openeos.control.ui
 
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import android.os.SystemClock
 import android.text.format.Formatter
 import android.view.SurfaceHolder
@@ -12,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,6 +42,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,6 +54,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.viewinterop.AndroidView
@@ -65,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -80,6 +86,9 @@ import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.NativeLiveViewSession
 import java.text.NumberFormat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -422,8 +431,11 @@ internal fun String.toCameraHudName(): String =
 @Composable
 fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val bitmap = state.liveViewBitmap
-    val sourceAspectRatio = bitmap?.takeIf { it.width > 0 && it.height > 0 }
+    var loadedFrameBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val decodedFrame = bitmap ?: loadedFrameBitmap
+    val sourceAspectRatio = decodedFrame?.takeIf { it.width > 0 && it.height > 0 }
         ?.let { it.width.toFloat() / it.height.toFloat() } ?: state.liveViewAspectRatio
+    val displayAspectRatio = sourceAspectRatio * state.monitorSettings.desqueeze.horizontalScale
     val tapAction = when {
         state.liveViewTapAction == LiveViewTapAction.WHITE_BALANCE &&
             state.supports(CameraFeature.CLICK_WHITE_BALANCE) -> LiveViewTapAction.WHITE_BALANCE
@@ -440,6 +452,45 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     var lastFramePainter by remember { mutableStateOf<Painter?>(null) }
     val imageLoader = remember(context) {
         ImageLoader.Builder(context).build()
+    }
+    val pixelAnalysisAvailable = !state.previewMode &&
+        state.liveViewSource != dev.openeos.control.data.LiveViewSource.CCAPI_RTP &&
+        state.nativeLiveViewSession == null
+    val analysisSource = if (pixelAnalysisAvailable) decodedFrame else null
+    val monitorAnalysis by produceState<LiveViewMonitorAnalysis?>(
+        initialValue = null,
+        key1 = analysisSource,
+        key2 = state.monitorSettings.histogramVisible,
+        key3 = Triple(
+            state.monitorSettings.zebraThresholdPercent,
+            state.monitorSettings.falseColorEnabled,
+            state.monitorSettings.focusPeakingEnabled,
+        ),
+    ) {
+        value = if (analysisSource != null && state.monitorSettings.needsPixelAnalysis) {
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    analyzeLiveViewBitmap(
+                        analysisSource,
+                        state.monitorSettings.zebraThresholdPercent,
+                        state.monitorSettings.focusPeakingEnabled,
+                        state.monitorSettings.falseColorEnabled,
+                    )
+                }.getOrNull()
+            }
+        } else {
+            null
+        }
+    }
+    val monitorOverlay = remember(monitorAnalysis) {
+        monitorAnalysis?.overlayPixels?.let { pixels ->
+            Bitmap.createBitmap(
+                pixels,
+                monitorAnalysis!!.width,
+                monitorAnalysis!!.height,
+                Bitmap.Config.ARGB_8888,
+            )
+        }
     }
 
     Box(
@@ -464,22 +515,25 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             }
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
                 session = state.nativeLiveViewSession,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fitLiveViewContent(displayAspectRatio),
             )
             bitmap != null -> Image(
                 bitmap.asImageBitmap(),
                 stringResource(R.string.live_view),
-                Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
+                Modifier.fitLiveViewContent(displayAspectRatio),
+                contentScale = ContentScale.FillBounds,
             )
             state.liveViewFrameUrl != null -> AsyncImage(
                 model = ImageRequest.Builder(context).data(state.liveViewFrameUrl).crossfade(false).build(),
                 imageLoader = imageLoader,
                 placeholder = lastFramePainter,
                 contentDescription = stringResource(R.string.live_view),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-                onSuccess = { result -> lastFramePainter = result.painter },
+                modifier = Modifier.fitLiveViewContent(displayAspectRatio),
+                contentScale = ContentScale.FillBounds,
+                onSuccess = { result ->
+                    lastFramePainter = result.painter
+                    loadedFrameBitmap = (result.result.drawable as? BitmapDrawable)?.bitmap
+                },
             )
             else -> Box(
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
@@ -500,7 +554,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                                 tapY = offset.y,
                                 containerWidth = size.width.toFloat(),
                                 containerHeight = size.height.toFloat(),
-                                sourceAspectRatio = sourceAspectRatio,
+                                sourceAspectRatio = displayAspectRatio,
                             )?.let { point ->
                                 when (tapAction) {
                                     LiveViewTapAction.FOCUS -> actions.tapFocus(point.x, point.y)
@@ -608,9 +662,128 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 }
             }
         }
-        if (state.showGrid) GridOverlay(sourceAspectRatio)
-        FocusIndicator(state.focusPoint, state.focusFeedback, sourceAspectRatio)
+        monitorOverlay?.let { MonitoringPixelOverlay(it, displayAspectRatio) }
+        MonitorGuidesOverlay(state.monitorSettings, displayAspectRatio)
+        if (state.showGrid) GridOverlay(displayAspectRatio)
+        if (state.monitorSettings.histogramVisible) {
+            monitorAnalysis?.let { HistogramOverlay(it.histogram, state.hudVisible) }
+        }
+        FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
         if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
+    }
+}
+
+private fun Modifier.fitLiveViewContent(aspectRatio: Float): Modifier = layout { measurable, constraints ->
+    val availableWidth = constraints.maxWidth.coerceAtLeast(1)
+    val availableHeight = constraints.maxHeight.coerceAtLeast(1)
+    val availableAspect = availableWidth.toFloat() / availableHeight
+    val width: Int
+    val height: Int
+    if (availableAspect > aspectRatio) {
+        height = availableHeight
+        width = (height * aspectRatio).roundToInt().coerceIn(1, availableWidth)
+    } else {
+        width = availableWidth
+        height = (width / aspectRatio).roundToInt().coerceIn(1, availableHeight)
+    }
+    val placeable = measurable.measure(Constraints.fixed(width, height))
+    layout(width, height) { placeable.place(0, 0) }
+}
+
+@Composable
+private fun MonitoringPixelOverlay(bitmap: Bitmap, displayAspectRatio: Float) {
+    DisposableEffect(bitmap) {
+        onDispose { bitmap.recycle() }
+    }
+    Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = null,
+        modifier = Modifier.fitLiveViewContent(displayAspectRatio),
+        contentScale = ContentScale.FillBounds,
+    )
+}
+
+@Composable
+private fun BoxScope.HistogramOverlay(histogram: IntArray, hudVisible: Boolean) {
+    val description = stringResource(R.string.histogram)
+    Canvas(
+        Modifier
+            .align(Alignment.TopStart)
+            .padding(start = 12.dp, top = if (hudVisible) 60.dp else 12.dp)
+            .size(width = 156.dp, height = 82.dp)
+            .background(Color.Black.copy(alpha = 0.64f), RoundedCornerShape(4.dp))
+            .padding(8.dp)
+            .semantics { contentDescription = description },
+    ) {
+        val peak = histogram.maxOrNull()?.coerceAtLeast(1) ?: 1
+        val barWidth = size.width / histogram.size.coerceAtLeast(1)
+        histogram.forEachIndexed { index, count ->
+            val barHeight = size.height * count / peak.toFloat()
+            drawRect(
+                color = Color.White.copy(alpha = 0.86f),
+                topLeft = Offset(index * barWidth, size.height - barHeight),
+                size = androidx.compose.ui.geometry.Size(barWidth.coerceAtLeast(1f), barHeight),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MonitorGuidesOverlay(settings: LiveViewMonitorSettings, displayAspectRatio: Float) {
+    if (settings.frameGuide == LiveViewFrameGuide.OFF && !settings.safeAreaVisible) return
+    val description = stringResource(R.string.monitor_guides)
+    Canvas(Modifier.fillMaxSize().semantics { contentDescription = description }) {
+        val fitted = fittedLiveViewRect(size.width, size.height, displayAspectRatio)
+        val content = androidx.compose.ui.geometry.Rect(
+            left = fitted.left,
+            top = fitted.top,
+            right = fitted.left + fitted.width,
+            bottom = fitted.top + fitted.height,
+        )
+        val frameAspect = settings.frameGuide.aspectRatio
+        val frame = if (frameAspect == null) {
+            content
+        } else if (content.width / content.height > frameAspect) {
+            val width = content.height * frameAspect
+            androidx.compose.ui.geometry.Rect(
+                left = content.left + (content.width - width) / 2f,
+                top = content.top,
+                right = content.left + (content.width + width) / 2f,
+                bottom = content.bottom,
+            )
+        } else {
+            val height = content.width / frameAspect
+            androidx.compose.ui.geometry.Rect(
+                left = content.left,
+                top = content.top + (content.height - height) / 2f,
+                right = content.right,
+                bottom = content.top + (content.height + height) / 2f,
+            )
+        }
+        if (frameAspect != null) {
+            val shade = Color.Black.copy(alpha = 0.58f)
+            drawRect(shade, Offset(content.left, content.top), androidx.compose.ui.geometry.Size(content.width, frame.top - content.top))
+            drawRect(shade, Offset(content.left, frame.bottom), androidx.compose.ui.geometry.Size(content.width, content.bottom - frame.bottom))
+            drawRect(shade, Offset(content.left, frame.top), androidx.compose.ui.geometry.Size(frame.left - content.left, frame.height))
+            drawRect(shade, Offset(frame.right, frame.top), androidx.compose.ui.geometry.Size(content.right - frame.right, frame.height))
+            drawRect(Color.White.copy(alpha = 0.74f), frame.topLeft, frame.size, style = Stroke(1.dp.toPx()))
+        }
+        if (settings.safeAreaVisible) {
+            fun safeRect(scale: Float): androidx.compose.ui.geometry.Rect {
+                val width = frame.width * scale
+                val height = frame.height * scale
+                return androidx.compose.ui.geometry.Rect(
+                    left = frame.center.x - width / 2f,
+                    top = frame.center.y - height / 2f,
+                    right = frame.center.x + width / 2f,
+                    bottom = frame.center.y + height / 2f,
+                )
+            }
+            val actionSafe = safeRect(0.9f)
+            val titleSafe = safeRect(0.8f)
+            drawRect(Color.White.copy(alpha = 0.58f), actionSafe.topLeft, actionSafe.size, style = Stroke(1.dp.toPx()))
+            drawRect(Color.White.copy(alpha = 0.38f), titleSafe.topLeft, titleSafe.size, style = Stroke(1.dp.toPx()))
+        }
     }
 }
 

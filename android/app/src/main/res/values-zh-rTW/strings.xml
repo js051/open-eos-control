@@ -215,4 +215,21 @@
     <string name="stop_bulb_exposure">停止 Bulb 長曝光</string>
     <string name="bulb_exposure_time">BULB %1$s</string>
     <string name="bulb_not_supported">此連線無法持續按住並釋放快門，因此不支援 Bulb 長曝光。</string>
+    <string name="monitoring_assists">監看輔助</string>
+    <string name="monitoring_assists_rtp_unavailable">直方圖、斑馬紋、偽色與峰值對焦需要可解碼的 Live View 畫面；構圖框與反擠壓仍可使用。</string>
+    <string name="histogram">直方圖</string>
+    <string name="zebra">斑馬紋</string>
+    <string name="zebra_threshold">%1$d%%</string>
+    <string name="false_color">偽色</string>
+    <string name="focus_peaking">峰值對焦</string>
+    <string name="frame_guide">畫幅框線</string>
+    <string name="safe_area">動作與標題安全區域</string>
+    <string name="anamorphic_desqueeze">變形鏡頭反擠壓</string>
+    <string name="desqueeze_value">%1$.2f×</string>
+    <string name="monitor_guides">畫幅與安全區域框線</string>
+    <string name="off">關閉</string>
+    <string name="ratio_16_9">16:9</string>
+    <string name="ratio_2_39">2.39:1</string>
+    <string name="ratio_1_1">1:1</string>
+    <string name="ratio_4_3">4:3</string>
 </resources>
