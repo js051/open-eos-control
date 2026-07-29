@@ -60,6 +60,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
@@ -140,13 +141,31 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
             LiveViewFpsButton(state, { actions.openPicker(SettingPicker.LIVE_VIEW) })
         }
         if (!state.supports(feature)) {
-            Text(
-                stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.capture_not_supported else R.string.recording_not_supported),
-                color = AppWarning,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-            )
+            Box(
+                Modifier.fillMaxWidth().height(CAMERA_CAPABILITY_WARNING_HEIGHT).padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(if (state.captureMode == CaptureMode.PHOTO) R.string.capture_not_supported else R.string.recording_not_supported),
+                    color = AppWarning,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
+}
+
+internal val CAMERA_CAPABILITY_WARNING_HEIGHT = 40.dp
+
+internal fun cameraHudHeight(state: CameraUiState): Dp {
+    val feature = if (state.captureMode == CaptureMode.PHOTO) {
+        CameraFeature.STILL_CAPTURE
+    } else {
+        CameraFeature.VIDEO_RECORDING
+    }
+    return 176.dp + if (state.supports(feature)) 0.dp else CAMERA_CAPABILITY_WARNING_HEIGHT
 }
 
 
