@@ -134,6 +134,11 @@ private struct CameraOverlayHeader: View {
                     Label("focus_drive", systemImage: "arrow.left.and.right")
                 }
                 .disabled(!camera.supports(.focusDrive))
+                Button {
+                    camera.activeSheet = .monitoring
+                } label: {
+                    Label("monitoring_assists", systemImage: "waveform.path.ecg")
+                }
                 if camera.supports(.shutterHalfPress) {
                     Button {
                         Task { await camera.halfPressShutter() }

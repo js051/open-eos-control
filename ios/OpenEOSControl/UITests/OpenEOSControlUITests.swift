@@ -107,6 +107,26 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "media-download-complete")
     }
 
+    func testOfflineMonitoringAssistsKeepGeometryControlsAvailable() throws {
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))
+        app.buttons["offline-preview-button"].tap()
+        XCTAssertTrue(app.buttons["more-actions-button"].waitForExistence(timeout: 5))
+        app.buttons["more-actions-button"].tap()
+
+        let monitoring = app.buttons["Monitoring assists"]
+        XCTAssertTrue(monitoring.waitForExistence(timeout: 3))
+        monitoring.tap()
+
+        XCTAssertTrue(app.staticTexts["Histogram, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available."].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.switches["monitor-histogram"].isEnabled)
+        let safeArea = app.switches["monitor-safe-area"]
+        XCTAssertTrue(safeArea.isEnabled)
+        safeArea.tap()
+        XCTAssertEqual(safeArea.value as? String, "1")
+        addScreenshot(name: "monitoring-assists-offline")
+    }
+
     private func launch(appLanguage: String, appleLanguage: String, locale: String) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()

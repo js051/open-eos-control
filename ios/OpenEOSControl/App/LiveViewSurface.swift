@@ -5,28 +5,47 @@ import UIKit
 
 struct LiveViewSurface: View {
     @EnvironmentObject private var camera: CameraAppState
+    @State private var monitorAnalysis: LiveViewMonitorAnalysis?
 
     var body: some View {
         GeometryReader { proxy in
             let image = camera.liveViewData.flatMap(UIImage.init(data:))
-            let contentSize = image?.size ?? (camera.activeLiveViewSource == .ccapiRTP ? camera.nativeLiveViewSize : nil)
+            let sourceSize = image?.size ?? (camera.activeLiveViewSource == .ccapiRTP ? camera.nativeLiveViewSize : nil)
+            let contentSize = sourceSize.map {
+                CGSize(
+                    width: $0.width * camera.monitorSettings.desqueeze.horizontalScale,
+                    height: $0.height
+                )
+            }
             let imageRect = contentSize.map { aspectFitRect(contentSize: $0, containerSize: proxy.size) }
                 ?? CGRect(origin: .zero, size: proxy.size)
+            let overlayImage = monitorAnalysis?.overlayImage()
 
             ZStack {
                 Color.black
 
                 if camera.activeLiveViewSource == .ccapiRTP {
                     IOSCcapiRTPVideoSurface(controller: camera.rtpController)
+                        .frame(width: imageRect.width, height: imageRect.height)
                     if camera.lastFrameAt == nil { offlineSurface }
                 } else if let image {
                     Image(uiImage: image)
                         .resizable()
                         .interpolation(.medium)
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(width: imageRect.width, height: imageRect.height)
                 } else {
                     offlineSurface
+                }
+
+                if let overlayImage {
+                    Image(uiImage: overlayImage)
+                        .resizable()
+                        .interpolation(.none)
+                        .frame(width: imageRect.width, height: imageRect.height)
+                        .position(x: imageRect.midX, y: imageRect.midY)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        .accessibilityIdentifier("monitor-pixel-overlay")
                 }
 
                 if camera.showGrid {
@@ -34,6 +53,31 @@ struct LiveViewSurface: View {
                         .frame(width: imageRect.width, height: imageRect.height)
                         .position(x: imageRect.midX, y: imageRect.midY)
                         .allowsHitTesting(false)
+                }
+
+                if camera.monitorSettings.frameGuide != .off || camera.monitorSettings.safeAreaVisible {
+                    MonitorGuides(
+                        frameGuide: camera.monitorSettings.frameGuide,
+                        safeAreaVisible: camera.monitorSettings.safeAreaVisible
+                    )
+                    .frame(width: imageRect.width, height: imageRect.height)
+                    .position(x: imageRect.midX, y: imageRect.midY)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("monitor-guides-overlay")
+                }
+
+                if camera.monitorSettings.histogramVisible, let monitorAnalysis {
+                    let width = min(180, max(120, imageRect.width * 0.34))
+                    HistogramView(histogram: monitorAnalysis.histogram)
+                        .frame(width: width, height: 72)
+                        .position(
+                            x: imageRect.minX + width / 2 + 10,
+                            y: imageRect.minY + 106
+                        )
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        .accessibilityIdentifier("live-view-histogram")
                 }
 
                 if let marker = camera.focusMarker {
@@ -126,6 +170,34 @@ struct LiveViewSurface: View {
                 }
             )
         }
+        .task(id: monitorAnalysisTaskID) {
+            guard pixelMonitoringAvailable,
+                  camera.monitorSettings.needsPixelAnalysis,
+                  let data = camera.liveViewData else {
+                monitorAnalysis = nil
+                return
+            }
+            let settings = camera.monitorSettings
+            let result = await Task.detached(priority: .utility) {
+                analyzeLiveViewData(data, settings: settings)
+            }.value
+            guard !Task.isCancelled else { return }
+            monitorAnalysis = result
+        }
+    }
+
+    private var pixelMonitoringAvailable: Bool {
+        !camera.isPreview
+            && camera.activeLiveViewSource != nil
+            && camera.activeLiveViewSource != .ccapiRTP
+    }
+
+    private var monitorAnalysisTaskID: LiveViewMonitorTaskID {
+        LiveViewMonitorTaskID(
+            frameTimestamp: camera.lastFrameAt,
+            settings: camera.monitorSettings,
+            pixelMonitoringAvailable: pixelMonitoringAvailable
+        )
     }
 
     private var offlineSurface: some View {
@@ -148,6 +220,7 @@ private struct IOSCcapiRTPVideoSurface: UIViewRepresentable {
 
     func makeUIView(context: Context) -> IOSCcapiRTPVideoView {
         let view = IOSCcapiRTPVideoView()
+        view.displayLayer.videoGravity = .resize
         controller.attach(view.displayLayer)
         return view
     }
@@ -160,6 +233,12 @@ private struct IOSCcapiRTPVideoSurface: UIViewRepresentable {
         // The controller is retained by CameraAppState; detaching is handled when another layer attaches.
         uiView.displayLayer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
     }
+}
+
+private struct LiveViewMonitorTaskID: Hashable {
+    let frameTimestamp: Date?
+    let settings: LiveViewMonitorSettings
+    let pixelMonitoringAvailable: Bool
 }
 
 private final class IOSCcapiRTPVideoView: UIView {
@@ -182,6 +261,72 @@ private struct CompositionGrid: View {
             }
             context.stroke(path, with: .color(.white.opacity(0.38)), lineWidth: 0.8)
         }
+    }
+}
+
+private struct MonitorGuides: View {
+    let frameGuide: LiveViewFrameGuide
+    let safeAreaVisible: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            if let aspectRatio = frameGuide.aspectRatio {
+                let rect = aspectFitRect(
+                    contentSize: CGSize(width: aspectRatio, height: 1),
+                    containerSize: size
+                ).insetBy(dx: 1, dy: 1)
+                context.stroke(
+                    Path(roundedRect: rect, cornerRadius: 0),
+                    with: .color(.white.opacity(0.85)),
+                    style: StrokeStyle(lineWidth: 1.2, dash: [7, 5])
+                )
+            }
+            if safeAreaVisible {
+                let actionSafe = CGRect(origin: .zero, size: size).insetBy(
+                    dx: size.width * 0.05,
+                    dy: size.height * 0.05
+                )
+                let titleSafe = CGRect(origin: .zero, size: size).insetBy(
+                    dx: size.width * 0.10,
+                    dy: size.height * 0.10
+                )
+                context.stroke(
+                    Path(roundedRect: actionSafe, cornerRadius: 0),
+                    with: .color(Color.cameraAccent.opacity(0.72)),
+                    style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+                )
+                context.stroke(
+                    Path(roundedRect: titleSafe, cornerRadius: 0),
+                    with: .color(Color.cameraWarning.opacity(0.72)),
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 4])
+                )
+            }
+        }
+    }
+}
+
+private struct HistogramView: View {
+    let histogram: [Int]
+
+    var body: some View {
+        Canvas { context, size in
+            let peak = max(1, histogram.max() ?? 1)
+            guard histogram.count > 1 else { return }
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: size.height))
+            for (index, count) in histogram.enumerated() {
+                let x = size.width * CGFloat(index) / CGFloat(histogram.count - 1)
+                let y = size.height * (1 - CGFloat(count) / CGFloat(peak))
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+            path.addLine(to: CGPoint(x: size.width, y: size.height))
+            path.closeSubpath()
+            context.fill(path, with: .color(.white.opacity(0.36)))
+            context.stroke(path, with: .color(.white.opacity(0.92)), lineWidth: 1)
+        }
+        .padding(7)
+        .background(Color.black.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 

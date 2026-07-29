@@ -36,6 +36,7 @@ enum CameraSheet: String, Identifiable {
     case aperture
     case whiteBalance
     case liveView
+    case monitoring
     case more
     case focusDrive
     case language

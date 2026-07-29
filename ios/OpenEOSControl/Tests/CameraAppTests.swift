@@ -156,6 +156,41 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
     }
 
+    func testMonitoringAssistDefaultsDoNotAlterTheLiveView() {
+        let settings = LiveViewMonitorSettings()
+
+        XCTAssertFalse(settings.needsPixelAnalysis)
+        XCTAssertEqual(settings.frameGuide, .off)
+        XCTAssertEqual(settings.desqueeze.horizontalScale, 1)
+        XCTAssertFalse(settings.safeAreaVisible)
+    }
+
+    func testDiagnosticReportIncludesMonitoringAssistState() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.monitorSettings = LiveViewMonitorSettings(
+            histogramVisible: true,
+            zebraThresholdPercent: 95,
+            falseColorEnabled: true,
+            focusPeakingEnabled: true,
+            frameGuide: .ratio2x39,
+            safeAreaVisible: true,
+            desqueeze: .x1_5
+        )
+
+        let report = await state.diagnosticReport()
+
+        XCTAssertTrue(report.contains("monitorHistogram=true"))
+        XCTAssertTrue(report.contains("monitorZebra=95"))
+        XCTAssertTrue(report.contains("monitorFalseColor=true"))
+        XCTAssertTrue(report.contains("monitorFocusPeaking=true"))
+        XCTAssertTrue(report.contains("monitorFrameGuide=ratio2x39"))
+        XCTAssertTrue(report.contains("monitorSafeArea=true"))
+        XCTAssertTrue(report.contains("monitorDesqueeze=x1_5"))
+    }
+
     func testOfflineMediaDownloadCompletesAndClearsActiveTransferState() async throws {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
