@@ -1,5 +1,6 @@
 package dev.openeos.control.ui
 
+import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.ExposureState
@@ -65,5 +66,36 @@ class CameraUiStateTest {
         assertNull(movieSetting.valueForCaptureMode(CaptureMode.PHOTO, null))
         assertTrue("auto_exposure_mode".isShootingModeKey())
         assertEquals(CaptureMode.VIDEO, captureModeForShootingValue("movie manual exposure"))
+    }
+
+    @Test
+    fun eventMediaRefreshPreservesCurrentItemsAndClosesRemovedPreview() {
+        val retained = CameraMediaItem("media-1", "IMG_0001.JPG", "image", previewAvailable = true)
+        val removed = CameraMediaItem("media-2", "IMG_0002.JPG", "image", previewAvailable = true)
+        val added = CameraMediaItem("media-3", "IMG_0003.JPG", "image", previewAvailable = true)
+        val state = CameraUiState(
+            mediaItems = listOf(retained, removed),
+            mediaThumbnailLoadingIds = setOf("media-1", "media-2"),
+            mediaPreviewItem = removed,
+            mediaPreviewBytes = byteArrayOf(1, 2, 3),
+            mediaPreviewLoading = true,
+        )
+
+        val refreshed = with(CameraViewModel()) {
+            state.withEventMediaItems(listOf(retained, added))
+        }
+
+        assertEquals(listOf(retained, added), refreshed.mediaItems)
+        assertTrue(refreshed.mediaThumbnailLoadingIds.isEmpty())
+        assertNull(refreshed.mediaPreviewItem)
+        assertNull(refreshed.mediaPreviewBytes)
+        assertFalse(refreshed.mediaPreviewLoading)
+
+        val preservedPreview = with(CameraViewModel()) {
+            state.copy(mediaPreviewItem = retained).withEventMediaItems(listOf(retained, added))
+        }
+        assertEquals(retained, preservedPreview.mediaPreviewItem)
+        assertTrue(preservedPreview.mediaPreviewBytes?.contentEquals(byteArrayOf(1, 2, 3)) == true)
+        assertTrue(preservedPreview.mediaPreviewLoading)
     }
 }

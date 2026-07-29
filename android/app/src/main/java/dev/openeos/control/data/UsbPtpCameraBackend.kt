@@ -2,11 +2,14 @@ package dev.openeos.control.data
 
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStream
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 class UsbPtpCameraBackend(
     override val connection: CameraConnection.AndroidUsbPtp,
@@ -34,7 +37,8 @@ class UsbPtpCameraBackend(
     private var selectedCaptureDestination: Long? = null
     private var bulbExposureActive = false
     private var bulbHostTransferPrepared = false
-    private val observedFeatures = mutableSetOf<CameraFeature>()
+    private val canonEventMutex = Mutex()
+    private val observedFeatures = ConcurrentHashMap.newKeySet<CameraFeature>()
 
     override fun observedFeatures(): Set<CameraFeature> = observedFeatures.toSet()
 
@@ -192,6 +196,7 @@ class UsbPtpCameraBackend(
             canSetCanonProperties = CanonEosPtp.supportsPropertyControl(info),
         )
         val supportsCanonRelease = CanonEosPtp.supportsRemoteRelease(info)
+        val supportsCanonEvents = CanonEosPtp.supportsRemotePreparation(info)
         val supportsCanonAutofocus = CanonEosPtp.supportsAutofocus(info)
         val supportsCanonLiveView = CanonEosPtp.supportsLiveView(info)
         val supportsCanonFocusDrive = CanonEosPtp.supportsFocusDrive(info)
@@ -204,6 +209,7 @@ class UsbPtpCameraBackend(
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
             add(CameraFeature.CAMERA_IDENTITY)
+            if (supportsCanonEvents) add(CameraFeature.EVENT_POLLING)
             if (PtpDevicePropertyCode.BATTERY_LEVEL in propertyDescriptors) add(CameraFeature.BATTERY_STATUS)
             if (supportsStorage(info)) add(CameraFeature.STORAGE_STATUS)
             if (supportsMediaBrowser(info) || supportsHostMedia) add(CameraFeature.MEDIA_BROWSER)
@@ -237,6 +243,7 @@ class UsbPtpCameraBackend(
         val candidates = setOf(
             CameraFeature.BATTERY_STATUS,
             CameraFeature.STORAGE_STATUS,
+            CameraFeature.EVENT_POLLING,
             CameraFeature.STILL_CAPTURE,
             CameraFeature.BULB_EXPOSURE,
             CameraFeature.AUTOFOCUS,
@@ -281,6 +288,8 @@ class UsbPtpCameraBackend(
                 supported = supported,
                 planned = candidates - supported,
                 reasons = mapOf(
+                    CameraFeature.EVENT_POLLING to
+                        "Uses Canon EOS GetEvent only when SetRemoteMode, SetEventMode, and GetEvent are all advertised.",
                     CameraFeature.STILL_CAPTURE to
                         "Uses standard InitiateCapture or Canon EOS RemoteReleaseOn/Off; advertised host-RAM transfers are downloaded in 1 MiB partial-object chunks before TransferComplete.",
                     CameraFeature.SHUTTER_HALF_PRESS to
@@ -345,6 +354,24 @@ class UsbPtpCameraBackend(
         )
     }
 
+    override suspend fun pollEvent(): CameraEvent {
+        if (!CanonEosPtp.supportsRemotePreparation(requireDeviceInfo())) {
+            unsupported<CameraEvent>(CameraFeature.EVENT_POLLING)
+        }
+        ensureCanonRemoteMode()
+        repeat(CANON_EVENT_LONG_POLL_ATTEMPTS) {
+            val changedKeys = canonEventMutex.withLock {
+                val payload = drainCanonEventsLocked()
+                handleExternalCanonTransfersLocked(payload)
+                canonEventChangeKeys(payload)
+            }
+            observedFeatures.add(CameraFeature.EVENT_POLLING)
+            if (changedKeys.isNotEmpty()) return CameraEvent(changedKeys)
+            delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+        }
+        return CameraEvent()
+    }
+
     override suspend fun captureStill(): CameraStatus {
         val info = requireDeviceInfo()
         if (!CanonEosPtp.supportsRemoteRelease(info) && info.supports(PtpOperationCode.INITIATE_CAPTURE)) {
@@ -355,21 +382,23 @@ class UsbPtpCameraBackend(
         if (!CanonEosPtp.supportsRemoteRelease(info)) unsupported<Unit>(CameraFeature.STILL_CAPTURE)
 
         ensureCanonRemoteMode()
-        drainCanonEvents()
-        val hostTransferPrepared = prepareCanonCaptureDestination()
         val ptp = requireSession()
-        ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
-        try {
-            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(2L, 0L))
+        canonEventMutex.withLock {
+            drainCanonEventsLocked()
+            val hostTransferPrepared = prepareCanonCaptureDestination()
+            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
             try {
-                Unit
+                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(2L, 0L))
+                try {
+                    Unit
+                } finally {
+                    ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(2L))
+                }
             } finally {
-                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(2L))
+                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
             }
-        } finally {
-            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
+            awaitCanonCapturedObjectLocked(hostTransferPrepared)
         }
-        awaitCanonCapturedObject(hostTransferPrepared)
         observedFeatures.add(CameraFeature.STILL_CAPTURE)
         return status()
     }
@@ -398,22 +427,25 @@ class UsbPtpCameraBackend(
             unsupported<Unit>(CameraFeature.BULB_EXPOSURE)
         }
         ensureCanonRemoteMode()
-        drainCanonEvents()
         val baseline = status()
-        val hostTransferPrepared = prepareCanonCaptureDestination()
         val ptp = requireSession()
-        try {
-            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
-            ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(2L, 0L))
-        } catch (exception: Throwable) {
-            withContext(NonCancellable) {
-                listOf(2L, 1L).forEach { stage ->
-                    runCatching { ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(stage)) }
-                        .exceptionOrNull()
-                        ?.let(exception::addSuppressed)
+        val hostTransferPrepared = canonEventMutex.withLock {
+            drainCanonEventsLocked()
+            val prepared = prepareCanonCaptureDestination()
+            try {
+                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(1L, 0L))
+                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_ON, listOf(2L, 0L))
+            } catch (exception: Throwable) {
+                withContext(NonCancellable) {
+                    listOf(2L, 1L).forEach { stage ->
+                        runCatching { ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(stage)) }
+                            .exceptionOrNull()
+                            ?.let(exception::addSuppressed)
+                    }
                 }
+                throw exception
             }
-            throw exception
+            prepared
         }
         bulbHostTransferPrepared = hostTransferPrepared
         bulbExposureActive = true
@@ -423,27 +455,33 @@ class UsbPtpCameraBackend(
     override suspend fun stopBulbExposure(): CameraStatus {
         if (!bulbExposureActive) return status()
         val ptp = requireSession()
-        var primaryFailure: Throwable? = null
-        try {
-            withContext(NonCancellable) {
-                ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(2L))
-            }
-        } catch (exception: Throwable) {
-            primaryFailure = exception
-        } finally {
+        canonEventMutex.withLock {
+            var primaryFailure: Throwable? = null
             try {
                 withContext(NonCancellable) {
-                    ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
+                    ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(2L))
                 }
-            } catch (releaseFailure: Throwable) {
-                if (primaryFailure != null) primaryFailure.addSuppressed(releaseFailure) else primaryFailure = releaseFailure
+            } catch (exception: Throwable) {
+                primaryFailure = exception
+            } finally {
+                try {
+                    withContext(NonCancellable) {
+                        ptp.executeOperation(CanonEosOperationCode.REMOTE_RELEASE_OFF, listOf(1L))
+                    }
+                } catch (releaseFailure: Throwable) {
+                    if (primaryFailure != null) {
+                        primaryFailure.addSuppressed(releaseFailure)
+                    } else {
+                        primaryFailure = releaseFailure
+                    }
+                }
             }
+            primaryFailure?.let { throw it }
+            bulbExposureActive = false
+            val hostTransferPrepared = bulbHostTransferPrepared
+            bulbHostTransferPrepared = false
+            awaitCanonCapturedObjectLocked(hostTransferPrepared)
         }
-        primaryFailure?.let { throw it }
-        bulbExposureActive = false
-        val hostTransferPrepared = bulbHostTransferPrepared
-        bulbHostTransferPrepared = false
-        awaitCanonCapturedObject(hostTransferPrepared)
         observedFeatures.add(CameraFeature.BULB_EXPOSURE)
         return status()
     }
@@ -753,6 +791,11 @@ class UsbPtpCameraBackend(
 
     private suspend fun ensureCanonRemoteMode() {
         if (canonRemotePrepared) return
+        canonEventMutex.withLock { ensureCanonRemoteModeLocked() }
+    }
+
+    private suspend fun ensureCanonRemoteModeLocked() {
+        if (canonRemotePrepared) return
         val info = requireDeviceInfo()
         if (!CanonEosPtp.supportsRemotePreparation(info)) {
             throw PtpProtocolException("Camera does not advertise the Canon EOS remote/event mode sequence.")
@@ -761,7 +804,7 @@ class UsbPtpCameraBackend(
         ptp.executeOperation(CanonEosOperationCode.SET_REMOTE_MODE, listOf(1L))
         try {
             ptp.executeOperation(CanonEosOperationCode.SET_EVENT_MODE, listOf(1L))
-            drainCanonEvents()
+            drainCanonEventsLocked()
             canonRemotePrepared = true
         } catch (exception: Exception) {
             runCatching { ptp.executeOperation(CanonEosOperationCode.SET_REMOTE_MODE, listOf(0L)) }
@@ -769,7 +812,9 @@ class UsbPtpCameraBackend(
         }
     }
 
-    private suspend fun drainCanonEvents(): ByteArray =
+    private suspend fun drainCanonEvents(): ByteArray = canonEventMutex.withLock { drainCanonEventsLocked() }
+
+    private suspend fun drainCanonEventsLocked(): ByteArray =
         requireSession().executeDataInOperation(CanonEosOperationCode.GET_EVENT).also(::applyCanonPropertyUpdates)
 
     private suspend fun refreshCanonPropertyState(info: PtpDeviceInfo) {
@@ -830,12 +875,12 @@ class UsbPtpCameraBackend(
         canonProperties.values.any { it.availableValues.isNotEmpty() }
     }
 
-    private suspend fun awaitCanonCapturedObject(hostTransferPrepared: Boolean) {
+    private suspend fun awaitCanonCapturedObjectLocked(hostTransferPrepared: Boolean) {
         var deadline = System.currentTimeMillis() + CANON_CAPTURE_EVENT_TIMEOUT_MILLIS
         var hostTransferCount = 0
         var hostTransferQuietAt = Long.MAX_VALUE
         do {
-            val payload = drainCanonEvents()
+            val payload = drainCanonEventsLocked()
             val transfers = CanonEosPtp.objectTransferRequests(payload)
             if (transfers.isNotEmpty()) {
                 if (!hostTransferPrepared) {
@@ -856,6 +901,42 @@ class UsbPtpCameraBackend(
             "Canon EOS shutter commands completed, but the camera did not report a captured object " +
                 "within ${CANON_CAPTURE_EVENT_TIMEOUT_MILLIS / 1_000} seconds."
         )
+    }
+
+    private suspend fun handleExternalCanonTransfersLocked(payload: ByteArray) {
+        val transfers = CanonEosPtp.objectTransferRequests(payload)
+        if (transfers.isEmpty()) return
+        val info = requireDeviceInfo()
+        if (!supportsCanonHostCaptureTarget(info) || hostCaptureStore == null) {
+            throw PtpProtocolException(
+                "Canon EOS requested a host object transfer outside an app capture, but the verified host-transfer path is unavailable."
+            )
+        }
+        if (!prepareCanonHostCapacity(info)) {
+            throw PtpProtocolException("Canon EOS host capacity could not be prepared for an external camera capture.")
+        }
+        transfers.forEach { downloadCanonHostCapture(it) }
+    }
+
+    private fun canonEventChangeKeys(payload: ByteArray): Set<String> = buildSet {
+        val eventCodes = CanonEosPtp.eventCodes(payload)
+        val updates = CanonEosPtp.propertyUpdates(payload)
+        if (
+            CanonEosEventCode.PROPERTY_VALUE_CHANGED in eventCodes ||
+            CanonEosEventCode.AVAILABLE_LIST_CHANGED in eventCodes
+        ) {
+            add("shootingsettings")
+        }
+        if (updates.any { it.propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS }) add("recording")
+        if (
+            updates.any {
+                it.propertyCode == CanonEosPropertyCode.AVAILABLE_SHOTS ||
+                    it.propertyCode == CanonEosPropertyCode.CAPTURE_DESTINATION
+            }
+        ) {
+            add("storage")
+        }
+        if (CanonEosPtp.containsCapturedObjectEvent(payload)) add("contents")
     }
 
     private suspend fun downloadCanonHostCapture(request: CanonEosObjectTransferRequest) {
@@ -1481,6 +1562,7 @@ private const val MAX_USB_MEDIA_ITEMS = 500
 private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
+private const val CANON_EVENT_LONG_POLL_ATTEMPTS = 10
 private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L
 private const val CANON_PROPERTY_DISCOVERY_ATTEMPTS = 10
 private const val CANON_PROPERTY_DISCOVERY_RETRY_MILLIS = 50L
