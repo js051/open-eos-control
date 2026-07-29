@@ -1511,7 +1511,7 @@ class CcapiClientTest {
         )
         server.enqueue(
             binaryResponse(ByteArray(1024 * 1024) { 3 }, "video/mp4")
-                .throttleBody(1024, 5, TimeUnit.SECONDS),
+                .throttleBody(1024, 100, TimeUnit.MILLISECONDS),
         )
         val firstWrite = CountDownLatch(1)
         val destination = object : OutputStream() {

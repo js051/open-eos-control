@@ -44,6 +44,29 @@ class DiagnosticsTest {
     }
 
     @Test
+    fun diagnosticReportRedactsMachineLocalPaths() {
+        val windowsHome = "C:" + "\\Users\\Private User\\capture.jpg"
+        val networkHome = "\\\\" + "PRIVATE-SERVER\\private\\capture.jpg"
+        val unixHome = "/" + "Users/private/capture.jpg"
+        val report = buildDiagnosticReport(
+            CameraUiState(
+                error =
+                    "Failed $windowsHome, $networkHome, C:/dev/frame.jpg, " +
+                        "$unixHome, /data/user/0/dev.openeos.control/frame.jpg and file:///tmp/frame.jpg",
+            )
+        )
+
+        assertFalse(report.contains("C:" + "\\Users"))
+        assertFalse(report.contains("Private User"))
+        assertFalse(report.contains("PRIVATE-SERVER"))
+        assertFalse(report.contains("C:/dev"))
+        assertFalse(report.contains("/" + "Users/private"))
+        assertFalse(report.contains("/data/user"))
+        assertFalse(report.contains("file:///tmp"))
+        assertTrue(report.contains("[local-path]"))
+    }
+
+    @Test
     fun diagnosticReportIsVersionedRedactsSerialAndSummarizesValidationEvidence() {
         val serial = "PRIVATE-CAMERA-SERIAL"
         val report = buildDiagnosticReport(

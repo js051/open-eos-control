@@ -36,7 +36,14 @@
     if (typeof value !== "string") return value;
     let safe = value
       .replace(/(authorization\s*[:=]\s*(?:bearer|basic)?\s*)[^\s,]+/gi, "$1[redacted]")
-      .replace(/((?:password|token)\s*[=:]\s*)[^\s&,]+/gi, "$1[redacted]");
+      .replace(/((?:password|token)\s*[=:]\s*)[^\s&,]+/gi, "$1[redacted]")
+      .replace(/\b[A-Z]:[\\/]+[^\r\n,;"'}\]]+/gi, "[local-path]")
+      .replace(/\\\\[^\\\r\n\s"']+\\[^\r\n,;"'}\]]+/g, "[local-path]")
+      .replace(/\bfile:\/\/[^\r\n,;"'}\]]+/gi, "[local-path]")
+      .replace(
+        /(^|[^A-Za-z0-9_])\/(?:Users|home|tmp|var\/folders|private\/var|data\/user|storage\/emulated|mnt\/[a-z])\/[^\r\n,;"'}\]]+/g,
+        "$1[local-path]",
+      );
     secrets.filter(Boolean).forEach((secret) => {
       safe = safe.replaceAll(String(secret), "[redacted]");
     });

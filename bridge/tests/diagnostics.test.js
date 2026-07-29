@@ -20,12 +20,23 @@ assert.deepEqual(summary, {
 
 const privateSerial = "PRIVATE-CAMERA-SERIAL";
 const privateToken = "PRIVATE-BRIDGE-TOKEN";
+const windowsHome = "C:" + "\\Users\\Private User\\capture.jpg";
+const networkHome = "\\\\" + "PRIVATE-SERVER\\private\\capture.jpg";
+const unixHome = "/" + "Users/private/capture.jpg";
 const safe = diagnostics.safeValue(
   {
     info: { serial: privateSerial, model: "Canon EOS R6 Mark III" },
     unknownCamera: { serial: "unknown" },
     nested: [{ password: "camera-password" }, { authorization: `Bearer ${privateToken}` }],
     lastError: `Authorization: Bearer ${privateToken} token=${privateToken} camera=${privateSerial}`,
+    localPaths: [
+      windowsHome,
+      networkHome,
+      "C:/dev/capture.jpg",
+      unixHome,
+      "/private/var/mobile/frame.jpg",
+      "file:///tmp/frame.jpg",
+    ],
   },
   { secrets: [privateToken, privateSerial] },
 );
@@ -38,3 +49,11 @@ assert.equal(safe.nested[1].authorization, "[redacted]");
 assert.ok(!serialized.includes(privateSerial));
 assert.ok(!serialized.includes(privateToken));
 assert.ok(!serialized.includes("camera-password"));
+assert.ok(!serialized.includes("C:" + "\\Users"));
+assert.ok(!serialized.includes("Private User"));
+assert.ok(!serialized.includes("PRIVATE-SERVER"));
+assert.ok(!serialized.includes("C:/dev"));
+assert.ok(!serialized.includes("/" + "Users/private"));
+assert.ok(!serialized.includes("/private/var"));
+assert.ok(!serialized.includes("file:///tmp"));
+assert.ok(serialized.includes("[local-path]"));

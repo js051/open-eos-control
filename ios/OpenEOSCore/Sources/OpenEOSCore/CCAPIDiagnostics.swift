@@ -167,6 +167,26 @@ func redactDiagnosticText(_ value: String, sensitiveValues: [String?] = []) -> S
             with: "$1[redacted]",
             options: .regularExpression
         )
+        .replacingOccurrences(
+            of: #"(?i)\b[A-Z]:[\\/]+[^\r\n,;\"'}\]]+"#,
+            with: "[local-path]",
+            options: .regularExpression
+        )
+        .replacingOccurrences(
+            of: #"(?i)\\\\[^\\\r\n\s\"']+\\[^\r\n,;\"'}\]]+"#,
+            with: "[local-path]",
+            options: .regularExpression
+        )
+        .replacingOccurrences(
+            of: #"(?i)\bfile://[^\r\n,;\"'}\]]+"#,
+            with: "[local-path]",
+            options: .regularExpression
+        )
+        .replacingOccurrences(
+            of: #"(?<![A-Za-z0-9_])/(?:Users|home|tmp|var/folders|private/var|data/user|storage/emulated|mnt/[a-z])/[^\r\n,;\"'}\]]+"#,
+            with: "[local-path]",
+            options: .regularExpression
+        )
     for sensitiveValue in sensitiveValues.compactMap({ $0 }).filter({ !$0.isDiagnosticUnknown }) {
         redacted = redacted.replacingOccurrences(of: sensitiveValue, with: "[redacted]")
     }

@@ -203,7 +203,11 @@ http://localhost:18080
 - 在 R6 Mark III 完成已實作 PC CCAPI、Android-to-Desktop-Bridge、持續 gphoto2 USB 預覽與 USB PC 控制介面的真機驗證，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
 - 以實體 iPhone 與 R6 Mark III 驗證已實作的 iOS SwiftUI CCAPI App、相機有公告時的 RTP，以及 Wi-Fi／行動網路共存；iOS USB/PTP 先列為研究線。
 
-功能是否真正完成以 [docs/feature-status.md](docs/feature-status.md) 為準；架構與後續路線請看 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/android-usb-ptp.md](docs/android-usb-ptp.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md)、[docs/ios-ccapi.md](docs/ios-ccapi.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
+## 真機證據
+
+Android、iOS 與 PC 的診斷報告可以交給 repository 內的 R6 Mark III 嚴格 verifier。過期、集合不一致、證據截斷或含敏感資訊的報告會被拒絕；必要能力只有在相機公告且本次工作階段確實成功時才會通過。相機端實體結果仍必須另外由操作人員明確確認。完整流程與可審核的 Markdown／JSON 輸出請見[真機驗證](docs/device-validation.zh-TW.md)。
+
+功能是否真正完成以 [docs/feature-status.md](docs/feature-status.md) 為準；架構與後續路線請看 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/android-usb-ptp.md](docs/android-usb-ptp.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md)、[docs/ios-ccapi.md](docs/ios-ccapi.md)、[docs/device-validation.zh-TW.md](docs/device-validation.zh-TW.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
 
 ## 授權
 

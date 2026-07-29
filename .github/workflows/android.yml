@@ -40,6 +40,9 @@ jobs:
       - name: Verify product version consistency
         run: python3 scripts/release/verify-version.py
 
+      - name: Test physical-camera evidence verifier
+        run: python3 -m unittest discover -s scripts/validation/tests -p "test_*.py"
+
       - name: Validate GitHub Actions workflows
         run: bash scripts/ci/run-actionlint.sh
 
@@ -175,7 +178,7 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Lint desktop bridge
-        run: ruff check --no-cache .
+        run: ruff check --no-cache . ../scripts/validation
 
       - name: Check desktop control scripts
         run: |

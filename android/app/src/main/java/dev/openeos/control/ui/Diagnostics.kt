@@ -143,6 +143,16 @@ private fun redactDiagnosticText(value: String, state: CameraUiState): String {
     var redacted = value
         .replace(Regex("(?i)(authorization\\s*[:=]\\s*)([^\\r\\n,]+)"), "\$1[redacted]")
         .replace(Regex("(https?://)[^/@\\s]+@"), "\$1")
+        .replace(Regex("(?i)\\b[A-Z]:[\\\\/]+[^\\r\\n,;\"'}\\]]+"), "[local-path]")
+        .replace(Regex("(?i)\\\\\\\\[^\\\\\\r\\n\\s\"']+\\\\[^\\r\\n,;\"'}\\]]+"), "[local-path]")
+        .replace(Regex("(?i)\\bfile://[^\\r\\n,;\"'}\\]]+"), "[local-path]")
+        .replace(
+            Regex(
+                "(?<![A-Za-z0-9_])/(?:Users|home|tmp|var/folders|private/var|data/user|storage/emulated|mnt/[a-z])/" +
+                    "[^\\r\\n,;\"'}\\]]+",
+            ),
+            "[local-path]",
+        )
     if (state.password.isNotBlank()) redacted = redacted.replace(state.password, "[redacted]")
     if (state.bridgeToken.isNotBlank()) redacted = redacted.replace(state.bridgeToken, "[redacted]")
     state.info?.serial?.takeUnless { it.isDiagnosticUnknown() }?.let { serial ->

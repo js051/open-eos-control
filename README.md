@@ -202,7 +202,11 @@ Useful endpoints:
 - Validate the implemented PC CCAPI, Android-to-Desktop-Bridge, persistent gphoto2 USB preview, and USB PC control paths on R6 Mark III, then retain Canon EDSDK as an optional user-installed adapter.
 - Validate the implemented iOS SwiftUI CCAPI app, including RTP when advertised and Wi-Fi/cellular coexistence, on an iPhone and R6 Mark III; keep iOS USB/PTP as a research track.
 
-See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/android-usb-ptp.md](docs/android-usb-ptp.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), [docs/ios-ccapi.md](docs/ios-ccapi.md), and [docs/reference-projects.md](docs/reference-projects.md).
+## Physical-Camera Evidence
+
+Android, iOS, and PC diagnostic reports can be checked with the repository's strict R6 Mark III verifier. It rejects stale, inconsistent, truncated, or privacy-unsafe reports; required capabilities pass only when they were both advertised and observed successfully in the current session. Physical camera-side results remain a separate explicit operator confirmation. See [Device Validation](docs/device-validation.md) for the workflow and auditable Markdown/JSON output.
+
+See [docs/feature-status.md](docs/feature-status.md) for the canonical completeness ledger, plus [docs/architecture.md](docs/architecture.md), [docs/control-transports.md](docs/control-transports.md), [docs/android-usb-ptp.md](docs/android-usb-ptp.md), [docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md), [docs/ios-ccapi.md](docs/ios-ccapi.md), [docs/device-validation.md](docs/device-validation.md), and [docs/reference-projects.md](docs/reference-projects.md).
 
 ## License
 
