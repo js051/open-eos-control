@@ -5,6 +5,8 @@
   if (!diagnostics) throw new Error("Open EOS diagnostics module is unavailable.");
   const monitoring = globalThis.OpenEOSMonitoring;
   if (!monitoring) throw new Error("Open EOS monitoring module is unavailable.");
+  const localVideo = globalThis.OpenEOSLocalVideo;
+  if (!localVideo) throw new Error("Open EOS local video module is unavailable.");
   const mediaTransfer = globalThis.OpenEOSMediaTransfer;
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
 
@@ -32,6 +34,7 @@
   const CCAPI_USERNAME_KEY = "open-eos-control-ccapi-username";
   const MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024;
   const MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024;
+  const LOCAL_VIDEO_RENDER_INTERVAL_MILLIS = 100;
 
   const messages = {
     en: {
@@ -86,6 +89,12 @@
       near: "Near",
       far: "Far",
       liveViewSettings: "Live View",
+      previewInput: "Preview input",
+      cameraLiveView: "Camera Live View",
+      localVideoInput: "Local UVC / HDMI input",
+      videoDevice: "Video device",
+      systemDefault: "System default",
+      videoInputNumber: "Video input {index}",
       liveViewSource: "Source",
       liveViewSourceAuto: "Auto",
       liveViewSourceRtp: "RTP H.264",
@@ -236,6 +245,22 @@
       freeImages: "{count} shots",
       notAvailable: "Not available",
       liveViewImage: "Camera Live View",
+      localVideoImage: "Local video input",
+      startLocalVideo: "Start video input",
+      stopLocalVideo: "Stop video input",
+      localVideoStarted: "Local video input started",
+      localVideoStopped: "Local video input stopped",
+      localVideoEnded: "The local video input was disconnected",
+      localVideoInsecure: "Local video requires HTTPS or a loopback address such as localhost.",
+      localVideoUnavailable: "This browser does not expose local video devices.",
+      localVideoPermissionDenied: "Camera permission was not granted for the local video input.",
+      localVideoNotFound: "The selected local video input is unavailable.",
+      localVideoNotReadable: "The local video input is already in use or could not be opened.",
+      localVideoConstraints: "The local video input could not satisfy the requested video format.",
+      localVideoSecurity: "The browser blocked access to the local video input.",
+      localVideoPlaybackBlocked: "The browser could not start local video playback.",
+      localVideoAborted: "Opening the local video input was interrupted.",
+      localVideoError: "The local video input could not be started.",
       authRequired: "This bridge requires a Bearer token",
     },
     "zh-TW": {
@@ -290,6 +315,12 @@
       near: "近",
       far: "遠",
       liveViewSettings: "即時預覽",
+      previewInput: "監看輸入",
+      cameraLiveView: "相機即時預覽",
+      localVideoInput: "本機 UVC／HDMI 輸入",
+      videoDevice: "視訊裝置",
+      systemDefault: "系統預設",
+      videoInputNumber: "視訊輸入 {index}",
       liveViewSource: "畫面來源",
       liveViewSourceAuto: "自動",
       liveViewSourceRtp: "RTP H.264",
@@ -440,6 +471,22 @@
       freeImages: "可拍 {count} 張",
       notAvailable: "無資料",
       liveViewImage: "相機即時預覽",
+      localVideoImage: "本機視訊輸入",
+      startLocalVideo: "啟動視訊輸入",
+      stopLocalVideo: "停止視訊輸入",
+      localVideoStarted: "已啟動本機視訊輸入",
+      localVideoStopped: "已停止本機視訊輸入",
+      localVideoEnded: "本機視訊輸入已中斷連線",
+      localVideoInsecure: "本機視訊需要 HTTPS 或 localhost 等回送位址。",
+      localVideoUnavailable: "此瀏覽器未提供本機視訊裝置介面。",
+      localVideoPermissionDenied: "未授權使用本機視訊輸入。",
+      localVideoNotFound: "找不到選取的本機視訊輸入。",
+      localVideoNotReadable: "本機視訊輸入正在使用中或無法開啟。",
+      localVideoConstraints: "本機視訊輸入無法符合要求的視訊格式。",
+      localVideoSecurity: "瀏覽器已封鎖本機視訊輸入。",
+      localVideoPlaybackBlocked: "瀏覽器無法開始播放本機視訊。",
+      localVideoAborted: "開啟本機視訊輸入時遭到中斷。",
+      localVideoError: "無法啟動本機視訊輸入。",
       authRequired: "此 Bridge 需要 Bearer token",
     },
   };
@@ -543,6 +590,25 @@
     activeView: "live",
     captureMode: "photo",
     liveActive: false,
+    previewInput: "CAMERA",
+    localVideoSupport: localVideo.supportState({
+      secureContext: Boolean(globalThis.isSecureContext),
+      mediaDevices: navigator.mediaDevices,
+    }),
+    localVideoInputs: [],
+    localVideoDeviceId: "",
+    localVideoStream: null,
+    localVideoTrack: null,
+    localVideoSettings: null,
+    localVideoActive: false,
+    localVideoBusy: false,
+    localVideoGeneration: 0,
+    localVideoFrameHandle: null,
+    localVideoFrameTimes: [],
+    localVideoFrameSamples: [],
+    localVideoLastRenderAt: 0,
+    localVideoError: null,
+    localVideoMuted: false,
     liveMagnification: 1,
     liveGeneration: 0,
     eventGeneration: 0,
@@ -618,6 +684,7 @@
     diagnosticsPanel: byId("diagnostics-panel"),
     viewfinder: byId("viewfinder"),
     liveImage: byId("live-image"),
+    localVideo: byId("local-video"),
     monitorPixelOverlay: byId("monitor-pixel-overlay"),
     monitorGuidesOverlay: byId("monitor-guides-overlay"),
     monitorHistogram: byId("monitor-histogram"),
@@ -625,6 +692,7 @@
     liveToggleButton: byId("live-toggle-button"),
     railLiveButton: byId("rail-live-button"),
     modeIndicator: byId("mode-indicator"),
+    previewSourceIndicator: byId("preview-source-indicator"),
     frameIndicator: byId("frame-indicator"),
     recordIndicator: byId("record-indicator"),
     bulbIndicator: byId("bulb-indicator"),
@@ -644,6 +712,11 @@
     focusNearButton: byId("focus-near-button"),
     focusFarButton: byId("focus-far-button"),
     fpsSelect: byId("fps-select"),
+    fpsRow: byId("fps-row"),
+    previewInputSelect: byId("preview-input-select"),
+    localVideoDeviceRow: byId("local-video-device-row"),
+    localVideoDeviceSelect: byId("local-video-device-select"),
+    localVideoSupport: byId("local-video-support"),
     liveSourceRow: byId("live-source-row"),
     liveSourceSelect: byId("live-source-select"),
     tapActionRow: byId("tap-action-row"),
@@ -732,12 +805,15 @@
       if (element.hasAttribute("data-tooltip")) element.dataset.tooltip = label;
     });
     ui.liveImage.alt = t("liveViewImage");
+    ui.localVideo.setAttribute("aria-label", t("localVideoImage"));
     document.querySelector(".camera-metrics > span:first-child")?.setAttribute("title", t("battery"));
     document.querySelector(".camera-metrics > span:last-child")?.setAttribute("title", t("storage"));
     renderConnectionMode();
     renderHealth();
     renderCameras();
     renderSession();
+    renderPreviewInput();
+    renderLocalVideoDevices();
     renderLiveState();
     renderMedia();
     renderMediaTransfer();
@@ -1040,6 +1116,7 @@
     cancelMediaDownload({ silent: true });
     renderAvailability();
     stopLiveLoop();
+    stopLocalVideo({ announce: false });
     await stopEventLoop(sessionId);
     try {
       await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
@@ -1052,6 +1129,7 @@
 
   function resetSession() {
     stopLiveLoop();
+    stopLocalVideo({ announce: false });
     cancelEventLoop();
     cancelMediaDownload({ silent: true });
     clearScheduledMediaTransferRender();
@@ -1066,6 +1144,7 @@
     state.mediaDownloadPreparing = false;
     state.mediaDownload = null;
     state.captureMode = "photo";
+    state.previewInput = "CAMERA";
     state.liveSource = "AUTO";
     state.activeLiveSource = null;
     state.liveMagnification = 1;
@@ -1245,6 +1324,7 @@
     ui.modeIndicator.textContent = state.status.mode && state.status.mode !== "unknown" ? state.status.mode : "-";
     renderExposure();
     renderAdvancedSettings();
+    renderPreviewInput();
     renderLiveSource();
     renderFps();
     renderTapAction();
@@ -1504,6 +1584,313 @@
     return state.capabilities?.liveView || {};
   }
 
+  function localPreviewSelected() {
+    return state.previewInput === "LOCAL_VIDEO";
+  }
+
+  function previewActive() {
+    return localPreviewSelected() ? state.localVideoActive : state.liveActive;
+  }
+
+  function activePreviewElement() {
+    if (localPreviewSelected() && state.localVideoActive) return ui.localVideo;
+    if (!localPreviewSelected() && state.liveActive && state.liveObjectUrl) return ui.liveImage;
+    return null;
+  }
+
+  function previewDimensions(element = activePreviewElement()) {
+    if (!element) return { width: 0, height: 0 };
+    if (element === ui.localVideo) {
+      return { width: element.videoWidth || 0, height: element.videoHeight || 0 };
+    }
+    return { width: element.naturalWidth || 0, height: element.naturalHeight || 0 };
+  }
+
+  function renderPreviewInput() {
+    const available = state.localVideoSupport.available;
+    const localOption = ui.previewInputSelect.querySelector('option[value="LOCAL_VIDEO"]');
+    if (localOption) localOption.disabled = !available;
+    if (localPreviewSelected() && !available) state.previewInput = "CAMERA";
+    ui.previewInputSelect.value = state.previewInput;
+    ui.previewInputSelect.disabled = state.localVideoBusy || cameraInteractionBusy();
+    ui.localVideoDeviceRow.hidden = !localPreviewSelected() || !available;
+    ui.localVideoSupport.hidden = available;
+    ui.localVideoSupport.textContent = state.localVideoSupport.reason === "INSECURE_CONTEXT"
+      ? t("localVideoInsecure")
+      : t("localVideoUnavailable");
+    ui.liveSourceRow.hidden = localPreviewSelected() || (liveCapabilities().sources || []).length <= 1;
+    ui.fpsRow.hidden = localPreviewSelected();
+    renderLocalVideoDevices();
+  }
+
+  function renderLocalVideoDevices() {
+    const selected = state.localVideoDeviceId;
+    ui.localVideoDeviceSelect.replaceChildren();
+    const fallback = document.createElement("option");
+    fallback.value = "";
+    fallback.textContent = t("systemDefault");
+    ui.localVideoDeviceSelect.append(fallback);
+    const seen = new Set();
+    state.localVideoInputs.forEach((input) => {
+      if (!input.deviceId || seen.has(input.deviceId)) return;
+      seen.add(input.deviceId);
+      const option = document.createElement("option");
+      option.value = input.deviceId;
+      option.textContent = input.label || t("videoInputNumber", { index: input.index });
+      ui.localVideoDeviceSelect.append(option);
+    });
+    if (selected && !seen.has(selected) && !state.localVideoActive) state.localVideoDeviceId = "";
+    ui.localVideoDeviceSelect.value = state.localVideoDeviceId;
+    ui.localVideoDeviceSelect.disabled = !state.localVideoSupport.available || state.localVideoBusy;
+  }
+
+  async function refreshLocalVideoInputs({ quiet = true } = {}) {
+    if (!state.localVideoSupport.available) return;
+    try {
+      state.localVideoInputs = await localVideo.enumerateInputs(navigator.mediaDevices);
+      renderLocalVideoDevices();
+    } catch (error) {
+      state.localVideoError = {
+        at: new Date().toISOString(),
+        code: localVideo.errorCode(error),
+      };
+      if (!quiet) showToast(t("localVideoError"), true);
+      renderDiagnostics();
+    }
+  }
+
+  function localVideoErrorMessage(code) {
+    const keys = {
+      ABORT: "localVideoAborted",
+      NOT_ALLOWED: "localVideoPermissionDenied",
+      NOT_FOUND: "localVideoNotFound",
+      NOT_READABLE: "localVideoNotReadable",
+      OVERCONSTRAINED: "localVideoConstraints",
+      PLAYBACK: "localVideoPlaybackBlocked",
+      SECURITY: "localVideoSecurity",
+    };
+    return t(keys[code] || "localVideoError");
+  }
+
+  function captureLocalVideoError(error) {
+    const code = localVideo.errorCode(error);
+    const normalized = new ApiError(localVideoErrorMessage(code), {
+      code: `LOCAL_VIDEO_${code}`,
+      feature: "LOCAL_VIDEO_INPUT",
+      engine: "browser-media-devices",
+    });
+    state.localVideoError = {
+      at: new Date().toISOString(),
+      code: normalized.code,
+      message: normalized.message,
+    };
+    return captureError(normalized);
+  }
+
+  async function startLocalVideo({ announce = true } = {}) {
+    if (!state.session || !localPreviewSelected() || !state.localVideoSupport.available || state.localVideoBusy) return;
+    const generation = state.localVideoGeneration + 1;
+    state.localVideoGeneration = generation;
+    state.localVideoBusy = true;
+    state.localVideoError = null;
+    setOperationState(t("busy"));
+    renderAvailability();
+    let opened = null;
+    try {
+      opened = await localVideo.start(navigator.mediaDevices, state.localVideoDeviceId);
+      if (generation !== state.localVideoGeneration || !state.session || !localPreviewSelected()) {
+        localVideo.stop(opened.stream);
+        return;
+      }
+      state.localVideoStream = opened.stream;
+      state.localVideoTrack = opened.track;
+      state.localVideoSettings = opened.settings;
+      state.localVideoMuted = Boolean(opened.track.muted);
+      ui.localVideo.srcObject = opened.stream;
+      try {
+        await ui.localVideo.play();
+      } catch (error) {
+        const playbackError = new Error(error?.message || "Local video playback failed.");
+        playbackError.name = "LocalVideoPlaybackError";
+        throw playbackError;
+      }
+      if (generation !== state.localVideoGeneration || !state.session || !localPreviewSelected()) {
+        localVideo.stop(opened.stream);
+        if (ui.localVideo.srcObject === opened.stream) {
+          ui.localVideo.pause();
+          ui.localVideo.srcObject = null;
+        }
+        return;
+      }
+      state.localVideoActive = true;
+      state.localVideoFrameTimes = [];
+      state.localVideoFrameSamples = [];
+      state.localVideoLastRenderAt = 0;
+      state.observedFps = 0;
+      state.frameBytes = 0;
+      state.frameContentType = "video/MediaStream";
+      state.lastFrameAt = null;
+      opened.track.addEventListener("ended", () => handleLocalVideoEnded(generation), { once: true });
+      opened.track.addEventListener("mute", () => {
+        if (generation !== state.localVideoGeneration) return;
+        state.localVideoMuted = true;
+        renderDiagnostics();
+      });
+      opened.track.addEventListener("unmute", () => {
+        if (generation !== state.localVideoGeneration) return;
+        state.localVideoMuted = false;
+        renderDiagnostics();
+      });
+      scheduleLocalVideoFrame(generation);
+      await refreshLocalVideoInputs();
+      setOperationState(t("localVideoStarted"));
+      if (announce) showToast(t("localVideoStarted"));
+    } catch (error) {
+      const currentGeneration = generation === state.localVideoGeneration;
+      if (opened?.stream) {
+        if (currentGeneration && state.localVideoStream === opened.stream) {
+          stopLocalVideo({ announce: false });
+        } else {
+          localVideo.stop(opened.stream);
+          if (ui.localVideo.srcObject === opened.stream) {
+            ui.localVideo.pause();
+            ui.localVideo.srcObject = null;
+          }
+        }
+      }
+      if (!currentGeneration) return;
+      const normalized = captureLocalVideoError(error);
+      setOperationState(normalized.message, true);
+      if (announce) showToast(normalized.message, true);
+    } finally {
+      if (generation === state.localVideoGeneration) state.localVideoBusy = false;
+      renderLiveState();
+      renderAvailability();
+    }
+  }
+
+  function cancelLocalVideoFrame() {
+    const handle = state.localVideoFrameHandle;
+    state.localVideoFrameHandle = null;
+    if (!handle) return;
+    if (handle.kind === "video" && typeof ui.localVideo.cancelVideoFrameCallback === "function") {
+      ui.localVideo.cancelVideoFrameCallback(handle.id);
+    } else if (handle.kind === "timer") {
+      window.clearTimeout(handle.id);
+    }
+  }
+
+  function stopLocalVideo({ announce = true } = {}) {
+    const wasActive = state.localVideoActive || Boolean(state.localVideoStream);
+    state.localVideoGeneration += 1;
+    cancelLocalVideoFrame();
+    ui.localVideo.pause();
+    localVideo.stop(state.localVideoStream);
+    ui.localVideo.srcObject = null;
+    state.localVideoStream = null;
+    state.localVideoTrack = null;
+    state.localVideoSettings = null;
+    state.localVideoActive = false;
+    state.localVideoBusy = false;
+    state.localVideoMuted = false;
+    state.localVideoFrameTimes = [];
+    state.localVideoFrameSamples = [];
+    state.localVideoLastRenderAt = 0;
+    state.observedFps = 0;
+    state.frameBytes = 0;
+    state.frameContentType = null;
+    state.lastFrameAt = null;
+    clearMonitoringLayers();
+    if (wasActive && announce) {
+      setOperationState(t("localVideoStopped"));
+      showToast(t("localVideoStopped"));
+    }
+    renderLiveState();
+    renderAvailability();
+  }
+
+  function handleLocalVideoEnded(generation) {
+    if (generation !== state.localVideoGeneration || !state.localVideoActive) return;
+    stopLocalVideo({ announce: false });
+    state.localVideoError = {
+      at: new Date().toISOString(),
+      code: "LOCAL_VIDEO_ENDED",
+      message: t("localVideoEnded"),
+    };
+    setOperationState(t("localVideoEnded"), true);
+    showToast(t("localVideoEnded"), true);
+    renderDiagnostics();
+    void refreshLocalVideoInputs();
+  }
+
+  function scheduleLocalVideoFrame(generation) {
+    if (!state.localVideoActive || generation !== state.localVideoGeneration) return;
+    if (typeof ui.localVideo.requestVideoFrameCallback === "function") {
+      const id = ui.localVideo.requestVideoFrameCallback((now) => handleLocalVideoFrame(now, generation, true));
+      state.localVideoFrameHandle = { kind: "video", id };
+    } else {
+      const id = window.setTimeout(
+        () => handleLocalVideoFrame(performance.now(), generation, false),
+        LOCAL_VIDEO_RENDER_INTERVAL_MILLIS,
+      );
+      state.localVideoFrameHandle = { kind: "timer", id };
+    }
+  }
+
+  function handleLocalVideoFrame(now, generation, presentedCallback) {
+    if (!state.localVideoActive || generation !== state.localVideoGeneration) return;
+    state.localVideoFrameHandle = null;
+    if (presentedCallback) {
+      const rolling = localVideo.rollingFps(state.localVideoFrameTimes, now);
+      state.localVideoFrameTimes = rolling.timestamps;
+      state.observedFps = rolling.fps || null;
+    } else {
+      const rolling = localVideo.rollingFrameCount(
+        state.localVideoFrameSamples,
+        now,
+        localVideo.presentedFrameCount(ui.localVideo),
+      );
+      state.localVideoFrameSamples = rolling.samples;
+      state.observedFps = rolling.fps;
+    }
+    if (now - state.localVideoLastRenderAt >= LOCAL_VIDEO_RENDER_INTERVAL_MILLIS) {
+      state.localVideoLastRenderAt = now;
+      state.lastFrameAt = new Date().toISOString();
+      renderMonitoringFrame();
+      renderFrameIndicator();
+    }
+    scheduleLocalVideoFrame(generation);
+  }
+
+  async function changePreviewInput() {
+    const next = ui.previewInputSelect.value;
+    if (next === state.previewInput || !["CAMERA", "LOCAL_VIDEO"].includes(next)) return;
+    if (next === "LOCAL_VIDEO" && !state.localVideoSupport.available) {
+      renderPreviewInput();
+      return;
+    }
+    const wasActive = previewActive();
+    if (state.liveActive) await stopLiveView({ announce: false });
+    if (state.localVideoActive) stopLocalVideo({ announce: false });
+    state.previewInput = next;
+    renderPreviewInput();
+    renderLiveState();
+    renderAvailability();
+    if (!wasActive) return;
+    if (localPreviewSelected()) await startLocalVideo({ announce: false });
+    else await startLiveView({ announce: false });
+  }
+
+  async function changeLocalVideoDevice() {
+    const deviceId = ui.localVideoDeviceSelect.value;
+    if (deviceId === state.localVideoDeviceId) return;
+    const wasActive = state.localVideoActive;
+    if (wasActive) stopLocalVideo({ announce: false });
+    state.localVideoDeviceId = deviceId;
+    renderLocalVideoDevices();
+    if (wasActive) await startLocalVideo({ announce: false });
+  }
+
   function clampFps(value) {
     const minimum = liveCapabilities().minFps || 1;
     const maximum = liveCapabilities().maxFps || 1;
@@ -1527,7 +1914,9 @@
       ui.fpsSelect.append(option);
     });
     ui.fpsSelect.value = String(state.requestedFps);
-    ui.fpsSelect.disabled = cameraInteractionBusy() || !featureSupported(FEATURES.LIVE_VIEW);
+    ui.fpsRow.hidden = localPreviewSelected();
+    ui.fpsSelect.disabled = localPreviewSelected() || cameraInteractionBusy() ||
+      !featureSupported(FEATURES.LIVE_VIEW);
   }
 
   function renderLiveSource() {
@@ -1549,8 +1938,9 @@
     });
     if (sources.length === 1) state.liveSource = sources[0];
     ui.liveSourceSelect.value = state.liveSource;
-    ui.liveSourceRow.hidden = sources.length <= 1;
-    ui.liveSourceSelect.disabled = cameraInteractionBusy() || !featureSupported(FEATURES.LIVE_VIEW);
+    ui.liveSourceRow.hidden = localPreviewSelected() || sources.length <= 1;
+    ui.liveSourceSelect.disabled = localPreviewSelected() || cameraInteractionBusy() ||
+      !featureSupported(FEATURES.LIVE_VIEW);
   }
 
   function effectiveTapAction() {
@@ -1564,22 +1954,30 @@
 
   function renderTapAction() {
     const clickWhiteBalanceSupported = featureSupported(FEATURES.CLICK_WHITE_BALANCE);
-    ui.tapActionRow.hidden = !clickWhiteBalanceSupported;
+    ui.tapActionRow.hidden = localPreviewSelected() || !clickWhiteBalanceSupported;
     const focusOption = ui.tapActionSelect.querySelector('option[value="focus"]');
     focusOption.hidden = !featureSupported(FEATURES.TAP_FOCUS);
     const effective = effectiveTapAction();
     if (effective) state.tapAction = effective;
     ui.tapActionSelect.value = state.tapAction;
-    ui.tapActionSelect.disabled = cameraInteractionBusy() || !state.liveActive;
+    ui.tapActionSelect.disabled = localPreviewSelected() || cameraInteractionBusy() || !state.liveActive;
   }
 
   async function toggleLiveView() {
+    if (localPreviewSelected()) {
+      if (state.localVideoActive) stopLocalVideo();
+      else await startLocalVideo();
+      return;
+    }
     if (state.liveActive) await stopLiveView();
     else await startLiveView();
   }
 
   async function startLiveView({ announce = true } = {}) {
-    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.LIVE_VIEW)) return;
+    if (
+      localPreviewSelected() || !state.session || cameraInteractionBusy() ||
+      !featureSupported(FEATURES.LIVE_VIEW)
+    ) return;
     state.busy = true;
     state.lastError = null;
     setOperationState(t("busy"));
@@ -1732,6 +2130,7 @@
   }
 
   async function changeFps() {
+    if (localPreviewSelected()) return;
     state.requestedFps = clampFps(ui.fpsSelect.value);
     if (!state.liveActive) {
       renderFrameIndicator();
@@ -1743,6 +2142,7 @@
   }
 
   async function changeLiveSource() {
+    if (localPreviewSelected()) return;
     state.liveSource = ui.liveSourceSelect.value;
     if (!state.liveActive) return;
     await stopLiveView({ announce: false });
@@ -1750,10 +2150,15 @@
   }
 
   function renderLiveState() {
-    ui.liveImage.hidden = !state.liveActive || !state.liveObjectUrl;
-    ui.viewfinderPlaceholder.hidden = state.liveActive && Boolean(state.liveObjectUrl);
-    if (ui.liveImage.hidden) clearMonitoringLayers();
-    const labelKey = state.liveActive ? "stopLiveView" : "startLiveView";
+    const local = localPreviewSelected();
+    const active = previewActive();
+    ui.liveImage.hidden = local || !state.liveActive || !state.liveObjectUrl;
+    ui.localVideo.hidden = !local || !state.localVideoActive;
+    ui.viewfinderPlaceholder.hidden = active && (local ? ui.localVideo.readyState >= 1 : Boolean(state.liveObjectUrl));
+    if (ui.liveImage.hidden && ui.localVideo.hidden) clearMonitoringLayers();
+    const labelKey = local
+      ? (active ? "stopLocalVideo" : "startLocalVideo")
+      : (active ? "stopLiveView" : "startLiveView");
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       const label = button.querySelector("span[data-i18n]");
       if (label) {
@@ -1761,9 +2166,10 @@
         label.textContent = t(labelKey);
       }
       button.setAttribute("aria-label", t(labelKey));
-      replaceButtonIcon(button, state.liveActive ? "square" : "play");
+      replaceButtonIcon(button, active ? "square" : "play");
     });
-    if (!state.liveActive) ui.focusReticle.hidden = true;
+    if (!state.liveActive || local) ui.focusReticle.hidden = true;
+    renderPreviewInput();
     renderLiveMagnification();
     renderFrameIndicator();
   }
@@ -1776,9 +2182,11 @@
       settings.falseColorEnabled || settings.focusPeakingEnabled;
   }
 
-  function liveImageDisplayRect() {
-    const naturalWidth = ui.liveImage.naturalWidth;
-    const naturalHeight = ui.liveImage.naturalHeight;
+  function liveContentDisplayRect() {
+    const media = activePreviewElement();
+    const dimensions = previewDimensions(media);
+    const naturalWidth = dimensions.width;
+    const naturalHeight = dimensions.height;
     const width = ui.viewfinder.clientWidth;
     const height = ui.viewfinder.clientHeight;
     if (!naturalWidth || !naturalHeight || !width || !height) return null;
@@ -1798,9 +2206,10 @@
   }
 
   function applyLiveViewLayout() {
-    const rect = liveImageDisplayRect();
+    const media = activePreviewElement();
+    const rect = liveContentDisplayRect();
     if (!rect) return null;
-    [ui.liveImage, ui.monitorPixelOverlay, ui.monitorGuidesOverlay].forEach((element) => {
+    [media, ui.monitorPixelOverlay, ui.monitorGuidesOverlay].forEach((element) => {
       positionMonitorLayer(element, rect);
     });
     drawMonitorGuides(rect);
@@ -1809,6 +2218,8 @@
   }
 
   function renderMonitoringFrame() {
+    const media = activePreviewElement();
+    const sourceDimensions = previewDimensions(media);
     const rect = applyLiveViewLayout();
     if (!rect || !monitorNeedsPixelAnalysis()) {
       ui.monitorPixelOverlay.hidden = true;
@@ -1817,11 +2228,11 @@
       return;
     }
     try {
-      const dimensions = monitoring.analysisDimensions(ui.liveImage.naturalWidth, ui.liveImage.naturalHeight);
+      const dimensions = monitoring.analysisDimensions(sourceDimensions.width, sourceDimensions.height);
       monitorAnalysisCanvas.width = dimensions.width;
       monitorAnalysisCanvas.height = dimensions.height;
       const analysisContext = monitorAnalysisCanvas.getContext("2d", { willReadFrequently: true });
-      analysisContext.drawImage(ui.liveImage, 0, 0, dimensions.width, dimensions.height);
+      analysisContext.drawImage(media, 0, 0, dimensions.width, dimensions.height);
       const frame = analysisContext.getImageData(0, 0, dimensions.width, dimensions.height);
       const analysis = monitoring.analyzePixels(frame.data, dimensions.width, dimensions.height, {
         zebraThresholdPercent: state.monitorSettings.zebraThresholdPercent,
@@ -1964,10 +2375,12 @@
 
   function renderLiveMagnification() {
     const supported = featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION);
+    const cameraPreview = !localPreviewSelected();
     const bulbActive = Boolean(state.status?.bulbExposureActive);
     const target = state.liveMagnification === 5 ? 1 : 5;
-    ui.liveMagnificationButton.hidden = !supported;
-    ui.liveMagnificationButton.disabled = cameraInteractionBusy() || bulbActive || !state.liveActive || !supported;
+    ui.liveMagnificationButton.hidden = !supported || !cameraPreview;
+    ui.liveMagnificationButton.disabled = !cameraPreview || cameraInteractionBusy() || bulbActive ||
+      !state.liveActive || !supported;
     ui.liveMagnificationLabel.textContent = `${target}x`;
     const description = t("liveViewMagnification", { value: target });
     ui.liveMagnificationButton.setAttribute("aria-label", description);
@@ -1977,7 +2390,7 @@
 
   async function setLiveViewMagnification() {
     if (
-      !state.session || cameraInteractionBusy() || !state.liveActive ||
+      localPreviewSelected() || !state.session || cameraInteractionBusy() || !state.liveActive ||
       state.status?.bulbExposureActive ||
       !featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)
     ) return;
@@ -2006,8 +2419,13 @@
   }
 
   function renderFrameIndicator() {
-    const fps = state.observedFps ? state.observedFps.toFixed(1) : "0";
-    ui.frameIndicator.textContent = `${fps} / ${state.requestedFps} FPS`;
+    const fps = Number.isFinite(state.observedFps) && state.observedFps > 0
+      ? state.observedFps.toFixed(1)
+      : (localPreviewSelected() ? "--" : "0");
+    ui.frameIndicator.textContent = localPreviewSelected()
+      ? `${fps} FPS`
+      : `${fps} / ${state.requestedFps} FPS`;
+    ui.previewSourceIndicator.textContent = localPreviewSelected() ? "UVC" : "CAM";
     renderDiagnostics();
   }
 
@@ -2038,7 +2456,9 @@
   }
 
   function focusPointFromClient(clientX, clientY) {
+    if (localPreviewSelected()) return null;
     const imageBounds = ui.liveImage.getBoundingClientRect();
+    const viewfinderBounds = ui.viewfinder.getBoundingClientRect();
     const imageWidth = imageBounds.width;
     const imageHeight = imageBounds.height;
     const imageLeft = imageBounds.left;
@@ -2051,8 +2471,8 @@
     return {
       x: (clientX - imageLeft) / imageWidth,
       y: (clientY - imageTop) / imageHeight,
-      displayX: clientX - bounds.left,
-      displayY: clientY - bounds.top,
+      displayX: clientX - viewfinderBounds.left,
+      displayY: clientY - viewfinderBounds.top,
     };
   }
 
@@ -2060,7 +2480,7 @@
     const action = effectiveTapAction();
     if (
       !point || !state.session || cameraInteractionBusy() || !state.liveActive ||
-      !action
+      localPreviewSelected() || !action
     ) return;
     state.busy = true;
     ui.focusReticle.style.left = `${point.displayX}px`;
@@ -2127,22 +2547,32 @@
     const halfPressSupported = featureSupported(FEATURES.SHUTTER_HALF_PRESS);
     ui.halfPressButton.hidden = !halfPressSupported;
     ui.halfPressButton.disabled = interactionBusy || bulbActive || !halfPressSupported;
-    const liveSupported = featureSupported(FEATURES.LIVE_VIEW);
+    const cameraLiveSupported = featureSupported(FEATURES.LIVE_VIEW);
+    const localLiveSupported = state.localVideoSupport.available;
+    const selectedLiveSupported = localPreviewSelected() ? localLiveSupported : cameraLiveSupported;
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
-      button.hidden = !liveSupported;
-      button.disabled = interactionBusy || bulbActive || !liveSupported;
+      button.hidden = !cameraLiveSupported && !localLiveSupported;
+      button.disabled = localPreviewSelected()
+        ? state.localVideoBusy || !localLiveSupported
+        : interactionBusy || bulbActive || !selectedLiveSupported;
     });
-    const quickActionCount = [autofocusSupported, halfPressSupported, liveSupported].filter(Boolean).length;
+    const quickActionCount = [
+      autofocusSupported,
+      halfPressSupported,
+      cameraLiveSupported || localLiveSupported,
+    ].filter(Boolean).length;
     ui.railLiveButton.parentElement.classList.toggle("single", quickActionCount === 1);
     ui.railLiveButton.parentElement.classList.toggle("three", quickActionCount === 3);
-    document.querySelector(".live-settings").hidden = !liveSupported;
+    document.querySelector(".live-settings").hidden = !connected || (!cameraLiveSupported && !localLiveSupported);
     const focusSupported = featureSupported(FEATURES.FOCUS_DRIVE);
     ui.focusSection.hidden = !focusSupported;
     ui.focusNearButton.disabled = interactionBusy || bulbActive || !state.liveActive;
     ui.focusFarButton.disabled = interactionBusy || bulbActive || !state.liveActive;
-    ui.fpsSelect.disabled = interactionBusy || bulbActive || !liveSupported;
-    ui.liveSourceSelect.disabled = interactionBusy || bulbActive || !liveSupported;
-    ui.tapActionSelect.disabled = interactionBusy || bulbActive || !state.liveActive;
+    ui.previewInputSelect.disabled = interactionBusy || state.localVideoBusy;
+    ui.localVideoDeviceSelect.disabled = !localPreviewSelected() || !localLiveSupported || state.localVideoBusy;
+    ui.fpsSelect.disabled = localPreviewSelected() || interactionBusy || bulbActive || !cameraLiveSupported;
+    ui.liveSourceSelect.disabled = localPreviewSelected() || interactionBusy || bulbActive || !cameraLiveSupported;
+    ui.tapActionSelect.disabled = localPreviewSelected() || interactionBusy || bulbActive || !state.liveActive;
     ui.monitoringButton.disabled = !connected;
     renderLiveMagnification();
     document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
@@ -2155,7 +2585,8 @@
       button.disabled = interactionBusy || bulbActive || !state.liveActive;
     });
     const tapAction = effectiveTapAction();
-    const tapFocusEnabled = Boolean(tapAction) && state.liveActive && !interactionBusy && !bulbActive;
+    const tapFocusEnabled = !localPreviewSelected() && Boolean(tapAction) && state.liveActive &&
+      !interactionBusy && !bulbActive;
     ui.viewfinder.classList.toggle("tap-focus-enabled", tapFocusEnabled);
     const tapDescription = tapAction === "whiteBalance" ? t("tapToWhiteBalance") : t("tapToFocus");
     ui.viewfinder.title = tapFocusEnabled ? tapDescription : "";
@@ -2628,17 +3059,33 @@
       capabilities: state.capabilities,
       validation: diagnostics.featureSummary(state.capabilities),
       liveView: {
-        active: state.liveActive,
+        active: previewActive(),
+        previewInput: state.previewInput,
+        cameraLiveActive: state.liveActive,
         requestedSource: state.liveSource,
         activeSource: state.activeLiveSource,
         requestedFps: state.requestedFps,
-        observedFps: Number(state.observedFps.toFixed(1)),
+        observedFps: Number.isFinite(state.observedFps)
+          ? Number(state.observedFps.toFixed(1))
+          : null,
         frameBytes: state.frameBytes,
         contentType: state.frameContentType,
         lastFrameAt: state.lastFrameAt,
         monitoring: {
           ...state.monitorSettings,
           analysisError: state.monitorAnalysisError,
+        },
+        localVideo: {
+          available: state.localVideoSupport.available,
+          unavailableReason: state.localVideoSupport.reason,
+          active: state.localVideoActive,
+          busy: state.localVideoBusy,
+          muted: state.localVideoMuted,
+          deviceCount: state.localVideoInputs.length,
+          selection: state.localVideoDeviceId ? "explicit" : "system-default",
+          trackState: state.localVideoTrack?.readyState || null,
+          settings: state.localVideoSettings,
+          error: state.localVideoError,
         },
       },
       mediaTransfer: state.mediaDownload ? {
@@ -2759,6 +3206,8 @@
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
     ui.railLiveButton.addEventListener("click", toggleLiveView);
     ui.liveMagnificationButton.addEventListener("click", setLiveViewMagnification);
+    ui.previewInputSelect.addEventListener("change", changePreviewInput);
+    ui.localVideoDeviceSelect.addEventListener("change", changeLocalVideoDevice);
     ui.fpsSelect.addEventListener("change", changeFps);
     ui.liveSourceSelect.addEventListener("change", changeLiveSource);
     ui.tapActionSelect.addEventListener("change", () => {
@@ -2788,6 +3237,19 @@
       const bounds = ui.viewfinder.getBoundingClientRect();
       tapFocus(focusPointFromClient(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2));
     });
+    ui.localVideo.addEventListener("loadedmetadata", () => {
+      if (!state.localVideoActive) return;
+      state.localVideoSettings = {
+        ...state.localVideoSettings,
+        width: ui.localVideo.videoWidth || state.localVideoSettings?.width,
+        height: ui.localVideo.videoHeight || state.localVideoSettings?.height,
+      };
+      renderLiveState();
+      renderMonitoringFrame();
+    });
+    navigator.mediaDevices?.addEventListener?.("devicechange", () => {
+      void refreshLocalVideoInputs();
+    });
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
       button.addEventListener("click", () => {
         state.focusStep = button.dataset.step;
@@ -2811,12 +3273,13 @@
       if (event.target === ui.settingDialog) ui.settingDialog.close();
     });
     window.addEventListener("resize", () => {
-      if (state.liveActive) applyLiveViewLayout();
+      if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
       cancelMediaDownload({ silent: true });
       clearMediaThumbnails();
       closeMediaPreview();
+      stopLocalVideo({ announce: false });
       if (!state.session) return;
       cancelEventLoop();
       if (featureSupported(FEATURES.EVENT_POLLING)) {
@@ -2838,6 +3301,7 @@
     applyLanguage();
     renderLiveState();
     renderAvailability();
+    await refreshLocalVideoInputs();
     await refreshHealth();
     const engine = state.health?.engines?.libgphoto2;
     if (engine?.available && !state.health.authRequired) await scanCameras();

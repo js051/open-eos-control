@@ -50,6 +50,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "ccapi-password-input",
         "connect-button",
         "live-image",
+        "local-video",
         "monitor-pixel-overlay",
         "monitor-guides-overlay",
         "monitor-histogram",
@@ -72,6 +73,10 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "tap-action-row",
         "tap-action-select",
         "live-source-select",
+        "preview-input-select",
+        "local-video-device-row",
+        "local-video-device-select",
+        "local-video-support",
         "media-list",
         "media-transfer",
         "media-transfer-name",
@@ -87,6 +92,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
     assert all(asset.startswith("/app/") for asset in parser.assets)
     assert "/app/diagnostics.js" in parser.assets
     assert "/app/monitoring.js" in parser.assets
+    assert "/app/local-video.js" in parser.assets
     assert "/app/media-transfer.js" in parser.assets
 
 
@@ -139,6 +145,7 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
 def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     script = (STATIC / "app.js").read_text(encoding="utf-8")
+    local_video_script = (STATIC / "local-video.js").read_text(encoding="utf-8")
     required_paths = {
         "/v1/cameras",
         "/v1/session",
@@ -208,16 +215,32 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "Math.min(15, state.capabilities.liveView?.maxFps || 1)" in script
     assert "monitoring.analysisDimensions" in script
     assert "monitoring.analyzePixels" in script
-    assert "function liveImageDisplayRect()" in script
+    assert "function liveContentDisplayRect()" in script
+    assert "function activePreviewElement()" in script
     assert "const imageBounds = ui.liveImage.getBoundingClientRect()" in script
+    assert "const viewfinderBounds = ui.viewfinder.getBoundingClientRect()" in script
     assert 'source: state.liveSource || "AUTO"' in script
     assert "CCAPI_RTP" in script
     assert "engine?.detail" in script
+    assert 'state.previewInput === "LOCAL_VIDEO"' in script
+    assert "await localVideo.start(navigator.mediaDevices" in script
+    assert "localVideo.stop(state.localVideoStream)" in script
+    assert "requestVideoFrameCallback" in script
+    assert "navigator.mediaDevices?.addEventListener?.(\"devicechange\"" in script
+    assert '<video id="local-video"' in html
+    assert all(attribute in html for attribute in ("autoplay", "muted", "playsinline"))
+    assert "getUserMedia" in local_video_script
+    assert "enumerateDevices" in local_video_script
+    assert "audio: false" in local_video_script
+    assert "localStorage" not in local_video_script
     report_source = script.split("function diagnosticReport()", 1)[1].split("\n  function ", 1)[0]
     assert "reportSchema: 1" in report_source
     assert "productVersion: state.health?.version" in report_source
     assert "validation: diagnostics.featureSummary(state.capabilities)" in report_source
     assert "monitoring: {" in report_source
     assert "analysisError: state.monitorAnalysisError" in report_source
+    assert "selection: state.localVideoDeviceId ? \"explicit\" : \"system-default\"" in report_source
+    assert "deviceId:" not in report_source
+    assert "label:" not in report_source
     assert "return diagnostics.safeValue(report" in report_source
     assert "secrets: [state.token, ui.ccapiPasswordInput?.value, state.info?.serial]" in report_source

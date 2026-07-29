@@ -550,14 +550,20 @@ input:disabled {
 }
 
 .viewfinder > img,
+.viewfinder > video,
 .monitor-layer {
   position: absolute;
   display: block;
   object-fit: fill;
 }
 
-.viewfinder > img {
+.viewfinder > img,
+.viewfinder > video {
   z-index: 1;
+}
+
+.viewfinder > video {
+  background: #000;
 }
 
 .monitor-layer {
@@ -1189,6 +1195,23 @@ button.media-thumbnail:focus-visible {
   height: 1px;
   margin: 6px 0;
   background: var(--line);
+}
+
+.rail-support {
+  margin: 6px 0 0;
+  color: var(--warning);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.local-preview-setting {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.local-preview-setting select {
+  width: 100%;
 }
 
 .media-preview-dialog {
