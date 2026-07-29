@@ -766,7 +766,11 @@ public actor CCAPIClient {
         }
     }
 
-    public func downloadMedia(_ item: CameraMediaItem, to destination: URL) async throws -> CameraMediaDownload {
+    public func downloadMedia(
+        _ item: CameraMediaItem,
+        to destination: URL,
+        progress: @escaping CameraMediaProgressHandler = { _ in }
+    ) async throws -> CameraMediaDownload {
         try await ensureInitialized()
         guard !FileManager.default.fileExists(atPath: destination.path) else {
             throw CCAPIError.destinationExists(destination.path)
@@ -785,7 +789,17 @@ public actor CCAPIClient {
         var failures: [String] = []
         for path in paths {
             try Task.checkCancellation()
-            let download = try await transport.download(request(path: path, method: .get))
+            let download = try await transport.download(
+                request(path: path, method: .get),
+                progress: { value in
+                    progress(
+                        CameraMediaTransferProgress(
+                            bytesTransferred: value.bytesTransferred,
+                            totalBytes: value.totalBytes ?? item.sizeBytes
+                        )
+                    )
+                }
+            )
             if (200..<300).contains(download.statusCode) {
                 let contentType = download.header("content-type")
                 let prefix = (try? Data(contentsOf: download.temporaryFileURL).prefix(2_000)).map { Data($0) } ?? Data()
@@ -803,6 +817,12 @@ public actor CCAPIClient {
                 }
                 let fileSize = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize
                 let size = Int64(fileSize ?? 0)
+                progress(
+                    CameraMediaTransferProgress(
+                        bytesTransferred: size,
+                        totalBytes: size
+                    )
+                )
                 observedFeatures.insert(.mediaDownload)
                 return CameraMediaDownload(
                     item: item,

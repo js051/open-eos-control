@@ -908,16 +908,22 @@ final class CCAPIClientTests: XCTestCase {
         )
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
         let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let progress = DownloadProgressRecorder()
         defer { try? FileManager.default.removeItem(at: destination) }
 
         let result = try await client.downloadMedia(
-            CameraMediaItem(id: path, name: "IMG_0001.CR3", kind: "raw"),
-            to: destination
+            CameraMediaItem(id: path, name: "IMG_0001.CR3", kind: "raw", sizeBytes: 4),
+            to: destination,
+            progress: { progress.record($0) }
         )
 
         XCTAssertEqual(try Data(contentsOf: destination), media)
         XCTAssertEqual(result.bytesTransferred, 4)
         XCTAssertEqual(result.contentType, "image/x-canon-cr3")
+        XCTAssertEqual(
+            progress.values().last,
+            CameraMediaTransferProgress(bytesTransferred: 4, totalBytes: 4)
+        )
         let downloadPaths = (await transport.requests()).map(\.path).filter { $0.contains("IMG_0001.CR3") }
         XCTAssertEqual(downloadPaths, [path, "\(path)?kind=main"])
     }

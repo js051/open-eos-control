@@ -108,7 +108,7 @@ cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` is the iOS 17 SwiftUI app. It provides direct CCAPI connection or Desktop Bridge URL/token, USB camera scanning and selection, offline UI preview, capability-gated Photo/Video controls, manual focus drive when advertised, JPEG or advertised RTP H.264 Live View, exposure sheets, media transfer and confirmation-gated deletion, redacted diagnostics, manual language selection, and safe portrait/landscape layouts. RTP uses a same-subnet Wi-Fi IPv4 address, a Wi-Fi-only Network.framework UDP listener, native sample-buffer rendering, Auto/JPEG/RTP selection, and a 1-30 FPS display cap; AUTO closes failed RTP state before falling back to JPEG. Bridge tokens and CCAPI passwords remain in memory. Whole-window upside-down rotation stays disabled while key controls can rotate with physical device orientation.
+`ios/OpenEOSControl` is the iOS 17 SwiftUI app. It provides direct CCAPI connection or Desktop Bridge URL/token, USB camera scanning and selection, offline UI preview, capability-gated Photo/Video controls, manual focus drive when advertised, JPEG or advertised RTP H.264 Live View, exposure sheets, file-backed media transfer with real byte progress and cancellation, confirmation-gated deletion, redacted diagnostics, manual language selection, and safe portrait/landscape layouts. RTP uses a same-subnet Wi-Fi IPv4 address, a Wi-Fi-only Network.framework UDP listener, native sample-buffer rendering, Auto/JPEG/RTP selection, and a 1-30 FPS display cap; AUTO closes failed RTP state before falling back to JPEG. Bridge tokens and CCAPI passwords remain in memory. Whole-window upside-down rotation stays disabled while key controls can rotate with physical device orientation.
 
 On a macOS host with Xcode and XcodeGen:
 
@@ -119,7 +119,7 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions builds an unsigned Simulator app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises English portrait/landscape control, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection-form flows on an iPhone Simulator. The workflow intentionally sets `CODE_SIGNING_ALLOWED=NO`, so this build cannot be installed on a physical iPhone and is not published as an IPA. This does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
+GitHub Actions builds an unsigned Simulator app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises English portrait/landscape control, media download, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection-form flows on an iPhone Simulator. The workflow intentionally sets `CODE_SIGNING_ALLOWED=NO`, so this build cannot be installed on a physical iPhone and is not published as an IPA. This does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
 
 ## Desktop Bridge
 

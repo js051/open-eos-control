@@ -156,6 +156,26 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
     }
 
+    func testOfflineMediaDownloadCompletesAndClearsActiveTransferState() async throws {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+        let item = try XCTUnwrap(state.mediaItems.first)
+
+        state.startMediaDownload(item)
+        for _ in 0..<20 where state.isBusy(.media) {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(state.downloadedFileName, item.name)
+        XCTAssertNil(state.activeMediaDownloadID)
+        XCTAssertNil(state.mediaDownloadProgress)
+        XCTAssertFalse(state.isBusy(.media))
+        XCTAssertNil(state.lastError)
+    }
+
     func testOfflinePreviewLiveViewMagnificationUpdatesLocally() async {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

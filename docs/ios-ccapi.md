@@ -9,7 +9,7 @@
 - Still capture, independent AF-ON through advertised Canon start/stop or a balanced half-press fallback, explicit timed half-press, recording, Tap AF, and Click White Balance only when supported
 - JPEG Live View only when discovery advertises a complete start/frame/stop lifecycle, with a bounded parser, endpoint fallback, cache busting, and retry without `liveviewsize` after Canon returns HTTP 400 `Invalid parameter`
 - Canon RTP H.264 Live View only when discovery advertises `GET rtpsessiondesc` and `POST rtp` and the App supplies a same-subnet camera-Wi-Fi IPv4 receiver; the core validates SDP, RFC 3550 packets and RFC 6184 single NAL/STAP-A/FU-A access units, owns exact start/stop cleanup, and falls back to JPEG for AUTO startup failures
-- Bounded, same-origin media traversal, Canon sample-backed `?kind=thumbnail` thumbnails and separately gated `?kind=display` image/RAW previews, plus file-backed downloads with Canon main-file query fallbacks; text/JSON metadata is rejected even when returned with HTTP 2xx
+- Bounded, same-origin media traversal, Canon sample-backed `?kind=thumbnail` thumbnails and separately gated `?kind=display` image/RAW previews, plus file-backed downloads with Canon main-file query fallbacks, URLSession byte progress, cancellation, and incomplete-directory cleanup; text/JSON metadata is rejected even when returned with HTTP 2xx
 - Same-origin exact-path media deletion only when discovery advertises `DELETE` for `/contents` or a child operation
 - Basic Authentication held by the client instance and versioned diagnostic output that redacts credentials and camera serials
 - Simulator mode and injectable HTTP transport for deterministic tests
@@ -23,7 +23,7 @@ Focus drive without a camera/engine-advertised operation and direct iOS USB/PTP 
 - Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, AF-ON, recording, a Tap AF/Click White Balance action selector, manual focus drive when advertised, and adjustable JPEG or Canon RTP H.264 Live View
 - Auto/RTP/JPEG source selection when the camera advertises both paths; iOS uses a Wi-Fi-only `NWListener`, RFC 6184 depacketization and `AVSampleBufferVideoRenderer`, while AUTO closes a failed native session before JPEG fallback
 - Live View FPS from 1-30, clamped to the camera-advertised range, plus JPEG size, automatic refresh, grid, rolling FPS, frame bytes, source type and endpoint diagnostics; RTP FPS is explicitly a display cap because Canon's start payload has no encoder-FPS field
-- Media listing, file-backed download/share, capability-gated confirmation deletion, redacted diagnostic report, and no fake USB/PTP action
+- Media listing, file-backed download/share with real byte progress and an accessible cancel action, capability-gated confirmation deletion, redacted diagnostic report, and no fake USB/PTP action
 - English, Traditional Chinese, and system language selection
 - Portrait and landscape layouts that respect system safe areas; whole-window upside-down rotation is disabled while key control content can rotate
 - App icon and localization resources verified in the built bundle
@@ -63,4 +63,4 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-The macOS CI job builds the app for iOS Simulator, verifies the compiled asset catalog, English/Traditional Chinese resources, launch screen, local-network metadata, and supported orientations, then runs the app unit tests and four UI workflows on an iPhone Simulator. The retained screenshots cover portrait control, landscape control, landscape Debug, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection states. Physical iPhone and R6 Mark III validation is still required.
+The macOS CI job builds the app for iOS Simulator, verifies the compiled asset catalog, English/Traditional Chinese resources, launch screen, local-network metadata, and supported orientations, then runs the app unit tests and five UI workflows on an iPhone Simulator. The retained screenshots cover portrait control, landscape control, landscape Debug, offline media download, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection states. Physical iPhone and R6 Mark III validation is still required.

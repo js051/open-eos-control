@@ -442,12 +442,26 @@ public actor DesktopBridgeClient {
         return (response.body, contentType)
     }
 
-    public func downloadMedia(_ item: CameraMediaItem, to destination: URL) async throws -> CameraMediaDownload {
+    public func downloadMedia(
+        _ item: CameraMediaItem,
+        to destination: URL,
+        progress: @escaping CameraMediaProgressHandler = { _ in }
+    ) async throws -> CameraMediaDownload {
         guard !FileManager.default.fileExists(atPath: destination.path) else {
             throw DesktopBridgeError.destinationExists(destination.path)
         }
         let url = try sessionEndpoint(["media", item.id])
-        let response = try await transport.download(makeRequest(url: url, method: "GET", accept: "application/octet-stream"))
+        let response = try await transport.download(
+            makeRequest(url: url, method: "GET", accept: "application/octet-stream"),
+            progress: { value in
+                progress(
+                    CameraMediaTransferProgress(
+                        bytesTransferred: value.bytesTransferred,
+                        totalBytes: value.totalBytes ?? item.sizeBytes
+                    )
+                )
+            }
+        )
         guard (200..<300).contains(response.statusCode) else {
             let body = Self.readPrefix(response.temporaryFileURL, limit: Self.maximumErrorBodyBytes)
             try? FileManager.default.removeItem(at: response.temporaryFileURL)
@@ -465,6 +479,12 @@ public actor DesktopBridgeClient {
             throw error
         }
         let size = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        progress(
+            CameraMediaTransferProgress(
+                bytesTransferred: Int64(size ?? 0),
+                totalBytes: Int64(size ?? 0)
+            )
+        )
         return CameraMediaDownload(
             item: item,
             fileURL: destination,

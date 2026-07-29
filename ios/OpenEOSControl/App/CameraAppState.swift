@@ -58,6 +58,8 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaPreviewLoading = false
     @Published private(set) var downloadedFileURL: URL?
     @Published private(set) var downloadedFileName: String?
+    @Published private(set) var activeMediaDownloadID: String?
+    @Published private(set) var mediaDownloadProgress: CameraMediaTransferProgress?
     @Published private(set) var deletedMediaName: String?
     @Published private(set) var lastError: String?
     @Published private(set) var busyOperations = Set<CameraOperation>()
@@ -65,6 +67,8 @@ final class CameraAppState: ObservableObject {
     private let defaults: UserDefaults
     private var session: CameraSession?
     private var liveViewTask: Task<Void, Never>?
+    private var mediaDownloadTask: Task<Void, Never>?
+    private var mediaDownloadToken: UUID?
     private var rateTracker = LiveViewRateTracker()
     private var downloadedMediaID: String?
     private var unavailableMediaThumbnailIDs = Set<String>()
@@ -257,6 +261,7 @@ final class CameraAppState: ObservableObject {
             mediaItems = []
             resetMediaThumbnails()
             resetMediaPreview()
+            resetMediaDownloadState()
             removeDownloadedFile()
             deletedMediaName = nil
             lastError = nil
@@ -271,6 +276,7 @@ final class CameraAppState: ObservableObject {
 
     func openOfflinePreview() {
         stopLiveViewLoop()
+        resetMediaDownloadState()
         session = nil
         snapshot = Self.makeOfflinePreviewSnapshot()
         isPreview = true
@@ -291,6 +297,7 @@ final class CameraAppState: ObservableObject {
 
     func disconnect() async {
         stopLiveViewLoop()
+        resetMediaDownloadState()
         if let session { await session.close() }
         session = nil
         snapshot = nil
@@ -695,30 +702,80 @@ final class CameraAppState: ObservableObject {
         resetMediaPreview()
     }
 
-    func downloadMedia(_ item: CameraMediaItem) async {
+    func startMediaDownload(_ item: CameraMediaItem) {
         guard supports(.mediaDownload), begin(.media) else { return }
-        defer { end(.media) }
+        let token = UUID()
+        mediaDownloadToken = token
+        activeMediaDownloadID = item.id
+        mediaDownloadProgress = CameraMediaTransferProgress(
+            bytesTransferred: 0,
+            totalBytes: item.sizeBytes
+        )
         deletedMediaName = nil
+        mediaDownloadTask = Task { [weak self] in
+            await self?.performMediaDownload(item, token: token)
+        }
+    }
+
+    func cancelMediaDownload() {
+        mediaDownloadTask?.cancel()
+    }
+
+    private func performMediaDownload(_ item: CameraMediaItem, token: UUID) async {
+        defer {
+            if mediaDownloadToken == token {
+                mediaDownloadTask = nil
+                mediaDownloadToken = nil
+                activeMediaDownloadID = nil
+                mediaDownloadProgress = nil
+                end(.media)
+            }
+        }
         if isPreview {
             downloadedMediaID = item.id
             downloadedFileName = item.name
+            lastError = nil
             return
         }
         guard let session else { return }
+        var downloadDirectory: URL?
+        var completed = false
+        defer {
+            if !completed, let downloadDirectory {
+                try? FileManager.default.removeItem(at: downloadDirectory)
+            }
+        }
         do {
             removeDownloadedFile()
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("OpenEOSControl", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            downloadDirectory = directory
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let destination = directory.appendingPathComponent(item.name)
-            let result = try await session.downloadMedia(item, to: destination)
+            let result = try await session.downloadMedia(
+                item,
+                to: destination,
+                progress: { [weak self] progress in
+                    Task { @MainActor in
+                        guard self?.mediaDownloadToken == token else { return }
+                        self?.mediaDownloadProgress = progress
+                    }
+                }
+            )
+            try Task.checkCancellation()
+            guard mediaDownloadToken == token else { throw CancellationError() }
             downloadedFileURL = result.fileURL
             downloadedMediaID = result.item.id
             downloadedFileName = result.item.name
             lastError = nil
+            completed = true
+        } catch is CancellationError {
+            // User cancellation is an expected control action, not a camera error.
+        } catch let error as URLError where error.code == .cancelled {
+            // URLSession reports an explicitly cancelled download as URLError.cancelled.
         } catch {
-            record(error)
+            if !Task.isCancelled { record(error) }
         }
     }
 
@@ -923,6 +980,15 @@ final class CameraAppState: ObservableObject {
         downloadedFileURL = nil
         downloadedMediaID = nil
         downloadedFileName = nil
+    }
+
+    private func resetMediaDownloadState() {
+        mediaDownloadTask?.cancel()
+        mediaDownloadTask = nil
+        mediaDownloadToken = nil
+        activeMediaDownloadID = nil
+        mediaDownloadProgress = nil
+        busyOperations.remove(.media)
     }
 
     private func applyDeletedMedia(_ item: CameraMediaItem) {

@@ -161,6 +161,9 @@
 "refresh_media" = "重新整理相機媒體";
 "no_media" = "相機中找不到媒體檔案。";
 "download_media" = "下載媒體";
+"cancel_media_download" = "取消媒體下載";
+"media_download_progress_known" = "%@ / %@（%d%%）";
+"media_download_progress_unknown" = "已下載 %@";
 "download_complete" = "下載完成";
 "save_media" = "儲存或分享媒體";
 "delete_media" = "刪除媒體";

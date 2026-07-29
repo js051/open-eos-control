@@ -191,9 +191,18 @@ final class DesktopBridgeClientTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let destination = directory.appendingPathComponent(item.name)
-        let download = try await client.downloadMedia(item, to: destination)
+        let progress = DownloadProgressRecorder()
+        let download = try await client.downloadMedia(
+            item,
+            to: destination,
+            progress: { progress.record($0) }
+        )
         XCTAssertEqual(download.bytesTransferred, 6)
         XCTAssertEqual(try Data(contentsOf: destination), Data("jpeg!!".utf8))
+        XCTAssertEqual(
+            progress.values().last,
+            CameraMediaTransferProgress(bytesTransferred: 6, totalBytes: 6)
+        )
         try await client.deleteMedia(item)
         await client.stopLiveView()
         await client.close()

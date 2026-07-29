@@ -172,10 +172,16 @@ enum CameraSession: Sendable {
         }
     }
 
-    func downloadMedia(_ item: CameraMediaItem, to destination: URL) async throws -> CameraMediaDownload {
+    func downloadMedia(
+        _ item: CameraMediaItem,
+        to destination: URL,
+        progress: @escaping CameraMediaProgressHandler = { _ in }
+    ) async throws -> CameraMediaDownload {
         switch self {
-        case let .ccapi(client): return try await client.downloadMedia(item, to: destination)
-        case let .desktopBridge(client): return try await client.downloadMedia(item, to: destination)
+        case let .ccapi(client):
+            return try await client.downloadMedia(item, to: destination, progress: progress)
+        case let .desktopBridge(client):
+            return try await client.downloadMedia(item, to: destination, progress: progress)
         }
     }
 
