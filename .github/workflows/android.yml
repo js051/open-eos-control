@@ -169,7 +169,7 @@ jobs:
           python -m pip install -e "../simulator"
           nohup python -m uvicorn main:app --host 0.0.0.0 --port 18080 \
             > "$RUNNER_TEMP/android-camera-simulator.log" 2>&1 &
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             if curl --fail --silent --show-error http://127.0.0.1:18080/health > /dev/null; then
               exit 0
             fi
