@@ -223,6 +223,68 @@ class DesktopBridgeClientTest {
     }
 
     @Test
+    fun bridgeCapabilitiesInferMissingOrInvalidProfileWithoutInventingR6Identity() = runTest {
+        val cases = listOf(
+            BridgeProfileCase(
+                sessionModel = "Canon EOS-R6 Mark III",
+                profile = null,
+                expectedModel = "Canon EOS-R6 Mark III",
+                expectedFamily = CameraModelFamily.EOS_R,
+                expectedPriority = CameraModelPriority.PRIMARY,
+            ),
+            BridgeProfileCase(
+                sessionModel = "Canon Camera",
+                profile = JSONObject()
+                    .put("modelName", "Canon EOS M50")
+                    .put("family", "Canon EOS")
+                    .put("priority", "compatible"),
+                expectedModel = "Canon EOS M50",
+                expectedFamily = CameraModelFamily.EOS_M,
+                expectedPriority = CameraModelPriority.SUPPORTED,
+            ),
+            BridgeProfileCase(
+                sessionModel = "Third-party Camera",
+                profile = null,
+                expectedModel = "Third-party Camera",
+                expectedFamily = CameraModelFamily.UNKNOWN,
+                expectedPriority = CameraModelPriority.RESEARCH,
+            ),
+            BridgeProfileCase(
+                sessionModel = "Canon EOS R5",
+                profile = JSONObject()
+                    .put("modelName", JSONObject.NULL)
+                    .put("family", JSONObject.NULL)
+                    .put("priority", JSONObject.NULL),
+                expectedModel = "Canon EOS R5",
+                expectedFamily = CameraModelFamily.EOS_R,
+                expectedPriority = CameraModelPriority.SUPPORTED,
+            ),
+        )
+
+        cases.forEach { case ->
+            val session = JSONObject(SESSION_JSON).apply {
+                getJSONObject("camera").put("model", case.sessionModel)
+            }
+            val capabilities = JSONObject(CAPABILITIES_JSON).apply {
+                if (case.profile == null) remove("profile") else put("profile", case.profile)
+            }
+            server.enqueue(jsonResponse(HEALTH_JSON))
+            server.enqueue(jsonResponse(session.toString(), code = 201))
+            server.enqueue(jsonResponse(capabilities.toString()))
+            server.enqueue(MockResponse().setResponseCode(204))
+            val client = DesktopBridgeClient(server.url("/").toString())
+
+            client.initialize()
+            val parsed = client.capabilities().profile
+            client.close()
+
+            assertEquals(case.expectedModel, parsed.modelName)
+            assertEquals(case.expectedFamily, parsed.family)
+            assertEquals(case.expectedPriority, parsed.priority)
+        }
+    }
+
+    @Test
     fun bridgeErrorsPreserveStableCodeFeatureAndEngine() = runTest {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(
@@ -279,6 +341,14 @@ class DesktopBridgeClientTest {
         .setResponseCode(code)
         .setHeader("content-type", "application/json")
         .setBody(body)
+
+    private data class BridgeProfileCase(
+        val sessionModel: String,
+        val profile: JSONObject?,
+        val expectedModel: String,
+        val expectedFamily: CameraModelFamily,
+        val expectedPriority: CameraModelPriority,
+    )
 
     private class BridgeDispatcher : Dispatcher() {
         val requests = CopyOnWriteArrayList<RecordedRequest>()

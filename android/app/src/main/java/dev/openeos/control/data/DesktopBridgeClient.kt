@@ -73,6 +73,7 @@ class DesktopBridgeClient(
     private val activeEventCall = AtomicReference<Call?>(null)
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var sessionId: String? = null
+    private var sessionCameraModel: String? = null
     private var eventPollingSupported = false
     private val observedFeatures = mutableSetOf(CameraFeature.DESKTOP_BRIDGE)
 
@@ -88,12 +89,17 @@ class DesktopBridgeClient(
         observedFeatures.clear()
         observedFeatures.add(CameraFeature.DESKTOP_BRIDGE)
         eventPollingSupported = false
+        sessionCameraModel = null
         validateService()
         val payload = JSONObject().put("engine", "auto")
         cameraId?.takeIf(String::isNotBlank)?.let { payload.put("cameraId", it) }
         profileHint?.takeIf(String::isNotBlank)?.let { payload.put("profileHint", it) }
         val created = postJson(endpoint("v1", "session"), payload)
         sessionId = created.requireString("id", "Desktop bridge did not return a session ID.")
+        sessionCameraModel = created.optJSONObject("camera")
+            ?.optNullableString("model")
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
     }
 
     suspend fun close() {
@@ -103,6 +109,7 @@ class DesktopBridgeClient(
             requestOk(Request.Builder().url(endpoint("v1", "session", id)).delete().build())
         } finally {
             sessionId = null
+            sessionCameraModel = null
             eventPollingSupported = false
         }
     }
@@ -117,7 +124,10 @@ class DesktopBridgeClient(
             manufacturer = body.optNullableString("manufacturer"),
             deviceVersion = body.optNullableString("deviceVersion"),
             engineVersion = body.optNullableString("engineVersion"),
-        ).also { observedFeatures.add(CameraFeature.CAMERA_IDENTITY) }
+        ).also { info ->
+            sessionCameraModel = info.model
+            observedFeatures.add(CameraFeature.CAMERA_IDENTITY)
+        }
     }
 
     suspend fun status(): CameraStatus = parseStatus(getJson(sessionEndpoint("status")))
@@ -177,6 +187,12 @@ class DesktopBridgeClient(
         val minFps = liveView.optInt("minFps", 1).coerceAtLeast(1)
         val maxFps = liveView.optInt("maxFps", minFps).coerceAtLeast(minFps)
         val profile = body.optJSONObject("profile") ?: JSONObject()
+        val profileModel = profile.optNullableString("modelName")
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: sessionCameraModel
+            ?: "Canon Camera"
+        val inferredProfile = CameraProfile.fromModelName(profileModel)
         val evidenceBody = body.optJSONObject("evidence") ?: JSONObject()
         val evidenceCommands = evidenceBody.optJSONArray("advertisedCommands").strings()
             .map { it.substringBefore('?').replace("\r", "").replace("\n", "").take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS) }
@@ -222,11 +238,11 @@ class DesktopBridgeClient(
                 maxFps = maxFps,
             ),
             profile = CameraProfile(
-                modelName = profile.optString("modelName", CameraProfile.R6_MARK_III.modelName),
+                modelName = profileModel,
                 family = profile.optString("family").toEnumOrNull<CameraModelFamily>()
-                    ?: CameraModelFamily.UNKNOWN,
+                    ?: inferredProfile.family,
                 priority = profile.optString("priority").toEnumOrNull<CameraModelPriority>()
-                    ?: CameraModelPriority.RESEARCH,
+                    ?: inferredProfile.priority,
             ),
             evidence = CameraCapabilityEvidence(
                 source = evidenceBody.optString("source", "unknown")
