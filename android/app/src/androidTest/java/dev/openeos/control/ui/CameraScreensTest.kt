@@ -158,7 +158,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.offline_preview)).assertIsDisplayed()
-        compose.onNodeWithText("R6\nMark III").assertIsDisplayed()
+        compose.onNodeWithText("R6 III").assertIsDisplayed()
         compose.onNodeWithContentDescription("Canon EOS R6 Mark III").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
         compose.onNodeWithText("800").assertIsDisplayed()
@@ -423,7 +423,7 @@ class CameraScreensTest {
                     bounds.bottom <= viewport.bottom,
             )
         }
-        compose.onNodeWithText("R6\nMark III").assertIsDisplayed()
+        compose.onNodeWithText("R6 III").assertIsDisplayed()
         compose.onNodeWithText("82%").assertIsDisplayed()
         compose.onNodeWithText("2,418").assertIsDisplayed()
         compose.onNodeWithContentDescription("Canon EOS R6 Mark III").assertIsDisplayed()
@@ -470,6 +470,10 @@ class CameraScreensTest {
             .onNodeWithTag("camera-status-dialog-rotation", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInRoot
+        assertTrue(
+            "A side-facing status panel must remain wide from the user's viewpoint: $dialog",
+            dialog.height > dialog.width,
+        )
         listOf("camera-status-model-detail", "camera-status-battery-detail", "camera-status-storage-detail")
             .forEach { tag ->
                 val detail = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -481,6 +485,44 @@ class CameraScreensTest {
             }
         compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
         compose.onAllNodesWithTag("camera-status-dialog").assertCountEquals(0)
+    }
+
+    @Test
+    fun quarterTurnKeepsLongMessageDialogsWideFromTheUsersViewpoint() {
+        val title = "Camera request failed"
+        val message = "The camera rejected this command. Check the advertised capability and try again."
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                CompositionLocalProvider(
+                    LocalCameraControlRotation provides -90f,
+                    LocalCameraControlTargetRotation provides -90f,
+                ) {
+                    MaterialTheme(colorScheme = OpenEosColorScheme) {
+                        CameraRotatingMessageDialog(title, message, onDismissRequest = {})
+                    }
+                }
+            }
+        }
+
+        compose.onNodeWithText(title).assertIsDisplayed()
+        compose.onNodeWithText(message).assertIsDisplayed()
+        val panel = compose
+            .onNodeWithTag("camera-message-dialog-rotation", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val copy = compose
+            .onNodeWithTag("camera-message-dialog-text", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "A side-facing message panel must remain wide from the user's viewpoint: $panel",
+            panel.height > panel.width,
+        )
+        assertTrue(
+            "Long message copy $copy must stay inside its readable panel $panel",
+            copy.left >= panel.left && copy.top >= panel.top &&
+                copy.right <= panel.right && copy.bottom <= panel.bottom,
+        )
     }
 
     @Test
@@ -1035,6 +1077,10 @@ class CameraScreensTest {
             .onNodeWithTag("capability-warning-surface", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInRoot
+        val warningSlotBounds = compose
+            .onNodeWithTag("capability-warning-rotation", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
         val liveViewBounds = compose
             .onNodeWithTag("live-view-frame")
             .fetchSemanticsNode()
@@ -1053,6 +1099,10 @@ class CameraScreensTest {
                 warningBounds.top >= liveViewBounds.top &&
                 warningBounds.right <= liveViewBounds.right &&
                 warningBounds.bottom <= liveViewBounds.bottom,
+        )
+        assertTrue(
+            "A side-facing warning must retain a wide reading area from the user's viewpoint: $warningSlotBounds",
+            warningSlotBounds.height > warningSlotBounds.width,
         )
         assertTrue(
             "Capability warning must not move or overlap the fixed exposure rail",

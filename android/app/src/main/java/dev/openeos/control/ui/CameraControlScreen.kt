@@ -192,11 +192,10 @@ private fun CaptureCapabilityWarning(
     var hasVisualOverflow by remember(message, configuration.fontScale, rotationQuadrant) {
         mutableStateOf(false)
     }
-    CameraRotatingSlot(
+    CameraReadableSlot(
+        width = 304.dp,
+        height = warningHeight,
         modifier = modifier
-            .fillMaxWidth(0.84f)
-            .widthIn(max = 304.dp)
-            .height(warningHeight)
             .testTag("capability-warning-rotation")
             .semantics { contentDescription = message },
         animateRotation = false,

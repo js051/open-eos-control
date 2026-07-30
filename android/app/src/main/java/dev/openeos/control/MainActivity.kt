@@ -1,5 +1,6 @@
 package dev.openeos.control
 
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.database.ContentObserver
 import android.net.Uri
@@ -40,6 +41,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        requestedOrientation = naturalCameraLayoutOrientation(
+            configurationOrientation = resources.configuration.orientation,
+            displayRotationDegrees = currentDisplayRotationDegrees(),
+        )
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         orientationListener = object : OrientationEventListener(this) {
@@ -184,5 +189,22 @@ class MainActivity : AppCompatActivity() {
         private const val DEVICE_STATE_ROTATION_LOCK_SETTING = "device_state_rotation_lock"
         private const val ROTATION_POLICY_SYNC_DELAY_MILLIS = 250L
         private const val ROTATION_SETTING_POLL_INTERVAL_MILLIS = 750L
+    }
+}
+
+internal fun naturalCameraLayoutOrientation(
+    configurationOrientation: Int,
+    displayRotationDegrees: Int,
+): Int {
+    val displayIsQuarterTurn = displayRotationDegrees == 90 || displayRotationDegrees == 270
+    val naturalOrientationIsPortrait = if (displayIsQuarterTurn) {
+        configurationOrientation == Configuration.ORIENTATION_LANDSCAPE
+    } else {
+        configurationOrientation == Configuration.ORIENTATION_PORTRAIT
+    }
+    return if (naturalOrientationIsPortrait) {
+        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    } else {
+        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
     }
 }

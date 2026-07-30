@@ -488,11 +488,10 @@ private fun CameraStatusDetailsDialog(
                 .testTag("camera-status-dialog"),
             contentAlignment = Alignment.Center,
         ) {
-            CameraRotatingSlot(
-                modifier = Modifier
-                    .width(312.dp)
-                    .height(240.dp)
-                    .testTag("camera-status-dialog-rotation"),
+            CameraReadableSlot(
+                width = 336.dp,
+                height = 288.dp,
+                modifier = Modifier.testTag("camera-status-dialog-rotation"),
                 animateRotation = false,
             ) {
                 Surface(
@@ -608,11 +607,10 @@ fun CameraRotatingMessageDialog(
                 .testTag("camera-message-dialog"),
             contentAlignment = Alignment.Center,
         ) {
-            CameraRotatingSlot(
-                modifier = Modifier
-                    .width(312.dp)
-                    .height(208.dp)
-                    .testTag("camera-message-dialog-rotation"),
+            CameraReadableSlot(
+                width = 336.dp,
+                height = 240.dp,
+                modifier = Modifier.testTag("camera-message-dialog-rotation"),
                 animateRotation = false,
             ) {
                 Surface(
@@ -711,7 +709,7 @@ internal fun String.toCameraHudName(): String {
         .removePrefix("EOS ")
         .trim()
     return compact
-        .replace(" Mark ", "\nMark ")
+        .replace(" Mark ", " ")
         .ifBlank { this }
 }
 
