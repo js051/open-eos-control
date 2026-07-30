@@ -72,8 +72,48 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest
 
-      - name: Build debug APK
+      - name: Prepare main Android signing keystore
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEVELOPMENT_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_DEVELOPMENT_STORE_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_DEVELOPMENT_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_KEYSTORE_BASE64"
+          test -n "$SIGNING_STORE_PASSWORD"
+          test -n "$SIGNING_KEY_PASSWORD"
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" \
+            | base64 --decode > "$RUNNER_TEMP/open-eos-control-development-v1.p12"
+          chmod 600 "$RUNNER_TEMP/open-eos-control-development-v1.p12"
+
+      - name: Build pull-request debug APK
+        if: github.event_name == 'pull_request'
         run: ./gradlew :app:assembleDebug
+
+      - name: Build stable-signed main debug APK
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          OEC_ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/open-eos-control-development-v1.p12
+          OEC_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_DEVELOPMENT_STORE_PASSWORD }}
+          OEC_ANDROID_SIGNING_KEY_ALIAS: open-eos-control-development-v1
+          OEC_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_DEVELOPMENT_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleDebug
+
+      - name: Verify main Android signer
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          signer_output="$($apksigner verify --print-certs "$apk")"
+          test "$(grep -c '^Signer #[0-9][0-9]* certificate SHA-256 digest:' <<< "$signer_output")" -eq 1
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<< "$signer_output" | tr '[:upper:]' '[:lower:]')"
+          expected="$(tr -d '[:space:]' < signing/development-certificate-sha256.txt)"
+          test "$actual" = "$expected"
 
       - name: Upload main Android debug APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
