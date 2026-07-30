@@ -1366,14 +1366,21 @@ private fun OfflinePreviewCopy(compact: Boolean) {
     if (compact) {
         Row(
             modifier = Modifier
-                .widthIn(max = 360.dp)
-                .padding(horizontal = 16.dp)
+                .fillMaxWidth(0.84f)
+                .widthIn(max = 520.dp)
+                .padding(horizontal = 20.dp)
                 .testTag("offline-preview-content"),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            OfflinePreviewIcon(40.dp)
-            OfflinePreviewTitle(title, TextAlign.Start)
+            OfflinePreviewIcon(36.dp)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                OfflinePreviewTitle(title, TextAlign.Start)
+                OfflinePreviewHint(hint, TextAlign.Start)
+            }
         }
         return
     }
