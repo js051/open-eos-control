@@ -30,39 +30,43 @@ capabilities = {
     "white_balance": ["auto", "daylight", "cloudy", "tungsten", "kelvin"],
 }
 
-state = {
-    "event_sequence": 0,
-    "event_history": [],
-    "recording": False,
-    "capture_count": 0,
-    "half_pressed": False,
-    "bulb_exposure_active": False,
-    "focus_x": 0.5,
-    "focus_y": 0.5,
-    "click_wb_x": 0.5,
-    "click_wb_y": 0.5,
-    "click_wb_count": 0,
-    "exposure": {
-        "iso": "800",
-        "shutter": "1/50",
-        "aperture": "2.8",
-        "white_balance": "auto",
-    },
-    "media": [
-        {
-            "id": "SIM_0002.PNG",
-            "name": "SIM_0002.PNG",
-            "kind": "image",
-            "capture_time": "2026-07-21T10:00:02+08:00",
+def initial_state() -> dict[str, object]:
+    return {
+        "event_sequence": 0,
+        "event_history": [],
+        "recording": False,
+        "capture_count": 0,
+        "half_pressed": False,
+        "bulb_exposure_active": False,
+        "focus_x": 0.5,
+        "focus_y": 0.5,
+        "click_wb_x": 0.5,
+        "click_wb_y": 0.5,
+        "click_wb_count": 0,
+        "exposure": {
+            "iso": "800",
+            "shutter": "1/50",
+            "aperture": "2.8",
+            "white_balance": "auto",
         },
-        {
-            "id": "SIM_0001.PNG",
-            "name": "SIM_0001.PNG",
-            "kind": "image",
-            "capture_time": "2026-07-21T10:00:01+08:00",
-        },
-    ],
-}
+        "media": [
+            {
+                "id": "SIM_0002.PNG",
+                "name": "SIM_0002.PNG",
+                "kind": "image",
+                "capture_time": "2026-07-21T10:00:02+08:00",
+            },
+            {
+                "id": "SIM_0001.PNG",
+                "name": "SIM_0001.PNG",
+                "kind": "image",
+                "capture_time": "2026-07-21T10:00:01+08:00",
+            },
+        ],
+    }
+
+
+state = initial_state()
 
 
 def publish_event(*keys: str) -> None:
@@ -101,6 +105,31 @@ def validate_setting(key: str, value: str) -> None:
 @app.get("/health")
 async def health() -> dict[str, bool | str]:
     return {"ok": True, "service": "open-eos-control-simulator"}
+
+
+@app.post("/ccapi/test/reset")
+async def reset_test_state() -> dict[str, bool]:
+    state.clear()
+    state.update(initial_state())
+    return {"ok": True}
+
+
+@app.get("/ccapi/test/state")
+async def get_test_state() -> dict[str, object]:
+    return {
+        "recording": state["recording"],
+        "capture_count": state["capture_count"],
+        "half_pressed": state["half_pressed"],
+        "bulb_exposure_active": state["bulb_exposure_active"],
+        "focus": {"x": state["focus_x"], "y": state["focus_y"]},
+        "click_white_balance": {
+            "x": state["click_wb_x"],
+            "y": state["click_wb_y"],
+            "count": state["click_wb_count"],
+        },
+        "exposure": dict(state["exposure"]),
+        "media_ids": [item["id"] for item in state["media"]],
+    }
 
 
 @app.get("/ccapi/info")

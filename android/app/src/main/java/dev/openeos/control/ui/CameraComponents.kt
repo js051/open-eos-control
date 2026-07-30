@@ -879,13 +879,17 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             lutPreviewActive && lutPreviewBitmap != null -> Image(
                 lutPreviewBitmap!!.asImageBitmap(),
                 stringResource(R.string.live_view_lut_preview),
-                Modifier.fitLiveViewContent(displayAspectRatio),
+                Modifier
+                    .fitLiveViewContent(displayAspectRatio)
+                    .testTag("live-view-decoded-frame"),
                 contentScale = ContentScale.FillBounds,
             )
             bitmap != null -> Image(
                 bitmap.asImageBitmap(),
                 stringResource(R.string.live_view),
-                Modifier.fitLiveViewContent(displayAspectRatio),
+                Modifier
+                    .fitLiveViewContent(displayAspectRatio)
+                    .testTag("live-view-decoded-frame"),
                 contentScale = ContentScale.FillBounds,
             )
             state.liveViewFrameUrl != null -> AsyncImage(
@@ -893,7 +897,15 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 imageLoader = imageLoader,
                 placeholder = lastFramePainter,
                 contentDescription = stringResource(R.string.live_view),
-                modifier = Modifier.fitLiveViewContent(displayAspectRatio),
+                modifier = Modifier
+                    .fitLiveViewContent(displayAspectRatio)
+                    .testTag(
+                        if (loadedFrameBitmap != null) {
+                            "live-view-decoded-frame"
+                        } else {
+                            "live-view-loading-frame"
+                        },
+                    ),
                 contentScale = ContentScale.FillBounds,
                 onSuccess = { result ->
                     lastFramePainter = result.painter

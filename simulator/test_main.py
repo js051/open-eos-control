@@ -1,32 +1,33 @@
 from fastapi.testclient import TestClient
 
-from main import app, state
+from main import app, initial_state, state
 
 client = TestClient(app)
 
 
 def setup_function() -> None:
-    state["event_sequence"] = 0
-    state["event_history"] = []
-    state["capture_count"] = 0
-    state["half_pressed"] = False
-    state["bulb_exposure_active"] = False
-    state["click_wb_count"] = 0
-    state["exposure"]["white_balance"] = "auto"
-    state["media"] = [
-        {
-            "id": "SIM_0002.PNG",
-            "name": "SIM_0002.PNG",
-            "kind": "image",
-            "capture_time": "2026-07-21T10:00:02+08:00",
-        },
-        {
-            "id": "SIM_0001.PNG",
-            "name": "SIM_0001.PNG",
-            "kind": "image",
-            "capture_time": "2026-07-21T10:00:01+08:00",
-        },
-    ]
+    state.clear()
+    state.update(initial_state())
+
+
+def test_state_endpoint_is_sanitized_and_resettable() -> None:
+    client.patch("/ccapi/exposure", json={"iso": "1600"})
+    client.post("/ccapi/record/start", json={})
+    client.post("/ccapi/capture/still", json={"af": True})
+
+    changed = client.get("/ccapi/test/state")
+    reset = client.post("/ccapi/test/reset")
+    restored = client.get("/ccapi/test/state")
+
+    assert changed.status_code == 200
+    assert changed.json()["exposure"]["iso"] == "1600"
+    assert changed.json()["recording"] is True
+    assert changed.json()["capture_count"] == 1
+    assert "event_history" not in changed.json()
+    assert reset.json() == {"ok": True}
+    assert restored.json()["exposure"]["iso"] == "800"
+    assert restored.json()["recording"] is False
+    assert restored.json()["capture_count"] == 0
 
 
 def test_half_press_and_release_are_stateful() -> None:
