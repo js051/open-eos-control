@@ -98,7 +98,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 GitHub Actions runs unit tests, the debug build, and the Compose instrumentation suite on a Pixel 5 API 34 emulator for pushes to `main` and pull requests.
 
-Development releases are built entirely by GitHub Actions. A `vX.Y.Z` tag must match every platform version and point to a commit already on `main`; after secret scanning and Android, Desktop Bridge, Simulator, and iOS validation pass, the release workflow publishes the Android debug APK, Desktop Bridge wheel/source distribution, release notes, and SHA-256 checksums as a GitHub prerelease.
+Development releases are built entirely by GitHub Actions. A `vX.Y.Z` tag must match every platform version and point to a commit already on `main`; after secret scanning and Android, Desktop Bridge, Windows standalone, Simulator, and iOS validation pass, the release workflow publishes the Android debug APK, a directly executable Windows x64 Desktop Bridge, the cross-platform Bridge wheel/source distribution, release notes, and SHA-256 checksums as a GitHub prerelease.
 
 The iOS app is compiled and tested on an iPhone Simulator, but the release does not include an installable IPA. Physical-device distribution requires an Apple Developer team, a distribution certificate, and a matching provisioning profile; none of those signing credentials are stored in this public repository.
 
@@ -128,7 +128,9 @@ GitHub Actions builds an unsigned Simulator app bundle, verifies icon/localizati
 
 The bridge is an executable local service and PC control app. It controls USB cameras through `gphoto2`, or connects directly to a camera's wireless CCAPI endpoint without requiring `gphoto2`. Its API and built-in UI expose capability-gated identity, status, settings, still capture, timed Bulb start/stop, AF-ON, half-press, recording, focus drive, coordinate Tap AF or Click White Balance when supported by the selected engine, JPEG or advertised RTP H.264 Live View, lazy authenticated media thumbnails, streaming downloads, confirmation-gated deletion, and versioned diagnostics with advertised/observed validation differences while excluding credentials and camera serials. The libgphoto2 settings map includes R6 Mark III WB shifts, per-card image quality, aspect ratio, power-zoom speed, Auto Power Off, and Capture Target; values still require writable camera-advertised choices, the undocumented `0xFFFFFFFF` power sentinel is rejected, and one-choice advanced controls stay hidden. `Memory card` uses the camera's card capture path. `Internal RAM`/`SDRAM` requires advertised image capture and uses gPhoto2's capture-and-download lifecycle; files remain hidden in same-volume staging until the command has downloaded and removed the camera-side temporary object, then move atomically into the Bridge media library for thumbnail, streaming download, and deletion. Direct CCAPI RTP validates Canon SDP, receives RFC 3550/RFC 6184 H.264 over a routed UDP socket, decodes every access unit through PyAV/FFmpeg, and emits FPS-capped JPEG frames through the existing authenticated Bridge endpoint. Direct CCAPI AF-ON uses the advertised `POST /shooting/control/af` start/stop contract; libgphoto2 USB prefers the runtime `autofocusdrive`/`autofocuscancel` pair and falls back to balanced half-press. Coordinate Tap AF and Click White Balance map normalized UI input through Canon `flipdetail` image geometry before sending integer `PUT afframeposition` or `POST clickwb` commands. The UI supports English, Traditional Chinese, and responsive desktop/narrow layouts. No product runtime uses a fake camera engine; deterministic fakes live only in bridge tests.
 
-Create the environment below. Install `gphoto2` on the host only when using a USB camera:
+On Windows x64, download `open-eos-control-bridge-windows-x64-X.Y.Z.exe` from a release and run it directly. It contains the Python runtime, PyAV/FFmpeg, and the browser control UI. The loopback control page opens after the embedded service is ready; keep the console window open while using the app, and close it to stop the service. `--no-browser` disables automatic browser launch. No Python installation is needed for wireless CCAPI or local UVC/HDMI preview. USB camera control still requires a working system `gphoto2` engine.
+
+The wheel remains the cross-platform and development path:
 
 ```powershell
 cd bridge
@@ -157,10 +159,11 @@ After connecting a camera-control session, **Preview input** can switch the view
 The default service listens only on `127.0.0.1:18181`. The Android connection screen can use `http://10.0.2.2:18181` from an emulator. A physical phone requires an explicit LAN bind and Bearer token:
 
 ```powershell
-$env:OPEN_EOS_BRIDGE_HOST = "0.0.0.0"
 $env:OPEN_EOS_BRIDGE_TOKEN = "replace-with-a-long-random-token"
-.\.venv\Scripts\open-eos-bridge.exe
+.\open-eos-control-bridge-windows-x64-X.Y.Z.exe --host 0.0.0.0 --no-browser
 ```
+
+The wheel command can instead use `OPEN_EOS_BRIDGE_HOST=0.0.0.0` with the same token. The standalone executable deliberately has no token command-line option, so credentials do not appear in the process list.
 
 Choose **Desktop Bridge** on the Android or iOS connection screen, enter the computer LAN URL and the same token, then scan and select the camera. The token is kept only in process memory and is never persisted or included in diagnostics. Direct iOS USB/PTP remains a research item; this Bridge path is the implemented iPhone/iPad route to a PC-attached USB camera.
 

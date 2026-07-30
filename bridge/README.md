@@ -1,6 +1,6 @@
 # Open EOS Control Desktop Bridge
 
-This package provides the PC camera backend and browser control surface for Open EOS Control 0.1.2.
+This package provides the PC camera backend and browser control surface for Open EOS Control 0.1.3.
 
 It can connect to Canon cameras through native HTTP CCAPI or through a system-installed `gphoto2`/libgphoto2 USB stack. Camera commands and settings are exposed only when the selected backend advertises support.
 
@@ -12,8 +12,18 @@ Camera media downloads are consumed as cancellable Fetch streams with visible by
 
 ## Install
 
+Windows x64 release assets include a single-file executable:
+
+```powershell
+.\open-eos-control-bridge-windows-x64-X.Y.Z.exe
+```
+
+It bundles the Python runtime, PyAV/FFmpeg, and the browser UI. The loopback control page opens only after the service is ready. Keep the console window open while using the Bridge; `--no-browser` suppresses automatic browser launch. The executable is a development-preview artifact and is not code-signed.
+
+The wheel is the cross-platform installation path:
+
 ```bash
-python -m pip install open_eos_control_bridge-0.1.2-py3-none-any.whl
+python -m pip install open_eos_control_bridge-0.1.3-py3-none-any.whl
 ```
 
 USB control requires `gphoto2` to be available on `PATH`. CCAPI control does not require `gphoto2`.
@@ -24,6 +34,6 @@ USB control requires `gphoto2` to be available on `PATH`. CCAPI control does not
 open-eos-bridge
 ```
 
-The service listens on `127.0.0.1:18181` by default. See the main [Open EOS Control repository](https://github.com/js051/open-eos-control) for LAN binding, Bearer authentication, platform clients, source code, documentation, and issue tracking.
+The service listens on `127.0.0.1:18181` by default. LAN binding requires `OPEN_EOS_BRIDGE_TOKEN`; the standalone executable intentionally accepts the token only through the environment and never through a process-list-visible command argument. See the main [Open EOS Control repository](https://github.com/js051/open-eos-control) for platform clients, source code, documentation, and issue tracking.
 
 This is an unofficial Canon EOS project and is licensed under Apache-2.0.
