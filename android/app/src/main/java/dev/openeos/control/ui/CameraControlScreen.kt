@@ -1,5 +1,10 @@
 package dev.openeos.control.ui
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -80,7 +86,10 @@ import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -684,9 +693,23 @@ private fun MonitoringAssistSheet(state: CameraUiState, actions: CameraActions) 
 @Composable
 private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraActions) {
     val settings = state.monitorSettings
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val pixelAnalysisAvailable = !state.previewMode &&
         state.liveViewSource != LiveViewSource.CCAPI_RTP &&
         state.nativeLiveViewSession == null
+    val lutLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) { readCubeLutDocument(context, uri) }
+                }.fold(
+                    onSuccess = { (name, text) -> actions.importCubeLut(name, text) },
+                    onFailure = { actions.reportCubeLutError(it.message ?: it::class.java.simpleName) },
+                )
+            }
+        }
+    }
     if (!pixelAnalysisAvailable) {
         Text(stringResource(R.string.monitoring_assists_rtp_unavailable), color = AppWarning)
     }
@@ -702,6 +725,46 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         enabled = pixelAnalysisAvailable,
         onCheckedChange = actions.setWaveformVisible,
     )
+    Column(
+        Modifier.fillMaxWidth().testTag("monitor-lut-options"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(stringResource(R.string.lut_preview), color = if (pixelAnalysisAvailable) AppText else AppMutedText)
+        Text(
+            settings.cubeLut?.let { stringResource(R.string.cube_lut_summary, it.name, it.size) }
+                ?: stringResource(R.string.no_cube_lut),
+            color = AppMutedText,
+            fontSize = 13.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = {
+                    lutLauncher.launch(arrayOf("text/plain", "application/octet-stream", "application/x-cube"))
+                },
+                enabled = pixelAnalysisAvailable,
+                modifier = Modifier.height(48.dp),
+            ) {
+                Icon(
+                    painterResource(LucideR.drawable.lucide_ic_download),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.load_cube_lut))
+            }
+            if (settings.cubeLut != null) {
+                ToolIconButton(
+                    icon = LucideR.drawable.lucide_ic_trash_2,
+                    description = stringResource(R.string.remove_cube_lut),
+                    onClick = actions.clearCubeLut,
+                    enabled = pixelAnalysisAvailable,
+                    modifier = Modifier.size(48.dp),
+                )
+            }
+        }
+    }
     MonitorChoiceRow(
         label = stringResource(R.string.zebra),
         testTag = "monitor-zebra-options",
@@ -744,6 +807,32 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         labelFor = { desqueeze -> desqueezeLabel(desqueeze) },
         onSelect = actions.setDesqueeze,
     )
+}
+
+private fun readCubeLutDocument(context: Context, uri: Uri): Pair<String, String> {
+    val name = context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null,
+    )?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }?.takeIf(String::isNotBlank) ?: uri.lastPathSegment ?: "Imported LUT.cube"
+    val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            output.write(buffer, 0, count)
+            require(output.size() <= MAX_CUBE_LUT_BYTES) {
+                "3D LUT exceeds the ${MAX_CUBE_LUT_BYTES / (1024 * 1024)} MiB limit."
+            }
+        }
+        output.toByteArray()
+    } ?: error("The selected LUT could not be opened.")
+    return name to bytes.toString(Charsets.UTF_8)
 }
 
 @Composable

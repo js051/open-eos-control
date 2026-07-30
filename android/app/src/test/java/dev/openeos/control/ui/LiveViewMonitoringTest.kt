@@ -114,4 +114,40 @@ class LiveViewMonitoringTest {
         assertTrue(LiveViewMonitorSettings(falseColorEnabled = true).needsPixelAnalysis)
         assertTrue(LiveViewMonitorSettings(focusPeakingEnabled = true).needsPixelAnalysis)
     }
+
+    @Test
+    fun cubeLutParsesRedFastRowsAndInterpolatesWithinTheDeclaredDomain() {
+        val lut = parseCubeLut(INVERT_LUT, "fallback.cube")
+
+        assertEquals("Invert", lut.name)
+        assertEquals(2, lut.size)
+        val result = lut.sample(0.25f, 0.5f, 0.75f)
+        assertEquals(0.75f, result[0], 0.0001f)
+        assertEquals(0.5f, result[1], 0.0001f)
+        assertEquals(0.25f, result[2], 0.0001f)
+        assertEquals(0x7fbf7f40.toInt(), lut.sampleArgb(0x7f4080bf))
+    }
+
+    @Test
+    fun cubeLutRejectsIncompleteAndOneDimensionalFiles() {
+        assertTrue(runCatching { parseCubeLut("LUT_3D_SIZE 2\n0 0 0", "bad.cube") }.isFailure)
+        assertTrue(runCatching { parseCubeLut("LUT_1D_SIZE 2\n0 0 0\n1 1 1", "bad.cube") }.isFailure)
+    }
+
+    private companion object {
+        const val INVERT_LUT = """
+            TITLE "Invert"
+            LUT_3D_SIZE 2
+            DOMAIN_MIN 0 0 0
+            DOMAIN_MAX 1 1 1
+            1 1 1
+            0 1 1
+            1 0 1
+            0 0 1
+            1 1 0
+            0 1 0
+            1 0 0
+            0 0 0
+        """
+    }
 }

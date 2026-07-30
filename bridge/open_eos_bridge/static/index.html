@@ -148,6 +148,7 @@
           <div id="viewfinder" class="viewfinder">
             <img id="live-image" alt="Camera Live View" hidden>
             <video id="local-video" aria-label="Local video input" autoplay muted playsinline hidden></video>
+            <canvas id="monitor-lut-preview" class="monitor-layer" aria-label="3D LUT preview" hidden></canvas>
             <canvas id="monitor-pixel-overlay" class="monitor-layer" aria-hidden="true" hidden></canvas>
             <canvas id="monitor-guides-overlay" class="monitor-layer" aria-hidden="true" hidden></canvas>
             <canvas id="monitor-histogram" class="monitor-histogram" aria-hidden="true" hidden></canvas>
@@ -322,6 +323,21 @@
         <span data-i18n="lumaWaveform">Luma waveform</span>
         <input id="monitor-waveform-toggle" type="checkbox">
       </label>
+      <div class="monitoring-lut-row">
+        <div>
+          <strong data-i18n="lutPreview">3D LUT preview</strong>
+          <span id="monitor-lut-summary" class="supporting" data-i18n="noLutLoaded">No LUT loaded</span>
+        </div>
+        <div class="monitoring-lut-actions">
+          <input id="monitor-lut-file" type="file" accept=".cube,text/plain" hidden>
+          <button id="monitor-lut-load" class="button secondary" type="button">
+            <span class="icon" data-icon="download" aria-hidden="true"></span><span data-i18n="loadCubeLut">Load .cube LUT</span>
+          </button>
+          <button id="monitor-lut-remove" class="icon-button danger" type="button" data-i18n-aria="removeLut" hidden>
+            <span class="icon" data-icon="trash-2" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
       <label class="monitoring-row">
         <span data-i18n="zebra">Zebra</span>
         <select id="monitor-zebra-select">
@@ -400,6 +416,7 @@
   <script src="/app/icons.js"></script>
   <script src="/app/diagnostics.js"></script>
   <script src="/app/monitoring.js"></script>
+  <script src="/app/lut.js"></script>
   <script src="/app/local-video.js"></script>
   <script src="/app/media-transfer.js"></script>
   <script src="/app/app.js"></script>

@@ -182,6 +182,10 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script
     assert "MAX_MEDIA_PREVIEW_BYTES" in script
+    assert 'src="/app/lut.js"' in html
+    assert 'id="monitor-lut-preview"' in html
+    assert 'id="monitor-lut-file"' in html
+    assert "lut.createWebGLRenderer" in script
     assert "item.previewAvailable === true" in script
     assert "await ui.mediaPreviewImage.decode()" in script
     assert 'data-view="media" data-i18n-aria="media"' in html

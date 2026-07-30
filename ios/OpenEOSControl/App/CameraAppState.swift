@@ -843,12 +843,56 @@ final class CameraAppState: ObservableObject {
             "monitorFrameGuide=\(monitorSettings.frameGuide.rawValue)",
             "monitorSafeArea=\(monitorSettings.safeAreaVisible)",
             "monitorDesqueeze=\(monitorSettings.desqueeze.rawValue)",
+            "monitorLut=\(monitorSettings.cubeLut.map { "loaded (\($0.size)x\($0.size)x\($0.size))" } ?? "off")",
         ].joined(separator: "\n")
         return "\(report)\n\(monitoring)"
     }
 
     func clearError() {
         lastError = nil
+    }
+
+    func importCubeLut(from url: URL) async {
+        let task = Task.detached(priority: .userInitiated) { () throws -> CubeLut in
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            guard fileSize == nil || fileSize! <= maximumCubeLutBytes else {
+                throw CubeLutError.invalid("3D LUT exceeds the 16 MiB limit.")
+            }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            guard data.count <= maximumCubeLutBytes else {
+                throw CubeLutError.invalid("3D LUT exceeds the 16 MiB limit.")
+            }
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw CubeLutError.invalid("The selected LUT is not valid UTF-8 text.")
+            }
+            return try parseCubeLut(text, fallbackName: url.lastPathComponent)
+        }
+        do {
+            monitorSettings.cubeLut = try await task.value
+            lastError = nil
+        } catch {
+            lastError = String(
+                format: NSLocalizedString("lut_import_failed", comment: ""),
+                error.localizedDescription
+            )
+        }
+    }
+
+    func clearCubeLut() {
+        monitorSettings.cubeLut = nil
+    }
+
+    func reportCubeLutImportError(_ error: Error) {
+        lastError = String(
+            format: NSLocalizedString("lut_import_failed", comment: ""),
+            error.localizedDescription
+        )
+    }
+
+    func reportCubeLutRenderFailure() {
+        lastError = NSLocalizedString("lut_render_failed", comment: "")
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {

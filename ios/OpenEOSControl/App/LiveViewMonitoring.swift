@@ -52,6 +52,7 @@ struct LiveViewMonitorSettings: Equatable, Hashable, Sendable {
     var frameGuide = LiveViewFrameGuide.off
     var safeAreaVisible = false
     var desqueeze = LiveViewDesqueeze.off
+    var cubeLut: CubeLut?
 
     var needsPixelAnalysis: Bool {
         histogramVisible || waveformVisible || zebraThresholdPercent != nil ||
@@ -133,6 +134,18 @@ func analyzeLiveViewData(_ data: Data, settings: LiveViewMonitorSettings) -> Liv
           ) else {
         return nil
     }
+    return analyzeLiveViewCGImage(source, settings: settings)
+}
+
+func analyzeLiveViewImage(_ image: UIImage, settings: LiveViewMonitorSettings) -> LiveViewMonitorAnalysis? {
+    guard settings.needsPixelAnalysis, let source = image.cgImage else { return nil }
+    return analyzeLiveViewCGImage(source, settings: settings)
+}
+
+private func analyzeLiveViewCGImage(
+    _ source: CGImage,
+    settings: LiveViewMonitorSettings
+) -> LiveViewMonitorAnalysis? {
     let dimensions = liveViewAnalysisDimensions(width: source.width, height: source.height)
     var rgba = [UInt8](repeating: 0, count: dimensions.width * dimensions.height * 4)
     let rendered = rgba.withUnsafeMutableBytes { bytes -> Bool in

@@ -94,8 +94,12 @@ import dev.openeos.control.data.NativeLiveViewSession
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import java.text.NumberFormat
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -746,7 +750,57 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     val pixelAnalysisAvailable = !state.previewMode &&
         state.liveViewSource != dev.openeos.control.data.LiveViewSource.CCAPI_RTP &&
         state.nativeLiveViewSession == null
-    val analysisSource = if (pixelAnalysisAvailable) decodedFrame else null
+    var lutPreviewBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val lutRequestGeneration = remember { AtomicLong(0) }
+    val lutRequests = remember { Channel<LiveViewLutRequest>(Channel.CONFLATED) }
+    LaunchedEffect(decodedFrame, state.monitorSettings.cubeLut, pixelAnalysisAvailable) {
+        val generation = lutRequestGeneration.incrementAndGet()
+        lutRequests.trySend(
+            LiveViewLutRequest(
+                generation = generation,
+                source = decodedFrame.takeIf { pixelAnalysisAvailable },
+                lut = state.monitorSettings.cubeLut.takeIf { pixelAnalysisAvailable },
+            )
+        )
+    }
+    LaunchedEffect(lutRequests) {
+        val processingJob = kotlin.coroutines.coroutineContext[Job]
+        for (request in lutRequests) {
+            val source = request.source
+            val lut = request.lut
+            if (source == null || lut == null) {
+                if (request.generation == lutRequestGeneration.get()) {
+                    val previous = lutPreviewBitmap
+                    lutPreviewBitmap = null
+                    previous?.recycle()
+                }
+                continue
+            }
+            val transformed = withContext(Dispatchers.Default) {
+                applyCubeLut(source, lut) { processingJob?.ensureActive() }
+            }
+            if (request.generation == lutRequestGeneration.get()) {
+                val previous = lutPreviewBitmap
+                lutPreviewBitmap = transformed
+                previous?.takeUnless { it === transformed }?.recycle()
+            } else {
+                transformed.recycle()
+            }
+        }
+    }
+    DisposableEffect(lutRequests) {
+        onDispose {
+            lutRequests.close()
+            lutPreviewBitmap?.recycle()
+            lutPreviewBitmap = null
+        }
+    }
+    val lutPreviewActive = pixelAnalysisAvailable && state.monitorSettings.cubeLut != null
+    val analysisSource = if (pixelAnalysisAvailable) {
+        if (lutPreviewActive) lutPreviewBitmap else decodedFrame
+    } else {
+        null
+    }
     val monitorAnalysis by produceState<LiveViewMonitorAnalysis?>(
         initialValue = null,
         key1 = analysisSource,
@@ -811,6 +865,12 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
                 session = state.nativeLiveViewSession,
                 modifier = Modifier.fitLiveViewContent(displayAspectRatio),
+            )
+            lutPreviewActive && lutPreviewBitmap != null -> Image(
+                lutPreviewBitmap!!.asImageBitmap(),
+                stringResource(R.string.live_view_lut_preview),
+                Modifier.fitLiveViewContent(displayAspectRatio),
+                contentScale = ContentScale.FillBounds,
             )
             bitmap != null -> Image(
                 bitmap.asImageBitmap(),
@@ -984,6 +1044,12 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
     }
 }
+
+private data class LiveViewLutRequest(
+    val generation: Long,
+    val source: Bitmap?,
+    val lut: CubeLut?,
+)
 
 private fun Modifier.fitLiveViewContent(aspectRatio: Float): Modifier = layout { measurable, constraints ->
     val availableWidth = constraints.maxWidth.coerceAtLeast(1)

@@ -5,6 +5,8 @@
   if (!diagnostics) throw new Error("Open EOS diagnostics module is unavailable.");
   const monitoring = globalThis.OpenEOSMonitoring;
   if (!monitoring) throw new Error("Open EOS monitoring module is unavailable.");
+  const lut = globalThis.OpenEOSLut;
+  if (!lut) throw new Error("Open EOS LUT module is unavailable.");
   const localVideo = globalThis.OpenEOSLocalVideo;
   if (!localVideo) throw new Error("Open EOS local video module is unavailable.");
   const mediaTransfer = globalThis.OpenEOSMediaTransfer;
@@ -493,6 +495,27 @@
     },
   };
 
+  Object.assign(messages.en, {
+    lutPreview: "3D LUT preview",
+    loadCubeLut: "Load .cube LUT",
+    removeLut: "Remove LUT",
+    noLutLoaded: "No LUT loaded",
+    lutSummary: "{name} · {size}³",
+    lutLoaded: "3D LUT loaded",
+    lutRemoved: "3D LUT removed",
+    lutLoadFailed: "Could not load 3D LUT",
+  });
+  Object.assign(messages["zh-TW"], {
+    lutPreview: "3D LUT 預覽",
+    loadCubeLut: "載入 .cube LUT",
+    removeLut: "移除 LUT",
+    noLutLoaded: "尚未載入 LUT",
+    lutSummary: "{name} · {size}³",
+    lutLoaded: "已載入 3D LUT",
+    lutRemoved: "已移除 3D LUT",
+    lutLoadFailed: "無法載入 3D LUT",
+  });
+
   const commonSettingValueKeys = {
     auto: "valueAuto",
     on: "valueOn",
@@ -635,6 +658,7 @@
       frameGuide: "",
       safeAreaVisible: false,
       desqueeze: 1,
+      cubeLut: null,
     },
     bulbStartedAt: null,
     bulbTimer: null,
@@ -689,6 +713,7 @@
     liveImage: byId("live-image"),
     localVideo: byId("local-video"),
     monitorPixelOverlay: byId("monitor-pixel-overlay"),
+    monitorLutPreview: byId("monitor-lut-preview"),
     monitorGuidesOverlay: byId("monitor-guides-overlay"),
     monitorHistogram: byId("monitor-histogram"),
     monitorWaveform: byId("monitor-waveform"),
@@ -730,6 +755,10 @@
     monitoringDialogClose: byId("monitoring-dialog-close"),
     monitorHistogramToggle: byId("monitor-histogram-toggle"),
     monitorWaveformToggle: byId("monitor-waveform-toggle"),
+    monitorLutSummary: byId("monitor-lut-summary"),
+    monitorLutFile: byId("monitor-lut-file"),
+    monitorLutLoad: byId("monitor-lut-load"),
+    monitorLutRemove: byId("monitor-lut-remove"),
     monitorZebraSelect: byId("monitor-zebra-select"),
     monitorFalseColorToggle: byId("monitor-false-color-toggle"),
     monitorFocusPeakingToggle: byId("monitor-focus-peaking-toggle"),
@@ -2180,6 +2209,7 @@
   }
 
   const monitorAnalysisCanvas = document.createElement("canvas");
+  let lutPreviewRenderer = null;
 
   function monitorNeedsPixelAnalysis() {
     const settings = state.monitorSettings;
@@ -2214,7 +2244,7 @@
     const media = activePreviewElement();
     const rect = liveContentDisplayRect();
     if (!rect) return null;
-    [media, ui.monitorPixelOverlay, ui.monitorGuidesOverlay].forEach((element) => {
+    [media, ui.monitorLutPreview, ui.monitorPixelOverlay, ui.monitorGuidesOverlay].forEach((element) => {
       positionMonitorLayer(element, rect);
     });
     drawMonitorGuides(rect);
@@ -2226,7 +2256,12 @@
     const media = activePreviewElement();
     const sourceDimensions = previewDimensions(media);
     const rect = applyLiveViewLayout();
-    if (!rect || !monitorNeedsPixelAnalysis()) {
+    if (!rect) {
+      clearMonitoringLayers();
+      return;
+    }
+    const lutRendered = renderLutPreview(media);
+    if (!monitorNeedsPixelAnalysis()) {
       ui.monitorPixelOverlay.hidden = true;
       ui.monitorHistogram.hidden = true;
       ui.monitorWaveform.hidden = true;
@@ -2238,7 +2273,7 @@
       monitorAnalysisCanvas.width = dimensions.width;
       monitorAnalysisCanvas.height = dimensions.height;
       const analysisContext = monitorAnalysisCanvas.getContext("2d", { willReadFrequently: true });
-      analysisContext.drawImage(media, 0, 0, dimensions.width, dimensions.height);
+      analysisContext.drawImage(lutRendered ? ui.monitorLutPreview : media, 0, 0, dimensions.width, dimensions.height);
       const frame = analysisContext.getImageData(0, 0, dimensions.width, dimensions.height);
       const analysis = monitoring.analyzePixels(frame.data, dimensions.width, dimensions.height, {
         waveformVisible: state.monitorSettings.waveformVisible,
@@ -2255,6 +2290,24 @@
       ui.monitorPixelOverlay.hidden = true;
       ui.monitorHistogram.hidden = true;
       ui.monitorWaveform.hidden = true;
+    }
+  }
+
+  function renderLutPreview(media) {
+    const cubeLut = state.monitorSettings.cubeLut;
+    if (!cubeLut) {
+      ui.monitorLutPreview.hidden = true;
+      return false;
+    }
+    try {
+      lutPreviewRenderer ||= lut.createWebGLRenderer(ui.monitorLutPreview);
+      lutPreviewRenderer.render(media, cubeLut);
+      ui.monitorLutPreview.hidden = false;
+      return true;
+    } catch (error) {
+      state.monitorAnalysisError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      ui.monitorLutPreview.hidden = true;
+      return false;
     }
   }
 
@@ -2390,6 +2443,7 @@
   }
 
   function clearMonitoringLayers() {
+    ui.monitorLutPreview.hidden = true;
     ui.monitorPixelOverlay.hidden = true;
     ui.monitorGuidesOverlay.hidden = true;
     ui.monitorHistogram.hidden = true;
@@ -2400,6 +2454,18 @@
     const settings = state.monitorSettings;
     ui.monitorHistogramToggle.checked = settings.histogramVisible;
     ui.monitorWaveformToggle.checked = settings.waveformVisible;
+    if (settings.cubeLut) {
+      delete ui.monitorLutSummary.dataset.i18n;
+      ui.monitorLutSummary.textContent = t("lutSummary", {
+        name: settings.cubeLut.name,
+        size: settings.cubeLut.size,
+      });
+      ui.monitorLutRemove.hidden = false;
+    } else {
+      ui.monitorLutSummary.dataset.i18n = "noLutLoaded";
+      ui.monitorLutSummary.textContent = t("noLutLoaded");
+      ui.monitorLutRemove.hidden = true;
+    }
     ui.monitorZebraSelect.value = settings.zebraThresholdPercent === null
       ? ""
       : String(settings.zebraThresholdPercent);
@@ -2425,9 +2491,42 @@
       frameGuide: ui.monitorFrameGuideSelect.value,
       safeAreaVisible: ui.monitorSafeAreaToggle.checked,
       desqueeze: Number(ui.monitorDesqueezeSelect.value) || 1,
+      cubeLut: state.monitorSettings.cubeLut,
     };
     renderMonitoringFrame();
     renderDiagnostics();
+  }
+
+  async function importCubeLutFile() {
+    const file = ui.monitorLutFile.files?.[0];
+    ui.monitorLutFile.value = "";
+    if (!file) return;
+    try {
+      if (file.size > lut.MAX_CUBE_BYTES) throw new RangeError("3D LUT exceeds the 16 MiB limit.");
+      const parsed = lut.parseCubeLut(await file.text(), file.name);
+      lutPreviewRenderer ||= lut.createWebGLRenderer(ui.monitorLutPreview);
+      state.monitorSettings = { ...state.monitorSettings, cubeLut: parsed };
+      state.monitorAnalysisError = null;
+      renderMonitoringControls();
+      renderMonitoringFrame();
+      renderDiagnostics();
+      showToast(t("lutLoaded"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      state.monitorAnalysisError = `LUT: ${message}`;
+      showToast(`${t("lutLoadFailed")}: ${message}`, true);
+      renderDiagnostics();
+    }
+  }
+
+  function removeCubeLut() {
+    state.monitorSettings = { ...state.monitorSettings, cubeLut: null };
+    ui.monitorLutPreview.hidden = true;
+    state.monitorAnalysisError = null;
+    renderMonitoringControls();
+    renderMonitoringFrame();
+    renderDiagnostics();
+    showToast(t("lutRemoved"));
   }
 
   function renderLiveMagnification() {
@@ -3129,7 +3228,17 @@
         contentType: state.frameContentType,
         lastFrameAt: state.lastFrameAt,
         monitoring: {
-          ...state.monitorSettings,
+          histogramVisible: state.monitorSettings.histogramVisible,
+          waveformVisible: state.monitorSettings.waveformVisible,
+          zebraThresholdPercent: state.monitorSettings.zebraThresholdPercent,
+          falseColorEnabled: state.monitorSettings.falseColorEnabled,
+          focusPeakingEnabled: state.monitorSettings.focusPeakingEnabled,
+          frameGuide: state.monitorSettings.frameGuide,
+          safeAreaVisible: state.monitorSettings.safeAreaVisible,
+          desqueeze: state.monitorSettings.desqueeze,
+          lut: state.monitorSettings.cubeLut
+            ? { loaded: true, size: state.monitorSettings.cubeLut.size }
+            : { loaded: false },
           analysisError: state.monitorAnalysisError,
         },
         localVideo: {
@@ -3284,6 +3393,9 @@
       if (ui.monitorWaveformToggle.checked) ui.monitorHistogramToggle.checked = false;
       changeMonitoringSettings();
     });
+    ui.monitorLutLoad.addEventListener("click", () => ui.monitorLutFile.click());
+    ui.monitorLutFile.addEventListener("change", () => void importCubeLutFile());
+    ui.monitorLutRemove.addEventListener("click", removeCubeLut);
     [
       ui.monitorZebraSelect,
       ui.monitorFalseColorToggle,
@@ -3340,6 +3452,8 @@
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      lutPreviewRenderer?.dispose();
+      lutPreviewRenderer = null;
       cancelMediaDownload({ silent: true });
       clearMediaThumbnails();
       closeMediaPreview();

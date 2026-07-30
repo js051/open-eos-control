@@ -33,6 +33,7 @@ data class LiveViewMonitorSettings(
     val frameGuide: LiveViewFrameGuide = LiveViewFrameGuide.OFF,
     val safeAreaVisible: Boolean = false,
     val desqueeze: LiveViewDesqueeze = LiveViewDesqueeze.OFF,
+    val cubeLut: CubeLut? = null,
 ) {
     val needsPixelAnalysis: Boolean
         get() = histogramVisible || waveformVisible || zebraThresholdPercent != null ||

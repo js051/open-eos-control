@@ -1,5 +1,6 @@
 import OpenEOSCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct CameraSheetHost: View {
     let sheet: CameraSheet
@@ -372,6 +373,7 @@ private struct MonitoringAssistView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
+    @State private var showingLutImporter = false
 
     private let zebraValues = [0, 70, 75, 80, 85, 90, 95, 100]
 
@@ -408,6 +410,44 @@ private struct MonitoringAssistView: View {
                         enabled: pixelAnalysisAvailable,
                         identifier: "monitor-waveform"
                     )
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("lut_preview")
+                            .foregroundStyle(pixelAnalysisAvailable ? Color.cameraText : Color.cameraSecondaryText)
+                        Text(
+                            camera.monitorSettings.cubeLut.map {
+                                language.format("cube_lut_summary", $0.name, $0.size)
+                            } ?? language.string("no_cube_lut")
+                        )
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraSecondaryText)
+                        .lineLimit(2)
+                        HStack(spacing: 8) {
+                            Button {
+                                showingLutImporter = true
+                            } label: {
+                                Label("load_cube_lut", systemImage: "square.and.arrow.down")
+                                    .frame(minHeight: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Color.cameraAccent)
+                            .disabled(!pixelAnalysisAvailable)
+                            .accessibilityIdentifier("monitor-lut-import")
+                            if camera.monitorSettings.cubeLut != nil {
+                                Button(role: .destructive) {
+                                    camera.clearCubeLut()
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .frame(width: 44, height: 44)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(!pixelAnalysisAvailable)
+                                .accessibilityLabel(Text("remove_cube_lut"))
+                                .accessibilityIdentifier("monitor-lut-remove")
+                            }
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("monitor-lut-options")
                     monitorPickerRow("zebra") {
                         Picker("zebra", selection: Binding(
                             get: { camera.monitorSettings.zebraThresholdPercent ?? 0 },
@@ -476,6 +516,17 @@ private struct MonitoringAssistView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .fileImporter(
+            isPresented: $showingLutImporter,
+            allowedContentTypes: [UTType(filenameExtension: "cube") ?? .plainText, .plainText]
+        ) { result in
+            switch result {
+            case let .success(url):
+                Task { await camera.importCubeLut(from: url) }
+            case let .failure(error):
+                camera.reportCubeLutImportError(error)
+            }
+        }
     }
 
     private var pixelAnalysisAvailable: Bool {
