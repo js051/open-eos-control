@@ -20,6 +20,9 @@ data class DiagnosticValidationSummary(
 data class DiagnosticReportMetadata(
     val productVersion: String = "unknown",
     val generatedAt: String = Instant.now().toString(),
+    val controlOrientationMode: CameraControlOrientationMode? = null,
+    val systemAutoRotationEnabled: Boolean? = null,
+    val controlRotationDegrees: Float? = null,
 )
 
 fun rollingFps(frameTimesMillis: List<Long>): Double {
@@ -66,6 +69,9 @@ fun buildDiagnosticReport(
         appendLine("reportSchema=$DIAGNOSTIC_REPORT_SCHEMA")
         appendLine("generatedAt=${metadata.generatedAt}")
         appendLine("productVersion=${metadata.productVersion}")
+        appendLine("controlOrientationMode=${metadata.controlOrientationMode?.name ?: "unknown"}")
+        appendLine("systemAutoRotationEnabled=${metadata.systemAutoRotationEnabled ?: "unknown"}")
+        appendLine("controlRotationDegrees=${metadata.controlRotationDegrees ?: "unknown"}")
         appendLine("camera=${state.info?.model ?: "unknown"}")
         appendLine("serial=${diagnosticSerial(state.info?.serial)}")
         appendLine("transport=${if (state.previewMode) "OFFLINE_PREVIEW" else state.transport?.name ?: "disconnected"}")

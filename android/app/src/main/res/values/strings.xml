@@ -179,6 +179,13 @@
     <string name="language_system">Automatic (system)</string>
     <string name="language_english">English</string>
     <string name="language_traditional_chinese">Traditional Chinese</string>
+    <string name="control_orientation">Control orientation</string>
+    <string name="system_auto_rotation">System auto-rotate</string>
+    <string name="system_auto_rotation_on">On</string>
+    <string name="system_auto_rotation_off">Off</string>
+    <string name="orientation_follow_system">Follow system</string>
+    <string name="orientation_always_rotate">Always rotate controls</string>
+    <string name="orientation_keep_fixed">Keep controls fixed</string>
     <string name="setting_af_method">AF method</string>
     <string name="setting_af_operation">AF operation</string>
     <string name="setting_continuous_af">Continuous AF</string>

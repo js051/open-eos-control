@@ -322,6 +322,14 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
                     },
                 )
                 DropdownMenuItem(
+                    text = { Text(stringResource(R.string.control_orientation)) },
+                    leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_rotate_ccw), null) },
+                    onClick = {
+                        menuExpanded = false
+                        actions.openPicker(SettingPicker.ORIENTATION)
+                    },
+                )
+                DropdownMenuItem(
                     text = { Text(stringResource(R.string.debug)) },
                     leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_bug), null) },
                     onClick = {
