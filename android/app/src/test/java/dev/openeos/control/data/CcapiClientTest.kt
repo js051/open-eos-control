@@ -406,6 +406,63 @@ class CcapiClientTest {
     }
 
     @Test
+    fun discoveryLoadsCanonDeveloperApiListWhenRootOmitsOperations() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(jsonResponse("""{"value":"No list of APIs"}"""))
+        server.enqueue(jsonResponse(DISCOVERY_JSON))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/topurlfordev", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/shooting/settings", server.takeRequest().path)
+        assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER))
+        assertEquals(
+            "GET /ccapi/ver100/topurlfordev (Canon developer API fallback)",
+            capabilities.evidence.source,
+        )
+        assertTrue(
+            "POST /ccapi/ver110/shooting/control/shutterbutton" in
+                capabilities.evidence.advertisedCommands,
+        )
+    }
+
+    @Test
+    fun discoveryReportsDeveloperApiFailureWithoutInventingCapabilities() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(jsonResponse("""{"value":"No list of APIs"}"""))
+        server.enqueue(MockResponse().setResponseCode(503).setBody("camera busy"))
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(MockResponse().setResponseCode(404))
+
+        val failure = runCatching { client.initialize() }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("/ccapi/ver100/topurlfordev"))
+        assertEquals(
+            listOf(
+                "/ccapi",
+                "/ccapi/ver100/topurlfordev",
+                "/ccapi/",
+                "/ccapi/ver110/deviceinformation",
+                "/ccapi/ver100/deviceinformation",
+            ),
+            List(server.requestCount) { server.takeRequest().path },
+        )
+    }
+
+    @Test
     fun realCapabilitiesFollowAdvertisedApiOperations() = runTest {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),

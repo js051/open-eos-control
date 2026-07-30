@@ -48,6 +48,8 @@ private struct CCAPIDetailedLiveView {
 public actor CCAPIClient {
     private static let maximumErrorBodyCharacters = 2_000
     private static let maximumMediaItems = 500
+    private static let noAPIListValue = "No list of APIs"
+    private static let developerAPIPath = "/ccapi/ver100/topurlfordev"
     private static let maximumMediaPages = 100
     private static let maximumMediaTreeDepth = 4
     private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
@@ -152,8 +154,16 @@ public actor CCAPIClient {
         var errors: [String] = []
         for path in ["/ccapi", "/ccapi/"] {
             do {
-                let discovery = try await requestJSON(path: path)
-                parseDiscovery(discovery, source: "GET \(path)")
+                let rootDiscovery = try await requestJSON(path: path)
+                if rootDiscovery.string("value") == Self.noAPIListValue {
+                    let discovery = try await requestJSON(path: Self.developerAPIPath)
+                    parseDiscovery(
+                        discovery,
+                        source: "GET \(Self.developerAPIPath) (Canon developer API fallback)"
+                    )
+                } else {
+                    parseDiscovery(rootDiscovery, source: "GET \(path)")
+                }
                 initialized = true
                 return
             } catch {

@@ -85,6 +85,7 @@ class FakeCcapiTransport:
         self,
         *,
         discovery: dict[str, object] | None = None,
+        developer_discovery: dict[str, object] | None = None,
         external_media: bool = False,
         reject_autofocus_start: bool = False,
         reject_bulb_press: bool = False,
@@ -96,6 +97,7 @@ class FakeCcapiTransport:
         preview_content_type: str = "image/jpeg",
     ) -> None:
         self.discovery = discovery or DISCOVERY
+        self.developer_discovery = developer_discovery
         self.external_media = external_media
         self.reject_autofocus_start = reject_autofocus_start
         self.reject_bulb_press = reject_bulb_press
@@ -146,6 +148,8 @@ class FakeCcapiTransport:
         self.requests.append(RecordedRequest(method, path, payload))
         if method == "GET" and path == "/ccapi":
             return _json_response(self.discovery)
+        if method == "GET" and path == "/ccapi/ver100/topurlfordev" and self.developer_discovery is not None:
+            return _json_response(self.developer_discovery)
         if method == "GET" and path == "/ccapi/ver110/event/polling?timeout=long":
             return _json_response({"shootingsettings": {"iso": {"value": "1600"}}})
         if method == "DELETE" and path == "/ccapi/ver110/event/polling":
@@ -756,6 +760,40 @@ def test_ccapi_discovery_accepts_same_origin_url_entries_and_rejects_unsafe_oper
     assert all(
         "secret" not in command and "attacker" not in command for command in capabilities.evidence.advertised_commands
     )
+
+
+def test_ccapi_discovery_loads_canon_developer_api_list_when_root_omits_operations() -> None:
+    transport = FakeCcapiTransport(
+        discovery={"value": "No list of APIs"},
+        developer_discovery=DISCOVERY,
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.STILL_CAPTURE in capabilities.supported
+    assert CameraFeature.VIDEO_RECORDING in capabilities.supported
+    assert CameraFeature.MEDIA_BROWSER in capabilities.supported
+    assert capabilities.evidence.source == "GET /ccapi/ver100/topurlfordev (Canon developer API fallback)"
+    assert "POST /ccapi/ver100/shooting/control/shutterbutton" in capabilities.evidence.advertised_commands
+    request_paths = [request.path for request in transport.requests]
+    assert request_paths[:2] == [
+        "/ccapi",
+        "/ccapi/ver100/topurlfordev",
+    ]
+    assert "/ccapi/ver100/shooting/settings" in request_paths
+
+
+def test_ccapi_discovery_developer_api_failure_does_not_invent_capabilities() -> None:
+    transport = FakeCcapiTransport(discovery={"value": "No list of APIs"})
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.STILL_CAPTURE not in capabilities.supported
+    assert CameraFeature.STILL_CAPTURE in capabilities.planned
+    assert capabilities.evidence.source == "GET /ccapi/ver100/deviceinformation (identity fallback)"
+    assert "/ccapi/ver100/topurlfordev" in [request.path for request in transport.requests]
 
 
 def test_ccapi_wb_shift_hides_malformed_or_unbounded_ranges() -> None:

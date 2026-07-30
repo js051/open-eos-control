@@ -72,6 +72,8 @@ IMAGE_QUALITY_FIELDS = ("raw", "jpeg", "heif")
 WB_SHIFT_SETTING_KEY = "wbshift"
 WB_SHIFT_FIELDS = ("ba", "mg")
 MAX_STRUCTURED_SETTING_OPTIONS = 256
+CCAPI_NO_API_LIST_VALUE = "No list of APIs"
+CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
 SETTING_ALIASES = {
     "iso": "iso",
     "tv": "shutter",
@@ -375,7 +377,19 @@ class CcapiSession:
                             status_code=502,
                             engine=self.engine_name,
                         )
-                    self._parse_discovery(value, source=f"GET {path}")
+                    if value.get("value") == CCAPI_NO_API_LIST_VALUE:
+                        value = self._request_json("GET", CCAPI_DEVELOPER_API_PATH)
+                        if not isinstance(value, dict):
+                            raise BridgeError(
+                                "INVALID_CCAPI_RESPONSE",
+                                f"Camera developer API {CCAPI_DEVELOPER_API_PATH} did not return a JSON object.",
+                                status_code=502,
+                                engine=self.engine_name,
+                            )
+                        source = f"GET {CCAPI_DEVELOPER_API_PATH} (Canon developer API fallback)"
+                    else:
+                        source = f"GET {path}"
+                    self._parse_discovery(value, source=source)
                     self._initialized = True
                     return
                 except BridgeError as error:
