@@ -150,9 +150,11 @@ final class LiveViewMonitoringTests: XCTestCase {
         let lut = try parseCubeLut(Self.invertLut, fallbackName: "invert.cube")
 
         let result = try XCTUnwrap(renderCubeLutPreview(data: data, lut: lut))
+        let sourcePixels = try XCTUnwrap(source.cgImage)
+        let resultPixels = try XCTUnwrap(result.cgImage)
 
-        XCTAssertEqual(result.size.width, 8)
-        XCTAssertEqual(result.size.height, 8)
+        XCTAssertEqual(resultPixels.width, sourcePixels.width)
+        XCTAssertEqual(resultPixels.height, sourcePixels.height)
     }
 
     private static let invertLut = """
