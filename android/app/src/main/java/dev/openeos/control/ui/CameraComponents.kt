@@ -362,7 +362,7 @@ internal fun CameraActionMenuPanel(
     val mediaAvailable = state.supports(CameraFeature.MEDIA_BROWSER)
     CameraReadableSlot(
         width = 328.dp,
-        height = if (mediaAvailable) 352.dp else 296.dp,
+        height = if (mediaAvailable) 296.dp else 240.dp,
         modifier = Modifier.testTag("camera-action-menu-rotation"),
         animateRotation = false,
     ) {
@@ -414,14 +414,6 @@ internal fun CameraActionMenuPanel(
                 ) {
                     onDismissRequest()
                     actions.openPicker(SettingPicker.LANGUAGE)
-                }
-                CameraActionMenuItem(
-                    icon = LucideR.drawable.lucide_ic_rotate_ccw,
-                    label = stringResource(R.string.control_orientation),
-                    testTag = "camera-action-orientation",
-                ) {
-                    onDismissRequest()
-                    actions.openPicker(SettingPicker.ORIENTATION)
                 }
                 CameraActionMenuItem(
                     icon = LucideR.drawable.lucide_ic_bug,
@@ -1620,15 +1612,21 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
                     .testTag("exposure-content-${picker.name}"),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(label, color = AppMutedText, maxLines = 1)
-                Text(
-                    value,
+                CameraHudText(
+                    value = label,
+                    color = AppMutedText,
+                    fontWeight = FontWeight.Normal,
+                    maxFontSize = 14.sp,
+                    minFontSize = 10.sp,
+                    modifier = Modifier.testTag("exposure-label-${picker.name}"),
+                )
+                CameraHudText(
+                    value = value,
                     color = if (enabled) AppText else AppMutedText,
-                    fontSize = 17.sp,
-                    lineHeight = 20.sp,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    maxFontSize = 17.sp,
+                    minFontSize = 11.sp,
+                    modifier = Modifier.testTag("exposure-value-${picker.name}"),
                 )
             }
         }

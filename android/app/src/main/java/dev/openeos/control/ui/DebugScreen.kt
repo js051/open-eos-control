@@ -47,7 +47,6 @@ import java.util.Locale
 fun DebugScreen(
     state: CameraUiState,
     actions: CameraActions,
-    controlOrientationMode: CameraControlOrientationMode = CameraControlOrientationMode.FOLLOW_SYSTEM,
     systemAutoRotationEnabled: Boolean = false,
     controlRotationDegrees: Float = 0f,
 ) {
@@ -237,7 +236,6 @@ fun DebugScreen(
                         state,
                         DiagnosticReportMetadata(
                             productVersion = productVersion,
-                            controlOrientationMode = controlOrientationMode,
                             systemAutoRotationEnabled = systemAutoRotationEnabled,
                             controlRotationDegrees = controlRotationDegrees,
                         ),

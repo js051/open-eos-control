@@ -423,7 +423,6 @@ class CameraScreensTest {
         }
         listOf(
             R.string.language,
-            R.string.control_orientation,
             R.string.debug,
             R.string.disconnect,
         ).forEach { labelResource ->
@@ -438,7 +437,6 @@ class CameraScreensTest {
         }
         listOf(
             "camera-action-language",
-            "camera-action-orientation",
             "camera-action-debug",
             "camera-action-disconnect",
         ).forEach { actionTag ->
@@ -448,8 +446,8 @@ class CameraScreensTest {
             ).assertCountEquals(0)
         }
 
-        compose.onNodeWithTag("camera-action-orientation").performClick()
-        compose.runOnIdle { assertEquals(SettingPicker.ORIENTATION, selectedPicker) }
+        compose.onNodeWithTag("camera-action-language").performClick()
+        compose.runOnIdle { assertEquals(SettingPicker.LANGUAGE, selectedPicker) }
         compose.runOnIdle { assertFalse(menuVisible.value) }
         compose.onAllNodesWithText(
             resourceText(R.string.language),
@@ -661,35 +659,6 @@ class CameraScreensTest {
     }
 
     @Test
-    fun orientationSettingsExposeSystemStateAndApplyTheSelectedPolicy() {
-        val selectedMode = mutableStateOf(CameraControlOrientationMode.FOLLOW_SYSTEM)
-        val actions = noOpActions().copy(setControlOrientationMode = { selectedMode.value = it })
-        compose.setContent {
-            MaterialTheme(colorScheme = OpenEosColorScheme) {
-                CameraControlScreen(
-                    state = CameraUiState().withOfflinePreview().copy(
-                        activeSettingPicker = SettingPicker.ORIENTATION,
-                    ),
-                    actions = actions,
-                    controlOrientationMode = selectedMode.value,
-                    systemAutoRotationEnabled = false,
-                )
-            }
-        }
-
-        compose.onNodeWithText(resourceText(R.string.system_auto_rotation_off)).assertIsDisplayed()
-        compose.onNodeWithTag("orientation-mode-FOLLOW_SYSTEM").assertIsDisplayed()
-        compose.onNodeWithTag("orientation-mode-ALWAYS_ROTATE").performClick()
-        compose.runOnIdle {
-            assertEquals(CameraControlOrientationMode.ALWAYS_ROTATE, selectedMode.value)
-        }
-        compose.onNodeWithTag("orientation-mode-KEEP_FIXED").performClick()
-        compose.runOnIdle {
-            assertEquals(CameraControlOrientationMode.KEEP_FIXED, selectedMode.value)
-        }
-    }
-
-    @Test
     fun upsideDownSettingsKeepTheSameBottomAnchoredLayout() {
         compose.setContent {
             CompositionLocalProvider(
@@ -783,6 +752,52 @@ class CameraScreensTest {
             }
         }
 
+        assertPrimaryCameraControlsVisible()
+    }
+
+    @Test
+    fun quarterTurnKeepsLongExposureValuesInsideFixedAtomicSlots() {
+        val status = requireNotNull(connectedState().status).copy(
+            exposure = ExposureState(
+                iso = "102400",
+                shutter = "1/16000",
+                aperture = "F32",
+                whiteBalance = "White fluorescent light",
+            ),
+        )
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                    CompositionLocalProvider(
+                        LocalCameraControlRotation provides -90f,
+                        LocalCameraControlTargetRotation provides -90f,
+                    ) {
+                        MaterialTheme(colorScheme = OpenEosColorScheme) {
+                            CameraControlScreen(connectedState().copy(status = status), noOpActions())
+                        }
+                    }
+                }
+            }
+        }
+
+        SettingPicker.entries.filter { it in setOf(
+            SettingPicker.ISO,
+            SettingPicker.SHUTTER,
+            SettingPicker.APERTURE,
+            SettingPicker.WHITE_BALANCE,
+        ) }.forEach { picker ->
+            val slot = compose.onNodeWithTag("exposure-control-${picker.name}")
+                .fetchSemanticsNode().boundsInRoot
+            val value = compose.onNodeWithTag("exposure-value-${picker.name}", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue(
+                "Rotated exposure value $picker must stay inside its fixed slot: $value, $slot",
+                value.left >= slot.left && value.top >= slot.top &&
+                    value.right <= slot.right && value.bottom <= slot.bottom,
+            )
+        }
         assertPrimaryCameraControlsVisible()
     }
 
