@@ -385,6 +385,79 @@ class CameraScreensTest {
     }
 
     @Test
+    fun quarterTurnActionMenuRemeasuresFullLabelsWithoutMovingTheCameraLayout() {
+        var selectedPicker: SettingPicker? = null
+        val menuVisible = mutableStateOf(true)
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                    CompositionLocalProvider(
+                        LocalCameraControlRotation provides -90f,
+                        LocalCameraControlTargetRotation provides -90f,
+                    ) {
+                        MaterialTheme(colorScheme = OpenEosColorScheme) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                if (menuVisible.value) {
+                                    CameraActionMenuPanel(
+                                        state = connectedState(),
+                                        actions = noOpActions().copy(openPicker = { selectedPicker = it }),
+                                        onDismissRequest = { menuVisible.value = false },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithText(
+                resourceText(R.string.language),
+                useUnmergedTree = true,
+            )
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        listOf(
+            R.string.language,
+            R.string.control_orientation,
+            R.string.debug,
+            R.string.disconnect,
+        ).forEach { labelResource ->
+            val labelBounds = compose
+                .onNodeWithText(resourceText(labelResource), useUnmergedTree = true)
+                .fetchSemanticsNode()
+                .boundsInRoot
+            assertTrue(
+                "A sideways action label must be rotated for the user's physical viewpoint: $labelBounds",
+                labelBounds.height > labelBounds.width,
+            )
+        }
+        listOf(
+            "camera-action-language",
+            "camera-action-orientation",
+            "camera-action-debug",
+            "camera-action-disconnect",
+        ).forEach { actionTag ->
+            compose.onAllNodesWithTag(
+                "$actionTag-label-overflow",
+                useUnmergedTree = true,
+            ).assertCountEquals(0)
+        }
+
+        compose.onNodeWithTag("camera-action-orientation").performClick()
+        compose.runOnIdle { assertEquals(SettingPicker.ORIENTATION, selectedPicker) }
+        compose.runOnIdle { assertFalse(menuVisible.value) }
+        compose.onAllNodesWithText(
+            resourceText(R.string.language),
+            useUnmergedTree = true,
+        ).assertCountEquals(0)
+    }
+
+    @Test
     fun quarterTurnKeepsLocalizedCopyInsideTheLiveViewViewport() {
         compose.setContent {
             DeviceConfigurationOverride(
@@ -1089,7 +1162,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnCapabilityWarningUsesACompactReadableMessage() {
+    fun quarterTurnCapabilityWarningKeepsTheFullReadableMessage() {
         val message = resourceText(R.string.capture_not_supported)
         val base = connectedState()
         val state = base.copy(
@@ -1116,8 +1189,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithTag("capability-warning-surface", useUnmergedTree = true).assertIsDisplayed()
-        compose.onAllNodesWithText(message).assertCountEquals(0)
-        compose.onNodeWithText(resourceText(R.string.camera_control_unavailable_short)).assertIsDisplayed()
+        compose.onNodeWithText(message).assertIsDisplayed()
         compose.onNodeWithContentDescription(message).assertIsDisplayed()
         compose.onNodeWithTag("capability-warning-message", useUnmergedTree = true).assertIsDisplayed()
         compose.onAllNodesWithTag("capability-warning-message-overflow", useUnmergedTree = true)
