@@ -4,6 +4,12 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-07-30
+
+- Established a stable Android development signing identity for `main` artifacts and tagged releases so previews from `0.1.5` onward can update in place.
+- Kept the private key outside Git while pinning and verifying its public SHA-256 certificate fingerprint before every APK upload.
+- Preserved ordinary pull-request and local debug builds without exposing release signing secrets.
+
 ## [0.1.4] - 2026-07-30
 
 - Added memory-only 3D `.cube` LUT preview to decoded Live View on Android, iOS, and PC, using bounded parsers and platform-native GPU paths without exposing LUT identity in diagnostics.
@@ -27,3 +33,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 
 [0.1.0]: https://github.com/js051/open-eos-control/releases/tag/v0.1.0
 [0.1.4]: https://github.com/js051/open-eos-control/releases/tag/v0.1.4
+[0.1.5]: https://github.com/js051/open-eos-control/releases/tag/v0.1.5

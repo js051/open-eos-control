@@ -4,6 +4,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val developmentSigningEnvironment = mapOf(
+    "storeFile" to providers.environmentVariable("OEC_ANDROID_SIGNING_STORE_FILE").orNull,
+    "storePassword" to providers.environmentVariable("OEC_ANDROID_SIGNING_STORE_PASSWORD").orNull,
+    "keyAlias" to providers.environmentVariable("OEC_ANDROID_SIGNING_KEY_ALIAS").orNull,
+    "keyPassword" to providers.environmentVariable("OEC_ANDROID_SIGNING_KEY_PASSWORD").orNull,
+)
+val developmentSigningEnabled = developmentSigningEnvironment.values.all { !it.isNullOrBlank() }
+if (!developmentSigningEnabled && developmentSigningEnvironment.values.any { !it.isNullOrBlank() }) {
+    throw GradleException("Android development signing requires all OEC_ANDROID_SIGNING_* values.")
+}
+
 android {
     namespace = "dev.openeos.control"
     compileSdk = 35
@@ -12,12 +23,26 @@ android {
         applicationId = "dev.openeos.control"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = "0.1.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val developmentSigningConfig = if (developmentSigningEnabled) {
+        signingConfigs.create("development") {
+            storeFile = file(developmentSigningEnvironment.getValue("storeFile")!!)
+            storePassword = developmentSigningEnvironment.getValue("storePassword")
+            keyAlias = developmentSigningEnvironment.getValue("keyAlias")
+            keyPassword = developmentSigningEnvironment.getValue("keyPassword")
+        }
+    } else {
+        null
+    }
+
     buildTypes {
+        debug {
+            developmentSigningConfig?.let { signingConfig = it }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
