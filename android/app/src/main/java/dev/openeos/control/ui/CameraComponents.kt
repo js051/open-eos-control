@@ -33,8 +33,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -112,6 +110,7 @@ fun ToolIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     tint: Color = AppText,
+    testTag: String? = null,
 ) {
     Box(modifier) {
         TooltipBox(
@@ -122,7 +121,9 @@ fun ToolIconButton(
             IconButton(
                 onClick = onClick,
                 enabled = enabled,
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier
+                    .size(48.dp)
+                    .then(if (testTag == null) Modifier else Modifier.testTag(testTag)),
             ) {
                 Icon(
                     painterResource(icon),
@@ -296,57 +297,19 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             stringResource(R.string.hide_hud),
             { actions.setHudVisible(false) },
         )
-        Box {
-            ToolIconButton(
-                LucideR.drawable.lucide_ic_ellipsis_vertical,
-                stringResource(R.string.more_actions),
-                { menuExpanded = true },
-            )
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                if (state.supports(CameraFeature.MEDIA_BROWSER)) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.camera_media)) },
-                        leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_images), null) },
-                        onClick = {
-                            menuExpanded = false
-                            actions.setUiMode(UiMode.MEDIA)
-                        },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.language)) },
-                    leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_languages), null) },
-                    onClick = {
-                        menuExpanded = false
-                        actions.openPicker(SettingPicker.LANGUAGE)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.control_orientation)) },
-                    leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_rotate_ccw), null) },
-                    onClick = {
-                        menuExpanded = false
-                        actions.openPicker(SettingPicker.ORIENTATION)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.debug)) },
-                    leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_bug), null) },
-                    onClick = {
-                        menuExpanded = false
-                        actions.setUiMode(UiMode.DEBUG)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.disconnect)) },
-                    leadingIcon = { Icon(painterResource(LucideR.drawable.lucide_ic_unplug), null) },
-                    onClick = {
-                        menuExpanded = false
-                        actions.disconnect()
-                    },
-                )
-            }
-        }
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_ellipsis_vertical,
+            stringResource(R.string.more_actions),
+            { menuExpanded = true },
+            testTag = "camera-action-menu-button",
+        )
+    }
+    if (menuExpanded) {
+        CameraActionMenuDialog(
+            state = state,
+            actions = actions,
+            onDismissRequest = { menuExpanded = false },
+        )
     }
     if (statusExpanded) {
         CameraStatusDetailsDialog(
@@ -354,6 +317,182 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
             battery = batteryDescription,
             storage = fullStorage,
             onDismissRequest = { statusExpanded = false },
+        )
+    }
+}
+
+@Composable
+private fun CameraActionMenuDialog(
+    state: CameraUiState,
+    actions: CameraActions,
+    onDismissRequest: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        DarkSheetSystemBarsEffect()
+        Box(
+            Modifier
+                .fillMaxSize()
+                .testTag("camera-action-menu"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.58f))
+                    .clickable(onClick = onDismissRequest)
+                    .testTag("camera-action-menu-scrim"),
+            )
+            CameraActionMenuPanel(state, actions, onDismissRequest)
+        }
+    }
+}
+
+@Composable
+internal fun CameraActionMenuPanel(
+    state: CameraUiState,
+    actions: CameraActions,
+    onDismissRequest: () -> Unit,
+) {
+    val mediaAvailable = state.supports(CameraFeature.MEDIA_BROWSER)
+    CameraReadableSlot(
+        width = 328.dp,
+        height = if (mediaAvailable) 352.dp else 296.dp,
+        modifier = Modifier.testTag("camera-action-menu-rotation"),
+        animateRotation = false,
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("camera-action-menu-surface")
+                .pointerInput(Unit) { detectTapGestures(onTap = {}) },
+            shape = RoundedCornerShape(8.dp),
+            color = AppSurface,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .testTag("camera-action-menu-content")
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().height(56.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.more_actions),
+                        color = AppText,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_x,
+                        stringResource(R.string.dismiss),
+                        onDismissRequest,
+                    )
+                }
+                if (mediaAvailable) {
+                    CameraActionMenuItem(
+                        icon = LucideR.drawable.lucide_ic_images,
+                        label = stringResource(R.string.camera_media),
+                        testTag = "camera-action-media",
+                    ) {
+                        onDismissRequest()
+                        actions.setUiMode(UiMode.MEDIA)
+                    }
+                }
+                CameraActionMenuItem(
+                    icon = LucideR.drawable.lucide_ic_languages,
+                    label = stringResource(R.string.language),
+                    testTag = "camera-action-language",
+                ) {
+                    onDismissRequest()
+                    actions.openPicker(SettingPicker.LANGUAGE)
+                }
+                CameraActionMenuItem(
+                    icon = LucideR.drawable.lucide_ic_rotate_ccw,
+                    label = stringResource(R.string.control_orientation),
+                    testTag = "camera-action-orientation",
+                ) {
+                    onDismissRequest()
+                    actions.openPicker(SettingPicker.ORIENTATION)
+                }
+                CameraActionMenuItem(
+                    icon = LucideR.drawable.lucide_ic_bug,
+                    label = stringResource(R.string.debug),
+                    testTag = "camera-action-debug",
+                ) {
+                    onDismissRequest()
+                    actions.setUiMode(UiMode.DEBUG)
+                }
+                CameraActionMenuItem(
+                    icon = LucideR.drawable.lucide_ic_unplug,
+                    label = stringResource(R.string.disconnect),
+                    testTag = "camera-action-disconnect",
+                ) {
+                    onDismissRequest()
+                    actions.disconnect()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CameraActionMenuItem(
+    @DrawableRes icon: Int,
+    label: String,
+    testTag: String,
+    onClick: () -> Unit,
+) {
+    var fontSize by remember(label) { mutableStateOf(16.sp) }
+    var hasVisualOverflow by remember(label) { mutableStateOf(false) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+            .semantics { contentDescription = label; role = Role.Button }
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = AppSubtleText,
+            modifier = Modifier.size(24.dp),
+        )
+        Text(
+            label,
+            color = AppText,
+            fontSize = fontSize,
+            lineHeight = fontSize * 1.15f,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier
+                .weight(1f)
+                .testTag(
+                    if (hasVisualOverflow) {
+                        "$testTag-label-overflow"
+                    } else {
+                        "$testTag-label"
+                    },
+                ),
+            onTextLayout = { result ->
+                hasVisualOverflow = result.hasVisualOverflow
+                if (result.hasVisualOverflow && fontSize > 11.sp) {
+                    fontSize = (fontSize.value - 0.5f).coerceAtLeast(11f).sp
+                }
+            },
         )
     }
 }

@@ -202,17 +202,12 @@ private fun CaptureCapabilityWarning(
     val configuration = LocalConfiguration.current
     val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
     val compact = rotationQuadrant % 2 == 1
-    val visibleMessage = if (compact) {
-        stringResource(R.string.camera_control_unavailable_short)
-    } else {
-        message
-    }
-    val warningWidth = if (compact) 220.dp else 304.dp
-    val warningHeight = if (compact) 88.dp else if (configuration.fontScale >= 1.3f) 176.dp else 144.dp
-    var fontSize by remember(visibleMessage, configuration.fontScale, rotationQuadrant) {
+    val warningWidth = if (compact) 320.dp else 304.dp
+    val warningHeight = if (compact) 108.dp else if (configuration.fontScale >= 1.3f) 176.dp else 144.dp
+    var fontSize by remember(message, configuration.fontScale, rotationQuadrant) {
         mutableStateOf(14.sp)
     }
-    var hasVisualOverflow by remember(visibleMessage, configuration.fontScale, rotationQuadrant) {
+    var hasVisualOverflow by remember(message, configuration.fontScale, rotationQuadrant) {
         mutableStateOf(false)
     }
     CameraReadableSlot(
@@ -242,13 +237,28 @@ private fun CaptureCapabilityWarning(
                         modifier = Modifier.size(20.dp),
                     )
                     Text(
-                        text = visibleMessage,
+                        text = message,
                         color = AppWarning,
                         fontSize = fontSize,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("capability-warning-message"),
+                        maxLines = 3,
+                        overflow = TextOverflow.Clip,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag(
+                                if (hasVisualOverflow) {
+                                    "capability-warning-message-overflow"
+                                } else {
+                                    "capability-warning-message"
+                                },
+                            ),
+                        onTextLayout = { result ->
+                            hasVisualOverflow = result.hasVisualOverflow
+                            if (result.hasVisualOverflow && fontSize > 11.sp) {
+                                fontSize = (fontSize.value - 0.5f).coerceAtLeast(11f).sp
+                            }
+                        },
                     )
                 }
             } else {
@@ -264,7 +274,7 @@ private fun CaptureCapabilityWarning(
                         modifier = Modifier.size(20.dp),
                     )
                     Text(
-                        text = visibleMessage,
+                        text = message,
                         color = AppWarning,
                         fontSize = fontSize,
                         lineHeight = fontSize * 1.2f,
