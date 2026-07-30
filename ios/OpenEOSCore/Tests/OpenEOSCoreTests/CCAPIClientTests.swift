@@ -161,7 +161,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.map(\.path), [
             "/ccapi",
             "/ccapi/ver100/topurlfordev",
-            "/ccapi/",
+            "/ccapi",
             "/ccapi/ver110/deviceinformation",
             "/ccapi/ver100/deviceinformation",
         ])
