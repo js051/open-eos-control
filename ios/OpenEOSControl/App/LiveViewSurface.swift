@@ -221,13 +221,13 @@ struct LiveViewSurface: View {
             }
             let settings = camera.monitorSettings
             let preview = activeLutPreviewFrame
-            let result = await Task.detached(priority: .utility) {
+            let result = await Task.detached(priority: .utility) { () -> LiveViewMonitorAnalysis? in
                 if let preview {
-                    analyzeLiveViewImage(preview.image, settings: settings)
+                    return analyzeLiveViewImage(preview.image, settings: settings)
                 } else if settings.cubeLut == nil {
-                    analyzeLiveViewData(data, settings: settings)
+                    return analyzeLiveViewData(data, settings: settings)
                 } else {
-                    nil
+                    return nil
                 }
             }.value
             guard !Task.isCancelled else { return }
