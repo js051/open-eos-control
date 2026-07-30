@@ -10,7 +10,7 @@ Open EOS Control 從 `main` 與 tag release 發布的 Android 開發 APK 使用�
 - 憑證 SHA-256：`c2d4ad020b223e4d854f17f41aa6fcde5177b57dacc7be70b9f2f2a07f7cfdba`
 - 第一個固定簽章版本：`0.1.5`
 
-PKCS#12 私鑰與密碼只保存在 GitHub Actions Secrets 及 repo 之外的受限本機備份。不得將它們提交到 Git、印在 log、放入 artifact 或診斷報告。Workflow 只會將 keystore 還原至 `RUNNER_TEMP`，並在上傳前驗證 APK 只有一位 signer 且指紋相符。
+PKCS#12 私鑰與密碼只保存在 GitHub Actions Secrets 及 repo 之外的受限本機備份。不得將它們提交到 Git、印在 log、放入 artifact 或診斷報告。Workflow 只會將 keystore 還原至 `RUNNER_TEMP`，並使用 `scripts/release/verify-android-apk-signing.sh` 在上傳前驗證 APK 只有一位 signer 且指紋相符。PR 也會以自己的 debug APK smoke-test 同一個 verifier，但不會讀取發行 secrets。
 
 Pull request 與一般本機建置在沒有完整提供四個 `OEC_ANDROID_SIGNING_*` 環境值時，繼續使用 Android SDK debug 憑證。這些 APK 是測試輸出，無法覆蓋更新公開的開發預覽版。
 
@@ -24,7 +24,7 @@ Open EOS Control development APKs published from `main` and tagged releases use 
 - Certificate SHA-256: `c2d4ad020b223e4d854f17f41aa6fcde5177b57dacc7be70b9f2f2a07f7cfdba`
 - First stable-signed version: `0.1.5`
 
-The private PKCS#12 keystore and passwords are stored only as GitHub Actions secrets and in a restricted local backup outside the repository. They must never be committed, printed in logs, included in artifacts, or placed in diagnostic reports. The workflows decode the keystore only into `RUNNER_TEMP`, use it for the build, and verify that the resulting APK has exactly one signer with the pinned public fingerprint before upload.
+The private PKCS#12 keystore and passwords are stored only as GitHub Actions secrets and in a restricted local backup outside the repository. They must never be committed, printed in logs, included in artifacts, or placed in diagnostic reports. The workflows decode the keystore only into `RUNNER_TEMP`, use it for the build, and run `scripts/release/verify-android-apk-signing.sh` to verify that the resulting APK has exactly one signer with the pinned public fingerprint before upload. Pull requests smoke-test the same verifier against their own debug APK without receiving release secrets.
 
 Pull-request and ordinary local builds continue to use the Android SDK debug certificate unless all four `OEC_ANDROID_SIGNING_*` environment values are explicitly supplied. Those APKs are test outputs and are not update-compatible with published development previews.
 
