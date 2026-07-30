@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertCountEquals
@@ -1338,6 +1339,8 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
         compose.onNodeWithText(resourceText(R.string.histogram)).performScrollTo().performClick()
         compose.onNodeWithText(resourceText(R.string.luma_waveform)).performScrollTo().performClick()
+        compose.onNodeWithTag("monitor-lut-options").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.load_cube_lut)).assertIsEnabled()
         compose.onNodeWithTag("monitor-zebra-options").performScrollTo().performScrollToIndex(6)
         compose.onNodeWithText(resourceText(R.string.zebra_threshold, 95)).performClick()
         compose.onNodeWithText(resourceText(R.string.false_color)).performScrollTo().performClick()
@@ -1377,6 +1380,8 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertExists()
         compose.onNodeWithText(resourceText(R.string.histogram)).assertIsNotEnabled()
         compose.onNodeWithText(resourceText(R.string.luma_waveform)).assertIsNotEnabled()
+        compose.onNodeWithTag("monitor-lut-options").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.load_cube_lut)).assertIsNotEnabled()
         compose.onNodeWithText(resourceText(R.string.frame_guide)).assertExists()
         compose.onNodeWithText(resourceText(R.string.anamorphic_desqueeze)).assertExists()
     }

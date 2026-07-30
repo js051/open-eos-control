@@ -123,4 +123,52 @@ final class LiveViewMonitoringTests: XCTestCase {
 
         XCTAssertEqual(Array(overlay[center..<(center + 4)]), [40, 197, 217, 255])
     }
+
+    func testCubeLutUsesRedFastRowsAndTrilinearInterpolation() throws {
+        let lut = try parseCubeLut(Self.invertLut, fallbackName: "fallback.cube")
+
+        XCTAssertEqual(lut.name, "Invert")
+        XCTAssertEqual(lut.size, 2)
+        let result = lut.sample(red: 0.25, green: 0.5, blue: 0.75)
+        XCTAssertEqual(result[0], 0.75, accuracy: 0.0001)
+        XCTAssertEqual(result[1], 0.5, accuracy: 0.0001)
+        XCTAssertEqual(result[2], 0.25, accuracy: 0.0001)
+    }
+
+    func testCubeLutRejectsIncompleteAndOneDimensionalFiles() {
+        XCTAssertThrowsError(try parseCubeLut("LUT_3D_SIZE 2\n0 0 0", fallbackName: "bad.cube"))
+        XCTAssertThrowsError(try parseCubeLut("LUT_1D_SIZE 2\n0 0 0\n1 1 1", fallbackName: "bad.cube"))
+    }
+
+    func testCubeLutRendersThroughCoreImage() throws {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8))
+        let source = renderer.image { context in
+            UIColor(red: 0.25, green: 0.5, blue: 0.75, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        let data = try XCTUnwrap(source.pngData())
+        let lut = try parseCubeLut(Self.invertLut, fallbackName: "invert.cube")
+
+        let result = try XCTUnwrap(renderCubeLutPreview(data: data, lut: lut))
+        let sourcePixels = try XCTUnwrap(source.cgImage)
+        let resultPixels = try XCTUnwrap(result.cgImage)
+
+        XCTAssertEqual(resultPixels.width, sourcePixels.width)
+        XCTAssertEqual(resultPixels.height, sourcePixels.height)
+    }
+
+    private static let invertLut = """
+        TITLE "Invert"
+        LUT_3D_SIZE 2
+        DOMAIN_MIN 0 0 0
+        DOMAIN_MAX 1 1 1
+        1 1 1
+        0 1 1
+        1 0 1
+        0 0 1
+        1 1 0
+        0 1 0
+        1 0 0
+        0 0 0
+        """
 }

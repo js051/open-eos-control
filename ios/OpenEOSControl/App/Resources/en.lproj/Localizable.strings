@@ -178,7 +178,14 @@
 "media_preview_unavailable" = "The camera preview could not be displayed.";
 
 "monitoring_assists" = "Monitoring assists";
-"monitoring_assists_rtp_unavailable" = "Histogram, luma waveform, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.";
+"lut_preview" = "3D LUT preview";
+"load_cube_lut" = "Load .cube LUT";
+"remove_cube_lut" = "Remove LUT";
+"no_cube_lut" = "No LUT loaded";
+"cube_lut_summary" = "%@ · %d³";
+"lut_import_failed" = "Could not load 3D LUT: %@";
+"lut_render_failed" = "The 3D LUT could not be rendered for this Live View frame.";
+"monitoring_assists_rtp_unavailable" = "Histogram, luma waveform, LUT preview, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.";
 "histogram" = "Histogram";
 "luma_waveform" = "Luma waveform";
 "zebra" = "Zebra";

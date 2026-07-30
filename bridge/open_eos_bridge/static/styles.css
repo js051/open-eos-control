@@ -575,6 +575,28 @@ input:disabled {
   image-rendering: pixelated;
 }
 
+#monitor-lut-preview {
+  z-index: 1;
+}
+
+.monitoring-lut-row {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.monitoring-lut-row > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.monitoring-lut-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .monitor-histogram,
 .monitor-waveform {
   position: absolute;

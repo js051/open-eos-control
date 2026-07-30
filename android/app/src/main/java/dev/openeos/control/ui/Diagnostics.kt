@@ -128,6 +128,9 @@ fun buildDiagnosticReport(
         appendLine("monitorFrameGuide=${state.monitorSettings.frameGuide.name}")
         appendLine("monitorSafeArea=${state.monitorSettings.safeAreaVisible}")
         appendLine("monitorDesqueeze=${state.monitorSettings.desqueeze.name}")
+        appendLine(
+            "monitorLut=${state.monitorSettings.cubeLut?.let { "loaded (${it.size}x${it.size}x${it.size})" } ?: "off"}"
+        )
         appendLine("observedFps=${String.format(Locale.US, "%.1f", live.observedFps)}")
         appendLine("frameBytes=${live.frameBytes ?: "unknown"}")
         appendLine("contentType=${live.contentType ?: "unknown"}")

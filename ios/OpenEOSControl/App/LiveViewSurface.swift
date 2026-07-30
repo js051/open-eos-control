@@ -1,4 +1,5 @@
 import AVFoundation
+import Foundation
 import OpenEOSCore
 import SwiftUI
 import UIKit
@@ -6,11 +7,14 @@ import UIKit
 struct LiveViewSurface: View {
     @EnvironmentObject private var camera: CameraAppState
     @State private var monitorAnalysis: LiveViewMonitorAnalysis?
+    @State private var lutPreviewFrame: LiveViewLutPreviewFrame?
+    @State private var lutPreviewWorker = LiveViewLutPreviewWorker()
 
     var body: some View {
         GeometryReader { proxy in
-            let image = camera.liveViewData.flatMap(UIImage.init(data:))
-            let sourceSize = image?.size ?? (camera.activeLiveViewSource == .ccapiRTP ? camera.nativeLiveViewSize : nil)
+            let sourceImage = camera.liveViewData.flatMap(UIImage.init(data:))
+            let image = activeLutPreviewFrame?.image ?? sourceImage
+            let sourceSize = sourceImage?.size ?? (camera.activeLiveViewSource == .ccapiRTP ? camera.nativeLiveViewSize : nil)
             let contentSize = sourceSize.map {
                 CGSize(
                     width: $0.width * camera.monitorSettings.desqueeze.horizontalScale,
@@ -183,6 +187,31 @@ struct LiveViewSurface: View {
                 }
             )
         }
+        .task(id: lutPreviewTaskID) {
+            guard pixelMonitoringAvailable,
+                  let data = camera.liveViewData,
+                  let lut = camera.monitorSettings.cubeLut else {
+                lutPreviewWorker.discardPending()
+                lutPreviewFrame = nil
+                return
+            }
+            let timestamp = camera.lastFrameAt
+            let result = await lutPreviewWorker.renderLatest(data: data, lut: lut, frameTimestamp: timestamp)
+            guard !Task.isCancelled else { return }
+            switch result {
+            case let .rendered(frame):
+                guard frame.frameTimestamp == camera.lastFrameAt,
+                      frame.lutID == camera.monitorSettings.cubeLut?.id else { return }
+                lutPreviewFrame = frame
+            case .failed:
+                guard timestamp == camera.lastFrameAt,
+                      lut.id == camera.monitorSettings.cubeLut?.id else { return }
+                lutPreviewFrame = nil
+                camera.reportCubeLutRenderFailure()
+            case .superseded:
+                break
+            }
+        }
         .task(id: monitorAnalysisTaskID) {
             guard pixelMonitoringAvailable,
                   camera.monitorSettings.needsPixelAnalysis,
@@ -191,8 +220,15 @@ struct LiveViewSurface: View {
                 return
             }
             let settings = camera.monitorSettings
-            let result = await Task.detached(priority: .utility) {
-                analyzeLiveViewData(data, settings: settings)
+            let preview = activeLutPreviewFrame
+            let result = await Task.detached(priority: .utility) { () -> LiveViewMonitorAnalysis? in
+                if let preview {
+                    return analyzeLiveViewImage(preview.image, settings: settings)
+                } else if settings.cubeLut == nil {
+                    return analyzeLiveViewData(data, settings: settings)
+                } else {
+                    return nil
+                }
             }.value
             guard !Task.isCancelled else { return }
             monitorAnalysis = result
@@ -209,8 +245,24 @@ struct LiveViewSurface: View {
         LiveViewMonitorTaskID(
             frameTimestamp: camera.lastFrameAt,
             settings: camera.monitorSettings,
+            pixelMonitoringAvailable: pixelMonitoringAvailable,
+            lutPreviewID: activeLutPreviewFrame?.id
+        )
+    }
+
+    private var lutPreviewTaskID: LiveViewLutTaskID {
+        LiveViewLutTaskID(
+            frameTimestamp: camera.lastFrameAt,
+            lutID: camera.monitorSettings.cubeLut?.id,
             pixelMonitoringAvailable: pixelMonitoringAvailable
         )
+    }
+
+    private var activeLutPreviewFrame: LiveViewLutPreviewFrame? {
+        guard let frame = lutPreviewFrame,
+              frame.frameTimestamp == camera.lastFrameAt,
+              frame.lutID == camera.monitorSettings.cubeLut?.id else { return nil }
+        return frame
     }
 
     private var offlineSurface: some View {
@@ -252,6 +304,97 @@ private struct LiveViewMonitorTaskID: Hashable {
     let frameTimestamp: Date?
     let settings: LiveViewMonitorSettings
     let pixelMonitoringAvailable: Bool
+    let lutPreviewID: UUID?
+}
+
+private struct LiveViewLutTaskID: Hashable {
+    let frameTimestamp: Date?
+    let lutID: UUID?
+    let pixelMonitoringAvailable: Bool
+}
+
+private struct LiveViewLutPreviewFrame: Identifiable, @unchecked Sendable {
+    let id = UUID()
+    let frameTimestamp: Date?
+    let lutID: UUID
+    let image: UIImage
+}
+
+private enum LiveViewLutWorkerResult: @unchecked Sendable {
+    case rendered(LiveViewLutPreviewFrame)
+    case failed
+    case superseded
+}
+
+private final class LiveViewLutPreviewWorker: @unchecked Sendable {
+    private struct Request: @unchecked Sendable {
+        let data: Data
+        let lut: CubeLut
+        let frameTimestamp: Date?
+        let continuation: CheckedContinuation<LiveViewLutWorkerResult, Never>
+    }
+
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "dev.openeos.control.live-view-lut", qos: .userInitiated)
+    private var pending: Request?
+    private var running = false
+
+    func renderLatest(data: Data, lut: CubeLut, frameTimestamp: Date?) async -> LiveViewLutWorkerResult {
+        await withCheckedContinuation { continuation in
+            let request = Request(
+                data: data,
+                lut: lut,
+                frameTimestamp: frameTimestamp,
+                continuation: continuation
+            )
+            lock.lock()
+            let superseded = pending
+            pending = request
+            let shouldStart = !running
+            if shouldStart { running = true }
+            lock.unlock()
+            superseded?.continuation.resume(returning: .superseded)
+            if shouldStart { queue.async { self.processRequests() } }
+        }
+    }
+
+    func discardPending() {
+        lock.lock()
+        let discarded = pending
+        pending = nil
+        lock.unlock()
+        discarded?.continuation.resume(returning: .superseded)
+    }
+
+    private func processRequests() {
+        while true {
+            lock.lock()
+            guard let request = pending else {
+                running = false
+                lock.unlock()
+                return
+            }
+            pending = nil
+            lock.unlock()
+
+            let image = autoreleasepool {
+                renderCubeLutPreview(data: request.data, lut: request.lut)
+            }
+            if let image {
+                request.continuation.resume(
+                    returning: .rendered(
+                        LiveViewLutPreviewFrame(
+                            frameTimestamp: request.frameTimestamp,
+                            lutID: request.lut.id,
+                            image: image
+                        )
+                    )
+                )
+            } else {
+                request.continuation.resume(returning: .failed)
+            }
+        }
+    }
 }
 
 private final class IOSCcapiRTPVideoView: UIView {

@@ -262,6 +262,43 @@ async function run() {
       const waveform = document.querySelector("#monitor-waveform");
       return histogram.hidden && !waveform.hidden && waveform.width > 0 && waveform.height > 0;
     });
+    await page.click("#monitoring-button");
+    await page.waitForSelector("#monitoring-dialog[open]");
+    await page.setInputFiles("#monitor-lut-file", {
+      name: "browser-private-name.cube",
+      mimeType: "text/plain",
+      buffer: Buffer.from([
+        'TITLE "Browser Invert"',
+        "LUT_3D_SIZE 2",
+        "1 1 1", "0 1 1", "1 0 1", "0 0 1",
+        "1 1 0", "0 1 0", "1 0 0", "0 0 0",
+      ].join("\n")),
+    });
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector("#monitor-lut-preview");
+      return !canvas.hidden && canvas.width > 0 && canvas.height > 0;
+    });
+    assert.match(await page.locator("#monitor-lut-summary").innerText(), /Browser Invert/);
+    const lutPixel = await page.evaluate(() => {
+      const canvas = document.querySelector("#monitor-lut-preview");
+      const gl = canvas.getContext("webgl2");
+      const pixel = new Uint8Array(4);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.readPixels(
+        Math.floor(canvas.width / 2),
+        Math.floor(canvas.height / 2),
+        1,
+        1,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        pixel,
+      );
+      return Array.from(pixel);
+    });
+    const expectedInvertedBackgrounds = [[238, 235, 233], [223, 59, 52]];
+    assert.ok(expectedInvertedBackgrounds.some((expected) => expected.every((value, index) =>
+      Math.abs(lutPixel[index] - value) <= 16)), `Unexpected post-LUT pixel: ${lutPixel}`);
+    await page.click("#monitoring-dialog-close");
 
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
     await page.screenshot({ path: path.join(RESULTS_DIR, "local-video-desktop.png") });
@@ -275,13 +312,20 @@ async function run() {
     const narrowLayout = await page.evaluate(() => {
       const viewfinder = document.querySelector("#viewfinder").getBoundingClientRect();
       const video = document.querySelector("#local-video").getBoundingClientRect();
+      const lutPreview = document.querySelector("#monitor-lut-preview").getBoundingClientRect();
       return {
         noPageOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
         videoInsideViewfinder: video.left >= viewfinder.left && video.top >= viewfinder.top &&
           video.right <= viewfinder.right && video.bottom <= viewfinder.bottom,
+        lutInsideViewfinder: lutPreview.left >= viewfinder.left && lutPreview.top >= viewfinder.top &&
+          lutPreview.right <= viewfinder.right && lutPreview.bottom <= viewfinder.bottom,
       };
     });
-    assert.deepEqual(narrowLayout, { noPageOverflow: true, videoInsideViewfinder: true });
+    assert.deepEqual(narrowLayout, {
+      noPageOverflow: true,
+      videoInsideViewfinder: true,
+      lutInsideViewfinder: true,
+    });
     await page.screenshot({ path: path.join(RESULTS_DIR, "local-video-narrow.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -312,6 +356,9 @@ async function run() {
     assert.equal(report.liveView.monitoring.analysisError, null);
     assert.equal(report.liveView.monitoring.histogramVisible, false);
     assert.equal(report.liveView.monitoring.waveformVisible, true);
+    assert.deepEqual(report.liveView.monitoring.lut, { loaded: true, size: 2 });
+    assert.equal(reportText.includes("browser-private-name"), false);
+    assert.equal(reportText.includes("Browser Invert"), false);
     assert.equal(reportText.includes("private-test-device-id"), false);
     assert.equal(reportText.includes("private-test-group-id"), false);
     assert.equal(reportText.includes("Test HDMI capture"), false);

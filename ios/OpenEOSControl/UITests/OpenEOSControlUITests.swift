@@ -121,8 +121,12 @@ final class OpenEOSControlUITests: XCTestCase {
         let unavailable = app.descendants(matching: .any)["monitor-pixel-analysis-unavailable"]
         XCTAssertTrue(unavailable.waitForExistence(timeout: 3))
         XCTAssertTrue(unavailable.label.localizedCaseInsensitiveContains("luma waveform"))
+        XCTAssertTrue(unavailable.label.localizedCaseInsensitiveContains("LUT preview"))
         XCTAssertFalse(app.switches["monitor-histogram"].isEnabled)
         XCTAssertFalse(app.switches["monitor-waveform"].isEnabled)
+        let lutImport = app.buttons["monitor-lut-import"]
+        XCTAssertTrue(lutImport.waitForExistence(timeout: 3))
+        XCTAssertFalse(lutImport.isEnabled)
         let safeArea = app.switches["monitor-safe-area"]
         XCTAssertTrue(safeArea.isEnabled)
         safeArea.tap()

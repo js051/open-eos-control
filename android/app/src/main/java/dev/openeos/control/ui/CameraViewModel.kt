@@ -128,6 +128,39 @@ class CameraViewModel(
 
     fun setDesqueeze(desqueeze: LiveViewDesqueeze) = updateMonitorSettings { copy(desqueeze = desqueeze) }
 
+    fun importCubeLut(name: String, text: String) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.Default) { runCatching { parseCubeLut(text, name) } }
+            result.fold(
+                onSuccess = { lut ->
+                    _uiState.update {
+                        it.copy(
+                            monitorSettings = it.monitorSettings.copy(cubeLut = lut),
+                            error = null,
+                            errorOperation = null,
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _uiState.update {
+                        it.copy(
+                            error = "3D LUT: ${error.message ?: error::class.java.simpleName}",
+                            errorOperation = CameraOperation.LIVE_VIEW,
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    fun clearCubeLut() = updateMonitorSettings { copy(cubeLut = null) }
+
+    fun reportCubeLutError(message: String) {
+        _uiState.update {
+            it.copy(error = "3D LUT: $message", errorOperation = CameraOperation.LIVE_VIEW)
+        }
+    }
+
     private fun updateMonitorSettings(update: LiveViewMonitorSettings.() -> LiveViewMonitorSettings) {
         _uiState.update { it.copy(monitorSettings = it.monitorSettings.update()) }
     }
