@@ -29,6 +29,7 @@ internal class CameraOrientationPolicy {
 
     fun onSensorOrientation(sensorDegrees: Int, systemAutoRotationEnabled: Boolean) {
         setSystemAutoRotation(systemAutoRotationEnabled)
+        if (!systemAutoRotationEnabled) return
         onSensorOrientation(sensorDegrees)
     }
 
@@ -92,3 +93,4 @@ private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % mod
 
 val LocalCameraControlRotation = staticCompositionLocalOf { 0f }
 val LocalCameraControlTargetRotation = staticCompositionLocalOf { 0f }
+val LocalCameraContentRotationHandled = staticCompositionLocalOf { false }

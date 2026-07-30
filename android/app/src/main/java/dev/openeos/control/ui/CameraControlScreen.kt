@@ -196,13 +196,22 @@ private fun CaptureCapabilityWarning(
     )
     val configuration = LocalConfiguration.current
     val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
-    val warningHeight = if (configuration.fontScale >= 1.3f) 176.dp else 144.dp
-    var fontSize by remember(message, configuration.fontScale, rotationQuadrant) { mutableStateOf(14.sp) }
-    var hasVisualOverflow by remember(message, configuration.fontScale, rotationQuadrant) {
+    val compact = rotationQuadrant % 2 == 1
+    val visibleMessage = if (compact) {
+        stringResource(R.string.camera_control_unavailable_short)
+    } else {
+        message
+    }
+    val warningWidth = if (compact) 220.dp else 304.dp
+    val warningHeight = if (compact) 88.dp else if (configuration.fontScale >= 1.3f) 176.dp else 144.dp
+    var fontSize by remember(visibleMessage, configuration.fontScale, rotationQuadrant) {
+        mutableStateOf(14.sp)
+    }
+    var hasVisualOverflow by remember(visibleMessage, configuration.fontScale, rotationQuadrant) {
         mutableStateOf(false)
     }
     CameraReadableSlot(
-        width = 304.dp,
+        width = warningWidth,
         height = warningHeight,
         modifier = modifier
             .testTag("capability-warning-rotation")
@@ -214,40 +223,65 @@ private fun CaptureCapabilityWarning(
             shape = RoundedCornerShape(6.dp),
             color = Color.Black.copy(alpha = 0.78f),
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(
-                    painterResource(LucideR.drawable.lucide_ic_triangle_alert),
-                    contentDescription = null,
-                    tint = AppWarning,
-                    modifier = Modifier.size(20.dp),
-                )
-                Text(
-                    text = message,
-                    color = AppWarning,
-                    fontSize = fontSize,
-                    lineHeight = fontSize * 1.2f,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 5,
-                    overflow = TextOverflow.Clip,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.testTag(
-                        if (hasVisualOverflow) {
-                            "capability-warning-message-overflow"
-                        } else {
-                            "capability-warning-message"
+            val contentModifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp)
+            if (compact) {
+                Row(
+                    modifier = contentModifier,
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                ) {
+                    Icon(
+                        painterResource(LucideR.drawable.lucide_ic_triangle_alert),
+                        contentDescription = null,
+                        tint = AppWarning,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = visibleMessage,
+                        color = AppWarning,
+                        fontSize = fontSize,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("capability-warning-message"),
+                    )
+                }
+            } else {
+                Column(
+                    modifier = contentModifier,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        painterResource(LucideR.drawable.lucide_ic_triangle_alert),
+                        contentDescription = null,
+                        tint = AppWarning,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = visibleMessage,
+                        color = AppWarning,
+                        fontSize = fontSize,
+                        lineHeight = fontSize * 1.2f,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 5,
+                        overflow = TextOverflow.Clip,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.testTag(
+                            if (hasVisualOverflow) {
+                                "capability-warning-message-overflow"
+                            } else {
+                                "capability-warning-message"
+                            },
+                        ),
+                        onTextLayout = { result ->
+                            hasVisualOverflow = result.hasVisualOverflow
+                            if (result.hasVisualOverflow && fontSize > 11.sp) {
+                                fontSize = (fontSize.value - 0.5f).coerceAtLeast(11f).sp
+                            }
                         },
-                    ),
-                    onTextLayout = { result ->
-                        hasVisualOverflow = result.hasVisualOverflow
-                        if (result.hasVisualOverflow && fontSize > 11.sp) {
-                            fontSize = (fontSize.value - 0.5f).coerceAtLeast(11f).sp
-                        }
-                    },
-                )
+                    )
+                }
             }
         }
     }
