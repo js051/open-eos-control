@@ -434,7 +434,7 @@ jobs:
             -derivedDataPath .derived-data \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO \
-            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) OEC_REQUIRE_SIMULATOR_E2E' \
+            "SWIFT_ACTIVE_COMPILATION_CONDITIONS=\$(inherited) OEC_REQUIRE_SIMULATOR_E2E" \
             test
 
       - name: Upload iOS test results
