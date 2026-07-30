@@ -97,8 +97,6 @@ import kotlin.math.roundToInt
 fun CameraControlScreen(
     state: CameraUiState,
     actions: CameraActions,
-    controlOrientationMode: CameraControlOrientationMode = CameraControlOrientationMode.FOLLOW_SYSTEM,
-    systemAutoRotationEnabled: Boolean = false,
 ) {
     Box(
         Modifier
@@ -123,7 +121,7 @@ fun CameraControlScreen(
     ) {
         StableCameraControls(state, actions)
     }
-    SettingSheets(state, actions, controlOrientationMode, systemAutoRotationEnabled)
+    SettingSheets(state, actions)
 }
 
 @Composable
@@ -387,8 +385,6 @@ internal fun cameraHudHeight(): Dp {
 private fun SettingSheets(
     state: CameraUiState,
     actions: CameraActions,
-    controlOrientationMode: CameraControlOrientationMode,
-    systemAutoRotationEnabled: Boolean,
 ) {
     when (state.activeSettingPicker) {
         SettingPicker.ISO,
@@ -399,76 +395,8 @@ private fun SettingSheets(
         SettingPicker.LIVE_VIEW -> LiveViewSettingsSheet(state, actions)
         SettingPicker.MONITOR -> MonitoringAssistSheet(state, actions)
         SettingPicker.MORE -> MoreSettingsSheet(state, actions)
-        SettingPicker.ORIENTATION -> OrientationSettingsSheet(
-            mode = controlOrientationMode,
-            systemAutoRotationEnabled = systemAutoRotationEnabled,
-            actions = actions,
-        )
         SettingPicker.LANGUAGE -> Unit
         null -> Unit
-    }
-}
-
-@Composable
-private fun OrientationSettingsSheet(
-    mode: CameraControlOrientationMode,
-    systemAutoRotationEnabled: Boolean,
-    actions: CameraActions,
-) {
-    CameraSettingsSurface(onDismissRequest = actions.closePicker) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            SettingsSheetTitle(stringResource(R.string.control_orientation), actions.closePicker)
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(40.dp)
-                    .testTag("system-auto-rotation-status"),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(R.string.system_auto_rotation), Modifier.weight(1f), color = AppSubtleText)
-                Text(
-                    stringResource(
-                        if (systemAutoRotationEnabled) R.string.system_auto_rotation_on
-                        else R.string.system_auto_rotation_off,
-                    ),
-                    color = if (systemAutoRotationEnabled) AppSuccess else AppWarning,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            CameraControlOrientationMode.entries.forEach { option ->
-                val selected = option == mode
-                Button(
-                    onClick = { actions.setControlOrientationMode(option) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (selected) AppAccent else AppSurfaceHigh,
-                        contentColor = if (selected) AppBackground else AppText,
-                    ),
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("orientation-mode-${option.name}"),
-                ) {
-                    Text(
-                        stringResource(
-                            when (option) {
-                                CameraControlOrientationMode.FOLLOW_SYSTEM -> R.string.orientation_follow_system
-                                CameraControlOrientationMode.ALWAYS_ROTATE -> R.string.orientation_always_rotate
-                                CameraControlOrientationMode.KEEP_FIXED -> R.string.orientation_keep_fixed
-                            },
-                        ),
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-                    )
-                }
-            }
-        }
     }
 }
 

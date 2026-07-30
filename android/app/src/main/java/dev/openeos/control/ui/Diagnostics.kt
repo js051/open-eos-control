@@ -20,7 +20,6 @@ data class DiagnosticValidationSummary(
 data class DiagnosticReportMetadata(
     val productVersion: String = "unknown",
     val generatedAt: String = Instant.now().toString(),
-    val controlOrientationMode: CameraControlOrientationMode? = null,
     val systemAutoRotationEnabled: Boolean? = null,
     val controlRotationDegrees: Float? = null,
 )
@@ -69,7 +68,7 @@ fun buildDiagnosticReport(
         appendLine("reportSchema=$DIAGNOSTIC_REPORT_SCHEMA")
         appendLine("generatedAt=${metadata.generatedAt}")
         appendLine("productVersion=${metadata.productVersion}")
-        appendLine("controlOrientationMode=${metadata.controlOrientationMode?.name ?: "unknown"}")
+        appendLine("controlOrientationMode=FOLLOW_SYSTEM")
         appendLine("systemAutoRotationEnabled=${metadata.systemAutoRotationEnabled ?: "unknown"}")
         appendLine("controlRotationDegrees=${metadata.controlRotationDegrees ?: "unknown"}")
         appendLine("camera=${state.info?.model ?: "unknown"}")

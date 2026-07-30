@@ -48,7 +48,6 @@ class DiagnosticsTest {
         val report = buildDiagnosticReport(
             state = CameraUiState(),
             metadata = DiagnosticReportMetadata(
-                controlOrientationMode = CameraControlOrientationMode.FOLLOW_SYSTEM,
                 systemAutoRotationEnabled = false,
                 controlRotationDegrees = -90f,
             ),

@@ -9,26 +9,6 @@ import java.util.Locale
 
 class CameraOrientationTest {
     @Test
-    fun cameraControlOrientationModesResolveAgainstTheSystemSetting() {
-        assertEquals(
-            false,
-            shouldRotateCameraControls(CameraControlOrientationMode.FOLLOW_SYSTEM, false),
-        )
-        assertEquals(
-            true,
-            shouldRotateCameraControls(CameraControlOrientationMode.FOLLOW_SYSTEM, true),
-        )
-        assertEquals(
-            true,
-            shouldRotateCameraControls(CameraControlOrientationMode.ALWAYS_ROTATE, false),
-        )
-        assertEquals(
-            false,
-            shouldRotateCameraControls(CameraControlOrientationMode.KEEP_FIXED, true),
-        )
-    }
-
-    @Test
     fun onlyTheDocumentedSystemSettingValueEnablesAutoRotation() {
         assertEquals(false, isSystemAutoRotationSettingEnabled(0))
         assertEquals(true, isSystemAutoRotationSettingEnabled(1))

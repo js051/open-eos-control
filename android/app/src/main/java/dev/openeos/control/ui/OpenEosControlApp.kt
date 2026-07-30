@@ -34,9 +34,7 @@ fun OpenEosControlApp(
     viewModel: CameraViewModel = viewModel(),
     controlRotationDegrees: Float = 0f,
     animateControlRotation: Boolean = true,
-    controlOrientationMode: CameraControlOrientationMode = CameraControlOrientationMode.FOLLOW_SYSTEM,
     systemAutoRotationEnabled: Boolean = false,
-    onControlOrientationModeChanged: (CameraControlOrientationMode) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -122,7 +120,6 @@ fun OpenEosControlApp(
             viewModel.closeSettingPicker()
             AppLanguageManager.set(language)
         },
-        setControlOrientationMode = onControlOrientationModeChanged,
         clearError = viewModel::clearError,
     )
 
@@ -141,7 +138,6 @@ fun OpenEosControlApp(
                     DebugScreen(
                         state = state,
                         actions = actions,
-                        controlOrientationMode = controlOrientationMode,
                         systemAutoRotationEnabled = systemAutoRotationEnabled,
                         controlRotationDegrees = controlRotationDegrees,
                     )
@@ -149,8 +145,6 @@ fun OpenEosControlApp(
                     CameraControlScreen(
                         state = state,
                         actions = actions,
-                        controlOrientationMode = controlOrientationMode,
-                        systemAutoRotationEnabled = systemAutoRotationEnabled,
                     )
                 }
                 Box(Modifier.align(Alignment.BottomCenter)) {
@@ -258,6 +252,5 @@ data class CameraActions(
     val setLiveViewSize: (LiveViewSize) -> Unit,
     val setLiveViewSource: (LiveViewSource) -> Unit,
     val setAppLanguage: (AppLanguage) -> Unit,
-    val setControlOrientationMode: (CameraControlOrientationMode) -> Unit = {},
     val clearError: () -> Unit,
 )
