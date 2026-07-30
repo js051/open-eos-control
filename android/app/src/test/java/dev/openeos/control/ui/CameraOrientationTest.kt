@@ -74,6 +74,20 @@ class CameraOrientationTest {
     }
 
     @Test
+    fun sensorSamplesWhileRotationIsLockedAreNotReusedAfterUnlocking() {
+        val policy = CameraOrientationPolicy()
+
+        policy.onSensorOrientation(sensorDegrees = 90, systemAutoRotationEnabled = false)
+        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.setSystemAutoRotation(true)
+        assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
+
+        policy.onSensorOrientation(90)
+        assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
+    }
+
+    @Test
     fun orientationListenerRunsOnlyWhileSystemAutoRotationIsEnabled() {
         val policy = CameraOrientationPolicy()
 

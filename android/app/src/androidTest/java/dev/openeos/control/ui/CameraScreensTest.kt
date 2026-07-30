@@ -3,6 +3,10 @@ package dev.openeos.control.ui
 import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -262,7 +266,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnRemeasuresLongCopyAsWideLandscapeContent() {
+    fun quarterTurnUsesACompactReadableCameraState() {
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
@@ -278,10 +282,7 @@ class CameraScreensTest {
             }
         }
 
-        val previewHintBounds = compose
-            .onNodeWithText(resourceText(R.string.offline_preview_hint))
-            .fetchSemanticsNode()
-            .boundsInRoot
+        compose.onAllNodesWithText(resourceText(R.string.offline_preview_hint)).assertCountEquals(0)
         val previewTitleBounds = compose
             .onNodeWithText(resourceText(R.string.offline_preview))
             .fetchSemanticsNode()
@@ -319,11 +320,7 @@ class CameraScreensTest {
             previewTitleBounds.height > previewTitleBounds.width,
         )
         assertTrue(
-            "Wide landscape guidance should remain readable after rotation: $previewHintBounds",
-            previewHintBounds.height > previewHintBounds.width,
-        )
-        assertTrue(
-            "Sideways guidance should use a wide icon-and-copy layout before rotation",
+            "Sideways camera state should keep its icon and short title separated",
             kotlin.math.abs(previewIconBounds.center.y - previewTitleBounds.center.y) > 24f,
         )
         assertTrue(
@@ -377,7 +374,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnKeepsLargeLocalizedCopyInsideTheLiveViewViewport() {
+    fun quarterTurnKeepsCompactLocalizedCopyInsideTheLiveViewViewport() {
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
@@ -403,10 +400,6 @@ class CameraScreensTest {
             .onNodeWithTag("offline-preview-content", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInRoot
-        val hint = compose
-            .onNodeWithText(resourceText(R.string.offline_preview_hint))
-            .fetchSemanticsNode()
-            .boundsInRoot
         val modelSlot = compose
             .onNodeWithTag("camera-model-status")
             .fetchSemanticsNode()
@@ -415,15 +408,14 @@ class CameraScreensTest {
             .onNodeWithTag("camera-name", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInRoot
-        listOf(content, hint).forEach { bounds ->
-            assertTrue(
-                "Rotated large text $bounds must stay inside the orientation-aware viewport $viewport",
-                bounds.left >= viewport.left &&
-                    bounds.top >= viewport.top &&
-                    bounds.right <= viewport.right &&
-                    bounds.bottom <= viewport.bottom,
-            )
-        }
+        assertTrue(
+            "Rotated compact state $content must stay inside the orientation-aware viewport $viewport",
+            content.left >= viewport.left &&
+                content.top >= viewport.top &&
+                content.right <= viewport.right &&
+                content.bottom <= viewport.bottom,
+        )
+        compose.onAllNodesWithText(resourceText(R.string.offline_preview_hint)).assertCountEquals(0)
         compose.onNodeWithText("R6 III").assertIsDisplayed()
         compose.onNodeWithText("82%").assertIsDisplayed()
         compose.onNodeWithText("2,418").assertIsDisplayed()
@@ -1043,7 +1035,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnCapabilityWarningKeepsItsFullMessageVisibleInTheViewfinder() {
+    fun quarterTurnCapabilityWarningUsesACompactReadableMessage() {
         val message = resourceText(R.string.capture_not_supported)
         val base = connectedState()
         val state = base.copy(
@@ -1070,7 +1062,9 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithTag("capability-warning-surface", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText(message).assertIsDisplayed()
+        compose.onAllNodesWithText(message).assertCountEquals(0)
+        compose.onNodeWithText(resourceText(R.string.camera_control_unavailable_short)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(message).assertIsDisplayed()
         compose.onNodeWithTag("capability-warning-message", useUnmergedTree = true).assertIsDisplayed()
         compose.onAllNodesWithTag("capability-warning-message-overflow", useUnmergedTree = true)
             .assertCountEquals(0)
@@ -1115,6 +1109,42 @@ class CameraScreensTest {
                 warningBounds.left >= magnificationBounds.right ||
                 warningBounds.bottom <= magnificationBounds.top ||
                 warningBounds.top >= magnificationBounds.bottom,
+        )
+    }
+
+    @Test
+    fun quarterTurnKeepsLongErrorsInsideACompactReadableNotice() {
+        val message = "Camera request failed after checking every advertised CCAPI endpoint."
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                CompositionLocalProvider(
+                    LocalCameraControlRotation provides -90f,
+                    LocalCameraControlTargetRotation provides -90f,
+                ) {
+                    MaterialTheme {
+                        Box(Modifier.fillMaxSize()) {
+                            Box(Modifier.align(Alignment.BottomCenter)) {
+                                ErrorBanner(message, onDismiss = {})
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        compose.onNodeWithText(message).assertIsDisplayed()
+        val notice = compose
+            .onNodeWithTag("camera-error-rotation", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val copy = compose.onNodeWithText(message).fetchSemanticsNode().boundsInRoot
+        assertTrue("Side-facing error notice should remain wide to the user: $notice", notice.height > notice.width)
+        assertTrue(
+            "Long error copy $copy must stay inside its stable notice $notice",
+            copy.left >= notice.left && copy.top >= notice.top &&
+                copy.right <= notice.right && copy.bottom <= notice.bottom,
         )
     }
 

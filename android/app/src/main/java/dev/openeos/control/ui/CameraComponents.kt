@@ -357,8 +357,9 @@ private fun CameraModelIndicator(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    CameraRotatingSlot(
-        modifier
+    CameraRotatingSquareSlot(
+        size = 56.dp,
+        modifier = modifier
             .testTag("camera-model-status")
             .clickable(onClick = onClick)
             .semantics { contentDescription = description; role = Role.Button },
@@ -389,8 +390,9 @@ private fun CameraStatusIndicator(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    CameraRotatingSlot(
-        modifier
+    CameraRotatingSquareSlot(
+        size = 52.dp,
+        modifier = modifier
             .testTag(testTag)
             .clickable(onClick = onClick)
             .semantics { contentDescription = description; role = Role.Button },
@@ -852,14 +854,14 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
-                val useWideCopy = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
+                val compactCopy = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
                 CameraRotatingSlot(
                     Modifier
                         .fillMaxSize()
                         .testTag("offline-preview-viewport"),
                     animateRotation = false,
                 ) {
-                    OfflinePreviewCopy(useWideCopy)
+                    OfflinePreviewCopy(compactCopy)
                 }
             }
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
@@ -1350,27 +1352,20 @@ private fun BulbExposureIndicator(startedAtMillis: Long?, modifier: Modifier = M
 }
 
 @Composable
-private fun OfflinePreviewCopy(useWideLayout: Boolean) {
+private fun OfflinePreviewCopy(compact: Boolean) {
     val title = stringResource(R.string.offline_preview)
     val hint = stringResource(R.string.offline_preview_hint)
-    if (useWideLayout) {
+    if (compact) {
         Row(
             modifier = Modifier
-                .fillMaxWidth(0.9f)
-                .widthIn(max = 680.dp)
-                .padding(horizontal = 24.dp)
+                .widthIn(max = 360.dp)
+                .padding(horizontal = 16.dp)
                 .testTag("offline-preview-content"),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            OfflinePreviewIcon(48.dp)
-            Column(
-                Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OfflinePreviewTitle(title, TextAlign.Start)
-                OfflinePreviewHint(hint, TextAlign.Start)
-            }
+            OfflinePreviewIcon(40.dp)
+            OfflinePreviewTitle(title, TextAlign.Start)
         }
         return
     }
@@ -1443,30 +1438,33 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    CameraRotatingSlot(
+    Box(
         Modifier
             .weight(1f)
             .fillMaxSize()
             .testTag("exposure-control-${picker.name}")
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(
-            Modifier
-                .widthIn(max = 76.dp)
-                .testTag("exposure-content-${picker.name}"),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(label, color = AppMutedText, maxLines = 1)
-            Text(
-                value,
-                color = if (enabled) AppText else AppMutedText,
-                fontSize = 17.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        CameraRotatingSquareSlot(size = 72.dp) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .testTag("exposure-content-${picker.name}"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(label, color = AppMutedText, maxLines = 1)
+                Text(
+                    value,
+                    color = if (enabled) AppText else AppMutedText,
+                    fontSize = 17.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -1528,11 +1526,30 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
 @Composable
 fun ErrorBanner(error: String?, onDismiss: () -> Unit) {
     if (error == null) return
-    Row(
-        Modifier.fillMaxWidth().navigationBarsPadding().background(Color(0xFF512326)).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    CameraReadableSlot(
+        width = 328.dp,
+        height = 112.dp,
+        modifier = Modifier
+            .navigationBarsPadding()
+            .padding(8.dp)
+            .testTag("camera-error-rotation"),
+        animateRotation = false,
     ) {
-        Text(error, color = AppText, modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
-        ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), onDismiss)
+        Row(
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xFF512326), RoundedCornerShape(6.dp))
+                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                error,
+                color = AppText,
+                modifier = Modifier.weight(1f),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), onDismiss)
+        }
     }
 }
