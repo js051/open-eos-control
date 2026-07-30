@@ -139,7 +139,7 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions builds an unsigned Simulator app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises English portrait/landscape control, media download, confirmation-gated media deletion, Traditional Chinese connection, and Desktop Bridge connection-form flows on an iPhone Simulator. The workflow intentionally sets `CODE_SIGNING_ALLOWED=NO`, so this build cannot be installed on a physical iPhone and is not published as an IPA. This does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
+GitHub Actions builds an unsigned Simulator app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises seven iPhone Simulator UI workflows. In addition to the offline English/Traditional Chinese, orientation, media, monitoring, and Desktop Bridge states, a required network end-to-end workflow starts the real fake-camera service and drives the production SwiftUI -> `CameraAppState` -> `OpenEOSCore` -> CCAPI HTTP path through decoded Live View, ISO control, still capture, recording, media refresh, and disconnect. The workflow intentionally sets `CODE_SIGNING_ALLOWED=NO`, so this build cannot be installed on a physical iPhone and is not published as an IPA. Deterministic Simulator evidence does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
 
 ## Desktop Bridge
 

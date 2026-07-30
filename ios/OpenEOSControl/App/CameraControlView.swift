@@ -91,6 +91,7 @@ private struct CameraOverlayHeader: View {
                         .lineLimit(1)
                 }
             }
+            .accessibilityIdentifier("camera-model-status")
             Spacer(minLength: 4)
             RotatingControl(degrees: controlRotation) {
                 HStack(spacing: 4) {

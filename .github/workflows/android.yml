@@ -351,6 +351,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       - name: Install XcodeGen
         run: command -v xcodegen >/dev/null || brew install xcodegen
 
@@ -388,6 +393,22 @@ jobs:
             exit 1
           fi
 
+      - name: Start fake camera for iOS end-to-end tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e "../../simulator"
+          nohup python -m uvicorn main:app --host 0.0.0.0 --port 18080 \
+            > "$RUNNER_TEMP/ios-camera-simulator.log" 2>&1 &
+          for _ in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/ios-camera-simulator.log"
+          exit 1
+
       - name: Select iPhone simulator
         id: simulator
         run: |
@@ -413,6 +434,7 @@ jobs:
             -derivedDataPath .derived-data \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) OEC_REQUIRE_SIMULATOR_E2E' \
             test
 
       - name: Upload iOS test results
@@ -420,6 +442,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-test-results
-          path: ios/OpenEOSControl/TestResults.xcresult
+          path: |
+            ios/OpenEOSControl/TestResults.xcresult
+            ${{ runner.temp }}/ios-camera-simulator.log
           if-no-files-found: ignore
           retention-days: 7

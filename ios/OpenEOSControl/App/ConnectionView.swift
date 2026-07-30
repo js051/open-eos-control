@@ -217,13 +217,28 @@ struct ConnectionView: View {
 
     private var presetControl: some View {
         HStack(spacing: 2) {
-            presetButton("preset_http", systemImage: "network", selected: camera.baseURL == CameraAppState.defaultCameraURL) {
+            presetButton(
+                "preset_http",
+                systemImage: "network",
+                identifier: "preset-http-button",
+                selected: camera.baseURL == CameraAppState.defaultCameraURL
+            ) {
                 camera.useHTTPPreset()
             }
-            presetButton("preset_https", systemImage: "lock", selected: camera.baseURL == CameraAppState.defaultSecureCameraURL) {
+            presetButton(
+                "preset_https",
+                systemImage: "lock",
+                identifier: "preset-https-button",
+                selected: camera.baseURL == CameraAppState.defaultSecureCameraURL
+            ) {
                 camera.useHTTPSPreset()
             }
-            presetButton("preset_simulator", systemImage: "macwindow", selected: camera.baseURL == CameraAppState.simulatorURL) {
+            presetButton(
+                "preset_simulator",
+                systemImage: "macwindow",
+                identifier: "preset-simulator-button",
+                selected: camera.baseURL == CameraAppState.simulatorURL
+            ) {
                 camera.useSimulatorPreset()
             }
         }
@@ -235,6 +250,7 @@ struct ConnectionView: View {
     private func presetButton(
         _ title: LocalizedStringKey,
         systemImage: String,
+        identifier: String,
         selected: Bool,
         action: @escaping () -> Void
     ) -> some View {
@@ -249,6 +265,7 @@ struct ConnectionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
     }
 }
 

@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 
 final class OpenEOSControlUITests: XCTestCase {
@@ -134,6 +135,62 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "monitoring-assists-offline")
     }
 
+    func testDirectCCAPIControlsReachTheRunningCameraSimulator() async throws {
+        let health = try? await simulatorRequest(path: "/health")
+        let available = health?["ok"] as? Bool == true
+        guard available else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
+            return
+            #else
+            throw XCTSkip("Start the fake camera at \(simulatorURL.absoluteString) to run the network end-to-end test")
+            #endif
+        }
+        _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        let simulatorPreset = app.buttons["preset-simulator-button"]
+        XCTAssertTrue(simulatorPreset.waitForExistence(timeout: 8))
+        simulatorPreset.tap()
+        app.buttons["connect-button"].tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.images["live-view-decoded-frame"].waitForExistence(timeout: 30))
+
+        app.buttons["exposure-iso"].tap()
+        let iso1600 = app.buttons["setting-value-1600"]
+        XCTAssertTrue(iso1600.waitForExistence(timeout: 8))
+        iso1600.tap()
+        try await waitForSimulatorState { state in
+            (state["exposure"] as? [String: Any])?["iso"] as? String == "1600"
+        }
+        app.buttons["Done"].tap()
+
+        app.buttons["shutter-button"].tap()
+        try await waitForSimulatorState { state in
+            (state["capture_count"] as? NSNumber)?.intValue == 1
+        }
+
+        let captureMode = app.segmentedControls["capture-mode-picker"]
+        XCTAssertTrue(captureMode.waitForExistence(timeout: 8))
+        captureMode.buttons["Video"].tap()
+        let record = app.buttons["record-button"]
+        XCTAssertTrue(waitForInteraction(record, timeout: 8))
+        record.tap()
+        try await waitForSimulatorState { state in state["recording"] as? Bool == true }
+        XCTAssertTrue(waitForLabel(record, containing: "Stop recording", timeout: 15))
+        record.tap()
+        try await waitForSimulatorState { state in state["recording"] as? Bool == false }
+
+        app.buttons["more-actions-button"].tap()
+        app.buttons["Camera media"].tap()
+        XCTAssertTrue(app.staticTexts["SIM_0003.PNG"].waitForExistence(timeout: 20))
+        app.buttons["media-back-button"].tap()
+        app.buttons["more-actions-button"].tap()
+        app.buttons["Disconnect"].tap()
+        XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
+    }
+
     private func launch(appLanguage: String, appleLanguage: String, locale: String) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -156,10 +213,56 @@ final class OpenEOSControlUITests: XCTestCase {
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
+    private func waitForLabel(_ element: XCUIElement, containing value: String, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate { candidate, _ in
+            guard let element = candidate as? XCUIElement else { return false }
+            return element.exists && element.label.localizedCaseInsensitiveContains(value)
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func waitForSimulatorState(
+        timeout: TimeInterval = 20,
+        predicate: ([String: Any]) -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let state = try? await simulatorRequest(path: "/ccapi/test/state"), predicate(state) {
+                return
+            }
+            try await Task.sleep(nanoseconds: 250_000_000)
+        } while Date() < deadline
+        throw SimulatorTestError.timeout
+    }
+
+    private func simulatorRequest(path: String, method: String = "GET") async throws -> [String: Any] {
+        let normalizedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var request = URLRequest(url: simulatorURL.appendingPathComponent(normalizedPath))
+        request.httpMethod = method
+        if method == "POST" { request.httpBody = Data() }
+        request.timeoutInterval = 5
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+            throw SimulatorTestError.invalidResponse
+        }
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw SimulatorTestError.invalidResponse
+        }
+        return value
+    }
+
     private func addScreenshot(name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private var simulatorURL: URL { URL(string: "http://127.0.0.1:18080")! }
+
+    private enum SimulatorTestError: Error {
+        case invalidResponse
+        case timeout
     }
 }
