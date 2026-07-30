@@ -144,6 +144,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
@@ -157,6 +162,22 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Start fake camera for Android end-to-end tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e "../simulator"
+          nohup python -m uvicorn main:app --host 0.0.0.0 --port 18080 \
+            > "$RUNNER_TEMP/android-camera-simulator.log" 2>&1 &
+          for _ in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/android-camera-simulator.log"
+          exit 1
+
       - name: Run UI tests on Pixel API 34
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.34.0
         with:
@@ -167,7 +188,7 @@ jobs:
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: android
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest
+          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
 
       - name: Upload Android UI test results
         if: always()
@@ -177,6 +198,7 @@ jobs:
           path: |
             android/app/build/reports/androidTests/connected/debug
             android/app/build/outputs/androidTest-results/connected/debug
+            ${{ runner.temp }}/android-camera-simulator.log
           if-no-files-found: ignore
           retention-days: 7
 

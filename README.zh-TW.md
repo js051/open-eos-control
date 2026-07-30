@@ -92,6 +92,21 @@ repo 內有 `android/local.properties.example`。你可以在本機建立 `andro
 
 `connectedDebugAndroidTest` 需要先啟動 Android 模擬器或接上裝置。Compose 測試涵蓋連線、控制、Debug、媒體、語言選擇、離線預覽，以及 `360 x 800` 直向、`800 x 360` 橫向和 `1.5x` 字體下主要控制是否保持可見。
 
+若要納入 Android UI 到 HTTP Simulator 的真實路徑，請在另一個終端啟動假相機，並要求裝置測試必須連線成功：
+
+```powershell
+Set-Location simulator
+python -m pip install -e .
+python -m uvicorn main:app --host 0.0.0.0 --port 18080
+```
+
+```powershell
+.\scripts\android-gradle.ps1 connectedDebugAndroidTest `
+  -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
+```
+
+此流程會透過 `10.0.2.2` 連線、解碼 Live View 畫面、修改 ISO、拍照、開始與停止錄影、確認新增媒體，最後斷線。每次 pull request 與推送至 `main` 時，CI 都會執行這條路徑。
+
 debug APK 會輸出到：
 
 ```text

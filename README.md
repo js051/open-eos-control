@@ -92,6 +92,21 @@ On this Windows dev machine, use the helper script so Gradle runs with Android S
 
 `connectedDebugAndroidTest` requires a running Android emulator or attached device. The Compose suite covers connection, control, Debug, media, language selection, offline preview, and primary-control visibility at 360 x 800 portrait, 800 x 360 landscape, and 1.5x font scale.
 
+To include the real Android UI-to-HTTP Simulator path, start the fake camera in a second terminal and require it from the instrumentation run:
+
+```powershell
+Set-Location simulator
+python -m pip install -e .
+python -m uvicorn main:app --host 0.0.0.0 --port 18080
+```
+
+```powershell
+.\scripts\android-gradle.ps1 connectedDebugAndroidTest `
+  -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
+```
+
+This flow connects through `10.0.2.2`, decodes a Live View frame, changes ISO, captures a still, starts and stops recording, verifies the new media item, and disconnects. CI runs this path on every pull request and `main` push.
+
 The debug APK is written to:
 
 ```text
