@@ -35,13 +35,24 @@ fi
 
 [[ -n "$apksigner_path" && -f "$apksigner_path" ]] || fail "Unable to locate apksigner."
 
-signer_output="$($apksigner_path verify --print-certs "$apk")" || fail "apksigner rejected the APK."
+signer_output="$("$apksigner_path" verify --print-certs "$apk" 2>&1)" || fail "apksigner rejected the APK."
 mapfile -t signer_digests < <(
-  sed -n 's/^Signer #[0-9][0-9]* certificate SHA-256 digest: //p' <<< "$signer_output" \
-    | tr '[:upper:]' '[:lower:]'
+  awk '
+    BEGIN { IGNORECASE = 1 }
+    /^[[:space:]]*Signer #[0-9]+ certificate SHA-256 digest:/ {
+      digest = $NF
+      gsub(":", "", digest)
+      print tolower(digest)
+    }
+  ' <<< "$signer_output"
 )
 
-[[ ${#signer_digests[@]} -eq 1 ]] || fail "Expected exactly one APK signer, found ${#signer_digests[@]}."
+if [[ ${#signer_digests[@]} -ne 1 ]]; then
+  echo "::group::apksigner certificate output" >&2
+  printf '%s\n' "$signer_output" >&2
+  echo "::endgroup::" >&2
+  fail "Expected exactly one APK signer, found ${#signer_digests[@]}."
+fi
 actual="${signer_digests[0]}"
 [[ "$actual" =~ ^[0-9a-f]{64}$ ]] || fail "apksigner returned an invalid SHA-256 certificate digest."
 
