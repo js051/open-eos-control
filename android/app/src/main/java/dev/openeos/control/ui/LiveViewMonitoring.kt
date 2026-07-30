@@ -26,6 +26,7 @@ enum class LiveViewDesqueeze(val horizontalScale: Float) {
 
 data class LiveViewMonitorSettings(
     val histogramVisible: Boolean = false,
+    val waveformVisible: Boolean = false,
     val zebraThresholdPercent: Int? = null,
     val falseColorEnabled: Boolean = false,
     val focusPeakingEnabled: Boolean = false,
@@ -34,13 +35,21 @@ data class LiveViewMonitorSettings(
     val desqueeze: LiveViewDesqueeze = LiveViewDesqueeze.OFF,
 ) {
     val needsPixelAnalysis: Boolean
-        get() = histogramVisible || zebraThresholdPercent != null || falseColorEnabled || focusPeakingEnabled
+        get() = histogramVisible || waveformVisible || zebraThresholdPercent != null ||
+            falseColorEnabled || focusPeakingEnabled
 }
+
+internal data class LiveViewWaveform(
+    val width: Int,
+    val height: Int,
+    val density: IntArray,
+)
 
 internal data class LiveViewMonitorAnalysis(
     val width: Int,
     val height: Int,
     val histogram: IntArray,
+    val waveform: LiveViewWaveform?,
     val overlayPixels: IntArray?,
 )
 
@@ -49,6 +58,7 @@ internal fun analyzeLiveViewBitmap(
     zebraThresholdPercent: Int?,
     focusPeakingEnabled: Boolean,
     falseColorEnabled: Boolean = false,
+    waveformVisible: Boolean = false,
 ): LiveViewMonitorAnalysis {
     val dimensions = analysisDimensions(bitmap.width, bitmap.height)
     val sampled = Bitmap.createBitmap(dimensions.first, dimensions.second, Bitmap.Config.ARGB_8888)
@@ -68,6 +78,7 @@ internal fun analyzeLiveViewBitmap(
             zebraThresholdPercent = zebraThresholdPercent,
             focusPeakingEnabled = focusPeakingEnabled,
             falseColorEnabled = falseColorEnabled,
+            waveformVisible = waveformVisible,
         )
     } finally {
         sampled.recycle()
@@ -81,6 +92,7 @@ internal fun analyzeLiveViewPixels(
     zebraThresholdPercent: Int?,
     focusPeakingEnabled: Boolean,
     falseColorEnabled: Boolean = false,
+    waveformVisible: Boolean = false,
 ): LiveViewMonitorAnalysis {
     require(width > 0 && height > 0)
     require(pixels.size == width * height)
@@ -88,6 +100,11 @@ internal fun analyzeLiveViewPixels(
 
     val luminance = IntArray(pixels.size)
     val histogram = IntArray(HISTOGRAM_BUCKETS)
+    val waveformDensity = if (waveformVisible) {
+        IntArray(WAVEFORM_COLUMNS * WAVEFORM_LEVELS)
+    } else {
+        null
+    }
     pixels.forEachIndexed { index, pixel ->
         val red = pixel shr 16 and 0xff
         val green = pixel shr 8 and 0xff
@@ -95,6 +112,13 @@ internal fun analyzeLiveViewPixels(
         val value = (54 * red + 183 * green + 19 * blue) shr 8
         luminance[index] = value
         histogram[min(HISTOGRAM_BUCKETS - 1, value * HISTOGRAM_BUCKETS / 256)]++
+        waveformDensity?.let { density ->
+            val x = index % width
+            val column = if (width == 1) 0 else x * (WAVEFORM_COLUMNS - 1) / (width - 1)
+            val level = min(WAVEFORM_LEVELS - 1, value * WAVEFORM_LEVELS / 256)
+            val row = WAVEFORM_LEVELS - 1 - level
+            density[row * WAVEFORM_COLUMNS + column]++
+        }
     }
 
     val overlay = if (zebraThresholdPercent != null || falseColorEnabled || focusPeakingEnabled) {
@@ -126,7 +150,15 @@ internal fun analyzeLiveViewPixels(
         }
     }
 
-    return LiveViewMonitorAnalysis(width, height, histogram, overlay)
+    return LiveViewMonitorAnalysis(
+        width = width,
+        height = height,
+        histogram = histogram,
+        waveform = waveformDensity?.let {
+            LiveViewWaveform(WAVEFORM_COLUMNS, WAVEFORM_LEVELS, it)
+        },
+        overlayPixels = overlay,
+    )
 }
 
 private fun falseColor(luminance: Int): Int = when {
@@ -149,6 +181,8 @@ private fun analysisDimensions(width: Int, height: Int): Pair<Int, Int> {
 private const val MAX_ANALYSIS_WIDTH = 120
 private const val MAX_ANALYSIS_HEIGHT = 80
 private const val HISTOGRAM_BUCKETS = 64
+private const val WAVEFORM_COLUMNS = 64
+private const val WAVEFORM_LEVELS = 64
 private const val FOCUS_PEAKING_GRADIENT = 72
 private const val ZEBRA_LIGHT = 0xB0FFFFFF.toInt()
 private const val ZEBRA_DARK = 0x78000000

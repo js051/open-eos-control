@@ -389,10 +389,23 @@ private struct MonitoringAssistView: View {
                         "histogram",
                         value: Binding(
                             get: { camera.monitorSettings.histogramVisible },
-                            set: { camera.monitorSettings.histogramVisible = $0 }
+                            set: { value in
+                                camera.monitorSettings.setHistogramVisible(value)
+                            }
                         ),
                         enabled: pixelAnalysisAvailable,
                         identifier: "monitor-histogram"
+                    )
+                    monitorToggle(
+                        "luma_waveform",
+                        value: Binding(
+                            get: { camera.monitorSettings.waveformVisible },
+                            set: { value in
+                                camera.monitorSettings.setWaveformVisible(value)
+                            }
+                        ),
+                        enabled: pixelAnalysisAvailable,
+                        identifier: "monitor-waveform"
                     )
                     monitorPickerRow("zebra") {
                         Picker("zebra", selection: Binding(

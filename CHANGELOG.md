@@ -4,6 +4,7 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Added mutually exclusive luma histogram and 64x64 luma waveform monitoring scopes to decoded Live View on Android, iOS, and PC, including English/Traditional Chinese controls and redacted diagnostics.
 - Added a capability-gated Desktop Bridge Capture Target control. Canon USB host-RAM captures now use gPhoto2's capture-and-download lifecycle, atomically enter a persistent local media library, and support bounded thumbnails, streaming download, and exact deletion across native and WSL runners.
 - Added English and Traditional Chinese Capture Target labels to the PC, Android, and iOS control interfaces.
 

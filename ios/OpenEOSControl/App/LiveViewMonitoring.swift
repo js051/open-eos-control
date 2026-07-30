@@ -45,6 +45,7 @@ enum LiveViewDesqueeze: String, CaseIterable, Identifiable, Sendable {
 
 struct LiveViewMonitorSettings: Equatable, Hashable, Sendable {
     var histogramVisible = false
+    var waveformVisible = false
     var zebraThresholdPercent: Int?
     var falseColorEnabled = false
     var focusPeakingEnabled = false
@@ -53,14 +54,32 @@ struct LiveViewMonitorSettings: Equatable, Hashable, Sendable {
     var desqueeze = LiveViewDesqueeze.off
 
     var needsPixelAnalysis: Bool {
-        histogramVisible || zebraThresholdPercent != nil || falseColorEnabled || focusPeakingEnabled
+        histogramVisible || waveformVisible || zebraThresholdPercent != nil ||
+            falseColorEnabled || focusPeakingEnabled
     }
+
+    mutating func setHistogramVisible(_ visible: Bool) {
+        histogramVisible = visible
+        if visible { waveformVisible = false }
+    }
+
+    mutating func setWaveformVisible(_ visible: Bool) {
+        waveformVisible = visible
+        if visible { histogramVisible = false }
+    }
+}
+
+struct LiveViewWaveform: Equatable, Sendable {
+    let width: Int
+    let height: Int
+    let density: [Int]
 }
 
 struct LiveViewMonitorAnalysis: Equatable, Sendable {
     let width: Int
     let height: Int
     let histogram: [Int]
+    let waveform: LiveViewWaveform?
     let overlayRGBA: [UInt8]?
 
     func overlayImage() -> UIImage? {
@@ -144,7 +163,8 @@ func analyzeLiveViewData(_ data: Data, settings: LiveViewMonitorSettings) -> Liv
         height: dimensions.height,
         zebraThresholdPercent: settings.zebraThresholdPercent,
         focusPeakingEnabled: settings.focusPeakingEnabled,
-        falseColorEnabled: settings.falseColorEnabled
+        falseColorEnabled: settings.falseColorEnabled,
+        waveformVisible: settings.waveformVisible
     )
 }
 
@@ -154,7 +174,8 @@ func analyzeLiveViewPixels(
     height: Int,
     zebraThresholdPercent: Int?,
     focusPeakingEnabled: Bool,
-    falseColorEnabled: Bool = false
+    falseColorEnabled: Bool = false,
+    waveformVisible: Bool = false
 ) -> LiveViewMonitorAnalysis {
     precondition(width > 0 && height > 0)
     precondition(rgba.count == width * height * 4)
@@ -163,6 +184,9 @@ func analyzeLiveViewPixels(
     let pixelCount = width * height
     var luminance = [Int](repeating: 0, count: pixelCount)
     var histogram = [Int](repeating: 0, count: histogramBucketCount)
+    var waveformDensity = waveformVisible
+        ? [Int](repeating: 0, count: waveformColumns * waveformLevels)
+        : []
     for index in 0..<pixelCount {
         let offset = index * 4
         let value = (
@@ -172,6 +196,13 @@ func analyzeLiveViewPixels(
         ) >> 8
         luminance[index] = value
         histogram[min(histogramBucketCount - 1, value * histogramBucketCount / 256)] += 1
+        if waveformVisible {
+            let x = index % width
+            let column = width == 1 ? 0 : x * (waveformColumns - 1) / (width - 1)
+            let level = min(waveformLevels - 1, value * waveformLevels / 256)
+            let row = waveformLevels - 1 - level
+            waveformDensity[row * waveformColumns + column] += 1
+        }
     }
 
     let needsOverlay = zebraThresholdPercent != nil || falseColorEnabled || focusPeakingEnabled
@@ -211,6 +242,9 @@ func analyzeLiveViewPixels(
         width: width,
         height: height,
         histogram: histogram,
+        waveform: waveformVisible
+            ? LiveViewWaveform(width: waveformColumns, height: waveformLevels, density: waveformDensity)
+            : nil,
         overlayRGBA: overlay
     )
 }
@@ -239,6 +273,8 @@ private let maximumAnalysisWidth = 120
 private let maximumAnalysisHeight = 80
 private let maximumAnalysisDecodeSize = max(maximumAnalysisWidth, maximumAnalysisHeight)
 private let histogramBucketCount = 64
+private let waveformColumns = 64
+private let waveformLevels = 64
 private let focusPeakingGradient = 72
 private let zebraLight: (UInt8, UInt8, UInt8, UInt8) = (255, 255, 255, 176)
 private let zebraDark: (UInt8, UInt8, UInt8, UInt8) = (0, 0, 0, 120)

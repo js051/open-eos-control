@@ -1276,6 +1276,7 @@ class CameraScreensTest {
                         liveViewBitmap = frame,
                         monitorSettings = LiveViewMonitorSettings(
                             histogramVisible = true,
+                            waveformVisible = true,
                             zebraThresholdPercent = 90,
                             falseColorEnabled = true,
                             focusPeakingEnabled = true,
@@ -1297,6 +1298,7 @@ class CameraScreensTest {
                 .isNotEmpty()
         }
         compose.onNodeWithContentDescription(histogramDescription).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.luma_waveform)).assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.monitor_guides)).assertIsDisplayed()
     }
 
@@ -1306,7 +1308,18 @@ class CameraScreensTest {
         var settings = LiveViewMonitorSettings()
         val actions = noOpActions().copy(
             openPicker = { picker.value = it },
-            setHistogramVisible = { settings = settings.copy(histogramVisible = it) },
+            setHistogramVisible = {
+                settings = settings.copy(
+                    histogramVisible = it,
+                    waveformVisible = if (it) false else settings.waveformVisible,
+                )
+            },
+            setWaveformVisible = {
+                settings = settings.copy(
+                    waveformVisible = it,
+                    histogramVisible = if (it) false else settings.histogramVisible,
+                )
+            },
             setZebraThreshold = { settings = settings.copy(zebraThresholdPercent = it) },
             setFalseColorEnabled = { settings = settings.copy(falseColorEnabled = it) },
             setFrameGuide = { settings = settings.copy(frameGuide = it) },
@@ -1324,6 +1337,7 @@ class CameraScreensTest {
 
         compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
         compose.onNodeWithText(resourceText(R.string.histogram)).performScrollTo().performClick()
+        compose.onNodeWithText(resourceText(R.string.luma_waveform)).performScrollTo().performClick()
         compose.onNodeWithTag("monitor-zebra-options").performScrollTo().performScrollToIndex(6)
         compose.onNodeWithText(resourceText(R.string.zebra_threshold, 95)).performClick()
         compose.onNodeWithText(resourceText(R.string.false_color)).performScrollTo().performClick()
@@ -1333,7 +1347,8 @@ class CameraScreensTest {
         compose.onNodeWithTag("monitor-desqueeze-options").performScrollTo().performScrollToIndex(4)
         compose.onNodeWithText(resourceText(R.string.desqueeze_value, 2f)).performScrollTo().performClick()
         compose.runOnIdle {
-            assertTrue(settings.histogramVisible)
+            assertFalse(settings.histogramVisible)
+            assertTrue(settings.waveformVisible)
             assertEquals(95, settings.zebraThresholdPercent)
             assertTrue(settings.falseColorEnabled)
             assertEquals(LiveViewFrameGuide.RATIO_2_39, settings.frameGuide)
@@ -1361,6 +1376,7 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
         compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertExists()
         compose.onNodeWithText(resourceText(R.string.histogram)).assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.luma_waveform)).assertIsNotEnabled()
         compose.onNodeWithText(resourceText(R.string.frame_guide)).assertExists()
         compose.onNodeWithText(resourceText(R.string.anamorphic_desqueeze)).assertExists()
     }

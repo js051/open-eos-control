@@ -97,6 +97,7 @@ import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -749,7 +750,10 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     val monitorAnalysis by produceState<LiveViewMonitorAnalysis?>(
         initialValue = null,
         key1 = analysisSource,
-        key2 = state.monitorSettings.histogramVisible,
+        key2 = Pair(
+            state.monitorSettings.histogramVisible,
+            state.monitorSettings.waveformVisible,
+        ),
         key3 = Triple(
             state.monitorSettings.zebraThresholdPercent,
             state.monitorSettings.falseColorEnabled,
@@ -764,6 +768,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                         state.monitorSettings.zebraThresholdPercent,
                         state.monitorSettings.focusPeakingEnabled,
                         state.monitorSettings.falseColorEnabled,
+                        state.monitorSettings.waveformVisible,
                     )
                 }.getOrNull()
             }
@@ -972,6 +977,9 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         if (state.monitorSettings.histogramVisible) {
             monitorAnalysis?.let { HistogramOverlay(it.histogram, state.hudVisible) }
         }
+        if (state.monitorSettings.waveformVisible) {
+            monitorAnalysis?.waveform?.let { WaveformOverlay(it, state.hudVisible) }
+        }
         FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
         if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
     }
@@ -1027,6 +1035,47 @@ private fun BoxScope.HistogramOverlay(histogram: IntArray, hudVisible: Boolean) 
                 color = Color.White.copy(alpha = 0.86f),
                 topLeft = Offset(index * barWidth, size.height - barHeight),
                 size = androidx.compose.ui.geometry.Size(barWidth.coerceAtLeast(1f), barHeight),
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.WaveformOverlay(waveform: LiveViewWaveform, hudVisible: Boolean) {
+    val description = stringResource(R.string.luma_waveform)
+    Canvas(
+        Modifier
+            .align(Alignment.TopStart)
+            .padding(start = 12.dp, top = if (hudVisible) 60.dp else 12.dp)
+            .size(width = 156.dp, height = 96.dp)
+            .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp))
+            .padding(8.dp)
+            .semantics { contentDescription = description },
+    ) {
+        val columnWidth = size.width / waveform.width
+        val rowHeight = size.height / waveform.height
+        for (guide in 0..4) {
+            val y = size.height * guide / 4f
+            drawLine(
+                color = Color.White.copy(alpha = 0.16f),
+                start = Offset(0f, y.coerceAtMost(size.height - 1f)),
+                end = Offset(size.width, y.coerceAtMost(size.height - 1f)),
+                strokeWidth = 1f,
+            )
+        }
+        val peak = waveform.density.maxOrNull()?.coerceAtLeast(1) ?: 1
+        waveform.density.forEachIndexed { index, count ->
+            if (count == 0) return@forEachIndexed
+            val x = index % waveform.width
+            val y = index / waveform.width
+            val intensity = sqrt(count / peak.toFloat()).coerceIn(0.16f, 1f)
+            drawRect(
+                color = AppAccent.copy(alpha = intensity),
+                topLeft = Offset(x * columnWidth, y * rowHeight),
+                size = androidx.compose.ui.geometry.Size(
+                    columnWidth.coerceAtLeast(1f),
+                    rowHeight.coerceAtLeast(1f),
+                ),
             )
         }
     }

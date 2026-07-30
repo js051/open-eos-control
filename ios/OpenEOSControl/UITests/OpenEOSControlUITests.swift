@@ -118,8 +118,9 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(monitoring.waitForExistence(timeout: 3))
         monitoring.tap()
 
-        XCTAssertTrue(app.staticTexts["Histogram, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available."].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Histogram, luma waveform, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available."].waitForExistence(timeout: 3))
         XCTAssertFalse(app.switches["monitor-histogram"].isEnabled)
+        XCTAssertFalse(app.switches["monitor-waveform"].isEnabled)
         let safeArea = app.switches["monitor-safe-area"]
         XCTAssertTrue(safeArea.isEnabled)
         safeArea.tap()

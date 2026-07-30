@@ -696,6 +696,12 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         enabled = pixelAnalysisAvailable,
         onCheckedChange = actions.setHistogramVisible,
     )
+    MonitorSwitchRow(
+        label = stringResource(R.string.luma_waveform),
+        checked = settings.waveformVisible,
+        enabled = pixelAnalysisAvailable,
+        onCheckedChange = actions.setWaveformVisible,
+    )
     MonitorChoiceRow(
         label = stringResource(R.string.zebra),
         testTag = "monitor-zebra-options",

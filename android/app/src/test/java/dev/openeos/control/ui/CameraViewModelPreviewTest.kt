@@ -95,6 +95,19 @@ class CameraViewModelPreviewTest {
     }
 
     @Test
+    fun histogramAndWaveformRemainMutuallyExclusive() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+
+        viewModel.setHistogramVisible(true)
+        assertTrue(viewModel.uiState.value.monitorSettings.histogramVisible)
+        assertFalse(viewModel.uiState.value.monitorSettings.waveformVisible)
+
+        viewModel.setWaveformVisible(true)
+        assertFalse(viewModel.uiState.value.monitorSettings.histogramVisible)
+        assertTrue(viewModel.uiState.value.monitorSettings.waveformVisible)
+    }
+
+    @Test
     fun previewMediaDeleteRemovesOnlyConfirmedItemLocally() = runTest(dispatcher) {
         val viewModel = CameraViewModel()
         viewModel.enterOfflinePreview()

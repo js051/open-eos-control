@@ -836,6 +836,7 @@ final class CameraAppState: ObservableObject {
         }
         let monitoring = [
             "monitorHistogram=\(monitorSettings.histogramVisible)",
+            "monitorWaveform=\(monitorSettings.waveformVisible)",
             "monitorZebra=\(monitorSettings.zebraThresholdPercent.map { String($0) } ?? "off")",
             "monitorFalseColor=\(monitorSettings.falseColorEnabled)",
             "monitorFocusPeaking=\(monitorSettings.focusPeakingEnabled)",
