@@ -22,6 +22,20 @@ class EngineName(StrEnum):
     EDSDK = "edsdk"
 
 
+class CameraModelFamily(StrEnum):
+    EOS_R = "EOS_R"
+    EOS_DSLR = "EOS_DSLR"
+    EOS_M = "EOS_M"
+    POWERSHOT = "POWERSHOT"
+    UNKNOWN = "UNKNOWN"
+
+
+class CameraModelPriority(StrEnum):
+    PRIMARY = "PRIMARY"
+    SUPPORTED = "SUPPORTED"
+    RESEARCH = "RESEARCH"
+
+
 class CameraFeature(StrEnum):
     CAMERA_IDENTITY = "CAMERA_IDENTITY"
     BATTERY_STATUS = "BATTERY_STATUS"
@@ -139,8 +153,31 @@ class CameraEvent(ApiModel):
 
 class CameraProfile(ApiModel):
     model_name: str
-    family: str
-    priority: str
+    family: CameraModelFamily
+    priority: CameraModelPriority
+
+
+def camera_profile(model: str) -> CameraProfile:
+    normalized = "".join(character for character in model.casefold() if character.isalnum())
+    if any(alias in normalized for alias in ("r6markiii", "r6m3", "r63")):
+        family = CameraModelFamily.EOS_R
+        priority = CameraModelPriority.PRIMARY
+    elif "eosr" in normalized:
+        family = CameraModelFamily.EOS_R
+        priority = CameraModelPriority.SUPPORTED
+    elif "eosm" in normalized:
+        family = CameraModelFamily.EOS_M
+        priority = CameraModelPriority.SUPPORTED
+    elif "eos" in normalized:
+        family = CameraModelFamily.EOS_DSLR
+        priority = CameraModelPriority.SUPPORTED
+    elif "powershot" in normalized:
+        family = CameraModelFamily.POWERSHOT
+        priority = CameraModelPriority.RESEARCH
+    else:
+        family = CameraModelFamily.UNKNOWN
+        priority = CameraModelPriority.RESEARCH
+    return CameraProfile(model_name=model, family=family, priority=priority)
 
 
 class CameraSetting(ApiModel):

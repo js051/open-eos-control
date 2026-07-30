@@ -32,7 +32,6 @@ from .models import (
     CameraEvent,
     CameraFeature,
     CameraInfo,
-    CameraProfile,
     CameraSetting,
     CameraStatus,
     CapabilityEvidence,
@@ -43,6 +42,7 @@ from .models import (
     LiveViewStartRequest,
     MediaItem,
     StorageStatus,
+    camera_profile,
 )
 
 ENGINE_NAME = "libgphoto2"
@@ -1147,7 +1147,7 @@ class GPhoto2Session:
             }
             model = self.info().model
             return CameraCapabilities(
-                profile=_camera_profile(model),
+                profile=camera_profile(model),
                 supported=sorted(supported, key=str),
                 planned=sorted(planned, key=str),
                 reasons={
@@ -2162,18 +2162,3 @@ def _feature_for_setting(key: str) -> CameraFeature:
     if key == "whitebalance":
         return CameraFeature.WHITE_BALANCE_CONTROL
     return CameraFeature.ADVANCED_SETTINGS
-
-
-def _camera_profile(model: str) -> CameraProfile:
-    normalized = model.casefold()
-    if "eos r6 mark iii" in normalized or "eos r6m3" in normalized:
-        return CameraProfile(model_name=model, family="EOS_R", priority="PRIMARY")
-    if "eos r" in normalized:
-        return CameraProfile(model_name=model, family="EOS_R", priority="SUPPORTED")
-    if "eos m" in normalized:
-        return CameraProfile(model_name=model, family="EOS_M", priority="SUPPORTED")
-    if "eos" in normalized:
-        return CameraProfile(model_name=model, family="EOS_DSLR", priority="SUPPORTED")
-    if "powershot" in normalized:
-        return CameraProfile(model_name=model, family="POWERSHOT", priority="RESEARCH")
-    return CameraProfile(model_name=model, family="UNKNOWN", priority="RESEARCH")
