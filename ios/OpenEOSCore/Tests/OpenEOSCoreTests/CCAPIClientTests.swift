@@ -104,6 +104,69 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(remainingResponses, 0)
     }
 
+    func testDiscoveryLoadsCanonDeveloperAPIListWhenRootOmitsOperations() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: #"{"value":"No list of APIs"}"#)
+        await transport.enqueueJSON(path: "/ccapi/ver100/topurlfordev", body: discovery)
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        try await client.initialize()
+        let capabilities = try await client.capabilities()
+
+        XCTAssertTrue(capabilities.matrix.supports(.stillCapture))
+        XCTAssertTrue(capabilities.matrix.supports(.videoRecording))
+        XCTAssertTrue(capabilities.matrix.supports(.mediaBrowser))
+        XCTAssertEqual(
+            capabilities.evidence.source,
+            "GET /ccapi/ver100/topurlfordev (Canon developer API fallback)"
+        )
+        XCTAssertTrue(
+            capabilities.evidence.advertisedCommands.contains(
+                "POST /ccapi/ver100/shooting/control/shutterbutton"
+            )
+        )
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), [
+            "/ccapi",
+            "/ccapi/ver100/topurlfordev",
+            "/ccapi/ver100/shooting/settings",
+        ])
+    }
+
+    func testDiscoveryReportsDeveloperAPIFailureWithoutInventingCapabilities() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: #"{"value":"No list of APIs"}"#)
+        await transport.enqueueJSON(path: "/ccapi/ver100/topurlfordev", status: 503, body: "camera busy")
+        await transport.enqueueJSON(path: "/ccapi/", status: 404, body: "{}")
+        await transport.enqueueJSON(path: "/ccapi/ver110/deviceinformation", status: 404, body: "{}")
+        await transport.enqueueJSON(path: "/ccapi/ver100/deviceinformation", status: 404, body: "{}")
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        do {
+            try await client.initialize()
+            XCTFail("Expected discovery failure")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("/ccapi/ver100/topurlfordev"))
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), [
+            "/ccapi",
+            "/ccapi/ver100/topurlfordev",
+            "/ccapi",
+            "/ccapi/ver110/deviceinformation",
+            "/ccapi/ver100/deviceinformation",
+        ])
+    }
+
     func testEventPollingRequiresAdvertisedGetDeleteLifecycle() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(

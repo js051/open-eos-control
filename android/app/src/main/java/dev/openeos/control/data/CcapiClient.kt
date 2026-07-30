@@ -34,6 +34,8 @@ private const val MAX_CCAPI_EVENT_KEYS = 64
 private const val MAX_CCAPI_EVENT_KEY_CHARS = 128
 private const val CCAPI_EVENT_READ_TIMEOUT_SECONDS = 40L
 private const val CCAPI_EVENT_CALL_TIMEOUT_SECONDS = 45L
+private const val CCAPI_NO_API_LIST_VALUE = "No list of APIs"
+private const val CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
 
 private data class CcapiApiOperation(
     val method: String,
@@ -155,23 +157,7 @@ class CcapiClient(
         val errors = mutableListOf<String>()
 
         // 1. Try GET /ccapi
-        val success1 = try {
-            val request = Request.Builder().url("$baseUrl/ccapi").get().build()
-            withContext(Dispatchers.IO) {
-                httpClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        parseDiscoveryResponse(response.body?.string().orEmpty(), "GET /ccapi")
-                        true
-                    } else {
-                        errors.add("GET /ccapi: HTTP ${response.code}")
-                        false
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            errors.add("GET /ccapi failed: ${e.message}")
-            false
-        }
+        val success1 = discoverApiAt("/ccapi", errors)
 
         if (success1) {
             isRealCamera = true
@@ -179,23 +165,7 @@ class CcapiClient(
         }
 
         // 2. Try GET /ccapi/
-        val success2 = try {
-            val request = Request.Builder().url("$baseUrl/ccapi/").get().build()
-            withContext(Dispatchers.IO) {
-                httpClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        parseDiscoveryResponse(response.body?.string().orEmpty(), "GET /ccapi/")
-                        true
-                    } else {
-                        errors.add("GET /ccapi/: HTTP ${response.code}")
-                        false
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            errors.add("GET /ccapi/ failed: ${e.message}")
-            false
-        }
+        val success2 = discoverApiAt("/ccapi/", errors)
 
         if (success2) {
             isRealCamera = true
@@ -244,8 +214,29 @@ class CcapiClient(
         throw IllegalStateException(errorMessage)
     }
 
-    private fun parseDiscoveryResponse(body: String, source: String) {
-        val json = JSONObject(body)
+    private suspend fun discoverApiAt(path: String, errors: MutableList<String>): Boolean = try {
+        val rootDiscovery = getJson(path)
+        val needsDeveloperApi = rootDiscovery.optString("value") == CCAPI_NO_API_LIST_VALUE
+        val discovery = if (needsDeveloperApi) {
+            getJson(CCAPI_DEVELOPER_API_PATH)
+        } else {
+            rootDiscovery
+        }
+        val source = if (needsDeveloperApi) {
+            "GET $CCAPI_DEVELOPER_API_PATH (Canon developer API fallback)"
+        } else {
+            "GET $path"
+        }
+        parseDiscoveryResponse(discovery, source)
+        true
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        errors.add("GET $path failed: ${error.message}")
+        false
+    }
+
+    private fun parseDiscoveryResponse(json: JSONObject, source: String) {
         val versions = linkedSetOf<String>()
         apiOperations.clear()
         enforceAdvertisedOperations = true
