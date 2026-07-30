@@ -37,6 +37,7 @@ struct LiveViewSurface: View {
                         .resizable()
                         .interpolation(.medium)
                         .frame(width: imageRect.width, height: imageRect.height)
+                        .accessibilityIdentifier("live-view-decoded-frame")
                 } else {
                     offlineSurface
                 }

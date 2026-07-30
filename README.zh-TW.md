@@ -139,7 +139,7 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 實際跑過英文直向／橫向控制、媒體下載、確認式媒體刪除、繁中連線與 Desktop Bridge 連線表單流程。workflow 明確使用 `CODE_SIGNING_ALLOWED=NO`，因此這個 build 無法安裝到實體 iPhone，也不會作為 IPA 發布。這些證據不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄；細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
+GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 跑過七個 UI 流程。除了英文／繁中、方向、媒體、監看與 Desktop Bridge 的離線狀態，CI 還會強制啟動真實的假相機服務，從正式 SwiftUI -> `CameraAppState` -> `OpenEOSCore` -> CCAPI HTTP 路徑驗證已解碼 Live View、ISO 控制、拍照、錄影、媒體更新與斷線。workflow 明確使用 `CODE_SIGNING_ALLOWED=NO`，因此這個 build 無法安裝到實體 iPhone，也不會作為 IPA 發布；可重現的 Simulator 證據仍不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄。細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
 
 ## Desktop Bridge
 
