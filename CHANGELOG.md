@@ -4,6 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-30
+
+- Made Android camera controls follow the system auto-rotate setting by default, with explicit always-rotate and fixed alternatives.
+- Kept the camera composition fixed while atomic controls rotate in place using quarter-turn-aware measurement.
+- Preserved the complete English and Traditional Chinese offline preview copy in a bounded, readable sideways viewport.
+- Added orientation policy and effective angle to diagnostics, with emulator and Compose coverage for rotation lock, localization, and enlarged text.
+
 ## [0.1.5] - 2026-07-30
 
 - Established a stable Android development signing identity for `main` artifacts and tagged releases so previews from `0.1.5` onward can update in place.
@@ -34,3 +41,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.1.0]: https://github.com/js051/open-eos-control/releases/tag/v0.1.0
 [0.1.4]: https://github.com/js051/open-eos-control/releases/tag/v0.1.4
 [0.1.5]: https://github.com/js051/open-eos-control/releases/tag/v0.1.5
+[0.1.6]: https://github.com/js051/open-eos-control/releases/tag/v0.1.6
