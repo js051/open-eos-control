@@ -327,7 +327,8 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert status.battery.level == 89
     assert status.media.available is True
     assert status.exposure.shutter == "1/50"
-    assert capabilities.profile.priority == "primary"
+    assert capabilities.profile.family == "EOS_R"
+    assert capabilities.profile.priority == "PRIMARY"
     assert capabilities.live_view.max_fps == 30
     assert {
         CameraFeature.STILL_CAPTURE,

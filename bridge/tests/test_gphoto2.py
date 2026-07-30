@@ -25,7 +25,12 @@ from open_eos_bridge.gphoto2 import (
     resolve_gphoto_command,
 )
 from open_eos_bridge.local_media import default_capture_directory, preview_content_type
-from open_eos_bridge.models import CameraFeature, LiveViewStartRequest
+from open_eos_bridge.models import (
+    CameraFeature,
+    CameraModelFamily,
+    CameraModelPriority,
+    LiveViewStartRequest,
+)
 
 from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, THUMBNAIL, FakeRunner
 
@@ -324,6 +329,8 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
 
     capabilities = session.capabilities()
+    assert capabilities.profile.family is CameraModelFamily.EOS_R
+    assert capabilities.profile.priority is CameraModelPriority.PRIMARY
     assert CameraFeature.STILL_CAPTURE in capabilities.supported
     assert CameraFeature.BULB_EXPOSURE in capabilities.supported
     assert CameraFeature.LIVE_VIEW in capabilities.supported

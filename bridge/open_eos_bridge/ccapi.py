@@ -23,7 +23,6 @@ from .models import (
     CameraEvent,
     CameraFeature,
     CameraInfo,
-    CameraProfile,
     CameraSetting,
     CameraStatus,
     CapabilityEvidence,
@@ -34,6 +33,7 @@ from .models import (
     LiveViewStartRequest,
     MediaItem,
     StorageStatus,
+    camera_profile,
 )
 from .rtp import (
     RtpError,
@@ -592,7 +592,7 @@ class CcapiSession:
                 live_sources.append("CCAPI_JPEG_POLLING")
             model = self.info().model
             return CameraCapabilities(
-                profile=_camera_profile(model),
+                profile=camera_profile(model),
                 supported=sorted(supported, key=str),
                 planned=sorted(candidates - supported, key=str),
                 reasons={
@@ -2124,12 +2124,6 @@ def _feature_for_setting(key: str) -> CameraFeature:
 def _setting_label(key: str) -> str:
     words = re.sub(r"([a-z])([A-Z])", r"\1 \2", key.replace("_", " ").replace("-", " "))
     return " ".join(word.capitalize() for word in words.split()) or key
-
-
-def _camera_profile(model: str) -> CameraProfile:
-    normalized = model.casefold()
-    priority = "primary" if "r6 mark iii" in normalized or "r6m3" in normalized else "compatible"
-    return CameraProfile(model_name=model, family="Canon EOS", priority=priority)
 
 
 def _method_supported(value: object) -> bool:

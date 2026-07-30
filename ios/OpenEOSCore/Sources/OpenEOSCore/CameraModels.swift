@@ -50,17 +50,17 @@ public struct CapabilityMatrix: Equatable, Sendable {
 }
 
 public enum CameraModelFamily: String, Codable, Sendable {
-    case eosR
-    case eosDSLR
-    case eosM
-    case powerShot
-    case unknown
+    case eosR = "EOS_R"
+    case eosDSLR = "EOS_DSLR"
+    case eosM = "EOS_M"
+    case powerShot = "POWERSHOT"
+    case unknown = "UNKNOWN"
 }
 
 public enum CameraModelPriority: String, Codable, Sendable {
-    case primary
-    case supported
-    case research
+    case primary = "PRIMARY"
+    case supported = "SUPPORTED"
+    case research = "RESEARCH"
 }
 
 public struct CameraProfile: Equatable, Codable, Sendable {
@@ -75,14 +75,14 @@ public struct CameraProfile: Equatable, Codable, Sendable {
     }
 
     public static func from(modelName: String) -> CameraProfile {
-        let normalized = modelName.lowercased()
-        if normalized.contains("eos r6 mark iii") || normalized.contains("r6m3") || normalized.contains("r63") {
+        let normalized = modelName.lowercased().filter { $0.isLetter || $0.isNumber }
+        if normalized.contains("r6markiii") || normalized.contains("r6m3") || normalized.contains("r63") {
             return CameraProfile(modelName: modelName, family: .eosR, priority: .primary)
         }
-        if normalized.contains("eos r") {
+        if normalized.contains("eosr") {
             return CameraProfile(modelName: modelName, family: .eosR, priority: .supported)
         }
-        if normalized.contains("eos m") {
+        if normalized.contains("eosm") {
             return CameraProfile(modelName: modelName, family: .eosM, priority: .supported)
         }
         if normalized.contains("eos") {

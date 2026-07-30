@@ -33,15 +33,14 @@ data class CameraProfile(
         )
 
         fun fromModelName(modelName: String): CameraProfile {
-            val normalized = modelName.lowercase()
+            val normalized = modelName.lowercase().filter(Char::isLetterOrDigit)
             return when {
-                normalized.contains("eos r6 mark iii") ||
-                    normalized.contains("r6 mark iii") ||
+                normalized.contains("r6markiii") ||
                     normalized.contains("r6m3") ||
                     normalized.contains("r63") -> R6_MARK_III.copy(modelName = modelName.ifBlank { R6_MARK_III.modelName })
 
-                normalized.contains("eos r") -> genericEos(modelName, CameraModelFamily.EOS_R, CameraModelPriority.SUPPORTED)
-                normalized.contains("eos m") -> genericEos(modelName, CameraModelFamily.EOS_M, CameraModelPriority.SUPPORTED)
+                normalized.contains("eosr") -> genericEos(modelName, CameraModelFamily.EOS_R, CameraModelPriority.SUPPORTED)
+                normalized.contains("eosm") -> genericEos(modelName, CameraModelFamily.EOS_M, CameraModelPriority.SUPPORTED)
                 normalized.contains("eos") -> genericEos(modelName, CameraModelFamily.EOS_DSLR, CameraModelPriority.SUPPORTED)
                 normalized.contains("powershot") -> genericEos(modelName, CameraModelFamily.POWERSHOT, CameraModelPriority.RESEARCH)
                 else -> genericEos(modelName, CameraModelFamily.UNKNOWN, CameraModelPriority.RESEARCH)

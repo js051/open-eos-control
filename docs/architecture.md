@@ -28,7 +28,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 
 - `CameraControlBackend` is the transport boundary. Each backend exposes the same identity, status, settings, recording, focus, media, and live view surface.
 - `CameraConnection` identifies how the app reaches a camera: CCAPI network, Android USB/PTP, or desktop bridge.
-- `CameraProfile` identifies camera-family behavior. `Canon EOS R6 Mark III` is the primary profile and the golden validation target.
+- `CameraProfile` identifies camera-family behavior. Its wire values are canonical across Android, iOS, and the Desktop Bridge: family is `EOS_R`, `EOS_DSLR`, `EOS_M`, `POWERSHOT`, or `UNKNOWN`; priority is `PRIMARY`, `SUPPORTED`, or `RESEARCH`. `Canon EOS R6 Mark III` is the primary profile and the golden validation target.
 - `CapabilityMatrix` tells the UI and tests what is supported now versus planned for a backend.
 - `CameraCapabilityEvidence` records where discovery came from, protocol/engine versions, advertised commands, and writable settings so physical-camera reports can distinguish missing advertisements from parser defects.
 - `LiveViewRequest` and `LiveViewCapabilities` describe FPS, source, and size without hard-coding CCAPI polling into the UI.
@@ -48,6 +48,7 @@ The simulator is not part of the product runtime. It exists so UI, state flows, 
 ## Backend Rules
 
 - Backend-specific power should appear as capabilities, not UI assumptions.
+- Camera model classification must normalize spacing and punctuation before matching shared aliases. Every backend emits the canonical `CameraProfile`; client-side inference is only a backward-compatible fallback for older peers that omit the profile.
 - Unsupported operations must fail with explicit transport/feature errors.
 - A CCAPI control is writable only when discovery advertises the exact endpoint and HTTP method; setting values must also come from the camera's current `ability` list. UI gating and backend enforcement must use the same rule so stale or direct calls cannot bypass it.
 - Object-valued CCAPI settings are adapted into stable leaf controls only when their schema is documented. `stillimagequality` exposes camera-advertised RAW/JPEG/HEIF leaves and `wbshift` exposes bounded B/A and M/G integer ranges. Writes preserve the other current leaves and send Canon's complete nested `value` object.
