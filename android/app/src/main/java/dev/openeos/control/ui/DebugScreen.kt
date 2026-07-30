@@ -44,7 +44,13 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun DebugScreen(state: CameraUiState, actions: CameraActions) {
+fun DebugScreen(
+    state: CameraUiState,
+    actions: CameraActions,
+    controlOrientationMode: CameraControlOrientationMode = CameraControlOrientationMode.FOLLOW_SYSTEM,
+    systemAutoRotationEnabled: Boolean = false,
+    controlRotationDegrees: Float = 0f,
+) {
     val context = LocalContext.current
     val unknown = stringResource(R.string.unknown)
     val none = stringResource(R.string.none)
@@ -229,7 +235,12 @@ fun DebugScreen(state: CameraUiState, actions: CameraActions) {
                     }.getOrNull() ?: "unknown"
                     val report = buildDiagnosticReport(
                         state,
-                        DiagnosticReportMetadata(productVersion = productVersion),
+                        DiagnosticReportMetadata(
+                            productVersion = productVersion,
+                            controlOrientationMode = controlOrientationMode,
+                            systemAutoRotationEnabled = systemAutoRotationEnabled,
+                            controlRotationDegrees = controlRotationDegrees,
+                        ),
                     )
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Open EOS Control diagnostic", report))

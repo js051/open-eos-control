@@ -16,13 +16,18 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.view.WindowCompat
 import dev.openeos.control.ui.CameraOrientationPolicy
+import dev.openeos.control.ui.CameraControlOrientationMode
+import dev.openeos.control.ui.CameraControlOrientationPreferences
 import dev.openeos.control.ui.OpenEosControlApp
 import dev.openeos.control.ui.isSystemAutoRotationSettingEnabled
 import dev.openeos.control.ui.nearestEquivalentCameraRotation
+import dev.openeos.control.ui.shouldRotateCameraControls
 
 class MainActivity : AppCompatActivity() {
     private val controlRotationDegrees = mutableFloatStateOf(0f)
     private val animateControlRotation = mutableStateOf(true)
+    private val controlOrientationMode = mutableStateOf(CameraControlOrientationMode.FOLLOW_SYSTEM)
+    private val systemAutoRotationEnabled = mutableStateOf(false)
     private val orientationPolicy = CameraOrientationPolicy()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var orientationListener: OrientationEventListener
@@ -46,6 +51,7 @@ class MainActivity : AppCompatActivity() {
             displayRotationDegrees = currentDisplayRotationDegrees(),
         )
         super.onCreate(savedInstanceState)
+        controlOrientationMode.value = CameraControlOrientationPreferences.read(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         orientationListener = object : OrientationEventListener(this) {
             override fun onOrientationChanged(orientation: Int) {
@@ -65,6 +71,9 @@ class MainActivity : AppCompatActivity() {
             OpenEosControlApp(
                 controlRotationDegrees = controlRotationDegrees.floatValue,
                 animateControlRotation = animateControlRotation.value,
+                controlOrientationMode = controlOrientationMode.value,
+                systemAutoRotationEnabled = systemAutoRotationEnabled.value,
+                onControlOrientationModeChanged = ::setControlOrientationMode,
             )
         }
     }
@@ -124,7 +133,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     internal fun refreshSystemAutoRotationSetting() {
-        val enabled = isSystemAutoRotationEnabled()
+        val systemEnabled = isSystemAutoRotationEnabled()
+        systemAutoRotationEnabled.value = systemEnabled
+        val enabled = shouldRotateCameraControls(controlOrientationMode.value, systemEnabled)
         animateControlRotation.value = enabled
         orientationPolicy.setSystemAutoRotation(enabled)
         setOrientationListenerEnabled(
@@ -137,7 +148,9 @@ class MainActivity : AppCompatActivity() {
         if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return
         // Reconcile the public system setting for every sample. Some quick-settings
         // implementations do not reliably notify observers while an immersive app is focused.
-        val autoRotationEnabled = isSystemAutoRotationEnabled()
+        val systemEnabled = isSystemAutoRotationEnabled()
+        systemAutoRotationEnabled.value = systemEnabled
+        val autoRotationEnabled = shouldRotateCameraControls(controlOrientationMode.value, systemEnabled)
         animateControlRotation.value = autoRotationEnabled
         orientationPolicy.onSensorOrientation(orientation, autoRotationEnabled)
         setOrientationListenerEnabled(
@@ -149,6 +162,17 @@ class MainActivity : AppCompatActivity() {
     internal fun isOrientationListenerRunning(): Boolean = orientationListenerEnabled
 
     internal fun currentControlRotationDegrees(): Float = controlRotationDegrees.floatValue
+
+    internal fun currentControlOrientationMode(): CameraControlOrientationMode = controlOrientationMode.value
+
+    internal fun isSystemAutoRotationCurrentlyEnabled(): Boolean = systemAutoRotationEnabled.value
+
+    internal fun setControlOrientationMode(mode: CameraControlOrientationMode) {
+        if (controlOrientationMode.value == mode) return
+        controlOrientationMode.value = mode
+        CameraControlOrientationPreferences.write(this, mode)
+        refreshSystemAutoRotationSetting()
+    }
 
     private fun setOrientationListenerEnabled(enabled: Boolean) {
         if (orientationListenerEnabled == enabled) return

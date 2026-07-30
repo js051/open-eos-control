@@ -568,6 +568,35 @@ class CameraScreensTest {
     }
 
     @Test
+    fun orientationSettingsExposeSystemStateAndApplyTheSelectedPolicy() {
+        val selectedMode = mutableStateOf(CameraControlOrientationMode.FOLLOW_SYSTEM)
+        val actions = noOpActions().copy(setControlOrientationMode = { selectedMode.value = it })
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    state = CameraUiState().withOfflinePreview().copy(
+                        activeSettingPicker = SettingPicker.ORIENTATION,
+                    ),
+                    actions = actions,
+                    controlOrientationMode = selectedMode.value,
+                    systemAutoRotationEnabled = false,
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.system_auto_rotation_off)).assertIsDisplayed()
+        compose.onNodeWithTag("orientation-mode-FOLLOW_SYSTEM").assertIsDisplayed()
+        compose.onNodeWithTag("orientation-mode-ALWAYS_ROTATE").performClick()
+        compose.runOnIdle {
+            assertEquals(CameraControlOrientationMode.ALWAYS_ROTATE, selectedMode.value)
+        }
+        compose.onNodeWithTag("orientation-mode-KEEP_FIXED").performClick()
+        compose.runOnIdle {
+            assertEquals(CameraControlOrientationMode.KEEP_FIXED, selectedMode.value)
+        }
+    }
+
+    @Test
     fun upsideDownSettingsKeepTheSameBottomAnchoredLayout() {
         compose.setContent {
             CompositionLocalProvider(
@@ -833,6 +862,11 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithText(resourceText(R.string.live_view_tap_action))
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
         compose.onNodeWithText(resourceText(R.string.live_view_tap_action))
             .performScrollTo()
             .assertIsDisplayed()

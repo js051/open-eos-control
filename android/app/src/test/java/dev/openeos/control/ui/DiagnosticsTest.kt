@@ -44,6 +44,22 @@ class DiagnosticsTest {
     }
 
     @Test
+    fun diagnosticReportIncludesTheEffectiveControlOrientationPolicy() {
+        val report = buildDiagnosticReport(
+            state = CameraUiState(),
+            metadata = DiagnosticReportMetadata(
+                controlOrientationMode = CameraControlOrientationMode.FOLLOW_SYSTEM,
+                systemAutoRotationEnabled = false,
+                controlRotationDegrees = -90f,
+            ),
+        )
+
+        assertTrue(report.contains("controlOrientationMode=FOLLOW_SYSTEM"))
+        assertTrue(report.contains("systemAutoRotationEnabled=false"))
+        assertTrue(report.contains("controlRotationDegrees=-90.0"))
+    }
+
+    @Test
     fun diagnosticReportRedactsMachineLocalPaths() {
         val windowsHome = "C:" + "\\Users\\Private User\\capture.jpg"
         val networkHome = "\\\\" + "PRIVATE-SERVER\\private\\capture.jpg"

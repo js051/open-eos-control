@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.openeos.control.ui.cameraRotationQuadrant
+import dev.openeos.control.ui.CameraControlOrientationMode
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -49,6 +50,39 @@ class MainActivityOrientationTest {
                 shell("settings delete system accelerometer_rotation")
             }
             compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
+        }
+    }
+
+    @Test
+    fun explicitCameraControlOrientationModesOverrideTheSystemSetting() {
+        val originalSetting = shell("settings get system accelerometer_rotation")
+        val originalMode = compose.activity.currentControlOrientationMode()
+        try {
+            setSystemAutoRotation(false)
+            compose.runOnIdle {
+                compose.activity.setControlOrientationMode(CameraControlOrientationMode.ALWAYS_ROTATE)
+                compose.activity.handleDeviceOrientationChanged(90)
+                assertEquals(3, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
+                assertEquals(false, compose.activity.isSystemAutoRotationCurrentlyEnabled())
+            }
+
+            setSystemAutoRotation(true)
+            compose.runOnIdle {
+                compose.activity.setControlOrientationMode(CameraControlOrientationMode.KEEP_FIXED)
+                compose.activity.handleDeviceOrientationChanged(270)
+                assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
+                assertEquals(true, compose.activity.isSystemAutoRotationCurrentlyEnabled())
+            }
+        } finally {
+            if (originalSetting == "0" || originalSetting == "1") {
+                shell("settings put system accelerometer_rotation $originalSetting")
+            } else {
+                shell("settings delete system accelerometer_rotation")
+            }
+            compose.runOnIdle {
+                compose.activity.setControlOrientationMode(originalMode)
+                compose.activity.refreshSystemAutoRotationSetting()
+            }
         }
     }
 

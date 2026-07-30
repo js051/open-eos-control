@@ -34,6 +34,9 @@ fun OpenEosControlApp(
     viewModel: CameraViewModel = viewModel(),
     controlRotationDegrees: Float = 0f,
     animateControlRotation: Boolean = true,
+    controlOrientationMode: CameraControlOrientationMode = CameraControlOrientationMode.FOLLOW_SYSTEM,
+    systemAutoRotationEnabled: Boolean = false,
+    onControlOrientationModeChanged: (CameraControlOrientationMode) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -119,6 +122,7 @@ fun OpenEosControlApp(
             viewModel.closeSettingPicker()
             AppLanguageManager.set(language)
         },
+        setControlOrientationMode = onControlOrientationModeChanged,
         clearError = viewModel::clearError,
     )
 
@@ -134,9 +138,20 @@ fun OpenEosControlApp(
                 } else if (state.uiMode == UiMode.MEDIA) {
                     MediaScreen(state, actions)
                 } else if (state.uiMode == UiMode.DEBUG) {
-                    DebugScreen(state, actions)
+                    DebugScreen(
+                        state = state,
+                        actions = actions,
+                        controlOrientationMode = controlOrientationMode,
+                        systemAutoRotationEnabled = systemAutoRotationEnabled,
+                        controlRotationDegrees = controlRotationDegrees,
+                    )
                 } else {
-                    CameraControlScreen(state, actions)
+                    CameraControlScreen(
+                        state = state,
+                        actions = actions,
+                        controlOrientationMode = controlOrientationMode,
+                        systemAutoRotationEnabled = systemAutoRotationEnabled,
+                    )
                 }
                 Box(Modifier.align(Alignment.BottomCenter)) {
                     ErrorBanner(state.error, actions.clearError)
@@ -243,5 +258,6 @@ data class CameraActions(
     val setLiveViewSize: (LiveViewSize) -> Unit,
     val setLiveViewSource: (LiveViewSource) -> Unit,
     val setAppLanguage: (AppLanguage) -> Unit,
+    val setControlOrientationMode: (CameraControlOrientationMode) -> Unit = {},
     val clearError: () -> Unit,
 )
