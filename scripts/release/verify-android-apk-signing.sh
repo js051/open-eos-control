@@ -39,12 +39,12 @@ signer_output="$("$apksigner_path" verify --print-certs "$apk" 2>&1)" || fail "a
 mapfile -t signer_digests < <(
   awk '
     BEGIN { IGNORECASE = 1 }
-    /^[[:space:]]*Signer #[0-9]+ certificate SHA-256 digest:/ {
+    /^[[:space:]]*(Signer #[0-9]+|V[0-9]+ Signer):?[[:space:]]+certificate SHA-256 digest:/ {
       digest = $NF
       gsub(":", "", digest)
       print tolower(digest)
     }
-  ' <<< "$signer_output"
+  ' <<< "$signer_output" | sort -u
 )
 
 if [[ ${#signer_digests[@]} -ne 1 ]]; then
