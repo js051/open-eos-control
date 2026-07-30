@@ -384,6 +384,7 @@ private struct MonitoringAssistView: View {
                             .font(.caption)
                             .foregroundStyle(Color.cameraWarning)
                             .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("monitor-pixel-analysis-unavailable")
                     }
                     monitorToggle(
                         "histogram",
