@@ -266,7 +266,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnUsesACompactReadableCameraState() {
+    fun quarterTurnUsesAReadableCameraStateWithoutDroppingCopy() {
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
@@ -282,7 +282,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onAllNodesWithText(resourceText(R.string.offline_preview_hint)).assertCountEquals(0)
+        compose.onNodeWithText(resourceText(R.string.offline_preview_hint)).assertIsDisplayed()
         val previewTitleBounds = compose
             .onNodeWithText(resourceText(R.string.offline_preview))
             .fetchSemanticsNode()
@@ -297,6 +297,10 @@ class CameraScreensTest {
             .boundsInRoot
         val offlineContentBounds = compose
             .onNodeWithTag("offline-preview-content", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val previewHintBounds = compose
+            .onNodeWithText(resourceText(R.string.offline_preview_hint))
             .fetchSemanticsNode()
             .boundsInRoot
         val exposureBounds = compose
@@ -329,6 +333,13 @@ class CameraScreensTest {
                 offlineContentBounds.top >= previewBounds.top &&
                 offlineContentBounds.right <= previewBounds.right &&
                 offlineContentBounds.bottom <= previewBounds.bottom,
+        )
+        assertTrue(
+            "The complete offline hint $previewHintBounds must stay inside its readable group $offlineContentBounds",
+            previewHintBounds.left >= offlineContentBounds.left &&
+                previewHintBounds.top >= offlineContentBounds.top &&
+                previewHintBounds.right <= offlineContentBounds.right &&
+                previewHintBounds.bottom <= offlineContentBounds.bottom,
         )
         assertTrue(
             "Rotated offline content must stay above exposure controls",
@@ -374,7 +385,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun quarterTurnKeepsCompactLocalizedCopyInsideTheLiveViewViewport() {
+    fun quarterTurnKeepsLocalizedCopyInsideTheLiveViewViewport() {
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
@@ -400,6 +411,10 @@ class CameraScreensTest {
             .onNodeWithTag("offline-preview-content", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInRoot
+        val hint = compose
+            .onNodeWithText(resourceText(R.string.offline_preview_hint))
+            .fetchSemanticsNode()
+            .boundsInRoot
         val modelSlot = compose
             .onNodeWithTag("camera-model-status")
             .fetchSemanticsNode()
@@ -415,7 +430,12 @@ class CameraScreensTest {
                 content.right <= viewport.right &&
                 content.bottom <= viewport.bottom,
         )
-        compose.onAllNodesWithText(resourceText(R.string.offline_preview_hint)).assertCountEquals(0)
+        assertTrue(
+            "Localized offline copy $hint must stay inside the readable state $content",
+            hint.left >= content.left && hint.top >= content.top &&
+                hint.right <= content.right && hint.bottom <= content.bottom,
+        )
+        compose.onNodeWithText(resourceText(R.string.offline_preview_hint)).assertIsDisplayed()
         compose.onNodeWithText("R6 III").assertIsDisplayed()
         compose.onNodeWithText("82%").assertIsDisplayed()
         compose.onNodeWithText("2,418").assertIsDisplayed()
