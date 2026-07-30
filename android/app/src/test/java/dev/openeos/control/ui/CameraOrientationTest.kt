@@ -1,5 +1,8 @@
 package dev.openeos.control.ui
 
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import dev.openeos.control.naturalCameraLayoutOrientation
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.util.Locale
@@ -14,6 +17,30 @@ class CameraOrientationTest {
     }
 
     @Test
+    fun cameraLayoutLocksToTheNaturalDisplayAxisEvenWhenLaunchedSideways() {
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            naturalCameraLayoutOrientation(Configuration.ORIENTATION_PORTRAIT, 0),
+        )
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            naturalCameraLayoutOrientation(Configuration.ORIENTATION_LANDSCAPE, 90),
+        )
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            naturalCameraLayoutOrientation(Configuration.ORIENTATION_LANDSCAPE, 270),
+        )
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            naturalCameraLayoutOrientation(Configuration.ORIENTATION_LANDSCAPE, 0),
+        )
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            naturalCameraLayoutOrientation(Configuration.ORIENTATION_PORTRAIT, 90),
+        )
+    }
+
+    @Test
     fun systemRotationLockKeepsControlsFixedAndRequiresAFreshSampleWhenUnlocked() {
         val policy = CameraOrientationPolicy()
 
@@ -23,7 +50,7 @@ class CameraOrientationTest {
         assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(true)
@@ -47,18 +74,18 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun orientationListenerStaysActiveSoEveryPostureCanReconcileTheSystemSetting() {
+    fun orientationListenerRunsOnlyWhileSystemAutoRotationIsEnabled() {
         val policy = CameraOrientationPolicy()
 
         assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
         assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = false))
-        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(true)
         assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
     }
 
     @Test
@@ -142,9 +169,9 @@ class CameraOrientationTest {
 
     @Test
     fun cameraHudRemovesBrandPrefixesWithoutAbbreviatingTheModelGeneration() {
-        assertEquals("R6\nMark III", "Canon EOS R6 Mark III".toCameraHudName())
-        assertEquals("R5\nMark II", "EOS R5 Mark II".toCameraHudName())
-        assertEquals("PowerShot G7 X\nMark III", "Canon PowerShot G7 X Mark III".toCameraHudName())
+        assertEquals("R6 III", "Canon EOS R6 Mark III".toCameraHudName())
+        assertEquals("R5 II", "EOS R5 Mark II".toCameraHudName())
+        assertEquals("PowerShot G7 X III", "Canon PowerShot G7 X Mark III".toCameraHudName())
     }
 
     @Test
