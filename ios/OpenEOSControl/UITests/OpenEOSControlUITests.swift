@@ -135,6 +135,7 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "monitoring-assists-offline")
     }
 
+    @MainActor
     func testDirectCCAPIControlsReachTheRunningCameraSimulator() async throws {
         let health = try? await simulatorRequest(path: "/health")
         let available = health?["ok"] as? Bool == true
