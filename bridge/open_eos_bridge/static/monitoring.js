@@ -8,6 +8,8 @@
   const MAX_ANALYSIS_WIDTH = 120;
   const MAX_ANALYSIS_HEIGHT = 80;
   const HISTOGRAM_BUCKETS = 64;
+  const WAVEFORM_COLUMNS = 64;
+  const WAVEFORM_LEVELS = 64;
   const FOCUS_PEAKING_GRADIENT = 72;
   const ZEBRA_LIGHT = [255, 255, 255, 176];
   const ZEBRA_DARK = [0, 0, 0, 120];
@@ -49,6 +51,9 @@
     const pixelCount = width * height;
     const luminance = new Uint8Array(pixelCount);
     const histogram = new Uint32Array(HISTOGRAM_BUCKETS);
+    const waveform = settings.waveformVisible
+      ? new Uint32Array(WAVEFORM_COLUMNS * WAVEFORM_LEVELS)
+      : null;
     for (let index = 0; index < pixelCount; index += 1) {
       const offset = index * 4;
       const value = (
@@ -58,6 +63,13 @@
       ) >> 8;
       luminance[index] = value;
       histogram[Math.min(HISTOGRAM_BUCKETS - 1, Math.floor(value * HISTOGRAM_BUCKETS / 256))] += 1;
+      if (waveform) {
+        const x = index % width;
+        const column = width === 1 ? 0 : Math.floor(x * (WAVEFORM_COLUMNS - 1) / (width - 1));
+        const level = Math.min(WAVEFORM_LEVELS - 1, Math.floor(value * WAVEFORM_LEVELS / 256));
+        const row = WAVEFORM_LEVELS - 1 - level;
+        waveform[row * WAVEFORM_COLUMNS + column] += 1;
+      }
     }
 
     const falseColorEnabled = Boolean(settings.falseColorEnabled);
@@ -90,7 +102,13 @@
       }
     }
 
-    return { width, height, histogram, overlay };
+    return {
+      width,
+      height,
+      histogram,
+      waveform: waveform ? { width: WAVEFORM_COLUMNS, height: WAVEFORM_LEVELS, density: waveform } : null,
+      overlay,
+    };
   }
 
   function writeColor(rgba, index, color) {

@@ -27,6 +27,22 @@ const histogram = monitoring.analyzePixels(
 assert.equal(histogram.histogram.length, 64);
 assert.equal([...histogram.histogram].reduce((total, count) => total + count, 0), 4);
 assert.equal(histogram.overlay, null);
+assert.equal(histogram.waveform, null);
+
+const waveform = monitoring.analyzePixels(
+  new Uint8ClampedArray([
+    0, 0, 0, 255,
+    255, 255, 255, 255,
+  ]),
+  2,
+  1,
+  { waveformVisible: true },
+).waveform;
+assert.equal(waveform.width, 64);
+assert.equal(waveform.height, 64);
+assert.equal([...waveform.density].reduce((total, count) => total + count, 0), 2);
+assert.equal(waveform.density[63 * waveform.width], 1);
+assert.equal(waveform.density[waveform.width - 1], 1);
 
 const falseColor = monitoring.analyzePixels(
   new Uint8ClampedArray([0, 0, 0, 255]),

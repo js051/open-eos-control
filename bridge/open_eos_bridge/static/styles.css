@@ -575,7 +575,8 @@ input:disabled {
   image-rendering: pixelated;
 }
 
-.monitor-histogram {
+.monitor-histogram,
+.monitor-waveform {
   position: absolute;
   z-index: 3;
   width: 160px;

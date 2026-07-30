@@ -21,6 +21,26 @@ class LiveViewMonitoringTest {
         assertEquals(1, analysis.histogram.last())
         assertEquals(2, analysis.histogram.sum())
         assertNull(analysis.overlayPixels)
+        assertNull(analysis.waveform)
+    }
+
+    @Test
+    fun waveformPreservesHorizontalPositionAndLuminance() {
+        val analysis = analyzeLiveViewPixels(
+            pixels = intArrayOf(0xff000000.toInt(), 0xffffffff.toInt()),
+            width = 2,
+            height = 1,
+            zebraThresholdPercent = null,
+            focusPeakingEnabled = false,
+            waveformVisible = true,
+        )
+
+        val waveform = requireNotNull(analysis.waveform)
+        assertEquals(64, waveform.width)
+        assertEquals(64, waveform.height)
+        assertEquals(2, waveform.density.sum())
+        assertEquals(1, waveform.density[63 * waveform.width])
+        assertEquals(1, waveform.density[waveform.width - 1])
     }
 
     @Test
@@ -89,6 +109,7 @@ class LiveViewMonitoringTest {
             ).needsPixelAnalysis
         )
         assertTrue(LiveViewMonitorSettings(histogramVisible = true).needsPixelAnalysis)
+        assertTrue(LiveViewMonitorSettings(waveformVisible = true).needsPixelAnalysis)
         assertTrue(LiveViewMonitorSettings(zebraThresholdPercent = 95).needsPixelAnalysis)
         assertTrue(LiveViewMonitorSettings(falseColorEnabled = true).needsPixelAnalysis)
         assertTrue(LiveViewMonitorSettings(focusPeakingEnabled = true).needsPixelAnalysis)

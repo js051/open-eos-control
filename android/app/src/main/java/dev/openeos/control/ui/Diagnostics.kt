@@ -121,6 +121,7 @@ fun buildDiagnosticReport(
         appendLine("requestedFps=${state.liveViewFrameRateFps}")
         appendLine("liveViewSource=${state.liveViewSource.name}")
         appendLine("monitorHistogram=${state.monitorSettings.histogramVisible}")
+        appendLine("monitorWaveform=${state.monitorSettings.waveformVisible}")
         appendLine("monitorZebra=${state.monitorSettings.zebraThresholdPercent ?: "off"}")
         appendLine("monitorFalseColor=${state.monitorSettings.falseColorEnabled}")
         appendLine("monitorFocusPeaking=${state.monitorSettings.focusPeakingEnabled}")

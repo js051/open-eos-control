@@ -178,8 +178,9 @@
 "media_preview_unavailable" = "The camera preview could not be displayed.";
 
 "monitoring_assists" = "Monitoring assists";
-"monitoring_assists_rtp_unavailable" = "Histogram, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.";
+"monitoring_assists_rtp_unavailable" = "Histogram, luma waveform, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.";
 "histogram" = "Histogram";
+"luma_waveform" = "Luma waveform";
 "zebra" = "Zebra";
 "zebra_threshold" = "%d%%";
 "false_color" = "False color";

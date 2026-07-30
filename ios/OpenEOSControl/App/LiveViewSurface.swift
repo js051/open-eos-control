@@ -80,6 +80,19 @@ struct LiveViewSurface: View {
                         .accessibilityIdentifier("live-view-histogram")
                 }
 
+                if camera.monitorSettings.waveformVisible, let waveform = monitorAnalysis?.waveform {
+                    let width = min(180, max(120, imageRect.width * 0.34))
+                    WaveformView(waveform: waveform)
+                        .frame(width: width, height: 88)
+                        .position(
+                            x: imageRect.minX + width / 2 + 10,
+                            y: imageRect.minY + 114
+                        )
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        .accessibilityIdentifier("live-view-waveform")
+                }
+
                 if let marker = camera.focusMarker {
                     FocusMarkerView(accepted: marker.accepted)
                         .position(
@@ -323,6 +336,40 @@ private struct HistogramView: View {
             path.closeSubpath()
             context.fill(path, with: .color(.white.opacity(0.36)))
             context.stroke(path, with: .color(.white.opacity(0.92)), lineWidth: 1)
+        }
+        .padding(7)
+        .background(Color.black.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+private struct WaveformView: View {
+    let waveform: LiveViewWaveform
+
+    var body: some View {
+        Canvas { context, size in
+            for guide in 0...4 {
+                let y = min(size.height - 1, size.height * CGFloat(guide) / 4)
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(path, with: .color(.white.opacity(0.16)), lineWidth: 0.5)
+            }
+            let peak = max(1, waveform.density.max() ?? 1)
+            let cellWidth = size.width / CGFloat(waveform.width)
+            let cellHeight = size.height / CGFloat(waveform.height)
+            for (index, count) in waveform.density.enumerated() where count > 0 {
+                let x = index % waveform.width
+                let y = index / waveform.width
+                let intensity = min(1, max(0.16, sqrt(Double(count) / Double(peak))))
+                let rect = CGRect(
+                    x: CGFloat(x) * cellWidth,
+                    y: CGFloat(y) * cellHeight,
+                    width: max(1, cellWidth),
+                    height: max(1, cellHeight)
+                )
+                context.fill(Path(rect), with: .color(Color.cameraAccent.opacity(intensity)))
+            }
         }
         .padding(7)
         .background(Color.black.opacity(0.72))

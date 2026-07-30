@@ -162,6 +162,7 @@ class DiagnosticsTest {
             liveViewSource = LiveViewSource.CCAPI_RTP,
             monitorSettings = LiveViewMonitorSettings(
                 histogramVisible = true,
+                waveformVisible = true,
                 zebraThresholdPercent = 95,
                 falseColorEnabled = true,
                 focusPeakingEnabled = true,
@@ -185,6 +186,7 @@ class DiagnosticsTest {
         assertTrue(report.contains("liveViewHealthy=true"))
         assertTrue(report.contains("liveViewSource=CCAPI_RTP"))
         assertTrue(report.contains("monitorHistogram=true"))
+        assertTrue(report.contains("monitorWaveform=true"))
         assertTrue(report.contains("monitorZebra=95"))
         assertTrue(report.contains("monitorFalseColor=true"))
         assertTrue(report.contains("monitorFocusPeaking=true"))

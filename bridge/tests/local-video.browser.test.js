@@ -253,6 +253,15 @@ async function run() {
       const histogram = document.querySelector("#monitor-histogram");
       return !histogram.hidden && histogram.width > 0 && histogram.height > 0;
     });
+    await page.click("#monitoring-button");
+    await page.waitForSelector("#monitoring-dialog[open]");
+    await page.check("#monitor-waveform-toggle");
+    await page.click("#monitoring-dialog-close");
+    await page.waitForFunction(() => {
+      const histogram = document.querySelector("#monitor-histogram");
+      const waveform = document.querySelector("#monitor-waveform");
+      return histogram.hidden && !waveform.hidden && waveform.width > 0 && waveform.height > 0;
+    });
 
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
     await page.screenshot({ path: path.join(RESULTS_DIR, "local-video-desktop.png") });
@@ -301,6 +310,8 @@ async function run() {
     assert.equal(report.liveView.localVideo.selection, "explicit");
     assert.equal(report.liveView.localVideo.settings.width, 1280);
     assert.equal(report.liveView.monitoring.analysisError, null);
+    assert.equal(report.liveView.monitoring.histogramVisible, false);
+    assert.equal(report.liveView.monitoring.waveformVisible, true);
     assert.equal(reportText.includes("private-test-device-id"), false);
     assert.equal(reportText.includes("private-test-group-id"), false);
     assert.equal(reportText.includes("Test HDMI capture"), false);

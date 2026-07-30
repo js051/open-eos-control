@@ -172,6 +172,7 @@ final class CameraAppTests: XCTestCase {
         let state = CameraAppState(defaults: defaults)
         state.monitorSettings = LiveViewMonitorSettings(
             histogramVisible: true,
+            waveformVisible: true,
             zebraThresholdPercent: 95,
             falseColorEnabled: true,
             focusPeakingEnabled: true,
@@ -183,6 +184,7 @@ final class CameraAppTests: XCTestCase {
         let report = await state.diagnosticReport()
 
         XCTAssertTrue(report.contains("monitorHistogram=true"))
+        XCTAssertTrue(report.contains("monitorWaveform=true"))
         XCTAssertTrue(report.contains("monitorZebra=95"))
         XCTAssertTrue(report.contains("monitorFalseColor=true"))
         XCTAssertTrue(report.contains("monitorFocusPeaking=true"))

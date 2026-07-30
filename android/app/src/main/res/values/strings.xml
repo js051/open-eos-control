@@ -414,8 +414,9 @@
     <string name="bulb_exposure_time">BULB %1$s</string>
     <string name="bulb_not_supported">This connection cannot hold and release the shutter for Bulb exposure.</string>
     <string name="monitoring_assists">Monitoring assists</string>
-    <string name="monitoring_assists_rtp_unavailable">Histogram, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.</string>
+    <string name="monitoring_assists_rtp_unavailable">Histogram, luma waveform, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.</string>
     <string name="histogram">Histogram</string>
+    <string name="luma_waveform">Luma waveform</string>
     <string name="zebra">Zebra</string>
     <string name="zebra_threshold">%1$d%%</string>
     <string name="false_color">False color</string>

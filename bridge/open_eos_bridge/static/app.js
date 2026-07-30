@@ -103,6 +103,7 @@
       frameRate: "Frame rate",
       monitoringAssists: "Monitoring assists",
       histogram: "Histogram",
+      lumaWaveform: "Luma waveform",
       zebra: "Zebra",
       off: "Off",
       falseColor: "False color",
@@ -329,6 +330,7 @@
       frameRate: "影格率",
       monitoringAssists: "監看輔助",
       histogram: "直方圖",
+      lumaWaveform: "亮度波形圖",
       zebra: "斑馬紋",
       off: "關閉",
       falseColor: "偽色",
@@ -626,6 +628,7 @@
     monitorAnalysisError: null,
     monitorSettings: {
       histogramVisible: false,
+      waveformVisible: false,
       zebraThresholdPercent: null,
       falseColorEnabled: false,
       focusPeakingEnabled: false,
@@ -688,6 +691,7 @@
     monitorPixelOverlay: byId("monitor-pixel-overlay"),
     monitorGuidesOverlay: byId("monitor-guides-overlay"),
     monitorHistogram: byId("monitor-histogram"),
+    monitorWaveform: byId("monitor-waveform"),
     viewfinderPlaceholder: byId("viewfinder-placeholder"),
     liveToggleButton: byId("live-toggle-button"),
     railLiveButton: byId("rail-live-button"),
@@ -725,6 +729,7 @@
     monitoringDialog: byId("monitoring-dialog"),
     monitoringDialogClose: byId("monitoring-dialog-close"),
     monitorHistogramToggle: byId("monitor-histogram-toggle"),
+    monitorWaveformToggle: byId("monitor-waveform-toggle"),
     monitorZebraSelect: byId("monitor-zebra-select"),
     monitorFalseColorToggle: byId("monitor-false-color-toggle"),
     monitorFocusPeakingToggle: byId("monitor-focus-peaking-toggle"),
@@ -2178,7 +2183,7 @@
 
   function monitorNeedsPixelAnalysis() {
     const settings = state.monitorSettings;
-    return settings.histogramVisible || settings.zebraThresholdPercent !== null ||
+    return settings.histogramVisible || settings.waveformVisible || settings.zebraThresholdPercent !== null ||
       settings.falseColorEnabled || settings.focusPeakingEnabled;
   }
 
@@ -2224,6 +2229,7 @@
     if (!rect || !monitorNeedsPixelAnalysis()) {
       ui.monitorPixelOverlay.hidden = true;
       ui.monitorHistogram.hidden = true;
+      ui.monitorWaveform.hidden = true;
       state.monitorAnalysisError = null;
       return;
     }
@@ -2235,17 +2241,20 @@
       analysisContext.drawImage(media, 0, 0, dimensions.width, dimensions.height);
       const frame = analysisContext.getImageData(0, 0, dimensions.width, dimensions.height);
       const analysis = monitoring.analyzePixels(frame.data, dimensions.width, dimensions.height, {
+        waveformVisible: state.monitorSettings.waveformVisible,
         zebraThresholdPercent: state.monitorSettings.zebraThresholdPercent,
         falseColorEnabled: state.monitorSettings.falseColorEnabled,
         focusPeakingEnabled: state.monitorSettings.focusPeakingEnabled,
       });
       renderMonitorPixelOverlay(analysis);
       renderMonitorHistogram(analysis.histogram);
+      renderMonitorWaveform(analysis.waveform);
       state.monitorAnalysisError = null;
     } catch (error) {
       state.monitorAnalysisError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       ui.monitorPixelOverlay.hidden = true;
       ui.monitorHistogram.hidden = true;
+      ui.monitorWaveform.hidden = true;
     }
   }
 
@@ -2293,13 +2302,58 @@
     ui.monitorHistogram.hidden = false;
   }
 
+  function renderMonitorWaveform(waveform) {
+    if (!state.monitorSettings.waveformVisible || !waveform) {
+      ui.monitorWaveform.hidden = true;
+      return;
+    }
+    const width = 160;
+    const height = 88;
+    const padding = 7;
+    ui.monitorWaveform.width = width;
+    ui.monitorWaveform.height = height;
+    const context = ui.monitorWaveform.getContext("2d");
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = "rgb(255 255 255 / 16%)";
+    context.lineWidth = 0.5;
+    for (let guide = 0; guide <= 4; guide += 1) {
+      const y = Math.min(height - padding, padding + (height - padding * 2) * guide / 4);
+      context.beginPath();
+      context.moveTo(padding, y);
+      context.lineTo(width - padding, y);
+      context.stroke();
+    }
+    const peak = Math.max(1, ...waveform.density);
+    const cellWidth = (width - padding * 2) / waveform.width;
+    const cellHeight = (height - padding * 2) / waveform.height;
+    waveform.density.forEach((count, index) => {
+      if (!count) return;
+      const x = index % waveform.width;
+      const y = Math.floor(index / waveform.width);
+      const alpha = Math.min(1, Math.max(0.16, Math.sqrt(count / peak)));
+      context.fillStyle = `rgb(51 198 216 / ${alpha})`;
+      context.fillRect(
+        padding + x * cellWidth,
+        padding + y * cellHeight,
+        Math.max(1, cellWidth),
+        Math.max(1, cellHeight),
+      );
+    });
+    ui.monitorWaveform.hidden = false;
+  }
+
   function positionHistogram(rect) {
     const width = Math.min(160, Math.max(120, rect.width * 0.34));
-    const height = width * 72 / 160;
+    const histogramHeight = width * 72 / 160;
+    const waveformHeight = width * 88 / 160;
     ui.monitorHistogram.style.width = `${width}px`;
-    ui.monitorHistogram.style.height = `${height}px`;
+    ui.monitorHistogram.style.height = `${histogramHeight}px`;
     ui.monitorHistogram.style.left = `${rect.left + 10}px`;
-    ui.monitorHistogram.style.top = `${Math.max(rect.top + 10, rect.top + rect.height - height - 10)}px`;
+    ui.monitorHistogram.style.top = `${Math.max(rect.top + 10, rect.top + rect.height - histogramHeight - 10)}px`;
+    ui.monitorWaveform.style.width = `${width}px`;
+    ui.monitorWaveform.style.height = `${waveformHeight}px`;
+    ui.monitorWaveform.style.left = `${rect.left + 10}px`;
+    ui.monitorWaveform.style.top = `${Math.max(rect.top + 10, rect.top + rect.height - waveformHeight - 10)}px`;
   }
 
   function drawMonitorGuides(rect) {
@@ -2339,11 +2393,13 @@
     ui.monitorPixelOverlay.hidden = true;
     ui.monitorGuidesOverlay.hidden = true;
     ui.monitorHistogram.hidden = true;
+    ui.monitorWaveform.hidden = true;
   }
 
   function renderMonitoringControls() {
     const settings = state.monitorSettings;
     ui.monitorHistogramToggle.checked = settings.histogramVisible;
+    ui.monitorWaveformToggle.checked = settings.waveformVisible;
     ui.monitorZebraSelect.value = settings.zebraThresholdPercent === null
       ? ""
       : String(settings.zebraThresholdPercent);
@@ -2362,6 +2418,7 @@
   function changeMonitoringSettings() {
     state.monitorSettings = {
       histogramVisible: ui.monitorHistogramToggle.checked,
+      waveformVisible: ui.monitorWaveformToggle.checked,
       zebraThresholdPercent: ui.monitorZebraSelect.value ? Number(ui.monitorZebraSelect.value) : null,
       falseColorEnabled: ui.monitorFalseColorToggle.checked,
       focusPeakingEnabled: ui.monitorFocusPeakingToggle.checked,
@@ -3219,8 +3276,15 @@
     ui.monitoringDialog.addEventListener("click", (event) => {
       if (event.target === ui.monitoringDialog) ui.monitoringDialog.close();
     });
+    ui.monitorHistogramToggle.addEventListener("change", () => {
+      if (ui.monitorHistogramToggle.checked) ui.monitorWaveformToggle.checked = false;
+      changeMonitoringSettings();
+    });
+    ui.monitorWaveformToggle.addEventListener("change", () => {
+      if (ui.monitorWaveformToggle.checked) ui.monitorHistogramToggle.checked = false;
+      changeMonitoringSettings();
+    });
     [
-      ui.monitorHistogramToggle,
       ui.monitorZebraSelect,
       ui.monitorFalseColorToggle,
       ui.monitorFocusPeakingToggle,

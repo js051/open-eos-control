@@ -33,6 +33,40 @@ final class LiveViewMonitoringTests: XCTestCase {
         XCTAssertEqual(analysis.histogram.reduce(0, +), 4)
         XCTAssertEqual(analysis.histogram.count, 64)
         XCTAssertNil(analysis.overlayRGBA)
+        XCTAssertNil(analysis.waveform)
+    }
+
+    func testWaveformPreservesHorizontalPositionAndLuminance() throws {
+        let analysis = analyzeLiveViewPixels(
+            rgba: [
+                0, 0, 0, 255,
+                255, 255, 255, 255,
+            ],
+            width: 2,
+            height: 1,
+            zebraThresholdPercent: nil,
+            focusPeakingEnabled: false,
+            waveformVisible: true
+        )
+
+        let waveform = try XCTUnwrap(analysis.waveform)
+        XCTAssertEqual(waveform.width, 64)
+        XCTAssertEqual(waveform.height, 64)
+        XCTAssertEqual(waveform.density.reduce(0, +), 2)
+        XCTAssertEqual(waveform.density[63 * waveform.width], 1)
+        XCTAssertEqual(waveform.density[waveform.width - 1], 1)
+    }
+
+    func testHistogramAndWaveformRemainMutuallyExclusive() {
+        var settings = LiveViewMonitorSettings()
+
+        settings.setHistogramVisible(true)
+        XCTAssertTrue(settings.histogramVisible)
+        XCTAssertFalse(settings.waveformVisible)
+
+        settings.setWaveformVisible(true)
+        XCTAssertFalse(settings.histogramVisible)
+        XCTAssertTrue(settings.waveformVisible)
     }
 
     func testFalseColorMapsDarkPixelsToTheExposurePalette() throws {

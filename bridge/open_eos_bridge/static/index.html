@@ -151,6 +151,7 @@
             <canvas id="monitor-pixel-overlay" class="monitor-layer" aria-hidden="true" hidden></canvas>
             <canvas id="monitor-guides-overlay" class="monitor-layer" aria-hidden="true" hidden></canvas>
             <canvas id="monitor-histogram" class="monitor-histogram" aria-hidden="true" hidden></canvas>
+            <canvas id="monitor-waveform" class="monitor-waveform" aria-hidden="true" hidden></canvas>
             <div id="viewfinder-placeholder" class="viewfinder-placeholder">
               <span class="icon large" data-icon="camera" aria-hidden="true"></span>
               <button id="live-toggle-button" class="button primary" type="button">
@@ -316,6 +317,10 @@
       <label class="monitoring-row">
         <span data-i18n="histogram">Histogram</span>
         <input id="monitor-histogram-toggle" type="checkbox">
+      </label>
+      <label class="monitoring-row">
+        <span data-i18n="lumaWaveform">Luma waveform</span>
+        <input id="monitor-waveform-toggle" type="checkbox">
       </label>
       <label class="monitoring-row">
         <span data-i18n="zebra">Zebra</span>

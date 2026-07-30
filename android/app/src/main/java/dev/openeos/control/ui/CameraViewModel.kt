@@ -106,7 +106,13 @@ class CameraViewModel(
 
     fun setGridVisible(visible: Boolean) = _uiState.update { it.copy(showGrid = visible) }
 
-    fun setHistogramVisible(visible: Boolean) = updateMonitorSettings { copy(histogramVisible = visible) }
+    fun setHistogramVisible(visible: Boolean) = updateMonitorSettings {
+        copy(histogramVisible = visible, waveformVisible = if (visible) false else waveformVisible)
+    }
+
+    fun setWaveformVisible(visible: Boolean) = updateMonitorSettings {
+        copy(waveformVisible = visible, histogramVisible = if (visible) false else histogramVisible)
+    }
 
     fun setZebraThreshold(thresholdPercent: Int?) = updateMonitorSettings {
         copy(zebraThresholdPercent = thresholdPercent?.coerceIn(50, 100))
