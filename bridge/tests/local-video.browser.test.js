@@ -369,9 +369,25 @@ async function run() {
     await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.stoppedTracks === 2);
     assert.equal(await page.locator("#local-video").isVisible(), false);
     assert.equal(await page.locator("#preview-source-indicator").innerText(), "CAM");
+    try {
+      await page.waitForFunction(() => (
+        document.querySelector("#live-toggle-button").getAttribute("aria-label") === "Stop Live View" &&
+        !document.querySelector("#preview-input-select").disabled
+      ), null, { timeout: 10_000 });
+    } catch (error) {
+      const transitionDebug = await page.evaluate(() => ({
+        action: document.querySelector("#live-toggle-button").getAttribute("aria-label"),
+        input: document.querySelector("#preview-input-select").value,
+        inputDisabled: document.querySelector("#preview-input-select").disabled,
+        operation: document.querySelector("#operation-state").textContent,
+      }));
+      throw new Error(
+        `Camera preview did not become active: ${JSON.stringify(transitionDebug)}; ` +
+        `pageErrors=${JSON.stringify(pageErrors)}; ${error.message}`,
+      );
+    }
 
     await page.selectOption("#preview-input-select", "LOCAL_VIDEO");
-    await page.click("#live-toggle-button");
     await page.waitForFunction(() => !document.querySelector("#local-video").hidden);
     await page.evaluate(() => globalThis.__openEosLocalVideoTest.currentTrack.dispatchEvent(new Event("ended")));
     await page.waitForFunction(() => document.querySelector("#operation-state").textContent === "The local video input was disconnected");

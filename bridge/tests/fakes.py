@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Iterator
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image
@@ -54,8 +55,14 @@ There are 2 files in folder '/store_00010001/DCIM/100CANON'.
 #2 IMG_0001.JPG rd 6 B image/jpeg 1784600001
 """
 
-JPEG = b"\xff\xd8open-eos-control\xff\xd9"
-THUMBNAIL = b"\xff\xd8open-eos-thumbnail\xff\xd9"
+def _jpeg_fixture(width: int, height: int, color: tuple[int, int, int]) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (width, height), color=color).save(output, format="JPEG")
+    return output.getvalue()
+
+
+JPEG = _jpeg_fixture(16, 12, (20, 120, 180))
+THUMBNAIL = _jpeg_fixture(8, 6, (180, 80, 20))
 MEDIA_BYTES = b"jpeg!!"
 
 
