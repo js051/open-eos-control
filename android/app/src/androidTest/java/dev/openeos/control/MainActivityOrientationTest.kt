@@ -1,6 +1,7 @@
 package dev.openeos.control
 
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -28,7 +29,6 @@ class MainActivityOrientationTest {
             }
 
             setSystemAutoRotation(false)
-            Thread.sleep(1_000L)
             compose.runOnIdle {
                 assertEquals(false, compose.activity.isOrientationListenerRunning())
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
@@ -37,7 +37,6 @@ class MainActivityOrientationTest {
             }
 
             setSystemAutoRotation(true)
-            Thread.sleep(1_000L)
             compose.runOnIdle {
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
                 compose.activity.handleDeviceOrientationChanged(270)
@@ -87,7 +86,16 @@ class MainActivityOrientationTest {
     }
 
     private fun setSystemAutoRotation(enabled: Boolean) {
-        shell("settings put system accelerometer_rotation ${if (enabled) 1 else 0}")
+        val expected = if (enabled) "1" else "0"
+        shell("settings put system accelerometer_rotation $expected")
+        val deadline = SystemClock.uptimeMillis() + SYSTEM_SETTING_TIMEOUT_MILLIS
+        var actual: String
+        do {
+            actual = shell("settings get system accelerometer_rotation")
+            if (actual == expected) return
+            Thread.sleep(SYSTEM_SETTING_POLL_MILLIS)
+        } while (SystemClock.uptimeMillis() < deadline)
+        assertEquals("System auto-rotation setting did not settle.", expected, actual)
     }
 
     private fun shell(command: String): String {
@@ -97,5 +105,10 @@ class MainActivityOrientationTest {
         return ParcelFileDescriptor.AutoCloseInputStream(descriptor)
             .bufferedReader()
             .use { it.readText().trim() }
+    }
+
+    private companion object {
+        const val SYSTEM_SETTING_TIMEOUT_MILLIS = 5_000L
+        const val SYSTEM_SETTING_POLL_MILLIS = 50L
     }
 }
