@@ -4,10 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
-- Added memory-only 3D `.cube` LUT preview to decoded Live View on Android, iOS, and PC, using a conflated Android worker, Core Image `CIColorCube`, and WebGL2 3D textures respectively. Imports are bounded, reject unsupported 1D/shaper files, are localized, and omit LUT identity/data from diagnostics.
-- Added mutually exclusive luma histogram and 64x64 luma waveform monitoring scopes to decoded Live View on Android, iOS, and PC, including English/Traditional Chinese controls and redacted diagnostics.
-- Added a capability-gated Desktop Bridge Capture Target control. Canon USB host-RAM captures now use gPhoto2's capture-and-download lifecycle, atomically enter a persistent local media library, and support bounded thumbnails, streaming download, and exact deletion across native and WSL runners.
-- Added English and Traditional Chinese Capture Target labels to the PC, Android, and iOS control interfaces.
+## [0.1.4] - 2026-07-30
+
+- Added memory-only 3D `.cube` LUT preview to decoded Live View on Android, iOS, and PC, using bounded parsers and platform-native GPU paths without exposing LUT identity in diagnostics.
+- Added mutually exclusive luminance histogram and waveform scopes across Android, iOS, and PC.
+- Reworked Android camera orientation behavior so the composition remains fixed while bounded controls follow physical orientation only when the Android system auto-rotate setting is enabled.
+- Added compact quarter-turn camera HUD content, bounded readable notices, and nested-rotation protection for Traditional Chinese and enlarged text.
+- Added a seven-day Android debug APK artifact to successful `main` CI runs for faster physical-camera validation before a tagged release.
 
 ## [0.1.0] - 2026-07-26
 
@@ -23,3 +26,4 @@ Initial development preview.
 This preview still requires broader Canon EOS R6 Mark III physical-device validation. iOS is distributed as source; physical-device builds must be built and signed by the developer.
 
 [0.1.0]: https://github.com/js051/open-eos-control/releases/tag/v0.1.0
+[0.1.4]: https://github.com/js051/open-eos-control/releases/tag/v0.1.4
