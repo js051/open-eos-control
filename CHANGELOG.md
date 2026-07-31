@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Expanded Android's quarter-turn reading viewport and replaced ellipsized offline guidance with bounded font fitting, preserving complete English and Traditional Chinese copy at up to 200% font scale while the camera layout remains fixed.
+
 ## [0.1.7] - 2026-07-31
 
 - Added capability-gated Canon Auto Lighting Optimizer control to Android USB/PTP and the libgphoto2 Desktop Bridge. Exact `AloMode (0xD1C1)` UINT32 values are allow-listed from pinned upstream evidence; one-choice R6 Mark III `x3` state remains diagnostic-only, while usable advertised lists receive English and Traditional Chinese UI across Android, iOS, and PC.

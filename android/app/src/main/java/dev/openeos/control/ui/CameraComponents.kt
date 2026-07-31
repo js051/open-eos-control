@@ -1376,8 +1376,8 @@ internal fun offlinePreviewReadableSize(
     val userWidth = if (quarterTurn) availableHeight else availableWidth
     val userHeight = if (quarterTurn) availableWidth else availableHeight
     return DpSize(
-        width = minOf(if (quarterTurn) 420.dp else 320.dp, (userWidth - 32.dp).coerceAtLeast(1.dp)),
-        height = minOf(if (quarterTurn) 136.dp else 176.dp, (userHeight - 32.dp).coerceAtLeast(1.dp)),
+        width = minOf(if (quarterTurn) 480.dp else 320.dp, (userWidth - 32.dp).coerceAtLeast(1.dp)),
+        height = minOf(if (quarterTurn) 148.dp else 176.dp, (userHeight - 32.dp).coerceAtLeast(1.dp)),
     )
 }
 
@@ -1583,24 +1583,71 @@ private fun OfflinePreviewIcon(size: Dp) {
 
 @Composable
 private fun OfflinePreviewTitle(value: String, textAlign: TextAlign) {
-    Text(
-        value,
+    CameraFittedCopy(
+        value = value,
         color = AppText,
         fontWeight = FontWeight.SemiBold,
+        maxFontSize = 16.sp,
+        minFontSize = 12.sp,
         maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
         textAlign = textAlign,
+        testTag = "offline-preview-title",
     )
 }
 
 @Composable
 private fun OfflinePreviewHint(value: String, textAlign: TextAlign) {
-    Text(
-        value,
+    CameraFittedCopy(
+        value = value,
         color = AppSubtleText,
+        fontWeight = FontWeight.Normal,
+        maxFontSize = 15.sp,
+        minFontSize = 11.sp,
         maxLines = 3,
-        overflow = TextOverflow.Ellipsis,
         textAlign = textAlign,
+        testTag = "offline-preview-hint",
+    )
+}
+
+@Composable
+private fun CameraFittedCopy(
+    value: String,
+    color: Color,
+    fontWeight: FontWeight,
+    maxFontSize: TextUnit,
+    minFontSize: TextUnit,
+    maxLines: Int,
+    textAlign: TextAlign,
+    testTag: String,
+) {
+    val configuration = LocalConfiguration.current
+    val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
+    var fontSize by remember(value, configuration.fontScale, rotationQuadrant) {
+        mutableStateOf(maxFontSize)
+    }
+    var unresolvedOverflow by remember(value, configuration.fontScale, rotationQuadrant) {
+        mutableStateOf(false)
+    }
+    Text(
+        text = value,
+        color = color,
+        fontSize = fontSize,
+        lineHeight = fontSize * 1.22f,
+        fontWeight = fontWeight,
+        maxLines = maxLines,
+        softWrap = true,
+        overflow = TextOverflow.Clip,
+        textAlign = textAlign,
+        modifier = Modifier.testTag(if (unresolvedOverflow) "$testTag-overflow" else testTag),
+        onTextLayout = { result ->
+            when {
+                result.hasVisualOverflow && fontSize > minFontSize -> {
+                    unresolvedOverflow = false
+                    fontSize = (fontSize.value - 0.5f).coerceAtLeast(minFontSize.value).sp
+                }
+                else -> unresolvedOverflow = result.hasVisualOverflow
+            }
+        },
     )
 }
 

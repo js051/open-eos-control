@@ -287,6 +287,8 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.offline_preview_hint)).assertIsDisplayed()
         compose.onNodeWithTag("offline-preview-inline", useUnmergedTree = true).assertExists()
         compose.onAllNodesWithTag("offline-preview-stacked", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("offline-preview-title-overflow", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("offline-preview-hint-overflow", useUnmergedTree = true).assertCountEquals(0)
         val previewTitleBounds = compose
             .onNodeWithText(resourceText(R.string.offline_preview))
             .fetchSemanticsNode()
@@ -474,7 +476,7 @@ class CameraScreensTest {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
             ) {
-                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
                     CompositionLocalProvider(
                         LocalCameraControlRotation provides -90f,
                         LocalCameraControlTargetRotation provides -90f,
@@ -520,6 +522,8 @@ class CameraScreensTest {
                 hint.right <= content.right && hint.bottom <= content.bottom,
         )
         compose.onNodeWithText(resourceText(R.string.offline_preview_hint)).assertIsDisplayed()
+        compose.onAllNodesWithTag("offline-preview-title-overflow", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithTag("offline-preview-hint-overflow", useUnmergedTree = true).assertCountEquals(0)
         compose.onNodeWithText("R6 III").assertIsDisplayed()
         compose.onNodeWithText("82%").assertIsDisplayed()
         compose.onNodeWithText("2,418").assertIsDisplayed()
