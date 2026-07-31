@@ -1259,7 +1259,12 @@ private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraAct
         ) {
             items(setting.values) { value ->
                 Box(
-                    Modifier.height(48.dp).background(if (value == setting.value) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp)).clickable { actions.setCameraSetting(setting.key, value) }.padding(horizontal = 14.dp),
+                    Modifier
+                        .testTag("advanced-setting-value-${setting.key}-$value")
+                        .height(48.dp)
+                        .background(if (value == setting.value) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp))
+                        .clickable { actions.setCameraSetting(setting.key, value) }
+                        .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -1305,6 +1310,7 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "capturetarget" -> stringResource(R.string.setting_capture_target)
     "capturestorage" -> stringResource(R.string.setting_capture_storage)
     "highisonr" -> stringResource(R.string.setting_high_iso_noise_reduction)
+    "alomode" -> stringResource(R.string.setting_auto_lighting_optimizer)
     "aeb" -> stringResource(R.string.setting_aeb)
     "ae" -> stringResource(R.string.setting_ae_mode)
     else -> setting.label

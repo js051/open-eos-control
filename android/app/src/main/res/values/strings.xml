@@ -210,6 +210,7 @@
     <string name="setting_auto_power_off">Auto power off</string>
     <string name="setting_capture_target">Capture target</string>
     <string name="setting_high_iso_noise_reduction">High ISO noise reduction</string>
+    <string name="setting_auto_lighting_optimizer">Auto Lighting Optimizer</string>
     <string name="setting_aeb">Auto exposure bracketing (AEB)</string>
     <string name="setting_ae_mode">AE mode</string>
     <string name="preview_interface">Open offline preview</string>
@@ -340,6 +341,10 @@
     <string name="camera_value_red_eye_fill">Fill flash with red-eye reduction</string>
     <string name="camera_value_external_sync">External synchronization</string>
     <string name="camera_value_standard">Standard</string>
+    <string name="camera_value_standard_disabled_manual">Standard (disabled in manual exposure)</string>
+    <string name="camera_value_low_disabled_manual">Low (disabled in manual exposure)</string>
+    <string name="camera_value_high_disabled_manual">High (disabled in manual exposure)</string>
+    <string name="camera_value_off_disabled_manual">Off (disabled in manual exposure)</string>
     <string name="camera_value_portrait">Portrait</string>
     <string name="camera_value_landscape">Landscape</string>
     <string name="camera_value_neutral">Neutral</string>

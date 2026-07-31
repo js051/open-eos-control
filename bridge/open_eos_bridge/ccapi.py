@@ -107,6 +107,7 @@ SETTING_LABELS = {
     "moviequality": "Movie quality",
     "colortemperature": "Color temperature",
     "exposurecompensation": "Exposure compensation",
+    "alomode": "Auto Lighting Optimizer",
     "ae": "AE mode",
 }
 _DEFAULT_RTP_FACTORY = object()

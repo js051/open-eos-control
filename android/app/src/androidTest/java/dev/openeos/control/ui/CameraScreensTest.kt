@@ -868,6 +868,15 @@ class CameraScreensTest {
         compose.runOnIdle {
             assertEquals("zoomspeed" to "12", request)
         }
+        compose.onNodeWithTag("advanced-setting-alomode")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-value-alomode-High")
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle {
+            assertEquals("alomode" to "High", request)
+        }
         compose.onNodeWithText(resourceText(R.string.setting_drive_mode))
             .performScrollTo()
             .assertIsDisplayed()

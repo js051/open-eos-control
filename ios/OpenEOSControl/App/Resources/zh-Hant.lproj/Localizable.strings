@@ -116,6 +116,7 @@
 "setting_capture_target" = "拍攝儲存位置";
 "setting_capture_storage" = "拍攝記錄卡";
 "setting_high_iso_noise_reduction" = "高 ISO 感光度消除雜訊";
+"setting_auto_lighting_optimizer" = "自動亮度優化";
 "setting_continuous_af" = "連續自動對焦";
 "setting_movie_servo_af" = "短片伺服自動對焦";
 "setting_aeb" = "自動包圍曝光";
@@ -126,6 +127,11 @@
 "camera_value_low" = "低";
 "camera_value_normal" = "標準";
 "camera_value_high" = "高";
+"camera_value_standard" = "標準";
+"camera_value_standard_disabled_manual" = "標準（手動曝光時停用）";
+"camera_value_low_disabled_manual" = "低（手動曝光時停用）";
+"camera_value_high_disabled_manual" = "高（手動曝光時停用）";
+"camera_value_off_disabled_manual" = "關閉（手動曝光時停用）";
 "camera_value_disable" = "停用";
 "camera_value_internal_ram" = "電腦";
 "camera_value_memory_card" = "記憶卡";

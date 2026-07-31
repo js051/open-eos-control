@@ -884,6 +884,7 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
         "whitebalanceadjustb",
         "aspectratio",
         "zoomspeed",
+        "alomode",
         "autopoweroff",
         "stillimagequalitysd",
         "stillimagequalitycf",
@@ -892,12 +893,14 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
     }
     assert expected <= settings.keys()
     assert settings["autopoweroff"].values == ["15", "30", "60", "180", "300", "600", "1800", "0"]
+    assert settings["alomode"].values == ["Standard", "Low", "High", "Off"]
 
     writes = {
         "whitebalanceadjusta": ("9", "/main/imgsettings/whitebalanceadjusta", "9"),
         "whitebalanceadjustb": ("-9", "/main/imgsettings/whitebalanceadjustb", "-9"),
         "aspectratio": ("16:9", "/main/capturesettings/aspectratio", "16:9"),
         "zoomspeed": ("15", "/main/capturesettings/zoomspeed", "15"),
+        "alomode": ("High", "/main/capturesettings/alomode", "High"),
         "autopoweroff": ("1800", "/main/settings/autopoweroff", "1800"),
         "stillimagequalitysd": ("cRAW", "/main/imgsettings/imageformatsd", "cRAW"),
         "stillimagequalitycf": (
@@ -928,6 +931,38 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
         setting for setting in unsafe_session.capabilities().settings if setting.key == "autopoweroff"
     )
     assert unsafe_current.value == "-"
+
+
+def test_auto_lighting_optimizer_hides_single_or_unknown_choices() -> None:
+    class AloSnapshotRunner(FakeRunner):
+        def __init__(self, choices: list[str]) -> None:
+            super().__init__()
+            self.choices = choices
+            self.values["/main/capturesettings/alomode"] = choices[0]
+
+        def _config_dump(self) -> str:
+            original = self._radio(
+                "/main/capturesettings/alomode",
+                "Auto Lighting Optimizer",
+                ["Standard", "Low", "High", "Off"],
+            )
+            replacement = self._radio(
+                "/main/capturesettings/alomode",
+                "Auto Lighting Optimizer",
+                self.choices,
+            )
+            return super()._config_dump().replace(original, replacement)
+
+    one_choice = GPhoto2Engine(AloSnapshotRunner(["x3"])).open().capabilities().settings
+    assert not any(setting.key == "alomode" for setting in one_choice)
+
+    mixed = GPhoto2Engine(AloSnapshotRunner(["Standard", "Firmware private", "High"])).open()
+    alo = next(setting for setting in mixed.capabilities().settings if setting.key == "alomode")
+    assert alo.values == ["Standard", "High"]
+
+    with pytest.raises(BridgeError) as rejected:
+        mixed.set_setting("alomode", "Firmware private")
+    assert rejected.value.code == "INVALID_SETTING_VALUE"
 
 
 def test_capture_storage_is_hidden_without_two_writable_identified_cards() -> None:

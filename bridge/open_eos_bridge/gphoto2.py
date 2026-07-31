@@ -65,6 +65,21 @@ GPHOTO_EVENT_PROBE_ARGUMENT = "1ms"
 GPHOTO_EVENT_WAIT_ARGUMENT = "250ms"
 GPHOTO_EVENT_IDLE_SECONDS = 0.25
 GPHOTO_EVENT_COMMAND_TIMEOUT_SECONDS = 8.0
+CANON_AUTO_LIGHTING_OPTIMIZER_VALUES = frozenset(
+    {
+        "standard",
+        "standard (disabled in manual exposure)",
+        "low",
+        "low (disabled in manual exposure)",
+        "off",
+        "off (disabled in manual exposure)",
+        "high",
+        "high (disabled in manual exposure)",
+        "x1",
+        "x2",
+        "x3",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -703,6 +718,7 @@ CONFIG_SPECS = (
     ConfigSpec("zoomspeed", "Power zoom speed", ("zoomspeed",)),
     ConfigSpec("autopoweroff", "Auto power off", ("autopoweroff",)),
     ConfigSpec("highisonr", "High ISO noise reduction", ("highisonr",)),
+    ConfigSpec("alomode", "Auto Lighting Optimizer", ("alomode",)),
     ConfigSpec("continuousaf", "Continuous AF", ("continuousaf",)),
     ConfigSpec("movieservoaf", "Movie Servo AF", ("movieservoaf",)),
     ConfigSpec("aeb", "Auto exposure bracketing", ("aeb",)),
@@ -1906,6 +1922,8 @@ class GPhoto2Session:
 
     def _setting_values(self, spec: ConfigSpec, config: GPhotoConfig) -> list[str]:
         values = config.selectable_values()
+        if spec.key == "alomode":
+            return [value for value in values if value.casefold() in CANON_AUTO_LIGHTING_OPTIMIZER_VALUES]
         if spec.key == "autopoweroff":
             return [value for value in values if value.casefold() not in {"4294967295", "0xffffffff"}]
         if spec.key == "capturetarget":
