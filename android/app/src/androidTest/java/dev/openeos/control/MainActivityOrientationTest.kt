@@ -21,6 +21,7 @@ class MainActivityOrientationTest {
         val original = shell("settings get system accelerometer_rotation")
         try {
             setSystemAutoRotation(true)
+            settleAppAutoRotation()
             compose.runOnIdle {
                 compose.activity.refreshSystemAutoRotationSetting()
                 compose.activity.handleDeviceOrientationChanged(90)
@@ -29,13 +30,14 @@ class MainActivityOrientationTest {
 
             setSystemAutoRotation(false)
             compose.runOnIdle {
-                assertEquals(false, compose.activity.isOrientationListenerRunning())
+                assertEquals(true, compose.activity.isOrientationListenerRunning())
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
                 compose.activity.handleDeviceOrientationChanged(270)
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
             }
 
             setSystemAutoRotation(true)
+            settleAppAutoRotation()
             compose.runOnIdle {
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
                 compose.activity.handleDeviceOrientationChanged(270)
@@ -65,7 +67,7 @@ class MainActivityOrientationTest {
                 compose.activity.handleDeviceOrientationChanged(90)
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
                 assertEquals(false, compose.activity.isSystemAutoRotationCurrentlyEnabled())
-                assertEquals(false, compose.activity.isOrientationListenerRunning())
+                assertEquals(true, compose.activity.isOrientationListenerRunning())
             }
         } finally {
             if (originalSetting == "0" || originalSetting == "1") {
@@ -96,6 +98,12 @@ class MainActivityOrientationTest {
         assertEquals("System auto-rotation setting did not settle.", expected, actual)
     }
 
+    private fun settleAppAutoRotation() {
+        compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
+        SystemClock.sleep(SYSTEM_AUTO_ROTATION_ENABLE_SETTLE_MILLIS)
+        compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
+    }
+
     private fun shell(command: String): String {
         val descriptor = InstrumentationRegistry.getInstrumentation()
             .uiAutomation
@@ -108,5 +116,6 @@ class MainActivityOrientationTest {
     private companion object {
         const val SYSTEM_SETTING_TIMEOUT_MILLIS = 5_000L
         const val SYSTEM_SETTING_POLL_MILLIS = 50L
+        const val SYSTEM_AUTO_ROTATION_ENABLE_SETTLE_MILLIS = 350L
     }
 }

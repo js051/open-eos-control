@@ -17,6 +17,20 @@ class CameraOrientationTest {
     }
 
     @Test
+    fun systemAutoRotationDisablesImmediatelyButRequiresAStableEnableSignal() {
+        val gate = StableSystemAutoRotationGate(enableStabilityMillis = 250L)
+
+        assertEquals(false, gate.update(rawEnabled = true, elapsedRealtimeMillis = 1_000L))
+        assertEquals(250L, gate.remainingEnableDelayMillis(elapsedRealtimeMillis = 1_000L))
+        assertEquals(false, gate.update(rawEnabled = true, elapsedRealtimeMillis = 1_249L))
+        assertEquals(true, gate.update(rawEnabled = true, elapsedRealtimeMillis = 1_250L))
+
+        assertEquals(false, gate.update(rawEnabled = false, elapsedRealtimeMillis = 1_251L))
+        assertEquals(null, gate.remainingEnableDelayMillis(elapsedRealtimeMillis = 1_251L))
+        assertEquals(false, gate.update(rawEnabled = true, elapsedRealtimeMillis = 1_252L))
+    }
+
+    @Test
     fun cameraLayoutLocksToTheNaturalDisplayAxisEvenWhenLaunchedSideways() {
         assertEquals(
             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
@@ -50,7 +64,7 @@ class CameraOrientationTest {
         assertEquals(-90f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
         assertEquals(0f, policy.resolveControlRotation(displayRotationDegrees = 0))
 
         policy.setSystemAutoRotation(true)
@@ -88,18 +102,18 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun orientationListenerRunsOnlyWhileSystemAutoRotationIsEnabled() {
+    fun foregroundOrientationListenerKeepsRecheckingTheSystemRotationLock() {
         val policy = CameraOrientationPolicy()
 
         assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
         assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = false))
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(true)
         assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
 
         policy.setSystemAutoRotation(false)
-        assertEquals(false, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
+        assertEquals(true, policy.shouldListen(activityStarted = true, canDetectOrientation = true))
     }
 
     @Test

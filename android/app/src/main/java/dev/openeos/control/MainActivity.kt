@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.OrientationEventListener
 import android.view.Surface
@@ -17,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.view.WindowCompat
 import dev.openeos.control.ui.CameraOrientationPolicy
 import dev.openeos.control.ui.OpenEosControlApp
+import dev.openeos.control.ui.StableSystemAutoRotationGate
 import dev.openeos.control.ui.isSystemAutoRotationSettingEnabled
 import dev.openeos.control.ui.nearestEquivalentCameraRotation
 
@@ -25,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private val animateControlRotation = mutableStateOf(true)
     private val systemAutoRotationEnabled = mutableStateOf(false)
     private val orientationPolicy = CameraOrientationPolicy()
+    private val systemAutoRotationGate = StableSystemAutoRotationGate()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var orientationListener: OrientationEventListener
     private lateinit var autoRotationObserver: ContentObserver
@@ -116,6 +119,8 @@ class MainActivity : AppCompatActivity() {
         mainHandler.removeCallbacks(rotationSettingPoller)
         mainHandler.removeCallbacks(rotationPolicySyncRefresh)
         setOrientationListenerEnabled(false)
+        systemAutoRotationGate.reset()
+        applySystemAutoRotationSetting(false)
         contentResolver.unregisterContentObserver(autoRotationObserver)
         super.onStop()
     }
@@ -126,10 +131,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     internal fun refreshSystemAutoRotationSetting() {
-        val systemEnabled = isSystemAutoRotationEnabled()
+        val now = SystemClock.elapsedRealtime()
+        val systemEnabled = systemAutoRotationGate.update(
+            rawEnabled = isSystemAutoRotationEnabled(),
+            elapsedRealtimeMillis = now,
+        )
+        applySystemAutoRotationSetting(systemEnabled)
+        systemAutoRotationGate.remainingEnableDelayMillis(now)?.let { delayMillis ->
+            mainHandler.removeCallbacks(rotationPolicySyncRefresh)
+            mainHandler.postDelayed(rotationPolicySyncRefresh, delayMillis.coerceAtLeast(1L))
+        }
+    }
+
+    private fun applySystemAutoRotationSetting(systemEnabled: Boolean) {
         systemAutoRotationEnabled.value = systemEnabled
         animateControlRotation.value = systemEnabled
         orientationPolicy.setSystemAutoRotation(systemEnabled)
+        // Keep the foreground listener available even while rotation is locked. Some
+        // devices do not deliver a settings observer callback when Quick Settings is
+        // opened over an immersive Activity; every sensor sample still re-reads the
+        // public system setting and forces controls back to zero while it is locked.
         setOrientationListenerEnabled(
             orientationPolicy.shouldListen(activityStarted, orientationListener.canDetectOrientation()),
         )
@@ -140,9 +161,8 @@ class MainActivity : AppCompatActivity() {
         if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return
         // Reconcile the public system setting for every sample. Some quick-settings
         // implementations do not reliably notify observers while an immersive app is focused.
-        val systemEnabled = isSystemAutoRotationEnabled()
-        systemAutoRotationEnabled.value = systemEnabled
-        animateControlRotation.value = systemEnabled
+        refreshSystemAutoRotationSetting()
+        val systemEnabled = systemAutoRotationEnabled.value
         orientationPolicy.onSensorOrientation(orientation, systemEnabled)
         setOrientationListenerEnabled(
             orientationPolicy.shouldListen(activityStarted, orientationListener.canDetectOrientation()),
