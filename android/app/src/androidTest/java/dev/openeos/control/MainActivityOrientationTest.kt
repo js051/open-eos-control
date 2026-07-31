@@ -95,9 +95,37 @@ class MainActivityOrientationTest {
         }
     }
 
+    @Test
+    fun settingsObserverAppliesRotationLockBeforeQuickSettingsReturnsFocus() {
+        val original = shell("cmd window user-rotation")
+        try {
+            setSystemAutoRotation(true)
+            compose.runOnIdle {
+                compose.activity.refreshSystemAutoRotationSetting()
+                compose.activity.handleDeviceOrientationChanged(90)
+                assertEquals(3, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
+                compose.activity.onWindowFocusChanged(false)
+            }
+
+            setSystemAutoRotation(false)
+            compose.waitUntil(timeoutMillis = SYSTEM_SETTING_TIMEOUT_MILLIS) {
+                !compose.activity.isSystemAutoRotationCurrentlyEnabled()
+            }
+            compose.runOnIdle {
+                assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
+                assertEquals(false, compose.activity.isOrientationListenerRunning())
+            }
+        } finally {
+            compose.runOnIdle { compose.activity.onWindowFocusChanged(true) }
+            restoreSystemRotation(original)
+            compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
+        }
+    }
+
     private fun setSystemAutoRotation(enabled: Boolean) {
         val expected = if (enabled) "1" else "0"
-        shell(if (enabled) "cmd window user-rotation free" else "cmd window user-rotation lock 0")
+        shell("settings put system accelerometer_rotation $expected")
+        if (!enabled) shell("settings put system user_rotation 0")
         val deadline = SystemClock.uptimeMillis() + SYSTEM_SETTING_TIMEOUT_MILLIS
         var actual: String
         do {
@@ -110,8 +138,11 @@ class MainActivityOrientationTest {
 
     private fun restoreSystemRotation(original: String) {
         when {
-            original == "free" -> shell("cmd window user-rotation free")
-            original.startsWith("lock ") -> shell("cmd window user-rotation $original")
+            original == "free" -> shell("settings put system accelerometer_rotation 1")
+            original.startsWith("lock ") -> {
+                shell("settings put system user_rotation ${original.substringAfter("lock ")}")
+                shell("settings put system accelerometer_rotation 0")
+            }
         }
     }
 
