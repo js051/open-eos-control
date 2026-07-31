@@ -29,6 +29,10 @@ class MainActivityOrientationTest {
             }
 
             setSystemAutoRotation(false)
+            compose.waitUntil(timeoutMillis = SYSTEM_SETTING_TIMEOUT_MILLIS) {
+                !compose.activity.isSystemAutoRotationCurrentlyEnabled() &&
+                    !compose.activity.isOrientationListenerRunning()
+            }
             compose.runOnIdle {
                 assertEquals(false, compose.activity.isOrientationListenerRunning())
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
@@ -83,9 +87,8 @@ class MainActivityOrientationTest {
             }
 
             setSystemAutoRotation(false)
+            waitForPostureSampleToApplyAutoRotation(enabled = false, orientation = 270)
             compose.runOnIdle {
-                compose.activity.handleDeviceOrientationChanged(270)
-                assertEquals(false, compose.activity.isSystemAutoRotationCurrentlyEnabled())
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
             }
         } finally {
@@ -124,8 +127,13 @@ class MainActivityOrientationTest {
 
     private fun setSystemAutoRotation(enabled: Boolean) {
         val expected = if (enabled) "1" else "0"
-        shell("settings put system accelerometer_rotation $expected")
-        if (!enabled) shell("settings put system user_rotation 0")
+        shell(
+            if (enabled) {
+                "cmd window user-rotation free"
+            } else {
+                "cmd window user-rotation lock 0"
+            },
+        )
         val deadline = SystemClock.uptimeMillis() + SYSTEM_SETTING_TIMEOUT_MILLIS
         var actual: String
         do {
@@ -138,16 +146,29 @@ class MainActivityOrientationTest {
 
     private fun restoreSystemRotation(original: String) {
         when {
-            original == "free" -> shell("settings put system accelerometer_rotation 1")
-            original.startsWith("lock ") -> {
-                shell("settings put system user_rotation ${original.substringAfter("lock ")}")
-                shell("settings put system accelerometer_rotation 0")
-            }
+            original == "free" -> shell("cmd window user-rotation free")
+            original.startsWith("lock ") -> shell("cmd window user-rotation $original")
         }
     }
 
     private fun settleAppAutoRotation() {
         compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
+    }
+
+    private fun waitForPostureSampleToApplyAutoRotation(enabled: Boolean, orientation: Int) {
+        val deadline = SystemClock.uptimeMillis() + SYSTEM_SETTING_TIMEOUT_MILLIS
+        var actual: Boolean
+        do {
+            var observed = !enabled
+            compose.runOnIdle {
+                compose.activity.handleDeviceOrientationChanged(orientation)
+                observed = compose.activity.isSystemAutoRotationCurrentlyEnabled()
+            }
+            actual = observed
+            if (actual == enabled) return
+            Thread.sleep(SYSTEM_SETTING_POLL_MILLIS)
+        } while (SystemClock.uptimeMillis() < deadline)
+        assertEquals("App auto-rotation policy did not settle after posture samples.", enabled, actual)
     }
 
     private fun shell(command: String): String {
