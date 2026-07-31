@@ -226,6 +226,8 @@ class CameraScreensTest {
         }
 
         assertPrimaryCameraControlsVisible()
+        compose.onNodeWithTag("offline-preview-stacked", useUnmergedTree = true).assertExists()
+        compose.onAllNodesWithTag("offline-preview-inline", useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test
@@ -283,6 +285,8 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.offline_preview_hint)).assertIsDisplayed()
+        compose.onNodeWithTag("offline-preview-inline", useUnmergedTree = true).assertExists()
+        compose.onAllNodesWithTag("offline-preview-stacked", useUnmergedTree = true).assertCountEquals(0)
         val previewTitleBounds = compose
             .onNodeWithText(resourceText(R.string.offline_preview))
             .fetchSemanticsNode()
@@ -367,10 +371,6 @@ class CameraScreensTest {
                     statusBounds.bottom <= headerBounds.bottom,
             )
         }
-        compose.onNodeWithTag("battery-status-inline-row", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithTag("storage-status-inline-row", useUnmergedTree = true).assertIsDisplayed()
-        compose.onAllNodesWithTag("battery-status-sideways-stack", useUnmergedTree = true).assertCountEquals(0)
-        compose.onAllNodesWithTag("storage-status-sideways-stack", useUnmergedTree = true).assertCountEquals(0)
         val stableSlots = listOf(
             "camera-model-status" to "camera-name",
             "exposure-control-ISO" to "exposure-content-ISO",

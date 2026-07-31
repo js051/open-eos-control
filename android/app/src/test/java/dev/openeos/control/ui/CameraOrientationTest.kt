@@ -149,7 +149,7 @@ class CameraOrientationTest {
             ),
         )
         assertEquals(
-            DpSize(320.dp, 136.dp),
+            DpSize(320.dp, 176.dp),
             offlinePreviewReadableSize(
                 availableWidth = 360.dp,
                 availableHeight = 480.dp,

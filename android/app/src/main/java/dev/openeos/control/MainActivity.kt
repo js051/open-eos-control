@@ -27,7 +27,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoRotationObserver: ContentObserver
     private var activityStarted = false
     private var orientationListenerEnabled = false
-    private var windowHasFocus = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,7 +74,6 @@ class MainActivity : AppCompatActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!::orientationListener.isInitialized) return
-        windowHasFocus = hasFocus
         if (hasFocus) {
             refreshSystemAutoRotationSetting()
         }
@@ -133,7 +131,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onSystemRotationSettingObserved() {
-        if (activityStarted && windowHasFocus) {
+        if (activityStarted) {
             refreshSystemAutoRotationSetting()
         }
     }

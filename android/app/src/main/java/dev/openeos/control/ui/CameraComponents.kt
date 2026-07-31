@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -548,29 +549,24 @@ private fun CameraStatusIndicatorContent(
     value: String,
     testTag: String,
 ) {
-    Box(
-        Modifier.testTag("$testTag-inline-row"),
-        contentAlignment = Alignment.Center,
+    Column(
+        Modifier.testTag("$testTag-content"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
     ) {
-        Row(
-            Modifier.testTag("$testTag-content"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
-        ) {
-            Icon(
-                painterResource(icon),
-                contentDescription = null,
-                tint = AppSubtleText,
-                modifier = Modifier.size(14.dp),
-            )
-            CameraHudText(
-                value = value,
-                color = AppSubtleText,
-                fontWeight = FontWeight.SemiBold,
-                maxFontSize = 11.sp,
-                minFontSize = 7.sp,
-            )
-        }
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = AppSubtleText,
+            modifier = Modifier.size(14.dp),
+        )
+        CameraHudText(
+            value = value,
+            color = AppSubtleText,
+            fontWeight = FontWeight.SemiBold,
+            maxFontSize = 11.sp,
+            minFontSize = 8.sp,
+        )
     }
 }
 
@@ -995,10 +991,11 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
+                val quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
                 val readableSize = offlinePreviewReadableSize(
                     availableWidth = maxWidth,
                     availableHeight = maxHeight,
-                    quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current),
+                    quarterTurn = quarterTurn,
                 )
                 CameraReadableSlot(
                     width = readableSize.width,
@@ -1006,7 +1003,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     modifier = Modifier.testTag("offline-preview-viewport"),
                     animateRotation = false,
                 ) {
-                    OfflinePreviewCopy()
+                    OfflinePreviewCopy(quarterTurn)
                 }
             }
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
@@ -1380,7 +1377,7 @@ internal fun offlinePreviewReadableSize(
     val userHeight = if (quarterTurn) availableWidth else availableHeight
     return DpSize(
         width = minOf(if (quarterTurn) 420.dp else 320.dp, (userWidth - 32.dp).coerceAtLeast(1.dp)),
-        height = minOf(136.dp, (userHeight - 32.dp).coerceAtLeast(1.dp)),
+        height = minOf(if (quarterTurn) 136.dp else 176.dp, (userHeight - 32.dp).coerceAtLeast(1.dp)),
     )
 }
 
@@ -1522,25 +1519,55 @@ private fun BulbExposureIndicator(startedAtMillis: Long?, modifier: Modifier = M
 }
 
 @Composable
-private fun OfflinePreviewCopy() {
+private fun OfflinePreviewCopy(quarterTurn: Boolean) {
     val title = stringResource(R.string.offline_preview)
     val hint = stringResource(R.string.offline_preview_hint)
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .testTag("offline-preview-content"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        OfflinePreviewIcon(36.dp)
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            OfflinePreviewTitle(title, TextAlign.Start)
-            OfflinePreviewHint(hint, TextAlign.Start)
+    val modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 16.dp, vertical = 12.dp)
+        .testTag("offline-preview-content")
+    Box(modifier) {
+        if (quarterTurn) {
+            Row(
+                modifier = Modifier.fillMaxSize().testTag("offline-preview-inline"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                OfflinePreviewIcon(36.dp)
+                OfflinePreviewText(title, hint, TextAlign.Start)
+            }
+        } else {
+            Column(
+                modifier = Modifier.fillMaxSize().testTag("offline-preview-stacked"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                OfflinePreviewIcon(36.dp)
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    OfflinePreviewTitle(title, TextAlign.Center)
+                    OfflinePreviewHint(hint, TextAlign.Center)
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun RowScope.OfflinePreviewText(
+    title: String,
+    hint: String,
+    textAlign: TextAlign,
+) {
+    Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        OfflinePreviewTitle(title, textAlign)
+        OfflinePreviewHint(hint, textAlign)
     }
 }
 
