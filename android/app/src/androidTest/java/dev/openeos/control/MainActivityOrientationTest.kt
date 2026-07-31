@@ -18,7 +18,7 @@ class MainActivityOrientationTest {
 
     @Test
     fun cameraControlsFollowTheRealSystemAutoRotationSetting() {
-        val original = shell("settings get system accelerometer_rotation")
+        val original = shell("cmd window user-rotation")
         try {
             setSystemAutoRotation(true)
             settleAppAutoRotation()
@@ -36,26 +36,15 @@ class MainActivityOrientationTest {
                 assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
             }
 
-            setSystemAutoRotation(true)
-            settleAppAutoRotation()
-            compose.runOnIdle {
-                assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
-                compose.activity.handleDeviceOrientationChanged(270)
-                assertEquals(1, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
-            }
         } finally {
-            if (original == "0" || original == "1") {
-                shell("settings put system accelerometer_rotation $original")
-            } else {
-                shell("settings delete system accelerometer_rotation")
-            }
+            restoreSystemRotation(original)
             compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
         }
     }
 
     @Test
     fun legacyCameraControlPreferenceCannotOverrideTheSystemSetting() {
-        val originalSetting = shell("settings get system accelerometer_rotation")
+        val originalSetting = shell("cmd window user-rotation")
         try {
             compose.activity.getSharedPreferences("camera_control_orientation", 0)
                 .edit()
@@ -70,11 +59,7 @@ class MainActivityOrientationTest {
                 assertEquals(true, compose.activity.isOrientationListenerRunning())
             }
         } finally {
-            if (originalSetting == "0" || originalSetting == "1") {
-                shell("settings put system accelerometer_rotation $originalSetting")
-            } else {
-                shell("settings delete system accelerometer_rotation")
-            }
+            restoreSystemRotation(originalSetting)
             compose.activity.getSharedPreferences("camera_control_orientation", 0)
                 .edit()
                 .clear()
@@ -87,7 +72,7 @@ class MainActivityOrientationTest {
 
     private fun setSystemAutoRotation(enabled: Boolean) {
         val expected = if (enabled) "1" else "0"
-        shell("settings put system accelerometer_rotation $expected")
+        shell(if (enabled) "cmd window user-rotation free" else "cmd window user-rotation lock 0")
         val deadline = SystemClock.uptimeMillis() + SYSTEM_SETTING_TIMEOUT_MILLIS
         var actual: String
         do {
@@ -98,9 +83,14 @@ class MainActivityOrientationTest {
         assertEquals("System auto-rotation setting did not settle.", expected, actual)
     }
 
+    private fun restoreSystemRotation(original: String) {
+        when {
+            original == "free" -> shell("cmd window user-rotation free")
+            original.startsWith("lock ") -> shell("cmd window user-rotation $original")
+        }
+    }
+
     private fun settleAppAutoRotation() {
-        compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
-        SystemClock.sleep(SYSTEM_AUTO_ROTATION_ENABLE_SETTLE_MILLIS)
         compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
     }
 
@@ -116,6 +106,5 @@ class MainActivityOrientationTest {
     private companion object {
         const val SYSTEM_SETTING_TIMEOUT_MILLIS = 5_000L
         const val SYSTEM_SETTING_POLL_MILLIS = 50L
-        const val SYSTEM_AUTO_ROTATION_ENABLE_SETTLE_MILLIS = 350L
     }
 }

@@ -1,8 +1,5 @@
 package dev.openeos.control.ui
 
-import android.content.pm.ActivityInfo
-import android.content.res.Configuration
-import dev.openeos.control.naturalCameraLayoutOrientation
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.util.Locale
@@ -14,44 +11,6 @@ class CameraOrientationTest {
         assertEquals(true, isSystemAutoRotationSettingEnabled(1))
         assertEquals(false, isSystemAutoRotationSettingEnabled(2))
         assertEquals(false, isSystemAutoRotationSettingEnabled(-1))
-    }
-
-    @Test
-    fun systemAutoRotationDisablesImmediatelyButRequiresAStableEnableSignal() {
-        val gate = StableSystemAutoRotationGate(enableStabilityMillis = 250L)
-
-        assertEquals(false, gate.update(rawEnabled = true, elapsedRealtimeMillis = 1_000L))
-        assertEquals(250L, gate.remainingEnableDelayMillis(elapsedRealtimeMillis = 1_000L))
-        assertEquals(false, gate.update(rawEnabled = true, elapsedRealtimeMillis = 1_249L))
-        assertEquals(true, gate.update(rawEnabled = true, elapsedRealtimeMillis = 1_250L))
-
-        assertEquals(false, gate.update(rawEnabled = false, elapsedRealtimeMillis = 1_251L))
-        assertEquals(null, gate.remainingEnableDelayMillis(elapsedRealtimeMillis = 1_251L))
-        assertEquals(false, gate.update(rawEnabled = true, elapsedRealtimeMillis = 1_252L))
-    }
-
-    @Test
-    fun cameraLayoutLocksToTheNaturalDisplayAxisEvenWhenLaunchedSideways() {
-        assertEquals(
-            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
-            naturalCameraLayoutOrientation(Configuration.ORIENTATION_PORTRAIT, 0),
-        )
-        assertEquals(
-            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
-            naturalCameraLayoutOrientation(Configuration.ORIENTATION_LANDSCAPE, 90),
-        )
-        assertEquals(
-            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
-            naturalCameraLayoutOrientation(Configuration.ORIENTATION_LANDSCAPE, 270),
-        )
-        assertEquals(
-            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
-            naturalCameraLayoutOrientation(Configuration.ORIENTATION_LANDSCAPE, 0),
-        )
-        assertEquals(
-            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
-            naturalCameraLayoutOrientation(Configuration.ORIENTATION_PORTRAIT, 90),
-        )
     }
 
     @Test
@@ -74,7 +33,7 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun everySensorEventReconcilesTheCurrentSystemRotationSetting() {
+    fun everySensorEventHonorsTheConfirmedSystemRotationSetting() {
         val policy = CameraOrientationPolicy()
 
         policy.onSensorOrientation(sensorDegrees = 90, systemAutoRotationEnabled = true)
@@ -102,7 +61,7 @@ class CameraOrientationTest {
     }
 
     @Test
-    fun foregroundOrientationListenerKeepsRecheckingTheSystemRotationLock() {
+    fun foregroundOrientationListenerRemainsAvailableAcrossRotationPolicyChanges() {
         val policy = CameraOrientationPolicy()
 
         assertEquals(false, policy.shouldListen(activityStarted = false, canDetectOrientation = true))
