@@ -140,7 +140,7 @@ extension ExposureState {
 func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) -> [CameraSetting] {
     let primary = Set(["iso", "shutter", "aperture", "whitebalance"])
     let videoTokens = ["movie", "video", "frame", "codec", "record", "sound"]
-    let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget"]
+    let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage"]
     return settings.filter { setting in
         guard !primary.contains(setting.key) else { return false }
         let key = setting.key.lowercased()
@@ -179,6 +179,7 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "zoomspeed": "setting_power_zoom_speed"
     case "autopoweroff": "setting_auto_power_off"
     case "capturetarget": "setting_capture_target"
+    case "capturestorage": "setting_capture_storage"
     case "highisonr": "setting_high_iso_noise_reduction"
     case "continuousaf": "setting_continuous_af"
     case "movieservoaf": "setting_movie_servo_af"
@@ -215,6 +216,12 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
             "sdram": "camera_value_internal_ram",
             "memory card": "camera_value_memory_card",
             "card": "camera_value_memory_card",
+        ][value.lowercased()]
+    }
+    if normalizedKey == "capturestorage" {
+        return [
+            "card 1": "camera_value_card_1",
+            "card 2": "camera_value_card_2",
         ][value.lowercased()]
     }
     if [

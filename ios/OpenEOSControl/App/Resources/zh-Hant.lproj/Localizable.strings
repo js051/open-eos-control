@@ -110,6 +110,7 @@
 "setting_power_zoom_speed" = "電動變焦速度";
 "setting_auto_power_off" = "自動關閉電源";
 "setting_capture_target" = "拍攝儲存位置";
+"setting_capture_storage" = "拍攝記錄卡";
 "setting_high_iso_noise_reduction" = "高 ISO 感光度消除雜訊";
 "setting_continuous_af" = "連續自動對焦";
 "setting_movie_servo_af" = "短片伺服自動對焦";
@@ -124,6 +125,8 @@
 "camera_value_disable" = "停用";
 "camera_value_internal_ram" = "電腦";
 "camera_value_memory_card" = "記憶卡";
+"camera_value_card_1" = "記憶卡 1";
+"camera_value_card_2" = "記憶卡 2";
 "camera_value_15_seconds" = "15 秒";
 "camera_value_30_seconds" = "30 秒";
 "camera_value_1_minute" = "1 分鐘";

@@ -213,12 +213,47 @@ def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
     assert storage.total_bytes == 639_922_864_128
     assert storage.free_bytes == 499_332_284_416
     assert storage.free_images == 3210
+    assert [(entry.storage_id, entry.description, entry.writable) for entry in storage.entries] == [
+        ("00010001", "CFe", True),
+        ("00020001", "SD", True),
+    ]
     assert [item.name for item in media] == ["IMG_0001.JPG", "IMG_0001.CR3"]
     assert media[0].size_bytes == 6
     assert media[0].content_type == "image/jpeg"
     assert media[0].capture_time == "2026-07-21T02:13:21Z"
     assert media[0].preview_available is True
     assert media[1].preview_available is False
+
+
+def test_storage_parser_keeps_libgphoto2_summary_compatibility() -> None:
+    storage = parse_storage_info(
+        """store_00010001:
+    StorageDescription: CFe=primary
+    VolumeLabel: EOS_DIGITAL
+    Access Capability: Read-Write
+    Maximum Capability: 512090963968 (488368 MB)
+    Free Space (Bytes): 440194695168 (419802 MB)
+    Free Space (Images): 2048
+"""
+    )
+
+    assert storage.devices == 1
+    assert storage.total_bytes == 512_090_963_968
+    assert storage.entries[0].base_dir == "/store_00010001"
+    assert storage.entries[0].description == "CFe=primary"
+    assert storage.entries[0].label == "EOS_DIGITAL"
+    assert storage.entries[0].writable is True
+
+    numbered = parse_storage_info(
+        """Storage #1:
+    StorageDescription: Legacy card
+    Maximum Capacity: 4096
+    Free Space (Bytes): 1024
+"""
+    )
+    assert numbered.devices == 1
+    assert numbered.total_bytes == 4096
+    assert numbered.entries[0].storage_id is None
 
 
 def test_media_preview_validation_requires_complete_jpeg_or_png_markers() -> None:
@@ -351,7 +386,9 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         "400",
         "800",
     ]
-    assert capabilities.evidence.source == "gphoto2 --abilities + --list-all-config + --wait-event probe"
+    assert capabilities.evidence.source == (
+        "gphoto2 --abilities + --list-all-config + --storage-info + --wait-event probe"
+    )
     assert "CAPTURE_PREVIEW" in capabilities.evidence.advertised_commands
     assert "CAPTURE_MOVIE_STDOUT" in capabilities.evidence.advertised_commands
     assert "CAPTURE_IMAGE_AND_DOWNLOAD" in capabilities.evidence.advertised_commands
@@ -725,28 +762,38 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
         "stillimagequalitysd",
         "stillimagequalitycf",
         "capturetarget",
+        "capturestorage",
     }
     assert expected <= settings.keys()
     assert settings["autopoweroff"].values == ["15", "30", "60", "180", "300", "600", "1800", "0"]
 
     writes = {
-        "whitebalanceadjusta": ("9", "/main/imgsettings/whitebalanceadjusta"),
-        "whitebalanceadjustb": ("-9", "/main/imgsettings/whitebalanceadjustb"),
-        "aspectratio": ("16:9", "/main/capturesettings/aspectratio"),
-        "zoomspeed": ("15", "/main/capturesettings/zoomspeed"),
-        "autopoweroff": ("1800", "/main/settings/autopoweroff"),
-        "stillimagequalitysd": ("cRAW", "/main/imgsettings/imageformatsd"),
-        "stillimagequalitycf": ("Large Fine JPEG", "/main/imgsettings/imageformatcf"),
-        "capturetarget": ("Memory card", "/main/settings/capturetarget"),
+        "whitebalanceadjusta": ("9", "/main/imgsettings/whitebalanceadjusta", "9"),
+        "whitebalanceadjustb": ("-9", "/main/imgsettings/whitebalanceadjustb", "-9"),
+        "aspectratio": ("16:9", "/main/capturesettings/aspectratio", "16:9"),
+        "zoomspeed": ("15", "/main/capturesettings/zoomspeed", "15"),
+        "autopoweroff": ("1800", "/main/settings/autopoweroff", "1800"),
+        "stillimagequalitysd": ("cRAW", "/main/imgsettings/imageformatsd", "cRAW"),
+        "stillimagequalitycf": (
+            "Large Fine JPEG",
+            "/main/imgsettings/imageformatcf",
+            "Large Fine JPEG",
+        ),
+        "capturetarget": ("Memory card", "/main/settings/capturetarget", "Memory card"),
+        "capturestorage": ("SD", "/main/capturesettings/storageid", "00020001"),
     }
-    for key, (value, path) in writes.items():
+    for key, (value, path, expected_value) in writes.items():
         session.set_setting(key, value)
-        assert runner.values[path] == value
+        assert runner.values[path] == expected_value
 
     with pytest.raises(BridgeError) as rejected:
         session.set_setting("autopoweroff", "4294967295")
     assert rejected.value.code == "INVALID_SETTING_VALUE"
     assert runner.values["/main/settings/autopoweroff"] == "1800"
+    assert settings["capturestorage"].value == "CFe"
+    assert settings["capturestorage"].values == ["CFe", "SD"]
+    assert "SET_CURRENT_STORAGE" in session.capabilities().evidence.advertised_commands
+    assert "/main/capturesettings/storageid" in session.capabilities().evidence.writable_settings
 
     unsafe_runner = FakeRunner()
     unsafe_runner.values["/main/settings/autopoweroff"] = "4294967295"
@@ -755,6 +802,159 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
         setting for setting in unsafe_session.capabilities().settings if setting.key == "autopoweroff"
     )
     assert unsafe_current.value == "-"
+
+
+def test_capture_storage_is_hidden_without_two_writable_identified_cards() -> None:
+    class StorageRunner(FakeRunner):
+        def __init__(self, storage_output: str) -> None:
+            super().__init__()
+            self.storage_output = storage_output
+
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            if self._without_camera(arguments) == ["--storage-info"]:
+                return CommandOutput(self.storage_output.encode())
+            return super().run(arguments, timeout=timeout)
+
+    variants = [
+        STORAGE.replace("access=0 Read-Write", "access=1 Read-Only", 1),
+        STORAGE.split("[Storage 1]", 1)[0],
+        STORAGE.replace("basedir=/store_00020001", "basedir=/"),
+    ]
+
+    for output in variants:
+        settings = GPhoto2Engine(StorageRunner(output)).open().capabilities().settings
+        assert not any(setting.key == "capturestorage" for setting in settings)
+
+    missing_current = StorageRunner(STORAGE)
+    missing_current.values["/main/capturesettings/storageid"] = "00030001"
+    assert not any(
+        setting.key == "capturestorage"
+        for setting in GPhoto2Engine(missing_current).open().capabilities().settings
+    )
+
+
+def test_capture_storage_revalidates_removed_card_without_writing() -> None:
+    class MutableStorageRunner(FakeRunner):
+        storage_output = STORAGE
+
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            if self._without_camera(arguments) == ["--storage-info"]:
+                return CommandOutput(self.storage_output.encode())
+            return super().run(arguments, timeout=timeout)
+
+    runner = MutableStorageRunner()
+    session = GPhoto2Engine(runner).open()
+    assert any(setting.key == "capturestorage" for setting in session.capabilities().settings)
+    runner.storage_output = STORAGE.split("[Storage 1]", 1)[0]
+
+    with pytest.raises(BridgeError) as rejected:
+        session.set_setting("capturestorage", "SD")
+
+    assert rejected.value.code == "INVALID_SETTING_VALUE"
+    assert runner.values["/main/capturesettings/storageid"] == "00010001"
+    assert not any("storageid=" in part for command in runner.commands for part in command)
+
+
+def test_capture_storage_never_accepts_a_raw_storage_id_from_the_api() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+    session.capabilities()
+
+    with pytest.raises(BridgeError) as rejected:
+        session.set_setting("capturestorage", "00020001")
+
+    assert rejected.value.code == "INVALID_SETTING_VALUE"
+    assert runner.values["/main/capturesettings/storageid"] == "00010001"
+    assert not any("storageid=" in part for command in runner.commands for part in command)
+
+
+def test_capture_storage_keeps_fallback_labels_bound_to_ids_after_reordering() -> None:
+    duplicate_labels = STORAGE.replace("description=CFe", "description=Card").replace(
+        "description=SD", "description=Card"
+    )
+
+    class ReorderingStorageRunner(FakeRunner):
+        storage_output = duplicate_labels
+
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            if self._without_camera(arguments) == ["--storage-info"]:
+                return CommandOutput(self.storage_output.encode())
+            return super().run(arguments, timeout=timeout)
+
+    runner = ReorderingStorageRunner()
+    session = GPhoto2Engine(runner).open()
+    setting = next(setting for setting in session.capabilities().settings if setting.key == "capturestorage")
+    assert setting.values == ["Card 1", "Card 2"]
+    first, second = duplicate_labels.split("[Storage 1]", 1)
+    runner.storage_output = "[Storage 1]" + second + first
+
+    session.set_setting("capturestorage", "Card 2")
+
+    assert runner.values["/main/capturesettings/storageid"] == "00020001"
+
+
+def test_capture_storage_failed_write_preserves_current_value() -> None:
+    class RejectingStorageRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            command = self._without_camera(arguments)
+            if command and command[0] == "--set-config-value" and "storageid=" in command[1]:
+                raise BridgeError("CAMERA_REQUEST_FAILED", "Storage write failed.", status_code=502)
+            return super().run(arguments, timeout=timeout)
+
+    runner = RejectingStorageRunner()
+    session = GPhoto2Engine(runner).open()
+    session.capabilities()
+
+    with pytest.raises(BridgeError, match="Storage write failed"):
+        session.set_setting("capturestorage", "SD")
+
+    assert runner.values["/main/capturesettings/storageid"] == "00010001"
+    current = next(setting for setting in session.capabilities().settings if setting.key == "capturestorage")
+    assert current.value == "CFe"
+
+
+def test_capture_storage_refresh_failure_never_uses_stale_card_data() -> None:
+    class FailingRefreshRunner(FakeRunner):
+        fail_storage = False
+
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            command = self._without_camera(arguments)
+            if command == ["--storage-info"] and self.fail_storage:
+                raise BridgeError("CAMERA_REQUEST_FAILED", "Storage refresh failed.", status_code=502)
+            return super().run(arguments, timeout=timeout)
+
+    runner = FailingRefreshRunner()
+    session = GPhoto2Engine(runner).open()
+    session.capabilities()
+    runner.fail_storage = True
+
+    with pytest.raises(BridgeError, match="Storage refresh failed"):
+        session.set_setting("capturestorage", "SD")
+
+    assert runner.values["/main/capturesettings/storageid"] == "00010001"
+    assert not any("storageid=" in part for command in runner.commands for part in command)
+
+
+def test_capture_storage_config_refresh_failure_never_uses_stale_widget_data() -> None:
+    class FailingConfigRunner(FakeRunner):
+        fail_config = False
+
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            command = self._without_camera(arguments)
+            if command == ["--list-all-config"] and self.fail_config:
+                raise BridgeError("CAMERA_REQUEST_FAILED", "Config refresh failed.", status_code=502)
+            return super().run(arguments, timeout=timeout)
+
+    runner = FailingConfigRunner()
+    session = GPhoto2Engine(runner).open()
+    session.capabilities()
+    runner.fail_config = True
+
+    with pytest.raises(BridgeError, match="Config refresh failed"):
+        session.set_setting("capturestorage", "SD")
+
+    assert runner.values["/main/capturesettings/storageid"] == "00010001"
+    assert not any("storageid=" in part for command in runner.commands for part in command)
 
 
 def test_media_thumbnail_requires_gphoto2_advertised_ability(tmp_path: Path) -> None:

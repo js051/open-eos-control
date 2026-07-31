@@ -178,6 +178,7 @@
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
       capturetarget: "Capture target",
+      capturestorage: "Recording card",
       highisonr: "High ISO noise reduction",
       continuousaf: "Continuous AF",
       movieservoaf: "Movie Servo AF",
@@ -191,6 +192,8 @@
       valueDisable: "Disable",
       valueInternalRam: "Computer",
       valueMemoryCard: "Memory card",
+      valueCard1: "Card 1",
+      valueCard2: "Card 2",
       duration15Seconds: "15 seconds",
       duration30Seconds: "30 seconds",
       duration1Minute: "1 minute",
@@ -405,6 +408,7 @@
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
       capturetarget: "拍攝儲存位置",
+      capturestorage: "拍攝記錄卡",
       highisonr: "高 ISO 降噪",
       continuousaf: "連續自動對焦",
       movieservoaf: "短片伺服自動對焦",
@@ -418,6 +422,8 @@
       valueDisable: "停用",
       valueInternalRam: "電腦",
       valueMemoryCard: "記憶卡",
+      valueCard1: "記憶卡 1",
+      valueCard2: "記憶卡 2",
       duration15Seconds: "15 秒",
       duration30Seconds: "30 秒",
       duration1Minute: "1 分鐘",
@@ -566,6 +572,10 @@
     sdram: "valueInternalRam",
     "memory card": "valueMemoryCard",
     card: "valueMemoryCard",
+  };
+  const captureStorageValueKeys = {
+    "card 1": "valueCard1",
+    "card 2": "valueCard2",
   };
 
   function readLanguagePreference() {
@@ -1275,6 +1285,7 @@
     let messageKey = commonSettingValueKeys[rawValue.toLowerCase()];
     if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue];
     if (key === "capturetarget") messageKey = captureTargetValueKeys[rawValue.toLowerCase()];
+    if (key === "capturestorage") messageKey = captureStorageValueKeys[rawValue.toLowerCase()];
     if (
       [
         "stillimagequality",
@@ -1422,7 +1433,7 @@
   function settingMatchesCaptureMode(setting) {
     const key = setting.key.toLowerCase();
     const videoTokens = ["movie", "video", "frame", "codec", "record", "sound"];
-    const photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget"];
+    const photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage"];
     if (state.captureMode === "photo") return !videoTokens.some((token) => key.includes(token));
     return !photoTokens.some((token) => key.includes(token));
   }

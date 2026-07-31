@@ -58,6 +58,11 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
             headers=headers,
             json={"value": "800"},
         )
+        storage_setting = client.post(
+            f"/v1/session/{session_id}/settings/capturestorage",
+            headers=headers,
+            json={"value": "SD"},
+        )
         bulb_started = client.post(f"/v1/session/{session_id}/bulb/start", headers=headers)
         bulb_stopped = client.post(f"/v1/session/{session_id}/bulb/stop", headers=headers)
         autofocus = client.post(f"/v1/session/{session_id}/focus/auto", headers=headers)
@@ -110,13 +115,19 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert "EVENT_POLLING" in capabilities.json()["supported"]
     assert media.json()["items"][0]["previewAvailable"] is True
     assert capabilities.json()["evidence"]["source"] == (
-        "gphoto2 --abilities + --list-all-config + --wait-event probe"
+        "gphoto2 --abilities + --list-all-config + --storage-info + --wait-event probe"
     )
     assert "CAPTURE_IMAGE" in capabilities.json()["evidence"]["advertisedCommands"]
     assert "GPHOTO2_WAIT_EVENT" in capabilities.json()["evidence"]["advertisedCommands"]
+    assert "SET_CURRENT_STORAGE" in capabilities.json()["evidence"]["advertisedCommands"]
+    assert next(
+        item for item in capabilities.json()["settings"] if item["key"] == "capturestorage"
+    )["values"] == ["CFe", "SD"]
     assert event.json() == {"changedKeys": []}
     assert event_stopped.status_code == 204
     assert setting.json()["exposure"]["iso"] == "800"
+    assert storage_setting.status_code == 200
+    assert runner.values["/main/capturesettings/storageid"] == "00020001"
     assert bulb_started.json()["bulbExposureActive"] is True
     assert bulb_stopped.json()["bulbExposureActive"] is False
     assert autofocus.status_code == 200

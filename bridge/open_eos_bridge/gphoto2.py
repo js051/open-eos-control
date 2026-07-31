@@ -640,12 +640,25 @@ class GPhotoAbilities:
 
 
 @dataclass(frozen=True)
+class StorageDevice:
+    storage_id: str | None
+    label: str
+    description: str
+    base_dir: str
+    writable: bool | None
+    total_bytes: int | None
+    free_bytes: int | None
+    free_images: int | None
+
+
+@dataclass(frozen=True)
 class StorageSnapshot:
     available: bool | None
     total_bytes: int | None
     free_bytes: int | None
     free_images: int | None
     devices: int
+    entries: tuple[StorageDevice, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -683,6 +696,7 @@ CONFIG_SPECS = (
     ConfigSpec("movieservoaf", "Movie Servo AF", ("movieservoaf",)),
     ConfigSpec("aeb", "Auto exposure bracketing", ("aeb",)),
     ConfigSpec("capturetarget", "Capture target", ("capturetarget",)),
+    ConfigSpec("capturestorage", "Recording card", ("storageid",)),
 )
 
 
@@ -787,33 +801,94 @@ def parse_config_dump(output: str) -> dict[str, GPhotoConfig]:
 
 
 def parse_storage_info(output: str) -> StorageSnapshot:
-    device_headers = re.findall(r"^(?:Storage\s+#\d+|store_[^:]+):\s*$", output, re.M | re.I)
-    capacities = _matching_ints(
-        output,
-        r"^\s*Maximum\s+(?:Capacity|Capability):\s*(\d+)",
-        r"^\s*capacity\s*=\s*(\d+)",
-    )
-    free_bytes = _matching_ints(
-        output,
-        r"^\s*Free\s+Space\s*\(Bytes\):\s*(\d+)",
-        r"^\s*free\s*=\s*(\d+)",
-    )
-    free_images = [
-        value
-        for value in _matching_ints(
-            output,
-            r"^\s*Free\s+Space\s*\(Images\):\s*(-?\d+)",
-            r"^\s*freeimages\s*=\s*(-?\d+)",
+    entries: list[StorageDevice] = []
+    current: dict[str, object] | None = None
+
+    def finish_current() -> None:
+        nonlocal current
+        if current is None:
+            return
+        base_dir = str(current.get("base_dir", ""))
+        storage_id = current.get("storage_id")
+        if storage_id is None:
+            match = re.search(r"(?:^|/)store_([0-9a-f]{8})(?:/|$)", base_dir, re.I)
+            storage_id = match.group(1).upper() if match else None
+        entries.append(
+            StorageDevice(
+                storage_id=str(storage_id) if storage_id is not None else None,
+                label=str(current.get("label", "")),
+                description=str(current.get("description", "")),
+                base_dir=base_dir,
+                writable=current.get("writable") if isinstance(current.get("writable"), bool) else None,
+                total_bytes=current.get("total_bytes") if isinstance(current.get("total_bytes"), int) else None,
+                free_bytes=current.get("free_bytes") if isinstance(current.get("free_bytes"), int) else None,
+                free_images=current.get("free_images") if isinstance(current.get("free_images"), int) else None,
+            )
         )
-        if value >= 0
-    ]
-    devices = max(len(device_headers), len(capacities), len(free_bytes))
+        current = None
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        official_header = re.fullmatch(r"\[Storage\s+\d+\]", line, re.I)
+        numbered_header = re.fullmatch(r"Storage\s+#\d+:", line, re.I)
+        summary_header = re.fullmatch(r"store_([0-9a-f]{8}):", line, re.I)
+        if official_header or numbered_header or summary_header:
+            finish_current()
+            current = {}
+            if summary_header:
+                current["storage_id"] = summary_header.group(1).upper()
+                current["base_dir"] = f"/store_{summary_header.group(1).lower()}"
+            continue
+        if current is None:
+            continue
+
+        equals_index = line.find("=")
+        colon_index = line.find(":")
+        uses_key_value_format = equals_index >= 0 and (colon_index < 0 or equals_index < colon_index)
+        key, separator, raw_value = line.partition("=" if uses_key_value_format else ":")
+        if not separator:
+            continue
+        normalized_key = re.sub(r"\s+", "", key).casefold()
+        value = raw_value.strip()
+        if normalized_key in {"label", "volumelabel"}:
+            current["label"] = value
+        elif normalized_key in {"description", "storagedescription"}:
+            current["description"] = value
+        elif normalized_key == "basedir":
+            current["base_dir"] = value
+        elif normalized_key in {"access", "accesscapability"}:
+            access_code = re.match(r"(\d+)", value)
+            if access_code:
+                current["writable"] = access_code.group(1) == "0"
+            elif value.casefold() == "read-write":
+                current["writable"] = True
+            elif value:
+                current["writable"] = False
+        elif normalized_key in {"totalcapacity", "capacity", "maximumcapacity", "maximumcapability"}:
+            parsed = _storage_size_bytes(value, default_unit="KB" if uses_key_value_format else "B")
+            if parsed is not None:
+                current["total_bytes"] = parsed
+        elif normalized_key in {"free", "freespace(bytes)"}:
+            parsed = _storage_size_bytes(value, default_unit="KB" if uses_key_value_format else "B")
+            if parsed is not None:
+                current["free_bytes"] = parsed
+        elif normalized_key in {"freeimages", "freespace(images)"}:
+            parsed = _leading_int(value)
+            if parsed is not None and parsed >= 0:
+                current["free_images"] = parsed
+    finish_current()
+
+    capacities = [entry.total_bytes for entry in entries if entry.total_bytes is not None]
+    free_bytes = [entry.free_bytes for entry in entries if entry.free_bytes is not None]
+    free_images = [entry.free_images for entry in entries if entry.free_images is not None]
+    devices = len(entries)
     return StorageSnapshot(
         available=devices > 0 if output.strip() else None,
         total_bytes=sum(capacities) if capacities else None,
         free_bytes=sum(free_bytes) if free_bytes else None,
         free_images=sum(free_images) if free_images else None,
         devices=devices,
+        entries=tuple(entries),
     )
 
 
@@ -961,6 +1036,9 @@ class GPhoto2Session:
         self._configs: dict[str, GPhotoConfig] = {}
         self._last_config_refresh = 0.0
         self._storage = StorageSnapshot(None, None, None, None, 0)
+        self._last_storage_refresh = 0.0
+        self._storage_label_by_id: dict[str, str] = {}
+        self._advertised_storage_targets: dict[str, str] = {}
         self._camera_media_supported = False
         self._media_cache: dict[str, MediaItem] = {}
         self._observed: set[CameraFeature] = {CameraFeature.DESKTOP_BRIDGE}
@@ -1086,6 +1164,7 @@ class GPhoto2Session:
         with self._lock:
             self._require_open()
             self._refresh_configs(force=False)
+            self._refresh_storage(force=False)
             settings = self._camera_settings()
             settings_by_key = {setting.key: setting for setting in settings}
             host_media_supported = self._host_capture_supported() or bool(self._capture_store.list_items())
@@ -1235,6 +1314,8 @@ class GPhoto2Session:
                 raise unsupported(
                     CameraFeature.ADVANCED_SETTINGS.value, self.engine_name, f"Unknown setting key '{key}'."
                 )
+            if key == "capturestorage":
+                return self._set_capture_storage(value)
             config = self._find_config(spec.suffixes, writable=True)
             if config is None:
                 feature = _feature_for_setting(key)
@@ -1737,9 +1818,29 @@ class GPhoto2Session:
 
     def _camera_settings(self) -> list[CameraSetting]:
         settings: list[CameraSetting] = []
+        self._advertised_storage_targets = {}
         for spec in CONFIG_SPECS:
             config = self._find_config(spec.suffixes, writable=True)
             if config is None:
+                continue
+            if spec.key == "capturestorage":
+                targets = self._capture_storage_targets(config)
+                if len(targets) < 2:
+                    continue
+                self._advertised_storage_targets = {label.casefold(): storage_id for label, storage_id in targets}
+                current_id = _normalize_storage_id(config.current)
+                current_value = next(
+                    (label for label, storage_id in targets if storage_id == current_id),
+                    "-",
+                )
+                settings.append(
+                    CameraSetting(
+                        key=spec.key,
+                        label=config.label or spec.label,
+                        value=current_value,
+                        values=[label for label, _ in targets],
+                    )
+                )
                 continue
             values = self._setting_values(spec, config)
             if not values or (not spec.core and len(values) < 2):
@@ -1765,7 +1866,106 @@ class GPhoto2Session:
                 for value in values
                 if _is_card_capture_target(value) or (_is_host_capture_target(value) and self._abilities.capture_image)
             ]
+        if spec.key == "capturestorage":
+            return [label for label, _ in self._capture_storage_targets(config)]
         return values
+
+    def _capture_storage_targets(self, config: GPhotoConfig) -> list[tuple[str, str]]:
+        if config.kind != "TEXT":
+            return []
+        current_id = _normalize_storage_id(config.current)
+        writable = [
+            entry
+            for entry in self._storage.entries
+            if entry.writable is True and entry.storage_id is not None
+        ]
+        unique_by_id = {entry.storage_id: entry for entry in writable}
+        if len(unique_by_id) < 2 or current_id not in unique_by_id:
+            return []
+
+        entries = list(unique_by_id.values())
+        candidates = [
+            tuple(
+                candidate
+                for candidate in (
+                    _safe_storage_label(entry.description),
+                    _safe_storage_label(entry.label),
+                )
+                if candidate
+            )
+            for entry in entries
+        ]
+        selected: dict[str, str] = {}
+        used_labels: set[str] = set()
+        for entry, entry_candidates in zip(entries, candidates, strict=True):
+            unique_label = next(
+                (
+                    candidate
+                    for candidate in entry_candidates
+                    if sum(
+                        1
+                        for other_candidates in candidates
+                        if any(candidate.casefold() == other.casefold() for other in other_candidates)
+                    )
+                    == 1
+                    and candidate.casefold() not in used_labels
+                ),
+                None,
+            )
+            if unique_label is not None:
+                selected[entry.storage_id or ""] = unique_label
+                used_labels.add(unique_label.casefold())
+
+        reserved_labels = {
+            label.casefold()
+            for storage_id, label in self._storage_label_by_id.items()
+            if storage_id in unique_by_id
+        } | used_labels
+        next_card = 1
+        for entry in entries:
+            storage_id = entry.storage_id or ""
+            if storage_id in selected:
+                continue
+            cached = self._storage_label_by_id.get(storage_id)
+            if cached is not None and cached.casefold() not in used_labels:
+                selected[storage_id] = cached
+                used_labels.add(cached.casefold())
+                continue
+            while f"card {next_card}".casefold() in reserved_labels:
+                next_card += 1
+            label = f"Card {next_card}"
+            next_card += 1
+            selected[storage_id] = label
+            self._storage_label_by_id[storage_id] = label
+            reserved_labels.add(label.casefold())
+            used_labels.add(label.casefold())
+        return [(selected[entry.storage_id or ""], entry.storage_id or "") for entry in entries]
+
+    def _set_capture_storage(self, value: str) -> CameraStatus:
+        advertised_id = self._advertised_storage_targets.get(value.casefold())
+        if advertised_id is None:
+            raise BridgeError(
+                "INVALID_SETTING_VALUE",
+                f"Value '{value}' is not an advertised recording card.",
+                status_code=422,
+                engine=self.engine_name,
+            )
+
+        self._refresh_configs(force=True, strict=True)
+        self._refresh_storage(strict=True)
+        config = self._find_config(("storageid",), writable=True)
+        targets = self._capture_storage_targets(config) if config is not None else []
+        fresh_ids = {storage_id for _, storage_id in targets}
+        if config is None or advertised_id not in fresh_ids:
+            raise BridgeError(
+                "INVALID_SETTING_VALUE",
+                "The selected recording card is no longer advertised as writable by the camera.",
+                status_code=409,
+                engine=self.engine_name,
+            )
+        self._set_config_value(config, advertised_id, refresh=False)
+        self._observed.add(CameraFeature.ADVANCED_SETTINGS)
+        return self.status()
 
     def _setting_value(self, key: str) -> str:
         spec = next(candidate for candidate in CONFIG_SPECS if candidate.key == key)
@@ -1894,15 +2094,21 @@ class GPhoto2Session:
             commands.append("LIVE_VIEW_MAGNIFICATION_1X_5X")
         if self._event_polling_supported:
             commands.append("GPHOTO2_WAIT_EVENT")
-        writable_settings = sorted(
-            {
-                config.path.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
-                for config in self._configs.values()
-                if not config.readonly and config.selectable_values()
-            }
-        )
+        if self._advertised_storage_targets:
+            commands.append("SET_CURRENT_STORAGE")
+        writable_setting_paths = {
+            config.path.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
+            for config in self._configs.values()
+            if not config.readonly and config.selectable_values()
+        }
+        storage_config = self._find_config(("storageid",), writable=True)
+        if self._advertised_storage_targets and storage_config is not None:
+            writable_setting_paths.add(
+                storage_config.path.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
+            )
+        writable_settings = sorted(writable_setting_paths)
         return CapabilityEvidence(
-            source="gphoto2 --abilities + --list-all-config + --wait-event probe",
+            source="gphoto2 --abilities + --list-all-config + --storage-info + --wait-event probe",
             protocol_versions=(
                 [self.engine_version[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]] if self.engine_version else []
             ),
@@ -1915,7 +2121,7 @@ class GPhoto2Session:
             ),
         )
 
-    def _refresh_configs(self, *, force: bool) -> None:
+    def _refresh_configs(self, *, force: bool, strict: bool = False) -> None:
         now = time.monotonic()
         if not force and now - self._last_config_refresh < CONFIG_REFRESH_SECONDS:
             return
@@ -1924,18 +2130,35 @@ class GPhoto2Session:
             parsed = parse_config_dump(output)
             if parsed:
                 self._configs = parsed
+            elif strict:
+                raise BridgeError(
+                    "INVALID_CAMERA_RESPONSE",
+                    "gphoto2 returned no configuration while revalidating the recording card.",
+                    status_code=502,
+                    engine=self.engine_name,
+                )
             self._last_error = None
         except BridgeError as error:
             self._last_error = error.message
+            if strict:
+                self._last_config_refresh = now
+                raise
         self._last_config_refresh = now
 
-    def _refresh_storage(self) -> None:
+    def _refresh_storage(self, *, force: bool = True, strict: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self._last_storage_refresh < CONFIG_REFRESH_SECONDS:
+            return
         try:
             output = self._run(["--storage-info"], timeout=30.0).text
             self._storage = parse_storage_info(output)
             self._last_error = None
         except BridgeError as error:
             self._last_error = error.message
+            if strict:
+                self._last_storage_refresh = now
+                raise
+        self._last_storage_refresh = now
 
     def _probe_event_polling(self) -> None:
         try:
@@ -2032,11 +2255,17 @@ def _decode_media_id(media_id: str) -> tuple[str, str]:
     return folder, name
 
 
-def _matching_ints(output: str, *patterns: str) -> list[int]:
-    values: list[int] = []
-    for pattern in patterns:
-        values.extend(int(match) for match in re.findall(pattern, output, re.M | re.I))
-    return values
+def _leading_int(value: str) -> int | None:
+    match = re.match(r"(-?\d+)", value.strip())
+    return int(match.group(1)) if match else None
+
+
+def _storage_size_bytes(value: str, *, default_unit: str) -> int | None:
+    match = re.match(r"(\d+)\s*([KMGT]?B)?(?:\s|$)", value.strip(), re.I)
+    if match is None:
+        return None
+    unit = match.group(2) or default_unit
+    return int(match.group(1)) * _size_multiplier(unit)
 
 
 def _parse_float(value: str) -> float | None:
@@ -2146,6 +2375,19 @@ def _first_choice(choices: list[str], *candidates: str) -> str | None:
 def _case_insensitive_choice(choices: list[str], candidate: str) -> str | None:
     normalized = candidate.casefold()
     return next((choice for choice in choices if choice.casefold() == normalized), None)
+
+
+def _normalize_storage_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not re.fullmatch(r"[0-9a-f]{8}", normalized, re.I):
+        return None
+    return normalized.upper()
+
+
+def _safe_storage_label(value: str) -> str:
+    return re.sub(r"[\r\n\t]+", " ", value).strip()[:80]
 
 
 def _is_host_capture_target(value: str) -> bool:

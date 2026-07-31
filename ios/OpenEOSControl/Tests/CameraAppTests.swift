@@ -64,11 +64,12 @@ final class CameraAppTests: XCTestCase {
                 value: "Internal RAM",
                 values: ["Internal RAM", "Memory card"]
             ),
+            CameraSetting(key: "capturestorage", label: "Recording card", value: "CFe", values: ["CFe", "SD"]),
         ]
 
         XCTAssertEqual(
             advancedSettingsForMode(settings, mode: .photo).map(\.key),
-            ["drivemode", "meteringmode", "capturetarget"]
+            ["drivemode", "meteringmode", "capturetarget", "capturestorage"]
         )
         XCTAssertEqual(advancedSettingsForMode(settings, mode: .video).map(\.key), ["moviequality", "meteringmode"])
     }
@@ -83,6 +84,7 @@ final class CameraAppTests: XCTestCase {
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
             "capturetarget": "setting_capture_target",
+            "capturestorage": "setting_capture_storage",
             "stillimagequality.raw": "setting_image_quality_raw",
             "stillimagequality.jpeg": "setting_image_quality_jpeg",
             "stillimagequalitysd": "setting_image_quality_sd",
@@ -104,6 +106,10 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(
             settingValueLocalizationKey(key: "capturetarget", value: "Memory card"),
             "camera_value_memory_card"
+        )
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "capturestorage", value: "Card 2"),
+            "camera_value_card_2"
         )
         XCTAssertEqual(
             settingValueLocalizationKey(key: "stillimagequalitycf", value: "cRAW + Large Fine JPEG"),
@@ -154,6 +160,10 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveViewMagnification))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
+        XCTAssertEqual(
+            snapshot.capabilities.settings.first(where: { $0.key == "capturestorage" })?.values,
+            ["CFe", "SD"]
+        )
     }
 
     func testMonitoringAssistDefaultsDoNotAlterTheLiveView() {
