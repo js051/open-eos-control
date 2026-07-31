@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from open_eos_bridge.app import create_app
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine, SubprocessGPhotoRunner
+from open_eos_bridge.models import CameraDescriptor
+from open_eos_bridge.rtp import RtpAudioChunk
 
 from .fakes import JPEG, MEDIA_BYTES, THUMBNAIL, FakeRunner
 
@@ -37,6 +39,74 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert icon.status_code == 200
     assert icon.headers["content-type"].startswith("image/png")
     assert protected_api.status_code == 401
+
+
+def test_authenticated_rtp_audio_endpoint_returns_bounded_pcm_and_timeout() -> None:
+    session = _AudioSession()
+    headers = {"Authorization": "Bearer test-token"}
+    app = create_app(
+        engine=GPhoto2Engine(FakeRunner()),
+        ccapi_engine=_AudioEngine(session),
+        token="test-token",
+    )
+    with TestClient(app) as client:
+        created = client.post(
+            "/v1/session",
+            headers=headers,
+            json={"engine": "ccapi", "ccapiUrl": "http://192.0.2.1:8080"},
+        )
+        session_id = created.json()["id"]
+        unauthorized = client.get(f"/v1/session/{session_id}/liveview/audio")
+        pcm = client.get(
+            f"/v1/session/{session_id}/liveview/audio?after=4&timeoutMs=250",
+            headers=headers,
+        )
+        timeout = client.get(
+            f"/v1/session/{session_id}/liveview/audio?after=5&timeoutMs=0",
+            headers=headers,
+        )
+
+    assert unauthorized.status_code == 401
+    assert pcm.status_code == 200
+    assert pcm.content == b"\x00\x00\x01\x00"
+    assert pcm.headers["content-type"] == "audio/pcm;rate=48000;channels=2;format=s16le"
+    assert pcm.headers["x-open-eos-audio-generation"] == "5"
+    assert pcm.headers["x-open-eos-audio-sample-rate"] == "48000"
+    assert pcm.headers["x-open-eos-audio-channels"] == "2"
+    assert pcm.headers["x-open-eos-audio-frames"] == "1"
+    assert pcm.headers["x-open-eos-audio-discontinuity"] == "0"
+    assert timeout.status_code == 204
+    assert session.reads == [(4, 0.25), (5, 0.0)]
+
+
+class _AudioEngine:
+    name = "ccapi"
+
+    def __init__(self, session: _AudioSession) -> None:
+        self.session = session
+
+    def open_connection(self, base_url: str, username: str = "", password: str = "") -> _AudioSession:
+        assert base_url == "http://192.0.2.1:8080"
+        assert username == ""
+        assert password == ""
+        return self.session
+
+
+class _AudioSession:
+    engine_name = "ccapi"
+    camera = CameraDescriptor(id="rtp-audio-test", model="Canon test camera", port="network", engine="ccapi")
+
+    def __init__(self) -> None:
+        self.reads: list[tuple[int, float]] = []
+
+    def live_view_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None:
+        self.reads.append((after_generation, timeout))
+        if after_generation >= 5:
+            return None
+        return RtpAudioChunk(b"\x00\x00\x01\x00", 5, 48_000, 2, 1)
+
+    def close(self) -> None:
+        pass
 
 
 def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
@@ -75,6 +145,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
             json={"fps": 15, "size": "MEDIUM", "source": "DESKTOP_BRIDGE_STREAM"},
         )
         live_frame = client.get(f"/v1/session/{session_id}/liveview/frame", headers=headers)
+        unsupported_audio = client.get(f"/v1/session/{session_id}/liveview/audio", headers=headers)
         magnification = client.post(
             f"/v1/session/{session_id}/liveview/magnification",
             headers=headers,
@@ -143,6 +214,8 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
         "source": "DESKTOP_BRIDGE_STREAM",
     }
     assert live_frame.content == JPEG
+    assert unsupported_audio.status_code == 409
+    assert unsupported_audio.json()["error"]["feature"] == "LIVE_VIEW_RTP_AUDIO"
     assert magnification.json() == {"accepted": True, "value": 5}
     assert invalid_magnification.status_code == 422
     assert focus.json()["accepted"] is True

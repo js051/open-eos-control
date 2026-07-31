@@ -83,6 +83,10 @@ async function run() {
         rejectNextPlay: false,
         lastConstraints: null,
         currentTrack: null,
+        audioContexts: 0,
+        audioStarts: 0,
+        audioStops: 0,
+        audioCloses: 0,
       };
       let videoFrameCallbackId = 0;
       const videoFrameCallbacks = new Map();
@@ -192,6 +196,46 @@ async function run() {
       Object.defineProperty(navigator, "mediaDevices", {
         configurable: true,
         value: mediaDevices,
+      });
+      class FakeAudioContext {
+        constructor(options) {
+          testState.audioContexts += 1;
+          testState.audioContextOptions = options;
+          this.destination = {};
+        }
+
+        get currentTime() {
+          return performance.now() / 1000;
+        }
+
+        resume() {
+          return Promise.resolve();
+        }
+
+        close() {
+          testState.audioCloses += 1;
+          return Promise.resolve();
+        }
+
+        createBuffer(channels, frames, sampleRate) {
+          testState.audioBuffer = { channels, frames, sampleRate };
+          return { copyToChannel() {} };
+        }
+
+        createBufferSource() {
+          const source = new EventTarget();
+          source.connect = () => {};
+          source.start = () => {
+            testState.audioStarts += 1;
+            setTimeout(() => source.dispatchEvent(new Event("ended")), 10);
+          };
+          source.stop = () => { testState.audioStops += 1; };
+          return source;
+        }
+      }
+      Object.defineProperty(globalThis, "AudioContext", {
+        configurable: true,
+        value: FakeAudioContext,
       });
     });
 
@@ -398,6 +442,91 @@ async function run() {
         `pageErrors=${JSON.stringify(pageErrors)}; ${error.message}`,
       );
     }
+
+    let audioRequests = 0;
+    await page.route("**/v1/session/*/status", async (route) => {
+      const response = await route.fetch();
+      const status = await response.json();
+      status.raw = {
+        ...status.raw,
+        rtpAudio: {
+          advertised: true,
+          available: true,
+          active: true,
+          codec: "MP4A-LATM",
+          sampleRate: 48000,
+          channels: 2,
+          generation: 0,
+          reason: null,
+          lastError: null,
+        },
+      };
+      await route.fulfill({ response, json: status });
+    });
+    await page.route("**/v1/session/*/capabilities", async (route) => {
+      const response = await route.fetch();
+      const capabilities = await response.json();
+      capabilities.liveView.sources = ["CCAPI_RTP", "DESKTOP_BRIDGE_STREAM"];
+      capabilities.liveView.defaultSource = "CCAPI_RTP";
+      await route.fulfill({ response, json: capabilities });
+    });
+    await page.route("**/v1/session/*/liveview/start", async (route) => {
+      const request = route.request();
+      const payload = request.postDataJSON();
+      const response = await route.fetch({
+        postData: JSON.stringify({ ...payload, source: "DESKTOP_BRIDGE_STREAM" }),
+      });
+      const state = await response.json();
+      await route.fulfill({ response, json: { ...state, source: "CCAPI_RTP" } });
+    });
+    await page.route("**/v1/session/*/liveview/audio?*", async (route) => {
+      audioRequests += 1;
+      const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
+      if (after >= 3) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await route.fulfill({ status: 204 });
+        return;
+      }
+      const generation = after + 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "audio/pcm;rate=48000;channels=2;format=s16le",
+        headers: {
+          "X-Open-EOS-Audio-Generation": String(generation),
+          "X-Open-EOS-Audio-Sample-Rate": "48000",
+          "X-Open-EOS-Audio-Channels": "2",
+          "X-Open-EOS-Audio-Frames": "1",
+          "X-Open-EOS-Audio-Discontinuity": "0",
+        },
+        body: Buffer.from([0, 0, 0, 0]),
+      });
+    });
+    await page.click("#rail-live-button");
+    await page.waitForFunction(() => document.querySelector("#live-toggle-button").getAttribute("aria-label") === "Start Live View");
+    await page.click("#refresh-button");
+    await page.waitForFunction(() => (
+      Array.from(document.querySelector("#live-source-select").options).some((option) => option.value === "CCAPI_RTP")
+    ));
+    await page.selectOption("#live-source-select", "CCAPI_RTP");
+    await page.click("#rail-live-button");
+    await page.waitForSelector("#rtp-audio-button:not([hidden]):not([disabled])");
+    assert.equal(await page.locator("#rtp-audio-button").getAttribute("aria-pressed"), "false");
+    assert.equal(audioRequests, 0);
+    await page.click("#rtp-audio-button");
+    await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.audioStarts >= 1);
+    assert.equal(await page.locator("#rtp-audio-button").getAttribute("aria-pressed"), "true");
+    assert.deepEqual(await page.evaluate(() => globalThis.__openEosLocalVideoTest.audioBuffer), {
+      channels: 2,
+      frames: 1,
+      sampleRate: 48000,
+    });
+    assert.deepEqual(await page.evaluate(() => globalThis.__openEosLocalVideoTest.audioContextOptions), {
+      latencyHint: "interactive",
+      sampleRate: 48000,
+    });
+    await page.click("#rtp-audio-button");
+    await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.audioCloses === 1);
+    assert.equal(await page.locator("#rtp-audio-button").getAttribute("aria-pressed"), "false");
 
     await page.selectOption("#preview-input-select", "LOCAL_VIDEO");
     await page.waitForFunction(() => !document.querySelector("#local-video").hidden);

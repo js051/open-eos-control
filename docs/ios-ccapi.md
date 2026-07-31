@@ -17,7 +17,7 @@
 - Simulator mode and injectable HTTP transport for deterministic tests
 - Desktop Bridge service validation, Bearer authentication, USB camera discovery/selection, session lifecycle, dynamic capability mapping, event polling, settings, capture, independent autofocus, half-press, recording, tap/drive focus when advertised, bounded JPEG frames, thumbnails and advertised display previews, file-backed media download/deletion, structured errors, and secret-redacted diagnostics
 
-Focus drive without a camera/engine-advertised operation and direct iOS USB/PTP are not presented as implemented features. Desktop Bridge is the implemented iPhone/iPad route to a camera attached to a PC by USB. RTP AAC LATM audio remains unsupported; PC RTP H.264 video is implemented separately by the Bridge through PyAV and still requires physical-camera validation.
+Focus drive without a camera/engine-advertised operation and direct iOS USB/PTP are not presented as implemented features. Desktop Bridge is the implemented iPhone/iPad route to a camera attached to a PC by USB. Direct iOS RTP AAC LATM audio remains unsupported. The PC Bridge separately implements RTP H.264 video and in-band `MP4A-LATM/48000` playback through PyAV; both still require physical-camera validation.
 
 ## Implemented App
 

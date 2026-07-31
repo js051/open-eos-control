@@ -23,7 +23,7 @@ from open_eos_bridge.ccapi import (
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine
 from open_eos_bridge.models import CameraFeature, LiveViewStartRequest
-from open_eos_bridge.rtp import RtpError, RtpSessionDescription
+from open_eos_bridge.rtp import RtpAudioChunk, RtpError, RtpSessionDescription
 
 from .fakes import FakeRunner
 
@@ -292,6 +292,15 @@ class FakeRtpSession:
     ) -> None:
         self.source_url = "rtp://192.168.1.20:12000"
         self.last_error: str | None = None
+        self.audio_status: dict[str, object] = {
+            "advertised": True,
+            "available": True,
+            "active": True,
+            "codec": "MP4A-LATM",
+            "sampleRate": 48_000,
+            "channels": 2,
+            "generation": 1,
+        }
         self.start_error = start_error
         self.ready_error = ready_error
         self.target_fps = 0
@@ -309,6 +318,11 @@ class FakeRtpSession:
     def read_frame(self, timeout: float = 5.0) -> bytes:
         assert timeout == 5.0
         return RTP_JPEG
+
+    def read_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None:
+        assert after_generation == 0
+        assert timeout == 1.0
+        return RtpAudioChunk(b"\x00\x00\x01\x00", 1, 48_000, 2, 1)
 
     def wait_until_ready(self, timeout: float = 5.0) -> None:
         assert timeout == 5.0
@@ -675,7 +689,11 @@ def test_ccapi_rtp_capability_and_exact_lifecycle_are_end_to_end() -> None:
     assert rtp_sessions[0].target_fps == 24
     assert session.live_view_source == "CCAPI_RTP"
     assert session.status().raw["rtpSource"] == "rtp://192.168.1.20:12000"
+    assert session.status().raw["rtpAudio"]["codec"] == "MP4A-LATM"
     assert session.live_view_frame() == RTP_JPEG
+    audio = session.live_view_audio()
+    assert audio is not None
+    assert audio.content == b"\x00\x00\x01\x00"
 
     focus = session.tap_focus(0.25, 0.75)
     assert focus.accepted is True

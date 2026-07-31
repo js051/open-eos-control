@@ -4,15 +4,21 @@ import ipaddress
 import socket
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from typing import Protocol
 from urllib.parse import urlsplit
 
 MAX_ACCESS_UNIT_BYTES = 8 * 1024 * 1024
+MAX_LATM_AUDIO_MUX_BYTES = 0x1FFF
 MAX_DATAGRAM_BYTES = 65_535
 H264_CLOCK_RATE = 90_000
+CANON_AUDIO_CLOCK_RATE = 48_000
+AUDIO_CHANNELS = 2
+AUDIO_SAMPLE_BYTES = 2
+AUDIO_QUEUE_CHUNKS = 96
 ANNEX_B_START_CODE = b"\x00\x00\x00\x01"
 
 
@@ -28,6 +34,11 @@ class RtpMediaDescription:
     codec: str
     clock_rate: int
     channels: int | None = None
+    fmtp: tuple[tuple[str, str], ...] = ()
+
+    def parameter(self, name: str) -> str | None:
+        target = name.casefold()
+        return next((value for key, value in self.fmtp if key.casefold() == target), None)
 
 
 @dataclass(frozen=True)
@@ -48,6 +59,31 @@ class H264AccessUnit:
     @property
     def encoded_byte_count(self) -> int:
         return sum(map(len, self.nal_units))
+
+
+@dataclass(frozen=True)
+class LatmAccessUnit:
+    audio_mux_element: bytes
+    rtp_timestamp: int
+    discontinuity: bool = False
+
+
+@dataclass(frozen=True)
+class PcmAudio:
+    content: bytes
+    sample_rate: int
+    channels: int
+    sample_frames: int
+
+
+@dataclass(frozen=True)
+class RtpAudioChunk:
+    content: bytes
+    generation: int
+    sample_rate: int
+    channels: int
+    sample_frames: int
+    discontinuity: bool = False
 
 
 @dataclass(frozen=True)
@@ -95,6 +131,7 @@ def parse_sdp(sdp: str) -> RtpSessionDescription:
         raise RtpError("Canon RTP session description is empty.")
     lines = [line.strip() for line in sdp.splitlines() if line.strip()]
     mappings: dict[int, tuple[str, int, int | None]] = {}
+    format_parameters: dict[int, dict[str, str]] = {}
     for line in lines:
         if not line.casefold().startswith("a=rtpmap:") or " " not in line:
             continue
@@ -112,6 +149,21 @@ def parse_sdp(sdp: str) -> RtpSessionDescription:
             except ValueError:
                 channels = None
         mappings[payload_type] = (fields[0], clock_rate, channels)
+
+    for line in lines:
+        if not line.casefold().startswith("a=fmtp:") or " " not in line:
+            continue
+        payload_text, parameters_text = line[7:].split(" ", 1)
+        try:
+            payload_type = int(payload_text)
+        except ValueError:
+            continue
+        parameters: dict[str, str] = {}
+        for entry in parameters_text.split(";"):
+            key, separator, value = entry.strip().partition("=")
+            if key:
+                parameters[key.casefold()] = value.strip() if separator else ""
+        format_parameters[payload_type] = parameters
 
     media: list[RtpMediaDescription] = []
     for line in lines:
@@ -137,7 +189,8 @@ def parse_sdp(sdp: str) -> RtpSessionDescription:
         if payload_type is None:
             continue
         codec, clock_rate, channels = mappings[payload_type]
-        media.append(RtpMediaDescription(kind, port, payload_type, codec, clock_rate, channels))
+        fmtp = tuple(sorted(format_parameters.get(payload_type, {}).items()))
+        media.append(RtpMediaDescription(kind, port, payload_type, codec, clock_rate, channels, fmtp))
 
     video = next(
         (item for item in media if item.kind == "video" and item.codec.casefold() == "h264"),
@@ -152,9 +205,71 @@ def parse_sdp(sdp: str) -> RtpSessionDescription:
     if video.clock_rate != H264_CLOCK_RATE:
         raise RtpError(f"Canon RTP H.264 clock rate {video.clock_rate} is unsupported; expected {H264_CLOCK_RATE}.")
     audio = next((item for item in media if item.kind == "audio"), None)
-    if audio is not None and not 1 <= audio.port <= 65_535:
-        raise RtpError(f"Canon RTP audio port {audio.port} is invalid.")
+    if audio is not None:
+        if not 1 <= audio.port <= 65_535:
+            raise RtpError(f"Canon RTP audio port {audio.port} is invalid.")
+        if not 0 <= audio.payload_type <= 127:
+            raise RtpError(f"Canon RTP audio payload type {audio.payload_type} is invalid.")
     return RtpSessionDescription(raw_sdp=sdp, video=video, audio=audio)
+
+
+def latm_audio_support(audio: RtpMediaDescription | None) -> tuple[bool, str]:
+    if audio is None:
+        return False, "Canon RTP SDP does not advertise an audio stream."
+    if audio.codec.casefold() != "mp4a-latm":
+        return False, f"Canon RTP audio codec {audio.codec} is unsupported; expected MP4A-LATM."
+    if audio.clock_rate != CANON_AUDIO_CLOCK_RATE:
+        return False, (
+            f"Canon RTP MP4A-LATM clock rate {audio.clock_rate} is unsupported; "
+            f"expected {CANON_AUDIO_CLOCK_RATE}."
+        )
+    cpresent = audio.parameter("cpresent")
+    if cpresent == "0":
+        return False, "Out-of-band MP4A-LATM configuration (cpresent=0) is not supported."
+    if cpresent not in {None, "", "1"}:
+        return False, f"Canon RTP MP4A-LATM cpresent={cpresent} is invalid."
+    return True, "Canon RTP MP4A-LATM audio uses in-band StreamMuxConfig."
+
+
+class LatmRtpDepacketizer:
+    def __init__(self, payload_type: int) -> None:
+        self.payload_type = payload_type
+        self._timestamp: int | None = None
+        self._expected_sequence: int | None = None
+        self._valid = True
+        self._payload = bytearray()
+        self._pending_discontinuity = False
+
+    def accept(self, datagram: bytes) -> LatmAccessUnit | None:
+        packet = _RtpPacket.parse(datagram)
+        if packet is None or packet.payload_type != self.payload_type:
+            return None
+        if self._timestamp != packet.timestamp:
+            if self._timestamp is not None and self._payload:
+                self._pending_discontinuity = True
+            self._reset(packet.timestamp)
+        elif self._expected_sequence is not None and packet.sequence_number != self._expected_sequence:
+            self._valid = False
+            self._pending_discontinuity = True
+        self._expected_sequence = (packet.sequence_number + 1) & 0xFFFF
+        self._payload.extend(packet.payload)
+        if len(self._payload) > MAX_LATM_AUDIO_MUX_BYTES:
+            self._valid = False
+            self._pending_discontinuity = True
+        if not packet.marker:
+            return None
+        completed = None
+        if self._valid and self._payload and self._timestamp is not None:
+            completed = LatmAccessUnit(bytes(self._payload), self._timestamp, self._pending_discontinuity)
+            self._pending_discontinuity = False
+        self._reset(None)
+        return completed
+
+    def _reset(self, timestamp: int | None) -> None:
+        self._timestamp = timestamp
+        self._expected_sequence = None
+        self._valid = True
+        self._payload.clear()
 
 
 class H264RtpDepacketizer:
@@ -325,6 +440,46 @@ class PyAvH264FrameDecoder:
         self._codec = None
 
 
+class LatmAudioDecoder(Protocol):
+    def decode(self, access_unit: LatmAccessUnit) -> PcmAudio | None: ...
+
+    def close(self) -> None: ...
+
+
+class PyAvLatmAudioDecoder:
+    def __init__(self) -> None:
+        import av
+
+        self._codec = av.CodecContext.create("aac_latm", "r")
+        self._resampler = av.AudioResampler(format="s16", layout="stereo", rate=CANON_AUDIO_CLOCK_RATE)
+
+    def decode(self, access_unit: LatmAccessUnit) -> PcmAudio | None:
+        size = len(access_unit.audio_mux_element)
+        if not 0 < size <= MAX_LATM_AUDIO_MUX_BYTES:
+            raise RtpError(f"Canon RTP LATM audioMuxElement size {size} is invalid.")
+        loas = bytes((0x56, 0xE0 | ((size >> 8) & 0x1F), size & 0xFF)) + access_unit.audio_mux_element
+        content = bytearray()
+        sample_frames = 0
+        for packet in self._codec.parse(loas):
+            for decoded in self._codec.decode(packet):
+                for frame in self._resampler.resample(decoded):
+                    byte_count = frame.samples * AUDIO_CHANNELS * AUDIO_SAMPLE_BYTES
+                    content.extend(bytes(frame.planes[0])[:byte_count])
+                    sample_frames += frame.samples
+        if not content:
+            return None
+        return PcmAudio(
+            content=bytes(content),
+            sample_rate=CANON_AUDIO_CLOCK_RATE,
+            channels=AUDIO_CHANNELS,
+            sample_frames=sample_frames,
+        )
+
+    def close(self) -> None:
+        self._codec = None
+        self._resampler = None
+
+
 def pyav_decoder_available() -> bool:
     try:
         from PIL import Image  # noqa: F401
@@ -343,6 +498,9 @@ class RtpLiveViewSession(Protocol):
     @property
     def last_error(self) -> str | None: ...
 
+    @property
+    def audio_status(self) -> dict[str, object]: ...
+
     def start(self) -> None: ...
 
     def set_target_fps(self, fps: int) -> None: ...
@@ -350,6 +508,8 @@ class RtpLiveViewSession(Protocol):
     def wait_until_ready(self, timeout: float = 5.0) -> None: ...
 
     def read_frame(self, timeout: float = 5.0) -> bytes: ...
+
+    def read_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None: ...
 
     def close(self) -> None: ...
 
@@ -364,14 +524,28 @@ class UdpH264RtpSession:
         destination_address: str,
         *,
         decoder_factory: Callable[[], H264FrameDecoder] = PyAvH264FrameDecoder,
+        audio_decoder_factory: Callable[[], LatmAudioDecoder] | None = PyAvLatmAudioDecoder,
     ) -> None:
         self.description = description
         self.destination_address = destination_address
         self._decoder_factory = decoder_factory
+        self._audio_decoder_factory = audio_decoder_factory
         self._condition = threading.Condition()
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._decoder: H264FrameDecoder | None = None
+        self._audio_socket: socket.socket | None = None
+        self._audio_thread: threading.Thread | None = None
+        self._audio_decoder: LatmAudioDecoder | None = None
+        self._audio_chunks: deque[RtpAudioChunk] = deque(maxlen=AUDIO_QUEUE_CHUNKS)
+        self._audio_generation = 0
+        self._audio_last_bytes = 0
+        self._audio_last_frame_at_millis: int | None = None
+        self._audio_last_error: str | None = None
+        self._audio_supported, self._audio_support_reason = latm_audio_support(description.audio)
+        if self._audio_supported and audio_decoder_factory is None:
+            self._audio_supported = False
+            self._audio_support_reason = "PyAV MP4A-LATM decoder is unavailable."
         self._closed = False
         self._target_fps = 30
         self._latest_frame: bytes | None = None
@@ -389,6 +563,29 @@ class UdpH264RtpSession:
         with self._condition:
             return self._last_error
 
+    @property
+    def audio_status(self) -> dict[str, object]:
+        with self._condition:
+            audio = self.description.audio
+            active = self._audio_thread is not None and not self._closed
+            return {
+                "advertised": audio is not None,
+                "available": active,
+                "active": active,
+                "codec": audio.codec if audio is not None else None,
+                "clockRate": audio.clock_rate if audio is not None else None,
+                "sampleRate": CANON_AUDIO_CLOCK_RATE if active else None,
+                "channels": AUDIO_CHANNELS if active else audio.channels if audio is not None else None,
+                "generation": self._audio_generation,
+                "lastBytes": self._audio_last_bytes,
+                "lastFrameAtMillis": self._audio_last_frame_at_millis,
+                "source": (
+                    f"rtp://{self.destination_address}:{audio.port}" if audio is not None else None
+                ),
+                "reason": None if active else self._audio_support_reason,
+                "lastError": self._audio_last_error,
+            }
+
     def start(self) -> None:
         with self._condition:
             if self._thread is not None:
@@ -405,11 +602,39 @@ class UdpH264RtpSession:
             decoder.close()
             raise
         thread = threading.Thread(target=self._receive_loop, name="open-eos-ccapi-rtp", daemon=True)
+        audio_receiver: socket.socket | None = None
+        audio_decoder: LatmAudioDecoder | None = None
+        audio_thread: threading.Thread | None = None
+        if self._audio_supported and self.description.audio is not None and self._audio_decoder_factory is not None:
+            try:
+                audio_decoder = self._audio_decoder_factory()
+                audio_receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                audio_receiver.settimeout(0.25)
+                audio_receiver.bind((self.destination_address, self.description.audio.port))
+                audio_thread = threading.Thread(
+                    target=self._receive_audio_loop,
+                    name="open-eos-ccapi-rtp-audio",
+                    daemon=True,
+                )
+            except Exception as error:
+                if audio_receiver is not None:
+                    audio_receiver.close()
+                if audio_decoder is not None:
+                    audio_decoder.close()
+                audio_receiver = None
+                audio_decoder = None
+                self._audio_support_reason = f"Could not prepare Canon RTP audio: {error}"
+                self._audio_last_error = str(error)
         with self._condition:
             self._decoder = decoder
             self._socket = receiver
             self._thread = thread
+            self._audio_decoder = audio_decoder
+            self._audio_socket = audio_receiver
+            self._audio_thread = audio_thread
         thread.start()
+        if audio_thread is not None:
+            audio_thread.start()
 
     def set_target_fps(self, fps: int) -> None:
         with self._condition:
@@ -443,6 +668,35 @@ class UdpH264RtpSession:
             self._delivered_generation = self._frame_generation
             return self._latest_frame
 
+    def read_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None:
+        if after_generation < 0:
+            raise RtpError("Canon RTP audio generation must be non-negative.")
+        deadline = time.monotonic() + max(timeout, 0.0)
+        with self._condition:
+            if self._audio_thread is None:
+                raise RtpError(self._audio_support_reason)
+            while not self._closed and (
+                not self._audio_chunks or self._audio_chunks[-1].generation <= after_generation
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    if self._audio_last_error:
+                        raise RtpError(f"Canon RTP audio decoder error: {self._audio_last_error}")
+                    return None
+                self._condition.wait(remaining)
+            if self._closed:
+                raise RtpError("Canon RTP audio session is closed.")
+            chunk = self._audio_chunks[-1] if after_generation == 0 else next(
+                (candidate for candidate in self._audio_chunks if candidate.generation > after_generation),
+                None,
+            )
+            if chunk is None:
+                return None
+            discontinuity = chunk.discontinuity or (
+                after_generation > 0 and chunk.generation != after_generation + 1
+            )
+            return replace(chunk, discontinuity=discontinuity)
+
     def close(self) -> None:
         with self._condition:
             if self._closed:
@@ -451,9 +705,15 @@ class UdpH264RtpSession:
             receiver = self._socket
             thread = self._thread
             decoder = self._decoder
+            audio_receiver = self._audio_socket
+            audio_thread = self._audio_thread
+            audio_decoder = self._audio_decoder
             self._socket = None
             self._thread = None
             self._decoder = None
+            self._audio_socket = None
+            self._audio_thread = None
+            self._audio_decoder = None
             self._condition.notify_all()
         if receiver is not None:
             receiver.close()
@@ -461,6 +721,12 @@ class UdpH264RtpSession:
             thread.join(timeout=2.0)
         if decoder is not None:
             decoder.close()
+        if audio_receiver is not None:
+            audio_receiver.close()
+        if audio_thread is not None and audio_thread is not threading.current_thread():
+            audio_thread.join(timeout=2.0)
+        if audio_decoder is not None:
+            audio_decoder.close()
 
     def _receive_loop(self) -> None:
         depacketizer = H264RtpDepacketizer(self.description.video.payload_type)
@@ -498,6 +764,54 @@ class UdpH264RtpSession:
                     if self._closed:
                         return
                     self._last_error = str(error)
+
+    def _receive_audio_loop(self) -> None:
+        audio = self.description.audio
+        if audio is None:
+            return
+        depacketizer = LatmRtpDepacketizer(audio.payload_type)
+        decoder_discontinuity = False
+        while True:
+            with self._condition:
+                if self._closed:
+                    return
+                receiver = self._audio_socket
+                decoder = self._audio_decoder
+            if receiver is None or decoder is None:
+                return
+            try:
+                datagram, _ = receiver.recvfrom(MAX_DATAGRAM_BYTES)
+                access_unit = depacketizer.accept(datagram)
+                if access_unit is None:
+                    continue
+                decoder_discontinuity = decoder_discontinuity or access_unit.discontinuity
+                pcm = decoder.decode(access_unit)
+                if pcm is None:
+                    continue
+                with self._condition:
+                    self._audio_generation += 1
+                    chunk = RtpAudioChunk(
+                        content=pcm.content,
+                        generation=self._audio_generation,
+                        sample_rate=pcm.sample_rate,
+                        channels=pcm.channels,
+                        sample_frames=pcm.sample_frames,
+                        discontinuity=decoder_discontinuity,
+                    )
+                    self._audio_chunks.append(chunk)
+                    self._audio_last_bytes = len(pcm.content)
+                    self._audio_last_frame_at_millis = int(time.time() * 1000)
+                    self._audio_last_error = None
+                    self._condition.notify_all()
+                    decoder_discontinuity = False
+            except TimeoutError:
+                continue
+            except Exception as error:
+                with self._condition:
+                    if self._closed:
+                        return
+                    self._audio_last_error = str(error)
+                    decoder_discontinuity = True
 
 
 def create_udp_rtp_session(description: RtpSessionDescription, destination_address: str) -> RtpLiveViewSession:

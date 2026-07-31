@@ -66,6 +66,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "monitor-safe-area-toggle",
         "monitor-desqueeze-select",
         "live-magnification-button",
+        "rtp-audio-button",
         "exposure-strip",
         "shutter-button",
         "bulb-indicator",
@@ -95,6 +96,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
     assert "/app/diagnostics.js" in parser.assets
     assert "/app/monitoring.js" in parser.assets
     assert "/app/local-video.js" in parser.assets
+    assert "/app/rtp-audio.js" in parser.assets
     assert "/app/media-transfer.js" in parser.assets
 
 
