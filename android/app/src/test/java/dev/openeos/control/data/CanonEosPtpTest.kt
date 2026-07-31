@@ -281,6 +281,7 @@ class CanonEosPtpTest {
                 "afoperation",
                 "continuousaf",
                 "afmethod",
+                "alomode",
                 "drivemode",
                 "meteringmode",
                 "highisonr",
@@ -368,6 +369,30 @@ class CanonEosPtpTest {
         assertArrayEquals(
             CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.AEB, 0x10),
             CanonEosPtp.propertyPayload(CanonEosPropertyCode.AEB, 0x10),
+        )
+    }
+
+    @Test
+    fun r6MarkIIIAutoLightingOptimizerUsesPinned32BitSafeValues() {
+        val code = CanonEosPropertyCode.AUTO_LIGHTING_OPTIMIZER
+        assertEquals(0xD1C1, code)
+        assertEquals("Standard", CanonEosPtp.propertyLabel(code, 0x00010000))
+        assertEquals("Low", CanonEosPtp.propertyLabel(code, 0x00010101))
+        assertEquals("High", CanonEosPtp.propertyLabel(code, 0x00010202))
+        assertEquals("Off", CanonEosPtp.propertyLabel(code, 0x00010303))
+        assertEquals(
+            "High (disabled in manual exposure)",
+            CanonEosPtp.propertyLabel(code, 0x00000202),
+        )
+        assertEquals("x3", CanonEosPtp.propertyLabel(code, 3))
+        assertEquals(
+            listOf("Standard", "High", "x3"),
+            CanonEosPtp.propertyOptions(code, listOf(0x00010000, 0x00010202, 3, 0x76543210))
+                .map(CanonEosPropertyOption::label),
+        )
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(code, 0x00010202),
+            CanonEosPtp.propertyPayload(code, 0x00010202),
         )
     }
 

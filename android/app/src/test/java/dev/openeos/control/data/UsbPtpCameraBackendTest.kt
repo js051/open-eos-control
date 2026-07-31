@@ -537,6 +537,7 @@ class UsbPtpCameraBackendTest {
         backend.setSetting("zoomspeed", "12")
         backend.setSetting("autopoweroff", "Disable")
         backend.setSetting("highisonr", "High")
+        backend.setSetting("alomode", "High")
         backend.setSetting("aeb", "+/- 2")
         val recordingStatus = backend.startRecording()
         val stoppedRecordingStatus = backend.stopRecording()
@@ -605,6 +606,8 @@ class UsbPtpCameraBackendTest {
         assertEquals("Super high speed continuous shooting", settings.getValue("drivemode").value)
         assertEquals("Evaluative", settings.getValue("meteringmode").value)
         assertEquals(listOf("Off", "Low", "Normal", "High"), settings.getValue("highisonr").values)
+        assertEquals("Standard", settings.getValue("alomode").value)
+        assertEquals(listOf("Standard", "Low", "High", "Off"), settings.getValue("alomode").values)
         assertEquals("off", settings.getValue("aeb").value)
         assertEquals("Auto", settings.getValue("picturestyle").value)
         assertEquals("RAW", settings.getValue("stillimagequality").value)
@@ -810,6 +813,13 @@ class UsbPtpCameraBackendTest {
         assertTrue(
             propertyWrites.any {
                 it.contentEquals(CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 3))
+            }
+        )
+        assertTrue(
+            propertyWrites.any {
+                it.contentEquals(
+                    CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.AUTO_LIGHTING_OPTIMIZER, 0x00010202),
+                )
             }
         )
         assertTrue(
@@ -2319,6 +2329,11 @@ class UsbPtpCameraBackendTest {
             payload += eosAvailableValues(CanonEosPropertyCode.METERING_MODE, 3, 4, 1, 5)
             payload += eosPropertyValue(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 0)
             payload += eosAvailableValues(CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION, 0, 1, 2, 3)
+            payload += eosPropertyValue(CanonEosPropertyCode.AUTO_LIGHTING_OPTIMIZER, 0x00010000)
+            payload += eosAvailableValues(
+                CanonEosPropertyCode.AUTO_LIGHTING_OPTIMIZER,
+                0x00010000, 0x00010101, 0x00010202, 0x00010303,
+            )
             payload += eosPropertyValue(CanonEosPropertyCode.AEB, 0)
             payload += eosAvailableValues(
                 CanonEosPropertyCode.AEB,

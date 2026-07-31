@@ -143,6 +143,7 @@ func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) 
     let videoTokens = ["movie", "video", "frame", "codec", "record", "sound"]
     let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage"]
     return settings.filter { setting in
+        guard Set(setting.values).count > 1 else { return false }
         guard !primary.contains(setting.key) else { return false }
         let key = setting.key.lowercased()
         switch mode {
@@ -182,6 +183,7 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "capturetarget": "setting_capture_target"
     case "capturestorage": "setting_capture_storage"
     case "highisonr": "setting_high_iso_noise_reduction"
+    case "alomode": "setting_auto_lighting_optimizer"
     case "continuousaf": "setting_continuous_af"
     case "movieservoaf": "setting_movie_servo_af"
     case "aeb": "setting_aeb"
@@ -198,7 +200,16 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
         "low": "camera_value_low",
         "normal": "camera_value_normal",
         "high": "camera_value_high",
+        "standard": "camera_value_standard",
     ]
+    if normalizedKey == "alomode" {
+        return [
+            "standard (disabled in manual exposure)": "camera_value_standard_disabled_manual",
+            "low (disabled in manual exposure)": "camera_value_low_disabled_manual",
+            "high (disabled in manual exposure)": "camera_value_high_disabled_manual",
+            "off (disabled in manual exposure)": "camera_value_off_disabled_manual",
+        ][value.lowercased()] ?? common[value.lowercased()]
+    }
     if normalizedKey == "autopoweroff" {
         return [
             "0": "camera_value_disable",

@@ -2090,6 +2090,7 @@ public actor CCAPIClient {
             "stillimagequality.heif": "HEIF quality",
             "wbshift.ba": "WB shift B/A", "wbshift.mg": "WB shift M/G",
             "colortemperature": "Color temperature", "exposurecompensation": "Exposure compensation",
+            "alomode": "Auto Lighting Optimizer",
         ]
         if let label = known[key] { return label }
         return key.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").capitalized

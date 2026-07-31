@@ -18,6 +18,12 @@ class CameraValueLabelsTest {
             Triple("meteringmode", "Evaluative", R.string.camera_value_evaluative_metering),
             Triple("picturestyle", "Fine detail", R.string.camera_value_fine_detail),
             Triple("highisonr", "Multi-Shot", R.string.camera_value_multi_shot),
+            Triple("alomode", "Standard", R.string.camera_value_standard),
+            Triple(
+                "alomode",
+                "High (disabled in manual exposure)",
+                R.string.camera_value_high_disabled_manual,
+            ),
             Triple("autopoweroff", "30 minutes", R.string.camera_value_30_minutes),
             Triple("autopoweroff", "Disable", R.string.camera_value_disable),
             Triple("capturetarget", "Internal RAM", R.string.camera_value_internal_ram),

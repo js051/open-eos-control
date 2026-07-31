@@ -62,6 +62,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             CameraSettingControl("drivemode", "Drive mode", "Super high speed continuous shooting", listOf("Single", "Continuous high speed", "Super high speed continuous shooting")),
             CameraSettingControl("meteringmode", "Metering", "Evaluative", listOf("Evaluative", "Partial", "Spot", "Center-weighted average")),
             CameraSettingControl("highisonr", "High ISO noise reduction", "Off", listOf("Off", "Low", "Normal", "High")),
+            CameraSettingControl("alomode", "Auto Lighting Optimizer", "Standard", listOf("Standard", "Low", "High", "Off")),
             CameraSettingControl("aeb", "Auto exposure bracketing", "off", listOf("off", "+/- 1/3", "+/- 2/3", "+/- 1", "+/- 2", "+/- 3")),
             CameraSettingControl("picturestyle", "Picture style", "Auto", listOf("Auto", "Standard", "Portrait", "Fine detail")),
             CameraSettingControl("stillimagequality", "Image quality", "RAW", listOf("Large Fine JPEG", "cRAW + Large Fine JPEG", "RAW")),

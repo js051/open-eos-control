@@ -117,6 +117,7 @@ class FakeRunner:
             "/main/capturesettings/drivemode": "Single",
             "/main/capturesettings/aspectratio": "3:2",
             "/main/capturesettings/zoomspeed": "8",
+            "/main/capturesettings/alomode": "Standard",
             "/main/capturesettings/storageid": "00010001",
             "/main/actions/manualfocusdrive": "None",
             "/main/actions/autofocusdrive": "0",
@@ -279,6 +280,11 @@ class FakeRunner:
                 self._radio("/main/capturesettings/drivemode", "Drive Mode", ["Single", "Continuous high speed"]),
                 self._radio("/main/capturesettings/aspectratio", "Aspect Ratio", ["3:2", "16:9", "1.6x"]),
                 self._radio("/main/capturesettings/zoomspeed", "Zoom Speed", ["1", "8", "15"]),
+                self._radio(
+                    "/main/capturesettings/alomode",
+                    "Auto Lighting Optimizer",
+                    ["Standard", "Low", "High", "Off"],
+                ),
                 self._text("/main/capturesettings/storageid", "Storage Device", readonly=False),
                 self._radio(
                     "/main/actions/manualfocusdrive",

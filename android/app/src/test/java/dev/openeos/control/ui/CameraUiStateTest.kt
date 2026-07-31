@@ -69,6 +69,21 @@ class CameraUiStateTest {
     }
 
     @Test
+    fun advancedSettingsHideSingleChoiceEvidenceButKeepUsableAloControl() {
+        val singleChoice = CameraSettingControl("alomode", "ALO", "x3", listOf("x3"))
+        val usable = CameraSettingControl(
+            "alomode",
+            "ALO",
+            "Standard",
+            listOf("Standard", "Low", "High", "Off"),
+        )
+
+        assertTrue(settingsForMode(listOf(singleChoice), CaptureMode.PHOTO).isEmpty())
+        assertEquals(listOf(usable), settingsForMode(listOf(usable), CaptureMode.PHOTO))
+        assertEquals(listOf(usable), settingsForMode(listOf(usable), CaptureMode.VIDEO))
+    }
+
+    @Test
     fun eventMediaRefreshPreservesCurrentItemsAndClosesRemovedPreview() {
         val retained = CameraMediaItem("media-1", "IMG_0001.JPG", "image", previewAvailable = true)
         val removed = CameraMediaItem("media-2", "IMG_0002.JPG", "image", previewAvailable = true)

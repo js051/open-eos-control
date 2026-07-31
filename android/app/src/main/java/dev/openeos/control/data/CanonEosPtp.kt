@@ -49,6 +49,7 @@ object CanonEosPropertyCode {
     const val EVF_MODE = 0xD1B1
     const val EVF_RECORD_STATUS = 0xD1B8
     const val LIVE_VIEW_AF_SYSTEM = 0xD1BA
+    const val AUTO_LIGHTING_OPTIMIZER = 0xD1C1
     const val CONTINUOUS_AF_MODE = 0xD1C9
     const val AEB = 0xD1D9
 }
@@ -123,6 +124,11 @@ object CanonEosPtp {
         CanonEosSettingSpec(CanonEosPropertyCode.FOCUS_MODE, "afoperation", "AF operation"),
         CanonEosSettingSpec(CanonEosPropertyCode.CONTINUOUS_AF_MODE, "continuousaf", "Continuous AF"),
         CanonEosSettingSpec(CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM, "afmethod", "AF method"),
+        CanonEosSettingSpec(
+            CanonEosPropertyCode.AUTO_LIGHTING_OPTIMIZER,
+            "alomode",
+            "Auto Lighting Optimizer",
+        ),
         CanonEosSettingSpec(CanonEosPropertyCode.DRIVE_MODE, "drivemode", "Drive mode"),
         CanonEosSettingSpec(CanonEosPropertyCode.METERING_MODE, "meteringmode", "Metering mode"),
         CanonEosSettingSpec(
@@ -832,6 +838,20 @@ object CanonEosPtp {
         0x0018L to "+/- 3",
     )
 
+    private val autoLightingOptimizerLabels = mapOf(
+        0x00010000L to "Standard",
+        0x00000000L to "Standard (disabled in manual exposure)",
+        0x00010101L to "Low",
+        0x00000101L to "Low (disabled in manual exposure)",
+        0x00010303L to "Off",
+        0x00000303L to "Off (disabled in manual exposure)",
+        0x00010202L to "High",
+        0x00000202L to "High (disabled in manual exposure)",
+        0x00000001L to "x1",
+        0x00000002L to "x2",
+        0x00000003L to "x3",
+    )
+
     private val singleImageFormatLabels = mapOf(
         0x0C to "RAW",
         0x1C to "mRAW",
@@ -896,6 +916,12 @@ object CanonEosPtp {
         CanonEosPropertyCode.UTC_TIME to CanonEosPropertySpec(4, emptyMap()),
         CanonEosPropertyCode.EVF_RECORD_STATUS to CanonEosPropertySpec(2, movieRecordTargetLabels),
         CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM to CanonEosPropertySpec(4, afMethodLabels),
+        // libgphoto2's Generic32 table and EOS event parser establish the wire width.
+        CanonEosPropertyCode.AUTO_LIGHTING_OPTIMIZER to CanonEosPropertySpec(
+            valueBytes = 4,
+            labels = autoLightingOptimizerLabels,
+            selectableValues = autoLightingOptimizerLabels.keys,
+        ),
         CanonEosPropertyCode.CONTINUOUS_AF_MODE to CanonEosPropertySpec(4, offOnLabels),
         CanonEosPropertyCode.AEB to CanonEosPropertySpec(2, aebLabels),
     )

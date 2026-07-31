@@ -186,6 +186,7 @@
       capturetarget: "Capture target",
       capturestorage: "Recording card",
       highisonr: "High ISO noise reduction",
+      alomode: "Auto Lighting Optimizer",
       continuousaf: "Continuous AF",
       movieservoaf: "Movie Servo AF",
       aeb: "Auto exposure bracketing",
@@ -195,6 +196,11 @@
       valueLow: "Low",
       valueNormal: "Normal",
       valueHigh: "High",
+      valueStandard: "Standard",
+      valueStandardDisabledManual: "Standard (disabled in manual exposure)",
+      valueLowDisabledManual: "Low (disabled in manual exposure)",
+      valueHighDisabledManual: "High (disabled in manual exposure)",
+      valueOffDisabledManual: "Off (disabled in manual exposure)",
       valueDisable: "Disable",
       valueInternalRam: "Computer",
       valueMemoryCard: "Memory card",
@@ -531,6 +537,12 @@
     lutLoaded: "已載入 3D LUT",
     lutRemoved: "已移除 3D LUT",
     lutLoadFailed: "無法載入 3D LUT",
+    alomode: "自動亮度優化",
+    valueStandard: "標準",
+    valueStandardDisabledManual: "標準（手動曝光時停用）",
+    valueLowDisabledManual: "低（手動曝光時停用）",
+    valueHighDisabledManual: "高（手動曝光時停用）",
+    valueOffDisabledManual: "關閉（手動曝光時停用）",
   });
 
   const commonSettingValueKeys = {
@@ -540,6 +552,13 @@
     low: "valueLow",
     normal: "valueNormal",
     high: "valueHigh",
+    standard: "valueStandard",
+  };
+  const autoLightingOptimizerValueKeys = {
+    "standard (disabled in manual exposure)": "valueStandardDisabledManual",
+    "low (disabled in manual exposure)": "valueLowDisabledManual",
+    "high (disabled in manual exposure)": "valueHighDisabledManual",
+    "off (disabled in manual exposure)": "valueOffDisabledManual",
   };
   const autoPowerOffValueKeys = {
     0: "valueDisable",
@@ -1296,6 +1315,9 @@
     const key = typeof settingOrKey === "string" ? settingOrKey : settingOrKey.key;
     const rawValue = String(value);
     let messageKey = commonSettingValueKeys[rawValue.toLowerCase()];
+    if (key === "alomode") {
+      messageKey = autoLightingOptimizerValueKeys[rawValue.toLowerCase()] || messageKey;
+    }
     if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue];
     if (key === "capturetarget") messageKey = captureTargetValueKeys[rawValue.toLowerCase()];
     if (key === "capturestorage") messageKey = captureStorageValueKeys[rawValue.toLowerCase()];

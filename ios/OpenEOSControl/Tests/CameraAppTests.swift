@@ -55,9 +55,10 @@ final class CameraAppTests: XCTestCase {
     func testAdvancedSettingsAreFilteredByCaptureMode() {
         let settings = [
             CameraSetting(key: "iso", label: "ISO", value: "100", values: ["100"]),
-            CameraSetting(key: "drivemode", label: "Drive", value: "single", values: ["single"]),
-            CameraSetting(key: "moviequality", label: "Movie", value: "4K", values: ["4K"]),
-            CameraSetting(key: "meteringmode", label: "Metering", value: "eval", values: ["eval"]),
+            CameraSetting(key: "drivemode", label: "Drive", value: "single", values: ["single", "continuous"]),
+            CameraSetting(key: "moviequality", label: "Movie", value: "4K", values: ["4K", "FHD"]),
+            CameraSetting(key: "meteringmode", label: "Metering", value: "eval", values: ["eval", "spot"]),
+            CameraSetting(key: "alomode", label: "ALO", value: "x3", values: ["x3"]),
             CameraSetting(
                 key: "capturetarget",
                 label: "Capture target",
@@ -83,6 +84,7 @@ final class CameraAppTests: XCTestCase {
             "aspectratio": "setting_aspect_ratio",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
+            "alomode": "setting_auto_lighting_optimizer",
             "capturetarget": "setting_capture_target",
             "capturestorage": "setting_capture_storage",
             "stillimagequality.raw": "setting_image_quality_raw",
@@ -120,6 +122,11 @@ final class CameraAppTests: XCTestCase {
             "camera_value_large_fine"
         )
         XCTAssertEqual(settingValueLocalizationKey(key: "continuousaf", value: "Off"), "camera_value_off")
+        XCTAssertEqual(settingValueLocalizationKey(key: "alomode", value: "Standard"), "camera_value_standard")
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "alomode", value: "High (disabled in manual exposure)"),
+            "camera_value_high_disabled_manual"
+        )
     }
 
     func testEnglishAndTraditionalChineseResourcesHaveMatchingKeys() throws {
