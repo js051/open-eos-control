@@ -295,6 +295,10 @@ class CameraScreensTest {
             .onNodeWithTag("live-view-frame")
             .fetchSemanticsNode()
             .boundsInRoot
+        val previewViewportBounds = compose
+            .onNodeWithTag("offline-preview-viewport", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
         val offlineContentBounds = compose
             .onNodeWithTag("offline-preview-content", useUnmergedTree = true)
             .fetchSemanticsNode()
@@ -333,6 +337,15 @@ class CameraScreensTest {
                 offlineContentBounds.top >= previewBounds.top &&
                 offlineContentBounds.right <= previewBounds.right &&
                 offlineContentBounds.bottom <= previewBounds.bottom,
+        )
+        val density = compose.activity.resources.displayMetrics.density
+        assertTrue(
+            "Sideways guidance should use the available Live View long axis instead of a narrow fixed width: $previewViewportBounds",
+            previewViewportBounds.height >= 360f * density,
+        )
+        assertTrue(
+            "English sideways guidance should remain a compact two-line reading block: $previewHintBounds",
+            previewHintBounds.width <= 54f * density,
         )
         assertTrue(
             "The complete offline hint $previewHintBounds must stay inside its readable group $offlineContentBounds",

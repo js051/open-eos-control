@@ -2,6 +2,8 @@ package dev.openeos.control.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import java.util.Locale
 
 class CameraOrientationTest {
@@ -134,6 +136,34 @@ class CameraOrientationTest {
         assertEquals(true, cameraRotationSwapsDimensions(270f))
         assertEquals(true, cameraRotationSwapsDimensions(-90f))
         assertEquals(false, cameraRotationSwapsDimensions(720f))
+    }
+
+    @Test
+    fun sidewaysGuidanceUsesTheAvailableLiveViewLongAxis() {
+        assertEquals(
+            DpSize(420.dp, 136.dp),
+            offlinePreviewReadableSize(
+                availableWidth = 360.dp,
+                availableHeight = 480.dp,
+                quarterTurn = true,
+            ),
+        )
+        assertEquals(
+            DpSize(320.dp, 136.dp),
+            offlinePreviewReadableSize(
+                availableWidth = 360.dp,
+                availableHeight = 480.dp,
+                quarterTurn = false,
+            ),
+        )
+        assertEquals(
+            DpSize(288.dp, 136.dp),
+            offlinePreviewReadableSize(
+                availableWidth = 360.dp,
+                availableHeight = 320.dp,
+                quarterTurn = true,
+            ),
+        )
     }
 
     @Test

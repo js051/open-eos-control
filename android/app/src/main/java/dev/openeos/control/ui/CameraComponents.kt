@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -72,6 +73,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -989,13 +991,18 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         contentAlignment = Alignment.Center,
     ) {
         when {
-            state.previewMode -> Box(
+            state.previewMode -> BoxWithConstraints(
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
+                val readableSize = offlinePreviewReadableSize(
+                    availableWidth = maxWidth,
+                    availableHeight = maxHeight,
+                    quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current),
+                )
                 CameraReadableSlot(
-                    width = 320.dp,
-                    height = 136.dp,
+                    width = readableSize.width,
+                    height = readableSize.height,
                     modifier = Modifier.testTag("offline-preview-viewport"),
                     animateRotation = false,
                 ) {
@@ -1362,6 +1369,19 @@ private fun Modifier.cameraPreviewViewport(state: CameraUiState): Modifier = if 
     this.padding(top = CAMERA_OVERLAY_HEADER_HEIGHT, bottom = cameraHudHeight())
 } else {
     this
+}
+
+internal fun offlinePreviewReadableSize(
+    availableWidth: Dp,
+    availableHeight: Dp,
+    quarterTurn: Boolean,
+): DpSize {
+    val userWidth = if (quarterTurn) availableHeight else availableWidth
+    val userHeight = if (quarterTurn) availableWidth else availableHeight
+    return DpSize(
+        width = minOf(if (quarterTurn) 420.dp else 320.dp, (userWidth - 32.dp).coerceAtLeast(1.dp)),
+        height = minOf(136.dp, (userHeight - 32.dp).coerceAtLeast(1.dp)),
+    )
 }
 
 private fun liveViewOverlayBottomPadding(state: CameraUiState): Dp =
