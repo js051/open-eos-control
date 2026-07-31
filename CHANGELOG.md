@@ -4,7 +4,7 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
-- Added capability-gated camera date/time synchronization across Android, iOS, and the Desktop Bridge. Direct CCAPI writes Canon's RFC 1123 value and DST flag, then verifies a GET readback; direct Android USB prefers Canon EOS `UTCTime (0xD17C)` and falls back to `CameraTime (0xD113)`, requiring a matching post-write event; USB Bridge sessions use only writable libgphoto2 `syncdatetimeutc`/`syncdatetime` actions advertised by the connected camera.
+- Added capability-gated camera date/time synchronization across Android, iOS, and the Desktop Bridge. Direct CCAPI writes Canon's RFC 1123 value and DST flag, then verifies a GET readback; direct Android USB prefers Canon EOS `UTCTime (0xD17C)` and falls back to `CameraTime (0xD113)`, requiring a matching post-write event; USB Bridge sessions require a writable libgphoto2 `syncdatetimeutc`/`syncdatetime` action paired with its DATE widget and verify a fresh camera-config readback.
 - Added English and Traditional Chinese clock controls, success timestamps, diagnostics, simulator state, and deterministic CCAPI/Bridge/libgphoto2 contract coverage.
 - Reconciled Android's public auto-rotate setting on start, resume, focus return, and every posture sample so a late Pixel Quick Settings focus callback cannot leave controls rotating after the system lock is enabled.
 - Kept compact HUD atoms in fixed slots while deriving quarter-turn guidance width from the available Live View long axis and remeasuring settings content against swapped axes across the full fixed panel.

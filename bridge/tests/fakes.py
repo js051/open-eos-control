@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
@@ -124,6 +125,7 @@ class FakeRunner:
             "/main/actions/eoszoom": "0",
             "/main/actions/eosremoterelease": "None",
             "/main/actions/syncdatetimeutc": "0",
+            "/main/settings/datetimeutc": "1700000000",
             "/main/settings/movierecordtarget": "SDRAM",
             "/main/settings/autopoweroff": "30",
             "/main/settings/capturetarget": "Internal RAM",
@@ -199,6 +201,12 @@ class FakeRunner:
             if path not in self.values:
                 raise AssertionError(f"Unexpected config path: {path}")
             self.values[path] = value
+            clock_readback = {
+                "/main/actions/syncdatetimeutc": "/main/settings/datetimeutc",
+                "/main/actions/syncdatetime": "/main/settings/datetime",
+            }.get(path)
+            if value == "1" and clock_readback in self.values:
+                self.values[clock_readback] = str(int(time.time()))
             return CommandOutput(b"")
         raise AssertionError(f"Unexpected gphoto2 command: {command}")
 
@@ -287,6 +295,7 @@ class FakeRunner:
                     ["None", "Press Half", "Press Full", "Release Half", "Release Full"],
                 ),
                 self._toggle("/main/actions/syncdatetimeutc", "Synchronize UTC date and time"),
+                self._date("/main/settings/datetimeutc", "Camera Date and Time"),
                 self._radio("/main/settings/movierecordtarget", "Recording Destination", ["Card", "None", "SDRAM"]),
                 self._radio(
                     "/main/settings/autopoweroff",
@@ -312,3 +321,6 @@ class FakeRunner:
 
     def _toggle(self, path: str, label: str) -> str:
         return f"{path}\nLabel: {label}\nReadonly: 0\nType: TOGGLE\nCurrent: {self.values[path]}\nEND"
+
+    def _date(self, path: str, label: str) -> str:
+        return f"{path}\nLabel: {label}\nReadonly: 0\nType: DATE\nCurrent: {self.values[path]}\nEND"

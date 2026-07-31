@@ -53,6 +53,7 @@ MAX_MEDIA_ITEMS = 500
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 CONFIG_REFRESH_SECONDS = 1.0
+CAMERA_CLOCK_SYNC_TOLERANCE_SECONDS = 10
 MAX_BRIDGE_LIVE_VIEW_FPS = 30
 MAX_PREVIEW_FALLBACK_FPS = 5
 MAX_LIVE_VIEW_FRAME_BYTES = 16 * 1024 * 1024
@@ -626,6 +627,16 @@ class GPhotoConfig:
                 return []
             return [_format_number(self.bottom + self.step * index) for index in range(intervals + 1)]
         return []
+
+
+def _config_epoch_seconds(config: GPhotoConfig | None) -> int | None:
+    if config is None or config.kind != "DATE":
+        return None
+    try:
+        value = int(config.current, 10)
+    except ValueError:
+        return None
+    return value if 0 <= value <= 0xFFFF_FFFF else None
 
 
 @dataclass(frozen=True)
@@ -1212,7 +1223,7 @@ class GPhoto2Session:
                 supported.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
             if self._event_polling_supported:
                 supported.add(CameraFeature.EVENT_POLLING)
-            if self._camera_clock_config() is not None:
+            if self._camera_clock_control() is not None:
                 supported.add(CameraFeature.CAMERA_CLOCK_SYNC)
 
             planned = {
@@ -1252,7 +1263,8 @@ class GPhoto2Session:
                         "Requires an advertised writable Canon EOS eoszoom action and active Live View."
                     ),
                     CameraFeature.CAMERA_CLOCK_SYNC.value: (
-                        "Requires an advertised writable syncdatetimeutc or syncdatetime action."
+                        "Requires a matching writable syncdatetimeutc/datetimeutc or "
+                        "syncdatetime/datetime action and DATE readback pair."
                     ),
                     CameraFeature.LIVE_VIEW.value: (
                         "The CLI adapter uses persistent gphoto2 --capture-movie --stdout MJPEG and "
@@ -1341,14 +1353,31 @@ class GPhoto2Session:
 
     def sync_camera_clock(self) -> CameraStatus:
         with self._lock:
-            config = self._camera_clock_config()
-            if config is None:
+            control = self._camera_clock_control()
+            if control is None:
                 raise unsupported(
                     CameraFeature.CAMERA_CLOCK_SYNC.value,
                     self.engine_name,
-                    "The camera did not expose a writable libgphoto2 date-time synchronization action.",
+                    "The camera did not expose a matching writable libgphoto2 clock action and DATE readback.",
                 )
-            self._set_config_value(config, "1", refresh=False)
+            action, readback = control
+            requested_at = int(time.time())
+            self._set_config_value(action, "1", refresh=False)
+            self._refresh_configs(force=True, strict=True)
+            verified_at = int(time.time())
+            reported = _config_epoch_seconds(self._configs.get(readback.path))
+            earliest = requested_at - CAMERA_CLOCK_SYNC_TOLERANCE_SECONDS
+            latest = verified_at + CAMERA_CLOCK_SYNC_TOLERANCE_SECONDS
+            if reported is None or reported < earliest or reported > latest:
+                raise BridgeError(
+                    "CAMERA_CLOCK_VERIFY_FAILED",
+                    "gphoto2 accepted the camera clock action but the matching DATE widget did not "
+                    "confirm it "
+                    f"(expected={earliest}..{latest}, reported={reported if reported is not None else 'none'}).",
+                    status_code=502,
+                    feature=CameraFeature.CAMERA_CLOCK_SYNC.value,
+                    engine=self.engine_name,
+                )
             self._observed.add(CameraFeature.CAMERA_CLOCK_SYNC)
             return self.status()
 
@@ -2052,10 +2081,16 @@ class GPhoto2Session:
     def _live_view_magnification_config(self) -> GPhotoConfig | None:
         return self._find_config(("eoszoom",), writable=True)
 
-    def _camera_clock_config(self) -> GPhotoConfig | None:
-        return self._find_config(("syncdatetimeutc",), writable=True) or self._find_config(
-            ("syncdatetime",), writable=True
-        )
+    def _camera_clock_control(self) -> tuple[GPhotoConfig, GPhotoConfig] | None:
+        for action_suffix, readback_suffix in (
+            ("syncdatetimeutc", "datetimeutc"),
+            ("syncdatetime", "datetime"),
+        ):
+            action = self._find_config((action_suffix,), writable=True)
+            readback = self._find_config((readback_suffix,))
+            if action is not None and _config_epoch_seconds(readback) is not None:
+                return action, readback
+        return None
 
     def _set_viewfinder(self, enabled: bool) -> bool:
         config = self._find_config(("viewfinder",), writable=True)
@@ -2118,6 +2153,8 @@ class GPhoto2Session:
             commands.append("LIVE_VIEW_MAGNIFICATION_1X_5X")
         if self._event_polling_supported:
             commands.append("GPHOTO2_WAIT_EVENT")
+        if self._camera_clock_control() is not None:
+            commands.append("CAMERA_CLOCK_ACTION_WITH_DATE_READBACK")
         if self._advertised_storage_targets:
             commands.append("SET_CURRENT_STORAGE")
         writable_setting_paths = {
@@ -2157,7 +2194,7 @@ class GPhoto2Session:
             elif strict:
                 raise BridgeError(
                     "INVALID_CAMERA_RESPONSE",
-                    "gphoto2 returned no configuration while revalidating the recording card.",
+                    "gphoto2 returned no camera configuration during a strict refresh.",
                     status_code=502,
                     engine=self.engine_name,
                 )
