@@ -36,39 +36,66 @@ class AndroidCcapiRtpSessionFactory(
     ): NativeLiveViewSession = AndroidCcapiRtpSession(
         description = description,
         destinationAddress = destinationAddress,
-    ) { socket -> network.bindSocket(socket) }
+        socketBinder = { socket -> network.bindSocket(socket) },
+    )
 }
 
-private fun interface DatagramSocketBinder {
+internal fun interface DatagramSocketBinder {
     fun bind(socket: DatagramSocket)
 }
 
-private class AndroidCcapiRtpSession(
+internal class AndroidCcapiRtpSession(
     private val description: CcapiRtpSessionDescription,
     destinationAddress: String,
     private val socketBinder: DatagramSocketBinder,
+    private val latmExtractorFactory: () -> LatmSampleExtractor = ::Media3LatmSampleExtractor,
+    private val audioPlayerFactory: () -> RtpAudioPlayer = ::AndroidRtpAudioPlayer,
 ) : NativeLiveViewSession {
     override val source: LiveViewSource = LiveViewSource.CCAPI_RTP
     override val sourceUrl: String = "rtp://$destinationAddress:${description.video.port}"
     override val contentType: String = "video/H264"
+    override val audioStatus: NativeLiveViewAudioStatus
+        get() = audioStatusState.get()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val accessUnits = Channel<H264AccessUnit>(
         capacity = RTP_ACCESS_UNIT_QUEUE_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
+    private val audioAccessUnits = Channel<AacAccessUnit>(
+        capacity = RTP_AUDIO_ACCESS_UNIT_QUEUE_CAPACITY,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        onUndeliveredElement = { recordDroppedAudioAccessUnit() },
+    )
     private val listener = AtomicReference<((NativeLiveViewEvent) -> Unit)?>(null)
     private val targetFps = AtomicInteger(DEFAULT_RTP_RENDER_FPS)
     private val renderingEnabled = AtomicBoolean(true)
     private val started = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
+    private val audioEnabled = AtomicBoolean(false)
     private val surface = AtomicReference<Surface?>(null)
     private val decoderGuard = Any()
+    private val audioPlayerGuard = Any()
+    private val audioSupport = description.audio.latmAudioSupport()
+    private val audioStatusState = AtomicReference(
+        NativeLiveViewAudioStatus(
+            advertised = description.audio != null,
+            codec = description.audio?.codec,
+            rtpPort = description.audio?.port,
+            rtpClockRate = description.audio?.clockRate,
+            channels = description.audio?.channels,
+            error = audioSupport.reason.takeIf { description.audio != null && !audioSupport.supported },
+        )
+    )
 
     @Volatile
-    private var socket: DatagramSocket? = null
+    private var videoSocket: DatagramSocket? = null
+    @Volatile
+    private var audioSocket: DatagramSocket? = null
     private var receiverJob: Job? = null
     private var decoderJob: Job? = null
+    private var audioReceiverJob: Job? = null
+    private var audioPlayerJob: Job? = null
     private var latestSps: ByteArray? = null
     private var latestPps: ByteArray? = null
 
@@ -92,8 +119,9 @@ private class AndroidCcapiRtpSession(
                 exception,
             )
         }
-        socket = datagramSocket
+        videoSocket = datagramSocket
         receiverJob = scope.launch { receivePackets(datagramSocket) }
+        startAudioReceiverIfSupported()
     }
 
     override fun attachSurface(surface: Surface) {
@@ -122,22 +150,93 @@ private class AndroidCcapiRtpSession(
         renderingEnabled.set(enabled)
     }
 
+    override fun setAudioEnabled(enabled: Boolean) {
+        if (closed.get()) return
+        if (!enabled) {
+            stopAudioPlayer()
+            return
+        }
+        if (!audioStatusState.get().available || !audioEnabled.compareAndSet(false, true)) return
+        while (audioAccessUnits.tryReceive().isSuccess) Unit
+        updateAudioStatus { it.copy(enabled = true, error = null) }
+        synchronized(audioPlayerGuard) {
+            audioPlayerJob?.cancel()
+            audioPlayerJob = scope.launch {
+                try {
+                    audioPlayerFactory().play(audioAccessUnits, ::recordAudioPlaybackStats)
+                } catch (_: CancellationException) {
+                    throw CancellationException()
+                } catch (exception: Exception) {
+                    audioEnabled.set(false)
+                    updateAudioStatus {
+                        it.copy(
+                            enabled = false,
+                            error = "Canon RTP audio playback failed: ${exception.message ?: exception.javaClass.simpleName}",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     override fun setListener(listener: ((NativeLiveViewEvent) -> Unit)?) {
         this.listener.set(listener)
+        listener?.invoke(NativeLiveViewEvent.AudioStatusChanged(audioStatusState.get()))
     }
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         listener.set(null)
-        socket?.close()
-        socket = null
+        audioEnabled.set(false)
+        videoSocket?.close()
+        videoSocket = null
+        audioSocket?.close()
+        audioSocket = null
         receiverJob?.cancel()
+        audioReceiverJob?.cancel()
+        synchronized(audioPlayerGuard) {
+            audioPlayerJob?.cancel()
+            audioPlayerJob = null
+        }
         synchronized(decoderGuard) {
             decoderJob?.cancel()
             decoderJob = null
         }
         accessUnits.close()
+        audioAccessUnits.close()
         scope.cancel()
+    }
+
+    private fun startAudioReceiverIfSupported() {
+        val audio = description.audio ?: return
+        if (!audioSupport.supported) return
+        if (audio.port == description.video.port) {
+            updateAudioStatus {
+                it.copy(error = "Canon RTP audio shares the video UDP port; RTP multiplexing is unsupported.")
+            }
+            return
+        }
+        val datagramSocket = DatagramSocket(null).apply {
+            reuseAddress = true
+            receiveBufferSize = RTP_AUDIO_RECEIVE_BUFFER_BYTES
+            soTimeout = RTP_SOCKET_TIMEOUT_MILLIS
+        }
+        try {
+            socketBinder.bind(datagramSocket)
+            datagramSocket.bind(InetSocketAddress(audio.port))
+        } catch (exception: Exception) {
+            datagramSocket.close()
+            updateAudioStatus {
+                it.copy(
+                    available = false,
+                    error = "Unable to bind Canon RTP audio port ${audio.port}: ${exception.message ?: exception.javaClass.simpleName}",
+                )
+            }
+            return
+        }
+        audioSocket = datagramSocket
+        updateAudioStatus { it.copy(available = true, error = null) }
+        audioReceiverJob = scope.launch { receiveAudioPackets(datagramSocket, audio) }
     }
 
     private suspend fun receivePackets(datagramSocket: DatagramSocket) {
@@ -161,6 +260,85 @@ private class AndroidCcapiRtpSession(
             } catch (exception: Exception) {
                 if (!closed.get()) reportFailure("Canon RTP receive failed", exception)
                 return
+            }
+        }
+    }
+
+    private suspend fun receiveAudioPackets(
+        datagramSocket: DatagramSocket,
+        audio: RtpMediaDescription,
+    ) {
+        val depacketizer = LatmRtpDepacketizer(audio.payloadType)
+        var extractor = latmExtractorFactory()
+        val buffer = ByteArray(MAX_RTP_DATAGRAM_BYTES)
+        val packet = DatagramPacket(buffer, buffer.size)
+        var firstTimestamp: Long? = null
+        var lastPublishedAtMillis = 0L
+
+        while (currentCoroutineContext().isActive && !closed.get()) {
+            try {
+                packet.length = buffer.size
+                datagramSocket.receive(packet)
+            } catch (_: SocketTimeoutException) {
+                currentCoroutineContext().ensureActive()
+                continue
+            } catch (_: CancellationException) {
+                throw CancellationException()
+            } catch (exception: Exception) {
+                if (!closed.get() && datagramSocket.isClosed.not()) {
+                    stopAudioPlayer()
+                    updateAudioStatus {
+                        it.copy(
+                            available = false,
+                            enabled = false,
+                            error = "Canon RTP audio receive failed: ${exception.message ?: exception.javaClass.simpleName}",
+                        )
+                    }
+                }
+                return
+            }
+
+            val nowMillis = System.currentTimeMillis()
+            updateAudioStatus(notify = false) {
+                it.copy(
+                    packetsReceived = it.packetsReceived + 1,
+                    lastPacketAtMillis = nowMillis,
+                )
+            }
+            try {
+                val mux = depacketizer.accept(packet.data, packet.length)
+                if (mux != null) {
+                    if (mux.discontinuity) extractor.reset()
+                    val baseTimestamp = firstTimestamp ?: mux.rtpTimestamp.also { firstTimestamp = it }
+                    val presentationTimeUs = rtpTimestampDelta(baseTimestamp, mux.rtpTimestamp) * 1_000_000L /
+                        audio.clockRate
+                    val samples = extractor.consume(mux, presentationTimeUs)
+                    updateAudioStatus(notify = false) {
+                        it.copy(
+                            accessUnitsReceived = it.accessUnitsReceived + samples.size,
+                            error = if (samples.isNotEmpty()) null else it.error,
+                        )
+                    }
+                    if (audioEnabled.get()) {
+                        samples.forEach { audioAccessUnits.trySend(it) }
+                    }
+                }
+                if (lastPublishedAtMillis == 0L || nowMillis - lastPublishedAtMillis >= AUDIO_STATS_INTERVAL_MILLIS) {
+                    lastPublishedAtMillis = nowMillis
+                    publishAudioStatus()
+                }
+            } catch (_: CancellationException) {
+                throw CancellationException()
+            } catch (exception: Exception) {
+                depacketizer.resetAfterDiscontinuity()
+                extractor = latmExtractorFactory().also { it.reset() }
+                recordDroppedAudioAccessUnit()
+                updateAudioStatus(notify = false) {
+                    it.copy(
+                        error = "Canon RTP LATM parse failed: ${exception.message ?: exception.javaClass.simpleName}",
+                    )
+                }
+                publishAudioStatus()
             }
         }
     }
@@ -280,6 +458,52 @@ private class AndroidCcapiRtpSession(
             )
         )
     }
+
+    private fun stopAudioPlayer() {
+        audioEnabled.set(false)
+        synchronized(audioPlayerGuard) {
+            audioPlayerJob?.cancel()
+            audioPlayerJob = null
+        }
+        while (audioAccessUnits.tryReceive().isSuccess) Unit
+        updateAudioStatus { it.copy(enabled = false) }
+    }
+
+    private fun recordAudioPlaybackStats(stats: RtpAudioPlaybackStats) {
+        updateAudioStatus {
+            it.copy(
+                decodedAccessUnits = stats.decodedAccessUnits,
+                playedSampleFrames = stats.playedSampleFrames,
+                sampleRate = stats.sampleRate,
+                channels = stats.channels ?: it.channels,
+                underruns = stats.underruns,
+                lastPcmAtMillis = stats.lastPcmAtMillis,
+                error = null,
+            )
+        }
+    }
+
+    private fun recordDroppedAudioAccessUnit() {
+        updateAudioStatus(notify = false) { it.copy(droppedAccessUnits = it.droppedAccessUnits + 1) }
+    }
+
+    private fun updateAudioStatus(
+        notify: Boolean = true,
+        transform: (NativeLiveViewAudioStatus) -> NativeLiveViewAudioStatus,
+    ) {
+        while (true) {
+            val current = audioStatusState.get()
+            val updated = transform(current)
+            if (audioStatusState.compareAndSet(current, updated)) {
+                if (notify) listener.get()?.invoke(NativeLiveViewEvent.AudioStatusChanged(updated))
+                return
+            }
+        }
+    }
+
+    private fun publishAudioStatus() {
+        listener.get()?.invoke(NativeLiveViewEvent.AudioStatusChanged(audioStatusState.get()))
+    }
 }
 
 private fun concatenateParameterSets(sps: ByteArray?, pps: ByteArray?, frame: ByteArray): ByteArray {
@@ -311,9 +535,12 @@ private const val DEFAULT_RTP_RENDER_FPS = 30
 private const val MIN_RTP_RENDER_FPS = 1
 private const val MAX_RTP_RENDER_FPS = 30
 private const val RTP_ACCESS_UNIT_QUEUE_CAPACITY = 3
+private const val RTP_AUDIO_ACCESS_UNIT_QUEUE_CAPACITY = 24
 private const val MAX_RTP_DATAGRAM_BYTES = 65_535
 private const val RTP_RECEIVE_BUFFER_BYTES = 2 * 1024 * 1024
+private const val RTP_AUDIO_RECEIVE_BUFFER_BYTES = 512 * 1024
 private const val RTP_SOCKET_TIMEOUT_MILLIS = 1_000
 private const val MAX_H264_DECODER_INPUT_BYTES = 8 * 1024 * 1024
 private const val MAX_PENDING_FRAME_STATS = 16
 private const val DECODER_INPUT_TIMEOUT_US = 20_000L
+private const val AUDIO_STATS_INTERVAL_MILLIS = 500L

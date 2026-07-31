@@ -11,6 +11,7 @@ import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.LiveViewSource
+import dev.openeos.control.data.NativeLiveViewAudioStatus
 import dev.openeos.control.data.SystemNetworkTransport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -177,6 +178,25 @@ class DiagnosticsTest {
             ),
             liveViewDiagnostics = LiveViewDiagnostics(lastFrameAtMillis = 1_000L),
             liveViewSource = LiveViewSource.CCAPI_RTP,
+            liveViewAudioStatus = NativeLiveViewAudioStatus(
+                advertised = true,
+                available = true,
+                enabled = false,
+                codec = "MP4A-LATM",
+                rtpPort = 12_010,
+                rtpClockRate = 48_000,
+                sampleRate = 48_000,
+                channels = 2,
+                packetsReceived = 12,
+                accessUnitsReceived = 10,
+                decodedAccessUnits = 8,
+                playedSampleFrames = 8_192,
+                droppedAccessUnits = 2,
+                underruns = 1,
+                lastPacketAtMillis = 900,
+                lastPcmAtMillis = 850,
+                error = null,
+            ),
             monitorSettings = LiveViewMonitorSettings(
                 histogramVisible = true,
                 waveformVisible = true,
@@ -202,6 +222,20 @@ class DiagnosticsTest {
         assertTrue(report.contains("wifiCellularCoexistence=true"))
         assertTrue(report.contains("liveViewHealthy=true"))
         assertTrue(report.contains("liveViewSource=CCAPI_RTP"))
+        assertTrue(report.contains("rtpAudioAdvertised=true"))
+        assertTrue(report.contains("rtpAudioAvailable=true"))
+        assertTrue(report.contains("rtpAudioEnabled=false"))
+        assertTrue(report.contains("rtpAudioCodec=MP4A-LATM"))
+        assertTrue(report.contains("rtpAudioPort=12010"))
+        assertTrue(report.contains("rtpAudioClockRate=48000"))
+        assertTrue(report.contains("rtpAudioSampleRate=48000"))
+        assertTrue(report.contains("rtpAudioChannels=2"))
+        assertTrue(report.contains("rtpAudioPackets=12"))
+        assertTrue(report.contains("rtpAudioAccessUnits=10"))
+        assertTrue(report.contains("rtpAudioDecodedAccessUnits=8"))
+        assertTrue(report.contains("rtpAudioPlayedSampleFrames=8192"))
+        assertTrue(report.contains("rtpAudioDroppedAccessUnits=2"))
+        assertTrue(report.contains("rtpAudioUnderruns=1"))
         assertTrue(report.contains("monitorHistogram=true"))
         assertTrue(report.contains("monitorWaveform=true"))
         assertTrue(report.contains("monitorZebra=95"))

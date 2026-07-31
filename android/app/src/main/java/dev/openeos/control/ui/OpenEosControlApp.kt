@@ -20,6 +20,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.openeos.control.data.LiveViewSize
@@ -44,6 +46,9 @@ fun OpenEosControlApp(
         label = "camera-control-rotation",
     )
     LaunchedEffect(viewModel) { viewModel.initialize(context) }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        viewModel.setRtpAudioEnabled(false)
+    }
 
     val actions = CameraActions(
         setConnectionTarget = viewModel::setConnectionTarget,
@@ -114,6 +119,7 @@ fun OpenEosControlApp(
         refreshLiveView = viewModel::refreshLiveViewFrame,
         restartLiveView = viewModel::restartLiveView,
         setAutoRefresh = viewModel::setLiveViewAutoRefresh,
+        setRtpAudioEnabled = viewModel::setRtpAudioEnabled,
         setFps = viewModel::setLiveViewFrameRate,
         setLiveViewSize = viewModel::setLiveViewSize,
         setLiveViewSource = viewModel::setLiveViewSource,
@@ -250,6 +256,7 @@ data class CameraActions(
     val refreshLiveView: () -> Unit,
     val restartLiveView: () -> Unit,
     val setAutoRefresh: (Boolean) -> Unit,
+    val setRtpAudioEnabled: (Boolean) -> Unit = {},
     val setFps: (Int) -> Unit,
     val setLiveViewSize: (LiveViewSize) -> Unit,
     val setLiveViewSource: (LiveViewSource) -> Unit,

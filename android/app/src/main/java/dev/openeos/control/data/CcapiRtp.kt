@@ -9,7 +9,10 @@ data class RtpMediaDescription(
     val codec: String,
     val clockRate: Int,
     val channels: Int? = null,
-)
+    val formatParameters: Map<String, String> = emptyMap(),
+) {
+    fun parameter(name: String): String? = formatParameters[name.lowercase()]
+}
 
 data class CcapiRtpSessionDescription(
     val rawSdp: String,
@@ -19,6 +22,7 @@ data class CcapiRtpSessionDescription(
 
 object CcapiRtpSessionDescriptionParser {
     private val rtpMapPattern = Regex("""^a=rtpmap:(\d+)\s+([^/\s]+)/([0-9]+)(?:/([0-9]+))?$""", RegexOption.IGNORE_CASE)
+    private val formatParametersPattern = Regex("""^a=fmtp:(\d+)\s+(.+)$""", RegexOption.IGNORE_CASE)
 
     fun parse(sdp: String): CcapiRtpSessionDescription {
         require(sdp.isNotBlank()) { "Canon RTP session description is empty." }
@@ -33,16 +37,35 @@ object CcapiRtpSessionDescriptionParser {
                 channels = match.groupValues[4].toIntOrNull(),
             )
         }.toMap()
+        val formatParameters = lines.mapNotNull { line ->
+            val match = formatParametersPattern.matchEntire(line) ?: return@mapNotNull null
+            val payloadType = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
+            val parameters = match.groupValues[2]
+                .split(';')
+                .mapNotNull { entry ->
+                    val (key, value) = entry.trim().split('=', limit = 2).let {
+                        it.firstOrNull() to it.getOrNull(1).orEmpty()
+                    }
+                    key?.takeIf(String::isNotBlank)?.lowercase()?.let { it to value.trim() }
+                }
+                .toMap()
+            payloadType to parameters
+        }.toMap()
 
         val media = lines.filter { it.startsWith("m=", ignoreCase = true) }.mapNotNull { line ->
             val fields = line.substring(2).split(Regex("""\s+"""))
             if (fields.size < 4 || !fields[2].equals("RTP/AVP", ignoreCase = true)) return@mapNotNull null
             val port = fields[1].substringBefore('/').toIntOrNull() ?: return@mapNotNull null
             val advertisedPayloads = fields.drop(3).mapNotNull(String::toIntOrNull)
-            val payloadType = if (fields[0].equals("video", ignoreCase = true)) {
-                advertisedPayloads.firstOrNull { mappings[it]?.codec.equals("H264", ignoreCase = true) }
-            } else {
-                advertisedPayloads.firstOrNull { it in mappings }
+            val payloadType = when {
+                fields[0].equals("video", ignoreCase = true) ->
+                    advertisedPayloads.firstOrNull { mappings[it]?.codec.equals("H264", ignoreCase = true) }
+
+                fields[0].equals("audio", ignoreCase = true) ->
+                    advertisedPayloads.firstOrNull { mappings[it]?.codec.equals("MP4A-LATM", ignoreCase = true) }
+                        ?: advertisedPayloads.firstOrNull { it in mappings }
+
+                else -> advertisedPayloads.firstOrNull { it in mappings }
             } ?: return@mapNotNull null
             val mapping = mappings.getValue(payloadType)
             RtpMediaDescription(
@@ -52,6 +75,7 @@ object CcapiRtpSessionDescriptionParser {
                 codec = mapping.codec,
                 clockRate = mapping.clockRate,
                 channels = mapping.channels,
+                formatParameters = formatParameters[payloadType].orEmpty(),
             )
         }
 
@@ -66,6 +90,9 @@ object CcapiRtpSessionDescriptionParser {
 
         val audio = media.firstOrNull { it.kind == "audio" }?.also {
             require(it.port in 1..65535) { "Canon RTP audio port ${it.port} is invalid." }
+            require(it.payloadType in 0..127) {
+                "Canon RTP audio payload type ${it.payloadType} is invalid."
+            }
         }
         return CcapiRtpSessionDescription(rawSdp = sdp, video = video, audio = audio)
     }
@@ -75,6 +102,31 @@ object CcapiRtpSessionDescriptionParser {
         val clockRate: Int,
         val channels: Int?,
     )
+}
+
+data class LatmAudioSupport(
+    val supported: Boolean,
+    val reason: String,
+)
+
+fun RtpMediaDescription?.latmAudioSupport(): LatmAudioSupport {
+    if (this == null) {
+        return LatmAudioSupport(false, "Canon RTP SDP does not advertise an audio stream.")
+    }
+    if (!codec.equals("MP4A-LATM", ignoreCase = true)) {
+        return LatmAudioSupport(false, "Canon RTP audio codec $codec is unsupported; expected MP4A-LATM.")
+    }
+    if (clockRate != CANON_RTP_AUDIO_CLOCK_RATE) {
+        return LatmAudioSupport(
+            false,
+            "Canon RTP MP4A-LATM clock rate $clockRate is unsupported; expected $CANON_RTP_AUDIO_CLOCK_RATE.",
+        )
+    }
+    return when (val cpresent = parameter("cpresent")) {
+        null, "", "1" -> LatmAudioSupport(true, "Canon RTP MP4A-LATM audio uses in-band StreamMuxConfig.")
+        "0" -> LatmAudioSupport(false, "Out-of-band MP4A-LATM configuration (cpresent=0) is not supported.")
+        else -> LatmAudioSupport(false, "Canon RTP MP4A-LATM cpresent=$cpresent is invalid.")
+    }
 }
 
 internal data class RtpPacket(
@@ -280,6 +332,7 @@ internal class H264RtpDepacketizer(
 private fun ByteArray.withStartCode(): ByteArray = H264_START_CODE + this
 
 const val H264_RTP_CLOCK_RATE = 90_000
+const val CANON_RTP_AUDIO_CLOCK_RATE = 48_000
 private const val RTP_VERSION = 2
 private const val RTP_MIN_HEADER_BYTES = 12
 private const val H264_NAL_TYPE_MASK = 0x1F

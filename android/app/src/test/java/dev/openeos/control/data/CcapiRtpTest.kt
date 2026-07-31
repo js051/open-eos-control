@@ -7,6 +7,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Base64
 
 class CcapiRtpTest {
     @Test
@@ -20,6 +21,39 @@ class CcapiRtpTest {
         assertEquals(12010, description.audio?.port)
         assertEquals("MP4A-LATM", description.audio?.codec)
         assertEquals(48_000, description.audio?.clockRate)
+        assertTrue(description.audio.latmAudioSupport().supported)
+    }
+
+    @Test
+    fun scopesFmtpToItsPayloadAndRejectsOutOfBandLatmConfiguration() {
+        val description = CcapiRtpSessionDescriptionParser.parse(
+            CANON_SDP + "a=fmtp:103 packetization-mode=1\n" +
+                "a=fmtp:106 profile-level-id=1; cpresent=0; config=400026203fc0\n"
+        )
+
+        assertEquals("1", description.video.parameter("packetization-mode"))
+        assertEquals("400026203fc0", description.audio?.parameter("CONFIG"))
+        val support = description.audio.latmAudioSupport()
+        assertFalse(support.supported)
+        assertTrue(support.reason.contains("cpresent=0"))
+    }
+
+    @Test
+    fun rejectsUnsupportedLatmClockRateAndCpresentValue() {
+        val wrongClock = RtpMediaDescription("audio", 12010, 106, "MP4A-LATM", 44_100)
+        val invalidCpresent = RtpMediaDescription(
+            "audio",
+            12010,
+            106,
+            "MP4A-LATM",
+            48_000,
+            formatParameters = mapOf("cpresent" to "2"),
+        )
+
+        assertFalse(wrongClock.latmAudioSupport().supported)
+        assertTrue(wrongClock.latmAudioSupport().reason.contains("48000"))
+        assertFalse(invalidCpresent.latmAudioSupport().supported)
+        assertTrue(invalidCpresent.latmAudioSupport().reason.contains("cpresent=2"))
     }
 
     @Test
@@ -121,6 +155,86 @@ class CcapiRtpTest {
         assertFalse(RtpPacketParser.parse(rtpPacket(1, 1, byteArrayOf(1))) == null)
     }
 
+    @Test
+    fun reassemblesFragmentedLatmAndMarksRecoveryAfterPacketLoss() {
+        val depacketizer = LatmRtpDepacketizer(106)
+
+        assertNull(
+            depacketizer.accept(
+                rtpPacket(10, 900, "audio-".toByteArray(), payloadType = 106)
+            )
+        )
+        val completed = depacketizer.accept(
+            rtpPacket(11, 900, "mux".toByteArray(), marker = true, payloadType = 106)
+        )
+        assertNotNull(completed)
+        assertArrayEquals("audio-mux".toByteArray(), completed!!.audioMuxElement)
+        assertFalse(completed.discontinuity)
+
+        depacketizer.accept(rtpPacket(20, 901, byteArrayOf(1), payloadType = 106))
+        assertNull(
+            depacketizer.accept(
+                rtpPacket(22, 901, byteArrayOf(2), marker = true, payloadType = 106)
+            )
+        )
+        val recovered = depacketizer.accept(
+            rtpPacket(23, 902, byteArrayOf(3), marker = true, payloadType = 106)
+        )
+        assertNotNull(recovered)
+        assertTrue(recovered!!.discontinuity)
+    }
+
+    @Test
+    fun dropsOversizedLatmAndRecoversAtTheNextAccessUnit() {
+        val depacketizer = LatmRtpDepacketizer(106)
+
+        assertNull(
+            depacketizer.accept(
+                rtpPacket(
+                    1,
+                    100,
+                    ByteArray(MAX_LATM_AUDIO_MUX_BYTES + 1),
+                    marker = true,
+                    payloadType = 106,
+                )
+            )
+        )
+        val recovered = depacketizer.accept(
+            rtpPacket(2, 101, byteArrayOf(7), marker = true, payloadType = 106)
+        )
+
+        assertNotNull(recovered)
+        assertTrue(recovered!!.discontinuity)
+    }
+
+    @Test
+    fun wrapsAudioMuxElementInAValidLoasHeader() {
+        val frame = loasFrame(byteArrayOf(1, 2, 3, 4))
+
+        assertArrayEquals(
+            byteArrayOf(0x56, 0xE0.toByte(), 4, 1, 2, 3, 4),
+            frame,
+        )
+    }
+
+    @Test
+    fun media3LatmParserExtractsRawAacAndInBandFormat() {
+        val mux = Base64.getDecoder().decode(REAL_STEREO_SILENCE_LATM_BASE64)
+        val samples = Media3LatmSampleExtractor().consume(
+            LatmAccessUnit(mux, rtpTimestamp = 0),
+            presentationTimeUs = 12_345,
+        )
+
+        assertEquals(1, samples.size)
+        val sample = samples.single()
+        assertTrue(sample.bytes.isNotEmpty())
+        assertEquals(12_345L, sample.presentationTimeUs)
+        assertEquals(48_000, sample.format.sampleRate)
+        assertEquals(2, sample.format.channels)
+        assertTrue(sample.format.initializationData.isNotEmpty())
+        assertFalse(sample.discontinuity)
+    }
+
     private fun sizedNal(nal: ByteArray): ByteArray =
         byteArrayOf((nal.size ushr 8).toByte(), nal.size.toByte()) + nal
 
@@ -132,12 +246,13 @@ class CcapiRtpTest {
         csrc: Boolean = false,
         extension: Boolean = false,
         padding: Int = 0,
+        payloadType: Int = 103,
     ): ByteArray {
         val csrcBytes = if (csrc) byteArrayOf(0, 0, 0, 1) else byteArrayOf()
         val extensionBytes = if (extension) byteArrayOf(0x10, 0x00, 0x00, 0x01, 9, 8, 7, 6) else byteArrayOf()
         val paddingBytes = if (padding > 0) ByteArray(padding).also { it[it.lastIndex] = padding.toByte() } else byteArrayOf()
         val first = 0x80 or (if (padding > 0) 0x20 else 0) or (if (extension) 0x10 else 0) or (if (csrc) 1 else 0)
-        val second = (if (marker) 0x80 else 0) or 103
+        val second = (if (marker) 0x80 else 0) or payloadType
         val header = byteArrayOf(
             first.toByte(),
             second.toByte(),
@@ -165,5 +280,6 @@ class CcapiRtpTest {
             m=audio 12010 RTP/AVP 106
             a=rtpmap:106 MP4A-LATM/48000
         """
+        const val REAL_STEREO_SILENCE_LATM_BASE64 = "IAARkB/gvvAQAmMLsxmxkXGRwXGJgZACEQBGCMHA"
     }
 }
