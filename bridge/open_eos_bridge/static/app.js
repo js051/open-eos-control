@@ -9,6 +9,8 @@
   if (!lut) throw new Error("Open EOS LUT module is unavailable.");
   const localVideo = globalThis.OpenEOSLocalVideo;
   if (!localVideo) throw new Error("Open EOS local video module is unavailable.");
+  const rtpAudio = globalThis.OpenEOSRtpAudio;
+  if (!rtpAudio) throw new Error("Open EOS RTP audio module is unavailable.");
   const mediaTransfer = globalThis.OpenEOSMediaTransfer;
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
 
@@ -104,6 +106,11 @@
       liveViewSourceJpeg: "JPEG polling",
       liveViewSourceBridge: "Desktop preview",
       frameRate: "Frame rate",
+      cameraAudioUnmute: "Unmute camera audio",
+      cameraAudioMute: "Mute camera audio",
+      cameraAudioUnavailable: "Camera RTP audio is unavailable",
+      cameraAudioStarted: "Camera audio enabled",
+      cameraAudioStopped: "Camera audio muted",
       monitoringAssists: "Monitoring assists",
       histogram: "Histogram",
       lumaWaveform: "Luma waveform",
@@ -345,6 +352,11 @@
       liveViewSourceJpeg: "JPEG 輪詢",
       liveViewSourceBridge: "電腦預覽",
       frameRate: "影格率",
+      cameraAudioUnmute: "開啟相機音訊",
+      cameraAudioMute: "將相機音訊靜音",
+      cameraAudioUnavailable: "相機 RTP 音訊無法使用",
+      cameraAudioStarted: "已開啟相機音訊",
+      cameraAudioStopped: "相機音訊已靜音",
       monitoringAssists: "監看輔助",
       histogram: "直方圖",
       lumaWaveform: "亮度波形圖",
@@ -689,6 +701,19 @@
     lastFrameAt: null,
     liveObjectUrl: null,
     livePollingSuspended: false,
+    rtpAudioEnabled: false,
+    rtpAudioBusy: false,
+    rtpAudioLoopGeneration: 0,
+    rtpAudioAfterGeneration: 0,
+    rtpAudioContext: null,
+    rtpAudioAbortController: null,
+    rtpAudioSources: new Set(),
+    rtpAudioNextStart: Number.NaN,
+    rtpAudioBytes: 0,
+    rtpAudioSampleRate: null,
+    rtpAudioChannels: null,
+    rtpAudioLastAt: null,
+    rtpAudioError: null,
     monitorAnalysisError: null,
     monitorSettings: {
       histogramVisible: false,
@@ -768,6 +793,7 @@
     bulbIndicator: byId("bulb-indicator"),
     liveMagnificationButton: byId("live-magnification-button"),
     liveMagnificationLabel: byId("live-magnification-label"),
+    rtpAudioButton: byId("rtp-audio-button"),
     focusReticle: byId("focus-reticle"),
     captureFlash: byId("capture-flash"),
     exposureStrip: byId("exposure-strip"),
@@ -931,8 +957,8 @@
         engine: error.engine,
       });
     }
-    if (response.status === 204) return null;
     if (responseType === "response") return response;
+    if (response.status === 204) return null;
     if (responseType === "blob") return response.blob();
     if (responseType === "text") return response.text();
     return response.json();
@@ -2133,6 +2159,7 @@
       state.observedFps = 0;
       state.liveGeneration += 1;
       pollLiveView(state.liveGeneration);
+      void refreshRtpAudioStatus();
       setOperationState(t("liveViewStarted"));
       if (announce) showToast(t("liveViewStarted"));
     } catch (error) {
@@ -2171,6 +2198,7 @@
   }
 
   function stopLiveLoop() {
+    stopRtpAudio({ announce: false });
     state.liveActive = false;
     state.livePollingSuspended = false;
     state.liveGeneration += 1;
@@ -2303,7 +2331,167 @@
     if (!state.liveActive || local) ui.focusReticle.hidden = true;
     renderPreviewInput();
     renderLiveMagnification();
+    renderRtpAudio();
     renderFrameIndicator();
+  }
+
+  function currentRtpAudioStatus() {
+    const value = state.status?.raw?.rtpAudio;
+    return value && typeof value === "object" ? value : null;
+  }
+
+  async function refreshRtpAudioStatus() {
+    if (!state.session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP") {
+      renderRtpAudio();
+      return;
+    }
+    try {
+      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/status`);
+    } catch (_) {
+      // Video remains usable even when this optional status refresh fails.
+    }
+    renderRtpAudio();
+  }
+
+  function renderRtpAudio() {
+    const status = currentRtpAudioStatus();
+    const rtpActive = state.liveActive && state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected();
+    ui.rtpAudioButton.hidden = !rtpActive || !status?.advertised;
+    ui.rtpAudioButton.disabled = state.rtpAudioBusy || !status?.available;
+    ui.rtpAudioButton.classList.toggle("active", state.rtpAudioEnabled);
+    ui.rtpAudioButton.setAttribute("aria-pressed", String(state.rtpAudioEnabled));
+    const label = state.rtpAudioEnabled ? t("cameraAudioMute") : t("cameraAudioUnmute");
+    const unavailable = status?.reason || status?.lastError || t("cameraAudioUnavailable");
+    ui.rtpAudioButton.setAttribute("aria-label", status?.available ? label : unavailable);
+    ui.rtpAudioButton.title = status?.available ? label : unavailable;
+    replaceButtonIcon(ui.rtpAudioButton, state.rtpAudioEnabled ? "volume-2" : "volume-x");
+  }
+
+  async function toggleRtpAudio() {
+    if (state.rtpAudioEnabled) {
+      stopRtpAudio({ announce: true });
+      return;
+    }
+    const status = currentRtpAudioStatus();
+    if (!state.session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" || !status?.available) {
+      showToast(status?.reason || t("cameraAudioUnavailable"), true);
+      return;
+    }
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      showToast(t("cameraAudioUnavailable"), true);
+      return;
+    }
+    state.rtpAudioBusy = true;
+    state.rtpAudioError = null;
+    renderRtpAudio();
+    let context = null;
+    try {
+      context = new AudioContextClass({ latencyHint: "interactive", sampleRate: 48_000 });
+      await context.resume();
+      state.rtpAudioContext = context;
+      state.rtpAudioEnabled = true;
+      state.rtpAudioAfterGeneration = 0;
+      state.rtpAudioNextStart = Number.NaN;
+      state.rtpAudioLoopGeneration += 1;
+      void pollRtpAudio(state.rtpAudioLoopGeneration);
+      showToast(t("cameraAudioStarted"));
+    } catch (error) {
+      state.rtpAudioError = error instanceof Error ? error.message : String(error);
+      if (context) void context.close();
+      showToast(state.rtpAudioError, true);
+    } finally {
+      state.rtpAudioBusy = false;
+      renderRtpAudio();
+    }
+  }
+
+  async function pollRtpAudio(generation) {
+    while (
+      state.rtpAudioEnabled && generation === state.rtpAudioLoopGeneration &&
+      state.liveActive && state.activeLiveSource === "CCAPI_RTP" && state.session
+    ) {
+      const controller = new AbortController();
+      state.rtpAudioAbortController = controller;
+      try {
+        const response = await api(
+          `/v1/session/${encodeURIComponent(state.session.id)}/liveview/audio` +
+            `?after=${state.rtpAudioAfterGeneration}&timeoutMs=1000`,
+          { responseType: "response", signal: controller.signal },
+        );
+        if (!state.rtpAudioEnabled || generation !== state.rtpAudioLoopGeneration) return;
+        const chunk = await rtpAudio.readPcmResponse(response);
+        if (!state.rtpAudioEnabled || generation !== state.rtpAudioLoopGeneration) return;
+        if (!chunk) continue;
+        state.rtpAudioAfterGeneration = chunk.generation;
+        scheduleRtpAudioChunk(chunk);
+        state.rtpAudioBytes = chunk.byteLength;
+        state.rtpAudioSampleRate = chunk.sampleRate;
+        state.rtpAudioChannels = chunk.channels;
+        state.rtpAudioLastAt = new Date().toISOString();
+        state.rtpAudioError = null;
+      } catch (error) {
+        if (!state.rtpAudioEnabled || generation !== state.rtpAudioLoopGeneration || error?.name === "AbortError") {
+          return;
+        }
+        const normalized = captureError(error);
+        state.rtpAudioError = normalized.message;
+        stopRtpAudio({ announce: false });
+        showToast(normalized.message, true);
+        return;
+      } finally {
+        if (state.rtpAudioAbortController === controller) state.rtpAudioAbortController = null;
+      }
+    }
+  }
+
+  function scheduleRtpAudioChunk(chunk) {
+    const context = state.rtpAudioContext;
+    if (!context) return;
+    const duration = chunk.sampleFrames / chunk.sampleRate;
+    const timing = rtpAudio.scheduleTiming(
+      context.currentTime,
+      state.rtpAudioNextStart,
+      duration,
+      chunk.discontinuity,
+    );
+    if (timing.reset) stopRtpAudioSources();
+    const buffer = context.createBuffer(chunk.channels, chunk.sampleFrames, chunk.sampleRate);
+    chunk.channelData.forEach((samples, channel) => buffer.copyToChannel(samples, channel));
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.addEventListener("ended", () => state.rtpAudioSources.delete(source), { once: true });
+    state.rtpAudioSources.add(source);
+    source.start(timing.startTime);
+    state.rtpAudioNextStart = timing.nextStart;
+  }
+
+  function stopRtpAudioSources() {
+    state.rtpAudioSources.forEach((source) => {
+      try {
+        source.stop();
+      } catch (_) {
+        // A source that already ended requires no cleanup.
+      }
+    });
+    state.rtpAudioSources.clear();
+  }
+
+  function stopRtpAudio({ announce = false } = {}) {
+    const wasEnabled = state.rtpAudioEnabled;
+    state.rtpAudioEnabled = false;
+    state.rtpAudioBusy = false;
+    state.rtpAudioLoopGeneration += 1;
+    state.rtpAudioAbortController?.abort();
+    state.rtpAudioAbortController = null;
+    stopRtpAudioSources();
+    const context = state.rtpAudioContext;
+    state.rtpAudioContext = null;
+    state.rtpAudioNextStart = Number.NaN;
+    if (context) void context.close().catch(() => {});
+    renderRtpAudio();
+    if (announce && wasEnabled) showToast(t("cameraAudioStopped"));
   }
 
   const monitorAnalysisCanvas = document.createElement("canvas");
@@ -3329,6 +3517,17 @@
         frameBytes: state.frameBytes,
         contentType: state.frameContentType,
         lastFrameAt: state.lastFrameAt,
+        rtpAudio: {
+          ...currentRtpAudioStatus(),
+          enabled: state.rtpAudioEnabled,
+          busy: state.rtpAudioBusy,
+          playbackGeneration: state.rtpAudioAfterGeneration,
+          lastBytes: state.rtpAudioBytes,
+          sampleRate: state.rtpAudioSampleRate,
+          channels: state.rtpAudioChannels,
+          lastPlayedAt: state.rtpAudioLastAt,
+          playbackError: state.rtpAudioError,
+        },
         monitoring: {
           histogramVisible: state.monitorSettings.histogramVisible,
           waveformVisible: state.monitorSettings.waveformVisible,
@@ -3474,6 +3673,7 @@
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
     ui.railLiveButton.addEventListener("click", toggleLiveView);
     ui.liveMagnificationButton.addEventListener("click", setLiveViewMagnification);
+    ui.rtpAudioButton.addEventListener("click", toggleRtpAudio);
     ui.previewInputSelect.addEventListener("change", changePreviewInput);
     ui.localVideoDeviceSelect.addEventListener("change", changeLocalVideoDevice);
     ui.fpsSelect.addEventListener("change", changeFps);
@@ -3560,6 +3760,7 @@
       clearMediaThumbnails();
       closeMediaPreview();
       stopLocalVideo({ announce: false });
+      stopRtpAudio({ announce: false });
       if (!state.session) return;
       cancelEventLoop();
       if (featureSupported(FEATURES.EVENT_POLLING)) {

@@ -698,6 +698,20 @@ input:disabled {
   font-weight: 800;
 }
 
+.rtp-audio-action {
+  right: 72px;
+}
+
+.rtp-audio-action.active {
+  color: var(--success);
+  border-color: rgb(69 209 124 / 55%);
+}
+
+.rtp-audio-action:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .capture-flash {
   position: absolute;
   z-index: 6;

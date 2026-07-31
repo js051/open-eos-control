@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, FastAPI, Header, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .ccapi import CcapiEngine
 from .engine import CameraEngine, NetworkCameraEngine
-from .errors import BridgeError
+from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
 from .models import (
     CameraCapabilities,
@@ -271,6 +271,39 @@ def create_app(
             content=frame,
             media_type="image/jpeg",
             headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+    @router.get("/session/{session_id}/liveview/audio")
+    def live_view_audio(
+        session_id: str,
+        after: int = Query(default=0, ge=0),
+        timeout_ms: int = Query(default=1_000, alias="timeoutMs", ge=0, le=5_000),
+    ) -> Response:
+        session = manager.get(session_id)
+        reader = getattr(session, "live_view_audio", None)
+        if not callable(reader):
+            raise unsupported(
+                "LIVE_VIEW_RTP_AUDIO",
+                getattr(session, "engine_name", "unknown"),
+                "The active camera engine does not provide RTP audio.",
+            )
+        chunk = reader(after_generation=after, timeout=timeout_ms / 1_000)
+        if chunk is None:
+            return Response(status_code=204, headers={"Cache-Control": "no-store, max-age=0"})
+        headers = {
+            "Cache-Control": "no-store, max-age=0",
+            "X-Open-EOS-Audio-Generation": str(chunk.generation),
+            "X-Open-EOS-Audio-Sample-Rate": str(chunk.sample_rate),
+            "X-Open-EOS-Audio-Channels": str(chunk.channels),
+            "X-Open-EOS-Audio-Frames": str(chunk.sample_frames),
+            "X-Open-EOS-Audio-Discontinuity": "1" if chunk.discontinuity else "0",
+        }
+        return Response(
+            content=chunk.content,
+            media_type=(
+                f"audio/pcm;rate={chunk.sample_rate};channels={chunk.channels};format=s16le"
+            ),
+            headers=headers,
         )
 
     @router.get("/session/{session_id}/media", response_model=MediaList)

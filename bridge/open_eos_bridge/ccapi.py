@@ -38,6 +38,7 @@ from .models import (
     camera_profile,
 )
 from .rtp import (
+    RtpAudioChunk,
     RtpError,
     RtpLiveViewSession,
     RtpSessionFactory,
@@ -54,6 +55,7 @@ MAX_ERROR_BYTES = 2_000
 MAX_LIVE_VIEW_SCAN_BYTES = 16 * 1024 * 1024
 MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024
 MAX_RTP_SESSION_DESCRIPTION_BYTES = 64 * 1024
+RTP_AUDIO_FEATURE = "LIVE_VIEW_RTP_AUDIO"
 MAX_MEDIA_ITEMS = 500
 MAX_MEDIA_PAGES = 100
 MAX_MEDIA_TREE_DEPTH = 4
@@ -496,6 +498,7 @@ class CcapiSession:
                 self._observed.add(CameraFeature.BATTERY_STATUS)
             if storage is not None:
                 self._observed.add(CameraFeature.STORAGE_STATUS)
+            rtp_audio = getattr(self._rtp_session, "audio_status", None) if self._rtp_session else None
             return CameraStatus(
                 battery=battery_status,
                 recording=self._recording,
@@ -516,6 +519,7 @@ class CcapiSession:
                     "storage": storage,
                     "liveViewSource": self._active_live_view_source,
                     "rtpSource": self._rtp_session.source_url if self._rtp_session else None,
+                    "rtpAudio": rtp_audio,
                     "lastError": self._last_error,
                 },
             )
@@ -1092,6 +1096,36 @@ class CcapiSession:
                 str(error),
                 status_code=502,
                 feature=CameraFeature.LIVE_VIEW_RTP.value,
+                engine=self.engine_name,
+            ) from error
+
+    def live_view_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None:
+        with self._lock:
+            self._require_open()
+            session = self._rtp_session
+            if not self._live_view_active or self._active_live_view_source != "CCAPI_RTP" or session is None:
+                raise unsupported(
+                    RTP_AUDIO_FEATURE,
+                    self.engine_name,
+                    "Canon RTP Live View with an advertised audio stream must be active before requesting audio.",
+                )
+            audio_status = getattr(session, "audio_status", {})
+            if not isinstance(audio_status, dict) or not audio_status.get("available"):
+                reason = audio_status.get("reason") if isinstance(audio_status, dict) else None
+                raise unsupported(RTP_AUDIO_FEATURE, self.engine_name, str(reason) if reason else None)
+            reader = getattr(session, "read_audio", None)
+            if not callable(reader):
+                raise unsupported(RTP_AUDIO_FEATURE, self.engine_name, "The active RTP receiver has no audio path.")
+        try:
+            return reader(after_generation=after_generation, timeout=timeout)
+        except (RtpError, OSError, RuntimeError) as error:
+            with self._lock:
+                self._last_error = str(error)
+            raise BridgeError(
+                "CCAPI_RTP_AUDIO_FAILED",
+                str(error),
+                status_code=502,
+                feature=RTP_AUDIO_FEATURE,
                 engine=self.engine_name,
             ) from error
 

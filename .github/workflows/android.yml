@@ -270,6 +270,7 @@ jobs:
           node --check open_eos_bridge/static/diagnostics.js
           node --check open_eos_bridge/static/monitoring.js
           node --check open_eos_bridge/static/local-video.js
+          node --check open_eos_bridge/static/rtp-audio.js
           node --check open_eos_bridge/static/media-transfer.js
           node --check open_eos_bridge/static/app.js
           npm run test:modules
