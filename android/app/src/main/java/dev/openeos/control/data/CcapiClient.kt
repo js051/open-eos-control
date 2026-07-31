@@ -24,9 +24,15 @@ import java.io.OutputStream
 import java.net.URI
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.time.Duration
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.floor
 
 private const val MAX_CCAPI_EVENT_BODY_BYTES = 256 * 1024
@@ -36,6 +42,10 @@ private const val CCAPI_EVENT_READ_TIMEOUT_SECONDS = 40L
 private const val CCAPI_EVENT_CALL_TIMEOUT_SECONDS = 45L
 private const val CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 private const val CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
+private val CANON_DATETIME_FORMATTER = DateTimeFormatter.ofPattern(
+    "EEE, dd MMM yyyy HH:mm:ss xx",
+    Locale.US,
+)
 
 private data class CcapiApiOperation(
     val method: String,
@@ -479,6 +489,9 @@ class CcapiClient(
             if (eventPollingOperations() != null) {
                 supportedFeatures.add(CameraFeature.EVENT_POLLING)
             }
+            if (cameraClockOperations() != null) {
+                supportedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC)
+            }
 
             val liveViewCapabilities = ccapiLiveViewCapabilities().let { capabilities ->
                 if (liveViewSizeControlSupported) {
@@ -609,6 +622,33 @@ class CcapiClient(
         }
         observedFeatures.add(featureForSetting(key))
         return status
+    }
+
+    suspend fun syncCameraClock(): CameraStatus {
+        if (!isRealCamera) {
+            return postJson("/ccapi/clock/sync", JSONObject()).toCameraStatus().also {
+                observedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC)
+            }
+        }
+        val (read, write) = cameraClockOperations()
+            ?: throw UnsupportedOperationException(
+                "${CameraFeature.CAMERA_CLOCK_SYNC.label} is not supported by this camera's advertised CCAPI.",
+            )
+        val requested = ZonedDateTime.now()
+        val daylight = requested.zone.rules.isDaylightSavings(requested.toInstant())
+        val payload = JSONObject()
+            .put("datetime", CANON_DATETIME_FORMATTER.format(requested))
+            .put("dst", daylight)
+        parseCameraClock(putJson(write.path, payload))
+        val (reported, reportedDaylight) = parseCameraClock(getJson(read.path))
+        check(abs(Duration.between(requested.toInstant(), reported.toInstant()).toMillis()) <= 10_000L) {
+            "The camera did not report the requested date and time."
+        }
+        check(reportedDaylight == daylight) {
+            "The camera did not report the requested daylight-saving state."
+        }
+        observedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC)
+        return status()
     }
 
     suspend fun startRecording(): CameraStatus {
@@ -1139,6 +1179,31 @@ class CcapiClient(
 
     private fun supportsApi(method: String, pathSuffix: String): Boolean =
         apiOperations.any { it.method == method && it.path.endsWith(pathSuffix) }
+
+    private fun cameraClockOperations(): Pair<CcapiApiOperation, CcapiApiOperation>? {
+        val reads = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith("/functions/datetime") }
+            .sortedByDescending { it.apiVersionNumber() }
+        reads.forEach { read ->
+            val prefix = read.path.removeSuffix("/functions/datetime")
+            val write = CcapiApiOperation("PUT", "$prefix/functions/datetime")
+            if (write in apiOperations) return read to write
+        }
+        return null
+    }
+
+    private fun parseCameraClock(json: JSONObject): Pair<ZonedDateTime, Boolean> {
+        val rawDateTime = json.opt("datetime") as? String
+            ?: error("Canon date-time response is missing an RFC 1123 datetime string.")
+        val daylight = json.opt("dst") as? Boolean
+            ?: error("Canon date-time response is missing a boolean dst field.")
+        val parsed = try {
+            ZonedDateTime.parse(rawDateTime, CANON_DATETIME_FORMATTER)
+        } catch (exception: DateTimeParseException) {
+            throw IllegalStateException("Canon date-time response contains an invalid RFC 1123 value.", exception)
+        }
+        return parsed to daylight
+    }
 
     private fun capabilityEvidence(): CameraCapabilityEvidence {
         val protocolVersions = apiVersionPrefixes
@@ -2262,6 +2327,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
             CameraFeature.EVENT_POLLING,
+            CameraFeature.CAMERA_CLOCK_SYNC,
         ),
     ),
     liveView = LiveViewCapabilities.simulator(),

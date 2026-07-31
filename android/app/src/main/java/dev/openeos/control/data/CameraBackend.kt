@@ -74,6 +74,7 @@ interface CameraControlBackend {
     suspend fun setExposure(iso: String? = null, shutter: String? = null, aperture: String? = null): CameraStatus
     suspend fun setWhiteBalance(value: String): CameraStatus
     suspend fun setSetting(key: String, value: String): CameraStatus
+    suspend fun syncCameraClock(): CameraStatus = unsupported(CameraFeature.CAMERA_CLOCK_SYNC)
     suspend fun startRecording(): CameraStatus
     suspend fun stopRecording(): CameraStatus
     suspend fun tapFocus(x: Double, y: Double): FocusResult
@@ -157,6 +158,8 @@ class CcapiCameraBackend(
     override suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
 
     override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+
+    override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
 
     override suspend fun startRecording(): CameraStatus = client.startRecording()
 
@@ -245,6 +248,8 @@ class DesktopBridgeCameraBackend(
     override suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
 
     override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+
+    override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
 
     override suspend fun startRecording(): CameraStatus = client.startRecording()
 

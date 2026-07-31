@@ -2,6 +2,7 @@ import Foundation
 
 public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case cameraIdentity = "CAMERA_IDENTITY"
+    case cameraClockSync = "CAMERA_CLOCK_SYNC"
     case batteryStatus = "BATTERY_STATUS"
     case storageStatus = "STORAGE_STATUS"
     case eventPolling = "EVENT_POLLING"

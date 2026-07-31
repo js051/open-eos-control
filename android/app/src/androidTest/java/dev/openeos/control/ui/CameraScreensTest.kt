@@ -947,6 +947,41 @@ class CameraScreensTest {
     }
 
     @Test
+    fun moreSettingsShowsClockSyncOnlyWhenCapabilityIsAdvertised() {
+        var syncRequested = false
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities)
+        val supportedState = base.copy(
+            activeSettingPicker = SettingPicker.MORE,
+            capabilities = capabilities.copy(
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported + CameraFeature.CAMERA_CLOCK_SYNC,
+                ),
+            ),
+        )
+        val screenState = mutableStateOf(supportedState)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    screenState.value,
+                    noOpActions().copy(syncCameraClock = { syncRequested = true }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("sync-camera-clock")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertTrue(syncRequested) }
+
+        compose.runOnIdle {
+            screenState.value = base.copy(activeSettingPicker = SettingPicker.MORE)
+        }
+        compose.onNodeWithTag("sync-camera-clock").assertDoesNotExist()
+    }
+
+    @Test
     fun moreSettingsHidesShutterHalfPressWhenTheCameraDoesNotAdvertiseIt() {
         val picker = mutableStateOf<SettingPicker?>(null)
         val preview = CameraUiState().withOfflinePreview()

@@ -29,6 +29,7 @@
     MEDIA_PREVIEW: "MEDIA_PREVIEW",
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
     MEDIA_DELETE: "MEDIA_DELETE",
+    CAMERA_CLOCK_SYNC: "CAMERA_CLOCK_SYNC",
   };
   const CORE_SETTINGS = ["iso", "shutter", "aperture", "whitebalance"];
   const LANGUAGE_KEY = "open-eos-control-language";
@@ -114,6 +115,11 @@
       safeArea: "Action and title safe areas",
       anamorphicDesqueeze: "Anamorphic desqueeze",
       moreSettings: "More settings",
+      syncCameraClock: "Camera date and time",
+      syncCameraClockHint: "Set the camera clock and time zone from this computer, then verify the camera readback.",
+      cameraClockSyncedAt: "Verified at {time}",
+      syncNow: "Sync now",
+      cameraClockSynced: "Camera date and time verified",
       diagnosticSafe: "Authentication secrets and camera serial are excluded",
       copy: "Copy",
       close: "Close",
@@ -344,6 +350,11 @@
       safeArea: "動作與標題安全區域",
       anamorphicDesqueeze: "變形鏡頭反擠壓",
       moreSettings: "更多設定",
+      syncCameraClock: "相機日期與時間",
+      syncCameraClockHint: "使用此電腦的時間與時區設定相機，並回讀確認結果。",
+      cameraClockSyncedAt: "已於 {time} 驗證",
+      syncNow: "立即同步",
+      cameraClockSynced: "已驗證相機日期與時間",
       diagnosticSafe: "診斷內容不包含驗證機密與相機序號",
       copy: "複製",
       close: "關閉",
@@ -622,6 +633,7 @@
     info: null,
     status: null,
     capabilities: null,
+    lastClockSyncAt: null,
     activeView: "live",
     captureMode: "photo",
     liveActive: false,
@@ -1183,6 +1195,7 @@
     state.info = null;
     state.status = null;
     state.capabilities = null;
+    state.lastClockSyncAt = null;
     state.media = [];
     state.mediaLoaded = false;
     state.mediaDownloadPreparing = false;
@@ -1404,7 +1417,33 @@
     const settings = (state.capabilities?.settings || []).filter(
       (setting) => !CORE_SETTINGS.includes(setting.key) && settingMatchesCaptureMode(setting),
     );
-    if (!settings.length) {
+    const clockSupported = featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+    if (clockSupported) {
+      const row = document.createElement("div");
+      row.className = "settings-command";
+      const copy = document.createElement("span");
+      const title = document.createElement("strong");
+      title.textContent = t("syncCameraClock");
+      const detail = document.createElement("small");
+      detail.textContent = state.lastClockSyncAt
+        ? t("cameraClockSyncedAt", {
+            time: new Date(state.lastClockSyncAt).toLocaleTimeString(resolvedLanguage(), {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          })
+        : t("syncCameraClockHint");
+      copy.append(title, detail);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button secondary";
+      button.textContent = t("syncNow");
+      button.disabled = cameraInteractionBusy();
+      button.addEventListener("click", () => syncCameraClock(button));
+      row.append(copy, button);
+      ui.advancedSettings.append(row);
+    }
+    if (!settings.length && !clockSupported) {
       const empty = document.createElement("p");
       empty.className = "supporting";
       empty.textContent = t("notAvailable");
@@ -1428,6 +1467,32 @@
       label.append(text, select);
       ui.advancedSettings.append(label);
     });
+  }
+
+  async function syncCameraClock(source) {
+    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.CAMERA_CLOCK_SYNC)) return;
+    state.busy = true;
+    state.lastError = null;
+    source.disabled = true;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      state.status = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/clock/sync`,
+        { method: "POST", json: {} },
+      );
+      state.lastClockSyncAt = Date.now();
+      await refreshCapabilityEvidence();
+      setOperationState(t("ready"));
+      showToast(t("cameraClockSynced"));
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderSession();
+    }
   }
 
   function settingMatchesCaptureMode(setting) {
@@ -2748,6 +2813,9 @@
     document.querySelectorAll("#advanced-settings select").forEach((select) => {
       select.disabled = interactionBusy || bulbActive;
     });
+    document.querySelectorAll("#advanced-settings .settings-command button").forEach((button) => {
+      button.disabled = interactionBusy || bulbActive || !featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+    });
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
       button.disabled = interactionBusy || bulbActive || !state.liveActive;
     });
@@ -3225,6 +3293,7 @@
       status: state.status,
       capabilities: state.capabilities,
       validation: diagnostics.featureSummary(state.capabilities),
+      cameraClock: { lastSyncAt: state.lastClockSyncAt },
       liveView: {
         active: previewActive(),
         previewInput: state.previewInput,

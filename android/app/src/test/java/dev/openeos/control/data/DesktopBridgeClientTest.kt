@@ -47,6 +47,7 @@ class DesktopBridgeClientTest {
         val capabilities = client.capabilities()
         val exposureStatus = client.setExposure(iso = "800")
         val whiteBalanceStatus = client.setWhiteBalance("Daylight")
+        client.syncCameraClock()
         client.captureStill()
         val bulbStarted = client.startBulbExposure()
         val bulbStopped = client.stopBulbExposure()
@@ -111,6 +112,7 @@ class DesktopBridgeClientTest {
                     CameraFeature.CAMERA_IDENTITY,
                     CameraFeature.EXPOSURE_CONTROL,
                     CameraFeature.WHITE_BALANCE_CONTROL,
+                    CameraFeature.CAMERA_CLOCK_SYNC,
                     CameraFeature.STILL_CAPTURE,
                     CameraFeature.BULB_EXPOSURE,
                     CameraFeature.AUTOFOCUS,
@@ -151,6 +153,7 @@ class DesktopBridgeClientTest {
         val sessionPayload = JSONObject(sessionRequest.body.readUtf8())
         assertEquals("camera-r6m3", sessionPayload.getString("cameraId"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/settings/iso") == true })
+        assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/clock/sync") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/capture/still") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/start") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/stop") == true })
@@ -379,6 +382,7 @@ class DesktopBridgeClientTest {
                     whiteBalance = "click"
                     json(statusJson())
                 }
+                path.endsWith("/clock/sync") -> json(statusJson())
                 path.endsWith("/capture/still") -> json(statusJson())
                 path.endsWith("/bulb/start") -> {
                     bulbExposureActive = true
@@ -510,7 +514,7 @@ class DesktopBridgeClientTest {
               "profile": {"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},
               "supported": [
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
-                "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
+                "CAMERA_CLOCK_SYNC", "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "LIVE_VIEW_MAGNIFICATION",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
                 "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"

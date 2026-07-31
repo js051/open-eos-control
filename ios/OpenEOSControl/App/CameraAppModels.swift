@@ -49,6 +49,7 @@ enum CameraOperation: Hashable {
     case scan
     case refresh
     case setting
+    case clock
     case capture
     case recording
     case focus

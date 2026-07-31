@@ -1644,6 +1644,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     }
     Box(
         Modifier.size(76.dp)
+            .testTag("capture-button")
             .background(AppBackground, CircleShape)
             .clickable(enabled = supported && !processing) {
                 when {

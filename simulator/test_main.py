@@ -22,11 +22,15 @@ def test_state_endpoint_is_sanitized_and_resettable() -> None:
     assert changed.status_code == 200
     assert changed.json()["exposure"]["iso"] == "1600"
     assert changed.json()["recording"] is True
+    assert changed.json()["record_start_count"] == 1
+    assert changed.json()["record_stop_count"] == 0
     assert changed.json()["capture_count"] == 1
     assert "event_history" not in changed.json()
     assert reset.json() == {"ok": True}
     assert restored.json()["exposure"]["iso"] == "800"
     assert restored.json()["recording"] is False
+    assert restored.json()["record_start_count"] == 0
+    assert restored.json()["record_stop_count"] == 0
     assert restored.json()["capture_count"] == 0
 
 
@@ -39,6 +43,19 @@ def test_half_press_and_release_are_stateful() -> None:
     assert release.status_code == 200
     assert release.json()["half_pressed"] is False
     assert state["half_pressed"] is False
+
+
+def test_clock_sync_records_time_and_publishes_change() -> None:
+    response = client.post("/ccapi/clock/sync", json={})
+    test_state = client.get("/ccapi/test/state").json()
+    event = client.get("/ccapi/events?after=0").json()
+
+    assert response.status_code == 200
+    assert response.json()["clock_sync_count"] == 1
+    assert response.json()["camera_datetime"]
+    assert test_state["clock_sync_count"] == 1
+    assert test_state["camera_datetime"] == response.json()["camera_datetime"]
+    assert event["keys"] == ["datetime"]
 
 
 def test_bulb_start_and_stop_are_stateful() -> None:

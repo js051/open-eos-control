@@ -997,6 +997,36 @@ input:disabled {
   font-size: 0.78rem;
 }
 
+.settings-command {
+  display: grid;
+  margin-top: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-command > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-command strong {
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.settings-command small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.settings-command .button {
+  min-width: 96px;
+  padding-inline: 12px;
+}
+
 .setting-row select,
 .settings-list select {
   height: 48px;

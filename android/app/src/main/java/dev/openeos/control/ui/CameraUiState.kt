@@ -33,7 +33,7 @@ enum class ConnectionTarget { CCAPI, DESKTOP_BRIDGE }
 
 enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MONITOR, MORE, LANGUAGE }
 
-enum class CameraOperation { CONNECT, STATUS, SETTING, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
+enum class CameraOperation { CONNECT, STATUS, SETTING, CLOCK, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
 
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,
@@ -94,6 +94,7 @@ data class CameraUiState(
     val bulbStartedAtMillis: Long? = null,
     val focusPoint: FocusPoint? = null,
     val focusFeedback: FocusFeedback? = null,
+    val lastClockSyncAtMillis: Long? = null,
     val error: String? = null,
     val errorOperation: CameraOperation? = null,
     val pendingOperations: Set<CameraOperation> = emptySet(),

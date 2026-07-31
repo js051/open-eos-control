@@ -123,6 +123,7 @@ class DiagnosticsTest {
                         ),
                     ),
                 ),
+                lastClockSyncAtMillis = 1_784_480_400_000L,
                 error = "Camera $serial rejected a request",
             ),
             metadata = DiagnosticReportMetadata(
@@ -141,6 +142,7 @@ class DiagnosticsTest {
         assertTrue(report.contains("validatedAdvertisedFeatureCount=2"))
         assertTrue(report.contains("unverifiedAdvertisedFeatures=STILL_CAPTURE"))
         assertTrue(report.contains("observedWithoutAdvertisement=USB_DIAGNOSTICS"))
+        assertTrue(report.contains("lastClockSyncAtMillis=1784480400000"))
     }
 
     @Test

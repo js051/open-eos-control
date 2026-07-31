@@ -25,6 +25,9 @@ import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -127,6 +130,7 @@ class CcapiClientTest {
         assertEquals(listOf("auto", "daylight"), capabilities.whiteBalance)
         assertEquals(emptyList<CameraSettingControl>(), capabilities.advancedSettings)
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
+        assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_CLOCK_SYNC))
         assertEquals(listOf(LiveViewSource.SIMULATOR_FRAME), capabilities.liveView.sources)
         assertEquals(2, capabilities.liveView.maxFps)
     }
@@ -143,6 +147,90 @@ class CcapiClientTest {
         assertEquals("PATCH", request.method)
         assertEquals("1600", body.getString("iso"))
         assertEquals("1600", status.exposure.iso)
+    }
+
+    @Test
+    fun simulatorClockSyncUsesBackedEndpoint() = runTest {
+        server.enqueue(jsonResponse(STATUS_JSON))
+
+        val status = client.syncCameraClock()
+        val request = server.takeRequest()
+
+        assertEquals("/ccapi/clock/sync", request.path)
+        assertEquals("POST", request.method)
+        assertEquals(0, JSONObject(request.body.readUtf8()).length())
+        assertTrue(status.connected)
+        assertTrue(CameraFeature.CAMERA_CLOCK_SYNC in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realClockSyncRequiresAdvertisedReadWriteAndVerifiesReadback() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        val formatter = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss xx", Locale.US)
+        val requested = ZonedDateTime.now()
+        val cameraClock = formatter.format(requested)
+        val daylight = requested.zone.rules.isDaylightSavings(requested.toInstant())
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[
+                    {"path":"/functions/datetime","get":true,"put":true},
+                    {"path":"/shooting/settings","get":true}
+                ]}""",
+            ),
+        )
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{"datetime":"$cameraClock","dst":$daylight}"""))
+        server.enqueue(jsonResponse("""{"datetime":"$cameraClock","dst":$daylight}"""))
+        enqueueRealStatus()
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val status = client.syncCameraClock()
+        server.takeRequest()
+        server.takeRequest()
+        val write = server.takeRequest()
+        val read = server.takeRequest()
+        val payload = JSONObject(write.body.readUtf8())
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_CLOCK_SYNC))
+        assertEquals("PUT", write.method)
+        assertEquals("/ccapi/ver110/functions/datetime", write.path)
+        assertTrue(payload.getString("datetime").matches(Regex("^[A-Z][a-z]{2}, \\d{2} [A-Z][a-z]{2} \\d{4} \\d{2}:\\d{2}:\\d{2} [+-]\\d{4}$")))
+        assertTrue(payload.has("dst"))
+        assertEquals("GET", read.method)
+        assertEquals("/ccapi/ver110/functions/datetime", read.path)
+        assertTrue(status.connected)
+        assertTrue(CameraFeature.CAMERA_CLOCK_SYNC in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realClockSyncDoesNotCombineReadAndWriteAcrossApiVersions() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver100":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/functions/datetime","get":true}
+                    ],
+                    "ver110":[{"path":"/functions/datetime","put":true}]
+                }""",
+            ),
+        )
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.CAMERA_CLOCK_SYNC))
+        assertTrue(CameraFeature.CAMERA_CLOCK_SYNC in capabilities.matrix.planned)
+        try {
+            client.syncCameraClock()
+            throw AssertionError("Expected unsupported camera clock synchronization")
+        } catch (_: UnsupportedOperationException) {
+            // Expected: GET and PUT are not advertised by the same API version.
+        }
+        assertEquals(2, server.requestCount)
     }
 
     @Test

@@ -40,6 +40,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func syncCameraClock() async throws -> CameraStatus {
+        switch self {
+        case let .ccapi(client): return try await client.syncCameraClock()
+        case let .desktopBridge(client): return try await client.syncCameraClock()
+        }
+    }
+
     func captureStill() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.captureStill()

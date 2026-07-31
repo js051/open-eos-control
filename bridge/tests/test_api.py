@@ -27,6 +27,8 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert script.status_code == 200
     assert script.headers["content-type"].startswith(("text/javascript", "application/javascript"))
     assert "Bearer ${state.token}" in script.text
+    assert "CAMERA_CLOCK_SYNC" in script.text
+    assert "/clock/sync" in script.text
     assert media_transfer.status_code == 200
     assert media_transfer.headers["content-type"].startswith(("text/javascript", "application/javascript"))
     assert "readResponse" in media_transfer.text
@@ -63,6 +65,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
             headers=headers,
             json={"value": "SD"},
         )
+        clock_sync = client.post(f"/v1/session/{session_id}/clock/sync", headers=headers)
         bulb_started = client.post(f"/v1/session/{session_id}/bulb/start", headers=headers)
         bulb_stopped = client.post(f"/v1/session/{session_id}/bulb/stop", headers=headers)
         autofocus = client.post(f"/v1/session/{session_id}/focus/auto", headers=headers)
@@ -113,6 +116,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert "MEDIA_PREVIEW" in capabilities.json()["supported"]
     assert "LIVE_VIEW_MAGNIFICATION" in capabilities.json()["supported"]
     assert "EVENT_POLLING" in capabilities.json()["supported"]
+    assert "CAMERA_CLOCK_SYNC" in capabilities.json()["supported"]
     assert media.json()["items"][0]["previewAvailable"] is True
     assert capabilities.json()["evidence"]["source"] == (
         "gphoto2 --abilities + --list-all-config + --storage-info + --wait-event probe"
@@ -128,6 +132,8 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert setting.json()["exposure"]["iso"] == "800"
     assert storage_setting.status_code == 200
     assert runner.values["/main/capturesettings/storageid"] == "00020001"
+    assert clock_sync.status_code == 200
+    assert runner.values["/main/actions/syncdatetimeutc"] == "1"
     assert bulb_started.json()["bulbExposureActive"] is True
     assert bulb_stopped.json()["bulbExposureActive"] is False
     assert autofocus.status_code == 200
