@@ -635,6 +635,10 @@ class CameraScreensTest {
             .onNodeWithTag("camera-settings-panel")
             .fetchSemanticsNode()
             .boundsInRoot
+        val rotatedViewportBounds = compose
+            .onNodeWithTag("settings-content-rotation", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
         val titleBounds = compose
             .onNodeWithText(resourceText(R.string.live_view_settings))
             .fetchSemanticsNode()
@@ -650,6 +654,17 @@ class CameraScreensTest {
         assertTrue(
             "Quarter-turn settings should use a tall side panel in the fixed camera layout: $panelBounds",
             panelBounds.height > panelBounds.width,
+        )
+        assertTrue(
+            "Quarter-turn settings must rotate inside a square viewport instead of clipping a long sheet: $rotatedViewportBounds",
+            kotlin.math.abs(rotatedViewportBounds.width - rotatedViewportBounds.height) < 2f,
+        )
+        assertTrue(
+            "The square settings viewport must remain inside the fixed bottom panel: $rotatedViewportBounds, $panelBounds",
+            rotatedViewportBounds.left >= panelBounds.left &&
+                rotatedViewportBounds.top >= panelBounds.top &&
+                rotatedViewportBounds.right <= panelBounds.right &&
+                rotatedViewportBounds.bottom <= panelBounds.bottom,
         )
         compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.composition_grid)).assertIsDisplayed()

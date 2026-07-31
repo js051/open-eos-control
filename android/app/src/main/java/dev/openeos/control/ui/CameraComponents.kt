@@ -993,14 +993,13 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
-                val compactCopy = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
-                CameraRotatingSlot(
-                    Modifier
-                        .fillMaxSize()
-                        .testTag("offline-preview-viewport"),
+                CameraReadableSlot(
+                    width = 320.dp,
+                    height = 136.dp,
+                    modifier = Modifier.testTag("offline-preview-viewport"),
                     animateRotation = false,
                 ) {
-                    OfflinePreviewCopy(compactCopy)
+                    OfflinePreviewCopy()
                 }
             }
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
@@ -1047,10 +1046,10 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
                 contentAlignment = Alignment.Center,
             ) {
-                CameraRotatingSlot(
-                    Modifier
-                        .fillMaxSize()
-                        .testTag("live-view-unavailable-rotation"),
+                CameraReadableSlot(
+                    width = 288.dp,
+                    height = 72.dp,
+                    modifier = Modifier.testTag("live-view-unavailable-rotation"),
                     animateRotation = false,
                 ) {
                     Text(
@@ -1059,7 +1058,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(0.8f),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                     )
                 }
             }
@@ -1503,43 +1502,25 @@ private fun BulbExposureIndicator(startedAtMillis: Long?, modifier: Modifier = M
 }
 
 @Composable
-private fun OfflinePreviewCopy(compact: Boolean) {
+private fun OfflinePreviewCopy() {
     val title = stringResource(R.string.offline_preview)
     val hint = stringResource(R.string.offline_preview_hint)
-    if (compact) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth(0.84f)
-                .widthIn(max = 520.dp)
-                .padding(horizontal = 20.dp)
-                .testTag("offline-preview-content"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            OfflinePreviewIcon(36.dp)
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                OfflinePreviewTitle(title, TextAlign.Start)
-                OfflinePreviewHint(hint, TextAlign.Start)
-            }
-        }
-        return
-    }
-
-    Column(
+    Row(
         modifier = Modifier
-            .fillMaxWidth(0.84f)
-            .widthIn(max = 520.dp)
-            .padding(horizontal = 20.dp)
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
             .testTag("offline-preview-content"),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        OfflinePreviewIcon(40.dp)
-        OfflinePreviewTitle(title, TextAlign.Center)
-        OfflinePreviewHint(hint, TextAlign.Center)
+        OfflinePreviewIcon(36.dp)
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            OfflinePreviewTitle(title, TextAlign.Start)
+            OfflinePreviewHint(hint, TextAlign.Start)
+        }
     }
 }
 

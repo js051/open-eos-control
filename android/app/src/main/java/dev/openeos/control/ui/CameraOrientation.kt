@@ -4,8 +4,45 @@ import androidx.compose.runtime.staticCompositionLocalOf
 
 private const val CAMERA_ORIENTATION_HYSTERESIS_DEGREES = 5
 private const val ORIENTATION_UNKNOWN = -1
+internal const val SYSTEM_AUTO_ROTATION_ENABLE_STABILITY_MILLIS = 250L
 
 internal fun isSystemAutoRotationSettingEnabled(value: Int): Boolean = value == 1
+
+internal class StableSystemAutoRotationGate(
+    private val enableStabilityMillis: Long = SYSTEM_AUTO_ROTATION_ENABLE_STABILITY_MILLIS,
+) {
+    var enabled: Boolean = false
+        private set
+    private var enableCandidateSinceMillis: Long? = null
+
+    fun update(rawEnabled: Boolean, elapsedRealtimeMillis: Long): Boolean {
+        if (!rawEnabled) {
+            enabled = false
+            enableCandidateSinceMillis = null
+            return false
+        }
+        if (enabled) return true
+
+        val candidateSince = enableCandidateSinceMillis
+        if (candidateSince == null) {
+            enableCandidateSinceMillis = elapsedRealtimeMillis
+        } else if (elapsedRealtimeMillis - candidateSince >= enableStabilityMillis) {
+            enabled = true
+            enableCandidateSinceMillis = null
+        }
+        return enabled
+    }
+
+    fun remainingEnableDelayMillis(elapsedRealtimeMillis: Long): Long? =
+        enableCandidateSinceMillis?.let { candidateSince ->
+            (enableStabilityMillis - (elapsedRealtimeMillis - candidateSince)).coerceAtLeast(0L)
+        }
+
+    fun reset() {
+        enabled = false
+        enableCandidateSinceMillis = null
+    }
+}
 
 internal class CameraOrientationPolicy {
     private var systemAutoRotationEnabled = false
@@ -34,7 +71,7 @@ internal class CameraOrientationPolicy {
     }
 
     fun shouldListen(activityStarted: Boolean, canDetectOrientation: Boolean): Boolean =
-        activityStarted && systemAutoRotationEnabled && canDetectOrientation
+        activityStarted && canDetectOrientation
 
     fun resolveControlRotation(displayRotationDegrees: Int): Float = resolveCameraControlRotation(
         autoRotationEnabled = systemAutoRotationEnabled,

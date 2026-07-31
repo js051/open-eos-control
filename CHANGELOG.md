@@ -4,6 +4,9 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Kept the Android orientation listener active only while the camera Activity is in the foreground, but hard-gated every posture sample through the live system auto-rotate setting so a missed Quick Settings notification cannot leave controls at a stale angle.
+- Replaced full-view and long-sheet rotation with bounded readable HUD notices and a square quarter-turn settings viewport, preserving complete English and Traditional Chinese copy without moving the camera layout.
+
 ## [0.1.6] - 2026-07-30
 
 - Made Android camera controls follow the system auto-rotate setting by default, with explicit always-rotate and fixed alternatives.
