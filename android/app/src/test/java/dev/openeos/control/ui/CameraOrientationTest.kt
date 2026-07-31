@@ -141,7 +141,7 @@ class CameraOrientationTest {
     @Test
     fun sidewaysGuidanceUsesTheAvailableLiveViewLongAxis() {
         assertEquals(
-            DpSize(420.dp, 136.dp),
+            DpSize(448.dp, 148.dp),
             offlinePreviewReadableSize(
                 availableWidth = 360.dp,
                 availableHeight = 480.dp,
@@ -157,7 +157,7 @@ class CameraOrientationTest {
             ),
         )
         assertEquals(
-            DpSize(288.dp, 136.dp),
+            DpSize(288.dp, 148.dp),
             offlinePreviewReadableSize(
                 availableWidth = 360.dp,
                 availableHeight = 320.dp,
