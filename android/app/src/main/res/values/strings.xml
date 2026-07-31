@@ -437,4 +437,7 @@
     <string name="ratio_2_39">2.39:1</string>
     <string name="ratio_1_1">1:1</string>
     <string name="ratio_4_3">4:3</string>
+    <string name="setting_capture_storage">Recording card</string>
+    <string name="camera_value_card_1">Card 1</string>
+    <string name="camera_value_card_2">Card 2</string>
 </resources>

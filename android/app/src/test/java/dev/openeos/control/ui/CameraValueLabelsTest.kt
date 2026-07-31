@@ -23,6 +23,8 @@ class CameraValueLabelsTest {
             Triple("capturetarget", "Internal RAM", R.string.camera_value_internal_ram),
             Triple("capturetarget", "Phone", R.string.camera_value_phone),
             Triple("capturetarget", "Memory card", R.string.camera_value_memory_card),
+            Triple("capturestorage", "Card 1", R.string.camera_value_card_1),
+            Triple("capturestorage", "Card 2", R.string.camera_value_card_2),
             Triple("aeb", "off", R.string.camera_value_off),
             Triple("stillimagequalitycf", "cRAW + Large Fine JPEG", R.string.camera_value_craw_large_fine_jpeg),
             Triple("stillimagequality.raw", "none", R.string.camera_value_none),

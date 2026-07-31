@@ -295,6 +295,7 @@ class DiagnosticsTest {
             CameraSettingControl("movieservoaf", "Movie Servo AF", "on", listOf("off", "on")),
             CameraSettingControl("afmethod", "AF", "face", listOf("face", "spot")),
             CameraSettingControl("capturetarget", "Capture target", "Internal RAM", listOf("Internal RAM", "Memory card")),
+            CameraSettingControl("capturestorage", "Recording card", "CFe", listOf("CFe", "SD")),
             CameraSettingControl("singleoption", "Single option", "only", listOf("only")),
         )
 
@@ -312,6 +313,7 @@ class DiagnosticsTest {
                 "exposurecompensation",
                 "afmethod",
                 "capturetarget",
+                "capturestorage",
             ),
             settingsForMode(settings, CaptureMode.PHOTO).map { it.key },
         )

@@ -239,4 +239,7 @@
     <string name="ratio_2_39">2.39:1</string>
     <string name="ratio_1_1">1:1</string>
     <string name="ratio_4_3">4:3</string>
+    <string name="setting_capture_storage">拍攝記錄卡</string>
+    <string name="camera_value_card_1">記憶卡 1</string>
+    <string name="camera_value_card_2">記憶卡 2</string>
 </resources>

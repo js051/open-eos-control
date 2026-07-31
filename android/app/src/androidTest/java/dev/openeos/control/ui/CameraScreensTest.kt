@@ -868,6 +868,13 @@ class CameraScreensTest {
         compose.runOnIdle {
             assertEquals("capturetarget" to "Phone", request)
         }
+        compose.onNodeWithTag("advanced-setting-capturestorage")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText("SD").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals("capturestorage" to "SD", request)
+        }
     }
 
     @Test

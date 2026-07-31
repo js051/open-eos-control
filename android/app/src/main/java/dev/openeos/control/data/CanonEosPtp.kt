@@ -35,6 +35,7 @@ object CanonEosPropertyCode {
     const val AUTO_POWER_OFF = 0xD114
     const val AVAILABLE_SHOTS = 0xD11B
     const val CAPTURE_DESTINATION = 0xD11C
+    const val CURRENT_STORAGE = 0xD11E
     const val IMAGE_FORMAT = 0xD120
     const val IMAGE_FORMAT_CF = 0xD121
     const val IMAGE_FORMAT_SD = 0xD122
@@ -215,6 +216,24 @@ object CanonEosPtp {
     fun captureDestinationCardValue(availableValues: List<Long>): Long? =
         availableValues.distinct().firstOrNull { it != CAPTURE_DESTINATION_HOST }
 
+    fun storageTargetOptions(storages: List<PtpStorageInfo>): List<CanonEosPropertyOption> {
+        val writableStorages = storages
+            .filter { it.accessCapability == PTP_STORAGE_READ_WRITE }
+            .distinctBy(PtpStorageInfo::storageId)
+        val candidates = writableStorages.map { storage ->
+            listOf(storage.description.trim(), storage.volumeLabel.trim()).filter(String::isNotBlank)
+        }
+        return writableStorages.mapIndexed { index, storage ->
+            val uniqueCameraLabel = candidates[index].firstOrNull { candidate ->
+                candidates.count { labels -> labels.any { it.equals(candidate, ignoreCase = true) } } == 1
+            }
+            CanonEosPropertyOption(
+                value = storage.storageId,
+                label = uniqueCameraLabel ?: "Card ${index + 1}",
+            )
+        }
+    }
+
     fun availableShots(value: Long?): Long? =
         value?.takeIf { it in 0L..0xFFFF_FFFEL }
 
@@ -389,6 +408,7 @@ object CanonEosPtp {
 
     fun settingKey(propertyCode: Int): String? = when (propertyCode) {
         CanonEosPropertyCode.CAPTURE_DESTINATION -> "capturetarget"
+        CanonEosPropertyCode.CURRENT_STORAGE -> "capturestorage"
         else -> settingSpecs.firstOrNull { it.propertyCode == propertyCode }?.key
     }
 
@@ -866,6 +886,7 @@ object CanonEosPtp {
         ),
         CanonEosPropertyCode.AVAILABLE_SHOTS to CanonEosPropertySpec(4, emptyMap()),
         CanonEosPropertyCode.CAPTURE_DESTINATION to CanonEosPropertySpec(4, emptyMap()),
+        CanonEosPropertyCode.CURRENT_STORAGE to CanonEosPropertySpec(4, emptyMap()),
         CanonEosPropertyCode.PICTURE_STYLE to CanonEosPropertySpec(1, pictureStyleLabels),
         CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION to CanonEosPropertySpec(2, highIsoNoiseReductionLabels),
         CanonEosPropertyCode.MOVIE_SERVO_AF to CanonEosPropertySpec(4, offOnLabels),
@@ -876,6 +897,7 @@ object CanonEosPtp {
     )
 
     private const val MAX_PROPERTY_OPTIONS = 4_096L
+    private const val PTP_STORAGE_READ_WRITE = 0
     private const val IMAGE_FORMAT_ENTRY_BYTES = 0x10
     private const val IMAGE_FORMAT_TYPE_JPEG = 1L
     private const val IMAGE_FORMAT_TYPE_RAW = 6L
