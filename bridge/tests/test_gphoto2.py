@@ -185,6 +185,8 @@ def test_gphoto2_output_parsers_preserve_camera_advertised_values() -> None:
         "/main/capturesettings/exposurecompensation\n"
         "Label: Exposure Compensation\nReadonly: 0\nType: RANGE\nCurrent: 0\n"
         "Bottom: -1\nTop: 1\nStep: 0.5\nEND\n"
+        "/main/settings/datetimeutc\n"
+        "Label: Camera Date and Time\nReadonly: 0\nType: DATE\nCurrent: 1768044194\nEND\n"
     )
 
     assert cameras[0].model == "Canon EOS R6 Mark III"
@@ -203,6 +205,8 @@ def test_gphoto2_output_parsers_preserve_camera_advertised_values() -> None:
         "0.5",
         "1",
     ]
+    assert configs["/main/settings/datetimeutc"].kind == "DATE"
+    assert configs["/main/settings/datetimeutc"].current == "1768044194"
 
 
 def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
@@ -396,6 +400,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert "AUTOFOCUS_DRIVE_CANCEL" in capabilities.evidence.advertised_commands
     assert "SHUTTER_HALF_PRESS" in capabilities.evidence.advertised_commands
     assert "GPHOTO2_WAIT_EVENT" in capabilities.evidence.advertised_commands
+    assert "CAMERA_CLOCK_ACTION_WITH_DATE_READBACK" in capabilities.evidence.advertised_commands
     assert capabilities.live_view.max_fps == 30
     assert "/main/imgsettings/iso" in capabilities.evidence.writable_settings
 
@@ -413,6 +418,15 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
 
     session.sync_camera_clock()
     assert runner.values["/main/actions/syncdatetimeutc"] == "1"
+    clock_action_index = next(
+        index
+        for index, command in enumerate(runner.commands)
+        if "/main/actions/syncdatetimeutc=1" in command
+    )
+    assert any(
+        index > clock_action_index and command[-1] == "--list-all-config"
+        for index, command in enumerate(runner.commands)
+    )
 
     session.set_setting("capturetarget", "Memory card")
     assert runner.values["/main/settings/capturetarget"] == "Memory card"
@@ -500,6 +514,113 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.MEDIA_DELETE,
         CameraFeature.EVENT_POLLING,
     } <= observed
+
+
+def test_gphoto2_clock_sync_falls_back_to_matching_local_action_and_date_widget() -> None:
+    class LocalClockRunner(FakeRunner):
+        def __init__(self) -> None:
+            super().__init__()
+            self.values["/main/actions/syncdatetime"] = "0"
+            self.values["/main/settings/datetime"] = "1700000000"
+
+        def _config_dump(self) -> str:
+            self.values["/main/actions/syncdatetimeutc"] = self.values["/main/actions/syncdatetime"]
+            self.values["/main/settings/datetimeutc"] = self.values["/main/settings/datetime"]
+            return (
+                super()
+                ._config_dump()
+                .replace("/main/actions/syncdatetimeutc", "/main/actions/syncdatetime")
+                .replace("/main/settings/datetimeutc", "/main/settings/datetime")
+            )
+
+    runner = LocalClockRunner()
+    session = GPhoto2Engine(runner).open()
+
+    assert CameraFeature.CAMERA_CLOCK_SYNC in session.capabilities().supported
+    session.sync_camera_clock()
+
+    assert runner.values["/main/actions/syncdatetime"] == "1"
+    assert CameraFeature.CAMERA_CLOCK_SYNC in session.capabilities().evidence.observed_features
+
+
+def test_gphoto2_clock_sync_is_hidden_without_a_matching_date_readback() -> None:
+    class ActionOnlyClockRunner(FakeRunner):
+        def _config_dump(self) -> str:
+            date_block = self._date("/main/settings/datetimeutc", "Camera Date and Time")
+            return super()._config_dump().replace(f"\n{date_block}", "")
+
+    runner = ActionOnlyClockRunner()
+    session = GPhoto2Engine(runner).open()
+
+    capabilities = session.capabilities()
+    assert CameraFeature.CAMERA_CLOCK_SYNC not in capabilities.supported
+    assert CameraFeature.CAMERA_CLOCK_SYNC in capabilities.planned
+
+    with pytest.raises(BridgeError) as failure:
+        session.sync_camera_clock()
+
+    assert failure.value.code == "UNSUPPORTED_FEATURE"
+    assert not any("syncdatetime" in part and "=1" in part for command in runner.commands for part in command)
+
+
+def test_gphoto2_clock_sync_rejects_mismatched_readback_without_observation() -> None:
+    class MismatchedClockRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            output = super().run(arguments, timeout=timeout)
+            command = self._without_camera(arguments)
+            if command and command[0] == "--set-config-value" and "syncdatetimeutc=1" in command[1]:
+                self.values["/main/settings/datetimeutc"] = "1"
+            return output
+
+    runner = MismatchedClockRunner()
+    session = GPhoto2Engine(runner).open()
+
+    with pytest.raises(BridgeError) as failure:
+        session.sync_camera_clock()
+
+    assert failure.value.code == "CAMERA_CLOCK_VERIFY_FAILED"
+    assert failure.value.feature == CameraFeature.CAMERA_CLOCK_SYNC.value
+    assert CameraFeature.CAMERA_CLOCK_SYNC not in session.capabilities().evidence.observed_features
+
+
+def test_gphoto2_clock_sync_does_not_observe_a_rejected_action() -> None:
+    class RejectedClockRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            command = self._without_camera(arguments)
+            if command and command[0] == "--set-config-value" and "syncdatetimeutc=1" in command[1]:
+                raise BridgeError("CAMERA_REQUEST_FAILED", "Clock action rejected.", status_code=502)
+            return super().run(arguments, timeout=timeout)
+
+    runner = RejectedClockRunner()
+    session = GPhoto2Engine(runner).open()
+
+    with pytest.raises(BridgeError, match="Clock action rejected"):
+        session.sync_camera_clock()
+
+    assert CameraFeature.CAMERA_CLOCK_SYNC not in session.capabilities().evidence.observed_features
+
+
+def test_gphoto2_clock_sync_does_not_observe_a_failed_post_write_refresh() -> None:
+    class RefreshFailureClockRunner(FakeRunner):
+        fail_clock_refresh = False
+
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            command = self._without_camera(arguments)
+            if command == ["--list-all-config"] and self.fail_clock_refresh:
+                raise BridgeError("CAMERA_REQUEST_FAILED", "Clock readback failed.", status_code=502)
+            output = super().run(arguments, timeout=timeout)
+            if command and command[0] == "--set-config-value" and "syncdatetimeutc=1" in command[1]:
+                self.fail_clock_refresh = True
+            return output
+
+    runner = RefreshFailureClockRunner()
+    session = GPhoto2Engine(runner).open()
+
+    with pytest.raises(BridgeError, match="Clock readback failed"):
+        session.sync_camera_clock()
+
+    runner.fail_clock_refresh = False
+    assert CameraFeature.CAMERA_CLOCK_SYNC not in session.capabilities().evidence.observed_features
 
 
 def test_gphoto2_close_releases_an_active_bulb_exposure(tmp_path: Path) -> None:
