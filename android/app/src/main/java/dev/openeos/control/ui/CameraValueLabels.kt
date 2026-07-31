@@ -31,6 +31,7 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "highisonr" -> highIsoNoiseReductionValueLabels[value]
         "autopoweroff" -> autoPowerOffValueLabels[value]
         "capturetarget" -> captureTargetValueLabels[value]
+        "capturestorage" -> captureStorageValueLabels[value]
         "aeb" -> toggleValueLabels[value]
         "stillimagequality", "stillimagequalityraw", "stillimagequalityjpeg", "stillimagequalityheif",
         "stillimagequalitysd", "stillimagequalitycf" ->
@@ -211,6 +212,11 @@ private val captureTargetValueLabels = mapOf(
     "sdram" to R.string.camera_value_internal_ram,
     "memory card" to R.string.camera_value_memory_card,
     "card" to R.string.camera_value_memory_card,
+)
+
+private val captureStorageValueLabels = mapOf(
+    "card 1" to R.string.camera_value_card_1,
+    "card 2" to R.string.camera_value_card_2,
 )
 
 private val imageQualityValueLabels = mapOf(

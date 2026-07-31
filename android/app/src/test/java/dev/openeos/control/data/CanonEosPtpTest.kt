@@ -157,6 +157,56 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun currentStorageUsesUint32AndOnlyBuildsOptionsFromWritableCameraStorages() {
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.CURRENT_STORAGE, 0x00010001),
+        ) + block(type = 0, bytes = byteArrayOf())
+        val storages = listOf(
+            storage(0x00010001, description = "CFe"),
+            storage(0x00020001, description = "SD"),
+            storage(0x00030001, description = "Read only", accessCapability = 1),
+        )
+
+        assertEquals(0x00010001L, CanonEosPtp.propertyUpdates(payload).single().currentValue)
+        assertEquals(
+            listOf(
+                CanonEosPropertyOption(0x00010001, "CFe"),
+                CanonEosPropertyOption(0x00020001, "SD"),
+            ),
+            CanonEosPtp.storageTargetOptions(storages),
+        )
+        assertEquals("capturestorage", CanonEosPtp.settingKey(CanonEosPropertyCode.CURRENT_STORAGE))
+        assertArrayEquals(
+            byteArrayOf(
+                0x0C, 0x00, 0x00, 0x00,
+                0x1E, 0xD1.toByte(), 0x00, 0x00,
+                0x01, 0x00, 0x02, 0x00,
+            ),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.CURRENT_STORAGE, 0x00020001),
+        )
+    }
+
+    @Test
+    fun storageOptionsUseUniqueVolumeLabelsThenStableCardFallbacks() {
+        assertEquals(
+            listOf("CFE_CARD", "SD_CARD"),
+            CanonEosPtp.storageTargetOptions(
+                listOf(
+                    storage(1, description = "Removable", volumeLabel = "CFE_CARD"),
+                    storage(2, description = "Removable", volumeLabel = "SD_CARD"),
+                )
+            ).map(CanonEosPropertyOption::label),
+        )
+        assertEquals(
+            listOf("Card 1", "Card 2"),
+            CanonEosPtp.storageTargetOptions(
+                listOf(storage(1, description = "Removable"), storage(2, description = "Removable"))
+            ).map(CanonEosPropertyOption::label),
+        )
+    }
+
+    @Test
     fun availableShotsUsesCanonUint32ValueAndRejectsUnknownSentinel() {
         val payload = block(
             type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
@@ -597,5 +647,22 @@ class CanonEosPtpTest {
         model = "Canon EOS R6 Mark III",
         deviceVersion = "3-1.0.0",
         serialNumber = "test",
+    )
+
+    private fun storage(
+        id: Long,
+        description: String,
+        volumeLabel: String = "",
+        accessCapability: Int = 0,
+    ) = PtpStorageInfo(
+        storageId = id,
+        storageType = 3,
+        filesystemType = 2,
+        accessCapability = accessCapability,
+        maxCapacityBytes = 1UL,
+        freeSpaceBytes = 1UL,
+        freeSpaceImages = 1,
+        description = description,
+        volumeLabel = volumeLabel,
     )
 }

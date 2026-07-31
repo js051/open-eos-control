@@ -259,6 +259,7 @@ class UsbPtpCameraBackendTest {
                         CanonEosPtp.MOVIE_RECORD_TARGET_CARD.toInt(),
                     ) +
                     eosPropertyValue(CanonEosPropertyCode.AVAILABLE_SHOTS, 321) +
+                    eosPropertyValue(CanonEosPropertyCode.CURRENT_STORAGE, 0x00010001) +
                     eosBlock(0, byteArrayOf()),
             ),
         )
@@ -917,6 +918,170 @@ class UsbPtpCameraBackendTest {
             rejectedImageBackend.capabilities().advancedSettings.first { it.key == "stillimagequality" }.value,
         )
         rejectedImageBackend.close()
+    }
+
+    @Test
+    fun canonDualCardStorageSelectorWritesOnlyTheFreshCameraStorageId() = runTest {
+        val cfeId = 0x00010001L
+        val sdId = 0x00020001L
+        val transport = CanonEosScriptedTransport(
+            currentStorageId = cfeId,
+            storageDevices = mutableListOf(
+                StorageFixture(cfeId, "CFe", ""),
+                StorageFixture(sdId, "SD", ""),
+            ),
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val initial = backend.capabilities().advancedSettings.first { it.key == "capturestorage" }
+        backend.setSetting("capturestorage", "SD")
+        val updated = backend.capabilities().advancedSettings.first { it.key == "capturestorage" }
+        val write = transport.sentContainers.last { container ->
+            container.type == PtpContainerType.DATA &&
+                container.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
+                container.parameters().getOrNull(1)?.toInt() == CanonEosPropertyCode.CURRENT_STORAGE
+        }
+
+        assertEquals("CFe", initial.value)
+        assertEquals(listOf("CFe", "SD"), initial.values)
+        assertEquals("SD", updated.value)
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.CURRENT_STORAGE, sdId),
+            write.payload,
+        )
+        assertTrue("capturestorage" in backend.capabilities().evidence.writableSettings)
+        backend.close()
+    }
+
+    @Test
+    fun canonStorageSelectorStaysHiddenWithoutAnAdvertisedCurrentDualCardState() = runTest {
+        suspend fun settingsFor(
+            currentStorageId: Long?,
+            storageDevices: MutableList<StorageFixture>,
+        ): List<CameraSettingControl> {
+            val backend = UsbPtpCameraBackend(
+                connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+                transportFactory = PtpTransportFactory {
+                    CanonEosScriptedTransport(
+                        currentStorageId = currentStorageId,
+                        storageDevices = storageDevices,
+                    )
+                },
+            )
+            backend.initialize()
+            return backend.capabilities().advancedSettings.also { backend.close() }
+        }
+        val dualCards = mutableListOf(
+            StorageFixture(0x00010001L, "CFe", ""),
+            StorageFixture(0x00020001L, "SD", ""),
+        )
+
+        assertFalse(settingsFor(null, dualCards).any { it.key == "capturestorage" })
+        assertFalse(
+            settingsFor(
+                0x00010001L,
+                mutableListOf(StorageFixture(0x00010001L, "CFe", "")),
+            ).any { it.key == "capturestorage" }
+        )
+        assertFalse(settingsFor(0x00030001L, dualCards).any { it.key == "capturestorage" })
+    }
+
+    @Test
+    fun canonGenericCardLabelsKeepTheirAdvertisedIdsWhenEnumerationOrderChanges() = runTest {
+        val firstId = 0x00010001L
+        val secondId = 0x00020001L
+        val transport = CanonEosScriptedTransport(
+            currentStorageId = firstId,
+            storageDevices = mutableListOf(
+                StorageFixture(firstId, "Removable", ""),
+                StorageFixture(secondId, "Removable", ""),
+            ),
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        assertEquals(
+            listOf("Card 1", "Card 2"),
+            backend.capabilities().advancedSettings.first { it.key == "capturestorage" }.values,
+        )
+        transport.reverseStorages()
+
+        backend.setSetting("capturestorage", "Card 2")
+
+        val write = transport.sentContainers.last { container ->
+            container.type == PtpContainerType.DATA &&
+                container.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
+                container.parameters().getOrNull(1)?.toInt() == CanonEosPropertyCode.CURRENT_STORAGE
+        }
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.CURRENT_STORAGE, secondId),
+            write.payload,
+        )
+        backend.close()
+    }
+
+    @Test
+    fun canonStorageSelectorRejectsRemovedCardsAndPreservesStateAfterCameraFailure() = runTest {
+        val cfeId = 0x00010001L
+        val sdId = 0x00020001L
+        val devices = mutableListOf(
+            StorageFixture(cfeId, "CFe", ""),
+            StorageFixture(sdId, "SD", ""),
+        )
+        val removedTransport = CanonEosScriptedTransport(
+            currentStorageId = cfeId,
+            storageDevices = devices,
+        )
+        val removedBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { removedTransport },
+        )
+        removedBackend.initialize()
+        assertTrue(removedBackend.capabilities().advancedSettings.any { it.key == "capturestorage" })
+        removedTransport.removeStorage(sdId)
+
+        val removedFailure = runCatching {
+            removedBackend.setSetting("capturestorage", "SD")
+        }.exceptionOrNull()
+
+        assertTrue(removedFailure is UnsupportedOperationException)
+        assertFalse(removedTransport.hasCanonPropertyWrite(CanonEosPropertyCode.CURRENT_STORAGE))
+        removedBackend.close()
+
+        val rejectedTransport = CanonEosScriptedTransport(
+            currentStorageId = cfeId,
+            storageDevices = mutableListOf(
+                StorageFixture(cfeId, "CFe", ""),
+                StorageFixture(sdId, "SD", ""),
+            ),
+            rejectPropertyCode = CanonEosPropertyCode.CURRENT_STORAGE,
+        )
+        val rejectedBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { rejectedTransport },
+        )
+        rejectedBackend.initialize()
+        assertEquals(
+            "CFe",
+            rejectedBackend.capabilities().advancedSettings.first { it.key == "capturestorage" }.value,
+        )
+
+        val rejectedFailure = runCatching {
+            rejectedBackend.setSetting("capturestorage", "SD")
+        }.exceptionOrNull()
+
+        assertTrue(rejectedFailure is PtpResponseException)
+        assertEquals(
+            "CFe",
+            rejectedBackend.capabilities().advancedSettings.first { it.key == "capturestorage" }.value,
+        )
+        rejectedBackend.close()
     }
 
     @Test
@@ -1659,6 +1824,8 @@ class UsbPtpCameraBackendTest {
         private val advertiseHostTransferOperations: Boolean = hostCaptureObjects.isNotEmpty(),
         private val rejectPartialAtOffset: Long? = null,
         private val delayAfterFullReleaseMillis: Long = 0L,
+        private val currentStorageId: Long? = null,
+        private val storageDevices: MutableList<StorageFixture> = mutableListOf(defaultStorageFixture()),
         scriptedEvents: List<ByteArray> = emptyList(),
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
@@ -1743,6 +1910,7 @@ class UsbPtpCameraBackendTest {
                             captureDestination,
                             advertiseCardCaptureDestination,
                             availableShots,
+                            currentStorageId,
                         ).also {
                             initialPropertyEventsPending = false
                         }
@@ -1795,14 +1963,16 @@ class UsbPtpCameraBackendTest {
 
                 PtpOperationCode.GET_STORAGE_IDS -> {
                     incoming += data(container.code, transaction, Writer().apply {
-                        u32(1)
-                        u32(STORAGE_ID)
+                        u32(storageDevices.size)
+                        storageDevices.forEach { u32(it.id) }
                     }.bytes())
                     incoming += ok(transaction)
                 }
 
                 PtpOperationCode.GET_STORAGE_INFO -> {
-                    incoming += data(container.code, transaction, storageInfoPayload())
+                    val storageId = container.parameters().single()
+                    val storage = storageDevices.single { it.id == storageId }
+                    incoming += data(container.code, transaction, storageInfoPayload(storage))
                     incoming += ok(transaction)
                 }
 
@@ -1843,6 +2013,14 @@ class UsbPtpCameraBackendTest {
             container.type == PtpContainerType.COMMAND && container.code == operationCode
         }
 
+        fun removeStorage(storageId: Long) {
+            storageDevices.removeAll { it.id == storageId }
+        }
+
+        fun reverseStorages() {
+            storageDevices.reverse()
+        }
+
         private fun data(operation: Int, transaction: Long, payload: ByteArray) =
             PtpContainer(PtpContainerType.DATA, operation, transaction, payload)
 
@@ -1859,6 +2037,14 @@ class UsbPtpCameraBackendTest {
         val filename: String?,
         val bytes: ByteArray,
         val eventCode: Int = CanonEosEventCode.REQUEST_OBJECT_TRANSFER,
+    )
+
+    private data class StorageFixture(
+        val id: Long,
+        val description: String,
+        val volumeLabel: String,
+        val accessCapability: Int = 0,
+        val freeImages: Long = 1_234L,
     )
 
     private class MemoryHostCaptureStore : UsbHostCaptureStore {
@@ -1956,6 +2142,7 @@ class UsbPtpCameraBackendTest {
         captureDestination: Int,
         advertiseCardCaptureDestination: Boolean,
         availableShots: Int,
+        currentStorageId: Long?,
     ): ByteArray {
         var payload = eosPropertyValue(CanonEosPropertyCode.ISO_SPEED, 0x58) +
             eosAvailableValues(CanonEosPropertyCode.ISO_SPEED, 0x48, 0x58, 0x60) +
@@ -1971,6 +2158,9 @@ class UsbPtpCameraBackendTest {
             CanonEosPropertyCode.CAPTURE_DESTINATION,
             *if (advertiseCardCaptureDestination) intArrayOf(4, 2) else intArrayOf(4),
         )
+        currentStorageId?.let { storageId ->
+            payload += eosPropertyValue(CanonEosPropertyCode.CURRENT_STORAGE, storageId.toInt())
+        }
         if (advertiseAdvancedSettings) {
             payload += eosPropertyValue(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0)
             payload += eosAvailableValues(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0xE8, 0, 0x0B, 0x18)
@@ -2284,15 +2474,23 @@ class UsbPtpCameraBackendTest {
             values = values.map { PtpPropertyValue.Unsigned(it.toULong()) },
         )
 
-        private fun storageInfoPayload(): ByteArray = Writer().apply {
+        private fun defaultStorageFixture() = StorageFixture(
+            id = STORAGE_ID,
+            description = "SD",
+            volumeLabel = "EOS_CARD",
+        )
+
+        private fun storageInfoPayload(): ByteArray = storageInfoPayload(defaultStorageFixture())
+
+        private fun storageInfoPayload(storage: StorageFixture): ByteArray = Writer().apply {
             u16(3)
             u16(2)
-            u16(0)
+            u16(storage.accessCapability)
             u64(64UL * 1024UL * 1024UL * 1024UL)
             u64(32UL * 1024UL * 1024UL * 1024UL)
-            u32(1234)
-            string("SD")
-            string("EOS_CARD")
+            u32(storage.freeImages)
+            string(storage.description)
+            string(storage.volumeLabel)
         }.bytes()
 
         private fun objectInfoPayload(thumbnailSize: Long, objectSize: Long = OBJECT_BYTES.size.toLong()): ByteArray = Writer().apply {

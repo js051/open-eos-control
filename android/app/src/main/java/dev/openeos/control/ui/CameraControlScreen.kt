@@ -1260,6 +1260,7 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "zoomspeed" -> stringResource(R.string.setting_power_zoom_speed)
     "autopoweroff" -> stringResource(R.string.setting_auto_power_off)
     "capturetarget" -> stringResource(R.string.setting_capture_target)
+    "capturestorage" -> stringResource(R.string.setting_capture_storage)
     "highisonr" -> stringResource(R.string.setting_high_iso_noise_reduction)
     "aeb" -> stringResource(R.string.setting_aeb)
     "ae" -> stringResource(R.string.setting_ae_mode)

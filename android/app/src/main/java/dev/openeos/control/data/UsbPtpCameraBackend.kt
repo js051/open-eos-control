@@ -35,6 +35,7 @@ class UsbPtpCameraBackend(
     private var canonPropertyDiscoveryAttempted = false
     private var canonPropertyError: String? = null
     private var selectedCaptureDestination: Long? = null
+    private var advertisedStorageTargets: Map<String, Long> = emptyMap()
     private var bulbExposureActive = false
     private var bulbHostTransferPrepared = false
     private val canonEventMutex = Mutex()
@@ -86,6 +87,7 @@ class UsbPtpCameraBackend(
         canonPropertyDiscoveryAttempted = false
         canonPropertyError = null
         selectedCaptureDestination = null
+        advertisedStorageTargets = emptyMap()
         bulbExposureActive = false
         bulbHostTransferPrepared = false
         observedFeatures.clear()
@@ -112,9 +114,7 @@ class UsbPtpCameraBackend(
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
         refreshPropertyValuesIfNeeded(info)
-        val storageResult = if (supportsStorage(info)) runCatching { readStorageSnapshot() } else null
-        storageSnapshot = storageResult?.getOrDefault(emptyList()).orEmpty()
-        storageError = storageResult?.exceptionOrNull()?.message
+        val storageResult = refreshStorageSnapshot(info)
         val batteryLevel = propertyValues[PtpDevicePropertyCode.BATTERY_LEVEL]
             ?.unsignedLong()
             ?.takeIf { it <= 100UL }
@@ -169,6 +169,7 @@ class UsbPtpCameraBackend(
     override suspend fun capabilities(): CameraCapabilities {
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
+        if (storageSnapshot.isEmpty() && supportsStorage(info)) refreshStorageSnapshot(info)
         val canSetProperties = info.supports(PtpOperationCode.SET_DEVICE_PROP_VALUE)
         val iso = corePropertyOptions(
             CanonEosPropertyCode.ISO_SPEED,
@@ -599,6 +600,11 @@ class UsbPtpCameraBackend(
             observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             return status()
         }
+        if (key == USB_CAPTURE_STORAGE_KEY) {
+            setCanonCaptureStorage(info, value)
+            observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
+            return status()
+        }
         val canonSpec = CanonEosPtp.settingSpecs.firstOrNull { it.key == key }
         if (canonSpec != null && setAdvertisedCanonProperty(canonSpec.propertyCode, value)) {
             observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
@@ -931,7 +937,8 @@ class UsbPtpCameraBackend(
         if (
             updates.any {
                 it.propertyCode == CanonEosPropertyCode.AVAILABLE_SHOTS ||
-                    it.propertyCode == CanonEosPropertyCode.CAPTURE_DESTINATION
+                    it.propertyCode == CanonEosPropertyCode.CAPTURE_DESTINATION ||
+                    it.propertyCode == CanonEosPropertyCode.CURRENT_STORAGE
             }
         ) {
             add("storage")
@@ -1112,6 +1119,14 @@ class UsbPtpCameraBackend(
         return ptp.storageIds().map { storageId -> ptp.storageInfo(storageId) }
     }
 
+    private suspend fun refreshStorageSnapshot(info: PtpDeviceInfo): Result<List<PtpStorageInfo>>? {
+        if (!supportsStorage(info)) return null
+        return runCatching { readStorageSnapshot() }.also { result ->
+            storageSnapshot = result.getOrDefault(emptyList())
+            storageError = result.exceptionOrNull()?.message
+        }
+    }
+
     private suspend fun loadPropertyDescriptors(ptp: PtpSession, info: PtpDeviceInfo) {
         if (!info.supports(PtpOperationCode.GET_DEVICE_PROP_DESC)) return
         val descriptors = mutableMapOf<Int, PtpDevicePropertyDescriptor>()
@@ -1234,6 +1249,7 @@ class UsbPtpCameraBackend(
                 }
             }
             captureTargetControl(info)?.let { controls[it.key] = it }
+            captureStorageControl(info)?.let { controls[it.key] = it }
         }
         if (!canSetStandardProperties) return controls.values.toList()
         PtpStandardProperties.advancedProperties.forEach { spec ->
@@ -1267,6 +1283,49 @@ class UsbPtpCameraBackend(
             value = current,
             values = listOf(USB_CAPTURE_TARGET_PHONE, USB_CAPTURE_TARGET_CARD),
         )
+    }
+
+    private fun captureStorageControl(info: PtpDeviceInfo): CameraSettingControl? {
+        advertisedStorageTargets = emptyMap()
+        if (!supportsStorage(info)) return null
+        val current = canonPropertyState(CanonEosPropertyCode.CURRENT_STORAGE).currentValue ?: return null
+        val options = CanonEosPtp.storageTargetOptions(storageSnapshot)
+        if (options.size < 2 || options.none { it.value == current }) return null
+        advertisedStorageTargets = options.associate { it.label to it.value }
+        return CameraSettingControl(
+            key = USB_CAPTURE_STORAGE_KEY,
+            label = "Recording card",
+            value = options.first { it.value == current }.label,
+            values = options.map(CanonEosPropertyOption::label),
+        )
+    }
+
+    private suspend fun setCanonCaptureStorage(info: PtpDeviceInfo, label: String) {
+        if (!CanonEosPtp.supportsPropertyControl(info) || !supportsStorage(info)) {
+            unsupported<Unit>(CameraFeature.ADVANCED_SETTINGS)
+        }
+        val current = canonPropertyState(CanonEosPropertyCode.CURRENT_STORAGE).currentValue
+            ?: throw UnsupportedOperationException("The camera did not advertise its current recording card.")
+        val storages = refreshStorageSnapshot(info)?.getOrThrow()
+            ?: unsupported(CameraFeature.ADVANCED_SETTINGS)
+        val options = CanonEosPtp.storageTargetOptions(storages)
+        if (options.size < 2 || options.none { it.value == current }) {
+            throw UnsupportedOperationException("The camera does not currently expose two writable recording cards.")
+        }
+        val targetId = advertisedStorageTargets[label]
+            ?: throw PtpProtocolException("Recording card '$label' is no longer available.")
+        if (options.none { it.value == targetId }) {
+            throw PtpProtocolException("Recording card '$label' is no longer available.")
+        }
+        ensureCanonRemoteMode()
+        requireSession().executeDataOutOperation(
+            operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+            payload = CanonEosPtp.propertyPayload(CanonEosPropertyCode.CURRENT_STORAGE, targetId),
+        )
+        synchronized(canonProperties) {
+            val state = canonProperties[CanonEosPropertyCode.CURRENT_STORAGE] ?: CanonEosPropertyState()
+            canonProperties[CanonEosPropertyCode.CURRENT_STORAGE] = state.copy(currentValue = targetId)
+        }
     }
 
     private fun supportsCanonHostCaptureTarget(info: PtpDeviceInfo): Boolean {
@@ -1571,6 +1630,7 @@ private const val CANON_HOST_TRANSFER_QUIET_MILLIS = 1_000L
 private const val CANON_HOST_TRANSFER_CHUNK_BYTES = 1 * 1024 * 1024
 private const val CANON_HOST_MIN_AVAILABLE_SHOTS = 100L
 private const val USB_CAPTURE_TARGET_KEY = "capturetarget"
+private const val USB_CAPTURE_STORAGE_KEY = "capturestorage"
 private const val USB_CAPTURE_TARGET_PHONE = "Phone"
 private const val USB_CAPTURE_TARGET_CARD = "Memory card"
 private const val CANON_HOST_CAPACITY_CLUSTERS = 0x0FFF_FFFFL

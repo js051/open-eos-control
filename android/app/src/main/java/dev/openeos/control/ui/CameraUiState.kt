@@ -169,6 +169,7 @@ fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): Li
     val videoTokens = listOf("movie", "video", "frame", "codec", "record", "sound")
     val photoTokens = listOf(
         "still", "photo", "drive", "imagequality", "colorspace", "highisonr", "aeb", "aspect", "capturetarget",
+        "capturestorage",
     )
     return settings.filter { it.values.distinct().size > 1 }.filter { setting ->
         val key = setting.key.lowercase()
