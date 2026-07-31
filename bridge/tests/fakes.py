@@ -37,16 +37,19 @@ Delete selected files on camera  : yes
 File preview (thumbnail) support : yes
 """
 
-STORAGE = """store_00010001:
-    StorageDescription: CFe
-    Maximum Capability: 512090963968 (488368 MB)
-    Free Space (Bytes): 440194695168 (419802 MB)
-    Free Space (Images): -1
-store_00020001:
-    StorageDescription: SD
-    Maximum Capability: 127831900160 (121910 MB)
-    Free Space (Bytes): 59137589248 (56398 MB)
-    Free Space (Images): 3210
+STORAGE = """[Storage 0]
+description=CFe
+basedir=/store_00010001
+access=0 Read-Write
+totalcapacity=500088832 KB
+free=429877632 KB
+[Storage 1]
+description=SD
+basedir=/store_00020001
+access=0 Read-Write
+totalcapacity=124835840 KB
+free=57751552 KB
+freeimages=3210
 """
 
 MEDIA = """There are no files in folder '/'.
@@ -113,6 +116,7 @@ class FakeRunner:
             "/main/capturesettings/drivemode": "Single",
             "/main/capturesettings/aspectratio": "3:2",
             "/main/capturesettings/zoomspeed": "8",
+            "/main/capturesettings/storageid": "00010001",
             "/main/actions/manualfocusdrive": "None",
             "/main/actions/autofocusdrive": "0",
             "/main/actions/autofocuscancel": "0",
@@ -266,6 +270,7 @@ class FakeRunner:
                 self._radio("/main/capturesettings/drivemode", "Drive Mode", ["Single", "Continuous high speed"]),
                 self._radio("/main/capturesettings/aspectratio", "Aspect Ratio", ["3:2", "16:9", "1.6x"]),
                 self._radio("/main/capturesettings/zoomspeed", "Zoom Speed", ["1", "8", "15"]),
+                self._text("/main/capturesettings/storageid", "Storage Device", readonly=False),
                 self._radio(
                     "/main/actions/manualfocusdrive",
                     "Drive Canon DSLR Manual focus",

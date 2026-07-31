@@ -117,6 +117,7 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         "zoomspeed",
         "autopoweroff",
         "capturetarget",
+        "capturestorage",
         "stillimagequalitysd",
         "stillimagequalitycf",
     }
@@ -136,6 +137,8 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
     assert 'large_fine: "imageQualityLargeFine"' in script
     assert '"internal ram": "valueInternalRam"' in script
     assert '"memory card": "valueMemoryCard"' in script
+    assert '"card 1": "valueCard1"' in script
+    assert '"card 2": "valueCard2"' in script
 
     assert "function settingValueLabel(settingOrKey, value)" in script
     assert "option.value = value" in script
