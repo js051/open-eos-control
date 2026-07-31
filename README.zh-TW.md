@@ -32,8 +32,8 @@ open-eos-control/
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile 與電池；CCAPI、USB/PTP 或桌面橋接有回報時，亦顯示記憶卡數、總容量、可用容量及剩餘可拍張數
 - 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、協定版本、相機公告命令、可寫設定，以及本次工作階段中確實成功的操作
-- Android、iOS 與 PC 都提供依能力開放的相機日期／時間同步。直接 CCAPI 必須同時公告 GET 與 PUT `/functions/datetime`，寫入 Canon 指定的 RFC 1123 時間與 DST 狀態後再回讀驗證；Desktop Bridge USB 只在相機公開可寫的 libgphoto2 `syncdatetimeutc` 或 `syncdatetime` action 時執行。
-- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon `GetEvent` 機身操作同步。只有手機與記憶卡兩條路徑都可執行時才顯示拍攝儲存位置選擇；選擇手機會把 Canon 主機 RAM JPEG／RAW 原子傳輸至 App 私有 Media。另包含 Canon EOS 遠端快門、半按、保證取消的原生 AF-ON、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、自動關閉電源、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
+- Android、iOS 與 PC 都提供依能力開放的相機日期／時間同步。直接 CCAPI 必須同時公告 GET 與 PUT `/functions/datetime`，寫入 Canon 指定的 RFC 1123 時間與 DST 狀態後再回讀驗證。Android 直接 USB 會透過 `SetDevicePropValueEx` 寫入相機公告的 Canon EOS `UTCTime (0xD17C)` 或 `CameraTime (0xD113)` UINT32，並要求收到相符的屬性事件；Desktop Bridge USB 只在相機公開可寫的 libgphoto2 `syncdatetimeutc` 或 `syncdatetime` action 時執行。
+- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon `GetEvent` 機身操作與相機時鐘同步。只有手機與記憶卡兩條路徑都可執行時才顯示拍攝儲存位置選擇；選擇手機會把 Canon 主機 RAM JPEG／RAW 原子傳輸至 App 私有 Media。另包含 Canon EOS 遠端快門、半按、保證取消的原生 AF-ON、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、自動關閉電源、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
 - Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、AF-ON、Live View、焦點移動，以及依能力提供的媒體縮圖／傳輸／刪除；libgphoto2 路徑也包含經 runtime 探測的 `gphoto2 --wait-event` 機身／媒體同步、R6 Mark III 自動對焦啟動／取消 action、各卡槽影像畫質、白平衡偏移、畫面比例、電動變焦速度、安全的自動關機選項，以及可選擇寫入記憶卡或將主機 RAM 拍攝原子轉存到 Bridge 媒體庫的儲存位置
 - Live view 畫面，自動/手動更新與 FPS 控制
 - Android Live View 監看輔助會對解碼後的 JPEG／USB／Bridge 影格套用匯入的 3D `.cube` LUT，並以有界 120x80 背景分析提供互斥的亮度直方圖或 64x64 亮度波形圖、可調斑馬紋、偽色、峰值對焦、16:9／2.39:1／1:1／4:3 畫幅框線、動作／標題安全區域，以及 1.33x／1.5x／1.8x／2x 變形鏡頭反擠壓。LUT 使用單一 conflated worker 處理最新影格，不會累積工作；原生 RTP 保留零拷貝表面，因此 LUT 與像素分析停用，只保留幾何型框線與反擠壓。
@@ -221,7 +221,7 @@ http://localhost:18080
 ## Roadmap
 
 - 保持 R6 Mark III 的 CCAPI 無線控制穩定，並驗證機身公告的 API 是否包含已實作的 Android／iOS／PC RTP H.264 路徑；若未公告就維持 JPEG 輪詢。
-- 在 R6 Mark III 真機驗證已實作的 Android USB/PTP 標準路徑、Canon EOS 主機 RAM JPEG／RAW 傳輸與記憶卡拍攝，以及遠端快門、曝光、色彩、包圍曝光、錄影、進階設定、焦點移動與 Live View；後續只加入有可靠依據的其他專有設定或 Touch AF 命令。
+- 在 R6 Mark III 真機驗證已實作的 Android USB/PTP 標準路徑、Canon EOS 相機時鐘同步、主機 RAM JPEG／RAW 傳輸與記憶卡拍攝，以及遠端快門、曝光、色彩、包圍曝光、錄影、進階設定、焦點移動與 Live View；後續只加入有可靠依據的其他專有設定或 Touch AF 命令。
 - 在 R6 Mark III 完成已實作 PC CCAPI、Android-to-Desktop-Bridge、持續 gphoto2 USB 預覽與 USB PC 控制介面的真機驗證，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
 - 以實體 iPhone 與 R6 Mark III 驗證已實作的 iOS SwiftUI CCAPI App、相機有公告時的 RTP，以及 Wi-Fi／行動網路共存；iOS USB/PTP 先列為研究線。
 

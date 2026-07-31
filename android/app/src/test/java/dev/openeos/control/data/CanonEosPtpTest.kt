@@ -129,6 +129,23 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun canonClockEventsAndWritesUseTheLibgphoto2Uint32Layout() {
+        val epochSeconds = 0xF123_4567L
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.UTC_TIME, epochSeconds.toInt()),
+        ) + block(type = 0, bytes = byteArrayOf())
+
+        assertEquals(epochSeconds, CanonEosPtp.propertyUpdates(payload).single().currentValue)
+        assertEquals(4, CanonEosPtp.propertyValueBytes(CanonEosPropertyCode.UTC_TIME))
+        assertEquals(4, CanonEosPtp.propertyValueBytes(CanonEosPropertyCode.CAMERA_TIME))
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.UTC_TIME, epochSeconds),
+            CanonEosPtp.propertyPayload(CanonEosPropertyCode.UTC_TIME, epochSeconds),
+        )
+    }
+
+    @Test
     fun captureDestinationUsesCameraAdvertisedNonHostTarget() {
         val payload = block(
             type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,

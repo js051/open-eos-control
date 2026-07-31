@@ -180,7 +180,8 @@ data class CapabilityMatrix(
                 CameraFeature.USB_DIAGNOSTICS to "First wired milestone: enumerate Canon USB device and open a PTP session.",
                 CameraFeature.LIVE_VIEW to "Requires Canon PTP vendor-extension validation on EOS R6 Mark III.",
                 CameraFeature.CAMERA_CLOCK_SYNC to
-                    "No verified direct Android USB/PTP camera-time write and readback flow is implemented yet.",
+                    "Requires advertised Canon EOS UTC/CameraTime property events and SetDevicePropValueEx; " +
+                    "a matching post-write event is required.",
             ),
         )
 
@@ -207,6 +208,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
+                CameraFeature.CAMERA_CLOCK_SYNC,
             ),
             reasons = mapOf(
                 CameraFeature.DESKTOP_BRIDGE to "Bridge protocol is open; engines are libgphoto2 and optional user-installed Canon EDSDK.",

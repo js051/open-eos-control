@@ -20,7 +20,8 @@ The Android wired backend is split into a standards-based core, a small Android 
 14. Canon Live View writes EVF mode/output, requests `GetViewFinderData`, retries documented busy/not-ready responses, validates each response block, and returns only JPEG block types 1 or 11 as in-memory frames.
 15. Canon movie control writes the camera-advertised `EVFRecordStatus (0xD1B8)` value through `SetDevicePropValueEx`: Card (`4`) starts recording, None (`0`) stops, and SDRAM (`3`) represents preview output.
 16. Standard `GetObject (0x1009)` also backs display preview only when object metadata identifies JPEG or PNG and advertises a positive size no larger than 32 MiB. The receiver uses a bounded output stream and validates a complete image signature. Host-captured files use the same per-item gate and bounded read. RAW, HEIF and video remain downloadable without a preview action.
-17. Disconnect stops EVF output, restores Canon remote/event state on a best-effort basis, sends `CloseSession`, and always releases the USB interface and device connection.
+17. Canon clock synchronization prefers an emitted `UTCTime (0xD17C)` value and falls back to `CameraTime (0xD113)`. It writes current Unix seconds as UINT32 through `SetDevicePropValueEx (0x9110)` while owning the Canon event stream, then requires a same-property post-write event within three seconds and ten seconds of the requested value. Command acceptance alone is never reported as synchronization success.
+18. Disconnect stops EVF output, restores Canon remote/event state on a best-effort basis, sends `CloseSession`, and always releases the USB interface and device connection.
 
 The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PTP header. This supports Android 8.x transfer limits while preserving payload bytes that arrive in the same USB transfer as the header.
 
@@ -28,6 +29,7 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 
 - Identity and USB diagnostics are available after a valid DeviceInfo response.
 - Canon USB event polling requires vendor extension ID `0x0000000B` plus advertised `SetRemoteMode (0x9114)`, `SetEventMode (0x9115)`, and `GetEvent (0x9116)`. Property/list changes refresh shooting settings, record-state events refresh recording, capacity/destination events refresh storage, and captured-object events refresh media. Empty polls do not trigger redundant status traffic.
+- Canon clock synchronization additionally requires `SetDevicePropValueEx (0x9110)` and a current-value event for `UTCTime` or `CameraTime`. UTC is preferred when both are present. The feature becomes observed only after the exact property produces a bounded matching post-write event; a rejected command, missing event, stale event or mismatched time remains an error.
 - Storage requires both `GetStorageIDs (0x1004)` and `GetStorageInfo (0x1005)`.
 - Canon EOS `AvailableShots (0xD11B)` is read-only status evidence, not a writable setting. A valid event value takes precedence because the pinned R6 Mark III snapshot reports `-1` for standard per-card image counts while exposing the camera's remaining-shot count through this property.
 - Media browsing requires `GetStorageIDs`, `GetObjectHandles (0x1007)`, and `GetObjectInfo (0x1008)`.
@@ -66,6 +68,9 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 - [Pinned Canon EOS `RequestObjectTransfer` event layout](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp-pack.c#L1791-L1811)
 - [Pinned libgphoto2 Canon setting tables](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/config.c)
 - [Pinned EOS R6 Mark III capability snapshot](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/cameras/canon-eos-r6-markIII.txt)
+- [Pinned libgphoto2 Canon clock action and UINT32 write mapping](https://github.com/gphoto/libgphoto2/blob/cc81290cf1d2a6101ff71487ac96dde772f9efb9/camlibs/ptp2/config.c)
+- [Pinned Canon EOS UTC/CameraTime property codes](https://github.com/gphoto/libgphoto2/blob/cc81290cf1d2a6101ff71487ac96dde772f9efb9/camlibs/ptp2/ptp.h)
+- [Pinned R6 Mark III writable clock actions](https://github.com/gphoto/libgphoto2/blob/cc81290cf1d2a6101ff71487ac96dde772f9efb9/camlibs/ptp2/cameras/canon-eos-r6-markIII.txt)
 
 The pinned open-source implementation provides reproducible operation codes, packet shapes, property-event layouts and value tables, release ordering, focus values and Live View parsing behavior. It is corroborating implementation evidence, not a substitute for an authoritative Canon specification or a recorded physical R6 Mark III validation.
 
@@ -89,6 +94,7 @@ The pinned open-source implementation provides reproducible operation codes, pac
 - Verify native AF-ON starts with `0x9154`, remains active for the bounded hold, and always sends `0x9160` after success, camera rejection, cancellation, and disconnect.
 - Run each Near/Far focus step with an MF-compatible lens/camera state and record direction and distance.
 - Record the Canon property events in multiple exposure modes, verify the displayed ISO/Tv/Av/WB choices exactly match the camera, write representative values, and confirm both camera state and returned events change.
+- When the clock control is advertised, deliberately offset the camera time, run synchronization, confirm the body menu agrees with the phone time and time zone, and confirm `CAMERA_CLOCK_SYNC` appears in both supported and observed session features. Save the redacted report; a command-only success without the post-write property event does not pass.
 - In photo and movie modes, record the advertised AF operation/method, Continuous AF, drive, metering, Picture Style and Movie Servo AF lists; write one supported value per property and confirm both the camera state and next event.
 - Record the advertised exposure compensation, color temperature, both white-balance shifts, color space, High ISO noise reduction and AEB lists; write representative positive, negative and off values, then confirm the camera menu and next property event agree.
 - Record the advertised Auto Exposure Mode list, switch P/Tv/Av/M/Fv and Movie through both the settings sheet and Photo/Video control, then confirm the camera mode, returned event, restored prior photo mode and failure behavior agree.
