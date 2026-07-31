@@ -234,6 +234,10 @@ private struct LiveViewSettingsView: View {
                         Divider().overlay(Color.cameraBorder)
                     }
                     fpsControl
+                    if camera.activeLiveViewSource == .ccapiRTP, camera.rtpAudioStatus.advertised {
+                        Divider().overlay(Color.cameraBorder)
+                        audioControl
+                    }
                     if !camera.usesRTPLiveView {
                         Divider().overlay(Color.cameraBorder)
                         sizeControl
@@ -348,6 +352,42 @@ private struct LiveViewSettingsView: View {
             .pickerStyle(.segmented)
             .disabled((camera.capabilities?.liveView.sizes.count ?? 0) < 2)
         }
+    }
+
+    private var audioControl: some View {
+        let status = camera.rtpAudioStatus
+        return VStack(alignment: .leading, spacing: 8) {
+            Toggle(
+                "camera_audio_monitoring",
+                isOn: Binding(
+                    get: { camera.rtpAudioRequested },
+                    set: { camera.setRTPAudioEnabled($0) }
+                )
+            )
+            .tint(Color.cameraAccent)
+            .frame(minHeight: 48)
+            .disabled(!status.available)
+            .accessibilityIdentifier("rtp-audio-monitoring-toggle")
+
+            Text(audioStatusText(status))
+                .font(.caption)
+                .foregroundStyle(status.error == nil ? Color.cameraSecondaryText : Color.cameraWarning)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("rtp-audio-monitoring-status")
+        }
+    }
+
+    private func audioStatusText(_ status: IOSCcapiRTPAudioStatus) -> String {
+        if status.error != nil { return language.string("camera_audio_failed") }
+        if !status.available { return language.string("camera_audio_unavailable") }
+        if status.enabled {
+            return language.format(
+                "camera_audio_active_format",
+                status.rtpClockRate ?? 48_000,
+                status.channels ?? 0
+            )
+        }
+        return language.string("camera_audio_muted")
     }
 
     private func localizedSize(_ size: LiveViewSize) -> LocalizedStringKey {

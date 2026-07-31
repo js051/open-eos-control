@@ -41,6 +41,8 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var selectedLiveViewSource: LiveViewSource
     @Published private(set) var activeLiveViewSource: LiveViewSource?
     @Published private(set) var nativeLiveViewSize: CGSize?
+    @Published private(set) var rtpAudioRequested = false
+    @Published private(set) var rtpAudioStatus = IOSCcapiRTPAudioStatus.inactive
     @Published private(set) var liveViewData: Data?
     @Published private(set) var liveViewMagnification: LiveViewMagnification?
     @Published private(set) var observedFPS = 0.0
@@ -300,6 +302,9 @@ final class CameraAppState: ObservableObject {
         bulbStartedAt = nil
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
+        rtpAudioRequested = false
+        rtpAudioStatus = .inactive
+        rtpController.setAudioEnabled(false)
         resetLiveViewMetrics()
     }
 
@@ -324,6 +329,9 @@ final class CameraAppState: ObservableObject {
         liveViewMagnification = nil
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
+        rtpAudioRequested = false
+        rtpAudioStatus = .inactive
+        rtpController.setAudioEnabled(false)
         focusMarker = nil
         bulbStartedAt = nil
         lastClockSyncAt = nil
@@ -388,6 +396,17 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    func setRTPAudioEnabled(_ enabled: Bool) {
+        guard activeLiveViewSource == .ccapiRTP,
+              !enabled || rtpAudioStatus.available else { return }
+        rtpAudioRequested = enabled
+        rtpController.setAudioEnabled(enabled)
+    }
+
+    func setApplicationActive(_ active: Bool) {
+        rtpController.setApplicationActive(active)
+    }
+
     func startLiveView() async {
         guard let session, supports(.liveView), begin(.liveView) else { return }
         defer { end(.liveView) }
@@ -404,8 +423,11 @@ final class CameraAppState: ObservableObject {
                 frameContentType = "video/H264"
                 frameSourceURL = await session.currentNativeLiveViewSourceURL()
                 rtpController.setRenderingEnabled(autoRefresh)
-            } else if autoRefresh {
-                beginLiveViewLoop(session: session)
+            } else {
+                rtpAudioRequested = false
+                rtpAudioStatus = .inactive
+                rtpController.setAudioEnabled(false)
+                if autoRefresh { beginLiveViewLoop(session: session) }
             }
         } catch {
             record(error)
@@ -862,6 +884,23 @@ final class CameraAppState: ObservableObject {
             "monitorSafeArea=\(monitorSettings.safeAreaVisible)",
             "monitorDesqueeze=\(monitorSettings.desqueeze.rawValue)",
             "monitorLut=\(monitorSettings.cubeLut.map { "loaded (\($0.size)x\($0.size)x\($0.size))" } ?? "off")",
+            "rtpAudioAdvertised=\(rtpAudioStatus.advertised)",
+            "rtpAudioAvailable=\(rtpAudioStatus.available)",
+            "rtpAudioRequested=\(rtpAudioRequested)",
+            "rtpAudioEnabled=\(rtpAudioStatus.enabled)",
+            "rtpAudioCodec=\(rtpAudioStatus.codec ?? "none")",
+            "rtpAudioPort=\(rtpAudioStatus.rtpPort.map { String($0) } ?? "none")",
+            "rtpAudioClockRate=\(rtpAudioStatus.rtpClockRate.map { String($0) } ?? "none")",
+            "rtpAudioChannels=\(rtpAudioStatus.channels.map { String($0) } ?? "unknown")",
+            "rtpAudioPackets=\(rtpAudioStatus.packetsReceived)",
+            "rtpAudioAccessUnits=\(rtpAudioStatus.accessUnitsReceived)",
+            "rtpAudioDecoded=\(rtpAudioStatus.decodedAccessUnits)",
+            "rtpAudioPlayedFrames=\(rtpAudioStatus.playedSampleFrames)",
+            "rtpAudioDropped=\(rtpAudioStatus.droppedAccessUnits)",
+            "rtpAudioLastPacket=\(rtpAudioStatus.lastPacketAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
+            "rtpAudioLastPCM=\(rtpAudioStatus.lastPCMAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
+            "rtpAudioReason=\(rtpAudioStatus.reason ?? "none")",
+            "rtpAudioError=\(rtpAudioStatus.error ?? "none")",
         ].joined(separator: "\n")
         return "\(report)\n\(monitoring)"
     }
@@ -1051,17 +1090,21 @@ final class CameraAppState: ObservableObject {
     }
 
     private func handleRTPEvent(_ event: IOSCcapiRTPEvent) {
-        guard activeLiveViewSource == .ccapiRTP else { return }
         switch event {
+        case let .audioStatus(status):
+            rtpAudioStatus = status
         case let .frame(encodedBytes, at):
+            guard activeLiveViewSource == .ccapiRTP else { return }
             frameBytes = encodedBytes
             frameContentType = "video/H264"
             lastFrameAt = at
             observedFPS = rateTracker.record(at.timeIntervalSinceReferenceDate)
             if lastError?.contains("RTP") == true { lastError = nil }
         case let .videoSize(width, height):
+            guard activeLiveViewSource == .ccapiRTP else { return }
             nativeLiveViewSize = CGSize(width: CGFloat(width), height: CGFloat(height))
         case let .failed(message):
+            guard activeLiveViewSource == .ccapiRTP else { return }
             lastError = message
         }
     }

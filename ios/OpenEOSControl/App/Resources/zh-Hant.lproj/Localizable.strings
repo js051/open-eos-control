@@ -191,6 +191,11 @@
 "media_preview_unavailable" = "無法顯示相機提供的預覽影像。";
 
 "monitoring_assists" = "監看輔助";
+"camera_audio_monitoring" = "監聽相機音訊";
+"camera_audio_muted" = "預設靜音；只有開啟此選項且 App 位於前景時才會播放。";
+"camera_audio_unavailable" = "此 RTP 工作階段沒有可支援的相機音訊。";
+"camera_audio_failed" = "相機音訊已停止；請到 Debug 查看接收或解碼的完整錯誤。";
+"camera_audio_active_format" = "播放中 · %d Hz · %d 聲道";
 "lut_preview" = "3D LUT 預覽";
 "load_cube_lut" = "載入 .cube LUT";
 "remove_cube_lut" = "移除 LUT";
@@ -250,6 +255,23 @@
 "content_type" = "內容類型";
 "source_endpoint" = "來源端點";
 "latest_frame" = "最新畫面";
+"rtp_audio_advertised" = "相機公告 RTP 音訊";
+"rtp_audio_available" = "RTP 音訊可用";
+"rtp_audio_requested" = "已要求 RTP 音訊";
+"rtp_audio_enabled" = "RTP 音訊已啟用";
+"rtp_audio_codec" = "RTP 音訊編碼";
+"rtp_audio_port" = "RTP 音訊連接埠";
+"rtp_audio_clock_rate" = "RTP 音訊時脈";
+"rtp_audio_channels" = "RTP 音訊聲道";
+"rtp_audio_packets" = "RTP 音訊封包";
+"rtp_audio_access_units" = "RTP 音訊存取單元";
+"rtp_audio_decoded" = "RTP 音訊已解碼單元";
+"rtp_audio_played_frames" = "RTP 音訊已播放取樣幀";
+"rtp_audio_dropped" = "RTP 音訊丟棄單元";
+"rtp_audio_last_packet" = "最新 RTP 音訊封包";
+"rtp_audio_last_pcm" = "最新 RTP 音訊 PCM";
+"rtp_audio_reason" = "RTP 音訊支援狀態";
+"rtp_audio_error" = "RTP 音訊錯誤";
 "platform" = "平台";
 "operating_system" = "作業系統";
 "local_network" = "本機網路";

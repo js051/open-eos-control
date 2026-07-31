@@ -3,6 +3,7 @@ import UIKit
 
 struct RootView: View {
     @EnvironmentObject private var camera: CameraAppState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var controlRotation = 0.0
 
     var body: some View {
@@ -39,7 +40,9 @@ struct RootView: View {
         .onAppear {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             updateControlRotation()
+            camera.setApplicationActive(scenePhase == .active)
         }
+        .onChange(of: scenePhase) { _, phase in camera.setApplicationActive(phase == .active) }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             updateControlRotation()
         }

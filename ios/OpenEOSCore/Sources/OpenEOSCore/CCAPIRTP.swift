@@ -7,6 +7,7 @@ public struct CCAPIRTPMediaDescription: Equatable, Sendable {
     public let codec: String
     public let clockRate: Int
     public let channels: Int?
+    public let formatParameters: [String: String]
 
     public init(
         kind: String,
@@ -14,7 +15,8 @@ public struct CCAPIRTPMediaDescription: Equatable, Sendable {
         payloadType: UInt8,
         codec: String,
         clockRate: Int,
-        channels: Int? = nil
+        channels: Int? = nil,
+        formatParameters: [String: String] = [:]
     ) {
         self.kind = kind
         self.port = port
@@ -22,6 +24,73 @@ public struct CCAPIRTPMediaDescription: Equatable, Sendable {
         self.codec = codec
         self.clockRate = clockRate
         self.channels = channels
+        self.formatParameters = formatParameters
+    }
+
+    public func formatParameter(_ name: String) -> String? {
+        formatParameters[name.lowercased()]
+    }
+}
+
+public struct CCAPILatmAudioSupport: Equatable, Sendable {
+    public let supported: Bool
+    public let reason: String
+
+    public init(supported: Bool, reason: String) {
+        self.supported = supported
+        self.reason = reason
+    }
+}
+
+public extension CCAPIRTPSessionDescription {
+    var latmAudioSupport: CCAPILatmAudioSupport {
+        guard audio?.port != video.port else {
+            return CCAPILatmAudioSupport(
+                supported: false,
+                reason: "Canon RTP audio and video share UDP port \(video.port); separate receivers are required."
+            )
+        }
+        return audio.latmAudioSupport
+    }
+}
+
+public extension Optional where Wrapped == CCAPIRTPMediaDescription {
+    var latmAudioSupport: CCAPILatmAudioSupport {
+        guard let media = self else {
+            return CCAPILatmAudioSupport(
+                supported: false,
+                reason: "Canon RTP SDP does not advertise an audio stream."
+            )
+        }
+        guard media.codec.caseInsensitiveCompare("MP4A-LATM") == .orderedSame else {
+            return CCAPILatmAudioSupport(
+                supported: false,
+                reason: "Canon RTP audio codec \(media.codec) is unsupported; expected MP4A-LATM."
+            )
+        }
+        guard media.clockRate == canonRTPAudioClockRate else {
+            return CCAPILatmAudioSupport(
+                supported: false,
+                reason: "Canon RTP MP4A-LATM clock rate \(media.clockRate) is unsupported; expected \(canonRTPAudioClockRate)."
+            )
+        }
+        switch media.formatParameter("cpresent") {
+        case nil, "", "1":
+            return CCAPILatmAudioSupport(
+                supported: true,
+                reason: "Canon RTP MP4A-LATM audio uses in-band StreamMuxConfig."
+            )
+        case "0":
+            return CCAPILatmAudioSupport(
+                supported: false,
+                reason: "Out-of-band MP4A-LATM configuration (cpresent=0) is not supported."
+            )
+        case let value?:
+            return CCAPILatmAudioSupport(
+                supported: false,
+                reason: "Canon RTP MP4A-LATM cpresent=\(value) is invalid."
+            )
+        }
     }
 }
 
@@ -48,6 +117,7 @@ public enum CCAPIRTPError: Error, Equatable, LocalizedError, Sendable {
     case invalidPayloadType(Int)
     case unsupportedH264ClockRate(Int)
     case invalidAudioPort(Int)
+    case invalidAudioPayloadType(Int)
 
     public var errorDescription: String? {
         switch self {
@@ -63,6 +133,8 @@ public enum CCAPIRTPError: Error, Equatable, LocalizedError, Sendable {
             "Canon RTP H.264 clock rate \(clockRate) is unsupported; expected 90000."
         case let .invalidAudioPort(port):
             "Canon RTP audio port \(port) is invalid."
+        case let .invalidAudioPayloadType(payloadType):
+            "Canon RTP audio payload type \(payloadType) is invalid."
         }
     }
 }
@@ -91,6 +163,23 @@ public enum CCAPIRTPSessionDescriptionParser {
                 channels: fields.count > 2 ? Int(fields[2]) : nil
             )
         }
+        var formatParameters: [Int: [String: String]] = [:]
+        for line in lines where line.lowercased().hasPrefix("a=fmtp:") {
+            guard let separator = line.firstIndex(of: " ") else { continue }
+            let payloadText = line[line.index(line.startIndex, offsetBy: 7)..<separator]
+            guard let payloadType = Int(payloadText) else { continue }
+            let parameters = line[line.index(after: separator)...]
+                .split(separator: ";")
+                .reduce(into: [String: String]()) { result, entry in
+                    let parts = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                    let key = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+                    guard !key.isEmpty else { return }
+                    result[key] = parts.count > 1
+                        ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                        : ""
+                }
+            formatParameters[payloadType] = parameters
+        }
 
         var media: [(kind: String, port: Int, payloadType: Int, mapping: RTPMapping)] = []
         for line in lines where line.lowercased().hasPrefix("m=") {
@@ -105,6 +194,10 @@ public enum CCAPIRTPSessionDescriptionParser {
                 payloadType = candidates.first {
                     mappings[$0]?.codec.caseInsensitiveCompare("H264") == .orderedSame
                 }
+            } else if kind == "audio" {
+                payloadType = candidates.first {
+                    mappings[$0]?.codec.caseInsensitiveCompare("MP4A-LATM") == .orderedSame
+                } ?? candidates.first { mappings[$0] != nil }
             } else {
                 payloadType = candidates.first { mappings[$0] != nil }
             }
@@ -128,13 +221,17 @@ public enum CCAPIRTPSessionDescriptionParser {
         let audioDescription: CCAPIRTPMediaDescription?
         if let audio = media.first(where: { $0.kind == "audio" }) {
             guard (1...65_535).contains(audio.port) else { throw CCAPIRTPError.invalidAudioPort(audio.port) }
+            guard (0...127).contains(audio.payloadType) else {
+                throw CCAPIRTPError.invalidAudioPayloadType(audio.payloadType)
+            }
             audioDescription = CCAPIRTPMediaDescription(
                 kind: audio.kind,
                 port: UInt16(audio.port),
                 payloadType: UInt8(audio.payloadType),
                 codec: audio.mapping.codec,
                 clockRate: audio.mapping.clockRate,
-                channels: audio.mapping.channels
+                channels: audio.mapping.channels,
+                formatParameters: formatParameters[audio.payloadType] ?? [:]
             )
         } else {
             audioDescription = nil
@@ -147,7 +244,8 @@ public enum CCAPIRTPSessionDescriptionParser {
                 payloadType: UInt8(video.payloadType),
                 codec: video.mapping.codec,
                 clockRate: video.mapping.clockRate,
-                channels: video.mapping.channels
+                channels: video.mapping.channels,
+                formatParameters: formatParameters[video.payloadType] ?? [:]
             ),
             audio: audioDescription
         )
@@ -347,7 +445,7 @@ public protocol CCAPIRTPSessionFactory: Sendable {
     ) async throws -> any CCAPIRTPSession
 }
 
-private struct RTPPacket {
+struct RTPPacket {
     let marker: Bool
     let payloadType: UInt8
     let sequenceNumber: UInt16
@@ -391,6 +489,7 @@ private struct RTPPacket {
 }
 
 private let h264ClockRate = 90_000
+let canonRTPAudioClockRate = 48_000
 private let rtpVersion: UInt8 = 2
 private let minimumRTPHeaderBytes = 12
 private let nalTypeMask: UInt8 = 0x1F
