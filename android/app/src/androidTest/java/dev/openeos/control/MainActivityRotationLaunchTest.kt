@@ -21,6 +21,7 @@ class MainActivityRotationLaunchTest {
                 scenario.onActivity { activity ->
                     assertEquals("0", shell("settings get system accelerometer_rotation"))
                     assertFalse(activity.isSystemAutoRotationCurrentlyEnabled())
+                    assertFalse(activity.isOrientationListenerRunning())
                     activity.handleDeviceOrientationChanged(90)
                     assertEquals(0, cameraRotationQuadrant(activity.currentControlRotationDegrees()))
                 }
