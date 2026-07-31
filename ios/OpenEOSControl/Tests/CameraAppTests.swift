@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import OpenEOSCore
@@ -50,6 +51,80 @@ final class CameraAppTests: XCTestCase {
                 netmask: "255.255.255.0"
             )
         )
+    }
+
+    func testRealLatmFixtureDecodesToPCMWithAppleAACDecoder() throws {
+        let extractor = CCAPILatmSampleExtractor()
+        let decoder = IOSAACDecoder()
+        let firstMux = Data(base64Encoded: "IAARkB/gvvAQAmMLsxmxkXGRwXGJgZACEQBGCMHA")!
+        let repeatedMux = Data(base64Encoded: "gxCIAjBGDgA=")!
+        var decodedFrames = 0
+
+        for index in 0..<32 {
+            let sample = try extractor.consume(
+                CCAPILatmRTPAccessUnit(
+                    audioMuxElement: index == 0 ? firstMux : repeatedMux,
+                    rtpTimestamp: UInt32(index * 1_024)
+                ),
+                presentationTimeMicroseconds: Int64(index * 21_333)
+            )
+            let pcm = try decoder.decode(sample)
+            if let pcm {
+                XCTAssertEqual(Int(pcm.format.sampleRate.rounded()), 48_000)
+                XCTAssertEqual(pcm.format.channelCount, 2)
+                decodedFrames += Int(pcm.frameLength)
+            }
+        }
+
+        XCTAssertGreaterThan(decodedFrames, 0)
+    }
+
+    func testCameraAudioStartsMutedAndIsNotPersisted() {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let state = CameraAppState(defaults: defaults)
+        XCTAssertFalse(state.rtpAudioRequested)
+        XCTAssertFalse(state.rtpAudioStatus.enabled)
+        XCTAssertNil(defaults.object(forKey: "rtp-audio-enabled"))
+    }
+
+    func testClosingReplacedRTPSessionDoesNotClearCurrentAudioStatus() async throws {
+        let recorder = RTPAudioStatusRecorder()
+        let controller = IOSCcapiRTPController()
+        controller.setEventHandler { event in
+            if case let .audioStatus(status) = event { recorder.record(status) }
+        }
+        let description = try CCAPIRTPSessionDescriptionParser.parse(
+            """
+            v=0
+            m=video 12000 RTP/AVP 103
+            a=rtpmap:103 H264/90000
+            m=audio 12010 RTP/AVP 106
+            a=rtpmap:106 MP4A-LATM/48000
+            a=fmtp:106 cpresent=1
+            """
+        )
+
+        let first = try await controller.makeSession(
+            description: description,
+            destinationAddress: "127.0.0.1"
+        )
+        let second = try await controller.makeSession(
+            description: description,
+            destinationAddress: "127.0.0.1"
+        )
+
+        XCTAssertEqual(recorder.last?.advertised, true)
+        XCTAssertEqual(recorder.last?.available, false)
+        XCTAssertEqual(recorder.last?.enabled, false)
+        await first.close()
+        XCTAssertEqual(recorder.last?.advertised, true)
+        XCTAssertEqual(recorder.last?.codec, "MP4A-LATM")
+
+        await second.close()
+        XCTAssertEqual(recorder.last, .inactive)
     }
 
     func testAdvancedSettingsAreFilteredByCaptureMode() {
@@ -322,5 +397,22 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(restored.bridgeURL, "http://192.168.1.20:18181")
         XCTAssertTrue(restored.bridgeToken.isEmpty)
         XCTAssertFalse(restored.canConnect)
+    }
+}
+
+private final class RTPAudioStatusRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var statuses: [IOSCcapiRTPAudioStatus] = []
+
+    var last: IOSCcapiRTPAudioStatus? {
+        lock.lock()
+        defer { lock.unlock() }
+        return statuses.last
+    }
+
+    func record(_ status: IOSCcapiRTPAudioStatus) {
+        lock.lock()
+        statuses.append(status)
+        lock.unlock()
     }
 }

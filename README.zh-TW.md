@@ -41,7 +41,7 @@ open-eos-control/
 - PC 控制介面透過浮點 WebGL2 3D texture 與明確的三線性插值，對 Bridge 解碼影格與本機 UVC／HDMI 視訊輸入套用匯入的 3D `.cube` LUT，再執行同一套有界 120x80 分析。監看輔助視窗也提供直方圖／亮度波形圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與變形鏡頭反擠壓，不會改動相機命令或偽造拍攝結果。本機視訊只替換取景畫面，Bridge session 仍持續控制相機；裝置 ID／名稱及 LUT 檔名／標題只留在記憶體且不會寫入診斷。相機媒體下載會顯示位元組進度並可取消；一般檔案使用串流式瀏覽器下載 fallback，未知大小或至少 64 MiB 的檔案則在瀏覽器支援時直接寫入具暫存保護的目的檔。
 
 LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast 資料列、`DOMAIN_MIN`／`DOMAIN_MAX` 或 `LUT_3D_INPUT_RANGE`、有限數值與三線性顯示插值。混合 1D／shaper LUT 或超過 16 MiB 的檔案會回報明確錯誤；專案不重新散布 Canon 或第三方 LUT。
-- Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率。Android 與 PC 也會處理相機公告、使用帶內設定的 RFC 6416 `MP4A-LATM/48000` 音訊，且都預設靜音；Android 使用 Media3 LATM 解析、`MediaCodec` 與 `AudioTrack`，PC 則將有界 PCM 送至 WebAudio。Android 只有在使用者明確開啟後才解碼播放，App 進入背景時會再次靜音；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用影像 decoder 時才會出現 RTP
+- Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率。三個平台也會處理相機公告、使用帶內設定的 RFC 6416 `MP4A-LATM/48000` 音訊，且都預設靜音；Android 使用 Media3 LATM 解析、`MediaCodec` 與 `AudioTrack`，iOS 使用有界 Swift LATM 解析器、`AVAudioConverter` 與 `AVAudioEngine`，PC 則將有界 PCM 送至 WebAudio。手機端只有在使用者明確開啟後才解碼播放，App 進入背景時會再次靜音；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用影像 decoder 時才會出現 RTP
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質及有界 B/A／M/G 白平衡偏移，並依規格以完整物件寫回
 - 可選跟隨系統、英文或繁體中文；相機公告的設定值會本地化顯示，寫入時仍保留精確的協定原值
 - 固定於底部的拍照／錄影模式選擇器會在快門旁持續顯示目前操作情境；只有相機公告可寫且相符的機身模式時才同步寫入。曝光轉盤在寫入期間會鎖定，完成後再對齊相機確認值，因此遭拒或重疊的請求不會看起來像已套用。
@@ -129,7 +129,7 @@ cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG 或相機公告的 RTP H.264 Live View、曝光設定 sheet、具真實位元組進度與取消操作的檔案式媒體傳輸、需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。RTP 會使用和相機同子網的 Wi-Fi IPv4、限定 Wi-Fi 的 Network.framework UDP listener、系統原生 sample-buffer 顯示、自動／JPEG／RTP 選擇與 1-30 FPS 顯示上限；自動模式若 RTP 啟動失敗，會先完整清理再退回 JPEG。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
+`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG 或相機公告的 RTP H.264 Live View、曝光設定 sheet、具真實位元組進度與取消操作的檔案式媒體傳輸、需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。RTP 會使用和相機同子網的 Wi-Fi IPv4、限定 Wi-Fi 的 Network.framework UDP listener、系統原生 sample-buffer 顯示、自動／JPEG／RTP 選擇與 1-30 FPS 顯示上限；若 SDP 另行公告帶內 `MP4A-LATM/48000`，App 會獨立接收並以 `AVAudioConverter`／`AVAudioEngine` 提供預設靜音、前景限定的相機音訊。自動模式若 RTP 啟動失敗，會先完整清理再退回 JPEG。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
 
 在具備 Xcode 與 XcodeGen 的 macOS 主機執行：
 
@@ -220,7 +220,7 @@ http://localhost:18080
 
 ## Roadmap
 
-- 保持 R6 Mark III 的 CCAPI 無線控制穩定，並驗證機身公告的 API 是否包含已實作的 Android／iOS／PC RTP H.264 路徑；若未公告就維持 JPEG 輪詢。
+- 保持 R6 Mark III 的 CCAPI 無線控制穩定，並驗證機身公告的 API 是否包含已實作的 Android／iOS／PC RTP H.264 與 AAC-LATM 路徑；若未公告就維持 JPEG 輪詢。
 - 在 R6 Mark III 真機驗證已實作的 Android USB/PTP 標準路徑、Canon EOS 相機時鐘同步、主機 RAM JPEG／RAW 傳輸與記憶卡拍攝，以及遠端快門、曝光、色彩、包圍曝光、錄影、進階設定、焦點移動與 Live View；後續只加入有可靠依據的其他專有設定或 Touch AF 命令。
 - 在 R6 Mark III 完成已實作 PC CCAPI、Android-to-Desktop-Bridge、持續 gphoto2 USB 預覽與 USB PC 控制介面的真機驗證，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
 - 以實體 iPhone 與 R6 Mark III 驗證已實作的 iOS SwiftUI CCAPI App、相機有公告時的 RTP，以及 Wi-Fi／行動網路共存；iOS USB/PTP 先列為研究線。

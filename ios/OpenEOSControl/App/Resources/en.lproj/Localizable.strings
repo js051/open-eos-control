@@ -191,6 +191,11 @@
 "media_preview_unavailable" = "The camera preview could not be displayed.";
 
 "monitoring_assists" = "Monitoring assists";
+"camera_audio_monitoring" = "Camera audio monitoring";
+"camera_audio_muted" = "Muted by default. Audio plays only while this switch is on and the app is active.";
+"camera_audio_unavailable" = "This RTP session does not provide supported camera audio.";
+"camera_audio_failed" = "Camera audio stopped. Open Debug for the exact receiver or decoder error.";
+"camera_audio_active_format" = "Active · %d Hz · %d ch";
 "lut_preview" = "3D LUT preview";
 "load_cube_lut" = "Load .cube LUT";
 "remove_cube_lut" = "Remove LUT";
@@ -250,6 +255,23 @@
 "content_type" = "Content type";
 "source_endpoint" = "Source endpoint";
 "latest_frame" = "Latest frame";
+"rtp_audio_advertised" = "RTP audio advertised";
+"rtp_audio_available" = "RTP audio available";
+"rtp_audio_requested" = "RTP audio requested";
+"rtp_audio_enabled" = "RTP audio enabled";
+"rtp_audio_codec" = "RTP audio codec";
+"rtp_audio_port" = "RTP audio port";
+"rtp_audio_clock_rate" = "RTP audio clock rate";
+"rtp_audio_channels" = "RTP audio channels";
+"rtp_audio_packets" = "RTP audio packets";
+"rtp_audio_access_units" = "RTP audio access units";
+"rtp_audio_decoded" = "RTP audio decoded units";
+"rtp_audio_played_frames" = "RTP audio played frames";
+"rtp_audio_dropped" = "RTP audio dropped units";
+"rtp_audio_last_packet" = "Latest RTP audio packet";
+"rtp_audio_last_pcm" = "Latest RTP audio PCM";
+"rtp_audio_reason" = "RTP audio support reason";
+"rtp_audio_error" = "RTP audio error";
 "platform" = "Platform";
 "operating_system" = "Operating system";
 "local_network" = "Local network";

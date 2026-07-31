@@ -96,6 +96,36 @@ struct DebugView: View {
                         value("content_type", camera.frameContentType ?? language.string("none"))
                         value("source_endpoint", camera.frameSourceURL?.absoluteString ?? language.string("none"), mono: true)
                         value("latest_frame", camera.lastFrameAt?.formatted(date: .abbreviated, time: .standard) ?? language.string("none"))
+                        value("rtp_audio_advertised", language.string(camera.rtpAudioStatus.advertised ? "yes" : "no"))
+                        value("rtp_audio_available", language.string(camera.rtpAudioStatus.available ? "yes" : "no"))
+                        value("rtp_audio_requested", language.string(camera.rtpAudioRequested ? "yes" : "no"))
+                        value("rtp_audio_enabled", language.string(camera.rtpAudioStatus.enabled ? "yes" : "no"))
+                        value("rtp_audio_codec", camera.rtpAudioStatus.codec ?? language.string("none"), mono: true)
+                        value("rtp_audio_port", camera.rtpAudioStatus.rtpPort.map { String($0) } ?? language.string("none"), mono: true)
+                        value("rtp_audio_clock_rate", camera.rtpAudioStatus.rtpClockRate.map { String($0) } ?? language.string("none"), mono: true)
+                        value("rtp_audio_channels", camera.rtpAudioStatus.channels.map { String($0) } ?? language.string("none"), mono: true)
+                        value("rtp_audio_packets", "\(camera.rtpAudioStatus.packetsReceived)", mono: true)
+                        value("rtp_audio_access_units", "\(camera.rtpAudioStatus.accessUnitsReceived)", mono: true)
+                        value("rtp_audio_decoded", "\(camera.rtpAudioStatus.decodedAccessUnits)", mono: true)
+                        value("rtp_audio_played_frames", "\(camera.rtpAudioStatus.playedSampleFrames)", mono: true)
+                        value("rtp_audio_dropped", "\(camera.rtpAudioStatus.droppedAccessUnits)", mono: true)
+                        value(
+                            "rtp_audio_last_packet",
+                            camera.rtpAudioStatus.lastPacketAt?.formatted(date: .omitted, time: .standard) ?? language.string("none"),
+                            mono: true
+                        )
+                        value(
+                            "rtp_audio_last_pcm",
+                            camera.rtpAudioStatus.lastPCMAt?.formatted(date: .omitted, time: .standard) ?? language.string("none"),
+                            mono: true
+                        )
+                        value("rtp_audio_reason", camera.rtpAudioStatus.reason ?? language.string("none"), mono: true)
+                        value(
+                            "rtp_audio_error",
+                            camera.rtpAudioStatus.error ?? language.string("none"),
+                            mono: true,
+                            warning: camera.rtpAudioStatus.error != nil
+                        )
                     }
 
                     debugSection("platform") {
