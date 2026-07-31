@@ -32,6 +32,7 @@ object CanonEosPropertyCode {
     const val WHITE_BALANCE_ADJUST_B = 0xD10C
     const val COLOR_SPACE = 0xD10F
     const val PICTURE_STYLE = 0xD110
+    const val CAMERA_TIME = 0xD113
     const val AUTO_POWER_OFF = 0xD114
     const val AVAILABLE_SHOTS = 0xD11B
     const val CAPTURE_DESTINATION = 0xD11C
@@ -42,6 +43,7 @@ object CanonEosPropertyCode {
     const val POWER_ZOOM_SPEED = 0xD149
     const val HIGH_ISO_NOISE_REDUCTION = 0xD178
     const val MOVIE_SERVO_AF = 0xD179
+    const val UTC_TIME = 0xD17C
     const val MULTI_ASPECT = 0xD194
     const val EVF_OUTPUT_DEVICE = 0xD1B0
     const val EVF_MODE = 0xD1B1
@@ -877,6 +879,7 @@ object CanonEosPtp {
         CanonEosPropertyCode.WHITE_BALANCE_ADJUST_B to
             CanonEosPropertySpec(4, whiteBalanceAdjustLabels, signed = true),
         CanonEosPropertyCode.COLOR_SPACE to CanonEosPropertySpec(2, colorSpaceLabels),
+        CanonEosPropertyCode.CAMERA_TIME to CanonEosPropertySpec(4, emptyMap()),
         CanonEosPropertyCode.MULTI_ASPECT to CanonEosPropertySpec(4, aspectRatioLabels),
         CanonEosPropertyCode.POWER_ZOOM_SPEED to CanonEosPropertySpec(4, powerZoomSpeedLabels),
         CanonEosPropertyCode.AUTO_POWER_OFF to CanonEosPropertySpec(
@@ -890,6 +893,7 @@ object CanonEosPtp {
         CanonEosPropertyCode.PICTURE_STYLE to CanonEosPropertySpec(1, pictureStyleLabels),
         CanonEosPropertyCode.HIGH_ISO_NOISE_REDUCTION to CanonEosPropertySpec(2, highIsoNoiseReductionLabels),
         CanonEosPropertyCode.MOVIE_SERVO_AF to CanonEosPropertySpec(4, offOnLabels),
+        CanonEosPropertyCode.UTC_TIME to CanonEosPropertySpec(4, emptyMap()),
         CanonEosPropertyCode.EVF_RECORD_STATUS to CanonEosPropertySpec(2, movieRecordTargetLabels),
         CanonEosPropertyCode.LIVE_VIEW_AF_SYSTEM to CanonEosPropertySpec(4, afMethodLabels),
         CanonEosPropertyCode.CONTINUOUS_AF_MODE to CanonEosPropertySpec(4, offOnLabels),

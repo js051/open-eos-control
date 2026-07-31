@@ -5,16 +5,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStream
+import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.abs
 
 class UsbPtpCameraBackend(
     override val connection: CameraConnection.AndroidUsbPtp,
     private val transportFactory: PtpTransportFactory,
     private val hostCaptureStore: UsbHostCaptureStore? = null,
+    private val currentEpochSeconds: () -> Long = { Instant.now().epochSecond },
 ) : CameraControlBackend {
     override val transport: CameraTransport = CameraTransport.USB_PTP
     override val prefersBitmapLiveViewFrames: Boolean = true
@@ -206,6 +210,7 @@ class UsbPtpCameraBackend(
             info,
             canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).availableValues,
         )
+        val supportsCanonClockSync = canonClockPropertyCode(info) != null
         val supportsHostMedia = hostCaptureStore != null
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
@@ -240,6 +245,7 @@ class UsbPtpCameraBackend(
             }
             if (whiteBalance.isNotEmpty()) add(CameraFeature.WHITE_BALANCE_CONTROL)
             if (advancedSettings.isNotEmpty()) add(CameraFeature.ADVANCED_SETTINGS)
+            if (supportsCanonClockSync) add(CameraFeature.CAMERA_CLOCK_SYNC)
         }
         val candidates = setOf(
             CameraFeature.BATTERY_STATUS,
@@ -315,7 +321,8 @@ class UsbPtpCameraBackend(
                     CameraFeature.MEDIA_PREVIEW to
                         "Uses bounded standard PTP GetObject or app-private host files only for complete JPEG/PNG images up to 32 MiB.",
                     CameraFeature.CAMERA_CLOCK_SYNC to
-                        "No verified direct Android USB/PTP camera-time write and readback flow is implemented yet.",
+                        "Requires an advertised Canon EOS UTC/CameraTime event plus SetDevicePropValueEx; " +
+                        "success requires a matching post-write event readback.",
                     CameraFeature.MEDIA_DOWNLOAD to
                         "Uses standard GetObject with bounded USB reads or streams a completed app-private host capture.",
                     CameraFeature.MEDIA_DELETE to
@@ -374,6 +381,51 @@ class UsbPtpCameraBackend(
             delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
         }
         return CameraEvent()
+    }
+
+    override suspend fun syncCameraClock(): CameraStatus {
+        val info = requireDeviceInfo()
+        refreshCanonPropertyState(info)
+        val propertyCode = canonClockPropertyCode(info)
+            ?: unsupported<Int>(CameraFeature.CAMERA_CLOCK_SYNC)
+        val requested = currentEpochSeconds()
+        if (requested !in 0L..UINT32_MAX) {
+            throw PtpProtocolException("Current Unix time $requested does not fit the Canon EOS UINT32 clock property.")
+        }
+
+        ensureCanonRemoteMode()
+        var lastReadback: Long? = null
+        val verified = canonEventMutex.withLock {
+            drainCanonEventsLocked()
+            requireSession().executeDataOutOperation(
+                operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                payload = CanonEosPtp.uint32PropertyPayload(propertyCode, requested),
+            )
+            withTimeoutOrNull(CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS) {
+                while (true) {
+                    val payload = drainCanonEventsLocked()
+                    CanonEosPtp.propertyUpdates(payload)
+                        .lastOrNull { it.propertyCode == propertyCode && it.currentValue != null }
+                        ?.currentValue
+                        ?.let { readback ->
+                            lastReadback = readback
+                            if (abs(readback - requested) <= CANON_CLOCK_SYNC_TOLERANCE_SECONDS) {
+                                return@withTimeoutOrNull readback
+                            }
+                        }
+                    delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+                }
+            }
+        }
+        if (verified == null) {
+            throw PtpProtocolException(
+                "Canon EOS accepted the clock write but did not report a matching ${propertyCode.ptpHexCode()} readback " +
+                    "within ${CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS / 1_000} seconds " +
+                    "(requested=$requested, last=${lastReadback ?: "none"})."
+            )
+        }
+        observedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC)
+        return status()
     }
 
     override suspend fun captureStill(): CameraStatus {
@@ -1356,6 +1408,12 @@ class UsbPtpCameraBackend(
         canonProperties[propertyCode] ?: CanonEosPropertyState()
     }
 
+    private fun canonClockPropertyCode(info: PtpDeviceInfo): Int? {
+        if (!CanonEosPtp.supportsPropertyControl(info)) return null
+        return listOf(CanonEosPropertyCode.UTC_TIME, CanonEosPropertyCode.CAMERA_TIME)
+            .firstOrNull { canonPropertyState(it).currentValue != null }
+    }
+
     private fun batteryPropertyJson(level: Int?): String = JSONObject()
         .put("kind", "ptp-device-property")
         .put("code", "0x5001")
@@ -1624,6 +1682,8 @@ private const val MAX_USB_MEDIA_ITEMS = 500
 private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
+private const val CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS = 3_000L
+private const val CANON_CLOCK_SYNC_TOLERANCE_SECONDS = 10L
 private const val CANON_EVENT_LONG_POLL_ATTEMPTS = 10
 private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L
 private const val CANON_PROPERTY_DISCOVERY_ATTEMPTS = 10

@@ -250,6 +250,103 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun canonClockSyncUsesAdvertisedUtcTimeAndRequiresMatchingEventReadback() = runTest {
+        val transport = CanonEosScriptedTransport()
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+            currentEpochSeconds = { TEST_CLOCK_EPOCH_SECONDS },
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        val status = backend.syncCameraClock()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_CLOCK_SYNC))
+        assertTrue(status.connected)
+        assertTrue(CameraFeature.CAMERA_CLOCK_SYNC in backend.observedFeatures())
+        assertArrayEquals(
+            CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.UTC_TIME, TEST_CLOCK_EPOCH_SECONDS),
+            transport.sentContainers.single {
+                it.type == PtpContainerType.DATA &&
+                    it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
+                    it.parameters().getOrNull(1)?.toInt() == CanonEosPropertyCode.UTC_TIME
+            }.payload,
+        )
+        backend.close()
+    }
+
+    @Test
+    fun canonClockSyncFallsBackToAdvertisedCameraTime() = runTest {
+        val transport = CanonEosScriptedTransport(advertisedClockProperty = CanonEosPropertyCode.CAMERA_TIME)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-camera-time"),
+            transportFactory = PtpTransportFactory { transport },
+            currentEpochSeconds = { TEST_CLOCK_EPOCH_SECONDS },
+        )
+        backend.initialize()
+
+        assertTrue(backend.capabilities().matrix.supports(CameraFeature.CAMERA_CLOCK_SYNC))
+        backend.syncCameraClock()
+
+        assertTrue(transport.hasCanonPropertyWrite(CanonEosPropertyCode.CAMERA_TIME))
+        assertFalse(transport.hasCanonPropertyWrite(CanonEosPropertyCode.UTC_TIME))
+        backend.close()
+    }
+
+    @Test
+    fun canonClockSyncIsHiddenWithoutAnAdvertisedClockProperty() = runTest {
+        val transport = CanonEosScriptedTransport(advertisedClockProperty = null)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-no-clock"),
+            transportFactory = PtpTransportFactory { transport },
+            currentEpochSeconds = { TEST_CLOCK_EPOCH_SECONDS },
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        val failure = runCatching { backend.syncCameraClock() }.exceptionOrNull()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.CAMERA_CLOCK_SYNC))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.CAMERA_CLOCK_SYNC))
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(transport.hasCanonPropertyWrite(CanonEosPropertyCode.UTC_TIME))
+        backend.close()
+    }
+
+    @Test
+    fun canonClockSyncDoesNotClaimObservationAfterRejectedOrMismatchedWrite() = runTest {
+        val rejectedTransport = CanonEosScriptedTransport(rejectPropertyCode = CanonEosPropertyCode.UTC_TIME)
+        val rejectedBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-clock-rejected"),
+            transportFactory = PtpTransportFactory { rejectedTransport },
+            currentEpochSeconds = { TEST_CLOCK_EPOCH_SECONDS },
+        )
+        rejectedBackend.initialize()
+
+        val rejected = runCatching { rejectedBackend.syncCameraClock() }.exceptionOrNull()
+
+        assertTrue(rejected is PtpResponseException)
+        assertFalse(CameraFeature.CAMERA_CLOCK_SYNC in rejectedBackend.observedFeatures())
+        rejectedBackend.close()
+
+        val mismatchedTransport = CanonEosScriptedTransport(clockReadbackOffsetSeconds = 60)
+        val mismatchedBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-clock-mismatch"),
+            transportFactory = PtpTransportFactory { mismatchedTransport },
+            currentEpochSeconds = { TEST_CLOCK_EPOCH_SECONDS },
+        )
+        mismatchedBackend.initialize()
+
+        val mismatched = runCatching { mismatchedBackend.syncCameraClock() }.exceptionOrNull()
+
+        assertTrue(mismatched is PtpProtocolException)
+        assertTrue(mismatched?.message.orEmpty().contains("last=${TEST_CLOCK_EPOCH_SECONDS + 60}"))
+        assertFalse(CameraFeature.CAMERA_CLOCK_SYNC in mismatchedBackend.observedFeatures())
+        mismatchedBackend.close()
+    }
+
+    @Test
     fun canonEventPollingAppliesPropertyUpdatesAndReturnsRefreshHints() = runTest {
         val transport = CanonEosScriptedTransport(
             scriptedEvents = listOf(
@@ -1826,6 +1923,8 @@ class UsbPtpCameraBackendTest {
         private val delayAfterFullReleaseMillis: Long = 0L,
         private val currentStorageId: Long? = null,
         private val storageDevices: MutableList<StorageFixture> = mutableListOf(defaultStorageFixture()),
+        private val advertisedClockProperty: Int? = CanonEosPropertyCode.UTC_TIME,
+        private val clockReadbackOffsetSeconds: Int = 0,
         scriptedEvents: List<ByteArray> = emptyList(),
     ) : PtpTransport {
         private val incoming = ArrayDeque<PtpContainer>()
@@ -1837,6 +1936,7 @@ class UsbPtpCameraBackendTest {
         private var fullPressActive = false
         private var initialPropertyEventsPending = true
         private var moviePropertyEventPending: Int? = null
+        private var clockPropertyEventPending: Pair<Int, Int>? = null
 
         override suspend fun send(container: PtpContainer) {
             sentContainers += container
@@ -1911,10 +2011,15 @@ class UsbPtpCameraBackendTest {
                             advertiseCardCaptureDestination,
                             availableShots,
                             currentStorageId,
+                            advertisedClockProperty,
                         ).also {
                             initialPropertyEventsPending = false
                         }
                         pendingScriptedEvents.isNotEmpty() -> pendingScriptedEvents.removeFirst()
+                        clockPropertyEventPending != null -> clockPropertyEventPending!!.let { (propertyCode, value) ->
+                            clockPropertyEventPending = null
+                            eosPropertyValue(propertyCode, value) + eosBlock(0, byteArrayOf())
+                        }
                         moviePropertyValue != null ->
                             (eosPropertyValue(CanonEosPropertyCode.EVF_RECORD_STATUS, moviePropertyValue) +
                                 eosBlock(0, byteArrayOf())).also {
@@ -1955,6 +2060,9 @@ class UsbPtpCameraBackendTest {
                         } else {
                             if (propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && value != null) {
                                 moviePropertyEventPending = value and 0xFFFF
+                            }
+                            if (propertyCode != null && propertyCode == advertisedClockProperty && value != null) {
+                                clockPropertyEventPending = propertyCode to (value + clockReadbackOffsetSeconds)
                             }
                             incoming += ok(transaction)
                         }
@@ -2143,6 +2251,7 @@ class UsbPtpCameraBackendTest {
         advertiseCardCaptureDestination: Boolean,
         availableShots: Int,
         currentStorageId: Long?,
+        advertisedClockProperty: Int?,
     ): ByteArray {
         var payload = eosPropertyValue(CanonEosPropertyCode.ISO_SPEED, 0x58) +
             eosAvailableValues(CanonEosPropertyCode.ISO_SPEED, 0x48, 0x58, 0x60) +
@@ -2160,6 +2269,9 @@ class UsbPtpCameraBackendTest {
         )
         currentStorageId?.let { storageId ->
             payload += eosPropertyValue(CanonEosPropertyCode.CURRENT_STORAGE, storageId.toInt())
+        }
+        advertisedClockProperty?.let { propertyCode ->
+            payload += eosPropertyValue(propertyCode, TEST_CLOCK_EPOCH_SECONDS.toInt())
         }
         if (advertiseAdvancedSettings) {
             payload += eosPropertyValue(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0)
@@ -2338,6 +2450,7 @@ class UsbPtpCameraBackendTest {
 
     companion object {
         private const val STORAGE_ID = 0x00010001L
+        private const val TEST_CLOCK_EPOCH_SECONDS = 1_700_000_000L
         private const val OBJECT_HANDLE = 0x42L
         private val OBJECT_BYTES = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 3, 3, 7, 9, 0xFF.toByte(), 0xD9.toByte())
         private val THUMBNAIL_BYTES = byteArrayOf(
