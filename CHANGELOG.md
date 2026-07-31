@@ -6,8 +6,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 - Added capability-gated camera date/time synchronization across Android, iOS, and the Desktop Bridge. Direct CCAPI writes Canon's RFC 1123 value and DST flag, then verifies a GET readback; USB Bridge sessions use only writable libgphoto2 `syncdatetimeutc`/`syncdatetime` actions advertised by the connected camera.
 - Added English and Traditional Chinese clock controls, success timestamps, diagnostics, simulator state, and deterministic CCAPI/Bridge/libgphoto2 contract coverage.
-- Kept the Android orientation listener active only while the camera Activity is in the foreground, but hard-gated every posture sample through the live system auto-rotate setting so a missed Quick Settings notification cannot leave controls at a stale angle.
-- Replaced full-view and long-sheet rotation with bounded readable HUD notices and a square quarter-turn settings viewport, preserving complete English and Traditional Chinese copy without moving the camera layout.
+- Snapshot the Android system auto-rotate policy before the camera orientation listener starts, then apply observer and focus-transition changes without letting posture samples reinterpret platform synchronization values as user actions.
+- Kept compact HUD atoms in fixed slots while remeasuring long quarter-turn settings content against swapped axes across the full fixed panel, preserving complete English and Traditional Chinese copy without discarding the long axis.
 
 ## [0.1.6] - 2026-07-30
 
