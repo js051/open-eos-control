@@ -1376,8 +1376,8 @@ internal fun offlinePreviewReadableSize(
     val userWidth = if (quarterTurn) availableHeight else availableWidth
     val userHeight = if (quarterTurn) availableWidth else availableHeight
     return DpSize(
-        width = minOf(if (quarterTurn) 480.dp else 320.dp, (userWidth - 32.dp).coerceAtLeast(1.dp)),
-        height = minOf(if (quarterTurn) 148.dp else 176.dp, (userHeight - 32.dp).coerceAtLeast(1.dp)),
+        width = minOf(if (quarterTurn) 520.dp else 320.dp, (userWidth - 32.dp).coerceAtLeast(1.dp)),
+        height = minOf(176.dp, (userHeight - 32.dp).coerceAtLeast(1.dp)),
     )
 }
 
@@ -1528,13 +1528,24 @@ private fun OfflinePreviewCopy(quarterTurn: Boolean) {
         .testTag("offline-preview-content")
     Box(modifier) {
         if (quarterTurn) {
-            Row(
+            Column(
                 modifier = Modifier.fillMaxSize().testTag("offline-preview-inline"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
             ) {
-                OfflinePreviewIcon(36.dp)
-                OfflinePreviewText(title, hint, TextAlign.Start)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                ) {
+                    OfflinePreviewIcon(32.dp)
+                    OfflinePreviewTitle(title, TextAlign.Start)
+                }
+                OfflinePreviewHint(
+                    value = hint,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         } else {
             Column(
@@ -1553,21 +1564,6 @@ private fun OfflinePreviewCopy(quarterTurn: Boolean) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun RowScope.OfflinePreviewText(
-    title: String,
-    hint: String,
-    textAlign: TextAlign,
-) {
-    Column(
-        modifier = Modifier.weight(1f),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        OfflinePreviewTitle(title, textAlign)
-        OfflinePreviewHint(hint, textAlign)
     }
 }
 
@@ -1596,7 +1592,11 @@ private fun OfflinePreviewTitle(value: String, textAlign: TextAlign) {
 }
 
 @Composable
-private fun OfflinePreviewHint(value: String, textAlign: TextAlign) {
+private fun OfflinePreviewHint(
+    value: String,
+    textAlign: TextAlign,
+    modifier: Modifier = Modifier,
+) {
     CameraFittedCopy(
         value = value,
         color = AppSubtleText,
@@ -1606,6 +1606,7 @@ private fun OfflinePreviewHint(value: String, textAlign: TextAlign) {
         maxLines = 3,
         textAlign = textAlign,
         testTag = "offline-preview-hint",
+        modifier = modifier,
     )
 }
 
@@ -1619,6 +1620,7 @@ private fun CameraFittedCopy(
     maxLines: Int,
     textAlign: TextAlign,
     testTag: String,
+    modifier: Modifier = Modifier,
 ) {
     val configuration = LocalConfiguration.current
     val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
@@ -1638,7 +1640,7 @@ private fun CameraFittedCopy(
         softWrap = true,
         overflow = TextOverflow.Clip,
         textAlign = textAlign,
-        modifier = Modifier.testTag(if (unresolvedOverflow) "$testTag-overflow" else testTag),
+        modifier = modifier.testTag(if (unresolvedOverflow) "$testTag-overflow" else testTag),
         onTextLayout = { result ->
             when {
                 result.hasVisualOverflow && fontSize > minFontSize -> {
