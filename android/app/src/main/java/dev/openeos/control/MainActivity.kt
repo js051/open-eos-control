@@ -27,10 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoRotationObserver: ContentObserver
     private var activityStarted = false
     private var orientationListenerEnabled = false
-    private var firstStartCompleted = false
     private var windowHasFocus = false
-    private var rotationSettingAtFocusLoss: Boolean? = null
-    private var rotationSettingAtStop: Boolean? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,43 +64,24 @@ class MainActivity : AppCompatActivity() {
             false,
             autoRotationObserver,
         )
-        if (firstStartCompleted) {
-            val before = rotationSettingAtStop
-            val current = isSystemAutoRotationEnabled()
-            if (before != null && before != current) {
-                applySystemAutoRotationSetting(current)
-            } else {
-                applySystemAutoRotationSetting(systemAutoRotationEnabled.value)
-            }
-        } else {
-            firstStartCompleted = true
-            applySystemAutoRotationSetting(systemAutoRotationEnabled.value)
-        }
-        rotationSettingAtStop = null
+        refreshSystemAutoRotationSetting()
     }
 
     override fun onResume() {
         super.onResume()
+        refreshSystemAutoRotationSetting()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!::orientationListener.isInitialized) return
         windowHasFocus = hasFocus
-        if (!hasFocus) {
-            rotationSettingAtFocusLoss = isSystemAutoRotationEnabled()
-            return
-        }
-        val before = rotationSettingAtFocusLoss
-        rotationSettingAtFocusLoss = null
-        val current = isSystemAutoRotationEnabled()
-        if (before != null && before != current) {
-            applySystemAutoRotationSetting(current)
+        if (hasFocus) {
+            refreshSystemAutoRotationSetting()
         }
     }
 
     override fun onStop() {
-        rotationSettingAtStop = isSystemAutoRotationEnabled()
         activityStarted = false
         setOrientationListenerEnabled(false)
         contentResolver.unregisterContentObserver(autoRotationObserver)
@@ -131,7 +109,10 @@ class MainActivity : AppCompatActivity() {
 
     internal fun handleDeviceOrientationChanged(orientation: Int) {
         if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return
-        val systemEnabled = systemAutoRotationEnabled.value
+        val systemEnabled = isSystemAutoRotationEnabled()
+        if (systemEnabled != systemAutoRotationEnabled.value) {
+            applySystemAutoRotationSetting(systemEnabled)
+        }
         orientationPolicy.onSensorOrientation(orientation, systemEnabled)
         setOrientationListenerEnabled(
             orientationPolicy.shouldListen(activityStarted, orientationListener.canDetectOrientation()),
@@ -152,8 +133,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onSystemRotationSettingObserved() {
-        if (!windowHasFocus) return
-        applySystemAutoRotationSetting(isSystemAutoRotationEnabled())
+        if (activityStarted && windowHasFocus) {
+            refreshSystemAutoRotationSetting()
+        }
     }
 
     private fun updateControlRotation() {

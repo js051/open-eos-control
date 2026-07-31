@@ -70,6 +70,31 @@ class MainActivityOrientationTest {
         }
     }
 
+    @Test
+    fun aPostureSampleClearsAStaleEnabledPolicyWhileQuickSettingsOwnsFocus() {
+        val original = shell("cmd window user-rotation")
+        try {
+            setSystemAutoRotation(true)
+            compose.runOnIdle {
+                compose.activity.refreshSystemAutoRotationSetting()
+                compose.activity.handleDeviceOrientationChanged(90)
+                assertEquals(3, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
+                compose.activity.onWindowFocusChanged(false)
+            }
+
+            setSystemAutoRotation(false)
+            compose.runOnIdle {
+                compose.activity.handleDeviceOrientationChanged(270)
+                assertEquals(false, compose.activity.isSystemAutoRotationCurrentlyEnabled())
+                assertEquals(0, cameraRotationQuadrant(compose.activity.currentControlRotationDegrees()))
+            }
+        } finally {
+            compose.runOnIdle { compose.activity.onWindowFocusChanged(true) }
+            restoreSystemRotation(original)
+            compose.runOnIdle { compose.activity.refreshSystemAutoRotationSetting() }
+        }
+    }
+
     private fun setSystemAutoRotation(enabled: Boolean) {
         val expected = if (enabled) "1" else "0"
         shell(if (enabled) "cmd window user-rotation free" else "cmd window user-rotation lock 0")
