@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -84,6 +85,7 @@ import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
+import java.util.Date
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.Dispatchers
@@ -1061,12 +1063,53 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 if (state.supports(CameraFeature.FOCUS_DRIVE)) {
                     ManualFocusDriveControls(state, actions)
                 }
+                if (state.supports(CameraFeature.CAMERA_CLOCK_SYNC)) {
+                    val context = LocalContext.current
+                    val syncedAt = state.lastClockSyncAtMillis?.let {
+                        DateFormat.getTimeFormat(context).format(Date(it))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.sync_camera_clock),
+                                color = AppText,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                syncedAt?.let { stringResource(R.string.camera_clock_synced_at, it) }
+                                    ?: stringResource(R.string.sync_camera_clock_hint),
+                                color = if (syncedAt == null) AppSubtleText else AppSuccess,
+                            )
+                        }
+                        Button(
+                            onClick = actions.syncCameraClock,
+                            enabled = !state.isBusy(CameraOperation.CLOCK),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AppSurfaceHigh,
+                                contentColor = AppText,
+                            ),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("sync-camera-clock"),
+                        ) {
+                            Icon(
+                                painterResource(LucideR.drawable.lucide_ic_clock),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.sync_now))
+                        }
+                    }
+                }
                 if (
                     settings.isEmpty() &&
                     !state.supports(CameraFeature.CLICK_WHITE_BALANCE) &&
                     !state.supports(CameraFeature.AUTOFOCUS) &&
                     !state.supports(CameraFeature.SHUTTER_HALF_PRESS) &&
-                    !state.supports(CameraFeature.FOCUS_DRIVE)
+                    !state.supports(CameraFeature.FOCUS_DRIVE) &&
+                    !state.supports(CameraFeature.CAMERA_CLOCK_SYNC)
                 ) {
                     Text(stringResource(R.string.no_settings), color = AppSubtleText)
                 }

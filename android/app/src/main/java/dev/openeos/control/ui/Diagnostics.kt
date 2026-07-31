@@ -120,6 +120,7 @@ fun buildDiagnosticReport(
         appendLine("storageFreeBytes=${state.status?.storageFreeBytes ?: "unknown"}")
         appendLine("storageFreeImages=${state.status?.storageFreeImages ?: "unknown"}")
         appendLine("storageDevices=${state.status?.storageDeviceCount ?: "unknown"}")
+        appendLine("lastClockSyncAtMillis=${state.lastClockSyncAtMillis ?: "none"}")
         appendLine(
             "transportDetails=${state.status?.rawTransportJson?.ifBlank { "unknown" }?.let { redactDiagnosticText(it, state) } ?: "unknown"}"
         )

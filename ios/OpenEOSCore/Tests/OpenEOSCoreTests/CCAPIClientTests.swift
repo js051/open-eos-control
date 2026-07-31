@@ -18,6 +18,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/settings/stillimagequality","put":true},
         {"path":"/shooting/settings/wbshift","put":true},
         {"path":"/shooting/settings/meteringmode","put":true},
+        {"path":"/functions/datetime","get":true,"put":true},
         {"path":"/shooting/control/shutterbutton","post":true},
         {"path":"/shooting/control/shutterbutton/manual","put":true},
         {"path":"/shooting/control/af","post":true},
@@ -91,6 +92,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaPreview))
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.mediaPreview))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusDrive))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.cameraClockSync))
         XCTAssertEqual(snapshot.capabilities.evidence.source, "GET /ccapi")
         XCTAssertEqual(snapshot.capabilities.evidence.protocolVersions, ["ver100"])
         XCTAssertTrue(
@@ -433,6 +435,84 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(json["af"] as? Bool, true)
         let capabilities = try await client.capabilities()
         XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.stillCapture))
+    }
+
+    func testClockSyncUsesCanonRFC1123PayloadAndVerifiesReadback() async throws {
+        let transport = MockCameraHTTPTransport()
+        let now = Date()
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+        let cameraClock = formatter.string(from: now)
+        let daylight = TimeZone.current.isDaylightSavingTime(for: now)
+        let response = "{\"datetime\":\"\(cameraClock)\",\"dst\":\(daylight)}"
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
+        await transport.enqueueJSON(method: "PUT", path: "/ccapi/ver100/functions/datetime", body: response)
+        await transport.enqueueJSON(path: "/ccapi/ver100/functions/datetime", body: response)
+        await enqueueStatus(on: transport)
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        let status = try await client.syncCameraClock()
+
+        XCTAssertTrue(capabilities.matrix.supports(.cameraClockSync))
+        XCTAssertTrue(status.connected)
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first { $0.path.hasSuffix("/functions/datetime") && $0.method == "PUT" })
+        let body = try XCTUnwrap(write.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let rawDateTime = try XCTUnwrap(json["datetime"] as? String)
+        XCTAssertNotNil(
+            rawDateTime.range(
+                of: #"^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$"#,
+                options: .regularExpression
+            )
+        )
+        XCTAssertNotNil(json["dst"] as? Bool)
+        let observedCapabilities = try await client.capabilities()
+        XCTAssertTrue(observedCapabilities.evidence.observedFeatures.contains(.cameraClockSync))
+    }
+
+    func testClockSyncDoesNotCombineReadAndWriteAcrossAPIVersions() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: """
+            {
+              "ver100": [
+                {"path":"/shooting/settings","get":true},
+                {"path":"/functions/datetime","get":true}
+              ],
+              "ver110": [{"path":"/functions/datetime","put":true}]
+            }
+            """
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertFalse(capabilities.matrix.supports(.cameraClockSync))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.cameraClockSync))
+        do {
+            _ = try await client.syncCameraClock()
+            XCTFail("Expected unsupported camera clock synchronization")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.cameraClockSync))
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 2)
     }
 
     func testUnadvertisedCaptureFailsWithoutSendingACommand() async throws {

@@ -197,6 +197,10 @@ def create_app(
     def set_camera_setting(session_id: str, key: str, payload: SettingUpdate) -> CameraStatus:
         return manager.get(session_id).set_setting(key, payload.value)
 
+    @router.post("/session/{session_id}/clock/sync", response_model=CameraStatus)
+    def sync_camera_clock(session_id: str) -> CameraStatus:
+        return manager.get(session_id).sync_camera_clock()
+
     @router.post("/session/{session_id}/capture/still", response_model=CameraStatus)
     def capture_still(session_id: str) -> CameraStatus:
         return manager.get(session_id).capture_still()

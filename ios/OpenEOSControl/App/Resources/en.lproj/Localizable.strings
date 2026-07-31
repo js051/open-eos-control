@@ -82,6 +82,10 @@
 "auto_refresh" = "Auto refresh";
 "composition_grid" = "Composition grid";
 "no_settings" = "No settings are available for this mode.";
+"sync_camera_clock" = "Camera date and time";
+"sync_camera_clock_hint" = "Set the camera clock and time zone from this device, then verify the camera readback.";
+"camera_clock_synced_at" = "Verified at %@";
+"sync_now" = "Sync now";
 "choose_setting" = "Choose setting value";
 
 "setting_af_method" = "AF method";

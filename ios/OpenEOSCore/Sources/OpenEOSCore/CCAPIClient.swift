@@ -316,13 +316,14 @@ public actor CCAPIClient {
         }
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
         if eventPollingOperations() != nil { supported.insert(.eventPolling) }
+        if cameraClockOperations() != nil { supported.insert(.cameraClockSync) }
 
         let allPlanned: Set<CameraFeature> = [
             .eventPolling, .liveViewRTP, .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress,
             .videoRecording, .tapFocus,
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaDelete,
+            .mediaDelete, .cameraClockSync,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
         return CameraCapabilities(
@@ -337,6 +338,7 @@ public actor CCAPIClient {
                     .tapFocus: "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
                     .clickWhiteBalance: "The camera must advertise POST clickwb and detailed Live View metadata for Click WB.",
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
+                    .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                 ]
             ),
             liveView: LiveViewCapabilities(
@@ -442,6 +444,41 @@ public actor CCAPIClient {
             )
         }
         observedFeatures.insert(.stillCapture)
+        return try await status()
+    }
+
+    public func syncCameraClock() async throws -> CameraStatus {
+        try await ensureInitialized()
+        if resolvedMode == .simulator {
+            _ = try await requestJSON(path: "/ccapi/clock/sync", method: .post, json: [:])
+            observedFeatures.insert(.cameraClockSync)
+            return try await status()
+        }
+
+        guard let operations = cameraClockOperations() else {
+            throw CCAPIError.unsupported(.cameraClockSync)
+        }
+        let requested = Date()
+        let timeZone = TimeZone.current
+        let formatter = Self.canonDateTimeFormatter(timeZone: timeZone)
+        let daylight = timeZone.isDaylightSavingTime(for: requested)
+        let payload: JSONDictionary = [
+            "datetime": formatter.string(from: requested),
+            "dst": daylight,
+        ]
+        _ = try Self.parseCameraClock(
+            try await requestJSON(path: operations.write.path, method: .put, json: payload)
+        )
+        let reported = try Self.parseCameraClock(
+            try await requestJSON(path: operations.read.path)
+        )
+        guard abs(reported.date.timeIntervalSince(requested)) <= 10,
+              reported.daylight == daylight else {
+            throw CCAPIError.invalidResponse(
+                "The camera did not report the requested date, time, and daylight-saving state."
+            )
+        }
+        observedFeatures.insert(.cameraClockSync)
         return try await status()
     }
 
@@ -1115,6 +1152,18 @@ public actor CCAPIClient {
         return nil
     }
 
+    private func cameraClockOperations() -> (read: CCAPIOperation, write: CCAPIOperation)? {
+        let reads = operations
+            .filter { $0.method == .get && $0.path.hasSuffix("/functions/datetime") }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for read in reads {
+            let prefix = String(read.path.dropLast("/functions/datetime".count))
+            let write = CCAPIOperation(method: .put, path: "\(prefix)/functions/datetime")
+            if operations.contains(write) { return (read, write) }
+        }
+        return nil
+    }
+
     private func manualShutterOperation() -> CCAPIOperation? {
         operation(.put, suffix: "/shooting/control/shutterbutton/manual")
             ?? operation(.post, suffix: "/shooting/control/shutterbutton/manual")
@@ -1686,7 +1735,7 @@ public actor CCAPIClient {
             .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
             .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaDelete,
+            .mediaDelete, .cameraClockSync,
         ]
         return CameraCapabilities(
             settings: controls,
@@ -1982,6 +2031,27 @@ public actor CCAPIClient {
 
     private static func pathVersion(_ path: String) -> Int {
         extractVersion(from: path).flatMap(versionNumber) ?? 0
+    }
+
+    private static func canonDateTimeFormatter(timeZone: TimeZone) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+        return formatter
+    }
+
+    private static func parseCameraClock(_ value: JSONDictionary) throws -> (date: Date, daylight: Bool) {
+        let rawDateTime = value.string("datetime")
+        guard !rawDateTime.isEmpty,
+              let daylight = value.bool("dst"),
+              let date = canonDateTimeFormatter(timeZone: TimeZone(secondsFromGMT: 0)!).date(from: rawDateTime) else {
+            throw CCAPIError.invalidResponse(
+                "Canon date-time response must contain an RFC 1123 datetime with UTC offset and a boolean dst field."
+            )
+        }
+        return (date, daylight)
     }
 
     private static func methodSupported(_ value: Any?) -> Bool {

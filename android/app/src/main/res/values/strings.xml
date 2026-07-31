@@ -75,6 +75,10 @@
     <string name="auto_refresh">Auto refresh</string>
     <string name="composition_grid">Composition grid</string>
     <string name="no_settings">No settings are available for this mode.</string>
+    <string name="sync_camera_clock">Camera date and time</string>
+    <string name="sync_camera_clock_hint">Set the camera clock and time zone from this device, then verify the camera readback.</string>
+    <string name="camera_clock_synced_at">Verified at %1$s</string>
+    <string name="sync_now">Sync now</string>
     <string name="overview">Overview</string>
     <string name="ccapi">CCAPI</string>
     <string name="usb_ptp">USB / PTP</string>

@@ -32,6 +32,7 @@ open-eos-control/
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile 與電池；CCAPI、USB/PTP 或桌面橋接有回報時，亦顯示記憶卡數、總容量、可用容量及剩餘可拍張數
 - 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、協定版本、相機公告命令、可寫設定，以及本次工作階段中確實成功的操作
+- Android、iOS 與 PC 都提供依能力開放的相機日期／時間同步。直接 CCAPI 必須同時公告 GET 與 PUT `/functions/datetime`，寫入 Canon 指定的 RFC 1123 時間與 DST 狀態後再回讀驗證；Desktop Bridge USB 只在相機公開可寫的 libgphoto2 `syncdatetimeutc` 或 `syncdatetime` action 時執行。
 - Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon `GetEvent` 機身操作同步。只有手機與記憶卡兩條路徑都可執行時才顯示拍攝儲存位置選擇；選擇手機會把 Canon 主機 RAM JPEG／RAW 原子傳輸至 App 私有 Media。另包含 Canon EOS 遠端快門、半按、保證取消的原生 AF-ON、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、自動關閉電源、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
 - Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、AF-ON、Live View、焦點移動，以及依能力提供的媒體縮圖／傳輸／刪除；libgphoto2 路徑也包含經 runtime 探測的 `gphoto2 --wait-event` 機身／媒體同步、R6 Mark III 自動對焦啟動／取消 action、各卡槽影像畫質、白平衡偏移、畫面比例、電動變焦速度、安全的自動關機選項，以及可選擇寫入記憶卡或將主機 RAM 拍攝原子轉存到 Bridge 媒體庫的儲存位置
 - Live view 畫面，自動/手動更新與 FPS 控制
@@ -121,7 +122,7 @@ iOS App 會在 iPhone Simulator 完成編譯與測試，但 Release 不會附上
 
 ## iOS App 與相機 Core
 
-`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；除了完整 JPEG Live View 生命週期，也會在相機公告兩個 RTP operation 時驗證 Canon SDP、RFC 3550 與 RFC 6184 H.264 access unit，並負責精確清理 RTP start／stop。Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、Live View、拍照、Bulb 計時開始／停止、獨立自動對焦、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及含版本、產生時間、公告／實測差異與有界能力證據的診斷報告；帳密與相機序號都會遮蔽。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
+`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；除了完整 JPEG Live View 生命週期，也會在相機公告兩個 RTP operation 時驗證 Canon SDP、RFC 3550 與 RFC 6184 H.264 access unit，並負責精確清理 RTP start／stop。Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、Live View、拍照、相機時鐘同步、Bulb 計時開始／停止、獨立自動對焦、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及含版本、產生時間、公告／實測差異與有界能力證據的診斷報告；帳密與相機序號都會遮蔽。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
 
 ```bash
 cd ios/OpenEOSCore

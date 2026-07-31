@@ -585,6 +585,18 @@ class CameraViewModel(
         }
     }
 
+    fun syncCameraClock() = runCamera(CameraOperation.CLOCK) {
+        val state = _uiState.value
+        if (state.previewMode || !state.supports(CameraFeature.CAMERA_CLOCK_SYNC)) return@runCamera
+        val status = repository.syncCameraClock()
+        _uiState.update {
+            it.copy(
+                status = status,
+                lastClockSyncAtMillis = System.currentTimeMillis(),
+            )
+        }
+    }
+
     fun toggleRecording() = updateStatus(CameraOperation.RECORDING) {
         if (_uiState.value.previewMode) {
             return@updateStatus _uiState.value.status!!.copy(
@@ -978,11 +990,8 @@ class CameraViewModel(
         operation: CameraOperation,
         block: suspend () -> dev.openeos.control.data.CameraStatus,
     ) = runCamera(operation) {
-        _uiState.update {
-            it.copy(
-                status = block(),
-            )
-        }
+        val status = block()
+        _uiState.update { it.copy(status = status) }
         refreshLiveViewFrameInternal(reportErrors = false)
         startLiveViewLoopIfNeeded()
     }
@@ -1354,6 +1363,7 @@ class CameraViewModel(
         networkDiagnostics = CameraNetworkDiagnostics.Empty,
         focusPoint = null,
         focusFeedback = null,
+        lastClockSyncAtMillis = null,
         error = error,
         errorOperation = null,
     )
@@ -1470,6 +1480,7 @@ class CameraViewModel(
         val EVENT_RETRY_DELAYS_MILLIS = longArrayOf(1_000L, 2_000L, 5_000L)
         val CAPABILITY_EVIDENCE_OPERATIONS = setOf(
             CameraOperation.SETTING,
+            CameraOperation.CLOCK,
             CameraOperation.CAPTURE,
             CameraOperation.RECORDING,
             CameraOperation.FOCUS,

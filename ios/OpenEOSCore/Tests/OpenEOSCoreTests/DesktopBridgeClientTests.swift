@@ -51,6 +51,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         await transport.enqueueJSON(path: "/v1/session/session_123/status", body: status)
         await transport.enqueueJSON(path: "/v1/session/session_123/capabilities", body: capabilities)
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/settings/iso", on: transport)
+        await enqueueStatus(method: "POST", path: "/v1/session/session_123/clock/sync", on: transport)
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/capture/still", on: transport)
         await transport.enqueueJSON(
             method: "POST",
@@ -151,6 +152,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.evidence.observedFeatures.contains(.batteryStatus))
 
         _ = try await client.setSetting(key: "iso", value: "800")
+        _ = try await client.syncCameraClock()
         _ = try await client.captureStill()
         let bulbStarted = try await client.startBulbExposure()
         let bulbStopped = try await client.stopBulbExposure()
@@ -214,6 +216,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(sessionJSON["profileHint"] as? String, "Canon EOS R6 Mark III")
         XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/start") })
         XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/stop") })
+        XCTAssertTrue(requests.contains { $0.path.hasSuffix("/clock/sync") && $0.method == "POST" })
 
         let settingBody = try XCTUnwrap(requests.first { $0.path.hasSuffix("/settings/iso") }?.body)
         XCTAssertEqual(

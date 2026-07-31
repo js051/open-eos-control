@@ -1,7 +1,6 @@
 package dev.openeos.control
 
 import androidx.annotation.StringRes
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -65,15 +64,23 @@ class SimulatorEndToEndTest {
         waitForSimulatorState { state -> state.getInt("capture_count") == 1 }
 
         compose.onNodeWithTag("capture-mode-VIDEO").performClick()
-        compose.onNodeWithContentDescription(text(R.string.start_recording)).performClick()
-        waitForSimulatorState { state -> state.getBoolean("recording") }
+        waitForContentDescription(text(R.string.start_recording), useUnmergedTree = true)
+        compose.onNodeWithTag("capture-button", useUnmergedTree = true)
+            .performClick()
+        waitForSimulatorState { state ->
+            state.getBoolean("recording") &&
+                state.getInt("record_start_count") == 1 &&
+                state.getInt("record_stop_count") == 0
+        }
         // The fixed camera surface exposes the updated action only in Compose's unmerged tree.
         waitForContentDescription(text(R.string.stop_recording), useUnmergedTree = true)
-        compose.onNodeWithContentDescription(
-            text(R.string.stop_recording),
-            useUnmergedTree = true,
-        ).performSemanticsAction(SemanticsActions.OnClick)
-        waitForSimulatorState { state -> !state.getBoolean("recording") }
+        compose.onNodeWithTag("capture-button", useUnmergedTree = true)
+            .performClick()
+        waitForSimulatorState { state ->
+            !state.getBoolean("recording") &&
+                state.getInt("record_start_count") == 1 &&
+                state.getInt("record_stop_count") == 1
+        }
 
         compose.onNodeWithContentDescription(text(R.string.more_actions)).performClick()
         compose.onNodeWithText(text(R.string.camera_media)).performClick()

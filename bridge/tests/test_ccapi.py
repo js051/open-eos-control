@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from io import BytesIO
 from unittest.mock import patch
@@ -47,6 +48,7 @@ DISCOVERY = {
         {"path": "/shooting/settings/wb", "put": True},
         {"path": "/shooting/settings/stillimagequality", "put": True},
         {"path": "/shooting/settings/wbshift", "put": True},
+        {"path": "/functions/datetime", "get": True, "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/af", "post": True},
@@ -130,6 +132,7 @@ class FakeCcapiTransport:
             },
         }
         self.reject_live_view_size = True
+        self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.closed = False
 
     def request(
@@ -170,6 +173,12 @@ class FakeCcapiTransport:
             return _json_response({"storagelist": [{"name": "card1", "maxsize": 64_000, "spacesize": 32_000}]})
         if method == "GET" and path == "/ccapi/ver100/shooting/settings":
             return _json_response(self.settings)
+        if method == "PUT" and path == "/ccapi/ver100/functions/datetime":
+            assert payload is not None
+            self.camera_clock = payload
+            return _json_response(self.camera_clock)
+        if method == "GET" and path == "/ccapi/ver100/functions/datetime":
+            return _json_response(self.camera_clock)
         if method == "PUT" and path.startswith("/ccapi/ver100/shooting/settings/"):
             key = path.rsplit("/", 1)[-1]
             assert payload is not None
@@ -345,6 +354,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.MEDIA_PREVIEW,
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
+        CameraFeature.CAMERA_CLOCK_SYNC,
     } <= set(capabilities.supported)
     assert CameraFeature.MEDIA_THUMBNAIL not in capabilities.planned
     assert CameraFeature.MEDIA_PREVIEW not in capabilities.planned
@@ -386,6 +396,19 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         session.set_setting("wbshift.ba", "10")
     with pytest.raises(BridgeError, match="not advertised"):
         session.set_setting("iso", "51200")
+    session.sync_camera_clock()
+    clock_write = next(
+        request
+        for request in transport.requests
+        if request.method == "PUT" and request.path.endswith("/functions/datetime")
+    )
+    assert clock_write.body is not None
+    assert set(clock_write.body) == {"datetime", "dst"}
+    assert re.fullmatch(
+        r"[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}",
+        str(clock_write.body["datetime"]),
+    )
+    assert isinstance(clock_write.body["dst"], bool)
     session.capture_still()
     started_bulb = session.start_bulb_exposure()
     stopped_bulb = session.stop_bulb_exposure()
@@ -445,6 +468,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.DESKTOP_BRIDGE,
         CameraFeature.CAMERA_IDENTITY,
         CameraFeature.EXPOSURE_CONTROL,
+        CameraFeature.CAMERA_CLOCK_SYNC,
         CameraFeature.STILL_CAPTURE,
         CameraFeature.BULB_EXPOSURE,
         CameraFeature.AUTOFOCUS,
@@ -492,6 +516,30 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         {"cameradisplay": "on", "liveviewsize": "large"},
         {"cameradisplay": "on"},
     ]
+
+
+def test_ccapi_clock_sync_does_not_combine_read_and_write_across_api_versions() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/functions/datetime", "get": True},
+            ],
+            "ver110": [{"path": "/functions/datetime", "put": True}],
+        }
+    )
+    session = CcapiEngine(lambda _username, _password: transport, sleeper=lambda _: None).open_connection(
+        "http://192.168.1.2:8080/"
+    )
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.CAMERA_CLOCK_SYNC not in capabilities.supported
+    assert CameraFeature.CAMERA_CLOCK_SYNC in capabilities.planned
+    request_count = len(transport.requests)
+    with pytest.raises(BridgeError, match="same API version"):
+        session.sync_camera_clock()
+    assert len(transport.requests) == request_count
 
 
 def test_ccapi_close_releases_an_active_bulb_exposure() -> None:

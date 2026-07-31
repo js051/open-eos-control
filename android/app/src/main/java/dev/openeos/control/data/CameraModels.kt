@@ -63,6 +63,7 @@ enum class CameraFeature(
     val label: String,
 ) {
     CAMERA_IDENTITY("Camera identity"),
+    CAMERA_CLOCK_SYNC("Camera clock sync"),
     BATTERY_STATUS("Battery status"),
     STORAGE_STATUS("Storage status"),
     EVENT_POLLING("Camera event polling"),
@@ -132,6 +133,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
+                CameraFeature.CAMERA_CLOCK_SYNC,
             ) - supported,
             reasons = mapOf(
                 CameraFeature.LIVE_VIEW_RTP to
@@ -145,6 +147,8 @@ data class CapabilityMatrix(
                 CameraFeature.AUTOFOCUS to
                     "The camera must advertise CCAPI POST autofocus or a verified manual half-press operation.",
                 CameraFeature.FOCUS_DRIVE to "The camera must advertise the verified CCAPI POST drivefocus operation.",
+                CameraFeature.CAMERA_CLOCK_SYNC to
+                    "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
             ),
         )
 
@@ -170,10 +174,13 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
+                CameraFeature.CAMERA_CLOCK_SYNC,
             ),
             reasons = mapOf(
                 CameraFeature.USB_DIAGNOSTICS to "First wired milestone: enumerate Canon USB device and open a PTP session.",
                 CameraFeature.LIVE_VIEW to "Requires Canon PTP vendor-extension validation on EOS R6 Mark III.",
+                CameraFeature.CAMERA_CLOCK_SYNC to
+                    "No verified direct Android USB/PTP camera-time write and readback flow is implemented yet.",
             ),
         )
 

@@ -1212,6 +1212,8 @@ class GPhoto2Session:
                 supported.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
             if self._event_polling_supported:
                 supported.add(CameraFeature.EVENT_POLLING)
+            if self._camera_clock_config() is not None:
+                supported.add(CameraFeature.CAMERA_CLOCK_SYNC)
 
             planned = {
                 feature
@@ -1221,6 +1223,7 @@ class GPhoto2Session:
                     CameraFeature.CLICK_WHITE_BALANCE,
                     CameraFeature.LIVE_VIEW_RTP,
                     CameraFeature.LIVE_VIEW_MAGNIFICATION,
+                    CameraFeature.CAMERA_CLOCK_SYNC,
                 )
                 if feature not in supported
             }
@@ -1247,6 +1250,9 @@ class GPhoto2Session:
                     ),
                     CameraFeature.LIVE_VIEW_MAGNIFICATION.value: (
                         "Requires an advertised writable Canon EOS eoszoom action and active Live View."
+                    ),
+                    CameraFeature.CAMERA_CLOCK_SYNC.value: (
+                        "Requires an advertised writable syncdatetimeutc or syncdatetime action."
                     ),
                     CameraFeature.LIVE_VIEW.value: (
                         "The CLI adapter uses persistent gphoto2 --capture-movie --stdout MJPEG and "
@@ -1331,6 +1337,19 @@ class GPhoto2Session:
                 )
             self._set_config_value(config, selected_value, refresh=False)
             self._observed.add(_feature_for_setting(key))
+            return self.status()
+
+    def sync_camera_clock(self) -> CameraStatus:
+        with self._lock:
+            config = self._camera_clock_config()
+            if config is None:
+                raise unsupported(
+                    CameraFeature.CAMERA_CLOCK_SYNC.value,
+                    self.engine_name,
+                    "The camera did not expose a writable libgphoto2 date-time synchronization action.",
+                )
+            self._set_config_value(config, "1", refresh=False)
+            self._observed.add(CameraFeature.CAMERA_CLOCK_SYNC)
             return self.status()
 
     def capture_still(self) -> CameraStatus:
@@ -2032,6 +2051,11 @@ class GPhoto2Session:
 
     def _live_view_magnification_config(self) -> GPhotoConfig | None:
         return self._find_config(("eoszoom",), writable=True)
+
+    def _camera_clock_config(self) -> GPhotoConfig | None:
+        return self._find_config(("syncdatetimeutc",), writable=True) or self._find_config(
+            ("syncdatetime",), writable=True
+        )
 
     def _set_viewfinder(self, enabled: bool) -> bool:
         config = self._find_config(("viewfinder",), writable=True)

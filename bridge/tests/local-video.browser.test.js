@@ -207,6 +207,12 @@ async function run() {
     await page.click("#connect-button");
     await page.waitForSelector("#control-view:not([hidden])");
     assert.match(await page.locator("#camera-name").innerText(), /R6 Mark III/);
+    await page.waitForSelector(".settings-command");
+    assert.match(await page.locator(".settings-command").innerText(), /Camera date and time/);
+    await page.click(".settings-command button");
+    await page.waitForFunction(() => (
+      document.querySelector(".settings-command small")?.textContent.includes("Verified at")
+    ));
 
     await page.selectOption("#preview-input-select", "LOCAL_VIDEO");
     await page.waitForSelector("#local-video-device-row:not([hidden])");
@@ -313,18 +319,24 @@ async function run() {
       const viewfinder = document.querySelector("#viewfinder").getBoundingClientRect();
       const video = document.querySelector("#local-video").getBoundingClientRect();
       const lutPreview = document.querySelector("#monitor-lut-preview").getBoundingClientRect();
+      const clockCommand = document.querySelector(".settings-command").getBoundingClientRect();
+      const clockButton = document.querySelector(".settings-command button").getBoundingClientRect();
       return {
         noPageOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
         videoInsideViewfinder: video.left >= viewfinder.left && video.top >= viewfinder.top &&
           video.right <= viewfinder.right && video.bottom <= viewfinder.bottom,
         lutInsideViewfinder: lutPreview.left >= viewfinder.left && lutPreview.top >= viewfinder.top &&
           lutPreview.right <= viewfinder.right && lutPreview.bottom <= viewfinder.bottom,
+        clockCommandFits: clockCommand.width <= document.querySelector("#advanced-settings").clientWidth + 1,
+        clockButtonTarget: clockButton.width >= 48 && clockButton.height >= 48,
       };
     });
     assert.deepEqual(narrowLayout, {
       noPageOverflow: true,
       videoInsideViewfinder: true,
       lutInsideViewfinder: true,
+      clockCommandFits: true,
+      clockButtonTarget: true,
     });
     await page.screenshot({ path: path.join(RESULTS_DIR, "local-video-narrow.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });

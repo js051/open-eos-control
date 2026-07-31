@@ -62,6 +62,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var activeMediaDownloadID: String?
     @Published private(set) var mediaDownloadProgress: CameraMediaTransferProgress?
     @Published private(set) var deletedMediaName: String?
+    @Published private(set) var lastClockSyncAt: Date?
     @Published private(set) var lastError: String?
     @Published private(set) var busyOperations = Set<CameraOperation>()
 
@@ -267,6 +268,7 @@ final class CameraAppState: ObservableObject {
             resetMediaDownloadState()
             removeDownloadedFile()
             deletedMediaName = nil
+            lastClockSyncAt = nil
             lastError = nil
             clampLiveViewRequest()
             beginEventLoop(session: newSession)
@@ -291,6 +293,7 @@ final class CameraAppState: ObservableObject {
         resetMediaPreview()
         removeDownloadedFile()
         deletedMediaName = nil
+        lastClockSyncAt = nil
         lastError = nil
         liveViewData = nil
         liveViewMagnification = nil
@@ -323,6 +326,7 @@ final class CameraAppState: ObservableObject {
         nativeLiveViewSize = nil
         focusMarker = nil
         bulbStartedAt = nil
+        lastClockSyncAt = nil
         lastError = nil
         busyOperations.removeAll()
         resetLiveViewMetrics()
@@ -428,6 +432,19 @@ final class CameraAppState: ObservableObject {
         do {
             updateStatus(try await session.captureStill())
             showShutterFlash()
+            lastError = nil
+        } catch {
+            record(error)
+        }
+    }
+
+    func syncCameraClock() async {
+        guard !isPreview, supports(.cameraClockSync), begin(.clock) else { return }
+        defer { end(.clock) }
+        guard let session else { return }
+        do {
+            updateStatus(try await session.syncCameraClock())
+            lastClockSyncAt = Date()
             lastError = nil
         } catch {
             record(error)
@@ -835,6 +852,7 @@ final class CameraAppState: ObservableObject {
             )
         }
         let monitoring = [
+            "lastClockSyncAt=\(lastClockSyncAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
             "monitorHistogram=\(monitorSettings.histogramVisible)",
             "monitorWaveform=\(monitorSettings.waveformVisible)",
             "monitorZebra=\(monitorSettings.zebraThresholdPercent.map { String($0) } ?? "off")",

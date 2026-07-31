@@ -82,6 +82,10 @@
 "auto_refresh" = "自動更新";
 "composition_grid" = "構圖格線";
 "no_settings" = "此模式沒有可用設定。";
+"sync_camera_clock" = "相機日期與時間";
+"sync_camera_clock_hint" = "使用此裝置的時間與時區設定相機，並回讀確認結果。";
+"camera_clock_synced_at" = "已於 %@ 驗證";
+"sync_now" = "立即同步";
 "choose_setting" = "選擇設定值";
 
 "setting_af_method" = "自動對焦方式";

@@ -1,6 +1,7 @@
 import asyncio
 import struct
 import zlib
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -35,7 +36,11 @@ def initial_state() -> dict[str, object]:
         "event_sequence": 0,
         "event_history": [],
         "recording": False,
+        "record_start_count": 0,
+        "record_stop_count": 0,
         "capture_count": 0,
+        "clock_sync_count": 0,
+        "camera_datetime": None,
         "half_pressed": False,
         "bulb_exposure_active": False,
         "focus_x": 0.5,
@@ -84,6 +89,8 @@ def camera_status() -> dict[str, object]:
         "recording": state["recording"],
         "bulb_exposure_active": state["bulb_exposure_active"],
         "capture_count": state["capture_count"],
+        "clock_sync_count": state["clock_sync_count"],
+        "camera_datetime": state["camera_datetime"],
         "mode": "movie",
         "media": {
             "available": True,
@@ -118,7 +125,11 @@ async def reset_test_state() -> dict[str, bool]:
 async def get_test_state() -> dict[str, object]:
     return {
         "recording": state["recording"],
+        "record_start_count": state["record_start_count"],
+        "record_stop_count": state["record_stop_count"],
         "capture_count": state["capture_count"],
+        "clock_sync_count": state["clock_sync_count"],
+        "camera_datetime": state["camera_datetime"],
         "half_pressed": state["half_pressed"],
         "bulb_exposure_active": state["bulb_exposure_active"],
         "focus": {"x": state["focus_x"], "y": state["focus_y"]},
@@ -182,8 +193,17 @@ async def update_white_balance(payload: WhiteBalanceUpdate) -> dict[str, object]
     return camera_status()
 
 
+@app.post("/ccapi/clock/sync")
+async def sync_camera_clock() -> dict[str, object]:
+    state["clock_sync_count"] += 1
+    state["camera_datetime"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    publish_event("datetime")
+    return camera_status()
+
+
 @app.post("/ccapi/record/start")
 async def record_start() -> dict[str, bool]:
+    state["record_start_count"] += 1
     state["recording"] = True
     publish_event("recbutton")
     return {"ok": True, "recording": True}
@@ -191,6 +211,7 @@ async def record_start() -> dict[str, bool]:
 
 @app.post("/ccapi/record/stop")
 async def record_stop() -> dict[str, bool]:
+    state["record_stop_count"] += 1
     state["recording"] = False
     publish_event("recbutton")
     return {"ok": True, "recording": False}

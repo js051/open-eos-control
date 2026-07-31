@@ -264,6 +264,7 @@ class UsbPtpCameraBackend(
             CameraFeature.MEDIA_PREVIEW,
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
+            CameraFeature.CAMERA_CLOCK_SYNC,
         )
         val writableSettings = buildList {
             if (iso.isNotEmpty()) add("iso")
@@ -313,6 +314,8 @@ class UsbPtpCameraBackend(
                         "Uses advertised standard PTP GetThumb for card media or Android decoding for app-private host captures.",
                     CameraFeature.MEDIA_PREVIEW to
                         "Uses bounded standard PTP GetObject or app-private host files only for complete JPEG/PNG images up to 32 MiB.",
+                    CameraFeature.CAMERA_CLOCK_SYNC to
+                        "No verified direct Android USB/PTP camera-time write and readback flow is implemented yet.",
                     CameraFeature.MEDIA_DOWNLOAD to
                         "Uses standard GetObject with bounded USB reads or streams a completed app-private host capture.",
                     CameraFeature.MEDIA_DELETE to

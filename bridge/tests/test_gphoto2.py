@@ -378,6 +378,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert CameraFeature.MEDIA_THUMBNAIL in capabilities.supported
     assert CameraFeature.MEDIA_PREVIEW in capabilities.supported
     assert CameraFeature.EVENT_POLLING in capabilities.supported
+    assert CameraFeature.CAMERA_CLOCK_SYNC in capabilities.supported
     assert CameraFeature.TAP_FOCUS in capabilities.planned
     assert CameraFeature.CLICK_WHITE_BALANCE in capabilities.planned
     assert next(setting for setting in capabilities.settings if setting.key == "iso").values == [
@@ -409,6 +410,9 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
 
     status = session.set_setting("whitebalance", "daylight")
     assert status.exposure.white_balance == "Daylight"
+
+    session.sync_camera_clock()
+    assert runner.values["/main/actions/syncdatetimeutc"] == "1"
 
     session.set_setting("capturetarget", "Memory card")
     assert runner.values["/main/settings/capturetarget"] == "Memory card"
@@ -484,6 +488,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.AUTOFOCUS,
         CameraFeature.SHUTTER_HALF_PRESS,
         CameraFeature.VIDEO_RECORDING,
+        CameraFeature.CAMERA_CLOCK_SYNC,
         CameraFeature.FOCUS_DRIVE,
         CameraFeature.LIVE_VIEW_MAGNIFICATION,
         CameraFeature.LIVE_VIEW,

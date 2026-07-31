@@ -294,6 +294,11 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
+    public func syncCameraClock() async throws -> CameraStatus {
+        let body = try await postJSON(sessionEndpoint(["clock", "sync"]), payload: [:])
+        return parseStatus(body)
+    }
+
     public func captureStill() async throws -> CameraStatus {
         let body = try await postJSON(sessionEndpoint(["capture", "still"]), payload: [:])
         return parseStatus(body)

@@ -10,6 +10,8 @@ from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import format_datetime, parsedate_to_datetime
 from typing import BinaryIO, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
@@ -578,6 +580,8 @@ class CcapiSession:
                 supported.add(CameraFeature.MEDIA_DELETE)
             if self._event_polling_operations() is not None:
                 supported.add(CameraFeature.EVENT_POLLING)
+            if self._camera_clock_operations() is not None:
+                supported.add(CameraFeature.CAMERA_CLOCK_SYNC)
 
             candidates = {
                 CameraFeature.EVENT_POLLING,
@@ -595,6 +599,7 @@ class CcapiSession:
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
+                CameraFeature.CAMERA_CLOCK_SYNC,
             }
             live_sizes = (
                 [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
@@ -612,6 +617,10 @@ class CcapiSession:
                 reasons={
                     CameraFeature.EVENT_POLLING.value: (
                         "The camera must advertise both GET and DELETE for the Canon event polling endpoint."
+                    ),
+                    CameraFeature.CAMERA_CLOCK_SYNC.value: (
+                        "The camera must advertise both GET and PUT for the Canon date-time endpoint "
+                        "in the same API version."
                     ),
                     CameraFeature.LIVE_VIEW_RTP.value: (self._rtp_capability_reason()),
                     CameraFeature.FOCUS_DRIVE.value: (
@@ -737,6 +746,37 @@ class CcapiSession:
                 self._request_ok("PUT", path, {"value": value})
             self._settings_cache = None
             self._observed.add(_feature_for_setting(canonical))
+            return self.status()
+
+    def sync_camera_clock(self) -> CameraStatus:
+        with self._lock:
+            self._ensure_initialized()
+            operations = self._camera_clock_operations()
+            if operations is None:
+                raise unsupported(
+                    CameraFeature.CAMERA_CLOCK_SYNC.value,
+                    self.engine_name,
+                    "The camera did not advertise a readable and writable CCAPI date-time endpoint "
+                    "in the same API version.",
+                )
+            read, write = operations
+            requested = datetime.now().astimezone()
+            daylight = bool(requested.dst() and requested.dst().total_seconds())
+            payload = {"datetime": format_datetime(requested), "dst": daylight}
+            self._validate_camera_clock_response(self._request_json(write.method, write.path, payload))
+            reported, reported_daylight = self._validate_camera_clock_response(
+                self._request_json(read.method, read.path)
+            )
+            drift = abs((reported.astimezone(UTC) - requested.astimezone(UTC)).total_seconds())
+            if drift > 10 or reported_daylight != daylight:
+                raise BridgeError(
+                    "CAMERA_CLOCK_VERIFY_FAILED",
+                    "The camera did not report the requested date, time, and daylight-saving state.",
+                    status_code=502,
+                    feature=CameraFeature.CAMERA_CLOCK_SYNC.value,
+                    engine=self.engine_name,
+                )
+            self._observed.add(CameraFeature.CAMERA_CLOCK_SYNC)
             return self.status()
 
     def capture_still(self) -> CameraStatus:
@@ -1613,6 +1653,54 @@ class CcapiSession:
             if delete in self._operations:
                 return get, delete
         return None
+
+    def _camera_clock_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith("/functions/datetime")
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            prefix = read.path.removesuffix("/functions/datetime")
+            write = CcapiOperation("PUT", f"{prefix}/functions/datetime")
+            if write in self._operations:
+                return read, write
+        return None
+
+    def _validate_camera_clock_response(self, value: object) -> tuple[datetime, bool]:
+        if not isinstance(value, dict) or not isinstance(value.get("datetime"), str) or not isinstance(
+            value.get("dst"), bool
+        ):
+            raise BridgeError(
+                "INVALID_CCAPI_RESPONSE",
+                "Canon date-time response must contain RFC 1123 datetime and boolean dst fields.",
+                status_code=502,
+                feature=CameraFeature.CAMERA_CLOCK_SYNC.value,
+                engine=self.engine_name,
+            )
+        try:
+            parsed = parsedate_to_datetime(value["datetime"])
+        except (TypeError, ValueError) as error:
+            raise BridgeError(
+                "INVALID_CCAPI_RESPONSE",
+                "Canon date-time response contains an invalid RFC 1123 value.",
+                status_code=502,
+                feature=CameraFeature.CAMERA_CLOCK_SYNC.value,
+                engine=self.engine_name,
+            ) from error
+        if parsed.tzinfo is None:
+            raise BridgeError(
+                "INVALID_CCAPI_RESPONSE",
+                "Canon date-time response is missing a UTC offset.",
+                status_code=502,
+                feature=CameraFeature.CAMERA_CLOCK_SYNC.value,
+                engine=self.engine_name,
+            )
+        return parsed, value["dst"]
 
     def _live_view_frame_paths(self) -> list[str]:
         candidates: list[str] = []

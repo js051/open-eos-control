@@ -287,6 +287,10 @@ class DesktopBridgeClient(
         )
     ).also { observedFeatures.add(featureForSetting(key)) }
 
+    suspend fun syncCameraClock(): CameraStatus = parseStatus(
+        postJson(sessionEndpoint("clock", "sync"), JSONObject())
+    ).also { observedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC) }
+
     suspend fun captureStill(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("capture", "still"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }

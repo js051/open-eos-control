@@ -123,6 +123,7 @@ class FakeRunner:
             "/main/actions/viewfinder": "0",
             "/main/actions/eoszoom": "0",
             "/main/actions/eosremoterelease": "None",
+            "/main/actions/syncdatetimeutc": "0",
             "/main/settings/movierecordtarget": "SDRAM",
             "/main/settings/autopoweroff": "30",
             "/main/settings/capturetarget": "Internal RAM",
@@ -285,6 +286,7 @@ class FakeRunner:
                     "Canon EOS Remote Release",
                     ["None", "Press Half", "Press Full", "Release Half", "Release Full"],
                 ),
+                self._toggle("/main/actions/syncdatetimeutc", "Synchronize UTC date and time"),
                 self._radio("/main/settings/movierecordtarget", "Recording Destination", ["Card", "None", "SDRAM"]),
                 self._radio(
                     "/main/settings/autopoweroff",

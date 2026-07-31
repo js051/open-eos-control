@@ -580,6 +580,7 @@ private struct MonitoringAssistView: View {
 
 private struct MoreSettingsView: View {
     @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -590,7 +591,13 @@ private struct MoreSettingsView: View {
                         liveViewTapActionPicker
                         Divider().overlay(Color.cameraBorder)
                     }
-                    if settings.isEmpty && !camera.supports(.clickWhiteBalance) {
+                    if camera.supports(.cameraClockSync) {
+                        cameraClockRow
+                        Divider().overlay(Color.cameraBorder)
+                    }
+                    if settings.isEmpty &&
+                        !camera.supports(.clickWhiteBalance) &&
+                        !camera.supports(.cameraClockSync) {
                         ContentUnavailableView("no_settings", systemImage: "slider.horizontal.3")
                             .padding(.top, 48)
                     } else {
@@ -640,6 +647,45 @@ private struct MoreSettingsView: View {
             get: { camera.effectiveLiveViewTapAction ?? .focus },
             set: { camera.liveViewTapAction = $0 }
         )
+    }
+
+    private var cameraClockRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("sync_camera_clock")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Color.cameraText)
+                if let syncedAt = camera.lastClockSyncAt {
+                    Text(language.format("camera_clock_synced_at", localizedClockTime(syncedAt)))
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraStatus)
+                } else {
+                    Text("sync_camera_clock_hint")
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraSecondaryText)
+                }
+            }
+            Spacer(minLength: 8)
+            Button {
+                Task { await camera.syncCameraClock() }
+            } label: {
+                Label("sync_now", systemImage: "clock")
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.cameraAccent)
+            .disabled(camera.isBusy(.clock))
+            .accessibilityIdentifier("sync-camera-clock")
+        }
+        .frame(minHeight: 72)
+    }
+
+    private func localizedClockTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = language.locale
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     private func settingRow(_ setting: CameraSetting) -> some View {
