@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-31
+
 - Added capability-gated Canon Auto Lighting Optimizer control to Android USB/PTP and the libgphoto2 Desktop Bridge. Exact `AloMode (0xD1C1)` UINT32 values are allow-listed from pinned upstream evidence; one-choice R6 Mark III `x3` state remains diagnostic-only, while usable advertised lists receive English and Traditional Chinese UI across Android, iOS, and PC.
 - Added capability-gated camera date/time synchronization across Android, iOS, and the Desktop Bridge. Direct CCAPI writes Canon's RFC 1123 value and DST flag, then verifies a GET readback; direct Android USB prefers Canon EOS `UTCTime (0xD17C)` and falls back to `CameraTime (0xD113)`, requiring a matching post-write event; USB Bridge sessions require a writable libgphoto2 `syncdatetimeutc`/`syncdatetime` action paired with its DATE widget and verify a fresh camera-config readback.
 - Added English and Traditional Chinese clock controls, success timestamps, diagnostics, simulator state, and deterministic CCAPI/Bridge/libgphoto2 contract coverage.
@@ -48,3 +50,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.1.4]: https://github.com/js051/open-eos-control/releases/tag/v0.1.4
 [0.1.5]: https://github.com/js051/open-eos-control/releases/tag/v0.1.5
 [0.1.6]: https://github.com/js051/open-eos-control/releases/tag/v0.1.6
+[0.1.7]: https://github.com/js051/open-eos-control/releases/tag/v0.1.7
