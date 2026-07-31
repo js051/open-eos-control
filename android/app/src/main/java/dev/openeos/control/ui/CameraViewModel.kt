@@ -20,6 +20,7 @@ import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.NativeLiveViewEvent
+import dev.openeos.control.data.NativeLiveViewAudioStatus
 import dev.openeos.control.data.NativeLiveViewSession
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
 import kotlinx.coroutines.CancellationException
@@ -385,6 +386,8 @@ class CameraViewModel(
                 liveViewDiagnostics = session.nativeLiveViewSession?.let { native ->
                     LiveViewDiagnostics(contentType = native.contentType, sourceUrl = native.sourceUrl)
                 } ?: it.liveViewDiagnostics,
+                liveViewAudioStatus = session.nativeLiveViewSession?.audioStatus
+                    ?: NativeLiveViewAudioStatus.None,
                 captureMode = captureMode ?: it.captureMode,
                 error = session.liveViewStartError,
                 errorOperation = session.liveViewStartError?.let { CameraOperation.LIVE_VIEW },
@@ -469,6 +472,18 @@ class CameraViewModel(
         }
     }
 
+    fun setRtpAudioEnabled(enabled: Boolean) {
+        val state = _uiState.value
+        val session = state.nativeLiveViewSession ?: return
+        if (!enabled) {
+            session.setAudioEnabled(false)
+            _uiState.update { it.copy(liveViewAudioStatus = it.liveViewAudioStatus.copy(enabled = false)) }
+            return
+        }
+        if (state.liveViewSource != LiveViewSource.CCAPI_RTP || !state.liveViewAudioStatus.available) return
+        session.setAudioEnabled(true)
+    }
+
     fun setLiveViewFrameRate(fps: Int) {
         val liveView = _uiState.value.capabilities?.liveView
         val clampedFps = fps.coerceIn(
@@ -522,6 +537,8 @@ class CameraViewModel(
                 liveViewFrameUrl = null,
                 liveViewMagnification = null,
                 liveViewDiagnostics = LiveViewDiagnostics(),
+                liveViewAudioStatus = nativeSession?.audioStatus
+                    ?: NativeLiveViewAudioStatus.None,
             )
         }
         resetFrameMetrics()
@@ -1359,6 +1376,7 @@ class CameraViewModel(
         nativeLiveViewSession = null,
         liveViewMagnification = null,
         liveViewDiagnostics = LiveViewDiagnostics(),
+        liveViewAudioStatus = NativeLiveViewAudioStatus.None,
         liveViewAspectRatio = 16f / 9f,
         networkDiagnostics = CameraNetworkDiagnostics.Empty,
         focusPoint = null,
@@ -1433,6 +1451,10 @@ class CameraViewModel(
                     return@launch
                 }
                 when (event) {
+                    is NativeLiveViewEvent.AudioStatusChanged -> _uiState.update {
+                        it.copy(liveViewAudioStatus = event.status)
+                    }
+
                     is NativeLiveViewEvent.FrameRendered -> _uiState.update {
                         it.copy(
                             liveViewAspectRatio = event.width.toFloat() / event.height.coerceAtLeast(1),

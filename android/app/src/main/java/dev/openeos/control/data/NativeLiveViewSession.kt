@@ -15,21 +15,52 @@ sealed interface NativeLiveViewEvent {
         val height: Int,
     ) : NativeLiveViewEvent
 
+    data class AudioStatusChanged(
+        val status: NativeLiveViewAudioStatus,
+    ) : NativeLiveViewEvent
+
     data class Failed(
         val message: String,
     ) : NativeLiveViewEvent
+}
+
+data class NativeLiveViewAudioStatus(
+    val advertised: Boolean = false,
+    val available: Boolean = false,
+    val enabled: Boolean = false,
+    val codec: String? = null,
+    val rtpPort: Int? = null,
+    val rtpClockRate: Int? = null,
+    val sampleRate: Int? = null,
+    val channels: Int? = null,
+    val packetsReceived: Long = 0,
+    val accessUnitsReceived: Long = 0,
+    val decodedAccessUnits: Long = 0,
+    val playedSampleFrames: Long = 0,
+    val droppedAccessUnits: Long = 0,
+    val underruns: Int = 0,
+    val lastPacketAtMillis: Long? = null,
+    val lastPcmAtMillis: Long? = null,
+    val error: String? = null,
+) {
+    companion object {
+        val None = NativeLiveViewAudioStatus()
+    }
 }
 
 interface NativeLiveViewSession : AutoCloseable {
     val source: LiveViewSource
     val sourceUrl: String
     val contentType: String
+    val audioStatus: NativeLiveViewAudioStatus
+        get() = NativeLiveViewAudioStatus.None
 
     fun start()
     fun attachSurface(surface: Surface)
     fun detachSurface(surface: Surface)
     fun setTargetFps(fps: Int)
     fun setRenderingEnabled(enabled: Boolean)
+    fun setAudioEnabled(enabled: Boolean) = Unit
     fun setListener(listener: ((NativeLiveViewEvent) -> Unit)?)
     override fun close()
 }

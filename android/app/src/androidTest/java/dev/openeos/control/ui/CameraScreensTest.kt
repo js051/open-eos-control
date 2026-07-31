@@ -49,6 +49,7 @@ import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewCapabilities
 import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.LiveViewSource
+import dev.openeos.control.data.NativeLiveViewAudioStatus
 import dev.openeos.control.data.UsbCameraDevice
 import dev.openeos.control.data.UsbCameraInterface
 import dev.openeos.control.data.UsbPtpDiagnostics
@@ -1251,6 +1252,84 @@ class CameraScreensTest {
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(CaptureMode.VIDEO, selectedMode) }
         compose.onNodeWithText(resourceText(R.string.capture_not_supported)).assertIsDisplayed()
+    }
+
+    @Test
+    fun rtpAudioMonitorIsCapabilityGatedDefaultMutedAndDispatchesExplicitEnable() {
+        var requested: Boolean? = null
+        val state = connectedState().copy(
+            activeSettingPicker = SettingPicker.LIVE_VIEW,
+            liveViewSource = LiveViewSource.CCAPI_RTP,
+            liveViewAudioStatus = NativeLiveViewAudioStatus(
+                advertised = true,
+                available = true,
+                enabled = false,
+                codec = "MP4A-LATM",
+                rtpPort = 12_010,
+                rtpClockRate = 48_000,
+                channels = 2,
+            ),
+        )
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    state,
+                    noOpActions().copy(setRtpAudioEnabled = { requested = it }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("rtp-audio-toggle")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performClick()
+        compose.runOnIdle { assertEquals(true, requested) }
+    }
+
+    @Test
+    fun rtpAudioMonitorIsHiddenWhenSdpDoesNotAdvertiseAudio() {
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(
+                        activeSettingPicker = SettingPicker.LIVE_VIEW,
+                        liveViewSource = LiveViewSource.CCAPI_RTP,
+                    ),
+                    noOpActions(),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("rtp-audio-toggle").assertDoesNotExist()
+    }
+
+    @Test
+    fun advertisedButUnavailableRtpAudioShowsARealDisabledState() {
+        val failure = "Unsupported Canon RTP audio format"
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(
+                        activeSettingPicker = SettingPicker.LIVE_VIEW,
+                        liveViewSource = LiveViewSource.CCAPI_RTP,
+                        liveViewAudioStatus = NativeLiveViewAudioStatus(
+                            advertised = true,
+                            available = false,
+                            codec = "AAC-HBR",
+                            error = failure,
+                        ),
+                    ),
+                    noOpActions(),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("rtp-audio-toggle")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+        compose.onNodeWithText(failure).performScrollTo().assertIsDisplayed()
     }
 
     @Test

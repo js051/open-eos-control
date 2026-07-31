@@ -609,6 +609,7 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
         mutableFloatStateOf(state.liveViewFrameRateFps.toFloat())
     }
     val displayedFps = pendingFps.roundToInt().coerceIn(minFps, maxFps)
+    val audioMonitorDescription = stringResource(R.string.rtp_audio_monitor_description)
     CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
     ) {
@@ -658,6 +659,44 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
                                 color = if (source == state.liveViewSource) AppBackground else AppText,
                             )
                         }
+                    }
+                }
+                if (
+                    state.liveViewSource == LiveViewSource.CCAPI_RTP &&
+                    state.liveViewAudioStatus.advertised
+                ) {
+                    val audio = state.liveViewAudioStatus
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.rtp_audio_monitor),
+                                color = AppText,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                stringResource(
+                                    if (audio.available) {
+                                        R.string.rtp_audio_monitor_hint
+                                    } else {
+                                        R.string.rtp_audio_monitor_unavailable
+                                    }
+                                ),
+                                color = if (audio.available) AppSubtleText else AppWarning,
+                            )
+                        }
+                        Switch(
+                            checked = audio.enabled,
+                            onCheckedChange = actions.setRtpAudioEnabled,
+                            enabled = audio.available,
+                            modifier = Modifier
+                                .testTag("rtp-audio-toggle")
+                                .semantics {
+                                    contentDescription = audioMonitorDescription
+                                },
+                        )
+                    }
+                    audio.error?.let { error ->
+                        Text(error, color = AppWarning, modifier = Modifier.testTag("rtp-audio-error"))
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

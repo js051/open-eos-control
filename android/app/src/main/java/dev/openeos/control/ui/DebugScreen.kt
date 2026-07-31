@@ -191,6 +191,34 @@ fun DebugScreen(
                     stringResource(R.string.latest_frame),
                     live.lastFrameAtMillis?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: unknown,
                 )
+                val audio = state.liveViewAudioStatus
+                DebugValue(stringResource(R.string.rtp_audio_advertised), yesNoLabel(audio.advertised))
+                DebugValue(stringResource(R.string.rtp_audio_available), yesNoLabel(audio.available))
+                DebugValue(stringResource(R.string.rtp_audio_enabled), yesNoLabel(audio.enabled))
+                DebugValue(stringResource(R.string.rtp_audio_codec), audio.codec ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.rtp_audio_port), audio.rtpPort?.toString() ?: unavailable)
+                DebugValue(stringResource(R.string.rtp_audio_clock_rate), audio.rtpClockRate?.toString() ?: unavailable)
+                DebugValue(stringResource(R.string.rtp_audio_sample_rate), audio.sampleRate?.toString() ?: unavailable)
+                DebugValue(stringResource(R.string.rtp_audio_channels), audio.channels?.toString() ?: unavailable)
+                DebugValue(stringResource(R.string.rtp_audio_packets), audio.packetsReceived.toString())
+                DebugValue(stringResource(R.string.rtp_audio_access_units), audio.accessUnitsReceived.toString())
+                DebugValue(stringResource(R.string.rtp_audio_decoded_units), audio.decodedAccessUnits.toString())
+                DebugValue(stringResource(R.string.rtp_audio_played_frames), audio.playedSampleFrames.toString())
+                DebugValue(stringResource(R.string.rtp_audio_dropped_units), audio.droppedAccessUnits.toString())
+                DebugValue(stringResource(R.string.rtp_audio_underruns), audio.underruns.toString())
+                DebugValue(
+                    stringResource(R.string.rtp_audio_latest_packet),
+                    audio.lastPacketAtMillis?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: unavailable,
+                )
+                DebugValue(
+                    stringResource(R.string.rtp_audio_latest_pcm),
+                    audio.lastPcmAtMillis?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: unavailable,
+                )
+                DebugValue(
+                    stringResource(R.string.rtp_audio_error),
+                    audio.error ?: none,
+                    warning = audio.error != null,
+                )
             }
             DebugSection(stringResource(R.string.usb_ptp)) {
                 DebugValue(

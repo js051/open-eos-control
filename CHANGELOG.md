@@ -4,6 +4,7 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Added capability-gated Android playback for Canon CCAPI RTP `MP4A-LATM/48000` camera audio. Android now scopes SDP format parameters, performs bounded RFC 6416 fragmentation/loss recovery, extracts raw AAC with Media3's AOSP-derived LATM parser, decodes through `MediaCodec`, and streams PCM through `AudioTrack`. Monitoring remains default-muted, stops when the app enters the background, and reports packet/decode/playback health without allowing audio failure to stop video.
 - Added capability-gated PC playback for Canon CCAPI RTP `MP4A-LATM/48000` camera audio. The Bridge now parses SDP format parameters, reassembles RFC 6416 audioMuxElements, decodes in-band LATM through PyAV/FFmpeg, exposes bounded authenticated PCM long polling and reports audio status independently from video. The browser remains muted until a user enables audio and tears playback down on every Live View/source/session transition.
 - Expanded Android's quarter-turn reading viewport and replaced ellipsized offline guidance with bounded font fitting, preserving complete English and Traditional Chinese copy at up to 200% font scale while the camera layout remains fixed.
 

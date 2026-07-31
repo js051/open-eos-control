@@ -41,7 +41,7 @@ open-eos-control/
 - PC 控制介面透過浮點 WebGL2 3D texture 與明確的三線性插值，對 Bridge 解碼影格與本機 UVC／HDMI 視訊輸入套用匯入的 3D `.cube` LUT，再執行同一套有界 120x80 分析。監看輔助視窗也提供直方圖／亮度波形圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與變形鏡頭反擠壓，不會改動相機命令或偽造拍攝結果。本機視訊只替換取景畫面，Bridge session 仍持續控制相機；裝置 ID／名稱及 LUT 檔名／標題只留在記憶體且不會寫入診斷。相機媒體下載會顯示位元組進度並可取消；一般檔案使用串流式瀏覽器下載 fallback，未知大小或至少 64 MiB 的檔案則在瀏覽器支援時直接寫入具暫存保護的目的檔。
 
 LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast 資料列、`DOMAIN_MIN`／`DOMAIN_MAX` 或 `LUT_3D_INPUT_RANGE`、有限數值與三線性顯示插值。混合 1D／shaper LUT 或超過 16 MiB 的檔案會回報明確錯誤；專案不重新散布 Canon 或第三方 LUT。
-- Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率。PC 另外會將相機公告的 RFC 6416 `MP4A-LATM/48000` 音訊解碼成有界 WebAudio PCM，並以預設靜音的喇叭控制啟用；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用影像 decoder 時才會出現 RTP
+- Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率。Android 與 PC 也會處理相機公告、使用帶內設定的 RFC 6416 `MP4A-LATM/48000` 音訊，且都預設靜音；Android 使用 Media3 LATM 解析、`MediaCodec` 與 `AudioTrack`，PC 則將有界 PCM 送至 WebAudio。Android 只有在使用者明確開啟後才解碼播放，App 進入背景時會再次靜音；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用影像 decoder 時才會出現 RTP
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質及有界 B/A／M/G 白平衡偏移，並依規格以完整物件寫回
 - 可選跟隨系統、英文或繁體中文；相機公告的設定值會本地化顯示，寫入時仍保留精確的協定原值
 - 固定於底部的拍照／錄影模式選擇器會在快門旁持續顯示目前操作情境；只有相機公告可寫且相符的機身模式時才同步寫入。曝光轉盤在寫入期間會鎖定，完成後再對齊相機確認值，因此遭拒或重疊的請求不會看起來像已套用。
