@@ -476,7 +476,8 @@ final class CCAPIClientTests: XCTestCase {
             )
         )
         XCTAssertNotNil(json["dst"] as? Bool)
-        XCTAssertTrue((try await client.capabilities()).evidence.observedFeatures.contains(.cameraClockSync))
+        let observedCapabilities = try await client.capabilities()
+        XCTAssertTrue(observedCapabilities.evidence.observedFeatures.contains(.cameraClockSync))
     }
 
     func testClockSyncDoesNotCombineReadAndWriteAcrossAPIVersions() async throws {
