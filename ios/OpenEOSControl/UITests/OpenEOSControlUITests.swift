@@ -315,9 +315,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         let urlField = app.textFields["camera-url-field"]
         XCTAssertTrue(urlField.waitForExistence(timeout: 3))
-        urlField.tap()
-        urlField.typeText(XCUIKeyboardKey.command.rawValue + "a")
-        urlField.typeText(simulatorURL.absoluteString)
+        replaceText(in: urlField, with: simulatorURL.absoluteString)
         app.swipeDown()
         let connect = app.buttons["connect-button"]
         XCTAssertTrue(waitForInteraction(connect, timeout: 8))
@@ -386,6 +384,14 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func replaceText(in field: XCUIElement, with replacement: String) {
+        let currentValue = (field.value as? String) ?? ""
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentValue.count))
+        field.typeText(replacement)
+        XCTAssertEqual(field.value as? String, replacement)
     }
 
     private func openMoreActions(in app: XCUIApplication) {
