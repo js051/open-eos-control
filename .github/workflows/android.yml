@@ -203,6 +203,82 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  android-ui-api36:
+    needs: secret-scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Start fake camera for Android 16 end-to-end tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e "../simulator"
+          nohup python -m uvicorn main:app --host 0.0.0.0 --port 18080 \
+            > "$RUNNER_TEMP/android-camera-simulator-api36.log" 2>&1 &
+          for _ in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/android-camera-simulator-api36.log"
+          exit 1
+
+      - name: Run UI tests on Pixel API 36
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.34.0
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_5
+          emulator-boot-timeout: 900
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          working-directory: android
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
+
+      - name: Upload Android 16 UI test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-ui-test-results-api36
+          path: |
+            android/app/build/reports/androidTests/connected/debug
+            android/app/build/outputs/androidTest-results/connected/debug
+            android/app/build/outputs/connected_android_test_additional_output
+            ${{ runner.temp }}/android-camera-simulator-api36.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   simulator:
     needs: secret-scan
     runs-on: ubuntu-latest

@@ -103,6 +103,7 @@ fun CameraControlScreen(
     Box(
         Modifier
             .fillMaxSize()
+            .testTag("camera-control-root")
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .pointerInput(state.hudVisible) {
                 var dragDistance = 0f

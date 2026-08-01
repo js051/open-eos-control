@@ -17,6 +17,7 @@ import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.Locales
+import androidx.compose.ui.test.WindowInsets
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -38,6 +39,8 @@ import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
+import androidx.core.graphics.Insets
+import androidx.core.view.WindowInsetsCompat
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilityEvidence
 import dev.openeos.control.data.CameraCapabilities
@@ -242,14 +245,24 @@ class CameraScreensTest {
     fun landscapePhoneSizeKeepsTheSameCameraControlLayout() {
         compose.setContent {
             DeviceConfigurationOverride(
-                DeviceConfigurationOverride.ForcedSize(DpSize(800.dp, 360.dp)),
+                DeviceConfigurationOverride.WindowInsets(
+                    WindowInsetsCompat.Builder().build(),
+                ),
             ) {
-                MaterialTheme(colorScheme = OpenEosColorScheme) {
-                    CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                DeviceConfigurationOverride(
+                    DeviceConfigurationOverride.ForcedSize(DpSize(800.dp, 360.dp)),
+                ) {
+                    MaterialTheme(colorScheme = OpenEosColorScheme) {
+                        CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                    }
                 }
             }
         }
 
+        saveVisualSnapshot(
+            stem = "camera-control-landscape-en",
+            nodeTag = "camera-control-root",
+        )
         assertPrimaryCameraControlsVisible()
         val exposureCenters = listOf(
             "exposure-control-ISO",
@@ -273,6 +286,46 @@ class CameraScreensTest {
             "Landscape preview content must stay above the fixed exposure controls",
             previewHintBounds.bottom <= exposureBounds.top,
         )
+    }
+
+    @Test
+    fun safeDrawingInsetsKeepTheFixedCameraControlsInsideTheUsableWindow() {
+        val insets = WindowInsetsCompat.Builder()
+            .setInsets(
+                WindowInsetsCompat.Type.systemBars(),
+                Insets.of(0, 24, 0, 48),
+            )
+            .setInsets(
+                WindowInsetsCompat.Type.displayCutout(),
+                Insets.of(16, 0, 0, 0),
+            )
+            .build()
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(insets)) {
+                DeviceConfigurationOverride(
+                    DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+                ) {
+                    MaterialTheme(colorScheme = OpenEosColorScheme) {
+                        CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                    }
+                }
+            }
+        }
+
+        assertPrimaryCameraControlsVisible()
+        val root = compose.onNodeWithTag("camera-control-root").fetchSemanticsNode().boundsInRoot
+        listOf(
+            "camera-overlay-header",
+            "exposure-control-ISO",
+            "capture-mode-selector",
+        ).forEach { tag ->
+            val control = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+            assertTrue(
+                "Safe-area control $tag $control must remain inside the camera root $root",
+                control.left >= root.left && control.top >= root.top &&
+                    control.right <= root.right && control.bottom <= root.bottom,
+            )
+        }
     }
 
     @Test
@@ -2059,9 +2112,15 @@ class CameraScreensTest {
     private fun saveVisualSnapshot(
         stem: String,
         userViewRotationDegrees: Float = 0f,
+        nodeTag: String? = null,
     ) {
         compose.waitForIdle()
-        val deviceFrame = compose.onRoot(useUnmergedTree = true).captureToImage().asAndroidBitmap()
+        val snapshotNode = if (nodeTag == null) {
+            compose.onRoot(useUnmergedTree = true)
+        } else {
+            compose.onNodeWithTag(nodeTag, useUnmergedTree = true)
+        }
+        val deviceFrame = snapshotNode.captureToImage().asAndroidBitmap()
         writeVisualSnapshot("$stem-device-frame.png", deviceFrame)
         if (userViewRotationDegrees == 0f) return
 
