@@ -3,7 +3,17 @@ import OpenEOSCore
 
 @MainActor
 final class CameraAppState: ObservableObject {
-    static let defaultCameraURL = "http://192.168.1.2:8080"
+    static var defaultCameraURL: String {
+        #if DEBUG
+        if let override = ProcessInfo.processInfo.environment["OEC_HTTP_PRESET_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !override.isEmpty
+        {
+            return override
+        }
+        #endif
+        return "http://192.168.1.2:8080"
+    }
     static let defaultSecureCameraURL = "https://192.168.1.2:443"
     static let simulatorURL = "http://127.0.0.1:18080"
     static let defaultBridgeURL = "http://192.168.1.100:18181"

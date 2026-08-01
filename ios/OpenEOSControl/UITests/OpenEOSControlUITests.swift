@@ -308,15 +308,19 @@ final class OpenEOSControlUITests: XCTestCase {
             jsonBody: ["value": "Manual"]
         )
 
-        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        let app = launch(
+            appLanguage: "english",
+            appleLanguage: "en",
+            locale: "en_US",
+            environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString]
+        )
         let httpPreset = app.buttons["preset-http-button"]
         XCTAssertTrue(httpPreset.waitForExistence(timeout: 8))
         httpPreset.tap()
 
         let urlField = app.textFields["camera-url-field"]
         XCTAssertTrue(urlField.waitForExistence(timeout: 3))
-        replaceText(in: urlField, with: simulatorURL.absoluteString)
-        app.swipeDown()
+        XCTAssertEqual(urlField.value as? String, simulatorURL.absoluteString)
         let connect = app.buttons["connect-button"]
         XCTAssertTrue(waitForInteraction(connect, timeout: 8))
         connect.tap()
@@ -364,7 +368,12 @@ final class OpenEOSControlUITests: XCTestCase {
         }
     }
 
-    private func launch(appLanguage: String, appleLanguage: String, locale: String) -> XCUIApplication {
+    private func launch(
+        appLanguage: String,
+        appleLanguage: String,
+        locale: String,
+        environment: [String: String] = [:]
+    ) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchArguments = [
@@ -373,6 +382,7 @@ final class OpenEOSControlUITests: XCTestCase {
             "-AppleLanguages", "(\(appleLanguage))",
             "-AppleLocale", locale,
         ]
+        app.launchEnvironment.merge(environment) { _, newValue in newValue }
         app.launch()
         return app
     }
@@ -384,14 +394,6 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
-    }
-
-    private func replaceText(in field: XCUIElement, with replacement: String) {
-        let currentValue = (field.value as? String) ?? ""
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentValue.count))
-        field.typeText(replacement)
-        XCTAssertEqual(field.value as? String, replacement)
     }
 
     private func openMoreActions(in app: XCUIApplication) {
