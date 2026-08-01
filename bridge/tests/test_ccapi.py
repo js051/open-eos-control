@@ -108,6 +108,7 @@ class FakeCcapiTransport:
         preview_content_type: str = "image/jpeg",
         zoom_response: object | None = None,
         movie_mode_response: object | None = None,
+        card_selection_responses: dict[str, object] | None = None,
         recordable_response: object | None = None,
         lens_response: object | None = None,
         temperature_response: object | None = None,
@@ -125,6 +126,7 @@ class FakeCcapiTransport:
         self.preview_content_type = preview_content_type
         self.zoom_response = zoom_response
         self.movie_mode_response = movie_mode_response
+        self.card_selection_responses = card_selection_responses or {}
         self.recordable_response = (
             recordable_response
             if recordable_response is not None
@@ -158,6 +160,7 @@ class FakeCcapiTransport:
         }
         self.zoom = 50
         self.movie_mode = "off"
+        self.card_selection = {"stillimage": "card1", "movie": "card2"}
         self.reject_live_view_size = True
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.closed = False
@@ -222,6 +225,20 @@ class FakeCcapiTransport:
             assert payload is not None and payload.get("action") in {"off", "on"}
             self.movie_mode = str(payload["action"])
             return CcapiResponse(204, {}, b"")
+        card_match = re.fullmatch(r"/ccapi/ver100/functions/cardselection/(stillimage|movie)", path)
+        if method == "GET" and card_match:
+            kind = card_match.group(1)
+            response = self.card_selection_responses.get(kind)
+            if response is not None:
+                return _json_response(response)
+            return _json_response(
+                {"value": self.card_selection[kind], "ability": ["none", "card1", "card2"]}
+            )
+        if method == "PUT" and card_match:
+            kind = card_match.group(1)
+            assert payload is not None and payload.get("value") in {"none", "card1", "card2"}
+            self.card_selection[kind] = str(payload["value"])
+            return _json_response({"value": self.card_selection[kind]})
         if method == "PUT" and path == "/ccapi/ver100/functions/datetime":
             assert payload is not None
             self.camera_clock = payload
@@ -808,6 +825,99 @@ def test_ccapi_movie_mode_does_not_combine_get_post_across_versions() -> None:
 
     assert CameraFeature.MOVIE_MODE_CONTROL not in capabilities.supported
     assert not any(setting.key == "moviemode" for setting in capabilities.settings)
+
+
+def test_ccapi_card_selection_requires_matching_get_put_and_writes_value() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
+            {"path": "/functions/cardselection/movie", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    settings = {setting.key: setting for setting in capabilities.settings}
+
+    assert settings["cardselectionstillimage"].value == "card1"
+    assert settings["cardselectionstillimage"].values == ["none", "card1", "card2"]
+    assert settings["cardselectionmovie"].value == "card2"
+    assert CameraFeature.CARD_SELECTION_CONTROL in capabilities.supported
+    assert "cardselectionstillimage" in capabilities.evidence.writable_settings
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("cardselectionstillimage", "card3")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+    session.set_setting("cardselectionstillimage", "card2")
+
+    assert transport.card_selection["stillimage"] == "card2"
+    assert RecordedRequest(
+        "PUT",
+        "/ccapi/ver100/functions/cardselection/stillimage",
+        {"value": "card2"},
+    ) in transport.requests
+
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    transport.card_selection_responses["stillimage"] = {
+        "value": "card1",
+        "ability": ["none", "card1"],
+    }
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("cardselectionstillimage", "card2")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"value": "card1", "ability": ["card1", "card1"]},
+        {"value": "card3", "ability": ["card1", "card2"]},
+        {"value": "card1", "ability": ["card2", "none"]},
+        {"value": "card1", "ability": ["card1", 2]},
+        {"value": True, "ability": ["card1", "card2"]},
+        {"value": "card1", "ability": "card1"},
+    ],
+)
+def test_ccapi_card_selection_hides_malformed_contract(response: object) -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(
+        discovery=discovery,
+        card_selection_responses={"stillimage": response},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.CARD_SELECTION_CONTROL not in capabilities.supported
+    assert CameraFeature.CARD_SELECTION_CONTROL in capabilities.planned
+    assert not any(setting.key.startswith("cardselection") for setting in capabilities.settings)
+
+
+def test_ccapi_card_selection_does_not_combine_get_put_across_versions() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/functions/cardselection/stillimage", "get": True},
+            ],
+            "ver110": [{"path": "/functions/cardselection/stillimage", "put": True}],
+        }
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.CARD_SELECTION_CONTROL not in capabilities.supported
+    assert not any(setting.key.startswith("cardselection") for setting in capabilities.settings)
+    assert not any("cardselection" in request.path for request in transport.requests)
 
 
 def test_ccapi_clock_sync_does_not_combine_read_and_write_across_api_versions() -> None:

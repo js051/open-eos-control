@@ -8,6 +8,7 @@ from io import BytesIO
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field, StrictInt
 
@@ -65,6 +66,7 @@ capabilities = {
 }
 
 ZOOM_ABILITY = {"min": 0, "max": 100, "step": 1}
+CARD_SELECTION_ABILITY = ["none", "card1", "card2"]
 
 def initial_state() -> dict[str, object]:
     return {
@@ -75,6 +77,9 @@ def initial_state() -> dict[str, object]:
         "record_stop_count": 0,
         "movie_mode": "off",
         "movie_mode_update_count": 0,
+        "still_card_selection": "card1",
+        "movie_card_selection": "card2",
+        "card_selection_update_count": 0,
         "temperature_status": "normal",
         "capture_count": 0,
         "clock_sync_count": 0,
@@ -220,6 +225,9 @@ async def get_test_state() -> dict[str, object]:
         "record_stop_count": state["record_stop_count"],
         "movie_mode": state["movie_mode"],
         "movie_mode_update_count": state["movie_mode_update_count"],
+        "still_card_selection": state["still_card_selection"],
+        "movie_card_selection": state["movie_card_selection"],
+        "card_selection_update_count": state["card_selection_update_count"],
         "temperature_status": state["temperature_status"],
         "capture_count": state["capture_count"],
         "clock_sync_count": state["clock_sync_count"],
@@ -318,6 +326,14 @@ async def get_capabilities() -> dict[str, object]:
         **capabilities,
         "moviemode": {"status": state["movie_mode"], "ability": ["off", "on"]},
         "zoom": {"value": state["zoom"], "ability": ZOOM_ABILITY},
+        "cardselectionstillimage": {
+            "value": state["still_card_selection"],
+            "ability": CARD_SELECTION_ABILITY,
+        },
+        "cardselectionmovie": {
+            "value": state["movie_card_selection"],
+            "ability": CARD_SELECTION_ABILITY,
+        },
     }
 
 
@@ -335,6 +351,27 @@ async def update_zoom(payload: ZoomUpdate) -> dict[str, object]:
     state["zoom_update_count"] += 1
     publish_event("zoom")
     return {"value": state["zoom"]}
+
+
+def update_card_selection(kind: Literal["stillimage", "movie"], payload: dict[str, object]) -> bool:
+    value = payload.get("value")
+    if set(payload) != {"value"} or not isinstance(value, str) or value not in CARD_SELECTION_ABILITY:
+        return False
+    state_key = "still_card_selection" if kind == "stillimage" else "movie_card_selection"
+    state[state_key] = value
+    state["card_selection_update_count"] += 1
+    publish_event(f"cardselection{kind}")
+    return True
+
+
+@app.put("/ccapi/card-selection/{kind}", status_code=204)
+async def update_simulator_card_selection(
+    kind: Literal["stillimage", "movie"],
+    payload: dict[str, object],
+) -> Response:
+    if not update_card_selection(kind, payload):
+        return JSONResponse(status_code=400, content={"detail": "Unsupported card-selection value"})
+    return Response(status_code=204)
 
 
 @app.patch("/ccapi/exposure")
@@ -514,6 +551,8 @@ CANON_DISCOVERY = {
         {"path": "/shooting/settings/wb", "put": True},
         {"path": "/shooting/settings/shootingmode", "put": True},
         {"path": "/functions/datetime", "get": True, "put": True},
+        {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
+        {"path": "/functions/cardselection/movie", "get": True, "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/af", "post": True},
@@ -698,6 +737,30 @@ async def canon_set_datetime(payload: dict[str, object]) -> dict[str, object]:
     state["clock_sync_count"] += 1
     publish_event("datetime")
     return dict(payload)
+
+
+@app.get("/ccapi/ver100/functions/cardselection/stillimage")
+async def canon_get_still_card_selection() -> dict[str, object]:
+    return {"value": state["still_card_selection"], "ability": CARD_SELECTION_ABILITY}
+
+
+@app.put("/ccapi/ver100/functions/cardselection/stillimage")
+async def canon_set_still_card_selection(payload: dict[str, object]) -> Response:
+    if not update_card_selection("stillimage", payload):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["still_card_selection"]})
+
+
+@app.get("/ccapi/ver100/functions/cardselection/movie")
+async def canon_get_movie_card_selection() -> dict[str, object]:
+    return {"value": state["movie_card_selection"], "ability": CARD_SELECTION_ABILITY}
+
+
+@app.put("/ccapi/ver100/functions/cardselection/movie")
+async def canon_set_movie_card_selection(payload: dict[str, object]) -> Response:
+    if not update_card_selection("movie", payload):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["movie_card_selection"]})
 
 
 @app.post("/ccapi/ver100/shooting/control/shutterbutton", status_code=204)

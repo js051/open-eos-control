@@ -401,6 +401,8 @@ class DiagnosticsTest {
             CameraSettingControl("afmethod", "AF", "face", listOf("face", "spot")),
             CameraSettingControl("capturetarget", "Capture target", "Internal RAM", listOf("Internal RAM", "Memory card")),
             CameraSettingControl("capturestorage", "Recording card", "CFe", listOf("CFe", "SD")),
+            CameraSettingControl("cardselectionstillimage", "Still-image card", "card1", listOf("none", "card1", "card2")),
+            CameraSettingControl("cardselectionmovie", "Movie card", "card2", listOf("none", "card1", "card2")),
             CameraSettingControl("singleoption", "Single option", "only", listOf("only")),
         )
 
@@ -419,6 +421,7 @@ class DiagnosticsTest {
                 "afmethod",
                 "capturetarget",
                 "capturestorage",
+                "cardselectionstillimage",
             ),
             settingsForMode(settings, CaptureMode.PHOTO).map { it.key },
         )
@@ -431,6 +434,7 @@ class DiagnosticsTest {
                 "exposurecompensation",
                 "movieservoaf",
                 "afmethod",
+                "cardselectionmovie",
             ),
             settingsForMode(settings, CaptureMode.VIDEO).map { it.key },
         )

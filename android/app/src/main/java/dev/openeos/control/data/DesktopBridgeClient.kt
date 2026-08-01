@@ -584,6 +584,7 @@ class DesktopBridgeClient(
     private fun featureForSetting(key: String): CameraFeature = when (key.lowercase()) {
         "iso", "shutter", "aperture" -> CameraFeature.EXPOSURE_CONTROL
         "whitebalance" -> CameraFeature.WHITE_BALANCE_CONTROL
+        "cardselectionstillimage", "cardselectionmovie" -> CameraFeature.CARD_SELECTION_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
     }
 

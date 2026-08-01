@@ -452,3 +452,40 @@ def test_movie_mode_contract_uses_on_off_action_and_mutates_both_routes() -> Non
     assert invalid.status_code == 422
     assert test_state["movie_mode"] == "off"
     assert test_state["movie_mode_update_count"] == 2
+
+
+def test_card_selection_contract_mutates_canonical_and_simulator_routes() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    still = client.get("/ccapi/ver100/functions/cardselection/stillimage")
+    movie = client.get("/ccapi/ver100/functions/cardselection/movie")
+    canonical = client.put(
+        "/ccapi/ver100/functions/cardselection/stillimage",
+        json={"value": "card2"},
+    )
+    simulator = client.put("/ccapi/card-selection/movie", json={"value": "card1"})
+    invalid = client.put(
+        "/ccapi/ver100/functions/cardselection/movie",
+        json={"value": "card3"},
+    )
+    invalid_type = client.put(
+        "/ccapi/ver100/functions/cardselection/movie",
+        json={"value": 2},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert {"path": "/functions/cardselection/stillimage", "get": True, "put": True} in discovery
+    assert {"path": "/functions/cardselection/movie", "get": True, "put": True} in discovery
+    assert still.json() == {"value": "card1", "ability": ["none", "card1", "card2"]}
+    assert movie.json() == {"value": "card2", "ability": ["none", "card1", "card2"]}
+    assert canonical.status_code == 200
+    assert canonical.json() == {"value": "card2"}
+    assert simulator.status_code == 204
+    assert invalid.status_code == 400
+    assert invalid.json() == {"message": "Invalid parameter"}
+    assert invalid_type.status_code == 400
+    assert invalid_type.json() == {"message": "Invalid parameter"}
+    assert test_state["still_card_selection"] == "card2"
+    assert test_state["movie_card_selection"] == "card1"
+    assert test_state["card_selection_update_count"] == 2

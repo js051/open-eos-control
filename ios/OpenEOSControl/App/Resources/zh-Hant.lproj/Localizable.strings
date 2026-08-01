@@ -117,6 +117,8 @@
 "setting_auto_power_off" = "自動關閉電源";
 "setting_capture_target" = "拍攝儲存位置";
 "setting_capture_storage" = "拍攝記錄卡";
+"setting_still_image_card" = "相片記錄卡";
+"setting_movie_card" = "影片記錄卡";
 "setting_high_iso_noise_reduction" = "高 ISO 感光度消除雜訊";
 "setting_auto_lighting_optimizer" = "自動亮度優化";
 "setting_continuous_af" = "連續自動對焦";

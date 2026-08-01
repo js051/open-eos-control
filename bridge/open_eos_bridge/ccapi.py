@@ -83,6 +83,13 @@ ZOOM_PATH_SUFFIX = "/shooting/control/zoom"
 MOVIE_MODE_SETTING_KEY = "moviemode"
 MOVIE_MODE_PATH_SUFFIX = "/shooting/control/moviemode"
 MOVIE_MODE_VALUES = ("off", "on")
+STILL_CARD_SELECTION_SETTING_KEY = "cardselectionstillimage"
+MOVIE_CARD_SELECTION_SETTING_KEY = "cardselectionmovie"
+CARD_SELECTION_VALUES = ("none", "card1", "card2")
+CARD_SELECTION_ENDPOINTS = {
+    STILL_CARD_SELECTION_SETTING_KEY: "/functions/cardselection/stillimage",
+    MOVIE_CARD_SELECTION_SETTING_KEY: "/functions/cardselection/movie",
+}
 MAX_STRUCTURED_SETTING_OPTIONS = 256
 CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
@@ -99,6 +106,8 @@ SETTING_ALIASES = {
 }
 SETTING_LABELS = {
     "iso": "ISO",
+    STILL_CARD_SELECTION_SETTING_KEY: "Still-image card",
+    MOVIE_CARD_SELECTION_SETTING_KEY: "Movie card",
     "shutter": "Tv",
     "aperture": "Av",
     "whitebalance": "WB",
@@ -581,6 +590,8 @@ class CcapiSession:
                 supported.add(CameraFeature.ZOOM_CONTROL)
             if MOVIE_MODE_SETTING_KEY in control_keys:
                 supported.add(CameraFeature.MOVIE_MODE_CONTROL)
+            if control_keys & CARD_SELECTION_ENDPOINTS.keys():
+                supported.add(CameraFeature.CARD_SELECTION_CONTROL)
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             jpeg_live_view_supported = self._supports_jpeg_live_view()
@@ -656,6 +667,7 @@ class CcapiSession:
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
                 CameraFeature.ZOOM_CONTROL,
+                CameraFeature.CARD_SELECTION_CONTROL,
             }
             live_sizes = (
                 [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
@@ -696,6 +708,10 @@ class CcapiSession:
                     ),
                     CameraFeature.ZOOM_CONTROL.value: (
                         "The camera must advertise readable and writable Canon zoom control in the same API version."
+                    ),
+                    CameraFeature.CARD_SELECTION_CONTROL.value: (
+                        "The camera must advertise matching GET and PUT Canon card-selection endpoints "
+                        "and valid card abilities."
                     ),
                     CameraFeature.MOVIE_MODE_CONTROL.value: (
                         "The camera must advertise readable and writable Canon movie mode control "
@@ -772,7 +788,7 @@ class CcapiSession:
         with self._lock:
             self._ensure_initialized()
             canonical = SETTING_ALIASES.get(key, key)
-            settings = self._load_settings(False)
+            settings = self._load_settings(canonical in CARD_SELECTION_ENDPOINTS)
             control = next(
                 (item for item in self._camera_settings(settings) if item.key == canonical),
                 None,
@@ -1588,6 +1604,7 @@ class CcapiSession:
             return self._settings_cache
         merged: dict[str, object] = {}
         setting_paths: dict[str, str] = {}
+        self._observed.discard(CameraFeature.CARD_SELECTION_CONTROL)
         for path in self._versioned_paths("/shooting/settings"):
             value = self._first_json([path])
             if not isinstance(value, dict):
@@ -1615,6 +1632,16 @@ class CcapiSession:
             if movie_mode is not None:
                 merged[MOVIE_MODE_SETTING_KEY] = movie_mode
                 setting_paths[MOVIE_MODE_SETTING_KEY] = write.path
+        for key, suffix in CARD_SELECTION_ENDPOINTS.items():
+            operations = self._card_selection_operations(suffix)
+            if operations is None:
+                continue
+            read, write = operations
+            card_selection = _validated_card_selection_setting(self._first_json([read.path]))
+            if card_selection is not None:
+                merged[key] = card_selection
+                setting_paths[key] = write.path
+                self._observed.add(CameraFeature.CARD_SELECTION_CONTROL)
         self._settings_cache = merged
         self._setting_paths = setting_paths
         return merged
@@ -1869,6 +1896,22 @@ class CcapiSession:
         )
         for read in reads:
             write = CcapiOperation("POST", read.path)
+            if write in self._operations:
+                return read, write
+        return None
+
+    def _card_selection_operations(self, suffix: str) -> tuple[CcapiOperation, CcapiOperation] | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith(suffix)
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            write = CcapiOperation("PUT", read.path)
             if write in self._operations:
                 return read, write
         return None
@@ -2463,6 +2506,23 @@ def _validated_movie_mode_setting(raw: object) -> dict[str, object] | None:
     return {"value": status, "ability": list(MOVIE_MODE_VALUES)}
 
 
+def _validated_card_selection_setting(raw: object) -> dict[str, object] | None:
+    if not isinstance(raw, dict):
+        return None
+    current = raw.get("value")
+    ability = raw.get("ability")
+    if not isinstance(current, str) or not isinstance(ability, list) or len(ability) < 2:
+        return None
+    if not all(isinstance(item, str) for item in ability):
+        return None
+    values = list(ability)
+    if len(set(values)) != len(values) or any(item not in CARD_SELECTION_VALUES for item in values):
+        return None
+    if current not in CARD_SELECTION_VALUES or current not in values:
+        return None
+    return {"value": current, "ability": values}
+
+
 def _structured_setting_parts(key: str) -> tuple[str, str] | None:
     for base_key, fields in (
         (IMAGE_QUALITY_SETTING_KEY, IMAGE_QUALITY_FIELDS),
@@ -2509,6 +2569,8 @@ def _feature_for_setting(key: str) -> CameraFeature:
         return CameraFeature.MOVIE_MODE_CONTROL
     if key == ZOOM_SETTING_KEY:
         return CameraFeature.ZOOM_CONTROL
+    if key in CARD_SELECTION_ENDPOINTS:
+        return CameraFeature.CARD_SELECTION_CONTROL
     return CameraFeature.ADVANCED_SETTINGS
 
 

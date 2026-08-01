@@ -1472,6 +1472,8 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "autopoweroff" -> stringResource(R.string.setting_auto_power_off)
     "capturetarget" -> stringResource(R.string.setting_capture_target)
     "capturestorage" -> stringResource(R.string.setting_capture_storage)
+    "cardselectionstillimage" -> stringResource(R.string.setting_still_image_card)
+    "cardselectionmovie" -> stringResource(R.string.setting_movie_card)
     "highisonr" -> stringResource(R.string.setting_high_iso_noise_reduction)
     "alomode" -> stringResource(R.string.setting_auto_lighting_optimizer)
     "aeb" -> stringResource(R.string.setting_aeb)

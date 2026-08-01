@@ -71,6 +71,16 @@ public actor CCAPIClient {
     private static let movieModeSettingKey = "moviemode"
     private static let movieModePathSuffix = "/shooting/control/moviemode"
     private static let movieModeValues = ["off", "on"]
+    private static let stillCardSelectionSettingKey = "cardselectionstillimage"
+    private static let movieCardSelectionSettingKey = "cardselectionmovie"
+    private static let cardSelectionValues = ["none", "card1", "card2"]
+    private static let cardSelectionEndpoints = [
+        (key: stillCardSelectionSettingKey, suffix: "/functions/cardselection/stillimage"),
+        (key: movieCardSelectionSettingKey, suffix: "/functions/cardselection/movie"),
+    ]
+    private static let cardSelectionSettingKeys = Set(
+        cardSelectionEndpoints.map { $0.key }
+    )
     private static let maximumStructuredSettingOptions = 256
 
     private let baseURL: URL
@@ -349,6 +359,9 @@ public actor CCAPIClient {
         if controls.contains(where: { $0.key == Self.movieModeSettingKey }) {
             supported.insert(.movieModeControl)
         }
+        if controls.contains(where: { Self.cardSelectionSettingKeys.contains($0.key) }) {
+            supported.insert(.cardSelectionControl)
+        }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
@@ -388,7 +401,7 @@ public actor CCAPIClient {
             .videoRecording, .tapFocus,
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaDelete, .cameraClockSync, .zoomControl,
+            .mediaDelete, .cameraClockSync, .zoomControl, .cardSelectionControl,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
         return CameraCapabilities(
@@ -407,6 +420,7 @@ public actor CCAPIClient {
                     .clickWhiteBalance: "The camera must advertise POST clickwb and detailed Live View metadata for Click WB.",
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
                     .zoomControl: "The camera must advertise readable and writable Canon zoom control in the same API version.",
+                    .cardSelectionControl: "The camera must advertise matching GET and PUT Canon card-selection endpoints and valid card abilities.",
                     .movieModeControl: "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                 ]
@@ -478,6 +492,24 @@ public actor CCAPIClient {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
                 try await requestOK(path: "/ccapi/movie-mode", method: .post, json: ["action": value])
+            case Self.stillCardSelectionSettingKey:
+                guard Self.cardSelectionValues.contains(value) else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                try await requestOK(
+                    path: "/ccapi/card-selection/stillimage",
+                    method: .put,
+                    json: ["value": value]
+                )
+            case Self.movieCardSelectionSettingKey:
+                guard Self.cardSelectionValues.contains(value) else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                try await requestOK(
+                    path: "/ccapi/card-selection/movie",
+                    method: .put,
+                    json: ["value": value]
+                )
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
@@ -485,7 +517,12 @@ public actor CCAPIClient {
             return try await status()
         }
 
-        let settings = try await cachedOrLoadShootingSettings()
+        let settings: JSONDictionary?
+        if Self.cardSelectionSettingKeys.contains(key.lowercased()) {
+            settings = try await loadShootingSettings()
+        } else {
+            settings = try await cachedOrLoadShootingSettings()
+        }
         guard let control = cameraSettings(settings).first(where: { $0.key == key }),
               control.values.contains(value) else {
             throw CCAPIError.invalidSetting(key: key, value: value)
@@ -1269,6 +1306,20 @@ public actor CCAPIClient {
         return nil
     }
 
+    private func cardSelectionOperations(
+        suffix: String
+    ) -> (read: CCAPIOperation, write: CCAPIOperation)? {
+        let reads = operations
+            .filter { $0.method == .get && $0.path.hasSuffix(suffix) }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for read in reads {
+            if let write = operations.first(where: { $0.method == .put && $0.path == read.path }) {
+                return (read, write)
+            }
+        }
+        return nil
+    }
+
     private func directShutterOperation() -> CCAPIOperation? {
         operation(.post, suffix: "/shooting/control/shutterbutton")
     }
@@ -1604,6 +1655,7 @@ public actor CCAPIClient {
 
     private func loadShootingSettings() async throws -> JSONDictionary? {
         settingPaths.removeAll()
+        observedFeatures.remove(.cardSelectionControl)
         settingsLoaded = false
         var merged: JSONDictionary = [:]
         let paths = enforceAdvertisedOperations
@@ -1631,6 +1683,14 @@ public actor CCAPIClient {
            let movieMode = Self.validatedMovieModeSetting(raw) {
             settingPaths[Self.movieModeSettingKey] = operations.write.path
             merged[Self.movieModeSettingKey] = movieMode
+        }
+        for (key, suffix) in Self.cardSelectionEndpoints {
+            guard let operations = cardSelectionOperations(suffix: suffix),
+                  let raw = try await firstJSON(paths: [operations.read.path], required: false),
+                  let cardSelection = Self.validatedCardSelectionSetting(raw) else { continue }
+            settingPaths[key] = operations.write.path
+            merged[key] = cardSelection
+            observedFeatures.insert(.cardSelectionControl)
         }
         settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
@@ -1728,6 +1788,19 @@ public actor CCAPIClient {
         let status = value.string("status", default: value.string("value"))
         guard movieModeValues.contains(status) else { return nil }
         return ["value": status, "ability": movieModeValues]
+    }
+
+    private static func validatedCardSelectionSetting(_ value: JSONDictionary) -> JSONDictionary? {
+        guard let current = value["value"] as? String,
+              let rawAbility = value["ability"] as? [Any] else { return nil }
+        let values = rawAbility.compactMap { $0 as? String }
+        guard values.count == rawAbility.count,
+              values.count >= 2,
+              Set(values).count == values.count,
+              values.allSatisfy({ cardSelectionValues.contains($0) }),
+              cardSelectionValues.contains(current),
+              values.contains(current) else { return nil }
+        return ["value": current, "ability": values]
     }
 
     private func zoomControl(_ value: JSONDictionary) -> CameraSetting? {
@@ -1837,6 +1910,7 @@ public actor CCAPIClient {
         case "whitebalance": .whiteBalanceControl
         case Self.movieModeSettingKey: .movieModeControl
         case Self.zoomSettingKey: .zoomControl
+        case Self.stillCardSelectionSettingKey, Self.movieCardSelectionSettingKey: .cardSelectionControl
         default: .advancedSettings
         }
     }
@@ -1945,6 +2019,12 @@ public actor CCAPIClient {
            let control = control(Self.movieModeSettingKey, "Movie mode", normalized) {
             controls.append(control)
         }
+        for key in [Self.stillCardSelectionSettingKey, Self.movieCardSelectionSettingKey] {
+            guard let raw = value.object(key),
+                  let normalized = Self.validatedCardSelectionSetting(raw),
+                  let control = control(key, Self.settingLabel(key), normalized) else { continue }
+            controls.append(control)
+        }
         var supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
@@ -1958,6 +2038,9 @@ public actor CCAPIClient {
         }
         if controls.contains(where: { $0.key == Self.movieModeSettingKey }) {
             supported.insert(.movieModeControl)
+        }
+        if controls.contains(where: { Self.cardSelectionSettingKeys.contains($0.key) }) {
+            supported.insert(.cardSelectionControl)
         }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
@@ -2380,6 +2463,8 @@ public actor CCAPIClient {
             "colortemperature": "Color temperature", "exposurecompensation": "Exposure compensation",
             "alomode": "Auto Lighting Optimizer",
             "zoom": "Zoom",
+            Self.stillCardSelectionSettingKey: "Still-image card",
+            Self.movieCardSelectionSettingKey: "Movie card",
         ]
         if let label = known[key] { return label }
         return key.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").capitalized

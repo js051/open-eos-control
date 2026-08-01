@@ -127,6 +127,8 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         "alomode",
         "capturetarget",
         "capturestorage",
+        "cardselectionstillimage",
+        "cardselectionmovie",
         "stillimagequalitysd",
         "stillimagequalitycf",
     }
@@ -210,6 +212,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS"' in script
     assert 'BULB_EXPOSURE: "BULB_EXPOSURE"' in script
     assert 'MOVIE_MODE_CONTROL: "MOVIE_MODE_CONTROL"' in script
+    assert 'CARD_SELECTION_CONTROL: "CARD_SELECTION_CONTROL"' in script
     assert 'LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION"' in script
     assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
