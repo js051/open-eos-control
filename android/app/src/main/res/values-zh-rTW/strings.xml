@@ -257,4 +257,6 @@
     <string name="physical_validation_not_confirmed">尚未在相機上確認</string>
     <string name="copy_physical_validation">複製真機驗證紀錄</string>
     <string name="physical_validation_copied">已複製真機驗證紀錄</string>
+    <string name="setting_zoom">變焦</string>
+    <string name="zoom_value">%1$s%%</string>
 </resources>

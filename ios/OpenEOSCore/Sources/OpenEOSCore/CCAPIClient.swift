@@ -65,6 +65,8 @@ public actor CCAPIClient {
     private static let imageQualityFields = ["raw", "jpeg", "heif"]
     private static let wbShiftSettingKey = "wbshift"
     private static let wbShiftFields = ["ba", "mg"]
+    private static let zoomSettingKey = "zoom"
+    private static let zoomPathSuffix = "/shooting/control/zoom"
     private static let maximumStructuredSettingOptions = 256
 
     private let baseURL: URL
@@ -287,6 +289,9 @@ public actor CCAPIClient {
         if controls.contains(where: { $0.key == "whitebalance" }) {
             supported.insert(.whiteBalanceControl)
         }
+        if controls.contains(where: { $0.key == Self.zoomSettingKey }) {
+            supported.insert(.zoomControl)
+        }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
@@ -323,7 +328,7 @@ public actor CCAPIClient {
             .videoRecording, .tapFocus,
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaDelete, .cameraClockSync,
+            .mediaDelete, .cameraClockSync, .zoomControl,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
         return CameraCapabilities(
@@ -338,6 +343,7 @@ public actor CCAPIClient {
                     .tapFocus: "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
                     .clickWhiteBalance: "The camera must advertise POST clickwb and detailed Live View metadata for Click WB.",
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
+                    .zoomControl: "The camera must advertise readable and writable Canon zoom control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                 ]
             ),
@@ -398,6 +404,11 @@ public actor CCAPIClient {
                     method: .patch,
                     json: ["white_balance": value]
                 )
+            case Self.zoomSettingKey:
+                guard let zoom = Int(value), String(zoom) == value, (0...100).contains(zoom) else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                _ = try await requestJSON(path: "/ccapi/zoom", method: .post, json: ["value": zoom])
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
@@ -410,7 +421,14 @@ public actor CCAPIClient {
               control.values.contains(value) else {
             throw CCAPIError.invalidSetting(key: key, value: value)
         }
-        if let structured = structuredSettingParts(key) {
+        if key == Self.zoomSettingKey {
+            guard let path = settingPaths[Self.zoomSettingKey],
+                  let zoom = Int(value), String(zoom) == value else {
+                throw CCAPIError.invalidSetting(key: key, value: value)
+            }
+            _ = try await requestJSON(path: path, method: .post, json: ["value": zoom])
+            cachedSettings = nil
+        } else if let structured = structuredSettingParts(key) {
             try await putStructuredSettingValue(
                 settings: settings,
                 baseKey: structured.baseKey,
@@ -1147,6 +1165,18 @@ public actor CCAPIClient {
             ?? matching.max { Self.pathVersion($0.path) < Self.pathVersion($1.path) }
     }
 
+    private func zoomOperations() -> (read: CCAPIOperation, write: CCAPIOperation)? {
+        let reads = operations
+            .filter { $0.method == .get && $0.path.hasSuffix(Self.zoomPathSuffix) }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for read in reads {
+            if let write = operations.first(where: { $0.method == .post && $0.path == read.path }) {
+                return (read, write)
+            }
+        }
+        return nil
+    }
+
     private func directShutterOperation() -> CCAPIOperation? {
         operation(.post, suffix: "/shooting/control/shutterbutton")
     }
@@ -1498,6 +1528,12 @@ public actor CCAPIClient {
                 if merged[key] == nil { merged[key] = setting }
             }
         }
+        if let operations = zoomOperations(),
+           let raw = try await firstJSON(paths: [operations.read.path], required: false),
+           let zoom = Self.validatedZoomSetting(raw) {
+            settingPaths[Self.zoomSettingKey] = operations.write.path
+            merged[Self.zoomSettingKey] = zoom
+        }
         settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
         return cachedSettings
@@ -1531,6 +1567,8 @@ public actor CCAPIClient {
                 controls.append(contentsOf: structuredImageQualityControls(setting))
             } else if key == Self.wbShiftSettingKey {
                 controls.append(contentsOf: structuredWBShiftControls(setting))
+            } else if key == Self.zoomSettingKey {
+                if let control = zoomControl(setting) { controls.append(control) }
             } else if let settingControl = control(key, Self.settingLabel(key), setting) {
                 controls.append(settingControl)
             }
@@ -1577,6 +1615,22 @@ public actor CCAPIClient {
         let (count, countOverflow) = (distance / step).addingReportingOverflow(1)
         guard !countOverflow, count >= 1, count <= maximumStructuredSettingOptions else { return [] }
         return (0..<count).map { String(minimum + ($0 * step)) }
+    }
+
+    private static func validatedZoomSetting(_ value: JSONDictionary) -> JSONDictionary? {
+        guard let current = strictInteger(value["value"]),
+              let ability = value.object("ability") else { return nil }
+        let values = boundedIntegerRangeValues(ability)
+        let currentValue = String(current)
+        guard values.count >= 2, values.contains(currentValue) else { return nil }
+        return ["value": currentValue, "ability": values]
+    }
+
+    private func zoomControl(_ value: JSONDictionary) -> CameraSetting? {
+        let values = value.array("ability")?.strings ?? []
+        let current = value.string("value")
+        guard values.count >= 2, values.contains(current) else { return nil }
+        return CameraSetting(key: Self.zoomSettingKey, label: "Zoom", value: current, values: values)
     }
 
     private static func strictInteger(_ value: Any?) -> Int? {
@@ -1677,6 +1731,7 @@ public actor CCAPIClient {
         switch key.lowercased() {
         case "iso", "shutter", "aperture": .exposureControl
         case "whitebalance": .whiteBalanceControl
+        case Self.zoomSettingKey: .zoomControl
         default: .advancedSettings
         }
     }
@@ -1731,7 +1786,7 @@ public actor CCAPIClient {
 
     private func simulatorCapabilities() async throws -> CameraCapabilities {
         let value = try await requestJSON(path: "/ccapi/capabilities")
-        let controls = [
+        var controls = [
             CameraSetting(key: "iso", label: "ISO", value: "-", values: value.array("iso")?.strings ?? []),
             CameraSetting(key: "shutter", label: "Shutter speed", value: "-", values: value.array("shutter")?.strings ?? []),
             CameraSetting(key: "aperture", label: "Aperture", value: "-", values: value.array("aperture")?.strings ?? []),
@@ -1742,13 +1797,21 @@ public actor CCAPIClient {
                 values: value.array("white_balance")?.strings ?? []
             ),
         ]
-        let supported: Set<CameraFeature> = [
+        if let raw = value.object(Self.zoomSettingKey),
+           let normalized = Self.validatedZoomSetting(raw),
+           let control = zoomControl(normalized) {
+            controls.append(control)
+        }
+        var supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
             .clickWhiteBalance, .focusDrive,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete, .cameraClockSync,
         ]
+        if controls.contains(where: { $0.key == Self.zoomSettingKey }) {
+            supported.formUnion([.zoomControl, .advancedSettings])
+        }
         return CameraCapabilities(
             settings: controls,
             matrix: CapabilityMatrix(supported: supported, planned: [.liveViewRTP]),
@@ -2103,6 +2166,7 @@ public actor CCAPIClient {
             "wbshift.ba": "WB shift B/A", "wbshift.mg": "WB shift M/G",
             "colortemperature": "Color temperature", "exposurecompensation": "Exposure compensation",
             "alomode": "Auto Lighting Optimizer",
+            "zoom": "Zoom",
         ]
         if let label = known[key] { return label }
         return key.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").capitalized

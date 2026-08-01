@@ -156,7 +156,7 @@ The event payload is partial and never replaces `CameraStatus`. Android, iOS, an
 
 The response includes the effective `source`, so clients can distinguish an `AUTO` request that selected `CCAPI_RTP` from one that fell back to `CCAPI_JPEG_POLLING`.
 
-`POST /liveview/magnification` accepts `{"value":1}` or `{"value":5}` and returns the accepted value. It is capability-gated and requires active Live View. The libgphoto2 engine exposes it only when a writable `eoszoom` runtime widget exists; the direct CCAPI engine does not map Canon's PowerShot-only optical-zoom endpoint to this EOS feature.
+`POST /liveview/magnification` accepts `{"value":1}` or `{"value":5}` and returns the accepted value. It is capability-gated and requires active Live View. The libgphoto2 engine exposes it only when a writable `eoszoom` runtime widget exists. Canon CCAPI `GET`/`POST /shooting/control/zoom` is exposed separately as the generic `zoom` camera setting and `ZOOM_CONTROL`; it never masquerades as Live View magnification.
 
 The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --stdout` process and incrementally extracts bounded JPEG frames from its concatenated MJPEG output. It accepts a 1-30 FPS output cap but does not claim the camera and USB link delivered that rate. Commands that need exclusive camera access stop the movie process first; the next frame request automatically starts a fresh process. Startup, early termination, malformed-frame, size-limit, or frame-timeout failures switch the session to bounded `--capture-preview --stdout` transactions and reduce effective `requestedFps` to at most 5. `CameraStatus.raw.liveViewTransport` and `liveViewFallbackReason` distinguish these paths.
 

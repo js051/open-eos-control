@@ -350,3 +350,19 @@ def test_canonical_ccapi_controls_and_media_mutate_backend_state() -> None:
     assert test_state["bulb_start_count"] == 1
     assert test_state["bulb_stop_count"] == 1
     assert "SIM_0003.JPG" not in test_state["media_ids"]
+
+
+def test_zoom_contract_uses_integer_value_and_mutates_both_simulator_routes() -> None:
+    client.post("/ccapi/test/reset")
+
+    ability = client.get("/ccapi/ver100/shooting/control/zoom")
+    canonical = client.post("/ccapi/ver100/shooting/control/zoom", json={"value": 75})
+    simulator = client.post("/ccapi/zoom", json={"value": 25})
+    invalid = client.post("/ccapi/ver100/shooting/control/zoom", json={"value": "50"})
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert ability.json() == {"value": 50, "ability": {"min": 0, "max": 100, "step": 1}}
+    assert canonical.json() == {"value": 75}
+    assert simulator.json() == {"value": 25}
+    assert invalid.status_code == 422
+    assert test_state["zoom"] == {"value": 25, "update_count": 2}

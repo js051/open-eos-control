@@ -56,6 +56,7 @@ DISCOVERY = {
         {"path": "/shooting/liveview/afframeposition", "put": True},
         {"path": "/shooting/liveview/clickwb", "post": True},
         {"path": "/shooting/control/drivefocus", "post": True},
+        {"path": "/shooting/control/zoom", "get": True, "post": True},
         {"path": "/shooting/liveview", "get": True, "post": True, "delete": True},
         {"path": "/shooting/liveview/flip", "get": True},
         {"path": "/shooting/liveview/flipdetail", "get": True},
@@ -97,6 +98,7 @@ class FakeCcapiTransport:
         thumbnail_content_type: str = "image/jpeg",
         preview_body: bytes = JPEG,
         preview_content_type: str = "image/jpeg",
+        zoom_response: object | None = None,
     ) -> None:
         self.discovery = discovery or DISCOVERY
         self.developer_discovery = developer_discovery
@@ -109,6 +111,7 @@ class FakeCcapiTransport:
         self.thumbnail_content_type = thumbnail_content_type
         self.preview_body = preview_body
         self.preview_content_type = preview_content_type
+        self.zoom_response = zoom_response
         self.requests: list[RecordedRequest] = []
         self.settings = {
             "iso": {"value": "800", "ability": ["100", "800", "1600"]},
@@ -131,6 +134,7 @@ class FakeCcapiTransport:
                 },
             },
         }
+        self.zoom = 50
         self.reject_live_view_size = True
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.closed = False
@@ -173,6 +177,14 @@ class FakeCcapiTransport:
             return _json_response({"storagelist": [{"name": "card1", "maxsize": 64_000, "spacesize": 32_000}]})
         if method == "GET" and path == "/ccapi/ver100/shooting/settings":
             return _json_response(self.settings)
+        if method == "GET" and path == "/ccapi/ver100/shooting/control/zoom":
+            if self.zoom_response is not None:
+                return _json_response(self.zoom_response)
+            return _json_response({"value": self.zoom, "ability": {"min": 0, "max": 100, "step": 25}})
+        if method == "POST" and path == "/ccapi/ver100/shooting/control/zoom":
+            assert payload is not None and isinstance(payload.get("value"), int)
+            self.zoom = payload["value"]
+            return _json_response({"value": self.zoom})
         if method == "PUT" and path == "/ccapi/ver100/functions/datetime":
             assert payload is not None
             self.camera_clock = payload
@@ -369,6 +381,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
         CameraFeature.CAMERA_CLOCK_SYNC,
+        CameraFeature.ZOOM_CONTROL,
     } <= set(capabilities.supported)
     assert CameraFeature.MEDIA_THUMBNAIL not in capabilities.planned
     assert CameraFeature.MEDIA_PREVIEW not in capabilities.planned
@@ -382,13 +395,29 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert next(item for item in capabilities.settings if item.key == "wbshift.ba").values == [
         str(value) for value in range(-9, 10)
     ]
+    assert next(item for item in capabilities.settings if item.key == "zoom").values == [
+        "0",
+        "25",
+        "50",
+        "75",
+        "100",
+    ]
     assert capabilities.evidence.source == "GET /ccapi"
     assert capabilities.evidence.protocol_versions == ["ver100"]
     assert "POST /ccapi/ver100/shooting/control/shutterbutton" in capabilities.evidence.advertised_commands
     assert "iso" in capabilities.evidence.writable_settings
+    assert "zoom" in capabilities.evidence.writable_settings
     assert capabilities.evidence.truncated is False
 
     assert session.set_setting("iso", "1600").exposure.iso == "1600"
+    session.set_setting("zoom", "75")
+    zoom_write = next(
+        request
+        for request in transport.requests
+        if request.method == "POST" and request.path.endswith("/shooting/control/zoom")
+    )
+    assert zoom_write.body == {"value": 75}
+    assert transport.zoom == 75
     session.set_setting("stillimagequality.raw", "raw")
     quality_write = next(
         request
@@ -530,6 +559,28 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         {"cameradisplay": "on", "liveviewsize": "large"},
         {"cameradisplay": "on"},
     ]
+
+
+@pytest.mark.parametrize(
+    "zoom_response",
+    [
+        {"value": False, "ability": {"min": 0, "max": 100, "step": 1}},
+        {"value": 50, "ability": {"min": 0, "max": 1_000, "step": 1}},
+        {"value": 50, "ability": {"min": 0, "max": 100, "step": 0}},
+        {"value": 55, "ability": {"min": 0, "max": 100, "step": 10}},
+    ],
+)
+def test_ccapi_zoom_hides_malformed_or_unbounded_ranges(zoom_response: object) -> None:
+    transport = FakeCcapiTransport(zoom_response=zoom_response)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.ZOOM_CONTROL not in capabilities.supported
+    assert CameraFeature.ZOOM_CONTROL in capabilities.planned
+    assert not any(setting.key == "zoom" for setting in capabilities.settings)
+    with pytest.raises(BridgeError, match="ZOOM_CONTROL"):
+        session.set_setting("zoom", "50")
 
 
 def test_ccapi_clock_sync_does_not_combine_read_and_write_across_api_versions() -> None:

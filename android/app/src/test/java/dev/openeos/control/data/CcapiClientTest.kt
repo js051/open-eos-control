@@ -1028,6 +1028,62 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonZoomRequiresMatchingGetPostAndWritesIntegerValue() = runTest {
+        val discovery = """{"ver100":[
+            {"path":"/devicestatus/batterylist","get":true},
+            {"path":"/devicestatus/storage","get":true},
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/control/zoom","get":true,"post":true}
+        ]}""".trimIndent()
+        server.enqueue(jsonResponse(discovery))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":50,"ability":{"min":0,"max":100,"step":25}}"""))
+        server.enqueue(jsonResponse("""{"value":75}"""))
+        server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":75,"ability":{"min":0,"max":100,"step":25}}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val zoom = capabilities.advancedSettings.single { it.key == "zoom" }
+        assertEquals(listOf("0", "25", "50", "75", "100"), zoom.values)
+        assertEquals("50", zoom.value)
+        assertTrue(capabilities.matrix.supports(CameraFeature.ZOOM_CONTROL))
+
+        client.setSetting("zoom", "75")
+
+        repeat(3) { server.takeRequest() }
+        val write = server.takeRequest()
+        assertEquals("POST", write.method)
+        assertEquals("/ccapi/ver100/shooting/control/zoom", write.path)
+        assertEquals(75, JSONObject(write.body.readUtf8()).getInt("value"))
+    }
+
+    @Test
+    fun canonZoomIsHiddenWithoutMatchingPost() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/control/zoom","get":true}
+                ]}""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.ZOOM_CONTROL))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.ZOOM_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "zoom" })
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun realStillImageQualityUsesAdvertisedObjectFieldsAndPreservesCompanionFormat() = runTest {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))

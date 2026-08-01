@@ -179,6 +179,7 @@ final class CameraAppTests: XCTestCase {
             "wbshift.ba": "setting_white_balance_shift_ba",
             "wbshift.mg": "setting_white_balance_shift_mg",
             "aspectratio": "setting_aspect_ratio",
+            "zoom": "setting_zoom",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
             "alomode": "setting_auto_lighting_optimizer",

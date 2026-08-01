@@ -1078,6 +1078,11 @@ class CameraScreensTest {
         compose.runOnIdle {
             assertEquals("aspectratio" to "16:9", request)
         }
+        compose.onNodeWithTag("advanced-setting-zoom")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-values-zoom").assertIsDisplayed()
+        compose.onNodeWithText("50%").assertIsDisplayed()
         compose.onNodeWithTag("advanced-setting-zoomspeed")
             .performScrollTo()
             .assertIsDisplayed()

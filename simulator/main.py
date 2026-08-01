@@ -9,7 +9,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from PIL import Image, ImageDraw
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 app = FastAPI(title="Open EOS Control Fake Camera")
 
@@ -34,12 +34,18 @@ class WhiteBalanceUpdate(BaseModel):
     white_balance: str
 
 
+class ZoomUpdate(BaseModel):
+    value: StrictInt = Field(ge=0, le=100)
+
+
 capabilities = {
     "iso": ["100", "200", "400", "800", "1600", "3200", "6400"],
     "shutter": ["1/25", "1/50", "1/60", "1/100", "1/125"],
     "aperture": ["1.8", "2.0", "2.8", "4.0", "5.6"],
     "white_balance": ["auto", "daylight", "cloudy", "tungsten", "kelvin"],
 }
+
+ZOOM_ABILITY = {"min": 0, "max": 100, "step": 1}
 
 def initial_state() -> dict[str, object]:
     return {
@@ -67,6 +73,8 @@ def initial_state() -> dict[str, object]:
         "click_wb_x": 0.5,
         "click_wb_y": 0.5,
         "click_wb_count": 0,
+        "zoom": 50,
+        "zoom_update_count": 0,
         "canonical_af_start_count": 0,
         "canonical_af_stop_count": 0,
         "canonical_focus_position": None,
@@ -190,6 +198,10 @@ async def get_test_state() -> dict[str, object]:
             "y": state["click_wb_y"],
             "count": state["click_wb_count"],
         },
+        "zoom": {
+            "value": state["zoom"],
+            "update_count": state["zoom_update_count"],
+        },
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
         "canonical": {
@@ -246,8 +258,19 @@ async def events(after: int = 0) -> dict[str, object]:
 
 
 @app.get("/ccapi/capabilities")
-async def get_capabilities() -> dict[str, list[str]]:
-    return capabilities
+async def get_capabilities() -> dict[str, object]:
+    return {
+        **capabilities,
+        "zoom": {"value": state["zoom"], "ability": ZOOM_ABILITY},
+    }
+
+
+@app.post("/ccapi/zoom")
+async def update_zoom(payload: ZoomUpdate) -> dict[str, object]:
+    state["zoom"] = payload.value
+    state["zoom_update_count"] += 1
+    publish_event("zoom")
+    return {"value": state["zoom"]}
 
 
 @app.patch("/ccapi/exposure")
@@ -426,6 +449,7 @@ CANON_DISCOVERY = {
         {"path": "/shooting/control/af", "post": True},
         {"path": "/shooting/control/recbutton", "post": True},
         {"path": "/shooting/control/drivefocus", "post": True},
+        {"path": "/shooting/control/zoom", "get": True, "post": True},
         {"path": "/shooting/liveview", "post": True, "delete": True},
         {"path": "/shooting/liveview/flip", "get": True},
         {"path": "/shooting/liveview/flipdetail", "get": True},
@@ -662,6 +686,19 @@ async def canon_drive_focus(payload: dict[str, object]) -> Response:
     state["focus_drive_direction"] = value[:-1]
     state["focus_drive_step"] = {"1": "small", "2": "medium", "3": "large"}[value[-1]]
     return Response(status_code=204)
+
+
+@app.get("/ccapi/ver100/shooting/control/zoom")
+async def canon_get_zoom() -> dict[str, object]:
+    return {"value": state["zoom"], "ability": ZOOM_ABILITY}
+
+
+@app.post("/ccapi/ver100/shooting/control/zoom")
+async def canon_set_zoom(payload: ZoomUpdate) -> dict[str, int]:
+    state["zoom"] = payload.value
+    state["zoom_update_count"] += 1
+    publish_event("zoom")
+    return {"value": payload.value}
 
 
 @app.put("/ccapi/ver100/shooting/liveview/afframeposition", status_code=204)

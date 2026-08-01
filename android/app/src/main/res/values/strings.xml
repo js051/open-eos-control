@@ -228,6 +228,8 @@
     <string name="setting_color_space">Color space</string>
     <string name="setting_aspect_ratio">Aspect ratio</string>
     <string name="setting_power_zoom_speed">Power zoom speed</string>
+    <string name="setting_zoom">Zoom</string>
+    <string name="zoom_value">%1$s%%</string>
     <string name="setting_auto_power_off">Auto power off</string>
     <string name="setting_capture_target">Capture target</string>
     <string name="setting_high_iso_noise_reduction">High ISO noise reduction</string>

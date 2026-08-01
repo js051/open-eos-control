@@ -1025,6 +1025,71 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(value, ["value": "1600"])
     }
 
+    func testCanonZoomRequiresMatchingGetPostAndWritesIntegerValue() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/zoom","get":true,"post":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/control/zoom",
+            body: #"{"value":50,"ability":{"min":0,"max":100,"step":25}}"#
+        )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/ver100/shooting/control/zoom",
+            body: #"{"value":75}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/batterylist",
+            body: #"{"batterylist":[{"level":89}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/storage",
+            body: #"{"storagelist":[{"name":"card1","spacesize":32000000000}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/control/zoom",
+            body: #"{"value":75,"ability":{"min":0,"max":100,"step":25}}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let capabilities = try await client.capabilities()
+        XCTAssertEqual(capabilities.setting("zoom")?.values, ["0", "25", "50", "75", "100"])
+        XCTAssertEqual(capabilities.setting("zoom")?.value, "50")
+        XCTAssertTrue(capabilities.matrix.supports(.zoomControl))
+
+        _ = try await client.setSetting(key: "zoom", value: "75")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first {
+            $0.method == "POST" && $0.path == "/ccapi/ver100/shooting/control/zoom"
+        })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["value"] as? Int, 75)
+    }
+
+    func testCanonZoomIsHiddenWithoutMatchingPost() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/control/zoom","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertNil(capabilities.setting("zoom"))
+        XCTAssertFalse(capabilities.matrix.supports(.zoomControl))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.zoomControl))
+        let requestCount = await transport.requests().count
+        XCTAssertEqual(requestCount, 2)
+    }
+
     func testStillImageQualityWritesCanonObjectAndPreservesCompanionFormat() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
