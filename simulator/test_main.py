@@ -191,3 +191,136 @@ def test_events_coalesce_multiple_camera_changes() -> None:
 
     assert response["sequence"] == 2
     assert response["keys"] == ["contents", "recbutton"]
+
+
+def test_canonical_ccapi_discovery_settings_and_live_view_contract() -> None:
+    discovery = client.get("/ccapi")
+    settings = client.get("/ccapi/ver100/shooting/settings")
+    changed = client.put(
+        "/ccapi/ver100/shooting/settings/iso",
+        json={"value": "1600"},
+    )
+    rejected_size = client.post(
+        "/ccapi/ver100/shooting/liveview",
+        json={"cameradisplay": "on", "liveviewsize": "medium"},
+    )
+    started = client.post(
+        "/ccapi/ver100/shooting/liveview",
+        json={"cameradisplay": "on"},
+    )
+    detailed = client.get("/ccapi/ver100/shooting/liveview/flipdetail?kind=both")
+    stopped = client.delete("/ccapi/ver100/shooting/liveview")
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert discovery.status_code == 200
+    assert any(
+        entry == {"path": "/shooting/control/shutterbutton", "post": True}
+        for entry in discovery.json()["ver100"]
+    )
+    assert settings.json()["iso"] == {
+        "value": "800",
+        "ability": ["100", "200", "400", "800", "1600", "3200", "6400"],
+    }
+    assert changed.status_code == 204
+    assert state["exposure"]["iso"] == "1600"
+    assert rejected_size.status_code == 400
+    assert started.status_code == 204
+    assert detailed.status_code == 200
+    assert detailed.content.startswith(b"\xff\x00\x00")
+    assert b"positionwidth" in detailed.content
+    assert b"\xff\xd8" in detailed.content and b"\xff\xd9" in detailed.content
+    assert stopped.status_code == 204
+    assert test_state["canonical"] == {
+        "af_start_count": 0,
+        "af_stop_count": 0,
+        "focus_position": None,
+        "click_wb_position": None,
+        "live_view_active": False,
+        "live_view_start_count": 1,
+        "live_view_stop_count": 1,
+        "live_view_size_rejections": 1,
+    }
+
+
+def test_canonical_ccapi_controls_and_media_mutate_backend_state() -> None:
+    assert client.post(
+        "/ccapi/ver100/shooting/control/shutterbutton",
+        json={"af": True},
+    ).status_code == 204
+    assert client.post(
+        "/ccapi/ver100/shooting/control/af",
+        json={"action": "start"},
+    ).status_code == 204
+    assert client.post(
+        "/ccapi/ver100/shooting/control/af",
+        json={"action": "stop"},
+    ).status_code == 204
+    assert client.put(
+        "/ccapi/ver100/shooting/control/shutterbutton/manual",
+        json={"af": True, "action": "half_press"},
+    ).status_code == 204
+    assert client.put(
+        "/ccapi/ver100/shooting/control/shutterbutton/manual",
+        json={"af": False, "action": "release"},
+    ).status_code == 204
+    assert client.post(
+        "/ccapi/ver100/shooting/control/recbutton",
+        json={"action": "start"},
+    ).status_code == 204
+    assert client.post(
+        "/ccapi/ver100/shooting/control/recbutton",
+        json={"action": "stop"},
+    ).status_code == 204
+    assert client.post(
+        "/ccapi/ver100/shooting/control/drivefocus",
+        json={"value": "near3"},
+    ).status_code == 204
+    assert client.put(
+        "/ccapi/ver100/shooting/liveview/afframeposition",
+        json={"positionx": 4000, "positiony": 1600},
+    ).status_code == 204
+    assert client.post(
+        "/ccapi/ver100/shooting/liveview/clickwb",
+        json={"positionx": 2200, "positiony": 2800},
+    ).status_code == 204
+
+    assert client.put(
+        "/ccapi/ver100/shooting/settings/shootingmode",
+        json={"value": "Bulb"},
+    ).status_code == 204
+    assert client.put(
+        "/ccapi/ver100/shooting/control/shutterbutton/manual",
+        json={"af": False, "action": "full_press"},
+    ).status_code == 204
+    assert client.put(
+        "/ccapi/ver100/shooting/control/shutterbutton/manual",
+        json={"af": False, "action": "release"},
+    ).status_code == 204
+
+    contents = client.get("/ccapi/ver100/contents?page=1&order=desc").json()["path"]
+    captured_path = next(path for path in contents if path.endswith("SIM_0003.JPG"))
+    preview = client.get(f"{captured_path}?kind=display")
+    deleted = client.delete(captured_path)
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("image/jpeg")
+    assert preview.content.startswith(b"\xff\xd8") and preview.content.endswith(b"\xff\xd9")
+    assert deleted.status_code == 204
+    assert test_state["capture_count"] == 1
+    assert test_state["canonical"]["af_start_count"] == 1
+    assert test_state["canonical"]["af_stop_count"] == 1
+    assert test_state["half_press_count"] == 1
+    assert test_state["shutter_release_count"] == 1
+    assert test_state["record_start_count"] == 1
+    assert test_state["record_stop_count"] == 1
+    assert test_state["focus_drive"] == {
+        "count": 1,
+        "direction": "near",
+        "step": "large",
+    }
+    assert test_state["canonical"]["focus_position"] == {"x": 4000, "y": 1600}
+    assert test_state["canonical"]["click_wb_position"] == {"x": 2200, "y": 2800}
+    assert test_state["bulb_start_count"] == 1
+    assert test_state["bulb_stop_count"] == 1
+    assert "SIM_0003.JPG" not in test_state["media_ids"]

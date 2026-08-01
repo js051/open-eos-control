@@ -1,0 +1,287 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const net = require("node:net");
+const os = require("node:os");
+const path = require("node:path");
+const { chromium } = require("playwright");
+
+const BRIDGE_ROOT = path.resolve(__dirname, "..");
+const REPOSITORY_ROOT = path.resolve(BRIDGE_ROOT, "..");
+const SIMULATOR_ROOT = path.join(REPOSITORY_ROOT, "simulator");
+const RESULTS_DIR = path.join(BRIDGE_ROOT, "test-results");
+
+async function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close((error) => error ? reject(error) : resolve(address.port));
+    });
+  });
+}
+
+async function waitForServer(url, process, stderr, timeoutMillis = 20_000) {
+  const deadline = Date.now() + timeoutMillis;
+  while (Date.now() < deadline) {
+    if (process.exitCode !== null) {
+      throw new Error(`Test server exited early (${process.exitCode}): ${stderr()}`);
+    }
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch (_) {
+      // The process may still be binding its loopback socket.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Test server did not become ready: ${stderr()}`);
+}
+
+async function stopProcess(process) {
+  if (!process || process.exitCode !== null) return;
+  process.kill();
+  await Promise.race([
+    new Promise((resolve) => process.once("exit", resolve)),
+    new Promise((resolve) => setTimeout(resolve, 5_000)),
+  ]);
+  if (process.exitCode === null) process.kill("SIGKILL");
+}
+
+async function readSimulatorState(origin) {
+  const response = await fetch(`${origin}/ccapi/test/state`);
+  assert.equal(response.ok, true, `Simulator state returned HTTP ${response.status}`);
+  return response.json();
+}
+
+async function waitForSimulatorState(origin, predicate, description, timeoutMillis = 10_000) {
+  const deadline = Date.now() + timeoutMillis;
+  let latest = null;
+  while (Date.now() < deadline) {
+    latest = await readSimulatorState(origin);
+    if (predicate(latest)) return latest;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${description}: ${JSON.stringify(latest)}`);
+}
+
+function spawnUvicorn(python, root, module, port, environment = {}) {
+  const process = spawn(
+    python,
+    ["-m", "uvicorn", module, "--host", "127.0.0.1", "--port", String(port), "--log-level", "warning"],
+    {
+      cwd: root,
+      env: { ...processEnv(), ...environment },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stderr = "";
+  process.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+  return { process, stderr: () => stderr };
+}
+
+function processEnv() {
+  return { ...globalThis.process.env };
+}
+
+async function run() {
+  const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
+  const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;
+  const bridgeOrigin = `http://127.0.0.1:${bridgePort}`;
+  const captureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "open-eos-ccapi-browser-test-"));
+  const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
+  const simulator = spawnUvicorn(python, SIMULATOR_ROOT, "main:app", simulatorPort);
+  let bridge = null;
+  let browser = null;
+  try {
+    await waitForServer(`${simulatorOrigin}/health`, simulator.process, simulator.stderr);
+    const reset = await fetch(`${simulatorOrigin}/ccapi/test/reset`, { method: "POST" });
+    assert.equal(reset.ok, true);
+
+    bridge = spawnUvicorn(python, BRIDGE_ROOT, "tests.browser_server:app", bridgePort, {
+      OPEN_EOS_BROWSER_CAPTURE_DIR: captureDirectory,
+    });
+    await waitForServer(`${bridgeOrigin}/health`, bridge.process, bridge.stderr);
+
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") pageErrors.push(message.text());
+    });
+
+    await page.goto(bridgeOrigin, { waitUntil: "networkidle" });
+    await page.click("#ccapi-mode-button");
+    await page.fill("#ccapi-url-input", simulatorOrigin);
+    await page.click("#connect-button");
+    await page.waitForSelector("#control-view:not([hidden])");
+    assert.match(await page.locator("#camera-name").innerText(), /R6 Mark III/);
+
+    await page.click('.exposure-control[data-setting-key="iso"]');
+    await page.waitForSelector("#setting-dialog[open]");
+    await page.getByRole("button", { name: "1600", exact: true }).click();
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.exposure.iso === "1600",
+      "PC ISO control to reach Canon-style CCAPI",
+    );
+
+    await page.waitForSelector(".settings-command button:not([disabled])");
+    await page.click(".settings-command button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.clock_sync_count === 1,
+      "camera clock synchronization",
+    );
+
+    await page.click("#autofocus-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.canonical.af_start_count === 1 && state.canonical.af_stop_count === 1,
+      "balanced Canon AF start and stop",
+    );
+    await page.click("#half-press-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.half_press_count === 1 && state.shutter_release_count === 1 && !state.half_pressed,
+      "balanced Canon half-press and release",
+    );
+
+    await page.click("#shutter-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.capture_count === 1 && state.media_ids.includes("SIM_0003.JPG"),
+      "still capture and camera media creation",
+    );
+
+    await page.click("#live-toggle-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.canonical.live_view_active &&
+        state.canonical.live_view_start_count === 1 &&
+        state.canonical.live_view_size_rejections === 1,
+      "Live View size fallback and successful Canon start",
+    );
+    await page.waitForSelector("#live-image:not([hidden])");
+    await page.waitForFunction(() => {
+      const image = document.querySelector("#live-image");
+      return image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
+    });
+
+    const imageBounds = await page.locator("#live-image").boundingBox();
+    assert.ok(imageBounds && imageBounds.width > 0 && imageBounds.height > 0);
+    await page.mouse.click(
+      imageBounds.x + imageBounds.width * 0.65,
+      imageBounds.y + imageBounds.height * 0.35,
+    );
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.focus.count === 1 &&
+        state.canonical.focus_position?.x >= 3900 && state.canonical.focus_position?.x <= 4100 &&
+        state.canonical.focus_position?.y >= 1500 && state.canonical.focus_position?.y <= 1700,
+      "geometry-backed Canon Tap AF",
+    );
+
+    await page.selectOption("#tap-action-select", "whiteBalance");
+    await page.mouse.click(
+      imageBounds.x + imageBounds.width * 0.35,
+      imageBounds.y + imageBounds.height * 0.65,
+    );
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.click_white_balance.count === 1 &&
+        state.canonical.click_wb_position?.x >= 2100 && state.canonical.click_wb_position?.x <= 2300 &&
+        state.canonical.click_wb_position?.y >= 2700 && state.canonical.click_wb_position?.y <= 2900,
+      "geometry-backed Canon Click White Balance",
+    );
+
+    await page.click('#focus-step-control button[data-step="LARGE"]');
+    await page.click("#focus-near-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.focus_drive.count === 1 &&
+        state.focus_drive.direction === "near" && state.focus_drive.step === "large",
+      "Canon drivefocus near3 command",
+    );
+
+    await page.click("#video-mode-button");
+    await page.click("#shutter-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.recording && state.record_start_count === 1,
+      "Canon recording start",
+    );
+    await page.click("#shutter-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => !state.recording && state.record_stop_count === 1,
+      "Canon recording stop",
+    );
+    await page.click("#photo-mode-button");
+
+    await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
+    await waitForSimulatorState(simulatorOrigin, (state) => state.mode === "Bulb", "Canon Bulb mode write");
+    await page.click("#shutter-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.bulb_exposure_active && state.bulb_start_count === 1,
+      "Canon Bulb full press",
+    );
+    await page.click("#shutter-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => !state.bulb_exposure_active && state.bulb_stop_count === 1,
+      "Canon Bulb release",
+    );
+
+    await page.click('.tab[data-view="media"]');
+    const capturedMedia = page.locator(".media-row").filter({ hasText: "SIM_0003.JPG" });
+    await capturedMedia.waitFor({ state: "visible" });
+    await capturedMedia.locator("button.media-thumbnail").click();
+    await page.waitForSelector("#media-preview-dialog[open] #media-preview-image:not([hidden])");
+    await page.click("#media-preview-close");
+    page.once("dialog", (dialog) => dialog.accept());
+    await capturedMedia.locator('button[aria-label="Delete SIM_0003.JPG"]').click();
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => !state.media_ids.includes("SIM_0003.JPG"),
+      "confirmed exact Canon media deletion",
+    );
+
+    await page.click('.tab[data-view="diagnostics"]');
+    await page.waitForSelector("#diagnostics-panel:not([hidden])");
+    assert.match(await page.locator("#diagnostics-output").innerText(), /CCAPI_NETWORK|ccapi/i);
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-ccapi-e2e.png"), fullPage: true });
+
+    await page.click("#disconnect-button");
+    await page.waitForSelector("#connection-view:not([hidden])");
+    const finalState = await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => !state.canonical.live_view_active && state.canonical.live_view_stop_count === 1,
+      "CCAPI disconnect to stop Canon Live View",
+    );
+    assert.equal(finalState.canonical.af_start_count, finalState.canonical.af_stop_count);
+    assert.equal(finalState.half_press_count, finalState.shutter_release_count);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  } finally {
+    if (browser) await browser.close();
+    await stopProcess(bridge?.process);
+    await stopProcess(simulator.process);
+    fs.rmSync(captureDirectory, { recursive: true, force: true });
+  }
+}
+
+run().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
