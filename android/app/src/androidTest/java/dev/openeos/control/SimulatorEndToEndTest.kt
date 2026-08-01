@@ -69,6 +69,7 @@ class SimulatorEndToEndTest {
         compose.onNodeWithTag("live-view-frame").performTouchInput { click() }
         waitForSimulatorState { state -> state.getJSONObject("focus").getInt("count") == 1 }
 
+        waitForEnabledContentDescription(text(R.string.tap_action_focus))
         compose.onNodeWithContentDescription(text(R.string.tap_action_focus)).performClick()
         waitForContentDescription(text(R.string.tap_action_white_balance))
         compose.onNodeWithTag("live-view-frame").performTouchInput { click() }
@@ -224,6 +225,14 @@ class SimulatorEndToEndTest {
         compose.waitUntil(timeoutMillis = timeoutMillis) {
             runCatching {
                 compose.onNodeWithTag(tag).assertIsEnabled()
+            }.isSuccess
+        }
+    }
+
+    private fun waitForEnabledContentDescription(value: String, timeoutMillis: Long = 15_000) {
+        compose.waitUntil(timeoutMillis = timeoutMillis) {
+            runCatching {
+                compose.onNodeWithContentDescription(value).assertIsEnabled()
             }.isSuccess
         }
     }
