@@ -47,6 +47,33 @@ class CanonEosPtpTest {
         assertArrayEquals(jpeg, CanonEosPtp.liveViewJpeg(block(type = 11, bytes = jpeg)))
     }
 
+    @Test
+    fun viewfinderParserRetainsJpegAndSensorGeometryRegardlessOfBlockOrder() {
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2, 0xFF.toByte(), 0xD9.toByte())
+        val payload = block(type = 2, bytes = byteArrayOf(7, 8, 9)) +
+            block(type = 1, bytes = jpeg) +
+            block(type = 0x0E, bytes = u32Fields(6_000, 4_000))
+
+        val parsed = CanonEosPtp.liveViewData(payload)
+
+        assertArrayEquals(jpeg, parsed.jpeg)
+        assertEquals(CanonEosLiveViewGeometry(width = 6_000, height = 4_000), parsed.geometry)
+    }
+
+    @Test
+    fun viewfinderParserIgnoresIncompleteOrInvalidSensorGeometry() {
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2, 0xFF.toByte(), 0xD9.toByte())
+        val incomplete = CanonEosPtp.liveViewData(
+            block(type = 0x0E, bytes = u32Fields(6_000)) + block(type = 1, bytes = jpeg)
+        )
+        val invalid = CanonEosPtp.liveViewData(
+            block(type = 0x0E, bytes = u32Fields(0, 4_000)) + block(type = 1, bytes = jpeg)
+        )
+
+        assertEquals(null, incomplete.geometry)
+        assertEquals(null, invalid.geometry)
+    }
+
     @Test(expected = PtpProtocolException::class)
     fun viewfinderParserRejectsMalformedBlockLength() {
         CanonEosPtp.liveViewJpeg(byteArrayOf(30, 0, 0, 0, 1, 0, 0, 0, 0xFF.toByte(), 0xD8.toByte()))
@@ -609,6 +636,7 @@ class CanonEosPtpTest {
             CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
             CanonEosOperationCode.GET_VIEWFINDER_DATA,
             CanonEosOperationCode.DRIVE_LENS,
+            CanonEosOperationCode.TOUCH_AF_POSITION,
         )
         val complete = deviceInfo(operations)
 
@@ -616,6 +644,7 @@ class CanonEosPtpTest {
         assertTrue(CanonEosPtp.supportsAutofocus(complete))
         assertTrue(CanonEosPtp.supportsLiveView(complete))
         assertTrue(CanonEosPtp.supportsFocusDrive(complete))
+        assertTrue(CanonEosPtp.supportsTouchAutofocus(complete))
         assertTrue(CanonEosPtp.supportsPropertyControl(complete))
         assertFalse(
             CanonEosPtp.supportsRemoteRelease(
@@ -625,6 +654,18 @@ class CanonEosPtpTest {
         assertFalse(
             CanonEosPtp.supportsAutofocus(
                 deviceInfo(operations - CanonEosOperationCode.AF_CANCEL)
+            )
+        )
+        assertFalse(
+            CanonEosPtp.supportsTouchAutofocus(
+                deviceInfo(operations - CanonEosOperationCode.TOUCH_AF_POSITION)
+            )
+        )
+        assertFalse(
+            CanonEosPtp.supportsTouchAutofocus(
+                deviceInfo(
+                    operations - CanonEosOperationCode.AF_CANCEL - CanonEosOperationCode.REMOTE_RELEASE_OFF
+                )
             )
         )
         assertFalse(CanonEosPtp.supportsLiveView(complete.copy(vendorExtensionId = 0L)))
