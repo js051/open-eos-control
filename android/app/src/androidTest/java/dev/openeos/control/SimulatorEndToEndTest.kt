@@ -2,6 +2,7 @@ package dev.openeos.control
 
 import androidx.annotation.StringRes
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -63,6 +64,7 @@ class SimulatorEndToEndTest {
         compose.onNodeWithContentDescription(text(R.string.capture_photo)).performClick()
         waitForSimulatorState { state -> state.getInt("capture_count") == 1 }
 
+        waitForEnabledNode("capture-mode-VIDEO")
         compose.onNodeWithTag("capture-mode-VIDEO").performClick()
         waitForContentDescription(text(R.string.start_recording), useUnmergedTree = true)
         compose.onNodeWithTag("capture-button", useUnmergedTree = true)
@@ -95,6 +97,14 @@ class SimulatorEndToEndTest {
     private fun waitForNode(tag: String, timeoutMillis: Long = 15_000) {
         compose.waitUntil(timeoutMillis = timeoutMillis) {
             compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun waitForEnabledNode(tag: String, timeoutMillis: Long = 15_000) {
+        compose.waitUntil(timeoutMillis = timeoutMillis) {
+            runCatching {
+                compose.onNodeWithTag(tag).assertIsEnabled()
+            }.isSuccess
         }
     }
 
