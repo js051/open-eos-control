@@ -4,6 +4,7 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Refined Android's fixed Photo/Video mode rail with direction-aware labels, a rotating short selection underline, and a retained 48dp hit target inset from the physical edge. Sideways Traditional Chinese and 130% text now stay camera-like without a fixed selection rectangle turning into a clipped vertical block.
 - Added a complete Android 16/API 36 Pixel UI gate alongside the existing API 34 job. Both run the production Simulator path and retain device-frame plus user-view screenshots for fixed camera geometry, system rotation lock, Traditional Chinese, enlarged text, and orientation-aware reading surfaces.
 - Added an Android physical-camera validation checklist that exposes only advertised-and-observed features, requires explicit camera-side confirmation, rejects Simulator and Offline Preview sessions, clears confirmations across connections, and copies a privacy-safe Markdown record bound to the sanitized diagnostic by SHA-256.
 - Extended the same physical-camera validation workflow to iOS and the PC control UI with memory-only confirmations, native CryptoKit/Web Crypto SHA-256 binding, simulator rejection, localized UI, and browser/iPhone interaction coverage.

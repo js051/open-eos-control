@@ -180,7 +180,7 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
 }
 
 private val CAPTURE_CONTROL_HEIGHT = 88.dp
-private val CAPTURE_MODE_SELECTOR_HEIGHT = 48.dp
+private val CAPTURE_MODE_SELECTOR_HEIGHT = 56.dp
 
 private fun activeCaptureFeature(state: CameraUiState): CameraFeature = when {
     state.bulbMode -> CameraFeature.BULB_EXPOSURE
@@ -316,7 +316,7 @@ private fun CaptureModeSelector(state: CameraUiState, actions: CameraActions) {
         Row(
             Modifier
                 .width(208.dp)
-                .fillMaxSize()
+                .height(48.dp)
                 .selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -349,11 +349,11 @@ private fun CaptureModeOption(
     onSelect: (CaptureMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val selectedColor = if (mode == CaptureMode.VIDEO) AppRecord else AppAccent
     Box(
         modifier
             .fillMaxSize()
             .testTag("capture-mode-${mode.name}")
-            .background(if (selected) AppBorder else Color.Transparent, RoundedCornerShape(4.dp))
             .selectable(
                 selected = selected,
                 enabled = enabled,
@@ -363,17 +363,32 @@ private fun CaptureModeOption(
         contentAlignment = Alignment.Center,
     ) {
         CameraRotatingSlot(Modifier.fillMaxSize()) {
-            Text(
-                label,
-                color = when {
-                    !enabled -> AppMutedText
-                    selected && mode == CaptureMode.VIDEO -> AppRecord
-                    selected -> AppText
-                    else -> AppSubtleText
-                },
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-                maxLines = 1,
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    label,
+                    color = when {
+                        !enabled -> AppMutedText
+                        selected -> selectedColor
+                        else -> AppSubtleText
+                    },
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Box(
+                    Modifier
+                        .padding(top = 2.dp)
+                        .width(20.dp)
+                        .height(3.dp)
+                        .testTag("capture-mode-indicator-${mode.name}")
+                        .background(
+                            if (selected && enabled) selectedColor else Color.Transparent,
+                            RoundedCornerShape(2.dp),
+                        ),
+                )
+            }
         }
     }
 }

@@ -877,6 +877,21 @@ class CameraScreensTest {
             stem = "camera-control-side-zh-TW-130pct",
             userViewRotationDegrees = -90f,
         )
+        val selector = compose
+            .onNodeWithTag("capture-mode-selector", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val photoMode = compose
+            .onNodeWithTag("capture-mode-PHOTO", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "The fixed mode hit target must keep a physical-edge inset after a quarter turn: " +
+                "selector=$selector photo=$photoMode",
+            photoMode.top > selector.top && photoMode.bottom < selector.bottom,
+        )
+        compose.onNodeWithTag("capture-mode-indicator-PHOTO", useUnmergedTree = true)
+            .assertIsDisplayed()
         compose.onNodeWithText("離線 UI 預覽").assertIsDisplayed()
     }
 
