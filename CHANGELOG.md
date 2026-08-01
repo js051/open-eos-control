@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Added a complete Android 16/API 36 Pixel UI gate alongside the existing API 34 job. Both run the production Simulator path and retain device-frame plus user-view screenshots for fixed camera geometry, system rotation lock, Traditional Chinese, enlarged text, and orientation-aware reading surfaces.
+
 ## [0.1.8] - 2026-08-01
 
 - Added capability-gated Android playback for Canon CCAPI RTP `MP4A-LATM/48000` camera audio. Android now scopes SDP format parameters, performs bounded RFC 6416 fragmentation/loss recovery, extracts raw AAC with Media3's AOSP-derived LATM parser, decodes through `MediaCodec`, and streams PCM through `AudioTrack`. Monitoring remains default-muted, stops when the app enters the background, and reports packet/decode/playback health without allowing audio failure to stop video.
