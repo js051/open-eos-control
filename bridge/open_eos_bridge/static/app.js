@@ -128,6 +128,17 @@
       syncNow: "Sync now",
       cameraClockSynced: "Camera date and time verified",
       diagnosticSafe: "Authentication secrets and camera serial are excluded",
+      physicalValidation: "Physical validation",
+      physicalValidationHint: "Only camera-advertised features observed successfully in this connection can be confirmed. Check a feature after seeing the physical camera perform it.",
+      physicalValidationNoObserved: "Use a supported control first. Eligible features appear after the operation succeeds.",
+      physicalValidationSimulator: "Simulator sessions cannot produce physical-camera evidence.",
+      physicalValidationDisconnected: "Connect a physical camera to begin validation.",
+      physicalValidationCryptoUnavailable: "Open this app from localhost or HTTPS to create a SHA-256 validation record.",
+      physicalValidationConfirmed: "Confirmed on camera",
+      physicalValidationNotConfirmed: "Not yet confirmed on camera",
+      copyPhysicalValidation: "Copy physical validation record",
+      physicalValidationCopied: "Physical validation record copied",
+      physicalValidationCopyFailed: "Could not copy the physical validation record",
       copy: "Copy",
       close: "Close",
       bridgeReady: "{engine} ready",
@@ -374,6 +385,17 @@
       syncNow: "立即同步",
       cameraClockSynced: "已驗證相機日期與時間",
       diagnosticSafe: "診斷內容不包含驗證機密與相機序號",
+      physicalValidation: "真機驗證",
+      physicalValidationHint: "僅能確認相機已公告，且在本次連線中成功觀測的功能。請在看見實體相機確實執行後再勾選。",
+      physicalValidationNoObserved: "請先操作一項支援功能；成功執行後，該功能會出現在此處。",
+      physicalValidationSimulator: "模擬器工作階段不能產生真機證據。",
+      physicalValidationDisconnected: "請先連接實體相機再開始驗證。",
+      physicalValidationCryptoUnavailable: "請從 localhost 或 HTTPS 開啟此應用程式，才能建立 SHA-256 驗證紀錄。",
+      physicalValidationConfirmed: "已在相機上確認",
+      physicalValidationNotConfirmed: "尚未在相機上確認",
+      copyPhysicalValidation: "複製真機驗證紀錄",
+      physicalValidationCopied: "已複製真機驗證紀錄",
+      physicalValidationCopyFailed: "無法複製真機驗證紀錄",
       copy: "複製",
       close: "關閉",
       bridgeReady: "{engine} 已就緒",
@@ -664,6 +686,7 @@
     info: null,
     status: null,
     capabilities: null,
+    operatorConfirmedFeatures: new Set(),
     lastClockSyncAt: null,
     activeView: "live",
     captureMode: "photo",
@@ -851,6 +874,9 @@
     diagnosticsRefreshButton: byId("diagnostics-refresh-button"),
     copyDiagnosticsButton: byId("copy-diagnostics-button"),
     diagnosticsOutput: byId("diagnostics-output"),
+    physicalValidationStatus: byId("physical-validation-status"),
+    physicalValidationList: byId("physical-validation-list"),
+    copyPhysicalValidationButton: byId("copy-physical-validation-button"),
     settingDialog: byId("setting-dialog"),
     settingDialogGroup: byId("setting-dialog-group"),
     settingDialogTitle: byId("setting-dialog-title"),
@@ -1125,6 +1151,7 @@
     clearConnectionError();
     state.token = ui.tokenInput.value.trim();
     state.busy = true;
+    state.operatorConfirmedFeatures.clear();
     ui.engineState.textContent = t("connecting");
     renderAvailability();
     try {
@@ -1240,6 +1267,7 @@
     state.info = null;
     state.status = null;
     state.capabilities = null;
+    state.operatorConfirmedFeatures.clear();
     state.lastClockSyncAt = null;
     state.media = [];
     state.mediaLoaded = false;
@@ -3569,22 +3597,81 @@
     });
   }
 
-  function renderDiagnostics() {
-    if (!ui.diagnosticsOutput) return;
-    ui.diagnosticsOutput.textContent = JSON.stringify(diagnosticReport(), null, 2);
+  function currentPhysicalValidation() {
+    const summary = diagnostics.physicalValidationSummary(state.capabilities, {
+      connected: Boolean(state.session && state.status?.connected),
+      info: state.info,
+      confirmedFeatures: [...state.operatorConfirmedFeatures],
+    });
+    state.operatorConfirmedFeatures = new Set(summary.operatorConfirmedFeatures);
+    return summary;
   }
 
-  async function copyDiagnostics() {
-    await refreshCapabilityEvidence();
-    renderDiagnostics();
-    const report = ui.diagnosticsOutput.textContent;
+  function physicalValidationTransport() {
+    if (state.connectionMode === "ccapi") return "CCAPI_NETWORK";
+    return state.session?.engine === "ccapi"
+      ? "DESKTOP_BRIDGE_CCAPI"
+      : "DESKTOP_BRIDGE_LIBGPHOTO2";
+  }
+
+  function renderPhysicalValidation() {
+    if (!ui.physicalValidationList || !ui.copyPhysicalValidationButton) return;
+    const summary = currentPhysicalValidation();
+    ui.physicalValidationList.replaceChildren();
+    const cryptoAvailable = Boolean(globalThis.crypto?.subtle);
+    const statusMessage = summary.sessionStatus === "SIMULATOR"
+      ? t("physicalValidationSimulator")
+      : summary.sessionStatus !== "READY"
+        ? t("physicalValidationDisconnected")
+        : summary.eligibleFeatures.length === 0
+          ? t("physicalValidationNoObserved")
+          : !cryptoAvailable
+            ? t("physicalValidationCryptoUnavailable")
+            : "";
+    ui.physicalValidationStatus.textContent = statusMessage;
+    ui.physicalValidationStatus.classList.toggle(
+      "warning",
+      summary.sessionStatus !== "READY" || !cryptoAvailable,
+    );
+    summary.eligibleFeatures.forEach((feature) => {
+      const row = document.createElement("label");
+      row.className = "physical-validation-row";
+      const content = document.createElement("span");
+      const confirmed = state.operatorConfirmedFeatures.has(feature);
+      content.textContent = `${feature} · ${t(confirmed ? "physicalValidationConfirmed" : "physicalValidationNotConfirmed")}`;
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = confirmed;
+      checkbox.dataset.feature = feature;
+      checkbox.setAttribute("aria-label", content.textContent);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.operatorConfirmedFeatures.add(feature);
+        else state.operatorConfirmedFeatures.delete(feature);
+        renderPhysicalValidation();
+      });
+      row.append(content, checkbox);
+      ui.physicalValidationList.append(row);
+    });
+    ui.copyPhysicalValidationButton.disabled = summary.sessionStatus !== "READY"
+      || summary.eligibleFeatures.length === 0
+      || !cryptoAvailable;
+  }
+
+  function renderDiagnostics(report = diagnosticReport()) {
+    if (!ui.diagnosticsOutput) return;
+    ui.diagnosticsOutput.textContent = JSON.stringify(report, null, 2);
+    renderPhysicalValidation();
+  }
+
+  async function copyText(value, successMessage, failureMessage) {
     try {
-      await navigator.clipboard.writeText(report);
-      showToast(t("copied"));
+      await navigator.clipboard.writeText(value);
+      showToast(successMessage);
+      return;
     } catch (_) {
       try {
         const area = document.createElement("textarea");
-        area.value = report;
+        area.value = value;
         area.style.position = "fixed";
         area.style.opacity = "0";
         document.body.append(area);
@@ -3592,11 +3679,41 @@
         const copied = document.execCommand("copy");
         area.remove();
         if (!copied) throw new Error("copy failed");
-        showToast(t("copied"));
+        showToast(successMessage);
+        return;
       } catch (error) {
         captureError(error);
-        showToast(t("copyFailed"), true);
+        showToast(failureMessage, true);
       }
+    }
+  }
+
+  async function copyDiagnostics() {
+    await refreshCapabilityEvidence();
+    const report = diagnosticReport();
+    renderDiagnostics(report);
+    await copyText(ui.diagnosticsOutput.textContent, t("copied"), t("copyFailed"));
+  }
+
+  async function copyPhysicalValidation() {
+    await refreshCapabilityEvidence();
+    const report = diagnosticReport();
+    renderDiagnostics(report);
+    const summary = currentPhysicalValidation();
+    if (summary.sessionStatus !== "READY" || summary.eligibleFeatures.length === 0) return;
+    try {
+      const record = await diagnostics.physicalValidationRecord({
+        summary,
+        cameraModel: state.info?.model || state.session?.camera?.model || "unknown",
+        transport: physicalValidationTransport(),
+        generatedAt: report.generatedAt,
+        productVersion: report.productVersion,
+        diagnosticReport: ui.diagnosticsOutput.textContent,
+      });
+      await copyText(record, t("physicalValidationCopied"), t("physicalValidationCopyFailed"));
+    } catch (error) {
+      captureError(error);
+      showToast(t("physicalValidationCopyFailed"), true);
     }
   }
 
@@ -3746,6 +3863,7 @@
     });
     ui.diagnosticsRefreshButton.addEventListener("click", () => refreshSession({ quiet: true }));
     ui.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
+    ui.copyPhysicalValidationButton.addEventListener("click", copyPhysicalValidation);
     ui.settingDialogClose.addEventListener("click", () => ui.settingDialog.close());
     ui.settingDialog.addEventListener("click", (event) => {
       if (event.target === ui.settingDialog) ui.settingDialog.close();

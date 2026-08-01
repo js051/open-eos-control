@@ -1202,6 +1202,47 @@ button.media-thumbnail:focus-visible {
   word-break: break-word;
 }
 
+.diagnostic-validation {
+  display: grid;
+  gap: 10px;
+  padding: 4px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.diagnostic-validation h3,
+.diagnostic-validation p {
+  margin: 0;
+}
+
+.physical-validation-list {
+  display: grid;
+}
+
+.physical-validation-row {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.physical-validation-row span {
+  overflow-wrap: anywhere;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.physical-validation-row input {
+  width: 24px;
+  height: 24px;
+  margin: auto;
+  accent-color: var(--accent);
+}
+
+.diagnostic-validation > .button {
+  justify-self: start;
+}
+
 .setting-dialog {
   width: min(620px, calc(100% - 32px));
   max-height: min(720px, calc(100dvh - 40px));
