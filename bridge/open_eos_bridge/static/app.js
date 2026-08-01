@@ -22,6 +22,7 @@
     BULB_EXPOSURE: "BULB_EXPOSURE",
     AUTOFOCUS: "AUTOFOCUS",
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
+    MOVIE_MODE_CONTROL: "MOVIE_MODE_CONTROL",
     VIDEO_RECORDING: "VIDEO_RECORDING",
     TAP_FOCUS: "TAP_FOCUS",
     CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE",
@@ -192,6 +193,7 @@
       stillimagequalitysd: "SD image quality",
       stillimagequalitycf: "CF/CFexpress image quality",
       shootingmode: "Shooting mode",
+      moviemode: "Movie mode",
       colortemperature: "Color temperature",
       whitebalanceadjusta: "White balance shift A",
       whitebalanceadjustb: "White balance shift B",
@@ -450,6 +452,7 @@
       stillimagequalitysd: "SD 卡影像品質",
       stillimagequalitycf: "CF／CFexpress 卡影像品質",
       shootingmode: "拍攝模式",
+      moviemode: "影片模式",
       colortemperature: "色溫",
       whitebalanceadjusta: "白平衡偏移 A",
       whitebalanceadjustb: "白平衡偏移 B",
@@ -1179,7 +1182,7 @@
         api(`/v1/session/${sessionId}/capabilities`),
       ]);
       state.requestedFps = clampFps(Math.min(15, state.capabilities.liveView?.maxFps || 1));
-      state.captureMode = state.status.recording ? "video" : "photo";
+      state.captureMode = captureModeFromCamera() || (state.status.recording ? "video" : "photo");
       state.lastError = null;
       setOperationState(t("ready"));
       if (network) {
@@ -1440,6 +1443,13 @@
     return String(value).trim().toLowerCase().replace(/[^a-z0-9]/g, "") === "bulb";
   }
 
+  function captureModeFromCamera() {
+    const value = settingByKey("moviemode")?.value;
+    if (value === "on") return "video";
+    if (value === "off") return "photo";
+    return null;
+  }
+
   function clearBulbTimer() {
     if (state.bulbTimer != null) window.clearInterval(state.bulbTimer);
     state.bulbTimer = null;
@@ -1635,6 +1645,7 @@
 
   function settingMatchesCaptureMode(setting) {
     const key = setting.key.toLowerCase();
+    if (key === "moviemode") return false;
     const videoTokens = ["movie", "video", "frame", "codec", "record", "sound"];
     const photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage"];
     if (state.captureMode === "photo") return !videoTokens.some((token) => key.includes(token));
@@ -1664,7 +1675,7 @@
   }
 
   async function updateSetting(setting, value, source) {
-    if (!state.session || cameraInteractionBusy()) return;
+    if (!state.session || cameraInteractionBusy()) return false;
     beginCameraInteraction();
     state.lastError = null;
     source.disabled = true;
@@ -1678,10 +1689,12 @@
       setting.value = value;
       setOperationState(t("ready"));
       showToast(t("settingUpdated", { label: settingLabel(setting), value: settingValueLabel(setting, value) }));
+      return true;
     } catch (error) {
       const normalized = captureError(error);
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
+      return false;
     } finally {
       state.busy = false;
       source.disabled = false;
@@ -1691,6 +1704,9 @@
 
   function renderCaptureMode() {
     const recording = Boolean(state.status?.recording);
+    const cameraMode = captureModeFromCamera();
+    if (recording) state.captureMode = "video";
+    else if (cameraMode) state.captureMode = cameraMode;
     const bulb = state.captureMode === "photo" && isBulbMode();
     const bulbActive = bulb && Boolean(state.status?.bulbExposureActive);
     if (!featureSupported(FEATURES.VIDEO_RECORDING) && state.captureMode === "video") state.captureMode = "photo";
@@ -1714,9 +1730,19 @@
     );
   }
 
-  function selectCaptureMode(mode) {
+  async function selectCaptureMode(mode) {
     if (mode === "video" && !featureSupported(FEATURES.VIDEO_RECORDING)) return;
     if (state.status?.recording && mode !== "video") return;
+    const movieMode = settingByKey("moviemode");
+    if (movieMode) {
+      const desired = mode === "video" ? "on" : "off";
+      if (!movieMode.values.includes(desired)) return;
+      if (movieMode.value !== desired) {
+        const source = mode === "video" ? ui.videoModeButton : ui.photoModeButton;
+        const updated = await updateSetting(movieMode, desired, source);
+        if (!updated) return;
+      }
+    }
     state.captureMode = mode;
     renderCaptureMode();
     renderAdvancedSettings();

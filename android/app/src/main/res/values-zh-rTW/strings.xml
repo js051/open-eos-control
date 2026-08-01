@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="setting_movie_mode">影片模式</string>
     <string name="app_name">Open EOS Control</string>
     <string name="connect_title">連接你的 EOS</string>
     <string name="connect_subtitle">直接連接相機、透過桌面橋接，或使用 USB。</string>

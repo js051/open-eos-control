@@ -67,6 +67,9 @@ public actor CCAPIClient {
     private static let wbShiftFields = ["ba", "mg"]
     private static let zoomSettingKey = "zoom"
     private static let zoomPathSuffix = "/shooting/control/zoom"
+    private static let movieModeSettingKey = "moviemode"
+    private static let movieModePathSuffix = "/shooting/control/moviemode"
+    private static let movieModeValues = ["off", "on"]
     private static let maximumStructuredSettingOptions = 256
 
     private let baseURL: URL
@@ -292,6 +295,9 @@ public actor CCAPIClient {
         if controls.contains(where: { $0.key == Self.zoomSettingKey }) {
             supported.insert(.zoomControl)
         }
+        if controls.contains(where: { $0.key == Self.movieModeSettingKey }) {
+            supported.insert(.movieModeControl)
+        }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
@@ -325,6 +331,7 @@ public actor CCAPIClient {
 
         let allPlanned: Set<CameraFeature> = [
             .eventPolling, .liveViewRTP, .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress,
+            .movieModeControl,
             .videoRecording, .tapFocus,
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
@@ -344,6 +351,7 @@ public actor CCAPIClient {
                     .clickWhiteBalance: "The camera must advertise POST clickwb and detailed Live View metadata for Click WB.",
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
                     .zoomControl: "The camera must advertise readable and writable Canon zoom control in the same API version.",
+                    .movieModeControl: "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                 ]
             ),
@@ -409,6 +417,11 @@ public actor CCAPIClient {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
                 _ = try await requestJSON(path: "/ccapi/zoom", method: .post, json: ["value": zoom])
+            case Self.movieModeSettingKey:
+                guard Self.movieModeValues.contains(value) else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                try await requestOK(path: "/ccapi/movie-mode", method: .post, json: ["action": value])
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
@@ -421,7 +434,13 @@ public actor CCAPIClient {
               control.values.contains(value) else {
             throw CCAPIError.invalidSetting(key: key, value: value)
         }
-        if key == Self.zoomSettingKey {
+        if key == Self.movieModeSettingKey {
+            guard let path = settingPaths[Self.movieModeSettingKey] else {
+                throw CCAPIError.invalidSetting(key: key, value: value)
+            }
+            try await requestOK(path: path, method: .post, json: ["action": value])
+            cachedSettings = nil
+        } else if key == Self.zoomSettingKey {
             guard let path = settingPaths[Self.zoomSettingKey],
                   let zoom = Int(value), String(zoom) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
@@ -1177,6 +1196,18 @@ public actor CCAPIClient {
         return nil
     }
 
+    private func movieModeOperations() -> (read: CCAPIOperation, write: CCAPIOperation)? {
+        let reads = operations
+            .filter { $0.method == .get && $0.path.hasSuffix(Self.movieModePathSuffix) }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for read in reads {
+            if let write = operations.first(where: { $0.method == .post && $0.path == read.path }) {
+                return (read, write)
+            }
+        }
+        return nil
+    }
+
     private func directShutterOperation() -> CCAPIOperation? {
         operation(.post, suffix: "/shooting/control/shutterbutton")
     }
@@ -1534,6 +1565,12 @@ public actor CCAPIClient {
             settingPaths[Self.zoomSettingKey] = operations.write.path
             merged[Self.zoomSettingKey] = zoom
         }
+        if let operations = movieModeOperations(),
+           let raw = try await firstJSON(paths: [operations.read.path], required: false),
+           let movieMode = Self.validatedMovieModeSetting(raw) {
+            settingPaths[Self.movieModeSettingKey] = operations.write.path
+            merged[Self.movieModeSettingKey] = movieMode
+        }
         settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
         return cachedSettings
@@ -1624,6 +1661,12 @@ public actor CCAPIClient {
         let currentValue = String(current)
         guard values.count >= 2, values.contains(currentValue) else { return nil }
         return ["value": currentValue, "ability": values]
+    }
+
+    private static func validatedMovieModeSetting(_ value: JSONDictionary) -> JSONDictionary? {
+        let status = value.string("status", default: value.string("value"))
+        guard movieModeValues.contains(status) else { return nil }
+        return ["value": status, "ability": movieModeValues]
     }
 
     private func zoomControl(_ value: JSONDictionary) -> CameraSetting? {
@@ -1731,6 +1774,7 @@ public actor CCAPIClient {
         switch key.lowercased() {
         case "iso", "shutter", "aperture": .exposureControl
         case "whitebalance": .whiteBalanceControl
+        case Self.movieModeSettingKey: .movieModeControl
         case Self.zoomSettingKey: .zoomControl
         default: .advancedSettings
         }
@@ -1802,6 +1846,11 @@ public actor CCAPIClient {
            let control = zoomControl(normalized) {
             controls.append(control)
         }
+        if let raw = value.object(Self.movieModeSettingKey),
+           let normalized = Self.validatedMovieModeSetting(raw),
+           let control = control(Self.movieModeSettingKey, "Movie mode", normalized) {
+            controls.append(control)
+        }
         var supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
@@ -1810,7 +1859,13 @@ public actor CCAPIClient {
             .mediaDelete, .cameraClockSync,
         ]
         if controls.contains(where: { $0.key == Self.zoomSettingKey }) {
-            supported.formUnion([.zoomControl, .advancedSettings])
+            supported.insert(.zoomControl)
+        }
+        if controls.contains(where: { $0.key == Self.movieModeSettingKey }) {
+            supported.insert(.movieModeControl)
+        }
+        if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
+            supported.insert(.advancedSettings)
         }
         return CameraCapabilities(
             settings: controls,
@@ -2159,7 +2214,8 @@ public actor CCAPIClient {
     private static func settingLabel(_ key: String) -> String {
         let known = [
             "afmethod": "AF method", "afoperation": "AF operation", "drivemode": "Drive mode",
-            "meteringmode": "Metering", "picturestyle": "Picture style", "shootingmode": "Shooting mode",
+            "meteringmode": "Metering", "picturestyle": "Picture style", "moviemode": "Movie mode",
+            "shootingmode": "Shooting mode",
             "stillimagequality": "Image quality", "moviequality": "Movie quality",
             "stillimagequality.raw": "RAW quality", "stillimagequality.jpeg": "JPEG quality",
             "stillimagequality.heif": "HEIF quality",

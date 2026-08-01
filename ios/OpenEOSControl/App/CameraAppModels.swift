@@ -145,12 +145,62 @@ func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) 
     return settings.filter { setting in
         guard Set(setting.values).count > 1 else { return false }
         guard !primary.contains(setting.key) else { return false }
+        guard setting.key.lowercased() != "moviemode" else { return false }
         let key = setting.key.lowercased()
         switch mode {
         case .photo: return !videoTokens.contains(where: key.contains)
         case .video: return !photoTokens.contains(where: key.contains)
         }
     }
+}
+
+func captureModeSetting(_ settings: [CameraSetting]) -> CameraSetting? {
+    settings.first { $0.key.lowercased() == "moviemode" }
+        ?? settings.first { ["shootingmode", "autoexposuremode", "ae"].contains($0.key.lowercased()) }
+}
+
+func appCaptureMode(for setting: CameraSetting) -> AppCaptureMode? {
+    let key = setting.key.lowercased()
+    let token = cameraModeToken(setting.value)
+    if key == "moviemode" {
+        if token == "on" { return .video }
+        if token == "off" { return .photo }
+        return nil
+    }
+    guard !token.isEmpty, !token.hasPrefix("unknown"), !token.hasPrefix("0x") else { return nil }
+    return token.contains("movie") || token.contains("video") ? .video : .photo
+}
+
+func captureModeValue(
+    for mode: AppCaptureMode,
+    setting: CameraSetting,
+    preferredPhotoValue: String?
+) -> String? {
+    if setting.key.lowercased() == "moviemode" {
+        let expected = mode == .video ? "on" : "off"
+        return setting.values.first { cameraModeToken($0) == expected }
+    }
+    switch mode {
+    case .video:
+        return setting.values.first { value in
+            let token = cameraModeToken(value)
+            return token.contains("movie") || token.contains("video")
+        }
+    case .photo:
+        return [preferredPhotoValue, setting.value]
+            .compactMap { $0 }
+            .compactMap { candidate in
+                setting.values.first { cameraModeToken($0) == cameraModeToken(candidate) }
+            }
+            .first { value in
+                let token = cameraModeToken(value)
+                return !token.contains("movie") && !token.contains("video")
+            }
+    }
+}
+
+private func cameraModeToken(_ value: String) -> String {
+    value.lowercased().filter { $0.isLetter || $0.isNumber }
 }
 
 func settingLabelLocalizationKey(_ key: String) -> String? {
@@ -161,6 +211,7 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "meteringmode": "setting_metering_mode"
     case "flashmode": "setting_flash_mode"
     case "picturestyle": "setting_picture_style"
+    case "moviemode": "setting_movie_mode"
     case "shootingmode": "setting_shooting_mode"
     case "stillimagequality": "setting_image_quality"
     case "stillimagequality.raw": "setting_image_quality_raw"

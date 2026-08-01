@@ -75,6 +75,7 @@ enum class CameraFeature(
     BULB_EXPOSURE("Bulb exposure"),
     AUTOFOCUS("Autofocus"),
     SHUTTER_HALF_PRESS("Shutter half-press"),
+    MOVIE_MODE_CONTROL("Movie mode control"),
     VIDEO_RECORDING("Video recording"),
     TAP_FOCUS("Tap focus"),
     CLICK_WHITE_BALANCE("Click white balance"),
@@ -125,6 +126,7 @@ data class CapabilityMatrix(
                 CameraFeature.BULB_EXPOSURE,
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
+                CameraFeature.MOVIE_MODE_CONTROL,
                 CameraFeature.VIDEO_RECORDING,
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.CLICK_WHITE_BALANCE,
@@ -151,6 +153,8 @@ data class CapabilityMatrix(
                 CameraFeature.FOCUS_DRIVE to "The camera must advertise the verified CCAPI POST drivefocus operation.",
                 CameraFeature.ZOOM_CONTROL to
                     "The camera must advertise readable and writable Canon zoom control in the same API version.",
+                CameraFeature.MOVIE_MODE_CONTROL to
+                    "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                 CameraFeature.CAMERA_CLOCK_SYNC to
                     "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
             ),

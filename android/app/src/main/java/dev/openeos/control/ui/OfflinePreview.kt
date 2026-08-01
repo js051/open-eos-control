@@ -45,6 +45,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
         aperture = listOf("1.8", "2.0", "2.8", "4.0", "5.6", "8.0", "11"),
         whiteBalance = listOf("auto", "daylight", "shade", "cloudy", "tungsten", "fluorescent", "flash"),
         advancedSettings = listOf(
+            CameraSettingControl("moviemode", "Movie mode", "off", listOf("off", "on")),
             CameraSettingControl("shootingmode", "Shooting mode", "Manual", listOf("P", "TV", "AV", "Manual", "Bulb", "Movie", "Fv")),
             CameraSettingControl("exposurecompensation", "Exposure compensation", "0", listOf("-1", "-0.6", "-0.3", "0", "0.3", "0.6", "1")),
             CameraSettingControl("colortemperature", "Color temperature", "5200", listOf("2500", "3200", "4000", "5200", "5600", "6500", "10000")),
@@ -82,6 +83,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
                 CameraFeature.BULB_EXPOSURE,
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
+                CameraFeature.MOVIE_MODE_CONTROL,
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.VIDEO_RECORDING,
                 CameraFeature.TAP_FOCUS,

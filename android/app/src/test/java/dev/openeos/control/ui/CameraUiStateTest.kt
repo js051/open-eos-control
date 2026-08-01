@@ -66,6 +66,14 @@ class CameraUiStateTest {
         assertNull(movieSetting.valueForCaptureMode(CaptureMode.PHOTO, null))
         assertTrue("auto_exposure_mode".isShootingModeKey())
         assertEquals(CaptureMode.VIDEO, captureModeForShootingValue("movie manual exposure"))
+
+        val movieMode = CameraSettingControl("moviemode", "Movie mode", "off", listOf("off", "on"))
+        assertEquals(CaptureMode.PHOTO, movieMode.currentCaptureMode())
+        assertEquals("on", movieMode.valueForCaptureMode(CaptureMode.VIDEO, null))
+        assertEquals("off", movieMode.copy(value = "on").valueForCaptureMode(CaptureMode.PHOTO, null))
+        assertTrue("movie_mode".isMovieModeKey())
+        assertTrue("moviemode".isCaptureModeKey())
+        assertTrue(settingsForMode(listOf(movieMode), CaptureMode.PHOTO).isEmpty())
     }
 
     @Test

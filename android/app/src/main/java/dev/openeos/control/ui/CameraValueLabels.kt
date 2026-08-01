@@ -23,7 +23,7 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "whitebalance", "wb" -> whiteBalanceValueLabels[value]
         "afoperation", "focusmode" -> afOperationValueLabels[value]
         "afmethod" -> afMethodValueLabels[value]
-        "continuousaf", "movieservoaf" -> toggleValueLabels[value]
+        "continuousaf", "movieservoaf", "moviemode" -> toggleValueLabels[value]
         "drivemode" -> driveModeValueLabels[value]
         "meteringmode" -> meteringModeValueLabels[value]
         "flashmode" -> flashModeValueLabels[value]

@@ -120,6 +120,7 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         "whitebalanceadjusta",
         "whitebalanceadjustb",
         "aspectratio",
+        "moviemode",
         "zoom",
         "zoomspeed",
         "autopoweroff",
@@ -208,6 +209,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE"' in script
     assert 'SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS"' in script
     assert 'BULB_EXPOSURE: "BULB_EXPOSURE"' in script
+    assert 'MOVIE_MODE_CONTROL: "MOVIE_MODE_CONTROL"' in script
     assert 'LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION"' in script
     assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
@@ -223,6 +225,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "cancelMediaDownload({ silent: true })" in script
     assert "cameraInteractionBusy()" in script
     assert 'if (setting.key === "zoom")' in script
+    assert 'if (key === "moviemode") return false' in script
+    assert 'const movieMode = settingByKey("moviemode")' in script
     assert 'range.type = "range"' in script
     assert "scheduleMediaTransferRender()" in script
     assert script.count("cancelDownload:") == 2

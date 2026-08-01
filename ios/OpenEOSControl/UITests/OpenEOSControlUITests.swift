@@ -254,6 +254,10 @@ final class OpenEOSControlUITests: XCTestCase {
         let captureMode = app.segmentedControls["capture-mode-picker"]
         XCTAssertTrue(captureMode.waitForExistence(timeout: 8))
         captureMode.buttons["Video"].tap()
+        try await waitForSimulatorState { state in
+            state["movie_mode"] as? String == "on" &&
+                (state["movie_mode_update_count"] as? NSNumber)?.intValue == 1
+        }
         let record = app.buttons["record-button"]
         XCTAssertTrue(waitForInteraction(record, timeout: 8))
         record.tap()
@@ -261,6 +265,11 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(record, containing: "Stop recording", timeout: 15))
         record.tap()
         try await waitForSimulatorState { state in state["recording"] as? Bool == false }
+        captureMode.buttons["Photo"].tap()
+        try await waitForSimulatorState { state in
+            state["movie_mode"] as? String == "off" &&
+                (state["movie_mode_update_count"] as? NSNumber)?.intValue == 2
+        }
 
         openMoreActions(in: app)
         app.buttons["camera-media-menu-button"].tap()

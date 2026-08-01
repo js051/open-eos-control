@@ -104,6 +104,9 @@ class SimulatorEndToEndTest {
 
         waitForEnabledNode("capture-mode-VIDEO")
         compose.onNodeWithTag("capture-mode-VIDEO").performClick()
+        waitForSimulatorState { state ->
+            state.getString("movie_mode") == "on" && state.getInt("movie_mode_update_count") == 1
+        }
         waitForContentDescription(text(R.string.start_recording), useUnmergedTree = true)
         compose.onNodeWithTag("capture-button", useUnmergedTree = true)
             .performClick()
@@ -124,6 +127,9 @@ class SimulatorEndToEndTest {
 
         waitForEnabledNode("capture-mode-PHOTO")
         compose.onNodeWithTag("capture-mode-PHOTO").performClick()
+        waitForSimulatorState { state ->
+            state.getString("movie_mode") == "off" && state.getInt("movie_mode_update_count") == 2
+        }
         request("/ccapi/test/mode?mode=Bulb", method = "POST")
         waitForContentDescription(text(R.string.start_bulb_exposure), useUnmergedTree = true)
         compose.onNodeWithTag("capture-button", useUnmergedTree = true).performClick()

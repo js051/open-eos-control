@@ -152,6 +152,7 @@ final class CameraAppTests: XCTestCase {
     func testAdvancedSettingsAreFilteredByCaptureMode() {
         let settings = [
             CameraSetting(key: "iso", label: "ISO", value: "100", values: ["100"]),
+            CameraSetting(key: "moviemode", label: "Movie mode", value: "off", values: ["off", "on"]),
             CameraSetting(key: "drivemode", label: "Drive", value: "single", values: ["single", "continuous"]),
             CameraSetting(key: "moviequality", label: "Movie", value: "4K", values: ["4K", "FHD"]),
             CameraSetting(key: "meteringmode", label: "Metering", value: "eval", values: ["eval", "spot"]),
@@ -170,6 +171,10 @@ final class CameraAppTests: XCTestCase {
             ["drivemode", "meteringmode", "capturetarget", "capturestorage"]
         )
         XCTAssertEqual(advancedSettingsForMode(settings, mode: .video).map(\.key), ["moviequality", "meteringmode"])
+
+        let movieMode = try! XCTUnwrap(captureModeSetting(settings))
+        XCTAssertEqual(appCaptureMode(for: movieMode), .photo)
+        XCTAssertEqual(captureModeValue(for: .video, setting: movieMode, preferredPhotoValue: nil), "on")
     }
 
     func testR6AdvancedSettingLocalizationKeepsProtocolValuesSeparate() {
@@ -440,6 +445,23 @@ final class CameraAppTests: XCTestCase {
 
         XCTAssertEqual(state.liveViewMagnification, .x5)
         XCTAssertNil(state.lastError)
+    }
+
+    func testOfflinePreviewCaptureModeUsesAdvertisedMovieModeControl() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        await state.setCaptureMode(.video)
+        XCTAssertEqual(state.captureMode, .video)
+        XCTAssertEqual(state.capabilities?.setting("moviemode")?.value, "on")
+        XCTAssertEqual(state.capabilities?.setting("shootingmode")?.value, "Manual")
+
+        await state.setCaptureMode(.photo)
+        XCTAssertEqual(state.captureMode, .photo)
+        XCTAssertEqual(state.capabilities?.setting("moviemode")?.value, "off")
     }
 
     func testOfflinePreviewClickWhiteBalanceUpdatesTheVisibleValue() async {

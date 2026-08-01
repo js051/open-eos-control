@@ -37,7 +37,16 @@ final class CameraAppState: ObservableObject {
     @Published var bridgeToken = ""
     @Published private(set) var bridgeCameras: [DesktopBridgeCamera] = []
     @Published var selectedBridgeCameraID: String?
-    @Published private(set) var snapshot: CameraSnapshot?
+    @Published private(set) var snapshot: CameraSnapshot? {
+        didSet {
+            if let setting = snapshot.flatMap({ captureModeSetting($0.capabilities.settings) }),
+               let mode = appCaptureMode(for: setting) {
+                captureMode = mode
+            } else if snapshot?.status.recording == true {
+                captureMode = .video
+            }
+        }
+    }
     @Published private(set) var isPreview = false
     @Published var screen = AppScreen.control
     @Published var captureMode = AppCaptureMode.photo
@@ -46,6 +55,7 @@ final class CameraAppState: ObservableObject {
     @Published var showGrid = false
     @Published var monitorSettings = LiveViewMonitorSettings()
     @Published var liveViewTapAction = LiveViewTapAction.focus
+    private var lastPhotoShootingMode: String?
     @Published var autoRefresh = true
     @Published private(set) var requestedFPS: Int
     @Published private(set) var liveViewSize: LiveViewSize
@@ -660,6 +670,35 @@ final class CameraAppState: ObservableObject {
         } catch {
             record(error)
         }
+    }
+
+    func setCaptureMode(_ mode: AppCaptureMode) async {
+        guard captureMode != mode,
+              !recording,
+              !bulbExposureActive,
+              !isBusy(.setting),
+              !isBusy(.capture),
+              !isBusy(.recording) else { return }
+        guard let setting = capabilities.flatMap({ captureModeSetting($0.settings) }) else {
+            captureMode = mode
+            return
+        }
+        if setting.key.lowercased() != "moviemode", appCaptureMode(for: setting) == .photo {
+            lastPhotoShootingMode = setting.value
+        }
+        guard let target = captureModeValue(
+            for: mode,
+            setting: setting,
+            preferredPhotoValue: lastPhotoShootingMode
+        ) else {
+            captureMode = mode
+            return
+        }
+        if target == setting.value {
+            captureMode = mode
+            return
+        }
+        await setSetting(key: setting.key, value: target)
     }
 
     func setSetting(key: String, value: String) async {
@@ -1292,6 +1331,7 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "shutter", label: "Shutter speed", value: "1/125", values: ["1/30", "1/50", "1/60", "1/100", "1/125", "1/250", "1/500", "1/1000"]),
             CameraSetting(key: "aperture", label: "Aperture", value: "2.8", values: ["1.8", "2.0", "2.8", "4.0", "5.6", "8.0", "11"]),
             CameraSetting(key: "whitebalance", label: "White balance", value: "auto", values: ["auto", "daylight", "shade", "cloudy", "tungsten", "fluorescent", "flash"]),
+            CameraSetting(key: "moviemode", label: "Movie mode", value: "off", values: ["off", "on"]),
             CameraSetting(key: "shootingmode", label: "Shooting mode", value: "Manual", values: ["P", "TV", "AV", "Manual", "Bulb", "Movie", "Fv"]),
             CameraSetting(key: "afmethod", label: "AF method", value: "face+tracking", values: ["face+tracking", "1-point", "zone"]),
             CameraSetting(key: "afoperation", label: "AF operation", value: "servo", values: ["one-shot", "servo"]),
@@ -1306,7 +1346,8 @@ final class CameraAppState: ObservableObject {
         ]
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
-            .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
+            .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .movieModeControl, .videoRecording,
+            .tapFocus, .clickWhiteBalance,
             .liveViewMagnification,
             .exposureControl, .whiteBalanceControl, .zoomControl, .advancedSettings, .mediaBrowser, .mediaDownload,
             .mediaDelete,

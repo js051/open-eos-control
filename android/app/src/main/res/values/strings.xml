@@ -210,6 +210,7 @@
     <string name="setting_metering_mode">Metering</string>
     <string name="setting_flash_mode">Flash mode</string>
     <string name="setting_picture_style">Picture style</string>
+    <string name="setting_movie_mode">Movie mode</string>
     <string name="setting_shooting_mode">Shooting mode</string>
     <string name="setting_image_quality">Image quality</string>
     <string name="setting_image_quality_raw">RAW quality</string>

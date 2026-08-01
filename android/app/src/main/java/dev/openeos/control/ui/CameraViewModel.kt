@@ -94,13 +94,16 @@ class CameraViewModel(
     fun setCaptureMode(mode: CaptureMode) {
         val state = _uiState.value
         if (state.captureMode == mode || !captureModeSwitchEnabled(state)) return
-        val setting = state.capabilities?.shootingModeSetting()
-        if (setting?.currentCaptureMode() == CaptureMode.PHOTO) {
+        val setting = state.capabilities?.captureModeSetting()
+        if (setting?.key?.isShootingModeKey() == true && setting.currentCaptureMode() == CaptureMode.PHOTO) {
             lastPhotoShootingMode = setting.value
         }
-        _uiState.update { it.copy(captureMode = mode, activeSettingPicker = null) }
         val target = setting?.valueForCaptureMode(mode, lastPhotoShootingMode)
-        if (target != null && target != setting.value) setCameraSetting(setting.key, target)
+        if (target != null && target != setting.value) {
+            setCameraSetting(setting.key, target)
+        } else {
+            _uiState.update { it.copy(captureMode = mode, activeSettingPicker = null) }
+        }
     }
 
     fun setHudVisible(visible: Boolean) = _uiState.update { it.copy(hudVisible = visible) }
@@ -587,10 +590,17 @@ class CameraViewModel(
 
     fun setCameraSetting(key: String, value: String) {
         if (_uiState.value.isBusy(CameraOperation.SETTING)) return
-        val selectedCaptureMode = if (key.isShootingModeKey()) captureModeForShootingValue(value) else null
+        val selectedCaptureMode = when {
+            key.isMovieModeKey() && value.equals("on", ignoreCase = true) -> CaptureMode.VIDEO
+            key.isMovieModeKey() && value.equals("off", ignoreCase = true) -> CaptureMode.PHOTO
+            key.isShootingModeKey() -> captureModeForShootingValue(value)
+            else -> null
+        }
         runCamera(CameraOperation.SETTING) {
             if (_uiState.value.previewMode) {
-                if (selectedCaptureMode == CaptureMode.PHOTO) lastPhotoShootingMode = value
+                if (key.isShootingModeKey() && selectedCaptureMode == CaptureMode.PHOTO) {
+                    lastPhotoShootingMode = value
+                }
                 _uiState.update { state ->
                     state.copy(
                         captureMode = selectedCaptureMode ?: state.captureMode,
@@ -605,8 +615,14 @@ class CameraViewModel(
             }
             val status = repository.setCameraSetting(key, value)
             val capabilities = repository.refreshCapabilities()
-            val captureMode = selectedCaptureMode ?: captureModeFrom(capabilities)
-            if (selectedCaptureMode == CaptureMode.PHOTO) lastPhotoShootingMode = value
+            val captureMode = if (key.isCaptureModeKey()) {
+                captureModeFrom(capabilities)
+            } else {
+                selectedCaptureMode ?: captureModeFrom(capabilities)
+            }
+            if (key.isShootingModeKey() && selectedCaptureMode == CaptureMode.PHOTO) {
+                lastPhotoShootingMode = value
+            }
             _uiState.update {
                 it.copy(
                     status = status,
@@ -1041,9 +1057,9 @@ class CameraViewModel(
     }
 
     private fun captureModeFrom(capabilities: CameraCapabilities): CaptureMode? {
-        val setting = capabilities.shootingModeSetting() ?: return null
+        val setting = capabilities.captureModeSetting() ?: return null
         return setting.currentCaptureMode()?.also { mode ->
-            if (mode == CaptureMode.PHOTO) lastPhotoShootingMode = setting.value
+            if (mode == CaptureMode.PHOTO && setting.key.isShootingModeKey()) lastPhotoShootingMode = setting.value
         }
     }
 

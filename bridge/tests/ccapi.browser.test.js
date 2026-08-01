@@ -237,6 +237,11 @@ async function run() {
     );
 
     await page.click("#video-mode-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.movie_mode === "on" && state.movie_mode_update_count === 1,
+      "Canon movie mode on",
+    );
     await page.click("#shutter-button");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -250,6 +255,11 @@ async function run() {
       "Canon recording stop",
     );
     await page.click("#photo-mode-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.movie_mode === "off" && state.movie_mode_update_count === 2,
+      "Canon movie mode off",
+    );
 
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
     await waitForSimulatorState(simulatorOrigin, (state) => state.mode === "Bulb", "Canon Bulb mode write");

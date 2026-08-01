@@ -77,6 +77,9 @@ WB_SHIFT_SETTING_KEY = "wbshift"
 WB_SHIFT_FIELDS = ("ba", "mg")
 ZOOM_SETTING_KEY = "zoom"
 ZOOM_PATH_SUFFIX = "/shooting/control/zoom"
+MOVIE_MODE_SETTING_KEY = "moviemode"
+MOVIE_MODE_PATH_SUFFIX = "/shooting/control/moviemode"
+MOVIE_MODE_VALUES = ("off", "on")
 MAX_STRUCTURED_SETTING_OPTIONS = 256
 CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
@@ -101,6 +104,7 @@ SETTING_LABELS = {
     "drivemode": "Drive mode",
     "meteringmode": "Metering",
     "picturestyle": "Picture style",
+    "moviemode": "Movie mode",
     "shootingmode": "Shooting mode",
     "stillimagequality": "Image quality",
     "stillimagequality.raw": "RAW quality",
@@ -540,6 +544,8 @@ class CcapiSession:
                 supported.add(CameraFeature.WHITE_BALANCE_CONTROL)
             if ZOOM_SETTING_KEY in control_keys:
                 supported.add(CameraFeature.ZOOM_CONTROL)
+            if MOVIE_MODE_SETTING_KEY in control_keys:
+                supported.add(CameraFeature.MOVIE_MODE_CONTROL)
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             jpeg_live_view_supported = self._supports_jpeg_live_view()
@@ -600,6 +606,7 @@ class CcapiSession:
                 CameraFeature.BULB_EXPOSURE,
                 CameraFeature.AUTOFOCUS,
                 CameraFeature.SHUTTER_HALF_PRESS,
+                CameraFeature.MOVIE_MODE_CONTROL,
                 CameraFeature.VIDEO_RECORDING,
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.CLICK_WHITE_BALANCE,
@@ -639,6 +646,10 @@ class CcapiSession:
                     ),
                     CameraFeature.ZOOM_CONTROL.value: (
                         "The camera must advertise readable and writable Canon zoom control in the same API version."
+                    ),
+                    CameraFeature.MOVIE_MODE_CONTROL.value: (
+                        "The camera must advertise readable and writable Canon movie mode control "
+                        "in the same API version."
                     ),
                     CameraFeature.AUTOFOCUS.value: (
                         "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation."
@@ -729,7 +740,9 @@ class CcapiSession:
             path = self._setting_paths.get(structured[0] if structured else canonical)
             if path is None:
                 raise unsupported(_feature_for_setting(canonical).value, self.engine_name)
-            if canonical == ZOOM_SETTING_KEY:
+            if canonical == MOVIE_MODE_SETTING_KEY:
+                self._request_ok("POST", path, {"action": value})
+            elif canonical == ZOOM_SETTING_KEY:
                 try:
                     zoom = int(value)
                 except ValueError as error:
@@ -1498,6 +1511,13 @@ class CcapiSession:
             if zoom is not None:
                 merged[ZOOM_SETTING_KEY] = zoom
                 setting_paths[ZOOM_SETTING_KEY] = write.path
+        movie_mode_operations = self._movie_mode_operations()
+        if movie_mode_operations is not None:
+            read, write = movie_mode_operations
+            movie_mode = _validated_movie_mode_setting(self._first_json([read.path]))
+            if movie_mode is not None:
+                merged[MOVIE_MODE_SETTING_KEY] = movie_mode
+                setting_paths[MOVIE_MODE_SETTING_KEY] = write.path
         self._settings_cache = merged
         self._setting_paths = setting_paths
         return merged
@@ -1730,6 +1750,22 @@ class CcapiSession:
                 operation
                 for operation in self._operations
                 if operation.method == "GET" and operation.path.endswith(ZOOM_PATH_SUFFIX)
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            write = CcapiOperation("POST", read.path)
+            if write in self._operations:
+                return read, write
+        return None
+
+    def _movie_mode_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith(MOVIE_MODE_PATH_SUFFIX)
             ),
             key=lambda operation: _path_version(operation.path),
             reverse=True,
@@ -2277,6 +2313,15 @@ def _validated_zoom_setting(raw: object) -> dict[str, object] | None:
     return {"value": current_value, "ability": values}
 
 
+def _validated_movie_mode_setting(raw: object) -> dict[str, object] | None:
+    if not isinstance(raw, dict):
+        return None
+    status = raw.get("status", raw.get("value"))
+    if not isinstance(status, str) or status not in MOVIE_MODE_VALUES:
+        return None
+    return {"value": status, "ability": list(MOVIE_MODE_VALUES)}
+
+
 def _structured_setting_parts(key: str) -> tuple[str, str] | None:
     for base_key, fields in (
         (IMAGE_QUALITY_SETTING_KEY, IMAGE_QUALITY_FIELDS),
@@ -2319,6 +2364,8 @@ def _feature_for_setting(key: str) -> CameraFeature:
         return CameraFeature.EXPOSURE_CONTROL
     if key == "whitebalance":
         return CameraFeature.WHITE_BALANCE_CONTROL
+    if key == MOVIE_MODE_SETTING_KEY:
+        return CameraFeature.MOVIE_MODE_CONTROL
     if key == ZOOM_SETTING_KEY:
         return CameraFeature.ZOOM_CONTROL
     return CameraFeature.ADVANCED_SETTINGS

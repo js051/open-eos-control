@@ -1084,6 +1084,82 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonMovieModeRequiresMatchingGetPostAndWritesAction() = runTest {
+        val discovery = """{"ver100":[
+            {"path":"/devicestatus/batterylist","get":true},
+            {"path":"/devicestatus/storage","get":true},
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/control/moviemode","get":true,"post":true}
+        ]}""".trimIndent()
+        server.enqueue(jsonResponse(discovery))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"status":"off"}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"status":"on"}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val movieMode = capabilities.advancedSettings.single { it.key == "moviemode" }
+        assertEquals(listOf("off", "on"), movieMode.values)
+        assertEquals("off", movieMode.value)
+        assertTrue(capabilities.matrix.supports(CameraFeature.MOVIE_MODE_CONTROL))
+
+        client.setSetting("moviemode", "on")
+
+        repeat(3) { server.takeRequest() }
+        val write = server.takeRequest()
+        assertEquals("POST", write.method)
+        assertEquals("/ccapi/ver100/shooting/control/moviemode", write.path)
+        assertEquals("on", JSONObject(write.body.readUtf8()).getString("action"))
+    }
+
+    @Test
+    fun canonMovieModeIsHiddenWithoutMatchingPostOrValidStatus() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/control/moviemode","get":true}
+                ]}""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        var capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.MOVIE_MODE_CONTROL))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.MOVIE_MODE_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "moviemode" })
+        assertEquals(2, server.requestCount)
+
+        server.shutdown()
+        server = MockWebServer().also { it.start() }
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/control/moviemode","get":true,"post":true}
+                ]}""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"status":"recording"}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.MOVIE_MODE_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "moviemode" })
+    }
+
+    @Test
     fun realStillImageQualityUsesAdvertisedObjectFieldsAndPreservesCompanionFormat() = runTest {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
