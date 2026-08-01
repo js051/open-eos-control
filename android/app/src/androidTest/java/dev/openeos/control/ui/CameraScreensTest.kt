@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import androidx.compose.material3.MaterialTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
@@ -15,9 +16,12 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.ForcedSize
+import androidx.compose.ui.test.Locales
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -29,6 +33,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
@@ -53,6 +59,7 @@ import dev.openeos.control.data.NativeLiveViewAudioStatus
 import dev.openeos.control.data.UsbCameraDevice
 import dev.openeos.control.data.UsbCameraInterface
 import dev.openeos.control.data.UsbPtpDiagnostics
+import androidx.test.services.storage.TestStorage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -767,6 +774,143 @@ class CameraScreensTest {
             sidewaysPanel,
             compose.onNodeWithTag("camera-settings-panel").fetchSemanticsNode().boundsInRoot,
         )
+    }
+
+    @Test
+    fun visualSnapshotShowsEnglishPortraitCameraControls() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(
+                    DeviceConfigurationOverride.Locales(LocaleList("en")),
+                ) {
+                    MaterialTheme(colorScheme = OpenEosColorScheme) {
+                        CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                    }
+                }
+            }
+        }
+
+        saveVisualSnapshot("camera-control-portrait-en")
+        compose.onNodeWithText("Offline UI preview").assertIsDisplayed()
+    }
+
+    @Test
+    fun visualSnapshotShowsReadableTraditionalChineseSideControlsAtLargeText() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.3f)) {
+                    DeviceConfigurationOverride(
+                        DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
+                    ) {
+                        CompositionLocalProvider(
+                            LocalCameraControlRotation provides -90f,
+                            LocalCameraControlTargetRotation provides -90f,
+                        ) {
+                            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                                CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        saveVisualSnapshot(
+            stem = "camera-control-side-zh-TW-130pct",
+            userViewRotationDegrees = -90f,
+        )
+        compose.onNodeWithText("離線 UI 預覽").assertIsDisplayed()
+    }
+
+    @Test
+    fun visualSnapshotShowsReadableTraditionalChineseSideSettingsAtLargeText() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.3f)) {
+                    DeviceConfigurationOverride(
+                        DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
+                    ) {
+                        CompositionLocalProvider(
+                            LocalCameraControlRotation provides -90f,
+                            LocalCameraControlTargetRotation provides -90f,
+                        ) {
+                            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                                CameraControlScreen(
+                                    connectedState().copy(activeSettingPicker = SettingPicker.LIVE_VIEW),
+                                    noOpActions(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        saveVisualSnapshot(
+            stem = "live-view-settings-side-zh-TW-130pct",
+            userViewRotationDegrees = -90f,
+        )
+        val settingsRoot = compose
+            .onNodeWithTag("camera-settings-root", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val settingsPanel = compose
+            .onNodeWithTag("camera-settings-panel", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val settingsTitle = compose
+            .onNodeWithText("Live View 設定", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "Side settings title must remain inside its visible panel: " +
+                "root=$settingsRoot panel=$settingsPanel title=$settingsTitle",
+            settingsTitle.left >= settingsPanel.left &&
+                settingsTitle.top >= settingsPanel.top &&
+                settingsTitle.right <= settingsPanel.right &&
+                settingsTitle.bottom <= settingsPanel.bottom &&
+                settingsPanel.left >= settingsRoot.left &&
+                settingsPanel.top >= settingsRoot.top &&
+                settingsPanel.right <= settingsRoot.right &&
+                settingsPanel.bottom <= settingsRoot.bottom,
+        )
+        compose.onNodeWithText("自動更新").assertIsDisplayed()
+    }
+
+    @Test
+    fun visualSnapshotShowsTraditionalChineseUpsideDownControlsWithoutMovingLayout() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.3f)) {
+                    DeviceConfigurationOverride(
+                        DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
+                    ) {
+                        CompositionLocalProvider(
+                            LocalCameraControlRotation provides 180f,
+                            LocalCameraControlTargetRotation provides 180f,
+                        ) {
+                            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                                CameraControlScreen(CameraUiState().withOfflinePreview(), noOpActions())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        saveVisualSnapshot(
+            stem = "camera-control-upside-down-zh-TW-130pct",
+            userViewRotationDegrees = 180f,
+        )
+        compose.onNodeWithText("離線 UI 預覽").assertIsDisplayed()
     }
 
     @Test
@@ -1858,6 +2002,36 @@ class CameraScreensTest {
         compose.onNodeWithTag("exposure-control-APERTURE").assertIsDisplayed()
         compose.onNodeWithTag("exposure-control-WHITE_BALANCE").assertIsDisplayed()
         compose.onNodeWithTag("capture-mode-selector").assertIsDisplayed()
+    }
+
+    private fun saveVisualSnapshot(
+        stem: String,
+        userViewRotationDegrees: Float = 0f,
+    ) {
+        compose.waitForIdle()
+        val deviceFrame = compose.onRoot(useUnmergedTree = true).captureToImage().asAndroidBitmap()
+        writeVisualSnapshot("$stem-device-frame.png", deviceFrame)
+        if (userViewRotationDegrees == 0f) return
+
+        val userView = Bitmap.createBitmap(
+            deviceFrame,
+            0,
+            0,
+            deviceFrame.width,
+            deviceFrame.height,
+            Matrix().apply { setRotate(-userViewRotationDegrees) },
+            true,
+        )
+        writeVisualSnapshot("$stem-user-view.png", userView)
+        if (kotlin.math.abs(userViewRotationDegrees) == 90f) {
+            assertTrue("A side-facing user view must be wider than it is tall", userView.width > userView.height)
+        }
+    }
+
+    private fun writeVisualSnapshot(name: String, bitmap: Bitmap) {
+        TestStorage().openOutputFile(name).buffered().use { output ->
+            assertTrue("Failed to encode visual snapshot $name", bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+        }
     }
 
     private fun noOpActions() = CameraActions(
