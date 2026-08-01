@@ -158,6 +158,56 @@ class SimulatorEndToEndTest {
         compose.onNodeWithText(text(R.string.connect_title)).assertIsDisplayed()
     }
 
+    @Test
+    fun directCcapiUiUsesAdvertisedCanonEndpoints() {
+        request(
+            "/ccapi/ver100/shooting/settings/shootingmode",
+            method = "PUT",
+            body = """{"value":"Manual"}""",
+        )
+        compose.onNodeWithText(text(R.string.preset_http)).performScrollTo().performClick()
+        compose.onNode(hasSetTextAction()).performTextReplacement(simulatorUrl)
+        compose.onNodeWithText(text(R.string.connect)).performScrollTo().performClick()
+
+        waitForNode("camera-model-status", timeoutMillis = 30_000)
+        waitForNode("live-view-decoded-frame", timeoutMillis = 30_000)
+        waitForSimulatorState { state ->
+            state.getJSONObject("canonical").let { canonical ->
+                canonical.getInt("event_poll_count") >= 1 &&
+                    canonical.getInt("event_active_requests") == 1 &&
+                    canonical.getInt("live_view_start_count") == 1
+            }
+        }
+
+        compose.onNodeWithTag("exposure-control-ISO").performClick()
+        waitForNode("exposure-option-4")
+        compose.onNodeWithTag("exposure-option-4").performClick()
+        waitForSimulatorState { state -> state.getJSONObject("exposure").getString("iso") == "1600" }
+        compose.onNodeWithContentDescription(text(R.string.dismiss)).performClick()
+
+        compose.onNodeWithContentDescription(text(R.string.capture_photo)).performClick()
+        waitForSimulatorState { state ->
+            state.getInt("capture_count") == 1 && state.hasMediaId("SIM_0003.JPG")
+        }
+
+        request("/ccapi/exposure", method = "PATCH", body = """{"iso":"3200"}""")
+        waitForText("3200", timeoutMillis = 30_000)
+        waitForSimulatorState { state ->
+            state.getJSONObject("canonical").getInt("event_cursor") >= 4
+        }
+
+        compose.onNodeWithContentDescription(text(R.string.more_actions)).performClick()
+        compose.onNodeWithText(text(R.string.disconnect)).performClick()
+        compose.onNodeWithText(text(R.string.connect_title)).assertIsDisplayed()
+        waitForSimulatorState { state ->
+            state.getJSONObject("canonical").let { canonical ->
+                canonical.getInt("event_delete_count") >= 1 &&
+                    canonical.getInt("event_active_requests") == 0 &&
+                    canonical.getInt("live_view_stop_count") == 1
+            }
+        }
+    }
+
     private fun waitForNode(tag: String, timeoutMillis: Long = 15_000) {
         compose.waitUntil(timeoutMillis = timeoutMillis) {
             compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
@@ -194,21 +244,24 @@ class SimulatorEndToEndTest {
         }
     }
 
-    private fun request(path: String, method: String = "GET"): JSONObject {
+    private fun request(path: String, method: String = "GET", body: String? = null): JSONObject {
         val connection = URL("$simulatorUrl$path").openConnection() as HttpURLConnection
         return connection.run {
             requestMethod = method
             connectTimeout = 2_000
             readTimeout = 2_000
-            if (method == "POST") {
+            if (body != null || method == "POST") {
+                val bytes = body.orEmpty().toByteArray(Charsets.UTF_8)
                 doOutput = true
-                setFixedLengthStreamingMode(0)
-                outputStream.use { }
+                setRequestProperty("content-type", "application/json")
+                setFixedLengthStreamingMode(bytes.size)
+                outputStream.use { output -> output.write(bytes) }
             }
             try {
                 val responseCode = responseCode
                 check(responseCode in 200..299) { "$method $path returned HTTP $responseCode" }
-                JSONObject(inputStream.bufferedReader().use { it.readText() })
+                val responseBody = inputStream.bufferedReader().use { it.readText() }
+                JSONObject(responseBody.ifBlank { "{}" })
             } finally {
                 disconnect()
             }

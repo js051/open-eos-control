@@ -27,6 +27,7 @@ sealed interface CameraConnection {
         val baseUrl: String,
         val username: String = "",
         val password: String = "",
+        val simulatorMode: Boolean? = null,
         override val platform: CameraHostPlatform = CameraHostPlatform.ANDROID,
     ) : CameraConnection {
         override val transport: CameraTransport = CameraTransport.CCAPI_NETWORK
@@ -117,6 +118,7 @@ class CcapiCameraBackend(
         httpClient = httpTransport.client,
         username = connection.username,
         password = connection.password,
+        treatAsSimulator = connection.simulatorMode,
         rtpDestinationAddress = httpTransport.rtpDestinationAddress,
         rtpSessionFactory = httpTransport.rtpSessionFactory,
     )
