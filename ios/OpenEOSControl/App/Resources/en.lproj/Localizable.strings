@@ -251,6 +251,10 @@
 "storage_free_bytes" = "Storage free bytes";
 "storage_free_images" = "Shots remaining";
 "storage_devices" = "Storage devices";
+"recordable_shots" = "Camera recordable shots";
+"remaining_recording_time" = "Remaining recording time";
+"recording_time_remaining_format" = "%@ remaining";
+"recordable_raw" = "Recordable raw JSON";
 "lens" = "Lens";
 "no_lens_mounted" = "No lens mounted";
 "temperature_status" = "Temperature status";

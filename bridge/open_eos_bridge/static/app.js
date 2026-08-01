@@ -15,6 +15,7 @@
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
 
   const FEATURES = {
+    RECORDABLE_STATUS: "RECORDABLE_STATUS",
     LENS_STATUS: "LENS_STATUS",
     TEMPERATURE_STATUS: "TEMPERATURE_STATUS",
     EVENT_POLLING: "EVENT_POLLING",
@@ -576,6 +577,7 @@
   };
 
   Object.assign(messages.en, {
+    recordingTimeRemaining: "{time} remaining",
     lutPreview: "3D LUT preview",
     loadCubeLut: "Load .cube LUT",
     removeLut: "Remove LUT",
@@ -586,6 +588,7 @@
     lutLoadFailed: "Could not load 3D LUT",
   });
   Object.assign(messages["zh-TW"], {
+    recordingTimeRemaining: "剩餘 {time}",
     lutPreview: "3D LUT 預覽",
     loadCubeLut: "載入 .cube LUT",
     removeLut: "移除 LUT",
@@ -1514,11 +1517,18 @@
     const battery = state.status.battery || {};
     ui.batteryValue.textContent = battery.level == null ? (battery.status || "-") : `${battery.level}%`;
     const storage = state.status.media || {};
-    ui.storageValue.textContent = storage.freeImages != null
-      ? t("freeImages", { count: storage.freeImages })
-      : storage.freeBytes != null
-        ? formatBytes(storage.freeBytes)
-        : "-";
+    if (state.captureMode === "video" && state.status.remainingRecordingSeconds != null) {
+      ui.storageValue.textContent = t("recordingTimeRemaining", {
+        time: formatBulbElapsed(Number(state.status.remainingRecordingSeconds) * 1000),
+      });
+    } else {
+      const recordableShots = state.status.recordableShots ?? storage.freeImages;
+      ui.storageValue.textContent = recordableShots != null
+        ? t("freeImages", { count: recordableShots })
+        : storage.freeBytes != null
+          ? formatBytes(storage.freeBytes)
+          : "-";
+    }
     ui.modeIndicator.textContent = state.status.mode && state.status.mode !== "unknown" ? state.status.mode : "-";
     renderExposure();
     renderAdvancedSettings();

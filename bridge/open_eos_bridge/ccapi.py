@@ -502,6 +502,15 @@ class CcapiSession:
                 + self._versioned_paths("/devicestatus/currentstorage")
                 + [self._api_path("GET", "/contents")]
             )
+            recordable_operation = self._operation("GET", "/shooting/information/recordable")
+            recordable_value = (
+                self._first_json([recordable_operation.path]) if recordable_operation is not None else None
+            )
+            recordable_status = _recordable_status(recordable_value)
+            if recordable_status is None:
+                self._observed.discard(CameraFeature.RECORDABLE_STATUS)
+            else:
+                self._observed.add(CameraFeature.RECORDABLE_STATUS)
             lens_operation = self._operation("GET", "/devicestatus/lens")
             lens_value = self._first_json([lens_operation.path]) if lens_operation is not None else None
             lens_status = _lens_status(lens_value)
@@ -537,6 +546,8 @@ class CcapiSession:
                     aperture=_first_setting_value(settings, "av", "aperture") or "-",
                     white_balance=_first_setting_value(settings, "wb", "whitebalance", "white_balance") or "-",
                 ),
+                recordable_shots=recordable_status[0] if recordable_status is not None else None,
+                remaining_recording_seconds=recordable_status[1] if recordable_status is not None else None,
                 lens=lens_status,
                 temperature=self._temperature_status,
                 raw={
@@ -545,6 +556,7 @@ class CcapiSession:
                     "apiVersions": self._api_prefixes,
                     "battery": battery,
                     "storage": storage,
+                    "recordable": recordable_value,
                     "lens": lens_value,
                     "temperature": temperature_value,
                     "liveViewSource": self._active_live_view_source,
@@ -623,6 +635,7 @@ class CcapiSession:
                 supported.add(CameraFeature.CAMERA_CLOCK_SYNC)
 
             candidates = {
+                CameraFeature.RECORDABLE_STATUS,
                 CameraFeature.LENS_STATUS,
                 CameraFeature.TEMPERATURE_STATUS,
                 CameraFeature.EVENT_POLLING,
@@ -658,6 +671,10 @@ class CcapiSession:
                 supported=sorted(supported, key=str),
                 planned=sorted(candidates - supported, key=str),
                 reasons={
+                    CameraFeature.RECORDABLE_STATUS.value: (
+                        "The camera must advertise GET shooting/information/recordable and return Canon's "
+                        "documented nullable integer payload."
+                    ),
                     CameraFeature.LENS_STATUS.value: (
                         "The camera must advertise GET devicestatus/lens and return Canon's documented "
                         "mount/name payload."
@@ -2244,6 +2261,25 @@ def _lens_status(value: object | None) -> LensStatus | None:
     ):
         return None
     return LensStatus(mounted=mounted, name=name if mounted else "")
+
+
+def _recordable_status(value: object | None) -> tuple[int | None, int | None] | None:
+    if not isinstance(value, dict) or "recordableshots" not in value or "remainingtime" not in value:
+        return None
+
+    def nullable_non_negative_integer(key: str) -> tuple[bool, int | None]:
+        raw = value[key]
+        if raw is None:
+            return True, None
+        if type(raw) is not int or raw < 0:
+            return False, None
+        return True, raw
+
+    shots_valid, shots = nullable_non_negative_integer("recordableshots")
+    time_valid, remaining_time = nullable_non_negative_integer("remainingtime")
+    if not shots_valid or not time_valid:
+        return None
+    return shots, remaining_time
 
 
 def _temperature_status(value: object | None) -> CameraTemperatureStatus | None:

@@ -36,8 +36,11 @@ struct DebugView: View {
                         value("storage_free_bytes", camera.status?.storageFreeBytes.map { String($0) } ?? language.string("none"), mono: true)
                         value("storage_free_images", camera.status?.storageFreeImages.map { String($0) } ?? language.string("none"), mono: true)
                         value("storage_devices", camera.status?.storageDeviceCount.map { String($0) } ?? language.string("none"), mono: true)
+                        value("recordable_shots", camera.status?.recordableShots.map { String($0) } ?? language.string("none"), mono: true)
+                        value("remaining_recording_time", camera.status?.remainingRecordingSeconds.map { String($0) } ?? language.string("none"), mono: true)
                         value("battery_raw", camera.status?.rawBatteryJSON ?? "null", mono: true)
                         value("storage_raw", camera.status?.rawStorageJSON ?? "null", mono: true)
+                        value("recordable_raw", camera.status?.rawRecordableJSON ?? "null", mono: true)
                         value(
                             "lens",
                             camera.status?.lens.map { $0.mounted ? $0.name : language.string("no_lens_mounted") }

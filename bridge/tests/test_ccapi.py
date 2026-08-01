@@ -77,6 +77,7 @@ EVENT_DISCOVERY = {
 DEVICE_STATUS_DISCOVERY = {
     "ver100": [
         *DISCOVERY["ver100"],
+        {"path": "/shooting/information/recordable", "get": True},
         {"path": "/devicestatus/lens", "get": True},
         {"path": "/devicestatus/temperature", "get": True},
     ]
@@ -107,6 +108,7 @@ class FakeCcapiTransport:
         preview_content_type: str = "image/jpeg",
         zoom_response: object | None = None,
         movie_mode_response: object | None = None,
+        recordable_response: object | None = None,
         lens_response: object | None = None,
         temperature_response: object | None = None,
     ) -> None:
@@ -123,6 +125,11 @@ class FakeCcapiTransport:
         self.preview_content_type = preview_content_type
         self.zoom_response = zoom_response
         self.movie_mode_response = movie_mode_response
+        self.recordable_response = (
+            recordable_response
+            if recordable_response is not None
+            else {"recordableshots": 2418, "remainingtime": None}
+        )
         self.lens_response = (
             lens_response if lens_response is not None else {"mount": True, "name": "RF24-105mm F4 L IS USM"}
         )
@@ -191,6 +198,8 @@ class FakeCcapiTransport:
             return _json_response({"batterylist": [{"level": 89, "quality": "good"}]})
         if method == "GET" and path == "/ccapi/ver100/devicestatus/storage":
             return _json_response({"storagelist": [{"name": "card1", "maxsize": 64_000, "spacesize": 32_000}]})
+        if method == "GET" and path == "/ccapi/ver100/shooting/information/recordable":
+            return _json_response(self.recordable_response)
         if method == "GET" and path == "/ccapi/ver100/devicestatus/lens":
             return _json_response(self.lens_response)
         if method == "GET" and path == "/ccapi/ver100/devicestatus/temperature":
@@ -604,6 +613,9 @@ def test_ccapi_device_status_requires_advertised_strict_canon_payloads() -> None
     assert status.lens.name == "RF24-105mm F4 L IS USM"
     assert status.temperature is CameraTemperatureStatus.FRAME_RATE_DOWN_AND_RESTRICTION_MOVIE_RECORDING
     assert status.temperature.movie_recording_allowed is False
+    assert status.recordable_shots == 2418
+    assert status.remaining_recording_seconds is None
+    assert CameraFeature.RECORDABLE_STATUS in capabilities.supported
     assert CameraFeature.LENS_STATUS in capabilities.supported
     assert CameraFeature.TEMPERATURE_STATUS in capabilities.supported
 
@@ -611,6 +623,7 @@ def test_ccapi_device_status_requires_advertised_strict_canon_payloads() -> None
 def test_ccapi_malformed_device_status_remains_planned() -> None:
     transport = FakeCcapiTransport(
         discovery=DEVICE_STATUS_DISCOVERY,
+        recordable_response={"recordableshots": True, "remainingtime": -1},
         lens_response={"mount": "true", "name": "RF24-105mm"},
         temperature_response={"status": "hot"},
     )
@@ -621,6 +634,10 @@ def test_ccapi_malformed_device_status_remains_planned() -> None:
 
     assert status.lens is None
     assert status.temperature is None
+    assert status.recordable_shots is None
+    assert status.remaining_recording_seconds is None
+    assert CameraFeature.RECORDABLE_STATUS not in capabilities.supported
+    assert CameraFeature.RECORDABLE_STATUS in capabilities.planned
     assert CameraFeature.LENS_STATUS not in capabilities.supported
     assert CameraFeature.TEMPERATURE_STATUS not in capabilities.supported
     assert CameraFeature.LENS_STATUS in capabilities.planned

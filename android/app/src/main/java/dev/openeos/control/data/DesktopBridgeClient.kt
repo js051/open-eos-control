@@ -633,8 +633,11 @@ class DesktopBridgeClient(
             storageFreeBytes = media.optNullableLong("freeBytes"),
             storageFreeImages = media.optNullableLong("freeImages"),
             storageDeviceCount = media.optNullableInt("devices"),
+            recordableShots = body.optNullableLong("recordableShots"),
+            remainingRecordingSeconds = body.optNullableLong("remainingRecordingSeconds"),
             rawBatteryJson = battery.toString(),
             rawStorageJson = media.toString(),
+            rawRecordableJson = raw.optJSONObject("recordable")?.toString() ?: "null",
             rawTransportJson = raw.toString(),
             bulbExposureActive = body.optNullableBoolean("bulbExposureActive"),
             lens = body.optJSONObject("lens")?.let { lens ->

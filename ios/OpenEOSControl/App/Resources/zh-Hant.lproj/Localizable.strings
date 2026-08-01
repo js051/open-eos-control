@@ -251,6 +251,10 @@
 "storage_free_bytes" = "儲存空間可用位元組";
 "storage_free_images" = "剩餘可拍張數";
 "storage_devices" = "儲存裝置數";
+"recordable_shots" = "相機可拍張數";
+"remaining_recording_time" = "剩餘錄影時間";
+"recording_time_remaining_format" = "剩餘 %@";
+"recordable_raw" = "可拍攝資訊原始 JSON";
 "lens" = "鏡頭";
 "no_lens_mounted" = "未安裝鏡頭";
 "temperature_status" = "溫度狀態";

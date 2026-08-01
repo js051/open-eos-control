@@ -72,6 +72,15 @@ private data class CcapiDetailedLiveView(
     val geometry: CcapiLiveViewGeometry?,
 )
 
+private data class CcapiRecordableStatus(
+    val shots: Long?,
+    val remainingSeconds: Long?,
+)
+
+private data class StrictNullableLong(
+    val value: Long?,
+)
+
 private class CcapiHttpException(
     val statusCode: Int,
     message: String,
@@ -379,6 +388,15 @@ class CcapiClient(
                 null
             }
 
+            val recordableJson = apiOperation("GET", "/shooting/information/recordable")
+                ?.let { operation -> getFirstJson(listOf(operation.path)) }
+            val recordableStatus = recordableJson?.toCanonRecordableStatusOrNull()
+            if (recordableStatus != null) {
+                observedFeatures.add(CameraFeature.RECORDABLE_STATUS)
+            } else {
+                observedFeatures.remove(CameraFeature.RECORDABLE_STATUS)
+            }
+
             val lensJson = apiOperation("GET", "/devicestatus/lens")
                 ?.let { operation -> getFirstJson(listOf(operation.path)) }
             val lensStatus = lensJson?.toCanonLensStatusOrNull()
@@ -427,8 +445,11 @@ class CcapiClient(
                 storageFreeBytes = storageInfo?.freeBytes,
                 storageFreeImages = storageInfo?.freeImages,
                 storageDeviceCount = storageInfo?.devices,
+                recordableShots = recordableStatus?.shots,
+                remainingRecordingSeconds = recordableStatus?.remainingSeconds,
                 rawBatteryJson = batteryJson?.toString() ?: "null",
                 rawStorageJson = storageJson?.toString() ?: "null",
+                rawRecordableJson = recordableJson?.toString() ?: "null",
                 bulbExposureActive = bulbExposureActive,
                 lens = lensStatus,
                 temperature = latestTemperatureStatus,
@@ -437,6 +458,11 @@ class CcapiClient(
             getJson("/ccapi/status").toCameraStatus().also {
                 latestTemperatureStatus = it.temperature
                 observedFeatures.addAll(setOf(CameraFeature.BATTERY_STATUS, CameraFeature.STORAGE_STATUS))
+                if (it.recordableShots != null || it.remainingRecordingSeconds != null) {
+                    observedFeatures.add(CameraFeature.RECORDABLE_STATUS)
+                } else {
+                    observedFeatures.remove(CameraFeature.RECORDABLE_STATUS)
+                }
                 if (it.lens != null) observedFeatures.add(CameraFeature.LENS_STATUS)
                 else observedFeatures.remove(CameraFeature.LENS_STATUS)
                 if (it.temperature != null) observedFeatures.add(CameraFeature.TEMPERATURE_STATUS)
@@ -2478,6 +2504,26 @@ private fun String.isValidLensName(mounted: Boolean): Boolean =
 private fun JSONObject.toTemperatureStatusOrNull(): CameraTemperatureStatus? =
     (opt("status") as? String)?.let(CameraTemperatureStatus::fromCcapiValue)
 
+private fun JSONObject.toCanonRecordableStatusOrNull(): CcapiRecordableStatus? {
+    val shots = strictNullableNonNegativeLong("recordableshots") ?: return null
+    val remaining = strictNullableNonNegativeLong("remainingtime") ?: return null
+    return CcapiRecordableStatus(shots = shots.value, remainingSeconds = remaining.value)
+}
+
+private fun JSONObject.strictNullableNonNegativeLong(key: String): StrictNullableLong? {
+    if (!has(key)) return null
+    val value = opt(key)
+    if (value == JSONObject.NULL) return StrictNullableLong(null)
+    val parsed = when (value) {
+        is Byte -> value.toLong()
+        is Short -> value.toLong()
+        is Int -> value.toLong()
+        is Long -> value
+        else -> return null
+    }
+    return if (parsed >= 0L) StrictNullableLong(parsed) else null
+}
+
 private fun JSONObject.toCameraStatus(): CameraStatus {
     val battery = getJSONObject("battery")
     val media = getJSONObject("media")
@@ -2500,6 +2546,10 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
         storageFreeBytes = media.optNullableLong("free_bytes") ?: media.optNullableLong("freeBytes"),
         storageFreeImages = media.optNullableLong("free_images") ?: media.optNullableLong("freeImages"),
         storageDeviceCount = media.optNullableInt("devices"),
+        recordableShots = optNullableLong("recordable_shots") ?: optNullableLong("recordableShots"),
+        remainingRecordingSeconds = optNullableLong("remaining_recording_seconds")
+            ?: optNullableLong("remainingRecordingSeconds"),
+        rawRecordableJson = optJSONObject("recordable")?.toString() ?: "null",
         bulbExposureActive = optNullableBoolean("bulb_exposure_active")
             ?: optNullableBoolean("bulbExposureActive"),
         lens = optJSONObject("lens")?.toBridgeLensStatusOrNull(),
@@ -2542,6 +2592,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.EVENT_POLLING,
             CameraFeature.CAMERA_CLOCK_SYNC,
             CameraFeature.FOCUS_DRIVE,
+            CameraFeature.RECORDABLE_STATUS,
             CameraFeature.LENS_STATUS,
             CameraFeature.TEMPERATURE_STATUS,
         ) +

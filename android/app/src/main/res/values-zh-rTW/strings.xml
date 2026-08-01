@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="recordable_shots">相機可拍張數</string>
+    <string name="remaining_recording_time">剩餘錄影時間</string>
+    <string name="recording_time_remaining">剩餘 %1$s</string>
+    <string name="recordable_raw">可拍攝資訊原始 JSON</string>
     <string name="setting_movie_mode">影片模式</string>
     <string name="app_name">Open EOS Control</string>
     <string name="connect_title">連接你的 EOS</string>

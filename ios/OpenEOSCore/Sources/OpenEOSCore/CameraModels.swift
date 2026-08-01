@@ -5,6 +5,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case cameraClockSync = "CAMERA_CLOCK_SYNC"
     case batteryStatus = "BATTERY_STATUS"
     case storageStatus = "STORAGE_STATUS"
+    case recordableStatus = "RECORDABLE_STATUS"
     case lensStatus = "LENS_STATUS"
     case temperatureStatus = "TEMPERATURE_STATUS"
     case eventPolling = "EVENT_POLLING"
@@ -180,8 +181,11 @@ public struct CameraStatus: Equatable, Sendable {
     public let storageFreeBytes: Int64?
     public let storageFreeImages: Int64?
     public let storageDeviceCount: Int?
+    public let recordableShots: Int64?
+    public let remainingRecordingSeconds: Int64?
     public let rawBatteryJSON: String
     public let rawStorageJSON: String
+    public let rawRecordableJSON: String
     public let lens: LensStatus?
     public let temperature: CameraTemperatureStatus?
 
@@ -199,8 +203,11 @@ public struct CameraStatus: Equatable, Sendable {
         storageFreeBytes: Int64? = nil,
         storageFreeImages: Int64? = nil,
         storageDeviceCount: Int? = nil,
+        recordableShots: Int64? = nil,
+        remainingRecordingSeconds: Int64? = nil,
         rawBatteryJSON: String = "null",
         rawStorageJSON: String = "null",
+        rawRecordableJSON: String = "null",
         lens: LensStatus? = nil,
         temperature: CameraTemperatureStatus? = nil
     ) {
@@ -217,8 +224,11 @@ public struct CameraStatus: Equatable, Sendable {
         self.storageFreeBytes = storageFreeBytes
         self.storageFreeImages = storageFreeImages
         self.storageDeviceCount = storageDeviceCount
+        self.recordableShots = recordableShots
+        self.remainingRecordingSeconds = remainingRecordingSeconds
         self.rawBatteryJSON = rawBatteryJSON
         self.rawStorageJSON = rawStorageJSON
+        self.rawRecordableJSON = rawRecordableJSON
         self.lens = lens
         self.temperature = temperature
     }
@@ -238,8 +248,11 @@ public struct CameraStatus: Equatable, Sendable {
             storageFreeBytes: storageFreeBytes,
             storageFreeImages: storageFreeImages,
             storageDeviceCount: storageDeviceCount,
+            recordableShots: recordableShots,
+            remainingRecordingSeconds: remainingRecordingSeconds,
             rawBatteryJSON: rawBatteryJSON,
             rawStorageJSON: rawStorageJSON,
+            rawRecordableJSON: rawRecordableJSON,
             lens: lens,
             temperature: temperature
         )

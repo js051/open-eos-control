@@ -38,6 +38,8 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
         storageFreeBytes = 84_000_000_000,
         storageFreeImages = 2_418,
         storageDeviceCount = 2,
+        recordableShots = 2_418,
+        remainingRecordingSeconds = 7_080,
     ),
     capabilities = CameraCapabilities(
         iso = listOf("Auto", "100", "200", "400", "800", "1600", "3200", "6400", "12800"),
@@ -76,6 +78,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
                 CameraFeature.CAMERA_IDENTITY,
                 CameraFeature.BATTERY_STATUS,
                 CameraFeature.STORAGE_STATUS,
+                CameraFeature.RECORDABLE_STATUS,
                 CameraFeature.LIVE_VIEW,
                 CameraFeature.LIVE_VIEW_JPEG_POLLING,
                 CameraFeature.LIVE_VIEW_MAGNIFICATION,

@@ -186,6 +186,23 @@ class CameraScreensTest {
     }
 
     @Test
+    fun videoPreviewShowsExactRemainingRecordingDuration() {
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    CameraUiState().withOfflinePreview().copy(captureMode = CaptureMode.VIDEO),
+                    noOpActions(),
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription(
+            resourceText(R.string.recording_time_remaining, "1:58:00"),
+        ).assertIsDisplayed()
+        compose.onNodeWithText("1:58:00").assertIsDisplayed()
+    }
+
+    @Test
     fun offlinePreviewTapActionDoesNotCoverEmptyState() {
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {

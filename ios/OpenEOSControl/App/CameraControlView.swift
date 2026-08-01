@@ -229,7 +229,10 @@ private struct CameraOverlayHeader: View {
     }
 
     private var storageText: String? {
-        if let shots = camera.status?.storageFreeImages {
+        if camera.captureMode == .video, let seconds = camera.status?.remainingRecordingSeconds {
+            return language.format("recording_time_remaining_format", formatRecordingDuration(seconds))
+        }
+        if let shots = camera.status?.recordableShots ?? camera.status?.storageFreeImages {
             let formatter = NumberFormatter()
             formatter.numberStyle = .decimal
             formatter.locale = language.locale
@@ -243,6 +246,17 @@ private struct CameraOverlayHeader: View {
             )
         }
         return camera.status?.mediaAvailable == true ? language.string("storage_ready") : nil
+    }
+
+    private func formatRecordingDuration(_ value: Int64) -> String {
+        let seconds = max(0, value)
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainder = seconds % 60
+        if hours > 0 {
+            return String(format: "%lld:%02lld:%02lld", hours, minutes, remainder)
+        }
+        return String(format: "%02lld:%02lld", minutes, remainder)
     }
 
     private func compactCameraName(_ value: String) -> String {

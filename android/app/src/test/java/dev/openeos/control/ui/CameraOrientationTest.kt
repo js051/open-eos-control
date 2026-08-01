@@ -208,5 +208,8 @@ class CameraOrientationTest {
         assertEquals("18,900", exactCameraCount(18_900, Locale.US))
         assertEquals("1,250,000", exactCameraCount(1_250_000, Locale.US))
         assertEquals("2,418", exactCameraCount(2_418, Locale.TAIWAN))
+        assertEquals("00:00", formatRecordingDuration(-1))
+        assertEquals("01:05", formatRecordingDuration(65))
+        assertEquals("2:00:00", formatRecordingDuration(7_200))
     }
 }

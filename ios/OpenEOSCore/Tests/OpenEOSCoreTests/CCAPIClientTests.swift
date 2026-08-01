@@ -53,7 +53,7 @@ final class CCAPIClientTests: XCTestCase {
     }
     """
 
-    private let deviceStatusDiscovery = #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/devicestatus/lens","get":true},{"path":"/devicestatus/temperature","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/shutterbutton","post":true},{"path":"/shooting/control/recbutton","post":true}]}"#
+    private let deviceStatusDiscovery = #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/information/recordable","get":true},{"path":"/devicestatus/lens","get":true},{"path":"/devicestatus/temperature","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/shutterbutton","post":true},{"path":"/shooting/control/recbutton","post":true}]}"#
 
     func testDiscoverySnapshotBuildsCapabilitiesFromAdvertisedOperations() async throws {
         let transport = MockCameraHTTPTransport()
@@ -933,7 +933,7 @@ final class CCAPIClientTests: XCTestCase {
         await transport.enqueueJSON(
             method: "POST",
             path: "/ccapi/whitebalance/click",
-            body: #"{"connected":true,"battery":{"level":82,"status":"good"},"media":{"available":true,"remaining_minutes":120,"total_bytes":128000000000,"free_bytes":84000000000,"free_images":2418,"devices":2},"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"click"}}"#
+            body: #"{"connected":true,"battery":{"level":82,"status":"good"},"recordable_shots":2418,"remaining_recording_seconds":7200,"media":{"available":true,"remaining_minutes":120,"total_bytes":128000000000,"free_bytes":84000000000,"free_images":2418,"devices":2},"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"click"}}"#
         )
         let client = try CCAPIClient(
             baseURL: "http://127.0.0.1:18080",
@@ -946,6 +946,8 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(status.exposure.whiteBalance, "click")
         XCTAssertEqual(status.storageFreeImages, 2_418)
         XCTAssertEqual(status.storageDeviceCount, 2)
+        XCTAssertEqual(status.recordableShots, 2_418)
+        XCTAssertEqual(status.remainingRecordingSeconds, 7_200)
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.path), ["/ccapi/whitebalance/click"])
         let body = try XCTUnwrap(requests.first?.body)
@@ -1399,10 +1401,13 @@ final class CCAPIClientTests: XCTestCase {
 
         XCTAssertEqual(status.lens, LensStatus(mounted: true, name: "RF24-105mm F4 L IS USM"))
         XCTAssertEqual(status.temperature, .frameRateDownAndRestrictionMovieRecording)
+        XCTAssertEqual(status.recordableShots, 2_418)
+        XCTAssertNil(status.remainingRecordingSeconds)
         XCTAssertEqual(status.temperature?.frameRateReduced, true)
         XCTAssertEqual(status.temperature?.movieRecordingAllowed, false)
         XCTAssertTrue(capabilities.matrix.supports(.lensStatus))
         XCTAssertTrue(capabilities.matrix.supports(.temperatureStatus))
+        XCTAssertTrue(capabilities.matrix.supports(.recordableStatus))
     }
 
     func testMalformedAdvertisedDeviceStatusRemainsPlanned() async throws {
@@ -1410,6 +1415,7 @@ final class CCAPIClientTests: XCTestCase {
         await transport.enqueueJSON(path: "/ccapi", body: deviceStatusDiscovery)
         await enqueueDeviceStatus(
             on: transport,
+            recordable: #"{"recordableshots":true,"remainingtime":-1}"#,
             lens: #"{"mount":"true","name":"RF24-105mm"}"#,
             temperature: "hot"
         )
@@ -1420,10 +1426,14 @@ final class CCAPIClientTests: XCTestCase {
 
         XCTAssertNil(status.lens)
         XCTAssertNil(status.temperature)
+        XCTAssertNil(status.recordableShots)
+        XCTAssertNil(status.remainingRecordingSeconds)
         XCTAssertFalse(capabilities.matrix.supports(.lensStatus))
         XCTAssertFalse(capabilities.matrix.supports(.temperatureStatus))
+        XCTAssertFalse(capabilities.matrix.supports(.recordableStatus))
         XCTAssertTrue(capabilities.matrix.planned.contains(.lensStatus))
         XCTAssertTrue(capabilities.matrix.planned.contains(.temperatureStatus))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.recordableStatus))
     }
 
     func testOversizedAdvertisedLensNameRemainsPlanned() async throws {
@@ -1615,6 +1625,7 @@ final class CCAPIClientTests: XCTestCase {
 
     private func enqueueDeviceStatus(
         on transport: MockCameraHTTPTransport,
+        recordable: String = #"{"recordableshots":2418,"remainingtime":null}"#,
         lens: String = #"{"mount":true,"name":"RF24-105mm F4 L IS USM"}"#,
         temperature: String = "normal"
     ) async {
@@ -1625,6 +1636,10 @@ final class CCAPIClientTests: XCTestCase {
         await transport.enqueueJSON(
             path: "/ccapi/ver100/devicestatus/storage",
             body: #"{"storagelist":[{"name":"card1","spacesize":32000000000}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/information/recordable",
+            body: recordable
         )
         await transport.enqueueJSON(path: "/ccapi/ver100/devicestatus/lens", body: lens)
         await transport.enqueueJSON(

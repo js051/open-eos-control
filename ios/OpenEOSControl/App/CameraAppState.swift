@@ -1351,7 +1351,7 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "framerate", label: "Frame rate", value: "59.94p", values: ["23.98p", "29.97p", "59.94p"]),
         ]
         let supported: Set<CameraFeature> = [
-            .cameraIdentity, .batteryStatus, .storageStatus, .liveView, .liveViewJPEGPolling,
+            .cameraIdentity, .batteryStatus, .storageStatus, .recordableStatus, .liveView, .liveViewJPEGPolling,
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .movieModeControl, .videoRecording,
             .tapFocus, .clickWhiteBalance,
             .liveViewMagnification,
@@ -1383,6 +1383,8 @@ final class CameraAppState: ObservableObject {
             storageFreeBytes: 84_000_000_000,
             storageFreeImages: 2_418,
             storageDeviceCount: 2,
+            recordableShots: 2_418,
+            remainingRecordingSeconds: 7_080,
             rawBatteryJSON: #"{"kind":"battery","level":82,"quality":"good"}"#,
             rawStorageJSON: #"{"name":"card1","status":"ready"}"#
         )

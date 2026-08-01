@@ -245,6 +245,11 @@ public actor CCAPIClient {
             let status = try parseSimulatorStatus(await requestJSON(path: "/ccapi/status"))
             latestTemperatureStatus = status.temperature
             observedFeatures.formUnion([.batteryStatus, .storageStatus])
+            if status.recordableShots != nil || status.remainingRecordingSeconds != nil {
+                observedFeatures.insert(.recordableStatus)
+            } else {
+                observedFeatures.remove(.recordableStatus)
+            }
             if status.lens == nil { observedFeatures.remove(.lensStatus) }
             else { observedFeatures.insert(.lensStatus) }
             if status.temperature == nil { observedFeatures.remove(.temperatureStatus) }
@@ -264,6 +269,18 @@ public actor CCAPIClient {
             required: false
         )
         if storage != nil { observedFeatures.insert(.storageStatus) }
+        let recordableValue: JSONDictionary?
+        if let operation = operation(.get, suffix: "/shooting/information/recordable") {
+            recordableValue = try await firstJSON(paths: [operation.path], required: false)
+        } else {
+            recordableValue = nil
+        }
+        let recordable = parseRecordable(recordableValue)
+        if recordable == nil {
+            observedFeatures.remove(.recordableStatus)
+        } else {
+            observedFeatures.insert(.recordableStatus)
+        }
         let lensValue: JSONDictionary?
         if let operation = operation(.get, suffix: "/devicestatus/lens") {
             lensValue = try await firstJSON(paths: [operation.path], required: false)
@@ -302,8 +319,11 @@ public actor CCAPIClient {
             storageFreeBytes: storageState?.freeBytes,
             storageFreeImages: storageState?.freeImages,
             storageDeviceCount: storageState?.devices,
+            recordableShots: recordable?.shots,
+            remainingRecordingSeconds: recordable?.remainingSeconds,
             rawBatteryJSON: JSONString(battery),
             rawStorageJSON: JSONString(storage),
+            rawRecordableJSON: JSONString(recordableValue),
             lens: lens,
             temperature: latestTemperatureStatus
         )
@@ -361,6 +381,7 @@ public actor CCAPIClient {
         if cameraClockOperations() != nil { supported.insert(.cameraClockSync) }
 
         let allPlanned: Set<CameraFeature> = [
+            .recordableStatus,
             .lensStatus, .temperatureStatus,
             .eventPolling, .liveViewRTP, .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress,
             .movieModeControl,
@@ -376,6 +397,7 @@ public actor CCAPIClient {
                 supported: supported,
                 planned: allPlanned.subtracting(supported),
                 reasons: [
+                    .recordableStatus: "The camera must advertise GET shooting/information/recordable and return Canon's documented nullable integer payload.",
                     .lensStatus: "The camera must advertise GET devicestatus/lens and return Canon's documented mount/name payload.",
                     .temperatureStatus: "The camera must advertise GET devicestatus/temperature and return a documented Canon status value.",
                     .eventPolling: "The camera must advertise both GET and DELETE for the Canon event polling endpoint.",
@@ -1929,7 +1951,7 @@ public actor CCAPIClient {
             .clickWhiteBalance, .focusDrive,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete, .cameraClockSync,
-            .lensStatus, .temperatureStatus,
+            .recordableStatus, .lensStatus, .temperatureStatus,
         ]
         if controls.contains(where: { $0.key == Self.zoomSettingKey }) {
             supported.insert(.zoomControl)
@@ -1983,6 +2005,9 @@ public actor CCAPIClient {
             storageFreeBytes: media.integer64("free_bytes") ?? media.integer64("freeBytes"),
             storageFreeImages: media.integer64("free_images") ?? media.integer64("freeImages"),
             storageDeviceCount: media.integer("devices"),
+            recordableShots: value.integer64("recordable_shots") ?? value.integer64("recordableShots"),
+            remainingRecordingSeconds: value.integer64("remaining_recording_seconds")
+                ?? value.integer64("remainingRecordingSeconds"),
             lens: value.object("lens").flatMap(parseBridgeLens),
             temperature: CameraTemperatureStatus(rawValue: value.string("temperature", default: ""))
         )
@@ -2013,6 +2038,33 @@ public actor CCAPIClient {
             return nil
         }
         return LensStatus(mounted: mounted, name: mounted ? name : "")
+    }
+
+    private func parseRecordable(
+        _ value: JSONDictionary?
+    ) -> (shots: Int64?, remainingSeconds: Int64?)? {
+        guard let value,
+              value.keys.contains("recordableshots"),
+              value.keys.contains("remainingtime") else {
+            return nil
+        }
+
+        func nullableNonNegativeInteger(_ key: String) -> (valid: Bool, value: Int64?) {
+            guard let raw = value[key] else { return (false, nil) }
+            if raw is NSNull { return (true, nil) }
+            guard let number = raw as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID() else {
+                return (false, nil)
+            }
+            let integer = number.int64Value
+            guard integer >= 0, number.doubleValue == Double(integer) else { return (false, nil) }
+            return (true, integer)
+        }
+
+        let shots = nullableNonNegativeInteger("recordableshots")
+        let remaining = nullableNonNegativeInteger("remainingtime")
+        guard shots.valid, remaining.valid else { return nil }
+        return (shots.value, remaining.value)
     }
 
     private func parseBridgeLens(_ value: JSONDictionary) -> LensStatus? {

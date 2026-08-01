@@ -162,6 +162,10 @@
     <string name="storage_free_bytes">Storage free bytes</string>
     <string name="storage_free_images">Shots remaining</string>
     <string name="storage_devices">Storage devices</string>
+    <string name="recordable_shots">Camera recordable shots</string>
+    <string name="remaining_recording_time">Remaining recording time</string>
+    <string name="recording_time_remaining">%1$s remaining</string>
+    <string name="recordable_raw">Recordable raw JSON</string>
     <string name="none">None</string>
     <string name="unavailable">Unavailable</string>
     <string name="device">Device</string>

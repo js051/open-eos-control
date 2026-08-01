@@ -31,6 +31,7 @@ The app currently includes:
 - Dev simulator preset
 - Connect, refresh, and disconnect
 - Camera identity, transport, profile, battery, and storage display, including card count, total/free bytes, and remaining shots when reported by CCAPI, USB/PTP, or Desktop Bridge
+- Capability-gated Canon CCAPI recordable status on Android, iOS, and PC. Photo mode prefers the camera's current recordable-shot count, Video mode shows the exact remaining recording time, and both fall back to storage summaries when the camera does not advertise a valid `/shooting/information/recordable` response
 - Capability-gated Canon CCAPI lens and temperature status on Android, iOS, and PC. A documented temperature restriction is refreshed before still capture, recording start, or Live View start; localized warnings explain the active restriction while stop/release actions remain available for safe cleanup
 - Bounded, secret-redacted capability evidence showing the discovery source, protocol versions, advertised commands, writable settings, and operations that actually succeeded in the current session
 - Session-scoped physical-camera validation on Android, iOS, and PC that exposes only advertised-and-observed features, requires a visible camera-side confirmation, rejects Simulator/Offline Preview evidence, and copies privacy-safe Markdown bound to the matching sanitized diagnostic by native SHA-256

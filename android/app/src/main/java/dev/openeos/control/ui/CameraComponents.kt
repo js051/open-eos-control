@@ -219,7 +219,7 @@ private fun SegmentItem(label: String, selected: Boolean, onClick: () -> Unit, m
 fun CameraHeader(state: CameraUiState, actions: CameraActions) {
     val battery = state.status?.batteryLevel?.let { stringResource(R.string.battery_percent, it) }
         ?: stringResource(R.string.unknown)
-    val storage = cameraStorageLabel(state.status)
+    val storage = cameraStorageLabel(state.status, state.captureMode)
     Row(
         modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -257,8 +257,8 @@ fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: 
     val batteryValue = state.status?.batteryLevel?.let { "$it%" } ?: "-"
     val fullCameraName = state.info?.model ?: stringResource(R.string.unknown)
     val cameraHudName = fullCameraName.toCameraHudName()
-    val fullStorage = cameraStorageLabel(state.status)
-    val storageValue = cameraStorageHudValue(state.status)
+    val fullStorage = cameraStorageLabel(state.status, state.captureMode)
+    val storageValue = cameraStorageHudValue(state.status, state.captureMode)
     var menuExpanded by remember { mutableStateOf(false) }
     var statusExpanded by remember { mutableStateOf(false) }
     Row(
@@ -819,9 +819,18 @@ private fun batteryStatusIcon(level: Int?): Int = when {
 }
 
 @Composable
-private fun cameraStorageLabel(status: CameraStatus?): String {
+private fun cameraStorageLabel(status: CameraStatus?, captureMode: CaptureMode): String {
     val context = LocalContext.current
     return when {
+        captureMode == CaptureMode.VIDEO && status?.remainingRecordingSeconds != null -> stringResource(
+            R.string.recording_time_remaining,
+            formatRecordingDuration(status.remainingRecordingSeconds),
+        )
+        captureMode == CaptureMode.PHOTO && status?.recordableShots != null -> pluralStringResource(
+            R.plurals.storage_shots_remaining,
+            status.recordableShots.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            status.recordableShots,
+        )
         status?.storageFreeImages != null -> pluralStringResource(
             R.plurals.storage_shots_remaining,
             status.storageFreeImages.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
@@ -837,10 +846,14 @@ private fun cameraStorageLabel(status: CameraStatus?): String {
 }
 
 @Composable
-private fun cameraStorageHudValue(status: CameraStatus?): String {
+private fun cameraStorageHudValue(status: CameraStatus?, captureMode: CaptureMode): String {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
     return when {
+        captureMode == CaptureMode.VIDEO && status?.remainingRecordingSeconds != null ->
+            formatRecordingDuration(status.remainingRecordingSeconds)
+        captureMode == CaptureMode.PHOTO && status?.recordableShots != null ->
+            exactCameraCount(status.recordableShots, locale)
         status?.storageFreeImages != null -> exactCameraCount(status.storageFreeImages, locale)
         status?.storageFreeBytes != null -> Formatter.formatShortFileSize(context, status.storageFreeBytes)
         status?.mediaAvailable == true -> stringResource(R.string.storage_ready)
@@ -859,6 +872,18 @@ internal fun String.toCameraHudName(): String {
 
 internal fun exactCameraCount(value: Long, locale: Locale): String =
     NumberFormat.getIntegerInstance(locale).format(value.coerceAtLeast(0L))
+
+internal fun formatRecordingDuration(value: Long): String {
+    val seconds = value.coerceAtLeast(0L)
+    val hours = seconds / 3_600L
+    val minutes = (seconds % 3_600L) / 60L
+    val remainder = seconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(Locale.ROOT, hours, minutes, remainder)
+    } else {
+        "%02d:%02d".format(Locale.ROOT, minutes, remainder)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
