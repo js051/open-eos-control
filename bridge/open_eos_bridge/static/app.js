@@ -756,6 +756,7 @@
     tapAction: "focus",
     media: [],
     mediaLoaded: false,
+    mediaRefreshPromise: null,
     mediaThumbnailUrls: new Map(),
     mediaThumbnailLoads: new Set(),
     mediaThumbnailFailures: new Set(),
@@ -766,6 +767,7 @@
     mediaDownloadPreparing: false,
     mediaDownload: null,
     busy: false,
+    refreshGeneration: 0,
     lastError: null,
     toastTimer: null,
   };
@@ -1207,25 +1209,38 @@
   }
 
   async function refreshSession({ quiet = false } = {}) {
-    if (!state.session) return;
+    if (!state.session) return false;
     if (!quiet) setOperationState(t("refreshing"));
-    const sessionId = encodeURIComponent(state.session.id);
+    const rawSessionId = state.session.id;
+    const sessionId = encodeURIComponent(rawSessionId);
+    const refreshGeneration = state.refreshGeneration;
     try {
-      [state.info, state.status, state.capabilities] = await Promise.all([
+      const [info, status, capabilities] = await Promise.all([
         api(`/v1/session/${sessionId}/info`),
         api(`/v1/session/${sessionId}/status`),
         api(`/v1/session/${sessionId}/capabilities`),
       ]);
+      if (
+        state.session?.id !== rawSessionId ||
+        state.refreshGeneration !== refreshGeneration
+      ) return false;
+      [state.info, state.status, state.capabilities] = [info, status, capabilities];
       state.requestedFps = clampFps(state.requestedFps);
       state.lastError = null;
       renderSession();
       if (!quiet) setOperationState(t("ready"));
+      return true;
     } catch (error) {
+      if (
+        state.session?.id !== rawSessionId ||
+        state.refreshGeneration !== refreshGeneration
+      ) return false;
       const normalized = captureError(error);
       if (!quiet) {
         setOperationState(normalized.message, true);
         showToast(normalized.message, true);
       }
+      return false;
     }
   }
 
@@ -1241,7 +1256,7 @@
   async function disconnectCamera() {
     if (!state.session) return;
     const sessionId = state.session.id;
-    state.busy = true;
+    beginCameraInteraction();
     cancelMediaDownload({ silent: true });
     renderAvailability();
     stopLiveLoop();
@@ -1257,6 +1272,7 @@
   }
 
   function resetSession() {
+    state.refreshGeneration += 1;
     stopLiveLoop();
     stopLocalVideo({ announce: false });
     cancelEventLoop();
@@ -1315,8 +1331,17 @@
             const contentsChanged = event.changedKeys.some((key) =>
               String(key).toLowerCase().includes("content"),
             );
-            await refreshSession({ quiet: true });
-            if (contentsChanged && state.mediaLoaded && generation === state.eventGeneration) {
+            while (
+              cameraInteractionBusy() &&
+              state.session &&
+              generation === state.eventGeneration
+            ) await sleep(25);
+            if (!state.session || generation !== state.eventGeneration) break;
+            const refreshed = await refreshSession({ quiet: true });
+            if (
+              refreshed && contentsChanged && state.mediaLoaded &&
+              generation === state.eventGeneration
+            ) {
               await refreshMedia();
             }
           }
@@ -1355,6 +1380,11 @@
 
   function cameraInteractionBusy() {
     return state.busy || mediaTransferActive();
+  }
+
+  function beginCameraInteraction() {
+    state.refreshGeneration += 1;
+    state.busy = true;
   }
 
   function settingByKey(key) {
@@ -1549,7 +1579,7 @@
 
   async function syncCameraClock(source) {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.CAMERA_CLOCK_SYNC)) return;
-    state.busy = true;
+    beginCameraInteraction();
     state.lastError = null;
     source.disabled = true;
     setOperationState(t("busy"));
@@ -1605,7 +1635,7 @@
 
   async function updateSetting(setting, value, source) {
     if (!state.session || cameraInteractionBusy()) return;
-    state.busy = true;
+    beginCameraInteraction();
     state.lastError = null;
     source.disabled = true;
     setOperationState(t("busy"));
@@ -1673,7 +1703,7 @@
       : isPhoto ? featureSupported(FEATURES.STILL_CAPTURE)
       : featureSupported(FEATURES.VIDEO_RECORDING);
     if (!supported) return;
-    state.busy = true;
+    beginCameraInteraction();
     state.lastError = null;
     setOperationState(t("busy"));
     renderAvailability();
@@ -1722,7 +1752,7 @@
 
   async function autofocus() {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.AUTOFOCUS)) return;
-    state.busy = true;
+    beginCameraInteraction();
     setOperationState(t("busy"));
     renderAvailability();
     try {
@@ -1743,7 +1773,7 @@
 
   async function halfPressShutter() {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.SHUTTER_HALF_PRESS)) return;
-    state.busy = true;
+    beginCameraInteraction();
     setOperationState(t("busy"));
     renderAvailability();
     try {
@@ -2166,7 +2196,7 @@
       localPreviewSelected() || !state.session || cameraInteractionBusy() ||
       !featureSupported(FEATURES.LIVE_VIEW)
     ) return;
-    state.busy = true;
+    beginCameraInteraction();
     state.lastError = null;
     setOperationState(t("busy"));
     renderAvailability();
@@ -2209,7 +2239,7 @@
     if (!state.session) return;
     stopLiveLoop();
     if (remote) {
-      state.busy = true;
+      beginCameraInteraction();
       renderAvailability();
       try {
         await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/stop`, { method: "POST" });
@@ -2874,7 +2904,7 @@
       !featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)
     ) return;
     const target = state.liveMagnification === 5 ? 1 : 5;
-    state.busy = true;
+    beginCameraInteraction();
     setOperationState(t("busy"));
     renderAvailability();
     try {
@@ -2914,7 +2944,7 @@
       showToast(t("liveViewRequired"), true);
       return;
     }
-    state.busy = true;
+    beginCameraInteraction();
     setOperationState(t("busy"));
     renderAvailability();
     try {
@@ -2961,7 +2991,7 @@
       !point || !state.session || cameraInteractionBusy() || !state.liveActive ||
       localPreviewSelected() || !action
     ) return;
-    state.busy = true;
+    beginCameraInteraction();
     ui.focusReticle.style.left = `${point.displayX}px`;
     ui.focusReticle.style.top = `${point.displayY}px`;
     ui.focusReticle.className = "focus-reticle focusing";
@@ -3109,22 +3139,44 @@
     }
   }
 
-  async function refreshMedia() {
-    if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER) || cameraInteractionBusy()) return;
-    ui.mediaRefreshButton.disabled = true;
-    closeMediaPreview();
-    try {
-      const response = await api(`/v1/session/${encodeURIComponent(state.session.id)}/media`);
-      clearMediaThumbnails();
-      state.media = response.items || [];
-      state.mediaLoaded = true;
-      renderMedia();
-    } catch (error) {
-      const normalized = captureError(error);
-      showToast(normalized.message, true);
-    } finally {
+  function refreshMedia() {
+    if (state.mediaRefreshPromise) return state.mediaRefreshPromise;
+    const promise = refreshMediaWhenCurrent();
+    state.mediaRefreshPromise = promise;
+    return promise.finally(() => {
+      if (state.mediaRefreshPromise === promise) state.mediaRefreshPromise = null;
       renderAvailability();
+    });
+  }
+
+  async function refreshMediaWhenCurrent() {
+    while (state.session && featureSupported(FEATURES.MEDIA_BROWSER)) {
+      while (cameraInteractionBusy() && state.session) await sleep(25);
+      if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return false;
+      const rawSessionId = state.session.id;
+      const interactionGeneration = state.refreshGeneration;
+      ui.mediaRefreshButton.disabled = true;
+      closeMediaPreview();
+      try {
+        const response = await api(`/v1/session/${encodeURIComponent(rawSessionId)}/media`);
+        if (
+          state.session?.id !== rawSessionId ||
+          state.refreshGeneration !== interactionGeneration
+        ) continue;
+        clearMediaThumbnails();
+        state.media = response.items || [];
+        state.mediaLoaded = true;
+        renderMedia();
+        return true;
+      } catch (error) {
+        if (state.session?.id !== rawSessionId) return false;
+        if (state.refreshGeneration !== interactionGeneration) continue;
+        const normalized = captureError(error);
+        showToast(normalized.message, true);
+        return false;
+      }
     }
+    return false;
   }
 
   function renderMedia() {
@@ -3698,31 +3750,51 @@
   }
 
   async function copyDiagnostics() {
-    await refreshCapabilityEvidence();
-    const report = diagnosticReport();
-    renderDiagnostics(report);
-    await copyText(ui.diagnosticsOutput.textContent, t("copied"), t("copyFailed"));
+    if (cameraInteractionBusy()) return;
+    beginCameraInteraction();
+    renderAvailability();
+    let report = null;
+    try {
+      await refreshCapabilityEvidence();
+      report = diagnosticReport();
+      const diagnosticText = JSON.stringify(report, null, 2);
+      renderDiagnostics(report);
+      await copyText(diagnosticText, t("copied"), t("copyFailed"));
+    } finally {
+      state.busy = false;
+      if (report) renderDiagnostics(report);
+      renderAvailability();
+    }
   }
 
   async function copyPhysicalValidation() {
-    await refreshCapabilityEvidence();
-    const report = diagnosticReport();
-    renderDiagnostics(report);
-    const summary = currentPhysicalValidation();
-    if (summary.sessionStatus !== "READY" || summary.eligibleFeatures.length === 0) return;
+    if (cameraInteractionBusy()) return;
+    beginCameraInteraction();
+    renderAvailability();
+    let report = null;
     try {
+      await refreshCapabilityEvidence();
+      report = diagnosticReport();
+      const diagnosticText = JSON.stringify(report, null, 2);
+      renderDiagnostics(report);
+      const summary = currentPhysicalValidation();
+      if (summary.sessionStatus !== "READY" || summary.eligibleFeatures.length === 0) return;
       const record = await diagnostics.physicalValidationRecord({
         summary,
         cameraModel: state.info?.model || state.session?.camera?.model || "unknown",
         transport: physicalValidationTransport(),
         generatedAt: report.generatedAt,
         productVersion: report.productVersion,
-        diagnosticReport: ui.diagnosticsOutput.textContent,
+        diagnosticReport: diagnosticText,
       });
       await copyText(record, t("physicalValidationCopied"), t("physicalValidationCopyFailed"));
     } catch (error) {
       captureError(error);
       showToast(t("physicalValidationCopyFailed"), true);
+    } finally {
+      state.busy = false;
+      if (report) renderDiagnostics(report);
+      renderAvailability();
     }
   }
 

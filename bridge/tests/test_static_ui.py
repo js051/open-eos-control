@@ -191,6 +191,9 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'String(key).toLowerCase().includes("content")' in script
     assert "contentsChanged && state.mediaLoaded" in script
     assert "await refreshMedia()" in script
+    assert "mediaRefreshPromise: null" in script
+    assert "function refreshMediaWhenCurrent()" in script
+    assert "state.refreshGeneration !== interactionGeneration" in script
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script
     assert "MAX_MEDIA_PREVIEW_BYTES" in script
@@ -267,7 +270,10 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "diagnostics.physicalValidationSummary" in script
     assert "diagnostics.physicalValidationRecord" in script
     assert "globalThis.crypto?.subtle" in script
-    assert "diagnosticReport: ui.diagnosticsOutput.textContent" in script
+    assert "diagnosticReport: diagnosticText" in script
+    assert "const diagnosticText = JSON.stringify(report, null, 2)" in script
+    assert "state.refreshGeneration !== refreshGeneration" in script
+    assert "function beginCameraInteraction()" in script
     confirmation_source = script.split("operatorConfirmedFeatures: new Set()", 1)[1]
     assert "localStorage" not in "\n".join(
         line for line in confirmation_source.splitlines() if "operatorConfirmedFeatures" in line
