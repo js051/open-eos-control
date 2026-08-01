@@ -1228,6 +1228,58 @@ class CameraScreensTest {
     }
 
     @Test
+    fun advertisedClickWhiteBalanceEnablesTheConnectedCameraTapAction() {
+        val picker = mutableStateOf<SettingPicker?>(null)
+        var selectedAction: LiveViewTapAction? = null
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities)
+        val state = base.copy(
+            capabilities = capabilities.copy(
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported + CameraFeature.CLICK_WHITE_BALANCE,
+                ),
+            ),
+        )
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+            setLiveViewTapAction = { selectedAction = it },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.copy(activeSettingPicker = picker.value), actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("tap-action-white-balance")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+
+        compose.runOnIdle {
+            assertEquals(LiveViewTapAction.WHITE_BALANCE, selectedAction)
+        }
+    }
+
+    @Test
+    fun connectedCameraDoesNotShowClickWhiteBalanceWithoutCapability() {
+        val picker = mutableStateOf<SettingPicker?>(null)
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(connectedState().copy(activeSettingPicker = picker.value), actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onAllNodesWithTag("tap-action-white-balance").assertCountEquals(0)
+    }
+
+    @Test
     fun offlinePreviewIncludesMediaBrowserWithoutEnablingFakeDownloads() {
         val state = CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA)
         compose.setContent {
