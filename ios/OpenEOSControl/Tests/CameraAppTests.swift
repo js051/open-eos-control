@@ -285,6 +285,107 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(report.contains("monitorDesqueeze=x1_5"))
     }
 
+    func testPhysicalValidationRequiresAdvertisedAndObservedEvidence() {
+        let summary = PhysicalValidationSummary(
+            connected: true,
+            isPreview: false,
+            info: physicalCameraInfo(),
+            capabilities: physicalValidationCapabilities(),
+            operatorConfirmedFeatures: [.stillCapture, .liveView, .usbDiagnostics]
+        )
+
+        XCTAssertEqual(summary.sessionStatus, .ready)
+        XCTAssertEqual(summary.eligibleFeatures, [.stillCapture])
+        XCTAssertEqual(summary.operatorConfirmedFeatures, [.stillCapture])
+    }
+
+    func testPhysicalValidationRejectsSimulatorAndOfflinePreview() {
+        let simulator = PhysicalValidationSummary(
+            connected: true,
+            isPreview: false,
+            info: CameraInfo(
+                model: "Canon EOS R6 Mark III",
+                serial: "sim-r6m3",
+                api: "simulated-ccapi"
+            ),
+            capabilities: physicalValidationCapabilities(),
+            operatorConfirmedFeatures: [.stillCapture]
+        )
+        let preview = PhysicalValidationSummary(
+            connected: true,
+            isPreview: true,
+            info: physicalCameraInfo(),
+            capabilities: physicalValidationCapabilities(),
+            operatorConfirmedFeatures: [.stillCapture]
+        )
+
+        XCTAssertEqual(simulator.sessionStatus, .simulator)
+        XCTAssertTrue(simulator.eligibleFeatures.isEmpty)
+        XCTAssertEqual(preview.sessionStatus, .offlinePreview)
+        XCTAssertTrue(preview.operatorConfirmedFeatures.isEmpty)
+        XCTAssertThrowsError(
+            try PhysicalValidationRecord.make(
+                summary: simulator,
+                info: physicalCameraInfo(),
+                transport: "CCAPI_NETWORK",
+                diagnosticReport: "generatedAt=2026-08-01T00:00:00Z\nproductVersion=0.1.8"
+            )
+        )
+    }
+
+    func testPhysicalValidationRecordOmitsPrivateDiagnosticFields() throws {
+        let privateSerial = "PRIVATE-CAMERA-SERIAL"
+        let privatePassword = "camera-password"
+        let localPath = "C:/Us" + "ers/private/capture.jpg"
+        let summary = PhysicalValidationSummary(
+            connected: true,
+            isPreview: false,
+            info: physicalCameraInfo(serial: privateSerial),
+            capabilities: physicalValidationCapabilities(),
+            operatorConfirmedFeatures: [.stillCapture]
+        )
+        let diagnostic = [
+            "Open EOS Control iOS diagnostic report",
+            "generatedAt=2026-08-01T00:00:00Z",
+            "productVersion=0.1.8-test",
+            "serial=[redacted]",
+            "baseUrl=http://camera-user:\(privatePassword)@192.168.1.2:8080",
+            "lastError=Failed at \(localPath)",
+        ].joined(separator: "\n")
+
+        let record = try PhysicalValidationRecord.make(
+            summary: summary,
+            info: physicalCameraInfo(serial: privateSerial),
+            transport: "CCAPI_NETWORK",
+            diagnosticReport: diagnostic
+        )
+
+        XCTAssertTrue(record.contains("Record schema: 1"))
+        XCTAssertTrue(record.contains("| STILL_CAPTURE | true | true | true |"))
+        XCTAssertTrue(record.contains("| LIVE_VIEW | true | false | false |"))
+        XCTAssertTrue(record.contains(
+            "Diagnostic SHA-256: `9c1fac7afb55865781eb29f8c08bb562766749749b8cb031e5a7f53dacbefc6b`"
+        ))
+        XCTAssertFalse(record.contains(privateSerial))
+        XCTAssertFalse(record.contains(privatePassword))
+        XCTAssertFalse(record.contains("192.168.1.2"))
+        XCTAssertFalse(record.contains("C:/Us" + "ers"))
+        XCTAssertFalse(record.localizedCaseInsensitiveContains("baseUrl"))
+    }
+
+    func testOfflinePreviewCannotCreatePhysicalConfirmation() {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        state.setOperatorConfirmation(.stillCapture, confirmed: true)
+
+        XCTAssertTrue(state.operatorConfirmedFeatures.isEmpty)
+        XCTAssertEqual(state.physicalValidation.sessionStatus, .offlinePreview)
+    }
+
     func testOfflineMediaDownloadCompletesAndClearsActiveTransferState() async throws {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -397,6 +498,27 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(restored.bridgeURL, "http://192.168.1.20:18181")
         XCTAssertTrue(restored.bridgeToken.isEmpty)
         XCTAssertFalse(restored.canConnect)
+    }
+
+    private func physicalCameraInfo(serial: String = "TEST-SERIAL-0001") -> CameraInfo {
+        CameraInfo(
+            model: "Canon EOS R6 Mark III",
+            serial: serial,
+            api: "ccapi"
+        )
+    }
+
+    private func physicalValidationCapabilities() -> CameraCapabilities {
+        CameraCapabilities(
+            settings: [],
+            matrix: CapabilityMatrix(supported: [.stillCapture, .liveView]),
+            liveView: LiveViewCapabilities(),
+            profile: CameraProfile.from(modelName: "Canon EOS R6 Mark III"),
+            evidence: CameraCapabilityEvidence(
+                source: "GET /ccapi",
+                observedFeatures: [.stillCapture, .usbDiagnostics]
+            )
+        )
     }
 }
 

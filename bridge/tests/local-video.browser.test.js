@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
+const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
@@ -73,6 +74,7 @@ async function run() {
       locale: "en-US",
       viewport: { width: 1440, height: 900 },
     });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin });
     await context.addInitScript(() => {
       const testState = {
         getUserMediaCalls: 0,
@@ -419,6 +421,26 @@ async function run() {
     assert.equal(reportText.includes("private-test-group-id"), false);
     assert.equal(reportText.includes("Test HDMI capture"), false);
     assert.equal(reportText.includes("Test USB video"), false);
+    const stillConfirmation = page.locator(
+      '#physical-validation-list input[data-feature="STILL_CAPTURE"]',
+    );
+    await stillConfirmation.waitFor({ state: "visible" });
+    assert.equal(await stillConfirmation.isChecked(), false);
+    await stillConfirmation.check();
+    assert.equal(await stillConfirmation.isChecked(), true);
+    assert.match(
+      await page.locator("#physical-validation-list").innerText(),
+      /STILL_CAPTURE.*Confirmed on camera/s,
+    );
+    assert.equal(await page.locator("#copy-physical-validation-button").isEnabled(), true);
+    await page.click("#copy-physical-validation-button");
+    await page.waitForFunction(async () => (
+      (await navigator.clipboard.readText()).startsWith("# Open EOS Control physical camera validation")
+    ));
+    const visibleDiagnostic = await page.locator("#diagnostics-output").textContent();
+    const copiedValidation = await page.evaluate(() => navigator.clipboard.readText());
+    const visibleHash = createHash("sha256").update(visibleDiagnostic).digest("hex");
+    assert.ok(copiedValidation.includes(`Diagnostic SHA-256: \`${visibleHash}\``));
 
     await page.click('.tab[data-view="live"]');
     await page.selectOption("#preview-input-select", "CAMERA");

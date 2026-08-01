@@ -306,6 +306,15 @@
             </button>
           </div>
         </div>
+        <section class="diagnostic-validation" aria-labelledby="physical-validation-title">
+          <h3 id="physical-validation-title" data-i18n="physicalValidation">Physical validation</h3>
+          <p class="supporting" data-i18n="physicalValidationHint">Only camera-advertised features observed successfully in this connection can be confirmed.</p>
+          <p id="physical-validation-status" class="supporting"></p>
+          <div id="physical-validation-list" class="physical-validation-list"></div>
+          <button id="copy-physical-validation-button" class="button secondary" type="button">
+            <span class="icon" data-icon="clipboard-check" aria-hidden="true"></span><span data-i18n="copyPhysicalValidation">Copy physical validation record</span>
+          </button>
+        </section>
         <pre id="diagnostics-output" tabindex="0"></pre>
       </main>
     </section>

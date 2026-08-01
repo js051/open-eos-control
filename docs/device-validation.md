@@ -10,11 +10,11 @@ Automated tests prove request construction, parsing, state transitions, and UI c
 
 Only the third level is a physical-result claim. The verifier never promotes an advertised feature to observed and never treats a successful response as an operator confirmation.
 
-## Guided Android Session
+## Guided In-App Sessions
 
-Android exposes **Debug > Physical validation** while a camera is connected. A feature appears there only after the camera advertised it and the current backend observed a successful operation or valid payload. Check it only after seeing the expected result on the physical camera.
+Android and iOS expose **Debug > Physical validation** while a camera is connected. The PC control UI exposes the same workflow on its **Diagnostics** tab. A feature appears only after the camera advertised it and the current backend observed a successful operation or valid payload. Check it only after seeing the expected result on the physical camera.
 
-Confirmations are memory-only and are cleared on disconnect, reconnect, or entry into Offline UI Preview. Simulator and Offline UI Preview sessions cannot create a physical validation record. **Copy physical validation record** produces privacy-safe Markdown containing the camera model, transport, advertised/observed/operator-confirmed states, and a SHA-256 identifier for the matching sanitized diagnostic report. It never includes the serial, camera URL, endpoint inventory, raw status, credentials, or a local path.
+Confirmations are memory-only and are cleared on disconnect, reconnect, or entry into Offline UI Preview. Simulator and Offline UI Preview sessions cannot create a physical validation record. **Copy physical validation record** produces privacy-safe Markdown containing the camera model, transport, advertised/observed/operator-confirmed states, and a SHA-256 identifier for the matching sanitized diagnostic report. It never includes the serial, camera URL, endpoint inventory, raw status, credentials, or a local path. The PC control UI uses the browser's native Web Crypto implementation and therefore requires its normal localhost origin or HTTPS before this copy action is available.
 
 This in-app record is a reviewable session note, not remote attestation. Keep the full diagnostic report private and use the verifier below before committing a physical-camera record to the repository.
 

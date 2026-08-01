@@ -65,6 +65,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaDownloadProgress: CameraMediaTransferProgress?
     @Published private(set) var deletedMediaName: String?
     @Published private(set) var lastClockSyncAt: Date?
+    @Published private(set) var operatorConfirmedFeatures = Set<CameraFeature>()
     @Published private(set) var lastError: String?
     @Published private(set) var busyOperations = Set<CameraOperation>()
 
@@ -110,6 +111,15 @@ final class CameraAppState: ObservableObject {
     var transportIdentifier: String {
         if isPreview { return "OFFLINE_PREVIEW" }
         return connectionMode == .ccapi ? "CCAPI_NETWORK" : "DESKTOP_BRIDGE"
+    }
+    var physicalValidation: PhysicalValidationSummary {
+        PhysicalValidationSummary(
+            connected: connected,
+            isPreview: isPreview,
+            info: info,
+            capabilities: capabilities,
+            operatorConfirmedFeatures: operatorConfirmedFeatures
+        )
     }
     var canConnect: Bool {
         switch connectionMode {
@@ -221,6 +231,7 @@ final class CameraAppState: ObservableObject {
     func connect() async {
         guard begin(.connect) else { return }
         defer { end(.connect) }
+        operatorConfirmedFeatures.removeAll()
         do {
             let newSession: CameraSession
             switch connectionMode {
@@ -296,6 +307,7 @@ final class CameraAppState: ObservableObject {
         removeDownloadedFile()
         deletedMediaName = nil
         lastClockSyncAt = nil
+        operatorConfirmedFeatures.removeAll()
         lastError = nil
         liveViewData = nil
         liveViewMagnification = nil
@@ -335,6 +347,7 @@ final class CameraAppState: ObservableObject {
         focusMarker = nil
         bulbStartedAt = nil
         lastClockSyncAt = nil
+        operatorConfirmedFeatures.removeAll()
         lastError = nil
         busyOperations.removeAll()
         resetLiveViewMetrics()
@@ -903,6 +916,25 @@ final class CameraAppState: ObservableObject {
             "rtpAudioError=\(rtpAudioStatus.error ?? "none")",
         ].joined(separator: "\n")
         return "\(report)\n\(monitoring)"
+    }
+
+    func setOperatorConfirmation(_ feature: CameraFeature, confirmed: Bool) {
+        let eligible = physicalValidation.eligibleFeatures.contains(feature)
+        if confirmed, eligible {
+            operatorConfirmedFeatures.insert(feature)
+        } else if !confirmed {
+            operatorConfirmedFeatures.remove(feature)
+        }
+    }
+
+    func physicalValidationRecord() async throws -> String {
+        let report = await diagnosticReport()
+        return try PhysicalValidationRecord.make(
+            summary: physicalValidation,
+            info: info,
+            transport: transportIdentifier,
+            diagnosticReport: report
+        )
     }
 
     func clearError() {

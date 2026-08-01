@@ -86,6 +86,10 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "media-transfer-status",
         "media-transfer-progress",
         "media-transfer-cancel",
+        "physical-validation-title",
+        "physical-validation-status",
+        "physical-validation-list",
+        "copy-physical-validation-button",
         "diagnostics-output",
     }
     assert required_ids <= set(parser.ids)
@@ -258,3 +262,26 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "label:" not in report_source
     assert "return diagnostics.safeValue(report" in report_source
     assert "secrets: [state.token, ui.ccapiPasswordInput?.value, state.info?.serial]" in report_source
+    assert "operatorConfirmedFeatures: new Set()" in script
+    assert script.count("state.operatorConfirmedFeatures.clear()") >= 2
+    assert "diagnostics.physicalValidationSummary" in script
+    assert "diagnostics.physicalValidationRecord" in script
+    assert "globalThis.crypto?.subtle" in script
+    assert "diagnosticReport: ui.diagnosticsOutput.textContent" in script
+    confirmation_source = script.split("operatorConfirmedFeatures: new Set()", 1)[1]
+    assert "localStorage" not in "\n".join(
+        line for line in confirmation_source.splitlines() if "operatorConfirmedFeatures" in line
+    )
+
+
+def test_physical_validation_controls_are_accessible_and_unframed() -> None:
+    markup = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    assert 'aria-labelledby="physical-validation-title"' in markup
+    assert 'data-icon="clipboard-check"' in markup
+    row_rule = styles.split(".physical-validation-row {", 1)[1].split("}", 1)[0]
+    assert "min-height: 48px" in row_rule
+    section_rule = styles.split(".diagnostic-validation {", 1)[1].split("}", 1)[0]
+    assert "border-radius" not in section_rule
+    assert "box-shadow" not in section_rule
