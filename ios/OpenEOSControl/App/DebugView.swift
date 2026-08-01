@@ -93,12 +93,12 @@ struct DebugView: View {
                         let validation = camera.physicalValidation
                         Text("physical_validation_hint")
                             .font(.footnote)
-                            .foregroundStyle(Color.cameraSubtleText)
+                            .foregroundStyle(Color.cameraSecondaryText)
                         switch validation.sessionStatus {
                         case .ready:
                             if validation.eligibleFeatures.isEmpty {
                                 Text("physical_validation_no_observed")
-                                    .foregroundStyle(Color.cameraSubtleText)
+                                    .foregroundStyle(Color.cameraSecondaryText)
                             }
                             ForEach(validation.eligibleFeatures.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { feature in
                                 Toggle(isOn: Binding(
@@ -116,7 +116,7 @@ struct DebugView: View {
                                         .foregroundStyle(
                                             camera.operatorConfirmedFeatures.contains(feature)
                                                 ? Color.cameraStatus
-                                                : Color.cameraSubtleText
+                                                : Color.cameraSecondaryText
                                         )
                                     }
                                 }
