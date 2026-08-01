@@ -66,6 +66,7 @@ enum class CameraFeature(
     CAMERA_CLOCK_SYNC("Camera clock sync"),
     BATTERY_STATUS("Battery status"),
     STORAGE_STATUS("Storage status"),
+    RECORDABLE_STATUS("Recordable status"),
     LENS_STATUS("Lens status"),
     TEMPERATURE_STATUS("Temperature status"),
     EVENT_POLLING("Camera event polling"),
@@ -122,6 +123,7 @@ data class CapabilityMatrix(
         ): CapabilityMatrix = CapabilityMatrix(
             supported = supported,
             planned = setOf(
+                CameraFeature.RECORDABLE_STATUS,
                 CameraFeature.LENS_STATUS,
                 CameraFeature.TEMPERATURE_STATUS,
                 CameraFeature.EVENT_POLLING,
@@ -144,6 +146,8 @@ data class CapabilityMatrix(
                 CameraFeature.CAMERA_CLOCK_SYNC,
             ) - supported,
             reasons = mapOf(
+                CameraFeature.RECORDABLE_STATUS to
+                    "The camera must advertise GET shooting/information/recordable and return Canon's documented nullable integer payload.",
                 CameraFeature.LENS_STATUS to
                     "The camera must advertise GET devicestatus/lens and return Canon's documented mount/name payload.",
                 CameraFeature.TEMPERATURE_STATUS to
@@ -360,8 +364,11 @@ data class CameraStatus(
     val storageFreeBytes: Long? = null,
     val storageFreeImages: Long? = null,
     val storageDeviceCount: Int? = null,
+    val recordableShots: Long? = null,
+    val remainingRecordingSeconds: Long? = null,
     val rawBatteryJson: String = "",
     val rawStorageJson: String = "",
+    val rawRecordableJson: String = "",
     val rawTransportJson: String = "",
     val bulbExposureActive: Boolean? = null,
     val lens: LensStatus? = null,

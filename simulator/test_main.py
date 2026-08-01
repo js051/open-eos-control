@@ -37,6 +37,18 @@ def test_state_endpoint_is_sanitized_and_resettable() -> None:
     assert restored.json()["focus_drive"]["count"] == 0
 
 
+def test_canon_recordable_information_tracks_photo_and_movie_context() -> None:
+    initial = client.get("/ccapi/ver100/shooting/information/recordable")
+    client.post("/ccapi/capture/still", json={"af": True})
+    after_capture = client.get("/ccapi/ver100/shooting/information/recordable")
+    client.post("/ccapi/movie-mode", json={"action": "on"})
+    movie = client.get("/ccapi/ver100/shooting/information/recordable")
+
+    assert initial.json() == {"recordableshots": 2_418, "remainingtime": None}
+    assert after_capture.json() == {"recordableshots": 2_417, "remainingtime": None}
+    assert movie.json() == {"recordableshots": None, "remainingtime": 7_200}
+
+
 def test_half_press_and_release_are_stateful() -> None:
     half_press = client.post("/ccapi/shutter/half-press", json={})
     release = client.post("/ccapi/shutter/release", json={})

@@ -151,6 +151,7 @@ def publish_event(*keys: str) -> None:
 
 
 def camera_status() -> dict[str, object]:
+    recordable_shots, remaining_recording_seconds = recordable_status()
     return {
         "connected": True,
         "battery": {"level": 82, "status": "normal"},
@@ -162,6 +163,8 @@ def camera_status() -> dict[str, object]:
         "mode": state["mode"],
         "lens": {"mounted": True, "name": "RF24-105mm F4 L IS USM"},
         "temperature": state["temperature_status"],
+        "recordable_shots": recordable_shots,
+        "remaining_recording_seconds": remaining_recording_seconds,
         "media": {
             "available": True,
             "remaining_minutes": 120,
@@ -172,6 +175,13 @@ def camera_status() -> dict[str, object]:
         },
         "exposure": state["exposure"],
     }
+
+
+def recordable_status() -> tuple[int | None, int | None]:
+    movie_mode = state["movie_mode"] == "on" or bool(state["recording"])
+    if movie_mode:
+        return None, 7_200
+    return max(0, 2_418 - int(state["capture_count"])), None
 
 
 def validate_setting(key: str, value: str) -> None:
@@ -494,6 +504,7 @@ CANON_DISCOVERY = {
         {"path": "/deviceinformation", "get": True},
         {"path": "/devicestatus/batterylist", "get": True},
         {"path": "/devicestatus/storage", "get": True},
+        {"path": "/shooting/information/recordable", "get": True},
         {"path": "/devicestatus/lens", "get": True},
         {"path": "/devicestatus/temperature", "get": True},
         {"path": "/shooting/settings", "get": True},
@@ -620,6 +631,12 @@ async def canon_storage() -> dict[str, list[dict[str, object]]]:
             }
         ]
     }
+
+
+@app.get("/ccapi/ver100/shooting/information/recordable")
+async def canon_recordable_information() -> dict[str, int | None]:
+    shots, remaining_time = recordable_status()
+    return {"recordableshots": shots, "remainingtime": remaining_time}
 
 
 @app.get("/ccapi/ver100/devicestatus/lens")

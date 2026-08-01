@@ -21,6 +21,8 @@ final class CameraAppTests: XCTestCase {
         let original = CameraStatus(
             recording: false,
             exposure: ExposureState(iso: "100", shutter: "1/125", aperture: "4.0", whiteBalance: "auto"),
+            recordableShots: 2_418,
+            remainingRecordingSeconds: 7_200,
             lens: LensStatus(mounted: true, name: "RF24-105mm F4 L IS USM"),
             temperature: .warning
         )
@@ -32,6 +34,8 @@ final class CameraAppTests: XCTestCase {
 
         XCTAssertEqual(replaced.lens, original.lens)
         XCTAssertEqual(replaced.temperature, .warning)
+        XCTAssertEqual(replaced.recordableShots, 2_418)
+        XCTAssertEqual(replaced.remainingRecordingSeconds, 7_200)
         XCTAssertEqual(replaced.exposure.iso, "200")
         XCTAssertEqual(replaced.recording, true)
     }

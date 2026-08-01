@@ -602,8 +602,11 @@ public actor DesktopBridgeClient {
             storageFreeBytes: media.int64("freeBytes"),
             storageFreeImages: media.int64("freeImages"),
             storageDeviceCount: media.int("devices"),
+            recordableShots: body.int64("recordableShots"),
+            remainingRecordingSeconds: body.int64("remainingRecordingSeconds"),
             rawBatteryJSON: Self.jsonString(battery),
             rawStorageJSON: Self.jsonString(media),
+            rawRecordableJSON: Self.jsonString(body.dictionary("raw").dictionary("recordable")),
             lens: lens,
             temperature: body.string("temperature").flatMap(CameraTemperatureStatus.init(rawValue:))
         )
@@ -923,6 +926,9 @@ public enum DesktopBridgeDiagnosticReport {
             "storageFreeBytes=\(snapshot?.status.storageFreeBytes.map { String($0) } ?? "unknown")",
             "storageFreeImages=\(snapshot?.status.storageFreeImages.map { String($0) } ?? "unknown")",
             "storageDevices=\(snapshot?.status.storageDeviceCount.map { String($0) } ?? "unknown")",
+            "recordableShots=\(snapshot?.status.recordableShots.map { String($0) } ?? "unknown")",
+            "remainingRecordingSeconds=\(snapshot?.status.remainingRecordingSeconds.map { String($0) } ?? "unknown")",
+            "recordable=\(snapshot?.status.rawRecordableJSON ?? "null")",
             "lensMounted=\(snapshot?.status.lens.map { String($0.mounted) } ?? "unknown")",
             "lensName=\(snapshot?.status.lens?.name.nilIfEmpty ?? "none")",
             "temperature=\(snapshot?.status.temperature?.rawValue ?? "unknown")",

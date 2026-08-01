@@ -81,6 +81,8 @@ class DesktopBridgeClientTest {
         assertEquals(1024L, initialStatus.storageFreeBytes)
         assertEquals(123L, initialStatus.storageFreeImages)
         assertEquals(2, initialStatus.storageDeviceCount)
+        assertEquals(120L, initialStatus.recordableShots)
+        assertEquals(3_600L, initialStatus.remainingRecordingSeconds)
         assertEquals("800", exposureStatus.exposure.iso)
         assertEquals("Daylight", whiteBalanceStatus.exposure.whiteBalance)
         assertTrue(bulbStarted.bulbExposureActive == true)
@@ -437,6 +439,8 @@ class DesktopBridgeClientTest {
               "recording": $recording,
               "bulbExposureActive": $bulbExposureActive,
               "mode": "Manual",
+              "recordableShots": 120,
+              "remainingRecordingSeconds": 3600,
               "media": {"available": true, "totalBytes": 2048, "freeBytes": 1024, "freeImages": 123, "devices": 2},
               "exposure": {
                 "iso": "$iso",
@@ -444,7 +448,7 @@ class DesktopBridgeClientTest {
                 "aperture": "2.8",
                 "whiteBalance": "$whiteBalance"
               },
-              "raw": {"engine": "libgphoto2", "port": "usb:001,007"}
+              "raw": {"engine": "libgphoto2", "port": "usb:001,007", "recordable": {"recordableshots": 120, "remainingtime": 3600}}
             }
             """.trimIndent()
 

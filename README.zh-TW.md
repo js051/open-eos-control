@@ -31,6 +31,7 @@ open-eos-control/
 - Dev simulator preset
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile 與電池；CCAPI、USB/PTP 或桌面橋接有回報時，亦顯示記憶卡數、總容量、可用容量及剩餘可拍張數
+- Android、iOS 與 PC 依能力讀取 Canon CCAPI 可拍攝資訊。拍照模式優先顯示相機即時剩餘張數，錄影模式顯示精確剩餘錄影時間；相機未公告 `/shooting/information/recordable` 或回傳無效資料時，才退回既有儲存空間摘要
 - Android、iOS 與 PC 依能力顯示 Canon CCAPI 鏡頭與溫度狀態。拍照、開始錄影或啟動 Live View 前會重新讀取相機公告的溫度限制，並以繁中／英文警告說明原因；停止與釋放命令仍保持可用，避免相機留在作用中狀態
 - 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、協定版本、相機公告命令、可寫設定，以及本次工作階段中確實成功的操作
 - Android、iOS 與 PC 都提供工作階段限定的真機驗證，只列出相機已公告且本次操作確實成功的功能；必須再由操作人員確認相機端結果，模擬器／離線預覽不能充當證據，複製的隱私安全 Markdown 會以平台原生 SHA-256 綁定對應診斷報告

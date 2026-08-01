@@ -124,6 +124,7 @@ async function run() {
     await page.click("#connect-button");
     await page.waitForSelector("#control-view:not([hidden])");
     assert.match(await page.locator("#camera-name").innerText(), /R6 Mark III/);
+    await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2418 shots"));
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.canonical.event_poll_count >= 1 && state.canonical.event_active_requests === 1,
@@ -208,6 +209,7 @@ async function run() {
       (state) => state.capture_count === 1 && state.media_ids.includes("SIM_0003.JPG"),
       "still capture and camera media creation",
     );
+    await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2417 shots"));
 
     await page.click("#live-toggle-button");
     await waitForSimulatorState(
@@ -265,6 +267,7 @@ async function run() {
       (state) => state.movie_mode === "on" && state.movie_mode_update_count === 1,
       "Canon movie mode on",
     );
+    await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2:00:00 remaining"));
     await page.click("#shutter-button");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -283,6 +286,7 @@ async function run() {
       (state) => state.movie_mode === "off" && state.movie_mode_update_count === 2,
       "Canon movie mode off",
     );
+    await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2417 shots"));
 
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
     await waitForSimulatorState(simulatorOrigin, (state) => state.mode === "Bulb", "Canon Bulb mode write");

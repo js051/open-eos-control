@@ -41,6 +41,7 @@ class CameraFeature(StrEnum):
     CAMERA_CLOCK_SYNC = "CAMERA_CLOCK_SYNC"
     BATTERY_STATUS = "BATTERY_STATUS"
     STORAGE_STATUS = "STORAGE_STATUS"
+    RECORDABLE_STATUS = "RECORDABLE_STATUS"
     LENS_STATUS = "LENS_STATUS"
     TEMPERATURE_STATUS = "TEMPERATURE_STATUS"
     EVENT_POLLING = "EVENT_POLLING"
@@ -183,6 +184,8 @@ class CameraStatus(ApiModel):
     mode: str = "unknown"
     media: StorageStatus
     exposure: ExposureState
+    recordable_shots: int | None = Field(default=None, ge=0)
+    remaining_recording_seconds: int | None = Field(default=None, ge=0)
     lens: LensStatus | None = None
     temperature: CameraTemperatureStatus | None = None
     raw: dict[str, Any] = Field(default_factory=dict)

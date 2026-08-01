@@ -95,8 +95,11 @@ fun DebugScreen(
                 DebugValue(stringResource(R.string.storage_free_bytes), state.status?.storageFreeBytes?.toString() ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.storage_free_images), state.status?.storageFreeImages?.toString() ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.storage_devices), state.status?.storageDeviceCount?.toString() ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.recordable_shots), state.status?.recordableShots?.toString() ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.remaining_recording_time), state.status?.remainingRecordingSeconds?.let(::formatRecordingDuration) ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.battery_raw), state.status?.rawBatteryJson?.ifBlank { unavailable } ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.storage_raw), state.status?.rawStorageJson?.ifBlank { unavailable } ?: unavailable, mono = true)
+                DebugValue(stringResource(R.string.recordable_raw), state.status?.rawRecordableJson?.ifBlank { unavailable } ?: unavailable, mono = true)
                 DebugValue(
                     stringResource(R.string.lens),
                     state.status?.lens?.let { lens ->

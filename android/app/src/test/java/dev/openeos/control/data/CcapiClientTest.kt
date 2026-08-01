@@ -115,6 +115,8 @@ class CcapiClientTest {
         assertEquals(84_000_000_000L, status.storageFreeBytes)
         assertEquals(2_418L, status.storageFreeImages)
         assertEquals(2, status.storageDeviceCount)
+        assertEquals(2_418L, status.recordableShots)
+        assertEquals(7_200L, status.remainingRecordingSeconds)
     }
 
     @Test
@@ -132,6 +134,7 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_CLOCK_SYNC))
         assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.RECORDABLE_STATUS))
         assertEquals(listOf(LiveViewSource.SIMULATOR_FRAME), capabilities.liveView.sources)
         assertEquals(2, capabilities.liveView.maxFps)
     }
@@ -953,6 +956,7 @@ class CcapiClientTest {
         server.enqueue(jsonResponse(DEVICE_STATUS_DISCOVERY_JSON))
         server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
         server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("""{"recordableshots":2418,"remainingtime":null}"""))
         server.enqueue(jsonResponse("""{"mount":true,"name":"RF24-105mm F4 L IS USM"}"""))
         server.enqueue(jsonResponse("""{"status":"frameratedown_and_restrictionmovierecording"}"""))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
@@ -964,20 +968,24 @@ class CcapiClientTest {
 
         assertEquals(LensStatus(true, "RF24-105mm F4 L IS USM"), status.lens)
         assertEquals(CameraTemperatureStatus.FRAME_RATE_DOWN_AND_RESTRICTION_MOVIE_RECORDING, status.temperature)
+        assertEquals(2_418L, status.recordableShots)
+        assertNull(status.remainingRecordingSeconds)
         assertTrue(status.temperature?.frameRateReduced == true)
         assertFalse(status.temperature?.movieRecordingAllowed ?: true)
         assertTrue(capabilities.matrix.supports(CameraFeature.LENS_STATUS))
         assertTrue(capabilities.matrix.supports(CameraFeature.TEMPERATURE_STATUS))
+        assertTrue(capabilities.matrix.supports(CameraFeature.RECORDABLE_STATUS))
         assertEquals(
             listOf(
                 "/ccapi",
                 "/ccapi/ver100/devicestatus/batterylist",
                 "/ccapi/ver100/devicestatus/storage",
+                "/ccapi/ver100/shooting/information/recordable",
                 "/ccapi/ver100/devicestatus/lens",
                 "/ccapi/ver100/devicestatus/temperature",
                 "/ccapi/ver100/shooting/settings",
             ),
-            List(6) { server.takeRequest().path },
+            List(7) { server.takeRequest().path },
         )
     }
 
@@ -986,6 +994,7 @@ class CcapiClientTest {
         server.enqueue(jsonResponse(DEVICE_STATUS_DISCOVERY_JSON))
         server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
         server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("""{"recordableshots":true,"remainingtime":-1}"""))
         server.enqueue(jsonResponse("""{"mount":"true","name":"RF24-105mm"}"""))
         server.enqueue(jsonResponse("""{"status":"hot"}"""))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
@@ -997,10 +1006,14 @@ class CcapiClientTest {
 
         assertNull(status.lens)
         assertNull(status.temperature)
+        assertNull(status.recordableShots)
+        assertNull(status.remainingRecordingSeconds)
         assertFalse(capabilities.matrix.supports(CameraFeature.LENS_STATUS))
         assertFalse(capabilities.matrix.supports(CameraFeature.TEMPERATURE_STATUS))
+        assertFalse(capabilities.matrix.supports(CameraFeature.RECORDABLE_STATUS))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LENS_STATUS))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.TEMPERATURE_STATUS))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.RECORDABLE_STATUS))
     }
 
     @Test
@@ -1009,6 +1022,7 @@ class CcapiClientTest {
         server.enqueue(jsonResponse(DEVICE_STATUS_DISCOVERY_JSON))
         server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
         server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("""{"recordableshots":2418,"remainingtime":null}"""))
         server.enqueue(jsonResponse("""{"mount":true,"name":"$oversizedName"}"""))
         server.enqueue(jsonResponse("""{"status":"normal"}"""))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
@@ -2109,6 +2123,8 @@ class CcapiClientTest {
               "battery": {"level": 82, "status": "normal"},
               "recording": false,
               "mode": "movie",
+              "recordable_shots": 2418,
+              "remaining_recording_seconds": 7200,
               "media": {"available": true, "remaining_minutes": 120, "total_bytes": 128000000000, "free_bytes": 84000000000, "free_images": 2418, "devices": 2},
               "exposure": {
                 "iso": "800",
@@ -2180,6 +2196,7 @@ class CcapiClientTest {
               "ver100": [
                 {"path":"/devicestatus/batterylist","get":true},
                 {"path":"/devicestatus/storage","get":true},
+                {"path":"/shooting/information/recordable","get":true},
                 {"path":"/devicestatus/lens","get":true},
                 {"path":"/devicestatus/temperature","get":true},
                 {"path":"/shooting/settings","get":true}
