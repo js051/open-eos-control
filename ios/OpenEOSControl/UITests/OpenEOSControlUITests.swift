@@ -160,7 +160,10 @@ final class OpenEOSControlUITests: XCTestCase {
         app.buttons["connect-button"].tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.images["live-view-decoded-frame"].waitForExistence(timeout: 30))
+        let liveView = app.images["live-view-decoded-frame"]
+        XCTAssertTrue(liveView.waitForExistence(timeout: 30))
+        let liveViewInteraction = app.descendants(matching: .any)["live-view-interaction-surface"]
+        XCTAssertTrue(liveViewInteraction.waitForExistence(timeout: 8))
 
         app.buttons["exposure-iso"].tap()
         let iso1600 = app.buttons["setting-value-1600"]
@@ -176,6 +179,78 @@ final class OpenEOSControlUITests: XCTestCase {
             (state["capture_count"] as? NSNumber)?.intValue == 1
         }
 
+        let autofocus = app.buttons["autofocus-button"]
+        XCTAssertTrue(waitForInteraction(autofocus, timeout: 8))
+        autofocus.tap()
+        try await waitForSimulatorState { state in
+            (state["half_press_count"] as? NSNumber)?.intValue == 1 &&
+                (state["shutter_release_count"] as? NSNumber)?.intValue == 1
+        }
+
+        openMoreActions(in: app)
+        let halfPress = app.buttons["half-press-button"]
+        XCTAssertTrue(waitForInteraction(halfPress, timeout: 5))
+        halfPress.tap()
+        try await waitForSimulatorState { state in
+            (state["half_press_count"] as? NSNumber)?.intValue == 2 &&
+                (state["shutter_release_count"] as? NSNumber)?.intValue == 2 &&
+                state["half_pressed"] as? Bool == false
+        }
+
+        XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
+        liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35)).tap()
+        try await waitForSimulatorState { state in
+            (state["focus"] as? [String: Any])?["count"] as? Int == 1
+        }
+
+        let moreSettings = app.buttons["more-settings-button"]
+        XCTAssertTrue(waitForInteraction(moreSettings, timeout: 8))
+        moreSettings.tap()
+        let tapAction = app.segmentedControls["live-view-tap-action-picker"]
+        XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
+        tapAction.buttons["Click white balance"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
+        liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
+        try await waitForSimulatorState { state in
+            (state["click_white_balance"] as? [String: Any])?["count"] as? Int == 1 &&
+                (state["exposure"] as? [String: Any])?["white_balance"] as? String == "click"
+        }
+
+        openMoreActions(in: app)
+        let focusDrive = app.buttons["focus-drive-menu-button"]
+        XCTAssertTrue(waitForInteraction(focusDrive, timeout: 5))
+        focusDrive.tap()
+        let driveNearLarge = app.buttons["focus-drive-near-large"]
+        XCTAssertTrue(waitForInteraction(driveNearLarge, timeout: 5))
+        driveNearLarge.tap()
+        try await waitForSimulatorState { state in
+            guard let focus = state["focus_drive"] as? [String: Any] else { return false }
+            return (focus["count"] as? NSNumber)?.intValue == 1 &&
+                focus["direction"] as? String == "near" &&
+                focus["step"] as? String == "large"
+        }
+        app.buttons["Done"].tap()
+
+        _ = try await simulatorRequest(
+            path: "/ccapi/test/mode",
+            method: "POST",
+            queryItems: [URLQueryItem(name: "mode", value: "Bulb")]
+        )
+        try await waitForSimulatorState { state in state["mode"] as? String == "Bulb" }
+        XCTAssertTrue(waitForLabel(app.buttons["shutter-button"], containing: "Start Bulb exposure", timeout: 15))
+        app.buttons["shutter-button"].tap()
+        try await waitForSimulatorState { state in
+            state["bulb_exposure_active"] as? Bool == true &&
+                (state["bulb_start_count"] as? NSNumber)?.intValue == 1
+        }
+        XCTAssertTrue(waitForLabel(app.buttons["shutter-button"], containing: "Stop Bulb exposure", timeout: 8))
+        app.buttons["shutter-button"].tap()
+        try await waitForSimulatorState { state in
+            state["bulb_exposure_active"] as? Bool == false &&
+                (state["bulb_stop_count"] as? NSNumber)?.intValue == 1
+        }
+
         let captureMode = app.segmentedControls["capture-mode-picker"]
         XCTAssertTrue(captureMode.waitForExistence(timeout: 8))
         captureMode.buttons["Video"].tap()
@@ -187,11 +262,29 @@ final class OpenEOSControlUITests: XCTestCase {
         record.tap()
         try await waitForSimulatorState { state in state["recording"] as? Bool == false }
 
-        app.buttons["more-actions-button"].tap()
-        app.buttons["Camera media"].tap()
+        openMoreActions(in: app)
+        app.buttons["camera-media-menu-button"].tap()
         XCTAssertTrue(app.staticTexts["SIM_0003.PNG"].waitForExistence(timeout: 20))
+
+        let previewMedia = app.buttons["preview-media-SIM_0003.PNG"]
+        XCTAssertTrue(waitForInteraction(previewMedia, timeout: 8))
+        previewMedia.tap()
+        XCTAssertTrue(app.buttons["close-media-preview"].waitForExistence(timeout: 8))
+        app.buttons["close-media-preview"].tap()
+
+        let deleteMedia = app.buttons["delete-media-SIM_0003.PNG"]
+        XCTAssertTrue(waitForInteraction(deleteMedia, timeout: 8))
+        deleteMedia.tap()
+        let deleteAlert = app.alerts["Delete from camera?"]
+        XCTAssertTrue(deleteAlert.waitForExistence(timeout: 5))
+        deleteAlert.buttons["Delete"].tap()
+        try await waitForSimulatorState { state in
+            !(state["media_ids"] as? [String] ?? []).contains("SIM_0003.PNG")
+        }
+        XCTAssertTrue(app.staticTexts["SIM_0003.PNG"].waitForNonExistence(timeout: 8))
+
         app.buttons["media-back-button"].tap()
-        app.buttons["more-actions-button"].tap()
+        openMoreActions(in: app)
         app.buttons["Disconnect"].tap()
         XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
     }
@@ -218,6 +311,12 @@ final class OpenEOSControlUITests: XCTestCase {
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
+    private func openMoreActions(in app: XCUIApplication) {
+        let moreActions = app.buttons["more-actions-button"]
+        XCTAssertTrue(waitForInteraction(moreActions, timeout: 8))
+        moreActions.tap()
+    }
+
     private func waitForLabel(_ element: XCUIElement, containing value: String, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate { candidate, _ in
             guard let element = candidate as? XCUIElement else { return false }
@@ -241,9 +340,16 @@ final class OpenEOSControlUITests: XCTestCase {
         throw SimulatorTestError.timeout
     }
 
-    private func simulatorRequest(path: String, method: String = "GET") async throws -> [String: Any] {
+    private func simulatorRequest(
+        path: String,
+        method: String = "GET",
+        queryItems: [URLQueryItem] = []
+    ) async throws -> [String: Any] {
         let normalizedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        var request = URLRequest(url: simulatorURL.appendingPathComponent(normalizedPath))
+        let pathURL = simulatorURL.appendingPathComponent(normalizedPath)
+        var components = try XCTUnwrap(URLComponents(url: pathURL, resolvingAgainstBaseURL: false))
+        if !queryItems.isEmpty { components.queryItems = queryItems }
+        var request = URLRequest(url: try XCTUnwrap(components.url))
         request.httpMethod = method
         if method == "POST" { request.httpBody = Data() }
         request.timeoutInterval = 5

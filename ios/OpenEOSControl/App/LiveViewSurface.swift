@@ -42,6 +42,21 @@ struct LiveViewSurface: View {
                     offlineSurface
                 }
 
+                Color.clear
+                    .frame(width: imageRect.width, height: imageRect.height)
+                    .position(x: imageRect.midX, y: imageRect.midY)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        SpatialTapGesture().onEnded { value in
+                            handleLiveViewTap(value.location, imageSize: imageRect.size)
+                        }
+                    )
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("live_view_tap_action"))
+                    .accessibilityIdentifier("live-view-interaction-surface")
+                    .accessibilityHidden(camera.effectiveLiveViewTapAction == nil)
+                    .allowsHitTesting(camera.effectiveLiveViewTapAction != nil)
+
                 if let overlayImage {
                     Image(uiImage: overlayImage)
                         .resizable()
@@ -170,23 +185,6 @@ struct LiveViewSurface: View {
                     .padding(12)
                 }
             }
-            .contentShape(Rectangle())
-            .gesture(
-                SpatialTapGesture().onEnded { value in
-                    guard let action = camera.effectiveLiveViewTapAction,
-                          imageRect.contains(value.location), imageRect.width > 0, imageRect.height > 0 else {
-                        return
-                    }
-                    let x = (value.location.x - imageRect.minX) / imageRect.width
-                    let y = (value.location.y - imageRect.minY) / imageRect.height
-                    Task {
-                        switch action {
-                        case .focus: await camera.tapFocus(x: x, y: y)
-                        case .whiteBalance: await camera.clickWhiteBalance(x: x, y: y)
-                        }
-                    }
-                }
-            )
         }
         .task(id: lutPreviewTaskID) {
             guard pixelMonitoringAvailable,
@@ -233,6 +231,21 @@ struct LiveViewSurface: View {
             }.value
             guard !Task.isCancelled else { return }
             monitorAnalysis = result
+        }
+    }
+
+    private func handleLiveViewTap(_ location: CGPoint, imageSize: CGSize) {
+        guard let action = camera.effectiveLiveViewTapAction,
+              imageSize.width > 0, imageSize.height > 0 else {
+            return
+        }
+        let x = location.x / imageSize.width
+        let y = location.y / imageSize.height
+        Task {
+            switch action {
+            case .focus: await camera.tapFocus(x: x, y: y)
+            case .whiteBalance: await camera.clickWhiteBalance(x: x, y: y)
+            }
         }
     }
 

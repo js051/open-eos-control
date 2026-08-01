@@ -294,6 +294,7 @@ private struct LiveViewSettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("live-view-source-picker")
         }
     }
 
@@ -678,6 +679,7 @@ private struct MoreSettingsView: View {
                 Label("tap_action_white_balance", systemImage: "eyedropper").tag(LiveViewTapAction.whiteBalance)
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("live-view-tap-action-picker")
         }
         .padding(.vertical, 14)
     }
