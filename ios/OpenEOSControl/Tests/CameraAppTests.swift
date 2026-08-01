@@ -90,6 +90,28 @@ final class CameraAppTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "rtp-audio-enabled"))
     }
 
+    func testCCAPIPresetsCarryExplicitConnectionIntent() {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+
+        XCTAssertEqual(state.ccapiConnectionMode, .automatic)
+
+        state.useSimulatorPreset()
+        XCTAssertEqual(state.ccapiConnectionMode, .simulator)
+        state.setBaseURL("http://127.0.0.1:19090")
+        XCTAssertEqual(state.ccapiConnectionMode, .simulator)
+
+        state.useHTTPPreset()
+        XCTAssertEqual(state.ccapiConnectionMode, .camera)
+        state.setBaseURL(CameraAppState.simulatorURL)
+        XCTAssertEqual(state.ccapiConnectionMode, .camera)
+
+        state.useHTTPSPreset()
+        XCTAssertEqual(state.ccapiConnectionMode, .camera)
+    }
+
     func testClosingReplacedRTPSessionDoesNotClearCurrentAudioStatus() async throws {
         let recorder = RTPAudioStatusRecorder()
         let controller = IOSCcapiRTPController()

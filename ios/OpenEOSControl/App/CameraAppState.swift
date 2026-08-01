@@ -20,6 +20,7 @@ final class CameraAppState: ObservableObject {
 
     @Published var connectionMode: AppConnectionMode
     @Published var baseURL: String
+    @Published private(set) var ccapiConnectionMode = CCAPIConnectionMode.automatic
     @Published var username: String
     @Published var password = ""
     @Published var bridgeURL: String
@@ -74,6 +75,7 @@ final class CameraAppState: ObservableObject {
     private var liveViewTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var eventGeneration = UUID()
+    private var operationRevision: UInt64 = 0
     private var mediaDownloadTask: Task<Void, Never>?
     private var mediaDownloadToken: UUID?
     private var rateTracker = LiveViewRateTracker()
@@ -197,14 +199,17 @@ final class CameraAppState: ObservableObject {
     }
 
     func useHTTPPreset() {
+        ccapiConnectionMode = .camera
         setBaseURL(Self.defaultCameraURL)
     }
 
     func useHTTPSPreset() {
+        ccapiConnectionMode = .camera
         setBaseURL(Self.defaultSecureCameraURL)
     }
 
     func useSimulatorPreset() {
+        ccapiConnectionMode = .simulator
         setBaseURL(Self.simulatorURL)
     }
 
@@ -240,7 +245,7 @@ final class CameraAppState: ObservableObject {
                 newSession = .ccapi(
                     try CCAPIClient(
                         baseURL: baseURL,
-                        mode: .automatic,
+                        mode: ccapiConnectionMode,
                         username: username,
                         password: password,
                         rtpDestinationAddress: rtpAddress,
@@ -986,7 +991,9 @@ final class CameraAppState: ObservableObject {
 
     private func begin(_ operation: CameraOperation) -> Bool {
         if bulbExposureActive && operation != .capture { return false }
-        return busyOperations.insert(operation).inserted
+        let inserted = busyOperations.insert(operation).inserted
+        if inserted { operationRevision &+= 1 }
+        return inserted
     }
 
     private func end(_ operation: CameraOperation) {
@@ -1068,19 +1075,32 @@ final class CameraAppState: ObservableObject {
         eventTask = Task { [weak self] in
             guard let self else { return }
             var failures = 0
+            var pendingKeys = Set<String>()
             while !Task.isCancelled, generation == eventGeneration {
                 do {
-                    let event = try await session.pollEvent()
-                    failures = 0
-                    guard !event.changedKeys.isEmpty else { continue }
-                    let refreshed = try await session.connectSnapshot()
-                    guard generation == eventGeneration, !Task.isCancelled else { break }
+                    if pendingKeys.isEmpty {
+                        let event = try await session.pollEvent()
+                        pendingKeys.formUnion(event.changedKeys)
+                    }
+                    guard !pendingKeys.isEmpty else {
+                        failures = 0
+                        continue
+                    }
+                    guard let refreshed = try await stableEventSnapshot(
+                        session: session,
+                        generation: generation
+                    ) else { break }
                     snapshot = refreshed
                     clampLiveViewRequest()
                     if screen == .media,
-                       event.changedKeys.contains(where: { $0.lowercased().contains("content") }) {
-                        await loadMedia()
+                       pendingKeys.contains(where: { $0.lowercased().contains("content") }) {
+                        guard try await refreshMediaAfterEvent(
+                            session: session,
+                            generation: generation
+                        ) else { break }
                     }
+                    pendingKeys.removeAll()
+                    failures = 0
                 } catch is CancellationError {
                     break
                 } catch {
@@ -1097,6 +1117,53 @@ final class CameraAppState: ObservableObject {
         eventGeneration = UUID()
         eventTask?.cancel()
         eventTask = nil
+    }
+
+    private func stableEventSnapshot(
+        session: CameraSession,
+        generation: UUID
+    ) async throws -> CameraSnapshot? {
+        while generation == eventGeneration, !Task.isCancelled {
+            while !busyOperations.isEmpty, generation == eventGeneration, !Task.isCancelled {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+            guard generation == eventGeneration, !Task.isCancelled else { return nil }
+
+            let revision = operationRevision
+            let refreshed = try await session.connectSnapshot()
+            if revision == operationRevision, busyOperations.isEmpty {
+                return refreshed
+            }
+        }
+        return nil
+    }
+
+    private func refreshMediaAfterEvent(
+        session: CameraSession,
+        generation: UUID
+    ) async throws -> Bool {
+        while generation == eventGeneration, !Task.isCancelled {
+            if screen != .media { return true }
+            if busyOperations.contains(.media) || bulbExposureActive {
+                try await Task.sleep(nanoseconds: 50_000_000)
+                continue
+            }
+            guard begin(.media) else { continue }
+            do {
+                let items = try await session.listMedia()
+                end(.media)
+                guard generation == eventGeneration, !Task.isCancelled else { return false }
+                resetMediaThumbnails()
+                resetMediaPreview()
+                mediaItems = items
+                lastError = nil
+                return true
+            } catch {
+                end(.media)
+                throw error
+            }
+        }
+        return false
     }
 
     private func pauseLiveViewForBulb() {
