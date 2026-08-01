@@ -53,6 +53,8 @@ final class CCAPIClientTests: XCTestCase {
     }
     """
 
+    private let deviceStatusDiscovery = #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/devicestatus/lens","get":true},{"path":"/devicestatus/temperature","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/shutterbutton","post":true},{"path":"/shooting/control/recbutton","post":true}]}"#
+
     func testDiscoverySnapshotBuildsCapabilitiesFromAdvertisedOperations() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
@@ -1383,6 +1385,135 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.map(\.method), ["GET"])
     }
 
+    func testDeviceStatusUsesAdvertisedStrictCanonLensAndTemperaturePayloads() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: deviceStatusDiscovery)
+        await enqueueDeviceStatus(
+            on: transport,
+            temperature: "frameratedown_and_restrictionmovierecording"
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let status = try await client.status()
+        let capabilities = try await client.capabilities()
+
+        XCTAssertEqual(status.lens, LensStatus(mounted: true, name: "RF24-105mm F4 L IS USM"))
+        XCTAssertEqual(status.temperature, .frameRateDownAndRestrictionMovieRecording)
+        XCTAssertEqual(status.temperature?.frameRateReduced, true)
+        XCTAssertEqual(status.temperature?.movieRecordingAllowed, false)
+        XCTAssertTrue(capabilities.matrix.supports(.lensStatus))
+        XCTAssertTrue(capabilities.matrix.supports(.temperatureStatus))
+    }
+
+    func testMalformedAdvertisedDeviceStatusRemainsPlanned() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: deviceStatusDiscovery)
+        await enqueueDeviceStatus(
+            on: transport,
+            lens: #"{"mount":"true","name":"RF24-105mm"}"#,
+            temperature: "hot"
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let status = try await client.status()
+        let capabilities = try await client.capabilities()
+
+        XCTAssertNil(status.lens)
+        XCTAssertNil(status.temperature)
+        XCTAssertFalse(capabilities.matrix.supports(.lensStatus))
+        XCTAssertFalse(capabilities.matrix.supports(.temperatureStatus))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.lensStatus))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.temperatureStatus))
+    }
+
+    func testOversizedAdvertisedLensNameRemainsPlanned() async throws {
+        let transport = MockCameraHTTPTransport()
+        let oversizedName = String(repeating: "R", count: 513)
+        await transport.enqueueJSON(path: "/ccapi", body: deviceStatusDiscovery)
+        await enqueueDeviceStatus(
+            on: transport,
+            lens: "{\"mount\":true,\"name\":\"(oversizedName)\"}"
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let status = try await client.status()
+        let capabilities = try await client.capabilities()
+
+        XCTAssertNil(status.lens)
+        XCTAssertFalse(capabilities.matrix.supports(.lensStatus))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.lensStatus))
+    }
+
+    func testTemperatureRestrictionRefreshPreventsStillCaptureCommand() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/temperature","get":true},{"path":"/shooting/control/shutterbutton","post":true}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/temperature",
+            body: #"{"status":"disablerelease"}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        do {
+            _ = try await client.captureStill()
+            XCTFail("Expected temperature restriction")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .temperatureRestriction(.stillCapture))
+        }
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/temperature",
+            body: #"{"status":"hot"}"#
+        )
+        do {
+            _ = try await client.captureStill()
+            XCTFail("Expected the last valid temperature restriction to remain active")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .temperatureRestriction(.stillCapture))
+        }
+
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.method), ["GET", "GET", "GET"])
+    }
+
+    func testTemperatureRestrictionDoesNotBlockRecordingStop() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: deviceStatusDiscovery)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/temperature",
+            body: #"{"status":"normal"}"#
+        )
+        await transport.enqueue(method: "POST", path: "/ccapi/ver100/shooting/control/recbutton", status: 204)
+        await enqueueDeviceStatus(on: transport)
+        await transport.enqueue(method: "POST", path: "/ccapi/ver100/shooting/control/recbutton", status: 204)
+        await enqueueDeviceStatus(on: transport, temperature: "restrictionmovierecording")
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let started = try await client.startRecording()
+        XCTAssertEqual(started.recording, true)
+        let stopped = try await client.stopRecording()
+        XCTAssertEqual(stopped.recording, false)
+
+        let stop = (await transport.requests()).last { request in
+            request.method == "POST" && request.path == "/ccapi/ver100/shooting/control/recbutton"
+        }
+        let stopBody = try XCTUnwrap(stop?.body)
+        let stopJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: stopBody) as? [String: String])
+        XCTAssertEqual(stopJSON, ["action": "stop"])
+    }
+
+    func testCanonTemperatureStatusesExposeDocumentedRestrictions() {
+        XCTAssertEqual(CameraTemperatureStatus.allCases.count, 12)
+        XCTAssertFalse(CameraTemperatureStatus.disableLiveView.liveViewAllowed)
+        XCTAssertFalse(CameraTemperatureStatus.disableRelease.stillCaptureAllowed)
+        XCTAssertFalse(CameraTemperatureStatus.restrictionMovieRecording.movieRecordingAllowed)
+        XCTAssertTrue(CameraTemperatureStatus.frameRateDown.frameRateReduced)
+        XCTAssertTrue(CameraTemperatureStatus.stillQualityWarning.stillQualityWarning)
+        XCTAssertTrue(CameraTemperatureStatus.warning.temperatureWarning)
+        XCTAssertTrue(CameraTemperatureStatus.normal.isNormal)
+    }
+
     func testBasicAuthenticationIsSentButDiagnosticReportRedactsSecrets() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
@@ -1480,6 +1611,27 @@ final class CCAPIClientTests: XCTestCase {
             body: #"{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000,"freeimages":-1},{"name":"card2","capacity":128000000000,"freebytes":64000000000,"remainingimages":2400}]}"#
         )
         await transport.enqueueJSON(path: "\(prefix)/shooting/settings", body: settings)
+    }
+
+    private func enqueueDeviceStatus(
+        on transport: MockCameraHTTPTransport,
+        lens: String = #"{"mount":true,"name":"RF24-105mm F4 L IS USM"}"#,
+        temperature: String = "normal"
+    ) async {
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/batterylist",
+            body: #"{"batterylist":[{"level":89}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/storage",
+            body: #"{"storagelist":[{"name":"card1","spacesize":32000000000}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/devicestatus/lens", body: lens)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/temperature",
+            body: "{\"status\":\"\(temperature)\"}"
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
     }
 
     private func detailedLiveView(jpeg: Data) -> Data {

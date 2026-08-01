@@ -81,6 +81,7 @@ import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.CameraTemperatureStatus
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewSize
@@ -133,6 +134,14 @@ private fun StableCameraControls(state: CameraUiState, actions: CameraActions) {
         LiveViewFrame(state, actions, Modifier.fillMaxSize())
         if (state.hudVisible) {
             CameraOverlayHeader(state, actions)
+            state.status?.temperature?.takeUnless(CameraTemperatureStatus::isNormal)?.let { temperature ->
+                TemperatureStatusBanner(
+                    temperature = temperature,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = CAMERA_OVERLAY_HEADER_HEIGHT + 8.dp),
+                )
+            }
             if (!state.supports(activeCaptureFeature(state))) {
                 Box(
                     modifier = Modifier
@@ -159,6 +168,57 @@ private fun StableCameraControls(state: CameraUiState, actions: CameraActions) {
                 { actions.setHudVisible(true) },
                 Modifier.align(Alignment.TopEnd),
             )
+        }
+    }
+}
+
+@Composable
+private fun TemperatureStatusBanner(
+    temperature: CameraTemperatureStatus,
+    modifier: Modifier = Modifier,
+) {
+    val messages = buildList {
+        if (temperature.temperatureWarning) add(stringResource(R.string.camera_temperature_warning))
+        if (temperature.frameRateReduced) add(stringResource(R.string.temperature_frame_rate_reduced))
+        if (!temperature.liveViewAllowed) add(stringResource(R.string.temperature_live_view_unavailable))
+        if (!temperature.stillCaptureAllowed) add(stringResource(R.string.temperature_shutter_unavailable))
+        if (!temperature.movieRecordingAllowed) add(stringResource(R.string.temperature_movie_recording_restricted))
+        if (temperature.stillQualityWarning) add(stringResource(R.string.temperature_still_quality_warning))
+    }.ifEmpty { listOf(stringResource(R.string.camera_temperature_warning)) }
+    val message = messages.joinToString(separator = " · ")
+    CameraReadableSlot(
+        width = 344.dp,
+        height = 64.dp,
+        modifier = modifier
+            .testTag("temperature-status-banner")
+            .semantics { contentDescription = message },
+        animateRotation = false,
+    ) {
+        Surface(
+            color = Color.Black.copy(alpha = 0.82f),
+            shape = RoundedCornerShape(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    painterResource(LucideR.drawable.lucide_ic_triangle_alert),
+                    contentDescription = null,
+                    tint = AppWarning,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    text = message,
+                    color = AppWarning,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }

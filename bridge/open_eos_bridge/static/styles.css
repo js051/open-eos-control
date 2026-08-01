@@ -687,6 +687,28 @@ input:disabled {
   background: var(--record-strong);
 }
 
+.temperature-warning {
+  position: absolute;
+  z-index: 5;
+  top: 52px;
+  left: 50%;
+  display: flex;
+  max-width: min(92%, 640px);
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgb(240 180 41 / 70%);
+  border-radius: 4px;
+  color: #ffd66b;
+  background: rgb(4 6 7 / 86%);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
 .viewfinder-action {
   position: absolute;
   right: 14px;

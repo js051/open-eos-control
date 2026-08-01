@@ -260,4 +260,13 @@
     <string name="physical_validation_copied">已複製真機驗證紀錄</string>
     <string name="setting_zoom">變焦</string>
     <string name="zoom_value">%1$s%%</string>
+    <string name="lens">鏡頭</string>
+    <string name="no_lens_mounted">未安裝鏡頭</string>
+    <string name="temperature_status">溫度狀態</string>
+    <string name="camera_temperature_warning">相機溫度警告</string>
+    <string name="temperature_frame_rate_reduced">相機已降低畫面更新率</string>
+    <string name="temperature_live_view_unavailable">相機過熱，Live View 暫時無法使用</string>
+    <string name="temperature_shutter_unavailable">相機過熱，快門暫時無法使用</string>
+    <string name="temperature_movie_recording_restricted">相機過熱，短片錄影受限</string>
+    <string name="temperature_still_quality_warning">靜態影像畫質可能降低</string>
 </resources>

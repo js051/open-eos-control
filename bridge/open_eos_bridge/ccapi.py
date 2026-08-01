@@ -27,9 +27,11 @@ from .models import (
     CameraInfo,
     CameraSetting,
     CameraStatus,
+    CameraTemperatureStatus,
     CapabilityEvidence,
     ExposureState,
     FocusResult,
+    LensStatus,
     LiveViewCapabilities,
     LiveViewMagnificationResult,
     LiveViewStartRequest,
@@ -63,6 +65,7 @@ MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
+MAX_DEVICE_STATUS_TEXT_CHARS = 512
 MAX_EVENT_BYTES = 256 * 1024
 MAX_EVENT_KEYS = 64
 MAX_EVENT_KEY_CHARS = 128
@@ -362,6 +365,7 @@ class CcapiSession:
         self._discovery_source = "unknown"
         self._recording: bool | None = None
         self._bulb_exposure_active = False
+        self._temperature_status: CameraTemperatureStatus | None = None
         self._live_view_active = False
         self._active_live_view_source: str | None = None
         self._rtp_session: RtpLiveViewSession | None = None
@@ -498,6 +502,21 @@ class CcapiSession:
                 + self._versioned_paths("/devicestatus/currentstorage")
                 + [self._api_path("GET", "/contents")]
             )
+            lens_operation = self._operation("GET", "/devicestatus/lens")
+            lens_value = self._first_json([lens_operation.path]) if lens_operation is not None else None
+            lens_status = _lens_status(lens_value)
+            if lens_status is None:
+                self._observed.discard(CameraFeature.LENS_STATUS)
+            else:
+                self._observed.add(CameraFeature.LENS_STATUS)
+            temperature_operation = self._operation("GET", "/devicestatus/temperature")
+            temperature_value = (
+                self._first_json([temperature_operation.path]) if temperature_operation is not None else None
+            )
+            refreshed_temperature = _temperature_status(temperature_value)
+            if refreshed_temperature is not None:
+                self._temperature_status = refreshed_temperature
+                self._observed.add(CameraFeature.TEMPERATURE_STATUS)
             settings = self._load_settings(force=True)
             battery_status = _battery_status(battery)
             storage_status = _storage_status(storage)
@@ -518,12 +537,16 @@ class CcapiSession:
                     aperture=_first_setting_value(settings, "av", "aperture") or "-",
                     white_balance=_first_setting_value(settings, "wb", "whitebalance", "white_balance") or "-",
                 ),
+                lens=lens_status,
+                temperature=self._temperature_status,
                 raw={
                     "engine": self.engine_name,
                     "baseUrl": self.base_url,
                     "apiVersions": self._api_prefixes,
                     "battery": battery,
                     "storage": storage,
+                    "lens": lens_value,
+                    "temperature": temperature_value,
                     "liveViewSource": self._active_live_view_source,
                     "rtpSource": self._rtp_session.source_url if self._rtp_session else None,
                     "rtpAudio": rtp_audio,
@@ -600,6 +623,8 @@ class CcapiSession:
                 supported.add(CameraFeature.CAMERA_CLOCK_SYNC)
 
             candidates = {
+                CameraFeature.LENS_STATUS,
+                CameraFeature.TEMPERATURE_STATUS,
                 CameraFeature.EVENT_POLLING,
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
@@ -633,6 +658,14 @@ class CcapiSession:
                 supported=sorted(supported, key=str),
                 planned=sorted(candidates - supported, key=str),
                 reasons={
+                    CameraFeature.LENS_STATUS.value: (
+                        "The camera must advertise GET devicestatus/lens and return Canon's documented "
+                        "mount/name payload."
+                    ),
+                    CameraFeature.TEMPERATURE_STATUS.value: (
+                        "The camera must advertise GET devicestatus/temperature and return a documented "
+                        "Canon status value."
+                    ),
                     CameraFeature.EVENT_POLLING.value: (
                         "The camera must advertise both GET and DELETE for the Canon event polling endpoint."
                     ),
@@ -826,6 +859,8 @@ class CcapiSession:
 
     def capture_still(self) -> CameraStatus:
         with self._lock:
+            self._refresh_temperature_status()
+            self._require_temperature_allows_still_capture()
             direct = self._operation("POST", "/shooting/control/shutterbutton")
             manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
                 "POST", "/shooting/control/shutterbutton/manual"
@@ -869,6 +904,7 @@ class CcapiSession:
             if manual is None:
                 raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
             baseline = self.status()
+            self._require_temperature_allows_still_capture()
             try:
                 self._command_ok(manual, {"af": False, "action": "full_press"})
             except BridgeError as error:
@@ -976,6 +1012,8 @@ class CcapiSession:
     def start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._lock:
             self._ensure_initialized()
+            self._refresh_temperature_status()
+            self._require_temperature_allows_live_view()
             self._latest_live_view_geometry = None
             source = request.source.upper()
             if source == "DESKTOP_BRIDGE_STREAM":
@@ -1423,8 +1461,50 @@ class CcapiSession:
     def live_view_source(self) -> str | None:
         return self._active_live_view_source
 
+    def _temperature_restriction(self, feature: CameraFeature, message: str) -> BridgeError:
+        return BridgeError(
+            "CAMERA_TEMPERATURE_RESTRICTION",
+            message,
+            status_code=409,
+            feature=feature.value,
+            engine=self.engine_name,
+        )
+
+    def _refresh_temperature_status(self) -> None:
+        operation = self._operation("GET", "/devicestatus/temperature")
+        if operation is None:
+            return
+        refreshed = _temperature_status(self._first_json([operation.path]))
+        if refreshed is not None:
+            self._temperature_status = refreshed
+            self._observed.add(CameraFeature.TEMPERATURE_STATUS)
+
+    def _require_temperature_allows_live_view(self) -> None:
+        if self._temperature_status is not None and not self._temperature_status.live_view_allowed:
+            raise self._temperature_restriction(
+                CameraFeature.LIVE_VIEW,
+                "Live View is unavailable because the camera reported a temperature restriction.",
+            )
+
+    def _require_temperature_allows_still_capture(self) -> None:
+        if self._temperature_status is not None and not self._temperature_status.still_capture_allowed:
+            raise self._temperature_restriction(
+                CameraFeature.STILL_CAPTURE,
+                "Still capture is unavailable because the camera reported a temperature restriction.",
+            )
+
+    def _require_temperature_allows_movie_recording(self) -> None:
+        if self._temperature_status is not None and not self._temperature_status.movie_recording_allowed:
+            raise self._temperature_restriction(
+                CameraFeature.VIDEO_RECORDING,
+                "Movie recording is unavailable because the camera reported a temperature restriction.",
+            )
+
     def _set_recording(self, recording: bool) -> CameraStatus:
         with self._lock:
+            if recording:
+                self._refresh_temperature_status()
+                self._require_temperature_allows_movie_recording()
             operation = self._operation("POST", "/shooting/control/recbutton") or self._operation(
                 "PUT", "/shooting/control/recbutton"
             )
@@ -2148,6 +2228,31 @@ def _parse_live_view_geometry(value: bytes) -> CcapiLiveViewGeometry | None:
         return None
 
     return find(root)
+
+
+def _lens_status(value: object | None) -> LensStatus | None:
+    if not isinstance(value, dict):
+        return None
+    mounted = value.get("mount")
+    name = value.get("name")
+    if not isinstance(mounted, bool) or not isinstance(name, str):
+        return None
+    if (
+        len(name) > MAX_DEVICE_STATUS_TEXT_CHARS
+        or any(ord(character) < 32 or ord(character) == 127 for character in name)
+        or (mounted and not name.strip())
+    ):
+        return None
+    return LensStatus(mounted=mounted, name=name if mounted else "")
+
+
+def _temperature_status(value: object | None) -> CameraTemperatureStatus | None:
+    if not isinstance(value, dict) or not isinstance(value.get("status"), str):
+        return None
+    try:
+        return CameraTemperatureStatus(value["status"])
+    except ValueError:
+        return None
 
 
 def _battery_status(value: object | None) -> BatteryStatus:

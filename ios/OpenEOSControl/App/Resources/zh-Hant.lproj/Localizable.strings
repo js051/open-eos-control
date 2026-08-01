@@ -251,6 +251,15 @@
 "storage_free_bytes" = "儲存空間可用位元組";
 "storage_free_images" = "剩餘可拍張數";
 "storage_devices" = "儲存裝置數";
+"lens" = "鏡頭";
+"no_lens_mounted" = "未安裝鏡頭";
+"temperature_status" = "溫度狀態";
+"camera_temperature_warning" = "相機溫度警告";
+"temperature_frame_rate_reduced" = "相機已降低畫面更新率";
+"temperature_live_view_unavailable" = "相機過熱，Live View 暫時無法使用";
+"temperature_shutter_unavailable" = "相機過熱，快門暫時無法使用";
+"temperature_movie_recording_restricted" = "相機過熱，短片錄影受限";
+"temperature_still_quality_warning" = "靜態影像畫質可能降低";
 "requested_fps" = "要求 FPS";
 "observed_fps" = "實測 FPS";
 "frame_bytes" = "畫面位元組";

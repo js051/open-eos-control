@@ -5,6 +5,8 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case cameraClockSync = "CAMERA_CLOCK_SYNC"
     case batteryStatus = "BATTERY_STATUS"
     case storageStatus = "STORAGE_STATUS"
+    case lensStatus = "LENS_STATUS"
+    case temperatureStatus = "TEMPERATURE_STATUS"
     case eventPolling = "EVENT_POLLING"
     case liveView = "LIVE_VIEW"
     case liveViewJPEGPolling = "LIVE_VIEW_JPEG_POLLING"
@@ -130,6 +132,40 @@ public struct ExposureState: Equatable, Codable, Sendable {
     }
 }
 
+public struct LensStatus: Equatable, Codable, Sendable {
+    public let mounted: Bool
+    public let name: String
+
+    public init(mounted: Bool, name: String = "") {
+        self.mounted = mounted
+        self.name = name
+    }
+}
+
+public enum CameraTemperatureStatus: String, CaseIterable, Codable, Sendable {
+    case normal
+    case warning
+    case frameRateDown = "frameratedown"
+    case disableLiveView = "disableliveview"
+    case disableRelease = "disablerelease"
+    case stillQualityWarning = "stillqualitywarning"
+    case restrictionMovieRecording = "restrictionmovierecording"
+    case warningAndRestrictionMovieRecording = "warning_and_restrictionmovierecording"
+    case frameRateDownAndRestrictionMovieRecording = "frameratedown_and_restrictionmovierecording"
+    case disableLiveViewAndRestrictionMovieRecording = "disableliveview_and_restrictionmovierecording"
+    case disableReleaseAndRestrictionMovieRecording = "disablerelease_and_restrictionmovierecording"
+    case stillQualityWarningAndRestrictionMovieRecording =
+        "stillqualitywarning_and_restrictionmovierecording"
+
+    public var isNormal: Bool { self == .normal }
+    public var liveViewAllowed: Bool { !rawValue.contains("disableliveview") }
+    public var stillCaptureAllowed: Bool { !rawValue.contains("disablerelease") }
+    public var movieRecordingAllowed: Bool { !rawValue.contains("restrictionmovierecording") }
+    public var frameRateReduced: Bool { rawValue.hasPrefix("frameratedown") }
+    public var stillQualityWarning: Bool { rawValue.hasPrefix("stillqualitywarning") }
+    public var temperatureWarning: Bool { rawValue == "warning" || rawValue.hasPrefix("warning_and_") }
+}
+
 public struct CameraStatus: Equatable, Sendable {
     public let connected: Bool
     public let batteryLevel: Int?
@@ -146,6 +182,8 @@ public struct CameraStatus: Equatable, Sendable {
     public let storageDeviceCount: Int?
     public let rawBatteryJSON: String
     public let rawStorageJSON: String
+    public let lens: LensStatus?
+    public let temperature: CameraTemperatureStatus?
 
     public init(
         connected: Bool = true,
@@ -162,7 +200,9 @@ public struct CameraStatus: Equatable, Sendable {
         storageFreeImages: Int64? = nil,
         storageDeviceCount: Int? = nil,
         rawBatteryJSON: String = "null",
-        rawStorageJSON: String = "null"
+        rawStorageJSON: String = "null",
+        lens: LensStatus? = nil,
+        temperature: CameraTemperatureStatus? = nil
     ) {
         self.connected = connected
         self.batteryLevel = batteryLevel
@@ -179,6 +219,8 @@ public struct CameraStatus: Equatable, Sendable {
         self.storageDeviceCount = storageDeviceCount
         self.rawBatteryJSON = rawBatteryJSON
         self.rawStorageJSON = rawStorageJSON
+        self.lens = lens
+        self.temperature = temperature
     }
 
     public func withBulbExposureActive(_ active: Bool?) -> CameraStatus {
@@ -197,7 +239,9 @@ public struct CameraStatus: Equatable, Sendable {
             storageFreeImages: storageFreeImages,
             storageDeviceCount: storageDeviceCount,
             rawBatteryJSON: rawBatteryJSON,
-            rawStorageJSON: rawStorageJSON
+            rawStorageJSON: rawStorageJSON,
+            lens: lens,
+            temperature: temperature
         )
     }
 }

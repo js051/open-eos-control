@@ -38,6 +38,7 @@ import kotlin.math.floor
 private const val MAX_CCAPI_EVENT_BODY_BYTES = 256 * 1024
 private const val MAX_CCAPI_EVENT_KEYS = 64
 private const val MAX_CCAPI_EVENT_KEY_CHARS = 128
+private const val MAX_DEVICE_STATUS_TEXT_CHARS = 512
 private const val CCAPI_EVENT_READ_TIMEOUT_SECONDS = 40L
 private const val CCAPI_EVENT_CALL_TIMEOUT_SECONDS = 45L
 private const val CCAPI_NO_API_LIST_VALUE = "No list of APIs"
@@ -113,6 +114,7 @@ class CcapiClient(
     private var apiVersionPrefixes = listOf("/ccapi/ver100")
     private var isRecording: Boolean? = null
     private var bulbExposureActive = false
+    private var latestTemperatureStatus: CameraTemperatureStatus? = null
     private val settingPathsByKey = mutableMapOf<String, String>()
     private val settingValuesByKey = mutableMapOf<String, Set<String>>()
     private val structuredSettingPathsByKey = mutableMapOf<String, String>()
@@ -377,6 +379,22 @@ class CcapiClient(
                 null
             }
 
+            val lensJson = apiOperation("GET", "/devicestatus/lens")
+                ?.let { operation -> getFirstJson(listOf(operation.path)) }
+            val lensStatus = lensJson?.toCanonLensStatusOrNull()
+            if (lensStatus != null) {
+                observedFeatures.add(CameraFeature.LENS_STATUS)
+            } else {
+                observedFeatures.remove(CameraFeature.LENS_STATUS)
+            }
+
+            val temperatureJson = apiOperation("GET", "/devicestatus/temperature")
+                ?.let { operation -> getFirstJson(listOf(operation.path)) }
+            temperatureJson?.toTemperatureStatusOrNull()?.let { temperatureStatus ->
+                latestTemperatureStatus = temperatureStatus
+                observedFeatures.add(CameraFeature.TEMPERATURE_STATUS)
+            }
+
             val settings = loadShootingSettings()
 
             // Exposure values
@@ -412,10 +430,17 @@ class CcapiClient(
                 rawBatteryJson = batteryJson?.toString() ?: "null",
                 rawStorageJson = storageJson?.toString() ?: "null",
                 bulbExposureActive = bulbExposureActive,
+                lens = lensStatus,
+                temperature = latestTemperatureStatus,
             )
         } else {
             getJson("/ccapi/status").toCameraStatus().also {
+                latestTemperatureStatus = it.temperature
                 observedFeatures.addAll(setOf(CameraFeature.BATTERY_STATUS, CameraFeature.STORAGE_STATUS))
+                if (it.lens != null) observedFeatures.add(CameraFeature.LENS_STATUS)
+                else observedFeatures.remove(CameraFeature.LENS_STATUS)
+                if (it.temperature != null) observedFeatures.add(CameraFeature.TEMPERATURE_STATUS)
+                else observedFeatures.remove(CameraFeature.TEMPERATURE_STATUS)
             }
         }
     }
@@ -674,6 +699,8 @@ class CcapiClient(
     }
 
     suspend fun startRecording(): CameraStatus {
+        refreshTemperatureStatusForRestrictedCommand()
+        requireMovieRecordingAllowed()
         if (isRealCamera) {
             val operation = recordingOperation()
             if (enforceAdvertisedOperations && operation == null) {
@@ -712,6 +739,8 @@ class CcapiClient(
     }
 
     suspend fun captureStill(): CameraStatus {
+        refreshTemperatureStatusForRestrictedCommand()
+        requireStillCaptureAllowed()
         if (isRealCamera) {
             val directOperation = directShutterOperation()
             val manualOperation = manualShutterOperation()
@@ -752,6 +781,7 @@ class CcapiClient(
     suspend fun startBulbExposure(): CameraStatus {
         if (bulbExposureActive) return status()
         val baseline = status()
+        requireStillCaptureAllowed()
         if (isRealCamera) {
             val operation = manualShutterOperation()
             if (enforceAdvertisedOperations && operation == null) {
@@ -1055,6 +1085,8 @@ class CcapiClient(
     }
 
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest()) {
+        refreshTemperatureStatusForRestrictedCommand()
+        requireLiveViewAllowed()
         if (isRealCamera) {
             latestLiveViewGeometry = null
             val requestedSource = request.source
@@ -1318,6 +1350,33 @@ class CcapiClient(
         val matching = apiOperations.filter { it.method == method && it.path.endsWith(pathSuffix) }
         return matching.firstOrNull { it.path.startsWith(apiVersionPrefix) }
             ?: matching.maxByOrNull { it.path.substringBefore(pathSuffix).apiVersionNumber() }
+    }
+
+    private fun requireLiveViewAllowed() {
+        check(latestTemperatureStatus?.liveViewAllowed != false) {
+            "Live View is unavailable because the camera reported a temperature restriction."
+        }
+    }
+
+    private suspend fun refreshTemperatureStatusForRestrictedCommand() {
+        if (!isRealCamera) return
+        val operation = apiOperation("GET", "/devicestatus/temperature") ?: return
+        getFirstJson(listOf(operation.path))?.toTemperatureStatusOrNull()?.let { temperatureStatus ->
+            latestTemperatureStatus = temperatureStatus
+            observedFeatures.add(CameraFeature.TEMPERATURE_STATUS)
+        }
+    }
+
+    private fun requireStillCaptureAllowed() {
+        check(latestTemperatureStatus?.stillCaptureAllowed != false) {
+            "Still capture is unavailable because the camera reported a temperature restriction."
+        }
+    }
+
+    private fun requireMovieRecordingAllowed() {
+        check(latestTemperatureStatus?.movieRecordingAllowed != false) {
+            "Movie recording is unavailable because the camera reported a temperature restriction."
+        }
     }
 
     private fun directShutterOperation(): CcapiApiOperation? =
@@ -2397,6 +2456,28 @@ private fun JSONObject.toCameraInfo(): CameraInfo = CameraInfo(
     api = optString("api", "ccapi"),
 )
 
+private fun JSONObject.toCanonLensStatusOrNull(): LensStatus? {
+    val mounted = opt("mount") as? Boolean ?: return null
+    val name = opt("name") as? String ?: return null
+    if (!name.isValidLensName(mounted)) return null
+    return LensStatus(mounted = mounted, name = name.takeIf { mounted }.orEmpty())
+}
+
+private fun JSONObject.toBridgeLensStatusOrNull(): LensStatus? {
+    val mounted = opt("mounted") as? Boolean ?: return null
+    val name = opt("name") as? String ?: return null
+    if (!name.isValidLensName(mounted)) return null
+    return LensStatus(mounted = mounted, name = name.takeIf { mounted }.orEmpty())
+}
+
+private fun String.isValidLensName(mounted: Boolean): Boolean =
+    length <= MAX_DEVICE_STATUS_TEXT_CHARS &&
+        none { it.isISOControl() } &&
+        (!mounted || isNotBlank())
+
+private fun JSONObject.toTemperatureStatusOrNull(): CameraTemperatureStatus? =
+    (opt("status") as? String)?.let(CameraTemperatureStatus::fromCcapiValue)
+
 private fun JSONObject.toCameraStatus(): CameraStatus {
     val battery = getJSONObject("battery")
     val media = getJSONObject("media")
@@ -2421,6 +2502,9 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
         storageDeviceCount = media.optNullableInt("devices"),
         bulbExposureActive = optNullableBoolean("bulb_exposure_active")
             ?: optNullableBoolean("bulbExposureActive"),
+        lens = optJSONObject("lens")?.toBridgeLensStatusOrNull(),
+        temperature = (opt("temperature") as? String)
+            ?.let(CameraTemperatureStatus::fromCcapiValue),
     )
 }
 
@@ -2458,6 +2542,8 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.EVENT_POLLING,
             CameraFeature.CAMERA_CLOCK_SYNC,
             CameraFeature.FOCUS_DRIVE,
+            CameraFeature.LENS_STATUS,
+            CameraFeature.TEMPERATURE_STATUS,
         ) +
         (if (zoomControl != null) setOf(CameraFeature.ZOOM_CONTROL) else emptySet()) +
         (if (movieModeControl != null) setOf(CameraFeature.MOVIE_MODE_CONTROL) else emptySet())

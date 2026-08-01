@@ -97,6 +97,18 @@ fun DebugScreen(
                 DebugValue(stringResource(R.string.storage_devices), state.status?.storageDeviceCount?.toString() ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.battery_raw), state.status?.rawBatteryJson?.ifBlank { unavailable } ?: unavailable, mono = true)
                 DebugValue(stringResource(R.string.storage_raw), state.status?.rawStorageJson?.ifBlank { unavailable } ?: unavailable, mono = true)
+                DebugValue(
+                    stringResource(R.string.lens),
+                    state.status?.lens?.let { lens ->
+                        if (lens.mounted) lens.name else stringResource(R.string.no_lens_mounted)
+                    } ?: unavailable,
+                )
+                DebugValue(
+                    stringResource(R.string.temperature_status),
+                    state.status?.temperature?.ccapiValue ?: unavailable,
+                    mono = true,
+                    warning = state.status?.temperature?.isNormal == false,
+                )
             }
             DebugSection(stringResource(R.string.capability_evidence)) {
                 val evidence = state.capabilities?.evidence

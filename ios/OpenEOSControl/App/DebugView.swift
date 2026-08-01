@@ -38,6 +38,17 @@ struct DebugView: View {
                         value("storage_devices", camera.status?.storageDeviceCount.map { String($0) } ?? language.string("none"), mono: true)
                         value("battery_raw", camera.status?.rawBatteryJSON ?? "null", mono: true)
                         value("storage_raw", camera.status?.rawStorageJSON ?? "null", mono: true)
+                        value(
+                            "lens",
+                            camera.status?.lens.map { $0.mounted ? $0.name : language.string("no_lens_mounted") }
+                                ?? language.string("none")
+                        )
+                        value(
+                            "temperature_status",
+                            camera.status?.temperature?.rawValue ?? language.string("none"),
+                            mono: true,
+                            warning: camera.status?.temperature?.isNormal == false
+                        )
                     }
 
                     debugSection("capability_evidence") {

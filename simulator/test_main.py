@@ -247,6 +247,57 @@ def test_canonical_ccapi_discovery_settings_and_live_view_contract() -> None:
     }
 
 
+def test_canonical_lens_and_temperature_status_match_documented_shapes() -> None:
+    discovery = client.get("/ccapi").json()["ver100"]
+    lens = client.get("/ccapi/ver100/devicestatus/lens")
+    temperature = client.get("/ccapi/ver100/devicestatus/temperature")
+    changed = client.post(
+        "/ccapi/test/temperature?status=frameratedown_and_restrictionmovierecording"
+    )
+    updated = client.get("/ccapi/ver100/devicestatus/temperature")
+    invalid = client.post("/ccapi/test/temperature?status=hot")
+
+    assert {"path": "/devicestatus/lens", "get": True} in discovery
+    assert {"path": "/devicestatus/temperature", "get": True} in discovery
+    assert lens.json() == {"mount": True, "name": "RF24-105mm F4 L IS USM"}
+    assert temperature.json() == {"status": "normal"}
+    assert changed.status_code == 200
+    assert updated.json() == {"status": "frameratedown_and_restrictionmovierecording"}
+    assert invalid.status_code == 422
+
+
+def test_temperature_restrictions_block_starts_but_allow_stops() -> None:
+    client.post("/ccapi/test/temperature?status=disablerelease")
+    legacy_capture = client.post("/ccapi/capture/still", json={"af": True})
+    canonical_capture = client.post(
+        "/ccapi/ver100/shooting/control/shutterbutton",
+        json={"af": True},
+    )
+    assert legacy_capture.status_code == 409
+    assert canonical_capture.status_code == 409
+    assert state["capture_count"] == 0
+
+    client.post("/ccapi/test/temperature?status=normal")
+    assert client.post("/ccapi/record/start", json={}).status_code == 200
+    client.post("/ccapi/test/temperature?status=restrictionmovierecording")
+    assert client.post("/ccapi/record/start", json={}).status_code == 409
+    assert client.post("/ccapi/record/stop", json={}).status_code == 200
+    assert state["record_start_count"] == 1
+    assert state["record_stop_count"] == 1
+
+    client.post("/ccapi/test/temperature?status=normal")
+    assert client.post(
+        "/ccapi/ver100/shooting/liveview",
+        json={"cameradisplay": "on"},
+    ).status_code == 204
+    client.post("/ccapi/test/temperature?status=disableliveview")
+    assert client.post(
+        "/ccapi/ver100/shooting/liveview",
+        json={"cameradisplay": "on"},
+    ).status_code == 409
+    assert client.delete("/ccapi/ver100/shooting/liveview").status_code == 204
+
+
 def test_canonical_ccapi_event_polling_delivers_partial_changes_and_stops() -> None:
     discovery = client.get("/ccapi").json()
     changed = client.patch("/ccapi/exposure", json={"iso": "3200"})

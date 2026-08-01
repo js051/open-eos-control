@@ -107,7 +107,9 @@ extension CameraStatus {
             storageFreeImages: storageFreeImages,
             storageDeviceCount: storageDeviceCount,
             rawBatteryJSON: rawBatteryJSON,
-            rawStorageJSON: rawStorageJSON
+            rawStorageJSON: rawStorageJSON,
+            lens: lens,
+            temperature: temperature
         )
     }
 }

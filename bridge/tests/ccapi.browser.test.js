@@ -130,6 +130,29 @@ async function run() {
       "production CCAPI event long polling to become active",
     );
 
+    const restrictedTemperature = await fetch(
+      `${simulatorOrigin}/ccapi/test/temperature?status=disablerelease`,
+      { method: "POST" },
+    );
+    assert.equal(restrictedTemperature.ok, true);
+    await page.waitForFunction(() => {
+      const warning = document.querySelector("#temperature-warning");
+      const shutter = document.querySelector("#shutter-button");
+      return warning && !warning.hidden && shutter?.disabled;
+    });
+    assert.match(await page.locator("#temperature-warning-text").innerText(), /Shutter unavailable/i);
+
+    const normalTemperature = await fetch(
+      `${simulatorOrigin}/ccapi/test/temperature?status=normal`,
+      { method: "POST" },
+    );
+    assert.equal(normalTemperature.ok, true);
+    await page.waitForFunction(() => {
+      const warning = document.querySelector("#temperature-warning");
+      const shutter = document.querySelector("#shutter-button");
+      return warning?.hidden && shutter && !shutter.disabled;
+    });
+
     await page.click('.exposure-control[data-setting-key="iso"]');
     await page.waitForSelector("#setting-dialog[open]");
     await page.getByRole("button", { name: "1600", exact: true }).click();

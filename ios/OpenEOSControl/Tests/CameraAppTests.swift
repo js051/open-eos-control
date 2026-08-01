@@ -17,6 +17,25 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(tracker.record(1.2), 1, accuracy: 0.001)
     }
 
+    func testCameraStatusReplacementPreservesDeviceStatus() {
+        let original = CameraStatus(
+            recording: false,
+            exposure: ExposureState(iso: "100", shutter: "1/125", aperture: "4.0", whiteBalance: "auto"),
+            lens: LensStatus(mounted: true, name: "RF24-105mm F4 L IS USM"),
+            temperature: .warning
+        )
+
+        let replaced = original.replacing(
+            exposure: ExposureState(iso: "200", shutter: "1/125", aperture: "4.0", whiteBalance: "auto"),
+            recording: true
+        )
+
+        XCTAssertEqual(replaced.lens, original.lens)
+        XCTAssertEqual(replaced.temperature, .warning)
+        XCTAssertEqual(replaced.exposure.iso, "200")
+        XCTAssertEqual(replaced.recording, true)
+    }
+
     func testAspectFitRectPreservesImageAndLetterboxes() {
         let rect = aspectFitRect(
             contentSize: CGSize(width: 3_000, height: 2_000),
