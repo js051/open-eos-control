@@ -2,7 +2,7 @@
   "name": "open-eos-control-bridge-ui-tests",
   "private": true,
   "scripts": {
-    "test:browser": "node tests/local-video.browser.test.js",
+    "test:browser": "node tests/local-video.browser.test.js && node tests/ccapi.browser.test.js",
     "test:modules": "node tests/diagnostics.test.js && node tests/monitoring.test.js && node tests/lut.test.js && node tests/local-video.test.js && node tests/rtp-audio.test.js && node tests/media-transfer.test.js"
   },
   "devDependencies": {

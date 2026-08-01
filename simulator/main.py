@@ -1,10 +1,14 @@
 import asyncio
+import json
 import struct
 import zlib
 from datetime import datetime
+from email.utils import format_datetime
+from io import BytesIO
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Response
+from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Open EOS Control Fake Camera")
@@ -63,6 +67,19 @@ def initial_state() -> dict[str, object]:
         "click_wb_x": 0.5,
         "click_wb_y": 0.5,
         "click_wb_count": 0,
+        "canonical_af_start_count": 0,
+        "canonical_af_stop_count": 0,
+        "canonical_focus_position": None,
+        "canonical_click_wb_position": None,
+        "canonical_live_view_active": False,
+        "canonical_live_view_start_count": 0,
+        "canonical_live_view_stop_count": 0,
+        "canonical_live_view_size_rejections": 0,
+        "canonical_reject_live_view_size_once": True,
+        "canonical_datetime": {
+            "datetime": format_datetime(datetime.now().astimezone()),
+            "dst": False,
+        },
         "exposure": {
             "iso": "800",
             "shutter": "1/50",
@@ -169,6 +186,16 @@ async def get_test_state() -> dict[str, object]:
         },
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
+        "canonical": {
+            "af_start_count": state["canonical_af_start_count"],
+            "af_stop_count": state["canonical_af_stop_count"],
+            "focus_position": state["canonical_focus_position"],
+            "click_wb_position": state["canonical_click_wb_position"],
+            "live_view_active": state["canonical_live_view_active"],
+            "live_view_start_count": state["canonical_live_view_start_count"],
+            "live_view_stop_count": state["canonical_live_view_stop_count"],
+            "live_view_size_rejections": state["canonical_live_view_size_rejections"],
+        },
     }
 
 
@@ -362,6 +389,348 @@ async def media_delete(item_id: str) -> Response:
 @app.get("/ccapi/liveview/frame")
 async def liveview_frame() -> Response:
     return Response(content=camera_frame_png(), media_type="image/png")
+
+
+CANON_LIVE_VIEW_GEOMETRY = {
+    "positionx": 100,
+    "positiony": 200,
+    "positionwidth": 6000,
+    "positionheight": 4000,
+}
+
+CANON_DISCOVERY = {
+    "ver100": [
+        {"path": "/deviceinformation", "get": True},
+        {"path": "/devicestatus/batterylist", "get": True},
+        {"path": "/devicestatus/storage", "get": True},
+        {"path": "/shooting/settings", "get": True},
+        {"path": "/shooting/settings/iso", "put": True},
+        {"path": "/shooting/settings/tv", "put": True},
+        {"path": "/shooting/settings/av", "put": True},
+        {"path": "/shooting/settings/wb", "put": True},
+        {"path": "/shooting/settings/shootingmode", "put": True},
+        {"path": "/functions/datetime", "get": True, "put": True},
+        {"path": "/shooting/control/shutterbutton", "post": True},
+        {"path": "/shooting/control/shutterbutton/manual", "put": True},
+        {"path": "/shooting/control/af", "post": True},
+        {"path": "/shooting/control/recbutton", "post": True},
+        {"path": "/shooting/control/drivefocus", "post": True},
+        {"path": "/shooting/liveview", "post": True, "delete": True},
+        {"path": "/shooting/liveview/flip", "get": True},
+        {"path": "/shooting/liveview/flipdetail", "get": True},
+        {"path": "/shooting/liveview/afframeposition", "put": True},
+        {"path": "/shooting/liveview/clickwb", "post": True},
+        {"path": "/contents", "get": True, "delete": True},
+    ]
+}
+
+
+def canonical_settings() -> dict[str, dict[str, object]]:
+    exposure = state["exposure"]
+    assert isinstance(exposure, dict)
+    return {
+        "iso": {"value": exposure["iso"], "ability": capabilities["iso"]},
+        "tv": {"value": exposure["shutter"], "ability": capabilities["shutter"]},
+        "av": {"value": exposure["aperture"], "ability": capabilities["aperture"]},
+        "wb": {"value": exposure["white_balance"], "ability": capabilities["white_balance"]},
+        "shootingmode": {
+            "value": state["mode"],
+            "ability": ["Manual", "Bulb", "movie"],
+        },
+    }
+
+
+def canonical_media_path(item_id: str) -> str:
+    return f"/ccapi/ver100/contents/card1/100CANON/{item_id}"
+
+
+def canonical_media_item(item_id: str) -> dict[str, object]:
+    item = next((candidate for candidate in state["media"] if candidate["id"] == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    return item
+
+
+@app.get("/ccapi")
+async def canon_discovery() -> dict[str, list[dict[str, object]]]:
+    return CANON_DISCOVERY
+
+
+@app.get("/ccapi/ver100/deviceinformation")
+async def canon_device_information() -> dict[str, str]:
+    return {
+        "productname": "Canon EOS R6 Mark III",
+        "serialnumber": "SIMULATOR-SERIAL",
+        "version": "1.0.0-simulator",
+        "manufacturer": "Canon",
+        "firmwareversion": "simulator",
+    }
+
+
+@app.get("/ccapi/ver100/devicestatus/batterylist")
+async def canon_battery_list() -> dict[str, list[dict[str, object]]]:
+    return {"batterylist": [{"name": "LP-E6P", "level": 82, "quality": "good"}]}
+
+
+@app.get("/ccapi/ver100/devicestatus/storage")
+async def canon_storage() -> dict[str, list[dict[str, object]]]:
+    return {
+        "storagelist": [
+            {
+                "name": "card1",
+                "maxsize": 128_000_000_000,
+                "spacesize": 84_000_000_000,
+                "remainingshots": 2_418,
+            }
+        ]
+    }
+
+
+@app.get("/ccapi/ver100/shooting/settings")
+async def canon_shooting_settings() -> dict[str, dict[str, object]]:
+    return canonical_settings()
+
+
+@app.put("/ccapi/ver100/shooting/settings/{key}", status_code=204)
+async def canon_set_shooting_setting(key: str, payload: dict[str, object]) -> Response:
+    value = payload.get("value")
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="Setting value must be a string")
+    if key == "shootingmode":
+        if value not in {"Manual", "Bulb", "movie"}:
+            raise HTTPException(status_code=422, detail=f"Unsupported shootingmode: {value}")
+        state["mode"] = value
+    else:
+        setting_map = {
+            "iso": ("iso", "iso"),
+            "tv": ("shutter", "shutter"),
+            "av": ("aperture", "aperture"),
+            "wb": ("white_balance", "white_balance"),
+        }
+        mapped = setting_map.get(key)
+        if mapped is None:
+            raise HTTPException(status_code=404, detail="Setting not found")
+        state_key, capability_key = mapped
+        validate_setting(capability_key, value)
+        exposure = state["exposure"]
+        assert isinstance(exposure, dict)
+        exposure[state_key] = value
+    publish_event("shootingsettings")
+    return Response(status_code=204)
+
+
+@app.get("/ccapi/ver100/functions/datetime")
+async def canon_get_datetime() -> dict[str, object]:
+    value = state["canonical_datetime"]
+    assert isinstance(value, dict)
+    return value
+
+
+@app.put("/ccapi/ver100/functions/datetime")
+async def canon_set_datetime(payload: dict[str, object]) -> dict[str, object]:
+    if not isinstance(payload.get("datetime"), str) or not isinstance(payload.get("dst"), bool):
+        raise HTTPException(status_code=422, detail="datetime and dst are required")
+    state["canonical_datetime"] = dict(payload)
+    state["camera_datetime"] = payload["datetime"]
+    state["clock_sync_count"] += 1
+    publish_event("datetime")
+    return dict(payload)
+
+
+@app.post("/ccapi/ver100/shooting/control/shutterbutton", status_code=204)
+async def canon_capture_still(payload: dict[str, object]) -> Response:
+    if payload != {"af": True}:
+        raise HTTPException(status_code=422, detail="Unsupported shutter payload")
+    state["capture_count"] += 1
+    name = f"SIM_{state['capture_count'] + 2:04d}.JPG"
+    state["media"].insert(0, {"id": name, "name": name, "kind": "image", "capture_time": None})
+    publish_event("contents")
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/ver100/shooting/control/shutterbutton/manual", status_code=204)
+async def canon_manual_shutter(payload: dict[str, object]) -> Response:
+    action = payload.get("action")
+    autofocus = payload.get("af")
+    if action == "half_press" and autofocus is True:
+        state["half_pressed"] = True
+        state["half_press_count"] += 1
+    elif action == "full_press" and autofocus is False:
+        if state["mode"] != "Bulb":
+            raise HTTPException(status_code=409, detail="Camera is not in Bulb mode")
+        state["bulb_exposure_active"] = True
+        state["bulb_start_count"] += 1
+    elif action == "release" and autofocus is False:
+        if state["bulb_exposure_active"]:
+            state["bulb_exposure_active"] = False
+            state["bulb_stop_count"] += 1
+        else:
+            state["half_pressed"] = False
+            state["shutter_release_count"] += 1
+    else:
+        raise HTTPException(status_code=422, detail="Unsupported manual shutter payload")
+    publish_event("shutterbutton")
+    return Response(status_code=204)
+
+
+@app.post("/ccapi/ver100/shooting/control/af", status_code=204)
+async def canon_autofocus(payload: dict[str, object]) -> Response:
+    action = payload.get("action")
+    if action == "start":
+        state["canonical_af_start_count"] += 1
+    elif action == "stop":
+        state["canonical_af_stop_count"] += 1
+    else:
+        raise HTTPException(status_code=422, detail="Unsupported autofocus action")
+    return Response(status_code=204)
+
+
+@app.post("/ccapi/ver100/shooting/control/recbutton", status_code=204)
+async def canon_recording(payload: dict[str, object]) -> Response:
+    action = payload.get("action")
+    if action == "start":
+        state["recording"] = True
+        state["record_start_count"] += 1
+    elif action == "stop":
+        state["recording"] = False
+        state["record_stop_count"] += 1
+    else:
+        raise HTTPException(status_code=422, detail="Unsupported recording action")
+    publish_event("recbutton")
+    return Response(status_code=204)
+
+
+@app.post("/ccapi/ver100/shooting/control/drivefocus", status_code=204)
+async def canon_drive_focus(payload: dict[str, object]) -> Response:
+    value = payload.get("value")
+    valid_values = {f"{direction}{step}" for direction in ("near", "far") for step in (1, 2, 3)}
+    if not isinstance(value, str) or value not in valid_values:
+        raise HTTPException(status_code=422, detail="Unsupported focus drive value")
+    state["focus_drive_count"] += 1
+    state["focus_drive_direction"] = value[:-1]
+    state["focus_drive_step"] = {"1": "small", "2": "medium", "3": "large"}[value[-1]]
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/ver100/shooting/liveview/afframeposition", status_code=204)
+async def canon_tap_focus(payload: dict[str, object]) -> Response:
+    x = payload.get("positionx")
+    y = payload.get("positiony")
+    if isinstance(x, bool) or not isinstance(x, int) or isinstance(y, bool) or not isinstance(y, int):
+        raise HTTPException(status_code=422, detail="Integer focus coordinates are required")
+    state["canonical_focus_position"] = {"x": x, "y": y}
+    state["focus_x"] = (x - CANON_LIVE_VIEW_GEOMETRY["positionx"]) / CANON_LIVE_VIEW_GEOMETRY["positionwidth"]
+    state["focus_y"] = (y - CANON_LIVE_VIEW_GEOMETRY["positiony"]) / CANON_LIVE_VIEW_GEOMETRY["positionheight"]
+    state["focus_count"] += 1
+    return Response(status_code=204)
+
+
+@app.post("/ccapi/ver100/shooting/liveview/clickwb", status_code=204)
+async def canon_click_white_balance(payload: dict[str, object]) -> Response:
+    x = payload.get("positionx")
+    y = payload.get("positiony")
+    if isinstance(x, bool) or not isinstance(x, int) or isinstance(y, bool) or not isinstance(y, int):
+        raise HTTPException(status_code=422, detail="Integer white-balance coordinates are required")
+    state["canonical_click_wb_position"] = {"x": x, "y": y}
+    state["click_wb_count"] += 1
+    exposure = state["exposure"]
+    assert isinstance(exposure, dict)
+    exposure["white_balance"] = "click"
+    return Response(status_code=204)
+
+
+@app.post("/ccapi/ver100/shooting/liveview", status_code=204)
+async def canon_start_live_view(payload: dict[str, object]) -> Response:
+    if payload.get("cameradisplay") != "on":
+        raise HTTPException(status_code=422, detail="Camera display must be enabled")
+    if "liveviewsize" in payload and state["canonical_reject_live_view_size_once"]:
+        state["canonical_reject_live_view_size_once"] = False
+        state["canonical_live_view_size_rejections"] += 1
+        raise HTTPException(status_code=400, detail="Invalid parameter")
+    state["canonical_live_view_active"] = True
+    state["canonical_live_view_start_count"] += 1
+    return Response(status_code=204)
+
+
+@app.delete("/ccapi/ver100/shooting/liveview", status_code=204)
+async def canon_stop_live_view() -> Response:
+    state["canonical_live_view_active"] = False
+    state["canonical_live_view_stop_count"] += 1
+    return Response(status_code=204)
+
+
+@app.get("/ccapi/ver100/shooting/liveview/flip")
+async def canon_live_view_flip() -> Response:
+    if not state["canonical_live_view_active"]:
+        raise HTTPException(status_code=409, detail="Live View is not active")
+    jpeg = camera_frame_jpeg()
+    body = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n--frame\r\n"
+    return Response(content=body, media_type="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.get("/ccapi/ver100/shooting/liveview/flipdetail")
+async def canon_live_view_flip_detail(kind: str = "image") -> Response:
+    if not state["canonical_live_view_active"]:
+        raise HTTPException(status_code=409, detail="Live View is not active")
+    jpeg = camera_frame_jpeg()
+    if kind == "both":
+        info = {"liveview": {"image": CANON_LIVE_VIEW_GEOMETRY}}
+        return Response(content=detailed_live_view(jpeg, info), media_type="application/octet-stream")
+    if kind != "image":
+        raise HTTPException(status_code=422, detail="Unsupported detailed Live View kind")
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/ccapi/ver100/contents")
+async def canon_contents(
+    kind: str | None = None,
+    page: int | None = None,
+    order: str | None = None,
+) -> dict[str, object]:
+    del order
+    if kind == "number":
+        return {"pagenumber": 1}
+    if page not in {None, 1}:
+        return {"path": []}
+    return {"path": [canonical_media_path(item["id"]) for item in state["media"]]}
+
+
+@app.get("/ccapi/ver100/contents/card1/100CANON/{item_id}")
+async def canon_media(item_id: str, kind: str | None = None) -> Response:
+    canonical_media_item(item_id)
+    if kind not in {None, "main", "thumbnail", "display"}:
+        raise HTTPException(status_code=422, detail="Unsupported media representation")
+    return Response(content=camera_frame_jpeg(), media_type="image/jpeg")
+
+
+@app.delete("/ccapi/ver100/contents/card1/100CANON/{item_id}", status_code=204)
+async def canon_delete_media(item_id: str) -> Response:
+    item = canonical_media_item(item_id)
+    state["media"].remove(item)
+    publish_event("contents")
+    return Response(status_code=204)
+
+
+def camera_frame_jpeg() -> bytes:
+    image = Image.new("RGB", (960, 540), color=(17, 24, 39))
+    drawing = ImageDraw.Draw(image)
+    drawing.rectangle((52, 52, 907, 487), fill=(31, 41, 55), outline=(100, 116, 139), width=2)
+    focus_x = int(float(state["focus_x"]) * image.width)
+    focus_y = int(float(state["focus_y"]) * image.height)
+    drawing.ellipse((focus_x - 46, focus_y - 46, focus_x + 46, focus_y + 46), outline=(57, 197, 207), width=6)
+    status_color = (233, 75, 75) if state["recording"] else (88, 199, 123)
+    drawing.ellipse((72, 72, 92, 92), fill=status_color)
+    output = BytesIO()
+    image.save(output, format="JPEG", quality=88, optimize=True)
+    return output.getvalue()
+
+
+def detailed_live_view(jpeg: bytes, info: object) -> bytes:
+    return detail_packet(0x00, jpeg) + detail_packet(0x01, json.dumps(info).encode())
+
+
+def detail_packet(data_type: int, payload: bytes) -> bytes:
+    return b"\xff\x00" + bytes([data_type]) + len(payload).to_bytes(4, "big") + payload + b"\xff\xff"
 
 
 def camera_frame_png() -> bytes:
