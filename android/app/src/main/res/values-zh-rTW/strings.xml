@@ -246,4 +246,15 @@
     <string name="setting_capture_storage">拍攝記錄卡</string>
     <string name="camera_value_card_1">記憶卡 1</string>
     <string name="camera_value_card_2">記憶卡 2</string>
+    <string name="physical_validation">真機驗證</string>
+    <string name="physical_validation_hint">僅能確認相機已公告，且在本次連線中成功觀測的功能。請在看見實體相機確實執行後再勾選。</string>
+    <string name="physical_validation_offline_unavailable">離線 UI 預覽不能產生真機證據。</string>
+    <string name="physical_validation_simulator_unavailable">模擬器工作階段不能產生真機證據。</string>
+    <string name="physical_validation_disconnected">請先連接實體相機再開始驗證。</string>
+    <string name="physical_validation_no_observed">請先操作一項支援功能；成功執行後，該功能會出現在此處。</string>
+    <string name="physical_validation_confirmation_description">確認實體相機已執行 %1$s</string>
+    <string name="physical_validation_confirmed">已在相機上確認</string>
+    <string name="physical_validation_not_confirmed">尚未在相機上確認</string>
+    <string name="copy_physical_validation">複製真機驗證紀錄</string>
+    <string name="physical_validation_copied">已複製真機驗證紀錄</string>
 </resources>

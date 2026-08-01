@@ -3,10 +3,12 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraTransport
 import java.net.URI
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.Locale
 
 private const val DIAGNOSTIC_REPORT_SCHEMA = 1
+private const val PHYSICAL_VALIDATION_RECORD_SCHEMA = 1
 
 data class DiagnosticValidationSummary(
     val advertisedFeatures: Set<CameraFeature>,
@@ -24,6 +26,21 @@ data class DiagnosticReportMetadata(
     val controlRotationDegrees: Float? = null,
 )
 
+enum class PhysicalValidationSessionStatus {
+    READY,
+    DISCONNECTED,
+    OFFLINE_PREVIEW,
+    SIMULATOR,
+}
+
+data class PhysicalValidationSummary(
+    val sessionStatus: PhysicalValidationSessionStatus,
+    val advertisedFeatures: Set<CameraFeature>,
+    val observedFeatures: Set<CameraFeature>,
+    val eligibleFeatures: Set<CameraFeature>,
+    val operatorConfirmedFeatures: Set<CameraFeature>,
+)
+
 fun rollingFps(frameTimesMillis: List<Long>): Double {
     if (frameTimesMillis.size < 2) return 0.0
     val elapsed = frameTimesMillis.last() - frameTimesMillis.first()
@@ -35,6 +52,65 @@ fun diagnosticValidationSummary(state: CameraUiState): DiagnosticValidationSumma
     advertisedFeatures = state.capabilities?.matrix?.supported.orEmpty(),
     observedFeatures = state.capabilities?.evidence?.observedFeatures.orEmpty(),
 )
+
+fun physicalValidationSummary(state: CameraUiState): PhysicalValidationSummary {
+    val validation = diagnosticValidationSummary(state)
+    val status = when {
+        !state.connected -> PhysicalValidationSessionStatus.DISCONNECTED
+        state.previewMode -> PhysicalValidationSessionStatus.OFFLINE_PREVIEW
+        state.isSimulatorSession() -> PhysicalValidationSessionStatus.SIMULATOR
+        else -> PhysicalValidationSessionStatus.READY
+    }
+    val eligible = if (status == PhysicalValidationSessionStatus.READY) {
+        validation.validatedAdvertisedFeatures
+    } else {
+        emptySet()
+    }
+    return PhysicalValidationSummary(
+        sessionStatus = status,
+        advertisedFeatures = validation.advertisedFeatures,
+        observedFeatures = validation.observedFeatures,
+        eligibleFeatures = eligible,
+        operatorConfirmedFeatures = state.operatorConfirmedFeatures intersect eligible,
+    )
+}
+
+fun buildPhysicalValidationRecord(
+    state: CameraUiState,
+    metadata: DiagnosticReportMetadata = DiagnosticReportMetadata(),
+): String {
+    val validation = physicalValidationSummary(state)
+    require(validation.sessionStatus == PhysicalValidationSessionStatus.READY) {
+        "A physical camera session is required to create a validation record."
+    }
+    val diagnosticHash = buildDiagnosticReport(state, metadata)
+        .replace("\r\n", "\n")
+        .sha256()
+    val features = (validation.advertisedFeatures + validation.observedFeatures)
+        .sortedBy(CameraFeature::name)
+
+    return buildString {
+        appendLine("# Open EOS Control physical camera validation")
+        appendLine()
+        appendLine("- Record schema: $PHYSICAL_VALIDATION_RECORD_SCHEMA")
+        appendLine("- Generated at: ${metadata.generatedAt.markdownCell()}")
+        appendLine("- App version: ${metadata.productVersion.markdownCell()}")
+        appendLine("- Camera model: ${(state.info?.model ?: "unknown").markdownCell()}")
+        appendLine("- Transport: ${(state.transport?.name ?: "unknown").markdownCell()}")
+        appendLine("- Diagnostic SHA-256: `$diagnosticHash`")
+        appendLine()
+        appendLine("Operator confirmation is a manual in-app attestation that the physical camera visibly performed the operation.")
+        appendLine()
+        appendLine("| Feature | Advertised | Observed this session | Operator confirmed |")
+        appendLine("| --- | --- | --- | --- |")
+        features.forEach { feature ->
+            appendLine(
+                "| ${feature.name} | ${feature in validation.advertisedFeatures} | " +
+                    "${feature in validation.observedFeatures} | ${feature in validation.operatorConfirmedFeatures} |"
+            )
+        }
+    }.trimEnd()
+}
 
 fun buildDiagnosticReport(
     state: CameraUiState,
@@ -196,3 +272,18 @@ private fun diagnosticSerial(serial: String?): String = when {
 
 private fun String?.isDiagnosticUnknown(): Boolean =
     isNullOrBlank() || equals("unknown", ignoreCase = true) || equals("none", ignoreCase = true)
+
+private fun CameraUiState.isSimulatorSession(): Boolean = sequenceOf(
+    info?.api,
+    info?.model,
+    capabilities?.evidence?.source,
+).filterNotNull().any { it.contains("simulat", ignoreCase = true) }
+
+private fun String.markdownCell(): String = replace('\r', ' ')
+    .replace('\n', ' ')
+    .replace("|", "\\|")
+    .take(160)
+
+private fun String.sha256(): String = MessageDigest.getInstance("SHA-256")
+    .digest(toByteArray(Charsets.UTF_8))
+    .joinToString("") { byte -> "%02x".format(byte) }

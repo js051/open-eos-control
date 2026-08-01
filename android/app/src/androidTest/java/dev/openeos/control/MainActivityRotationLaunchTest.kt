@@ -14,9 +14,11 @@ import org.junit.runner.RunWith
 class MainActivityRotationLaunchTest {
     @Test
     fun launchingTheFixedCameraLayoutPreservesAnExistingSystemRotationLock() {
-        val original = shell("cmd window user-rotation")
+        val originalUserRotation = shell("cmd window user-rotation")
+        val originalAutoRotation = shell("settings get system accelerometer_rotation")
         try {
             shell("cmd window user-rotation lock 0")
+            shell("settings put system accelerometer_rotation 0")
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     assertEquals("0", shell("settings get system accelerometer_rotation"))
@@ -28,8 +30,13 @@ class MainActivityRotationLaunchTest {
             }
         } finally {
             when {
-                original == "free" -> shell("cmd window user-rotation free")
-                original.startsWith("lock ") -> shell("cmd window user-rotation $original")
+                originalUserRotation == "free" -> shell("cmd window user-rotation free")
+                originalUserRotation.startsWith("lock ") -> shell("cmd window user-rotation $originalUserRotation")
+            }
+            if (originalAutoRotation == "null") {
+                shell("settings delete system accelerometer_rotation")
+            } else {
+                shell("settings put system accelerometer_rotation $originalAutoRotation")
             }
         }
     }

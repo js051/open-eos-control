@@ -10,6 +10,14 @@
 
 只有第三層能宣稱實體結果已確認。驗證工具不會把相機公告冒充成執行成功，也不會把成功回覆自動當成肉眼確認。
 
+## Android 引導式驗證
+
+Android 連接相機後，可進入 **Debug > 真機驗證**。只有相機已公告，且目前 backend 在本次工作階段收到成功操作回覆或有效資料的功能才會出現。請在親眼看到實體相機產生預期結果後才勾選。
+
+確認內容只保存在記憶體；斷線、重新連線或進入離線 UI 預覽時會全部清空。模擬器與離線 UI 預覽不能建立真機驗證紀錄。**複製真機驗證紀錄** 會產生可公開的 Markdown，只包含相機型號、transport、advertised／observed／operator-confirmed 狀態，以及對應隱私安全診斷報告的 SHA-256；不包含序號、相機 URL、endpoint 清單、raw status、帳密或本機路徑。
+
+App 內紀錄是方便檢閱的工作階段筆記，不是遠端證明。完整診斷報告仍應留在私密位置，提交真機紀錄前仍須使用下方 verifier 檢查。
+
 ## 取得報告
 
 使用目前版本連接實體相機，實際操作要驗證的功能，再從 Android、iOS 或 PC 控制介面的 **Debug > 複製診斷報告** 取得報告。請把原始報告保存在 repository 外，檔名可使用 `diagnostic-report-r6m3.txt` 或 `diagnostic-report-r6m3.json`；Git 已忽略這類檔名。

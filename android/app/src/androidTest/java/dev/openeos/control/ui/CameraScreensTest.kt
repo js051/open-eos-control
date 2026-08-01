@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
@@ -1755,6 +1756,69 @@ class CameraScreensTest {
             .assertIsDisplayed()
         compose.onNodeWithText("CCAPI").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("USB / PTP").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun physicalValidationShowsOnlyObservedAdvertisedFeaturesAndCallsAction() {
+        var confirmed: Pair<CameraFeature, Boolean>? = null
+        val base = connectedState()
+        val state = base.copy(
+            uiMode = UiMode.DEBUG,
+            capabilities = base.capabilities?.copy(
+                matrix = CapabilityMatrix(
+                    supported = setOf(CameraFeature.STILL_CAPTURE, CameraFeature.LIVE_VIEW),
+                ),
+                evidence = base.capabilities.evidence.copy(
+                    observedFeatures = setOf(CameraFeature.STILL_CAPTURE),
+                ),
+            ),
+        )
+        compose.setContent {
+            MaterialTheme {
+                DebugScreen(
+                    state,
+                    noOpActions().copy(setOperatorConfirmation = { feature, value ->
+                        confirmed = feature to value
+                    }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("physical-confirmation-STILL_CAPTURE")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+        compose.onAllNodesWithTag("physical-confirmation-LIVE_VIEW").assertCountEquals(0)
+        compose.onNodeWithContentDescription(
+            resourceText(R.string.physical_validation_confirmation_description, "STILL_CAPTURE"),
+        ).performClick()
+        compose.runOnIdle {
+            assertEquals(CameraFeature.STILL_CAPTURE to true, confirmed)
+        }
+        compose.onNodeWithTag("copy-physical-validation-record").assertIsEnabled()
+    }
+
+    @Test
+    fun simulatorCannotCreatePhysicalValidationRecord() {
+        val base = connectedState()
+        val state = base.copy(
+            uiMode = UiMode.DEBUG,
+            info = base.info?.copy(api = "simulated-ccapi"),
+            capabilities = base.capabilities?.copy(
+                matrix = CapabilityMatrix(supported = setOf(CameraFeature.STILL_CAPTURE)),
+                evidence = base.capabilities.evidence.copy(
+                    source = "simulator contract",
+                    observedFeatures = setOf(CameraFeature.STILL_CAPTURE),
+                ),
+            ),
+        )
+        compose.setContent { MaterialTheme { DebugScreen(state, noOpActions()) } }
+
+        compose.onNodeWithText(resourceText(R.string.physical_validation_simulator_unavailable))
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onAllNodesWithTag("physical-confirmation-STILL_CAPTURE").assertCountEquals(0)
+        compose.onNodeWithTag("copy-physical-validation-record").assertIsNotEnabled()
     }
 
     @Test

@@ -470,4 +470,15 @@
     <string name="setting_capture_storage">Recording card</string>
     <string name="camera_value_card_1">Card 1</string>
     <string name="camera_value_card_2">Card 2</string>
+    <string name="physical_validation">Physical validation</string>
+    <string name="physical_validation_hint">Only features advertised by the camera and observed successfully in this connection can be confirmed. Check a feature only after seeing the physical camera perform it.</string>
+    <string name="physical_validation_offline_unavailable">Offline UI preview cannot produce physical-camera evidence.</string>
+    <string name="physical_validation_simulator_unavailable">Simulator sessions cannot produce physical-camera evidence.</string>
+    <string name="physical_validation_disconnected">Connect a physical camera to begin validation.</string>
+    <string name="physical_validation_no_observed">Use a supported control first. Eligible features appear after the operation succeeds.</string>
+    <string name="physical_validation_confirmation_description">Confirm %1$s on the physical camera</string>
+    <string name="physical_validation_confirmed">Confirmed on camera</string>
+    <string name="physical_validation_not_confirmed">Not yet confirmed on camera</string>
+    <string name="copy_physical_validation">Copy physical validation record</string>
+    <string name="physical_validation_copied">Physical validation record copied</string>
 </resources>

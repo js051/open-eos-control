@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
@@ -20,6 +21,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -27,12 +29,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraNetworkRouting
@@ -147,6 +152,89 @@ fun DebugScreen(
                     warning = evidence?.truncated == true,
                 )
             }
+            DebugSection(stringResource(R.string.physical_validation)) {
+                val validation = physicalValidationSummary(state)
+                Text(
+                    stringResource(R.string.physical_validation_hint),
+                    color = AppSubtleText,
+                )
+                when (validation.sessionStatus) {
+                    PhysicalValidationSessionStatus.OFFLINE_PREVIEW -> Text(
+                        stringResource(R.string.physical_validation_offline_unavailable),
+                        color = AppWarning,
+                    )
+                    PhysicalValidationSessionStatus.SIMULATOR -> Text(
+                        stringResource(R.string.physical_validation_simulator_unavailable),
+                        color = AppWarning,
+                    )
+                    PhysicalValidationSessionStatus.DISCONNECTED -> Text(
+                        stringResource(R.string.physical_validation_disconnected),
+                        color = AppWarning,
+                    )
+                    PhysicalValidationSessionStatus.READY -> {
+                        if (validation.eligibleFeatures.isEmpty()) {
+                            Text(stringResource(R.string.physical_validation_no_observed), color = AppSubtleText)
+                        }
+                        validation.eligibleFeatures.sortedBy { it.name }.forEach { feature ->
+                            val checked = feature in validation.operatorConfirmedFeatures
+                            val confirmationDescription = stringResource(
+                                R.string.physical_validation_confirmation_description,
+                                feature.name,
+                            )
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .testTag("physical-confirmation-${feature.name}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(feature.name, color = AppText, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        stringResource(
+                                            if (checked) R.string.physical_validation_confirmed
+                                            else R.string.physical_validation_not_confirmed,
+                                        ),
+                                        color = if (checked) AppSuccess else AppSubtleText,
+                                    )
+                                }
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = { actions.setOperatorConfirmation(feature, it) },
+                                    modifier = Modifier.semantics { contentDescription = confirmationDescription },
+                                )
+                            }
+                        }
+                    }
+                }
+                Button(
+                    onClick = {
+                        val metadata = diagnosticMetadata(
+                            context = context,
+                            systemAutoRotationEnabled = systemAutoRotationEnabled,
+                            controlRotationDegrees = controlRotationDegrees,
+                        )
+                        val record = buildPhysicalValidationRecord(state, metadata)
+                        copyToClipboard(context, "Open EOS Control physical validation", record)
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.physical_validation_copied),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                    enabled = validation.sessionStatus == PhysicalValidationSessionStatus.READY &&
+                        validation.eligibleFeatures.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth().testTag("copy-physical-validation-record"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppSurfaceHigh,
+                        contentColor = AppText,
+                    ),
+                    shape = RoundedCornerShape(6.dp),
+                ) {
+                    Icon(painterResource(LucideR.drawable.lucide_ic_clipboard_check), null)
+                    Text(stringResource(R.string.copy_physical_validation), modifier = Modifier.padding(start = 8.dp))
+                }
+            }
             DebugSection(stringResource(R.string.network)) {
                 val network = state.networkDiagnostics
                 DebugValue(stringResource(R.string.camera_route), networkRoutingLabel(network.routing))
@@ -257,19 +345,15 @@ fun DebugScreen(
             }
             Button(
                 onClick = {
-                    val productVersion = runCatching {
-                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                    }.getOrNull() ?: "unknown"
                     val report = buildDiagnosticReport(
                         state,
-                        DiagnosticReportMetadata(
-                            productVersion = productVersion,
+                        diagnosticMetadata(
+                            context = context,
                             systemAutoRotationEnabled = systemAutoRotationEnabled,
                             controlRotationDegrees = controlRotationDegrees,
                         ),
                     )
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("Open EOS Control diagnostic", report))
+                    copyToClipboard(context, "Open EOS Control diagnostic", report)
                     Toast.makeText(context, context.getString(R.string.diagnostic_copied), Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
@@ -284,6 +368,26 @@ fun DebugScreen(
             }
         }
     }
+}
+
+private fun diagnosticMetadata(
+    context: Context,
+    systemAutoRotationEnabled: Boolean,
+    controlRotationDegrees: Float,
+): DiagnosticReportMetadata {
+    val productVersion = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }.getOrNull() ?: "unknown"
+    return DiagnosticReportMetadata(
+        productVersion = productVersion,
+        systemAutoRotationEnabled = systemAutoRotationEnabled,
+        controlRotationDegrees = controlRotationDegrees,
+    )
+}
+
+private fun copyToClipboard(context: Context, label: String, value: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
 }
 
 @Composable

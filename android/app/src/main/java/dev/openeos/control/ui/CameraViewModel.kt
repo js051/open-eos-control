@@ -107,6 +107,19 @@ class CameraViewModel(
 
     fun setGridVisible(visible: Boolean) = _uiState.update { it.copy(showGrid = visible) }
 
+    fun setOperatorConfirmation(feature: CameraFeature, confirmed: Boolean) {
+        _uiState.update { current ->
+            val eligible = feature in physicalValidationSummary(current).eligibleFeatures
+            current.copy(
+                operatorConfirmedFeatures = when {
+                    confirmed && eligible -> current.operatorConfirmedFeatures + feature
+                    !confirmed -> current.operatorConfirmedFeatures - feature
+                    else -> current.operatorConfirmedFeatures
+                },
+            )
+        }
+    }
+
     fun setHistogramVisible(visible: Boolean) = updateMonitorSettings {
         copy(histogramVisible = visible, waveformVisible = if (visible) false else waveformVisible)
     }
@@ -1382,6 +1395,7 @@ class CameraViewModel(
         focusPoint = null,
         focusFeedback = null,
         lastClockSyncAtMillis = null,
+        operatorConfirmedFeatures = emptySet(),
         error = error,
         errorOperation = null,
     )

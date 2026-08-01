@@ -28,6 +28,7 @@ import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 
@@ -127,6 +128,7 @@ fun OpenEosControlApp(
             viewModel.closeSettingPicker()
             AppLanguageManager.set(language)
         },
+        setOperatorConfirmation = viewModel::setOperatorConfirmation,
         clearError = viewModel::clearError,
     )
 
@@ -262,4 +264,5 @@ data class CameraActions(
     val setLiveViewSource: (LiveViewSource) -> Unit,
     val setAppLanguage: (AppLanguage) -> Unit,
     val clearError: () -> Unit,
+    val setOperatorConfirmation: (CameraFeature, Boolean) -> Unit = { _, _ -> },
 )

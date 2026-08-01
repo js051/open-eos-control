@@ -252,6 +252,75 @@ class DiagnosticsTest {
     }
 
     @Test
+    fun physicalValidationRequiresAdvertisedAndObservedEvidence() {
+        val state = physicalCameraState().copy(
+            operatorConfirmedFeatures = setOf(
+                CameraFeature.STILL_CAPTURE,
+                CameraFeature.LIVE_VIEW,
+                CameraFeature.USB_DIAGNOSTICS,
+            ),
+        )
+
+        val validation = physicalValidationSummary(state)
+
+        assertEquals(PhysicalValidationSessionStatus.READY, validation.sessionStatus)
+        assertEquals(setOf(CameraFeature.STILL_CAPTURE), validation.eligibleFeatures)
+        assertEquals(setOf(CameraFeature.STILL_CAPTURE), validation.operatorConfirmedFeatures)
+    }
+
+    @Test
+    fun simulatorAndOfflinePreviewCannotProducePhysicalValidation() {
+        val simulator = physicalCameraState().copy(
+            info = physicalCameraState().info?.copy(api = "simulated-ccapi"),
+        )
+
+        assertEquals(
+            PhysicalValidationSessionStatus.SIMULATOR,
+            physicalValidationSummary(simulator).sessionStatus,
+        )
+        assertTrue(physicalValidationSummary(simulator).eligibleFeatures.isEmpty())
+        assertEquals(
+            PhysicalValidationSessionStatus.OFFLINE_PREVIEW,
+            physicalValidationSummary(physicalCameraState().copy(previewMode = true)).sessionStatus,
+        )
+        assertTrue(
+            runCatching { buildPhysicalValidationRecord(simulator) }.exceptionOrNull() is IllegalArgumentException,
+        )
+    }
+
+    @Test
+    fun physicalValidationRecordIsPrivacySafeAndBindsToSanitizedDiagnostic() {
+        val privateSerial = "PRIVATE-CAMERA-SERIAL"
+        val privatePassword = "camera-password"
+        val privateLocalPath = "C:/Us" + "ers/private/capture.jpg"
+        val state = physicalCameraState().copy(
+            baseUrl = "http://camera-user:$privatePassword@192.168.1.2:8080",
+            password = privatePassword,
+            info = physicalCameraState().info?.copy(serial = privateSerial),
+            operatorConfirmedFeatures = setOf(CameraFeature.STILL_CAPTURE),
+            error = "Camera $privateSerial at $privateLocalPath",
+        )
+        val metadata = DiagnosticReportMetadata(
+            productVersion = "0.1.9-test",
+            generatedAt = "2026-08-01T00:00:00Z",
+        )
+
+        val record = buildPhysicalValidationRecord(state, metadata)
+
+        assertTrue(record.contains("Record schema: 1"))
+        assertTrue(record.contains("Camera model: Canon EOS R6 Mark III"))
+        assertTrue(record.contains("| STILL_CAPTURE | true | true | true |"))
+        assertTrue(record.contains("| LIVE_VIEW | true | false | false |"))
+        assertTrue(record.contains(Regex("Diagnostic SHA-256: `[0-9a-f]{64}`")))
+        assertFalse(record.contains(privateSerial))
+        assertFalse(record.contains(privatePassword))
+        assertFalse(record.contains("192.168.1.2"))
+        assertFalse(record.contains("C:/Us" + "ers"))
+        assertFalse(record.contains("serial", ignoreCase = true))
+        assertFalse(record.contains("baseUrl", ignoreCase = true))
+    }
+
+    @Test
     fun usbDiagnosticReportDoesNotShowTheStaleCcapiUrl() {
         val report = buildDiagnosticReport(
             CameraUiState(
@@ -366,4 +435,37 @@ class DiagnosticsTest {
             settingsForMode(settings, CaptureMode.VIDEO).map { it.key },
         )
     }
+
+    private fun physicalCameraState(): CameraUiState = CameraUiState(
+        transport = CameraTransport.CCAPI_NETWORK,
+        info = CameraInfo(
+            connected = true,
+            model = "Canon EOS R6 Mark III",
+            serial = "TEST-SERIAL-0001",
+            api = "ccapi",
+        ),
+        status = CameraStatus(
+            connected = true,
+            batteryLevel = 80,
+            batteryStatus = "good",
+            recording = false,
+            mode = "M",
+            mediaAvailable = true,
+            remainingMinutes = null,
+            exposure = ExposureState("400", "1/125", "2.8", "auto"),
+        ),
+        capabilities = CameraCapabilities(
+            iso = emptyList(),
+            shutter = emptyList(),
+            aperture = emptyList(),
+            whiteBalance = emptyList(),
+            matrix = dev.openeos.control.data.CapabilityMatrix(
+                supported = setOf(CameraFeature.STILL_CAPTURE, CameraFeature.LIVE_VIEW),
+            ),
+            evidence = CameraCapabilityEvidence(
+                source = "GET /ccapi",
+                observedFeatures = setOf(CameraFeature.STILL_CAPTURE, CameraFeature.USB_DIAGNOSTICS),
+            ),
+        ),
+    )
 }

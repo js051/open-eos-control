@@ -106,6 +106,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
     liveViewFrameUrl = null,
     liveViewBitmap = null,
     liveViewDiagnostics = LiveViewDiagnostics(),
+    operatorConfirmedFeatures = emptySet(),
     uiMode = UiMode.CONTROL,
     activeSettingPicker = null,
     error = null,
