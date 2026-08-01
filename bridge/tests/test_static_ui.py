@@ -120,6 +120,7 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         "whitebalanceadjusta",
         "whitebalanceadjustb",
         "aspectratio",
+        "zoom",
         "zoomspeed",
         "autopoweroff",
         "alomode",
@@ -221,6 +222,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "await writable.abort(error)" in script
     assert "cancelMediaDownload({ silent: true })" in script
     assert "cameraInteractionBusy()" in script
+    assert 'if (setting.key === "zoom")' in script
+    assert 'range.type = "range"' in script
     assert "scheduleMediaTransferRender()" in script
     assert script.count("cancelDownload:") == 2
     assert script.count("deleteConfirm:") == 2

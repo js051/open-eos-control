@@ -20,6 +20,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case focusDrive = "FOCUS_DRIVE"
     case exposureControl = "EXPOSURE_CONTROL"
     case whiteBalanceControl = "WHITE_BALANCE_CONTROL"
+    case zoomControl = "ZOOM_CONTROL"
     case advancedSettings = "ADVANCED_SETTINGS"
     case mediaBrowser = "MEDIA_BROWSER"
     case mediaThumbnail = "MEDIA_THUMBNAIL"

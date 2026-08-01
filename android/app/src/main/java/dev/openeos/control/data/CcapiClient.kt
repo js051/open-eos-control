@@ -442,6 +442,9 @@ class CcapiClient(
             if (wbList.isNotEmpty()) {
                 supportedFeatures.add(CameraFeature.WHITE_BALANCE_CONTROL)
             }
+            if (advancedSettings.any { it.key == ZOOM_SETTING_KEY }) {
+                supportedFeatures.add(CameraFeature.ZOOM_CONTROL)
+            }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
             val supportsRtpLiveView = supportsRtpLiveView()
@@ -615,10 +618,22 @@ class CcapiClient(
 
     suspend fun setSetting(key: String, value: String): CameraStatus {
         val status = if (isRealCamera) {
-            putSettingValue(listOf(key), value)
+            if (key.equals(ZOOM_SETTING_KEY, ignoreCase = true)) {
+                postZoomValue(value)
+            } else {
+                putSettingValue(listOf(key), value)
+            }
             status()
         } else {
-            status()
+            if (key.equals(ZOOM_SETTING_KEY, ignoreCase = true)) {
+                val zoom = value.toIntOrNull()
+                    ?.takeIf { it.toString() == value }
+                    ?: error("Zoom value must be an integer advertised by the camera.")
+                postJson("/ccapi/zoom", JSONObject().put("value", zoom))
+                status()
+            } else {
+                status()
+            }
         }
         observedFeatures.add(featureForSetting(key))
         return status
@@ -1260,7 +1275,18 @@ class CcapiClient(
     private fun featureForSetting(key: String): CameraFeature = when (key.lowercase()) {
         "iso", "tv", "shutter", "shutterspeed", "av", "aperture" -> CameraFeature.EXPOSURE_CONTROL
         "wb", "whitebalance", "white_balance" -> CameraFeature.WHITE_BALANCE_CONTROL
+        ZOOM_SETTING_KEY -> CameraFeature.ZOOM_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
+    }
+
+    private fun zoomOperations(): Pair<CcapiApiOperation, CcapiApiOperation>? {
+        val reads = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith(ZOOM_PATH_SUFFIX) }
+            .sortedByDescending { it.apiVersionNumber() }
+        return reads.firstNotNullOfOrNull { read ->
+            apiOperations.firstOrNull { it.method == "POST" && it.path == read.path }
+                ?.let { write -> read to write }
+        }
     }
 
     private fun advertisedApiPaths(method: String, pathSuffix: String): List<String> =
@@ -1805,8 +1831,37 @@ class CcapiClient(
             }
         }
 
+        zoomOperations()?.let { (read, write) ->
+            val zoom = try {
+                getJson(read.path).toValidatedZoomSetting()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                null
+            }
+            if (zoom != null) {
+                val values = zoom.getJSONArray("ability").toStringList().toSet()
+                settingPathsByKey[ZOOM_SETTING_KEY] = write.path
+                settingValuesByKey[ZOOM_SETTING_KEY] = values
+                merged.put(ZOOM_SETTING_KEY, zoom)
+            }
+        }
+
         settingsLoaded = true
         return if (merged.length() > 0) merged else null
+    }
+
+    private suspend fun postZoomValue(value: String) {
+        if (!settingsLoaded) loadShootingSettings()
+        val path = settingPathsByKey[ZOOM_SETTING_KEY]
+            ?: error("Camera did not advertise writable Canon zoom control.")
+        if (value !in settingValuesByKey[ZOOM_SETTING_KEY].orEmpty()) {
+            error("Value '$value' is not advertised for zoom.")
+        }
+        val zoom = value.toIntOrNull()
+            ?.takeIf { it.toString() == value }
+            ?: error("Zoom value must be an integer advertised by the camera.")
+        postJson(path, JSONObject().put("value", zoom))
     }
 
     private suspend fun putSettingValue(candidateKeys: List<String>, value: String) {
@@ -2326,13 +2381,18 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
     )
 }
 
-private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabilities(
-    iso = getJSONArray("iso").toStringList(),
-    shutter = getJSONArray("shutter").toStringList(),
-    aperture = getJSONArray("aperture").toStringList(),
-    whiteBalance = getJSONArray("white_balance").toStringList(),
-    matrix = CapabilityMatrix.ccapiNetwork(
-        CapabilityMatrix.ccapiNetwork().supported + setOf(
+private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
+    val zoomControl = optJSONObject(ZOOM_SETTING_KEY)
+        ?.toValidatedZoomSetting()
+        ?.let { setting ->
+            CameraSettingControl(
+                key = ZOOM_SETTING_KEY,
+                label = "Zoom",
+                value = setting.getString("value"),
+                values = setting.getJSONArray("ability").toStringList(),
+            )
+        }
+    val supported = CapabilityMatrix.ccapiNetwork().supported + setOf(
             CameraFeature.STILL_CAPTURE,
             CameraFeature.BULB_EXPOSURE,
             CameraFeature.AUTOFOCUS,
@@ -2345,10 +2405,17 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
             CameraFeature.EVENT_POLLING,
             CameraFeature.CAMERA_CLOCK_SYNC,
             CameraFeature.FOCUS_DRIVE,
-        ),
-    ),
-    liveView = LiveViewCapabilities.simulator(),
-)
+        ) + if (zoomControl != null) setOf(CameraFeature.ZOOM_CONTROL) else emptySet()
+    return CameraCapabilities(
+        iso = getJSONArray("iso").toStringList(),
+        shutter = getJSONArray("shutter").toStringList(),
+        aperture = getJSONArray("aperture").toStringList(),
+        whiteBalance = getJSONArray("white_balance").toStringList(),
+        advancedSettings = listOfNotNull(zoomControl),
+        matrix = CapabilityMatrix.ccapiNetwork(supported),
+        liveView = LiveViewCapabilities.simulator(),
+    )
+}
 
 private fun JSONObject.safeTopLevelKeys(): Set<String> {
     val result = linkedSetOf<String>()
@@ -2428,6 +2495,20 @@ private fun JSONObject.toAdvancedSettingControls(writableKeys: Set<String>): Lis
             }
             continue
         }
+        if (key == ZOOM_SETTING_KEY) {
+            val values = setting.optJSONArray("ability")?.toStringList().orEmpty()
+            val value = setting.optString("value")
+            if (values.size < 2 || value !in values) continue
+            controls.add(
+                CameraSettingControl(
+                    key = key,
+                    label = "Zoom",
+                    value = value,
+                    values = values,
+                )
+            )
+            continue
+        }
         val values = setting.optJSONArray("ability")?.toStringList().orEmpty()
             .filter { it.isNotBlank() }
             .distinct()
@@ -2499,6 +2580,8 @@ private const val IMAGE_QUALITY_SETTING_KEY = "stillimagequality"
 private val IMAGE_QUALITY_FIELDS = listOf("raw", "jpeg", "heif")
 private const val WB_SHIFT_SETTING_KEY = "wbshift"
 private val WB_SHIFT_FIELDS = listOf("ba", "mg")
+private const val ZOOM_SETTING_KEY = "zoom"
+private const val ZOOM_PATH_SUFFIX = "/shooting/control/zoom"
 private const val MAX_STRUCTURED_SETTING_OPTIONS = 256
 
 private fun Any?.toExactJsonInt(): Int? = when (this) {
@@ -2517,6 +2600,17 @@ private fun JSONObject.toBoundedIntegerRangeValues(): List<String> {
     val count = ((maximum.toLong() - minimum.toLong()) / step.toLong()) + 1L
     if (count !in 1..MAX_STRUCTURED_SETTING_OPTIONS.toLong()) return emptyList()
     return List(count.toInt()) { index -> (minimum.toLong() + index.toLong() * step).toString() }
+}
+
+private fun JSONObject.toValidatedZoomSetting(): JSONObject? {
+    val current = opt("value").toExactJsonInt() ?: return null
+    val ability = optJSONObject("ability") ?: return null
+    val values = ability.toBoundedIntegerRangeValues()
+    val currentValue = current.toString()
+    if (values.size < 2 || currentValue !in values) return null
+    return JSONObject()
+        .put("value", currentValue)
+        .put("ability", org.json.JSONArray(values))
 }
 
 private fun String.splitCamelCaseWords(): List<String> =

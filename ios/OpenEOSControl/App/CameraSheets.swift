@@ -623,6 +623,7 @@ private struct MoreSettingsView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
+    @State private var pendingZoomIndices: [String: Double] = [:]
 
     var body: some View {
         NavigationStack {
@@ -730,39 +731,83 @@ private struct MoreSettingsView: View {
         return formatter.string(from: date)
     }
 
+    @ViewBuilder
     private func settingRow(_ setting: CameraSetting) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+        if setting.key.lowercased() == "zoom" {
+            zoomSettingRow(setting)
+        } else {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(localizedSettingLabel(setting))
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Color.cameraText)
+                    Text(localizedSettingValue(setting, value: currentValue(for: setting)))
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraSecondaryText)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Menu {
+                    ForEach(setting.values, id: \.self) { value in
+                        Button {
+                            Task { await camera.setSetting(key: setting.key, value: value) }
+                        } label: {
+                            if value == currentValue(for: setting) {
+                                Label(localizedSettingValue(setting, value: value), systemImage: "checkmark")
+                            } else {
+                                Text(localizedSettingValue(setting, value: value))
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .frame(width: 48, height: 48)
+                        .foregroundStyle(Color.cameraAccent)
+                        .accessibilityLabel(Text("choose_setting"))
+                }
+                .disabled(camera.isBusy(.setting))
+            }
+            .frame(minHeight: 64)
+        }
+    }
+
+    private func zoomSettingRow(_ setting: CameraSetting) -> some View {
+        let currentIndex = setting.values.firstIndex(of: currentValue(for: setting)) ?? 0
+        let pendingIndex = min(
+            max(Int((pendingZoomIndices[setting.key] ?? Double(currentIndex)).rounded()), 0),
+            setting.values.count - 1
+        )
+        let selection = Binding<Double>(
+            get: { pendingZoomIndices[setting.key] ?? Double(currentIndex) },
+            set: { pendingZoomIndices[setting.key] = $0 }
+        )
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
                 Text(localizedSettingLabel(setting))
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Color.cameraText)
-                Text(localizedSettingValue(setting, value: currentValue(for: setting)))
-                    .font(.caption)
-                    .foregroundStyle(Color.cameraSecondaryText)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Menu {
-                ForEach(setting.values, id: \.self) { value in
-                    Button {
-                        Task { await camera.setSetting(key: setting.key, value: value) }
-                    } label: {
-                        if value == currentValue(for: setting) {
-                            Label(localizedSettingValue(setting, value: value), systemImage: "checkmark")
-                        } else {
-                            Text(localizedSettingValue(setting, value: value))
-                        }
-                    }
-                }
-            } label: {
-                Image(systemName: "chevron.up.chevron.down")
-                    .frame(width: 48, height: 48)
+                Spacer()
+                Text("\(setting.values[pendingIndex])%")
+                    .font(.callout.weight(.bold))
                     .foregroundStyle(Color.cameraAccent)
-                    .accessibilityLabel(Text("choose_setting"))
             }
+            Slider(
+                value: selection,
+                in: 0...Double(setting.values.count - 1),
+                step: 1
+            ) { editing in
+                guard !editing else { return }
+                let selected = setting.values[pendingIndex]
+                pendingZoomIndices[setting.key] = nil
+                guard selected != currentValue(for: setting) else { return }
+                Task { await camera.setSetting(key: setting.key, value: selected) }
+            }
+            .tint(Color.cameraAccent)
             .disabled(camera.isBusy(.setting))
+            .accessibilityLabel(Text("setting_zoom"))
+            .accessibilityValue(Text("\(setting.values[pendingIndex])%"))
         }
-        .frame(minHeight: 64)
+        .frame(minHeight: 72)
     }
 
     private func currentValue(for setting: CameraSetting) -> String {

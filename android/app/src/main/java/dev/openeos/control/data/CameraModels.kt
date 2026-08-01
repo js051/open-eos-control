@@ -81,6 +81,7 @@ enum class CameraFeature(
     FOCUS_DRIVE("Focus drive"),
     EXPOSURE_CONTROL("Exposure control"),
     WHITE_BALANCE_CONTROL("White balance control"),
+    ZOOM_CONTROL("Zoom control"),
     ADVANCED_SETTINGS("Advanced camera settings"),
     MEDIA_BROWSER("Media browser"),
     MEDIA_THUMBNAIL("Media thumbnail"),
@@ -128,6 +129,7 @@ data class CapabilityMatrix(
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.CLICK_WHITE_BALANCE,
                 CameraFeature.FOCUS_DRIVE,
+                CameraFeature.ZOOM_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
@@ -147,6 +149,8 @@ data class CapabilityMatrix(
                 CameraFeature.AUTOFOCUS to
                     "The camera must advertise CCAPI POST autofocus or a verified manual half-press operation.",
                 CameraFeature.FOCUS_DRIVE to "The camera must advertise the verified CCAPI POST drivefocus operation.",
+                CameraFeature.ZOOM_CONTROL to
+                    "The camera must advertise readable and writable Canon zoom control in the same API version.",
                 CameraFeature.CAMERA_CLOCK_SYNC to
                     "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
             ),

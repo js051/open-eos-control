@@ -75,6 +75,8 @@ IMAGE_QUALITY_SETTING_KEY = "stillimagequality"
 IMAGE_QUALITY_FIELDS = ("raw", "jpeg", "heif")
 WB_SHIFT_SETTING_KEY = "wbshift"
 WB_SHIFT_FIELDS = ("ba", "mg")
+ZOOM_SETTING_KEY = "zoom"
+ZOOM_PATH_SUFFIX = "/shooting/control/zoom"
 MAX_STRUCTURED_SETTING_OPTIONS = 256
 CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
@@ -111,6 +113,7 @@ SETTING_LABELS = {
     "exposurecompensation": "Exposure compensation",
     "alomode": "Auto Lighting Optimizer",
     "ae": "AE mode",
+    "zoom": "Zoom",
 }
 _DEFAULT_RTP_FACTORY = object()
 
@@ -535,6 +538,8 @@ class CcapiSession:
                 supported.add(CameraFeature.EXPOSURE_CONTROL)
             if "whitebalance" in control_keys:
                 supported.add(CameraFeature.WHITE_BALANCE_CONTROL)
+            if ZOOM_SETTING_KEY in control_keys:
+                supported.add(CameraFeature.ZOOM_CONTROL)
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             jpeg_live_view_supported = self._supports_jpeg_live_view()
@@ -605,6 +610,7 @@ class CcapiSession:
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
+                CameraFeature.ZOOM_CONTROL,
             }
             live_sizes = (
                 [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
@@ -630,6 +636,9 @@ class CcapiSession:
                     CameraFeature.LIVE_VIEW_RTP.value: (self._rtp_capability_reason()),
                     CameraFeature.FOCUS_DRIVE.value: (
                         "The camera did not advertise the verified CCAPI POST drivefocus operation."
+                    ),
+                    CameraFeature.ZOOM_CONTROL.value: (
+                        "The camera must advertise readable and writable Canon zoom control in the same API version."
                     ),
                     CameraFeature.AUTOFOCUS.value: (
                         "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation."
@@ -720,7 +729,25 @@ class CcapiSession:
             path = self._setting_paths.get(structured[0] if structured else canonical)
             if path is None:
                 raise unsupported(_feature_for_setting(canonical).value, self.engine_name)
-            if structured:
+            if canonical == ZOOM_SETTING_KEY:
+                try:
+                    zoom = int(value)
+                except ValueError as error:
+                    raise BridgeError(
+                        "INVALID_SETTING_VALUE",
+                        "Zoom value must be an integer advertised by the camera.",
+                        status_code=422,
+                        engine=self.engine_name,
+                    ) from error
+                if str(zoom) != value:
+                    raise BridgeError(
+                        "INVALID_SETTING_VALUE",
+                        "Zoom value must be an integer advertised by the camera.",
+                        status_code=422,
+                        engine=self.engine_name,
+                    )
+                self._request_json("POST", path, {"value": zoom})
+            elif structured:
                 base_key, field = structured
                 raw = settings.get(base_key)
                 current = raw.get("value") if isinstance(raw, dict) else None
@@ -1463,6 +1490,14 @@ class CcapiSession:
                     setting_path = f"{prefix}/shooting/settings/{raw_key}"
                     if CcapiOperation("PUT", setting_path) in self._operations:
                         setting_paths[key] = setting_path
+        zoom_operations = self._zoom_operations()
+        if zoom_operations is not None:
+            read, write = zoom_operations
+            raw = self._first_json([read.path])
+            zoom = _validated_zoom_setting(raw)
+            if zoom is not None:
+                merged[ZOOM_SETTING_KEY] = zoom
+                setting_paths[ZOOM_SETTING_KEY] = write.path
         self._settings_cache = merged
         self._setting_paths = setting_paths
         return merged
@@ -1687,6 +1722,22 @@ class CcapiSession:
             delete = CcapiOperation("DELETE", f"{prefix}/event/polling")
             if delete in self._operations:
                 return get, delete
+        return None
+
+    def _zoom_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith(ZOOM_PATH_SUFFIX)
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            write = CcapiOperation("POST", read.path)
+            if write in self._operations:
+                return read, write
         return None
 
     def _camera_clock_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
@@ -2213,6 +2264,19 @@ def _bounded_integer_range_values(raw: object) -> list[str]:
     return [str(minimum + index * step) for index in range(count)]
 
 
+def _validated_zoom_setting(raw: object) -> dict[str, object] | None:
+    if not isinstance(raw, dict):
+        return None
+    current = raw.get("value")
+    if isinstance(current, bool) or not isinstance(current, int):
+        return None
+    values = _bounded_integer_range_values(raw.get("ability"))
+    current_value = str(current)
+    if len(values) < 2 or current_value not in values:
+        return None
+    return {"value": current_value, "ability": values}
+
+
 def _structured_setting_parts(key: str) -> tuple[str, str] | None:
     for base_key, fields in (
         (IMAGE_QUALITY_SETTING_KEY, IMAGE_QUALITY_FIELDS),
@@ -2255,6 +2319,8 @@ def _feature_for_setting(key: str) -> CameraFeature:
         return CameraFeature.EXPOSURE_CONTROL
     if key == "whitebalance":
         return CameraFeature.WHITE_BALANCE_CONTROL
+    if key == ZOOM_SETTING_KEY:
+        return CameraFeature.ZOOM_CONTROL
     return CameraFeature.ADVANCED_SETTINGS
 
 

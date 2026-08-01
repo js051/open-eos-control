@@ -378,6 +378,25 @@ input:disabled {
   background: #0f1213;
 }
 
+.range-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+}
+
+.range-setting input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.range-setting output {
+  color: var(--accent);
+  font-weight: 800;
+  text-align: end;
+}
+
 .field input {
   padding-right: 12px;
 }

@@ -199,6 +199,7 @@
       "wbshift.mg": "WB shift M/G",
       colorspace: "Color space",
       aspectratio: "Aspect ratio",
+      zoom: "Zoom",
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
       capturetarget: "Capture target",
@@ -456,6 +457,7 @@
       "wbshift.mg": "白平衡偏移 M/G",
       colorspace: "色彩空間",
       aspectratio: "畫面比例",
+      zoom: "變焦",
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
       capturetarget: "拍攝儲存位置",
@@ -1399,6 +1401,7 @@
   function settingValueLabel(settingOrKey, value) {
     const key = typeof settingOrKey === "string" ? settingOrKey : settingOrKey.key;
     const rawValue = String(value);
+    if (key === "zoom") return `${rawValue}%`;
     let messageKey = commonSettingValueKeys[rawValue.toLowerCase()];
     if (key === "alomode") {
       messageKey = autoLightingOptimizerValueKeys[rawValue.toLowerCase()] || messageKey;
@@ -1561,6 +1564,33 @@
       const label = document.createElement("label");
       const text = document.createElement("span");
       text.textContent = settingLabel(setting);
+      if (setting.key === "zoom") {
+        const control = document.createElement("span");
+        control.className = "range-setting";
+        const range = document.createElement("input");
+        range.type = "range";
+        range.min = "0";
+        range.max = String(setting.values.length - 1);
+        range.step = "1";
+        range.value = String(Math.max(0, setting.values.indexOf(setting.value)));
+        range.dataset.settingKey = setting.key;
+        range.disabled = cameraInteractionBusy();
+        range.setAttribute("aria-label", settingLabel(setting));
+        const output = document.createElement("output");
+        const updateOutput = () => {
+          output.textContent = settingValueLabel(setting, setting.values[Number(range.value)]);
+        };
+        updateOutput();
+        range.addEventListener("input", updateOutput);
+        range.addEventListener("change", () => {
+          const value = setting.values[Number(range.value)];
+          if (value !== setting.value) updateSetting(setting, value, range);
+        });
+        control.append(range, output);
+        label.append(text, control);
+        ui.advancedSettings.append(label);
+        return;
+      }
       const select = document.createElement("select");
       select.dataset.settingKey = setting.key;
       select.disabled = cameraInteractionBusy();
