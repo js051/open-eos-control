@@ -202,7 +202,7 @@ http://localhost:18080
 
 Useful endpoints:
 
-- `GET /ccapi` and Canon-style `/ccapi/ver100/...` routes for direct production CCAPI clients
+- `GET /ccapi`, Canon-style `/ccapi/ver100/...` controls, and cancellable `/ccapi/ver110/event/polling`
 - `GET /health`
 - `GET /ccapi/info`
 - `GET /ccapi/status`
@@ -225,7 +225,7 @@ Useful endpoints:
 - `DELETE /ccapi/media/{itemId}`
 - `GET /ccapi/liveview/frame`
 
-The required Android device workflow uses the test-only reset/state/mode endpoints to assert that production UI actions reached the backend. It covers Live View, exposure, still/movie capture, Tap AF, Click WB, AF-ON, half-press, focus drive, Bulb, media preview and deletion. The PC browser workflow connects through Canon-style discovery and `/ccapi/ver100/...` routes, then drives the production browser UI, FastAPI service, and `CcapiEngine` while asserting the same backend state. These reproducible Simulator paths do not replace the physical R6 Mark III validation record.
+The required Android device workflow uses the test-only reset/state/mode endpoints to assert that production UI actions reached the backend. It covers Live View, exposure, still/movie capture, Tap AF, Click WB, AF-ON, half-press, focus drive, Bulb, media preview and deletion. The PC browser workflow connects through Canon-style discovery and versioned CCAPI routes, then drives the production browser UI, FastAPI service, and `CcapiEngine` while asserting the same backend state. It also performs camera-side ISO and capture changes outside the PC UI, requiring Canon long-poll events to refresh the exposure strip and open media view without manual refresh, followed by explicit DELETE cleanup on disconnect. These reproducible Simulator paths do not replace the physical R6 Mark III validation record.
 
 ## Roadmap
 

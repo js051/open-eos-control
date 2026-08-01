@@ -7,7 +7,7 @@ from email.utils import format_datetime
 from io import BytesIO
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Query, Response
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 
@@ -76,6 +76,12 @@ def initial_state() -> dict[str, object]:
         "canonical_live_view_stop_count": 0,
         "canonical_live_view_size_rejections": 0,
         "canonical_reject_live_view_size_once": True,
+        "canonical_event_cursor": 0,
+        "canonical_event_poll_count": 0,
+        "canonical_event_delivery_count": 0,
+        "canonical_event_delete_count": 0,
+        "canonical_event_cancel_generation": 0,
+        "canonical_event_active_requests": 0,
         "canonical_datetime": {
             "datetime": format_datetime(datetime.now().astimezone()),
             "dst": False,
@@ -195,6 +201,11 @@ async def get_test_state() -> dict[str, object]:
             "live_view_start_count": state["canonical_live_view_start_count"],
             "live_view_stop_count": state["canonical_live_view_stop_count"],
             "live_view_size_rejections": state["canonical_live_view_size_rejections"],
+            "event_cursor": state["canonical_event_cursor"],
+            "event_poll_count": state["canonical_event_poll_count"],
+            "event_delivery_count": state["canonical_event_delivery_count"],
+            "event_delete_count": state["canonical_event_delete_count"],
+            "event_active_requests": state["canonical_event_active_requests"],
         },
     }
 
@@ -421,7 +432,10 @@ CANON_DISCOVERY = {
         {"path": "/shooting/liveview/afframeposition", "put": True},
         {"path": "/shooting/liveview/clickwb", "post": True},
         {"path": "/contents", "get": True, "delete": True},
-    ]
+    ],
+    "ver110": [
+        {"path": "/event/polling", "get": True, "delete": True},
+    ],
 }
 
 
@@ -465,6 +479,44 @@ async def canon_device_information() -> dict[str, str]:
         "manufacturer": "Canon",
         "firmwareversion": "simulator",
     }
+
+
+@app.get("/ccapi/ver110/event/polling")
+async def canon_poll_event(
+    timeout: Literal["immediately", "short", "long"] = "long",
+    continue_mode: str | None = Query(default=None, alias="continue"),
+) -> dict[str, object]:
+    if continue_mode is not None:
+        raise HTTPException(status_code=422, detail="continue is only valid for CCAPI 1.0")
+    state["canonical_event_poll_count"] += 1
+    state["canonical_event_active_requests"] += 1
+    cancel_generation = state["canonical_event_cancel_generation"]
+    attempts = {"immediately": 1, "short": 20, "long": 600}[timeout]
+    try:
+        for _ in range(attempts):
+            matching = [
+                event
+                for event in state["event_history"]
+                if event["sequence"] > state["canonical_event_cursor"]
+            ]
+            if matching:
+                state["canonical_event_cursor"] = matching[-1]["sequence"]
+                state["canonical_event_delivery_count"] += 1
+                keys = sorted({key for event in matching for key in event["keys"]})
+                return {key: {} for key in keys}
+            if state["canonical_event_cancel_generation"] != cancel_generation:
+                return {}
+            await asyncio.sleep(0.05)
+        return {}
+    finally:
+        state["canonical_event_active_requests"] -= 1
+
+
+@app.delete("/ccapi/ver110/event/polling", status_code=204)
+async def canon_stop_event_polling() -> Response:
+    state["canonical_event_delete_count"] += 1
+    state["canonical_event_cancel_generation"] += 1
+    return Response(status_code=204)
 
 
 @app.get("/ccapi/ver100/devicestatus/batterylist")

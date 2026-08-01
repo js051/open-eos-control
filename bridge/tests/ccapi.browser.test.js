@@ -124,6 +124,11 @@ async function run() {
     await page.click("#connect-button");
     await page.waitForSelector("#control-view:not([hidden])");
     assert.match(await page.locator("#camera-name").innerText(), /R6 Mark III/);
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.canonical.event_poll_count >= 1 && state.canonical.event_active_requests === 1,
+      "production CCAPI event long polling to become active",
+    );
 
     await page.click('.exposure-control[data-setting-key="iso"]');
     await page.waitForSelector("#setting-dialog[open]");
@@ -132,6 +137,25 @@ async function run() {
       simulatorOrigin,
       (state) => state.exposure.iso === "1600",
       "PC ISO control to reach Canon-style CCAPI",
+    );
+    const deliveredBeforeExternalSetting = await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.canonical.event_delivery_count >= 1,
+      "the camera setting event to reach the PC event loop",
+    );
+    const externalSetting = await fetch(`${simulatorOrigin}/ccapi/exposure`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ iso: "3200" }),
+    });
+    assert.equal(externalSetting.ok, true);
+    await page.waitForFunction(() =>
+      document.querySelector('.exposure-control[data-setting-key="iso"] strong')?.textContent?.trim() === "3200",
+    );
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.canonical.event_delivery_count > deliveredBeforeExternalSetting.canonical.event_delivery_count,
+      "external camera ISO event to refresh the PC UI without a manual refresh",
     );
 
     await page.waitForSelector(".settings-command button:not([disabled])");
@@ -229,6 +253,11 @@ async function run() {
 
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
     await waitForSimulatorState(simulatorOrigin, (state) => state.mode === "Bulb", "Canon Bulb mode write");
+    await page.waitForFunction(() => {
+      const shutter = document.querySelector("#shutter-button");
+      return shutter?.classList.contains("bulb") && !shutter.disabled;
+    });
+    assert.equal((await readSimulatorState(simulatorOrigin)).capture_count, 1);
     await page.click("#shutter-button");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -255,10 +284,22 @@ async function run() {
       (state) => !state.media_ids.includes("SIM_0003.JPG"),
       "confirmed exact Canon media deletion",
     );
+    const deliveredBeforeExternalCapture = (await readSimulatorState(simulatorOrigin))
+      .canonical.event_delivery_count;
+    const externalCapture = await fetch(`${simulatorOrigin}/ccapi/capture/still`, { method: "POST" });
+    assert.equal(externalCapture.ok, true);
+    await page.locator(".media-row").filter({ hasText: "SIM_0004.PNG" }).waitFor({ state: "visible" });
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.canonical.event_delivery_count > deliveredBeforeExternalCapture,
+      "external camera contents event to refresh the open media view",
+    );
 
     await page.click('.tab[data-view="diagnostics"]');
     await page.waitForSelector("#diagnostics-panel:not([hidden])");
-    assert.match(await page.locator("#diagnostics-output").innerText(), /CCAPI_NETWORK|ccapi/i);
+    const diagnostics = await page.locator("#diagnostics-output").innerText();
+    assert.match(diagnostics, /CCAPI_NETWORK|ccapi/i);
+    assert.match(diagnostics, /EVENT_POLLING/);
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
     await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-ccapi-e2e.png"), fullPage: true });
 
@@ -266,8 +307,11 @@ async function run() {
     await page.waitForSelector("#connection-view:not([hidden])");
     const finalState = await waitForSimulatorState(
       simulatorOrigin,
-      (state) => !state.canonical.live_view_active && state.canonical.live_view_stop_count === 1,
-      "CCAPI disconnect to stop Canon Live View",
+      (state) => !state.canonical.live_view_active &&
+        state.canonical.live_view_stop_count === 1 &&
+        state.canonical.event_delete_count >= 1 &&
+        state.canonical.event_active_requests === 0,
+      "CCAPI disconnect to stop Canon Live View and event polling",
     );
     assert.equal(finalState.canonical.af_start_count, finalState.canonical.af_stop_count);
     assert.equal(finalState.half_press_count, finalState.shutter_release_count);

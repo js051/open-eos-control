@@ -239,7 +239,33 @@ def test_canonical_ccapi_discovery_settings_and_live_view_contract() -> None:
         "live_view_start_count": 1,
         "live_view_stop_count": 1,
         "live_view_size_rejections": 1,
+        "event_cursor": 0,
+        "event_poll_count": 0,
+        "event_delivery_count": 0,
+        "event_delete_count": 0,
+        "event_active_requests": 0,
     }
+
+
+def test_canonical_ccapi_event_polling_delivers_partial_changes_and_stops() -> None:
+    discovery = client.get("/ccapi").json()
+    changed = client.patch("/ccapi/exposure", json={"iso": "3200"})
+    event = client.get("/ccapi/ver110/event/polling?timeout=long")
+    stopped = client.delete("/ccapi/ver110/event/polling")
+    test_state = client.get("/ccapi/test/state").json()["canonical"]
+
+    assert discovery["ver110"] == [
+        {"path": "/event/polling", "get": True, "delete": True}
+    ]
+    assert changed.status_code == 200
+    assert event.status_code == 200
+    assert event.json() == {"shootingsettings": {}}
+    assert stopped.status_code == 204
+    assert test_state["event_cursor"] == 1
+    assert test_state["event_poll_count"] == 1
+    assert test_state["event_delivery_count"] == 1
+    assert test_state["event_delete_count"] == 1
+    assert test_state["event_active_requests"] == 0
 
 
 def test_canonical_ccapi_controls_and_media_mutate_backend_state() -> None:
