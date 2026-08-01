@@ -35,12 +35,14 @@ class CameraRepository(
         baseUrl: String,
         username: String = "",
         password: String = "",
+        simulatorMode: Boolean? = null,
         request: LiveViewRequest = liveViewRequest,
     ): CameraSession = connect(
         connection = CameraConnection.CcapiNetwork(
             baseUrl = baseUrl,
             username = username,
             password = password,
+            simulatorMode = simulatorMode,
         ),
         request = request,
     )

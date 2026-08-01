@@ -107,7 +107,7 @@ python -m uvicorn main:app --host 0.0.0.0 --port 18080
   -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
 ```
 
-This flow connects through `10.0.2.2`, decodes a Live View frame, changes ISO, captures a still, starts and stops recording, verifies the new media item, and disconnects. CI runs this path on every pull request and `main` push.
+This runs two required paths through `10.0.2.2`. The Simulator preset covers the complete app control workflow, including decoded Live View, exposure, capture, focus, recording, Bulb, media preview/delete, and disconnect. A separate HTTP-preset workflow explicitly disables the Simulator shortcut and requires Canon-style `/ccapi` discovery, versioned ISO/capture/JPEG endpoints, Canon 1.1 event polling, camera-side ISO synchronization without manual refresh, and GET/DELETE cleanup. CI runs both paths on every pull request and `main` push. They remain deterministic protocol evidence rather than physical-camera acceptance.
 
 The debug APK is written to:
 
@@ -225,7 +225,7 @@ Useful endpoints:
 - `DELETE /ccapi/media/{itemId}`
 - `GET /ccapi/liveview/frame`
 
-The required Android device workflow uses the test-only reset/state/mode endpoints to assert that production UI actions reached the backend. It covers Live View, exposure, still/movie capture, Tap AF, Click WB, AF-ON, half-press, focus drive, Bulb, media preview and deletion. The PC browser workflow connects through Canon-style discovery and versioned CCAPI routes, then drives the production browser UI, FastAPI service, and `CcapiEngine` while asserting the same backend state. It also performs camera-side ISO and capture changes outside the PC UI, requiring Canon long-poll events to refresh the exposure strip and open media view without manual refresh, followed by explicit DELETE cleanup on disconnect. These reproducible Simulator paths do not replace the physical R6 Mark III validation record.
+The required Android device workflows use the test-only reset/state/mode endpoints to assert that production UI actions reached the backend. The Simulator-preset path covers Live View, exposure, still/movie capture, Tap AF, Click WB, AF-ON, half-press, focus drive, Bulb, media preview and deletion. The HTTP-preset path uses the same loopback service but explicitly selects the production Canon discovery and versioned endpoint contract, including event-driven external ISO synchronization. The PC browser workflow likewise connects through Canon-style discovery and versioned CCAPI routes, then drives the production browser UI, FastAPI service, and `CcapiEngine` while asserting backend state. It also performs camera-side ISO and capture changes outside the PC UI, requiring Canon long-poll events to refresh the exposure strip and open media view without manual refresh, followed by explicit DELETE cleanup on disconnect. These reproducible Simulator paths do not replace the physical R6 Mark III validation record.
 
 ## Roadmap
 

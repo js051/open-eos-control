@@ -51,6 +51,7 @@ enum class FocusFeedback { FOCUSING, SUCCESS, FAILURE }
 data class CameraUiState(
     val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
+    val ccapiSimulatorMode: Boolean? = null,
     val username: String = "",
     val password: String = "",
     val bridgeBaseUrl: String = CameraRepository.DEFAULT_DESKTOP_BRIDGE_URL,

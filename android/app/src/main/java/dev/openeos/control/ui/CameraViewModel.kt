@@ -245,6 +245,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_BASE_URL, error = null)
+                .copy(ccapiSimulatorMode = false)
         }
     }
 
@@ -253,6 +254,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_HTTPS_URL, error = null)
+                .copy(ccapiSimulatorMode = false)
         }
     }
 
@@ -261,6 +263,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEV_EMULATOR_SIMULATOR_URL, error = null)
+                .copy(ccapiSimulatorMode = true)
         }
     }
 
@@ -301,6 +304,7 @@ class CameraViewModel(
             baseUrl = _uiState.value.baseUrl,
             username = _uiState.value.username,
             password = _uiState.value.password,
+            simulatorMode = _uiState.value.ccapiSimulatorMode,
             request = LiveViewRequest(
                 fps = _uiState.value.liveViewFrameRateFps,
                 size = _uiState.value.liveViewSize,

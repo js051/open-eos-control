@@ -107,7 +107,7 @@ python -m uvicorn main:app --host 0.0.0.0 --port 18080
   -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
 ```
 
-此流程會透過 `10.0.2.2` 連線、解碼 Live View 畫面、修改 ISO、拍照、開始與停止錄影、確認新增媒體，最後斷線。每次 pull request 與推送至 `main` 時，CI 都會執行這條路徑。
+這會透過 `10.0.2.2` 執行兩條必跑流程。Simulator preset 負責完整 App 控制，包括解碼 Live View、曝光、拍照、對焦、錄影、Bulb、媒體預覽／刪除與斷線；另一條 HTTP preset 會明確停用 Simulator 捷徑，要求走 Canon `/ccapi` discovery、版本化 ISO／拍照／JPEG endpoint、Canon 1.1 event polling、免手動 Refresh 的機身端 ISO 同步，以及 GET／DELETE 清理。每次 pull request 與推送至 `main` 時，CI 都會執行兩條路徑；它們仍是可重現的協定證據，不能取代真機驗證。
 
 debug APK 會輸出到：
 
@@ -224,7 +224,7 @@ http://localhost:18080
 - `DELETE /ccapi/media/{itemId}`
 - `GET /ccapi/liveview/frame`
 
-Android 必跑的裝置流程會使用僅供測試的 reset／state／mode endpoint，逐項確認正式 UI 操作確實抵達 backend；範圍包含 Live View、曝光、拍照／錄影、Tap AF、點選白平衡、AF-ON、半按快門、焦點驅動、Bulb、媒體預覽與刪除。這條可重現的 Simulator 路徑不能取代 R6 Mark III 真機驗證紀錄。
+Android 必跑的裝置流程會使用僅供測試的 reset／state／mode endpoint，逐項確認正式 UI 操作確實抵達 backend。Simulator preset 涵蓋 Live View、曝光、拍照／錄影、Tap AF、點選白平衡、AF-ON、半按快門、焦點驅動、Bulb、媒體預覽與刪除；HTTP preset 則連到同一服務的 Canon discovery 與版本化 endpoint，驗證 direct CCAPI、JPEG 與 event polling 沒有繞進測試捷徑。這些可重現路徑不能取代 R6 Mark III 真機驗證紀錄。
 
 ## Roadmap
 
