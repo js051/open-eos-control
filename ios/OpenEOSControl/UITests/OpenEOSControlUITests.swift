@@ -289,7 +289,91 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
     }
 
-    private func launch(appLanguage: String, appleLanguage: String, locale: String) -> XCUIApplication {
+    @MainActor
+    func testCanonicalCCAPIEventsRefreshTheProductionUI() async throws {
+        let health = try? await simulatorRequest(path: "/health")
+        let available = health?["ok"] as? Bool == true
+        guard available else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
+            return
+            #else
+            throw XCTSkip("Start the fake camera at \(simulatorURL.absoluteString) to run the network end-to-end test")
+            #endif
+        }
+        _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+        _ = try await simulatorRequest(
+            path: "/ccapi/ver100/shooting/settings/shootingmode",
+            method: "PUT",
+            jsonBody: ["value": "Manual"]
+        )
+
+        let app = launch(
+            appLanguage: "english",
+            appleLanguage: "en",
+            locale: "en_US",
+            environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString]
+        )
+        let httpPreset = app.buttons["preset-http-button"]
+        XCTAssertTrue(httpPreset.waitForExistence(timeout: 8))
+        httpPreset.tap()
+
+        let urlField = app.textFields["camera-url-field"]
+        XCTAssertTrue(urlField.waitForExistence(timeout: 3))
+        XCTAssertEqual(urlField.value as? String, simulatorURL.absoluteString)
+        let connect = app.buttons["connect-button"]
+        XCTAssertTrue(waitForInteraction(connect, timeout: 8))
+        connect.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.images["live-view-decoded-frame"].waitForExistence(timeout: 30))
+        try await waitForSimulatorState { state in
+            guard let canonical = state["canonical"] as? [String: Any] else { return false }
+            return ((canonical["event_poll_count"] as? NSNumber)?.intValue ?? 0) >= 1 &&
+                (canonical["event_active_requests"] as? NSNumber)?.intValue == 1 &&
+                (canonical["live_view_start_count"] as? NSNumber)?.intValue == 1
+        }
+
+        _ = try await simulatorRequest(
+            path: "/ccapi/exposure",
+            method: "PATCH",
+            jsonBody: ["iso": "3200"]
+        )
+        XCTAssertTrue(waitForLabel(app.buttons["exposure-iso"], containing: "3200", timeout: 20))
+
+        openMoreActions(in: app)
+        app.buttons["camera-media-menu-button"].tap()
+        XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 20))
+
+        _ = try await simulatorRequest(
+            path: "/ccapi/ver100/shooting/control/shutterbutton",
+            method: "POST",
+            jsonBody: ["af": true]
+        )
+        XCTAssertTrue(app.staticTexts["SIM_0003.JPG"].waitForExistence(timeout: 20))
+        try await waitForSimulatorState { state in
+            guard let canonical = state["canonical"] as? [String: Any] else { return false }
+            return ((canonical["event_cursor"] as? NSNumber)?.intValue ?? 0) >= 3
+        }
+
+        app.buttons["media-back-button"].tap()
+        openMoreActions(in: app)
+        app.buttons["Disconnect"].tap()
+        XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
+        try await waitForSimulatorState { state in
+            guard let canonical = state["canonical"] as? [String: Any] else { return false }
+            return ((canonical["event_delete_count"] as? NSNumber)?.intValue ?? 0) >= 1 &&
+                (canonical["event_active_requests"] as? NSNumber)?.intValue == 0 &&
+                (canonical["live_view_stop_count"] as? NSNumber)?.intValue == 1
+        }
+    }
+
+    private func launch(
+        appLanguage: String,
+        appleLanguage: String,
+        locale: String,
+        environment: [String: String] = [:]
+    ) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchArguments = [
@@ -298,6 +382,7 @@ final class OpenEOSControlUITests: XCTestCase {
             "-AppleLanguages", "(\(appleLanguage))",
             "-AppleLocale", locale,
         ]
+        app.launchEnvironment.merge(environment) { _, newValue in newValue }
         app.launch()
         return app
     }
@@ -343,7 +428,8 @@ final class OpenEOSControlUITests: XCTestCase {
     private func simulatorRequest(
         path: String,
         method: String = "GET",
-        queryItems: [URLQueryItem] = []
+        queryItems: [URLQueryItem] = [],
+        jsonBody: [String: Any]? = nil
     ) async throws -> [String: Any] {
         let normalizedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let pathURL = simulatorURL.appendingPathComponent(normalizedPath)
@@ -351,12 +437,18 @@ final class OpenEOSControlUITests: XCTestCase {
         if !queryItems.isEmpty { components.queryItems = queryItems }
         var request = URLRequest(url: try XCTUnwrap(components.url))
         request.httpMethod = method
-        if method == "POST" { request.httpBody = Data() }
+        if let jsonBody {
+            request.httpBody = try JSONSerialization.data(withJSONObject: jsonBody)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        } else if method == "POST" {
+            request.httpBody = Data()
+        }
         request.timeoutInterval = 5
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             throw SimulatorTestError.invalidResponse
         }
+        if data.isEmpty { return [:] }
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw SimulatorTestError.invalidResponse
         }
