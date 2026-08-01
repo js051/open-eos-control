@@ -38,6 +38,10 @@ class ZoomUpdate(BaseModel):
     value: StrictInt = Field(ge=0, le=100)
 
 
+class MovieModeUpdate(BaseModel):
+    action: Literal["off", "on"]
+
+
 capabilities = {
     "iso": ["100", "200", "400", "800", "1600", "3200", "6400"],
     "shutter": ["1/25", "1/50", "1/60", "1/100", "1/125"],
@@ -54,6 +58,8 @@ def initial_state() -> dict[str, object]:
         "recording": False,
         "record_start_count": 0,
         "record_stop_count": 0,
+        "movie_mode": "off",
+        "movie_mode_update_count": 0,
         "capture_count": 0,
         "clock_sync_count": 0,
         "camera_datetime": None,
@@ -173,6 +179,8 @@ async def get_test_state() -> dict[str, object]:
         "recording": state["recording"],
         "record_start_count": state["record_start_count"],
         "record_stop_count": state["record_stop_count"],
+        "movie_mode": state["movie_mode"],
+        "movie_mode_update_count": state["movie_mode_update_count"],
         "capture_count": state["capture_count"],
         "clock_sync_count": state["clock_sync_count"],
         "camera_datetime": state["camera_datetime"],
@@ -261,8 +269,17 @@ async def events(after: int = 0) -> dict[str, object]:
 async def get_capabilities() -> dict[str, object]:
     return {
         **capabilities,
+        "moviemode": {"status": state["movie_mode"], "ability": ["off", "on"]},
         "zoom": {"value": state["zoom"], "ability": ZOOM_ABILITY},
     }
+
+
+@app.post("/ccapi/movie-mode", status_code=204)
+async def update_movie_mode(payload: MovieModeUpdate) -> Response:
+    state["movie_mode"] = payload.action
+    state["movie_mode_update_count"] += 1
+    publish_event("moviemode")
+    return Response(status_code=204)
 
 
 @app.post("/ccapi/zoom")
@@ -448,6 +465,7 @@ CANON_DISCOVERY = {
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/af", "post": True},
         {"path": "/shooting/control/recbutton", "post": True},
+        {"path": "/shooting/control/moviemode", "get": True, "post": True},
         {"path": "/shooting/control/drivefocus", "post": True},
         {"path": "/shooting/control/zoom", "get": True, "post": True},
         {"path": "/shooting/liveview", "post": True, "delete": True},
@@ -673,6 +691,19 @@ async def canon_recording(payload: dict[str, object]) -> Response:
     else:
         raise HTTPException(status_code=422, detail="Unsupported recording action")
     publish_event("recbutton")
+    return Response(status_code=204)
+
+
+@app.get("/ccapi/ver100/shooting/control/moviemode")
+async def canon_get_movie_mode() -> dict[str, str]:
+    return {"status": state["movie_mode"]}
+
+
+@app.post("/ccapi/ver100/shooting/control/moviemode", status_code=204)
+async def canon_set_movie_mode(payload: MovieModeUpdate) -> Response:
+    state["movie_mode"] = payload.action
+    state["movie_mode_update_count"] += 1
+    publish_event("moviemode")
     return Response(status_code=204)
 
 

@@ -243,12 +243,19 @@ private struct CaptureModePicker: View {
     @EnvironmentObject private var camera: CameraAppState
 
     var body: some View {
-        Picker("capture_mode", selection: $camera.captureMode) {
+        Picker("capture_mode", selection: Binding(
+            get: { camera.captureMode },
+            set: { mode in Task { await camera.setCaptureMode(mode) } }
+        )) {
             Text("photo").tag(AppCaptureMode.photo)
             Text("video").tag(AppCaptureMode.video)
         }
         .pickerStyle(.segmented)
         .frame(height: 38)
+        .disabled(
+            camera.recording || camera.bulbExposureActive || camera.isBusy(.setting) ||
+                camera.isBusy(.capture) || camera.isBusy(.recording)
+        )
         .accessibilityIdentifier("capture-mode-picker")
     }
 }

@@ -75,19 +75,15 @@ class CameraViewModelPreviewTest {
         advanceUntilIdle()
 
         assertEquals(CaptureMode.VIDEO, viewModel.uiState.value.captureMode)
-        assertEquals(
-            "Movie",
-            viewModel.uiState.value.capabilities?.shootingModeSetting()?.value,
-        )
+        assertEquals("on", viewModel.uiState.value.capabilities?.captureModeSetting()?.value)
+        assertEquals("Manual", viewModel.uiState.value.capabilities?.shootingModeSetting()?.value)
 
         viewModel.setCaptureMode(CaptureMode.PHOTO)
         advanceUntilIdle()
 
         assertEquals(CaptureMode.PHOTO, viewModel.uiState.value.captureMode)
-        assertEquals(
-            "Manual",
-            viewModel.uiState.value.capabilities?.shootingModeSetting()?.value,
-        )
+        assertEquals("off", viewModel.uiState.value.capabilities?.captureModeSetting()?.value)
+        assertEquals("Manual", viewModel.uiState.value.capabilities?.shootingModeSetting()?.value)
     }
 
     @Test

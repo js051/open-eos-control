@@ -445,6 +445,9 @@ class CcapiClient(
             if (advancedSettings.any { it.key == ZOOM_SETTING_KEY }) {
                 supportedFeatures.add(CameraFeature.ZOOM_CONTROL)
             }
+            if (advancedSettings.any { it.key == MOVIE_MODE_SETTING_KEY }) {
+                supportedFeatures.add(CameraFeature.MOVIE_MODE_CONTROL)
+            }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
             val supportsRtpLiveView = supportsRtpLiveView()
@@ -618,22 +621,26 @@ class CcapiClient(
 
     suspend fun setSetting(key: String, value: String): CameraStatus {
         val status = if (isRealCamera) {
-            if (key.equals(ZOOM_SETTING_KEY, ignoreCase = true)) {
-                postZoomValue(value)
-            } else {
-                putSettingValue(listOf(key), value)
+            when {
+                key.equals(ZOOM_SETTING_KEY, ignoreCase = true) -> postZoomValue(value)
+                key.equals(MOVIE_MODE_SETTING_KEY, ignoreCase = true) -> postMovieModeValue(value)
+                else -> putSettingValue(listOf(key), value)
             }
             status()
         } else {
-            if (key.equals(ZOOM_SETTING_KEY, ignoreCase = true)) {
-                val zoom = value.toIntOrNull()
-                    ?.takeIf { it.toString() == value }
-                    ?: error("Zoom value must be an integer advertised by the camera.")
-                postJson("/ccapi/zoom", JSONObject().put("value", zoom))
-                status()
-            } else {
-                status()
+            when {
+                key.equals(ZOOM_SETTING_KEY, ignoreCase = true) -> {
+                    val zoom = value.toIntOrNull()
+                        ?.takeIf { it.toString() == value }
+                        ?: error("Zoom value must be an integer advertised by the camera.")
+                    postJson("/ccapi/zoom", JSONObject().put("value", zoom))
+                }
+                key.equals(MOVIE_MODE_SETTING_KEY, ignoreCase = true) -> {
+                    require(value in MOVIE_MODE_VALUES) { "Movie mode must be on or off." }
+                    postOk("/ccapi/movie-mode", JSONObject().put("action", value))
+                }
             }
+            status()
         }
         observedFeatures.add(featureForSetting(key))
         return status
@@ -1275,6 +1282,7 @@ class CcapiClient(
     private fun featureForSetting(key: String): CameraFeature = when (key.lowercase()) {
         "iso", "tv", "shutter", "shutterspeed", "av", "aperture" -> CameraFeature.EXPOSURE_CONTROL
         "wb", "whitebalance", "white_balance" -> CameraFeature.WHITE_BALANCE_CONTROL
+        MOVIE_MODE_SETTING_KEY -> CameraFeature.MOVIE_MODE_CONTROL
         ZOOM_SETTING_KEY -> CameraFeature.ZOOM_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
     }
@@ -1282,6 +1290,16 @@ class CcapiClient(
     private fun zoomOperations(): Pair<CcapiApiOperation, CcapiApiOperation>? {
         val reads = apiOperations
             .filter { it.method == "GET" && it.path.endsWith(ZOOM_PATH_SUFFIX) }
+            .sortedByDescending { it.apiVersionNumber() }
+        return reads.firstNotNullOfOrNull { read ->
+            apiOperations.firstOrNull { it.method == "POST" && it.path == read.path }
+                ?.let { write -> read to write }
+        }
+    }
+
+    private fun movieModeOperations(): Pair<CcapiApiOperation, CcapiApiOperation>? {
+        val reads = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith(MOVIE_MODE_PATH_SUFFIX) }
             .sortedByDescending { it.apiVersionNumber() }
         return reads.firstNotNullOfOrNull { read ->
             apiOperations.firstOrNull { it.method == "POST" && it.path == read.path }
@@ -1847,6 +1865,21 @@ class CcapiClient(
             }
         }
 
+        movieModeOperations()?.let { (read, write) ->
+            val movieMode = try {
+                getJson(read.path).toValidatedMovieModeSetting()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                null
+            }
+            if (movieMode != null) {
+                settingPathsByKey[MOVIE_MODE_SETTING_KEY] = write.path
+                settingValuesByKey[MOVIE_MODE_SETTING_KEY] = MOVIE_MODE_VALUES
+                merged.put(MOVIE_MODE_SETTING_KEY, movieMode)
+            }
+        }
+
         settingsLoaded = true
         return if (merged.length() > 0) merged else null
     }
@@ -1862,6 +1895,16 @@ class CcapiClient(
             ?.takeIf { it.toString() == value }
             ?: error("Zoom value must be an integer advertised by the camera.")
         postJson(path, JSONObject().put("value", zoom))
+    }
+
+    private suspend fun postMovieModeValue(value: String) {
+        if (!settingsLoaded) loadShootingSettings()
+        val path = settingPathsByKey[MOVIE_MODE_SETTING_KEY]
+            ?: error("Camera did not advertise writable Canon movie mode control.")
+        if (value !in settingValuesByKey[MOVIE_MODE_SETTING_KEY].orEmpty()) {
+            error("Value '$value' is not advertised for movie mode.")
+        }
+        postOk(path, JSONObject().put("action", value))
     }
 
     private suspend fun putSettingValue(candidateKeys: List<String>, value: String) {
@@ -2382,6 +2425,16 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
 }
 
 private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
+    val movieModeControl = optJSONObject(MOVIE_MODE_SETTING_KEY)
+        ?.toValidatedMovieModeSetting()
+        ?.let { setting ->
+            CameraSettingControl(
+                key = MOVIE_MODE_SETTING_KEY,
+                label = "Movie mode",
+                value = setting.getString("value"),
+                values = setting.getJSONArray("ability").toStringList(),
+            )
+        }
     val zoomControl = optJSONObject(ZOOM_SETTING_KEY)
         ?.toValidatedZoomSetting()
         ?.let { setting ->
@@ -2405,13 +2458,15 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.EVENT_POLLING,
             CameraFeature.CAMERA_CLOCK_SYNC,
             CameraFeature.FOCUS_DRIVE,
-        ) + if (zoomControl != null) setOf(CameraFeature.ZOOM_CONTROL) else emptySet()
+        ) +
+        (if (zoomControl != null) setOf(CameraFeature.ZOOM_CONTROL) else emptySet()) +
+        (if (movieModeControl != null) setOf(CameraFeature.MOVIE_MODE_CONTROL) else emptySet())
     return CameraCapabilities(
         iso = getJSONArray("iso").toStringList(),
         shutter = getJSONArray("shutter").toStringList(),
         aperture = getJSONArray("aperture").toStringList(),
         whiteBalance = getJSONArray("white_balance").toStringList(),
-        advancedSettings = listOfNotNull(zoomControl),
+        advancedSettings = listOfNotNull(movieModeControl, zoomControl),
         matrix = CapabilityMatrix.ccapiNetwork(supported),
         liveView = LiveViewCapabilities.simulator(),
     )
@@ -2546,6 +2601,7 @@ private fun String.toSettingLabel(): String =
         "drivemode" -> "Drive mode"
         "meteringmode" -> "Metering"
         "picturestyle" -> "Picture style"
+        MOVIE_MODE_SETTING_KEY -> "Movie mode"
         "shootingmode" -> "Shooting mode"
         "stillimagequality" -> "Image quality"
         "stillimagequality.raw" -> "RAW quality"
@@ -2582,6 +2638,9 @@ private const val WB_SHIFT_SETTING_KEY = "wbshift"
 private val WB_SHIFT_FIELDS = listOf("ba", "mg")
 private const val ZOOM_SETTING_KEY = "zoom"
 private const val ZOOM_PATH_SUFFIX = "/shooting/control/zoom"
+private const val MOVIE_MODE_SETTING_KEY = "moviemode"
+private const val MOVIE_MODE_PATH_SUFFIX = "/shooting/control/moviemode"
+private val MOVIE_MODE_VALUES = linkedSetOf("off", "on")
 private const val MAX_STRUCTURED_SETTING_OPTIONS = 256
 
 private fun Any?.toExactJsonInt(): Int? = when (this) {
@@ -2600,6 +2659,14 @@ private fun JSONObject.toBoundedIntegerRangeValues(): List<String> {
     val count = ((maximum.toLong() - minimum.toLong()) / step.toLong()) + 1L
     if (count !in 1..MAX_STRUCTURED_SETTING_OPTIONS.toLong()) return emptyList()
     return List(count.toInt()) { index -> (minimum.toLong() + index.toLong() * step).toString() }
+}
+
+private fun JSONObject.toValidatedMovieModeSetting(): JSONObject? {
+    val status = opt("status") as? String ?: opt("value") as? String ?: return null
+    if (status !in MOVIE_MODE_VALUES) return null
+    return JSONObject()
+        .put("value", status)
+        .put("ability", org.json.JSONArray(MOVIE_MODE_VALUES.toList()))
 }
 
 private fun JSONObject.toValidatedZoomSetting(): JSONObject? {

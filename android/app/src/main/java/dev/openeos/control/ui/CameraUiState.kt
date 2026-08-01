@@ -138,7 +138,17 @@ internal fun captureModeSwitchEnabled(state: CameraUiState): Boolean =
 internal fun CameraCapabilities.shootingModeSetting(): CameraSettingControl? =
     advancedSettings.firstOrNull { it.key.isShootingModeKey() }
 
+internal fun CameraCapabilities.captureModeSetting(): CameraSettingControl? =
+    advancedSettings.firstOrNull { it.key.isMovieModeKey() } ?: shootingModeSetting()
+
 internal fun CameraSettingControl.currentCaptureMode(): CaptureMode? {
+    if (key.isMovieModeKey()) {
+        return when (value.cameraModeToken()) {
+            "on" -> CaptureMode.VIDEO
+            "off" -> CaptureMode.PHOTO
+            else -> null
+        }
+    }
     val current = values.firstOrNull { it.cameraModeToken() == value.cameraModeToken() } ?: return null
     return captureModeForShootingValue(current)
 }
@@ -146,14 +156,20 @@ internal fun CameraSettingControl.currentCaptureMode(): CaptureMode? {
 internal fun CameraSettingControl.valueForCaptureMode(
     mode: CaptureMode,
     preferredPhotoValue: String?,
-): String? = when (mode) {
-    CaptureMode.VIDEO -> values.firstOrNull { captureModeForShootingValue(it) == CaptureMode.VIDEO }
-    CaptureMode.PHOTO -> sequenceOf(preferredPhotoValue, value)
-        .filterNotNull()
-        .mapNotNull { candidate ->
-            values.firstOrNull { it.cameraModeToken() == candidate.cameraModeToken() }
-        }
-        .firstOrNull { captureModeForShootingValue(it) == CaptureMode.PHOTO }
+): String? {
+    if (key.isMovieModeKey()) {
+        val expected = if (mode == CaptureMode.VIDEO) "on" else "off"
+        return values.firstOrNull { it.cameraModeToken() == expected }
+    }
+    return when (mode) {
+        CaptureMode.VIDEO -> values.firstOrNull { captureModeForShootingValue(it) == CaptureMode.VIDEO }
+        CaptureMode.PHOTO -> sequenceOf(preferredPhotoValue, value)
+            .filterNotNull()
+            .mapNotNull { candidate ->
+                values.firstOrNull { it.cameraModeToken() == candidate.cameraModeToken() }
+            }
+            .firstOrNull { captureModeForShootingValue(it) == CaptureMode.PHOTO }
+    }
 }
 
 internal fun captureModeForShootingValue(value: String): CaptureMode? {
@@ -164,6 +180,10 @@ internal fun captureModeForShootingValue(value: String): CaptureMode? {
 
 internal fun String.isShootingModeKey(): Boolean =
     cameraModeToken() in setOf("shootingmode", "autoexposuremode", "ae")
+
+internal fun String.isMovieModeKey(): Boolean = cameraModeToken() == "moviemode"
+
+internal fun String.isCaptureModeKey(): Boolean = isMovieModeKey() || isShootingModeKey()
 
 private fun String.cameraModeToken(): String =
     lowercase(Locale.ROOT).filter(Char::isLetterOrDigit)
@@ -178,6 +198,7 @@ fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): Li
     )
     return settings.filter { it.values.distinct().size > 1 }.filter { setting ->
         val key = setting.key.lowercase()
+        if (setting.key.isMovieModeKey()) return@filter false
         val isVideo = videoTokens.any(key::contains)
         val isPhoto = photoTokens.any(key::contains)
         when (mode) {

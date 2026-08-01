@@ -14,6 +14,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case bulbExposure = "BULB_EXPOSURE"
     case autofocus = "AUTOFOCUS"
     case shutterHalfPress = "SHUTTER_HALF_PRESS"
+    case movieModeControl = "MOVIE_MODE_CONTROL"
     case videoRecording = "VIDEO_RECORDING"
     case tapFocus = "TAP_FOCUS"
     case clickWhiteBalance = "CLICK_WHITE_BALANCE"

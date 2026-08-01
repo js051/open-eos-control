@@ -1090,6 +1090,95 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requestCount, 2)
     }
 
+    func testCanonMovieModeRequiresMatchingGetPostAndWritesAction() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/moviemode","get":true,"post":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/control/moviemode",
+            body: #"{"status":"off"}"#
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver100/shooting/control/moviemode",
+            status: 204,
+            body: Data()
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/batterylist",
+            body: #"{"batterylist":[{"level":89}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/storage",
+            body: #"{"storagelist":[{"name":"card1","spacesize":32000000000}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/control/moviemode",
+            body: #"{"status":"on"}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let capabilities = try await client.capabilities()
+        XCTAssertEqual(capabilities.setting("moviemode")?.values, ["off", "on"])
+        XCTAssertEqual(capabilities.setting("moviemode")?.value, "off")
+        XCTAssertTrue(capabilities.matrix.supports(.movieModeControl))
+
+        _ = try await client.setSetting(key: "moviemode", value: "on")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first {
+            $0.method == "POST" && $0.path == "/ccapi/ver100/shooting/control/moviemode"
+        })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["action"] as? String, "on")
+    }
+
+    func testCanonMovieModeStaysPlannedWithoutMatchingPostOrValidStatus() async throws {
+        let missingPost = MockCameraHTTPTransport()
+        await missingPost.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/control/moviemode","get":true}]}"#
+        )
+        await missingPost.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let missingPostClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: missingPost
+        )
+
+        var capabilities = try await missingPostClient.capabilities()
+        XCTAssertNil(capabilities.setting("moviemode"))
+        XCTAssertFalse(capabilities.matrix.supports(.movieModeControl))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.movieModeControl))
+        let requestCount = await missingPost.requests().count
+        XCTAssertEqual(requestCount, 2)
+
+        let invalidStatus = MockCameraHTTPTransport()
+        await invalidStatus.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/control/moviemode","get":true,"post":true}]}"#
+        )
+        await invalidStatus.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await invalidStatus.enqueueJSON(
+            path: "/ccapi/ver100/shooting/control/moviemode",
+            body: #"{"status":"recording"}"#
+        )
+        let invalidStatusClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: invalidStatus
+        )
+
+        capabilities = try await invalidStatusClient.capabilities()
+        XCTAssertNil(capabilities.setting("moviemode"))
+        XCTAssertFalse(capabilities.matrix.supports(.movieModeControl))
+    }
+
     func testStillImageQualityWritesCanonObjectAndPreservesCompanionFormat() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)

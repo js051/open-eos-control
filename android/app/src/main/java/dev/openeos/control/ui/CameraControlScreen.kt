@@ -1389,6 +1389,7 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "meteringmode" -> stringResource(R.string.setting_metering_mode)
     "flashmode" -> stringResource(R.string.setting_flash_mode)
     "picturestyle" -> stringResource(R.string.setting_picture_style)
+    "moviemode" -> stringResource(R.string.setting_movie_mode)
     "shootingmode", "autoexposuremode" -> stringResource(R.string.setting_shooting_mode)
     "stillimagequality" -> stringResource(R.string.setting_image_quality)
     "stillimagequality.raw" -> stringResource(R.string.setting_image_quality_raw)

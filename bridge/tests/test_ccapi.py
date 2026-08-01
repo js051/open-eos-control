@@ -99,6 +99,7 @@ class FakeCcapiTransport:
         preview_body: bytes = JPEG,
         preview_content_type: str = "image/jpeg",
         zoom_response: object | None = None,
+        movie_mode_response: object | None = None,
     ) -> None:
         self.discovery = discovery or DISCOVERY
         self.developer_discovery = developer_discovery
@@ -112,6 +113,7 @@ class FakeCcapiTransport:
         self.preview_body = preview_body
         self.preview_content_type = preview_content_type
         self.zoom_response = zoom_response
+        self.movie_mode_response = movie_mode_response
         self.requests: list[RecordedRequest] = []
         self.settings = {
             "iso": {"value": "800", "ability": ["100", "800", "1600"]},
@@ -135,6 +137,7 @@ class FakeCcapiTransport:
             },
         }
         self.zoom = 50
+        self.movie_mode = "off"
         self.reject_live_view_size = True
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.closed = False
@@ -185,6 +188,14 @@ class FakeCcapiTransport:
             assert payload is not None and isinstance(payload.get("value"), int)
             self.zoom = payload["value"]
             return _json_response({"value": self.zoom})
+        if method == "GET" and path == "/ccapi/ver100/shooting/control/moviemode":
+            if self.movie_mode_response is not None:
+                return _json_response(self.movie_mode_response)
+            return _json_response({"status": self.movie_mode})
+        if method == "POST" and path == "/ccapi/ver100/shooting/control/moviemode":
+            assert payload is not None and payload.get("action") in {"off", "on"}
+            self.movie_mode = str(payload["action"])
+            return CcapiResponse(204, {}, b"")
         if method == "PUT" and path == "/ccapi/ver100/functions/datetime":
             assert payload is not None
             self.camera_clock = payload
@@ -581,6 +592,67 @@ def test_ccapi_zoom_hides_malformed_or_unbounded_ranges(zoom_response: object) -
     assert not any(setting.key == "zoom" for setting in capabilities.settings)
     with pytest.raises(BridgeError, match="ZOOM_CONTROL"):
         session.set_setting("zoom", "50")
+
+
+def test_ccapi_movie_mode_requires_matching_get_post_and_writes_action() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/shooting/control/moviemode", "get": True, "post": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    movie_mode = next(setting for setting in capabilities.settings if setting.key == "moviemode")
+    assert movie_mode.value == "off"
+    assert movie_mode.values == ["off", "on"]
+    assert CameraFeature.MOVIE_MODE_CONTROL in capabilities.supported
+    session.set_setting("moviemode", "on")
+    assert transport.movie_mode == "on"
+    assert RecordedRequest(
+        "POST",
+        "/ccapi/ver100/shooting/control/moviemode",
+        {"action": "on"},
+    ) in transport.requests
+
+
+@pytest.mark.parametrize("movie_mode_response", [{"status": "recording"}, {"status": True}, {}])
+def test_ccapi_movie_mode_hides_invalid_status(movie_mode_response: object) -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/shooting/control/moviemode", "get": True, "post": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery, movie_mode_response=movie_mode_response)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.MOVIE_MODE_CONTROL not in capabilities.supported
+    assert CameraFeature.MOVIE_MODE_CONTROL in capabilities.planned
+    assert not any(setting.key == "moviemode" for setting in capabilities.settings)
+
+
+def test_ccapi_movie_mode_does_not_combine_get_post_across_versions() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/shooting/control/moviemode", "get": True},
+            ],
+            "ver110": [{"path": "/shooting/control/moviemode", "post": True}],
+        }
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.MOVIE_MODE_CONTROL not in capabilities.supported
+    assert not any(setting.key == "moviemode" for setting in capabilities.settings)
 
 
 def test_ccapi_clock_sync_does_not_combine_read_and_write_across_api_versions() -> None:

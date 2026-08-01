@@ -366,3 +366,26 @@ def test_zoom_contract_uses_integer_value_and_mutates_both_simulator_routes() ->
     assert simulator.json() == {"value": 25}
     assert invalid.status_code == 422
     assert test_state["zoom"] == {"value": 25, "update_count": 2}
+
+
+def test_movie_mode_contract_uses_on_off_action_and_mutates_both_routes() -> None:
+    client.post("/ccapi/test/reset")
+
+    initial = client.get("/ccapi/ver100/shooting/control/moviemode")
+    canonical = client.post(
+        "/ccapi/ver100/shooting/control/moviemode",
+        json={"action": "on"},
+    )
+    simulator = client.post("/ccapi/movie-mode", json={"action": "off"})
+    invalid = client.post(
+        "/ccapi/ver100/shooting/control/moviemode",
+        json={"action": "start"},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert initial.json() == {"status": "off"}
+    assert canonical.status_code == 204
+    assert simulator.status_code == 204
+    assert invalid.status_code == 422
+    assert test_state["movie_mode"] == "off"
+    assert test_state["movie_mode_update_count"] == 2

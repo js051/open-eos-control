@@ -193,7 +193,8 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - held Bulb exposure through manual `full_press` and explicit `release`; capability requires the advertised manual shutter operation and successful release is the observation point
 - timed half-press with guaranteed release
 - independent autofocus through advertised `POST /shooting/control/af` start/stop, falling back to the advertised balanced half-press operation
-- movie start/stop through `recbutton`
+- camera Photo/Video context through matching same-version `GET`/`POST /shooting/control/moviemode`, accepting only Canon's `on`/`off` status and posting the exact `action`; this remains distinct from recording
+- movie recording start/stop through `recbutton`
 - normalized UI Tap AF mapped through detailed Live View `image` geometry to integer `positionx`/`positiony`, then sent only through advertised `PUT /shooting/liveview/afframeposition`
 - normalized UI Click White Balance mapped through the same geometry, then sent only through advertised `POST /shooting/liveview/clickwb`
 - bounded `event/polling` on an independent wait path, with v1.0 `continue=on`, v1.1+ `timeout=long`, explicit `DELETE`, and authoritative state refresh by clients
