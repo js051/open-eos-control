@@ -35,6 +35,10 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(debug.waitForExistence(timeout: 3))
         debug.tap()
         XCTAssertTrue(app.buttons["copy-diagnostic-button"].waitForExistence(timeout: 5))
+        let physicalCopy = app.buttons["copy-physical-validation-button"]
+        XCTAssertTrue(physicalCopy.waitForExistence(timeout: 5))
+        XCTAssertFalse(physicalCopy.isEnabled)
+        XCTAssertTrue(app.staticTexts["Offline UI preview cannot produce physical-camera evidence."].exists)
         addScreenshot(name: "debug-landscape")
     }
 

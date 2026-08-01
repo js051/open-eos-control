@@ -7,6 +7,7 @@ struct DebugView: View {
     @EnvironmentObject private var language: AppLanguageStore
     let controlRotation: Double
     @State private var copied = false
+    @State private var physicalValidationCopied = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -86,6 +87,76 @@ struct DebugView: View {
                             language.string(camera.capabilities?.evidence.truncated == true ? "yes" : "no"),
                             warning: camera.capabilities?.evidence.truncated == true
                         )
+                    }
+
+                    debugSection("physical_validation") {
+                        let validation = camera.physicalValidation
+                        Text("physical_validation_hint")
+                            .font(.footnote)
+                            .foregroundStyle(Color.cameraSubtleText)
+                        switch validation.sessionStatus {
+                        case .ready:
+                            if validation.eligibleFeatures.isEmpty {
+                                Text("physical_validation_no_observed")
+                                    .foregroundStyle(Color.cameraSubtleText)
+                            }
+                            ForEach(validation.eligibleFeatures.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { feature in
+                                Toggle(isOn: Binding(
+                                    get: { camera.operatorConfirmedFeatures.contains(feature) },
+                                    set: { camera.setOperatorConfirmation(feature, confirmed: $0) }
+                                )) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(feature.rawValue).font(.system(.body, design: .monospaced))
+                                        Text(LocalizedStringKey(
+                                            camera.operatorConfirmedFeatures.contains(feature)
+                                                ? "physical_validation_confirmed"
+                                                : "physical_validation_not_confirmed"
+                                        ))
+                                        .font(.caption)
+                                        .foregroundStyle(
+                                            camera.operatorConfirmedFeatures.contains(feature)
+                                                ? Color.cameraStatus
+                                                : Color.cameraSubtleText
+                                        )
+                                    }
+                                }
+                                .frame(minHeight: 48)
+                                .accessibilityIdentifier("physical-confirmation-\(feature.rawValue)")
+                            }
+                        case .offlinePreview:
+                            Text("physical_validation_offline_unavailable").foregroundStyle(Color.cameraWarning)
+                        case .simulator:
+                            Text("physical_validation_simulator_unavailable").foregroundStyle(Color.cameraWarning)
+                        case .disconnected:
+                            Text("physical_validation_disconnected").foregroundStyle(Color.cameraWarning)
+                        }
+
+                        Button {
+                            Task {
+                                guard let record = try? await camera.physicalValidationRecord() else { return }
+                                UIPasteboard.general.string = record
+                                physicalValidationCopied = true
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                physicalValidationCopied = false
+                            }
+                        } label: {
+                            Label(
+                                LocalizedStringKey(
+                                    physicalValidationCopied
+                                        ? "physical_validation_copied"
+                                        : "copy_physical_validation"
+                                ),
+                                systemImage: physicalValidationCopied ? "checkmark" : "checkmark.seal"
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.roundedRectangle(radius: 6))
+                        .tint(physicalValidationCopied ? Color.cameraStatus : Color.cameraText)
+                        .disabled(
+                            validation.sessionStatus != .ready || validation.eligibleFeatures.isEmpty
+                        )
+                        .accessibilityIdentifier("copy-physical-validation-button")
                     }
 
                     debugSection("live_view") {

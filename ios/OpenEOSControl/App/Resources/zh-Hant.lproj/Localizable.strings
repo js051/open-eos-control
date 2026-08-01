@@ -293,3 +293,13 @@
 "stop_bulb_exposure" = "停止 Bulb 長曝光";
 "bulb_exposure_time" = "BULB %02d:%02d";
 "bulb_not_supported" = "此連線無法持續按住並釋放快門，因此不支援 Bulb 長曝光。";
+"physical_validation" = "真機驗證";
+"physical_validation_hint" = "僅能確認相機已公告，且在本次連線中成功觀測的功能。請在看見實體相機確實執行後再勾選。";
+"physical_validation_offline_unavailable" = "離線 UI 預覽不能產生真機證據。";
+"physical_validation_simulator_unavailable" = "模擬器工作階段不能產生真機證據。";
+"physical_validation_disconnected" = "請先連接實體相機再開始驗證。";
+"physical_validation_no_observed" = "請先操作一項支援功能；成功執行後，該功能會出現在此處。";
+"physical_validation_confirmed" = "已在相機上確認";
+"physical_validation_not_confirmed" = "尚未在相機上確認";
+"copy_physical_validation" = "複製真機驗證紀錄";
+"physical_validation_copied" = "已複製真機驗證紀錄";

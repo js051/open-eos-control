@@ -293,3 +293,13 @@
 "stop_bulb_exposure" = "Stop Bulb exposure";
 "bulb_exposure_time" = "BULB %02d:%02d";
 "bulb_not_supported" = "This connection cannot hold and release the shutter for Bulb exposure.";
+"physical_validation" = "Physical validation";
+"physical_validation_hint" = "Only camera-advertised features observed successfully in this connection can be confirmed. Check a feature after seeing the physical camera perform it.";
+"physical_validation_offline_unavailable" = "Offline UI preview cannot produce physical-camera evidence.";
+"physical_validation_simulator_unavailable" = "Simulator sessions cannot produce physical-camera evidence.";
+"physical_validation_disconnected" = "Connect a physical camera to begin validation.";
+"physical_validation_no_observed" = "Use a supported control first. Eligible features appear after the operation succeeds.";
+"physical_validation_confirmed" = "Confirmed on camera";
+"physical_validation_not_confirmed" = "Not yet confirmed on camera";
+"copy_physical_validation" = "Copy physical validation record";
+"physical_validation_copied" = "Physical validation record copied";
