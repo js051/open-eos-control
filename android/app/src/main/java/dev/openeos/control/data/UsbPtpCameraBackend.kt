@@ -209,6 +209,7 @@ class UsbPtpCameraBackend(
         val supportsCanonFocusDrive = CanonEosPtp.supportsFocusDrive(info)
         val supportsCanonLiveViewMagnification = CanonEosPtp.supportsLiveViewMagnification(info)
         val supportsCanonTouchAutofocus = CanonEosPtp.supportsTouchAutofocus(info)
+        val supportsCanonClickWhiteBalance = CanonEosPtp.supportsClickWhiteBalance(info)
         val supportsCanonMovieRecording = CanonEosPtp.supportsMovieRecording(
             info,
             canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).availableValues,
@@ -241,6 +242,7 @@ class UsbPtpCameraBackend(
                 add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
             }
             if (supportsCanonTouchAutofocus) add(CameraFeature.TAP_FOCUS)
+            if (supportsCanonClickWhiteBalance) add(CameraFeature.CLICK_WHITE_BALANCE)
             if (supportsCanonFocusDrive) add(CameraFeature.FOCUS_DRIVE)
             if (supportsCanonLiveViewMagnification) add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
             if (supportsCanonMovieRecording) add(CameraFeature.VIDEO_RECORDING)
@@ -312,12 +314,12 @@ class UsbPtpCameraBackend(
                         "Prefers advertised Canon EOS DoAf/AfCancel and falls back to a balanced half-press sequence.",
                     CameraFeature.TAP_FOCUS to
                         "Requires advertised Canon EOS TouchAfPosition, complete Live View, a balanced AF path, and sensor geometry from viewfinder block 0x0E.",
+                    CameraFeature.CLICK_WHITE_BALANCE to
+                        "Requires advertised Canon EOS ClickWB, complete Live View, and sensor geometry from viewfinder block 0x0E.",
                     CameraFeature.FOCUS_DRIVE to
                         "Uses Canon EOS DriveLens with the Near/Far 1-3 values documented by libgphoto2.",
                     CameraFeature.LIVE_VIEW_MAGNIFICATION to
                         "Uses the advertised Canon EOS Zoom operation with the libgphoto2-verified 1x and 5x values.",
-                    CameraFeature.CLICK_WHITE_BALANCE to
-                        "No verified Canon USB/PTP Live View coordinate Click WB command is implemented.",
                     CameraFeature.VIDEO_RECORDING to
                         "Uses Canon EOS EVFRecordStatus only when camera events advertise both Card and None values.",
                     CameraFeature.MEDIA_BROWSER to
@@ -843,21 +845,7 @@ class UsbPtpCameraBackend(
     override suspend fun tapFocus(x: Double, y: Double): FocusResult {
         val info = requireDeviceInfo()
         if (!CanonEosPtp.supportsTouchAutofocus(info)) unsupported<Unit>(CameraFeature.TAP_FOCUS)
-        if (!canonLiveViewActive) {
-            throw PtpProtocolException("Canon EOS USB Touch AF requires an active Live View session.")
-        }
-        if (!x.isFinite() || !y.isFinite() || x !in 0.0..1.0 || y !in 0.0..1.0) {
-            throw PtpProtocolException("Canon EOS USB Touch AF coordinates must be normalized to 0.0..1.0.")
-        }
-
-        val geometry = canonLiveViewGeometry ?: CanonEosPtp.liveViewData(readCanonViewfinderData())
-            .geometry
-            ?.also { canonLiveViewGeometry = it }
-            ?: throw PtpProtocolException(
-                "Canon EOS USB Touch AF requires sensor geometry from Live View block 0x0E."
-            )
-        val cameraX = (x * geometry.width.toDouble()).toLong()
-        val cameraY = (y * geometry.height.toDouble()).toLong()
+        val (cameraX, cameraY) = canonLiveViewCoordinates(x, y, action = "Touch AF")
 
         ensureCanonRemoteMode()
         requireSession().executeOperation(
@@ -867,6 +855,22 @@ class UsbPtpCameraBackend(
         autofocus()
         observedFeatures.add(CameraFeature.TAP_FOCUS)
         return FocusResult(ok = true, x = x, y = y)
+    }
+
+    override suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus {
+        val info = requireDeviceInfo()
+        if (!CanonEosPtp.supportsClickWhiteBalance(info)) {
+            unsupported<Unit>(CameraFeature.CLICK_WHITE_BALANCE)
+        }
+        val (cameraX, cameraY) = canonLiveViewCoordinates(x, y, action = "Click WB")
+
+        ensureCanonRemoteMode()
+        requireSession().executeOperation(
+            CanonEosOperationCode.CLICK_WHITE_BALANCE,
+            listOf(cameraX, cameraY),
+        )
+        observedFeatures.add(CameraFeature.CLICK_WHITE_BALANCE)
+        return status()
     }
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String =
@@ -890,6 +894,30 @@ class UsbPtpCameraBackend(
     private suspend fun ensureCanonRemoteMode() {
         if (canonRemotePrepared) return
         canonEventMutex.withLock { ensureCanonRemoteModeLocked() }
+    }
+
+    private suspend fun canonLiveViewCoordinates(
+        x: Double,
+        y: Double,
+        action: String,
+    ): Pair<Long, Long> {
+        if (!canonLiveViewActive) {
+            throw PtpProtocolException("Canon EOS USB $action requires an active Live View session.")
+        }
+        if (!x.isFinite() || !y.isFinite() || x !in 0.0..1.0 || y !in 0.0..1.0) {
+            throw PtpProtocolException(
+                "Canon EOS USB $action coordinates must be normalized to 0.0..1.0."
+            )
+        }
+
+        val geometry = canonLiveViewGeometry ?: CanonEosPtp.liveViewData(readCanonViewfinderData())
+            .geometry
+            ?.also { canonLiveViewGeometry = it }
+            ?: throw PtpProtocolException(
+                "Canon EOS USB $action requires sensor geometry from Live View block 0x0E."
+            )
+        return (x * geometry.width.toDouble()).toLong() to
+            (y * geometry.height.toDouble()).toLong()
     }
 
     private suspend fun ensureCanonRemoteModeLocked() {

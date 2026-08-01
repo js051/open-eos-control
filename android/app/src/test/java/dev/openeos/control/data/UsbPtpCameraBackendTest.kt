@@ -564,6 +564,7 @@ class UsbPtpCameraBackendTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
         assertTrue(capabilities.matrix.supports(CameraFeature.WHITE_BALANCE_CONTROL))
         assertFalse(capabilities.matrix.supports(CameraFeature.TAP_FOCUS))
+        assertFalse(capabilities.matrix.supports(CameraFeature.CLICK_WHITE_BALANCE))
         assertTrue(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
         assertTrue(capabilities.matrix.supports(CameraFeature.ADVANCED_SETTINGS))
         assertTrue("movierecordtarget" in capabilities.evidence.writableSettings)
@@ -1896,6 +1897,124 @@ class UsbPtpCameraBackendTest {
         backend.close()
     }
 
+    @Test
+    fun canonClickWhiteBalanceMapsNormalizedPointWithoutStartingAutofocus() = runTest {
+        val transport = CanonEosScriptedTransport(
+            advertiseClickWhiteBalance = true,
+            liveViewSensorSize = 6_000 to 4_000,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        assertTrue(backend.capabilities().matrix.supports(CameraFeature.CLICK_WHITE_BALANCE))
+        backend.startLiveView(LiveViewRequest())
+        backend.liveViewFrame(cacheKey = 1)
+        val status = backend.clickWhiteBalance(x = 0.4, y = 0.6)
+
+        assertTrue(status.connected)
+        assertTrue(CameraFeature.CLICK_WHITE_BALANCE in backend.observedFeatures())
+        val click = transport.sentContainers.single { container ->
+            container.type == PtpContainerType.COMMAND &&
+                container.code == CanonEosOperationCode.CLICK_WHITE_BALANCE
+        }
+        assertEquals(listOf(2_400L, 2_400L), click.parameters())
+        assertFalse(transport.hasOperation(CanonEosOperationCode.DO_AF))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.AF_CANCEL))
+        backend.stopLiveView()
+        backend.close()
+    }
+
+    @Test
+    fun canonClickWhiteBalanceIsUnavailableWithoutAdvertisedOperation() = runTest {
+        val transport = CanonEosScriptedTransport(liveViewSensorSize = 6_000 to 4_000)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.clickWhiteBalance(x = 0.5, y = 0.5) }.exceptionOrNull()
+
+        assertFalse(backend.capabilities().matrix.supports(CameraFeature.CLICK_WHITE_BALANCE))
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(transport.hasOperation(CanonEosOperationCode.CLICK_WHITE_BALANCE))
+        backend.close()
+    }
+
+    @Test
+    fun canonClickWhiteBalanceRequiresActiveLiveViewAndValidCoordinates() = runTest {
+        val transport = CanonEosScriptedTransport(
+            advertiseClickWhiteBalance = true,
+            liveViewSensorSize = 6_000 to 4_000,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val inactiveFailure = runCatching { backend.clickWhiteBalance(x = 0.5, y = 0.5) }.exceptionOrNull()
+        backend.startLiveView(LiveViewRequest())
+        val coordinateFailure = runCatching {
+            backend.clickWhiteBalance(x = Double.NaN, y = 0.5)
+        }.exceptionOrNull()
+
+        assertTrue(inactiveFailure is PtpProtocolException)
+        assertTrue(inactiveFailure?.message.orEmpty().contains("active Live View"))
+        assertTrue(coordinateFailure is PtpProtocolException)
+        assertTrue(coordinateFailure?.message.orEmpty().contains("normalized"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.CLICK_WHITE_BALANCE))
+        backend.stopLiveView()
+        backend.close()
+    }
+
+    @Test
+    fun canonClickWhiteBalanceRefusesToGuessMissingSensorGeometry() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseClickWhiteBalance = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        backend.startLiveView(LiveViewRequest())
+
+        val failure = runCatching { backend.clickWhiteBalance(x = 0.5, y = 0.5) }.exceptionOrNull()
+
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("block 0x0E"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.CLICK_WHITE_BALANCE))
+        assertFalse(CameraFeature.CLICK_WHITE_BALANCE in backend.observedFeatures())
+        backend.stopLiveView()
+        backend.close()
+    }
+
+    @Test
+    fun canonClickWhiteBalanceDoesNotReportSuccessWhenCameraRejectsPoint() = runTest {
+        val transport = CanonEosScriptedTransport(
+            advertiseClickWhiteBalance = true,
+            liveViewSensorSize = 6_000 to 4_000,
+            rejectOperationCode = CanonEosOperationCode.CLICK_WHITE_BALANCE,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        backend.startLiveView(LiveViewRequest())
+        backend.liveViewFrame(cacheKey = 1)
+
+        val failure = runCatching { backend.clickWhiteBalance(x = 0.5, y = 0.5) }.exceptionOrNull()
+
+        assertTrue(failure is PtpResponseException)
+        assertTrue(transport.hasOperation(CanonEosOperationCode.CLICK_WHITE_BALANCE))
+        assertFalse(CameraFeature.CLICK_WHITE_BALANCE in backend.observedFeatures())
+        backend.stopLiveView()
+        backend.close()
+    }
+
     private class ScriptedTransport(
         private val advertiseCapture: Boolean,
         private val advertiseDelete: Boolean = true,
@@ -2052,6 +2171,7 @@ class UsbPtpCameraBackendTest {
         private val advertiseRemoteRelease: Boolean = true,
         private val advertiseLiveViewMagnification: Boolean = true,
         private val advertiseTouchAutofocus: Boolean = false,
+        private val advertiseClickWhiteBalance: Boolean = false,
         private val liveViewSensorSize: Pair<Int, Int>? = null,
         private val rejectOperationCode: Int? = null,
         private val rejectHalfRemotePress: Boolean = false,
@@ -2093,6 +2213,7 @@ class UsbPtpCameraBackendTest {
                             advertiseLiveViewMagnification,
                             advertiseEventPolling,
                             advertiseTouchAutofocus,
+                            advertiseClickWhiteBalance,
                         ),
                     )
                     incoming += ok(transaction)
@@ -2107,6 +2228,7 @@ class UsbPtpCameraBackendTest {
                 CanonEosOperationCode.DO_AF,
                 CanonEosOperationCode.AF_CANCEL,
                 CanonEosOperationCode.TOUCH_AF_POSITION,
+                CanonEosOperationCode.CLICK_WHITE_BALANCE,
                 CanonEosOperationCode.TRANSFER_COMPLETE,
                 CanonEosOperationCode.PC_HDD_CAPACITY,
                 -> incoming += if (container.code == rejectOperationCode) {
@@ -2627,6 +2749,7 @@ class UsbPtpCameraBackendTest {
             advertiseLiveViewMagnification: Boolean = true,
             advertiseEventPolling: Boolean = true,
             advertiseTouchAutofocus: Boolean = false,
+            advertiseClickWhiteBalance: Boolean = false,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
@@ -2663,6 +2786,9 @@ class UsbPtpCameraBackendTest {
                     }
                     if (advertiseTouchAutofocus) {
                         add(CanonEosOperationCode.TOUCH_AF_POSITION)
+                    }
+                    if (advertiseClickWhiteBalance) {
+                        add(CanonEosOperationCode.CLICK_WHITE_BALANCE)
                     }
                     if (advertiseHostTransferOperations) {
                         add(PtpOperationCode.GET_PARTIAL_OBJECT)
