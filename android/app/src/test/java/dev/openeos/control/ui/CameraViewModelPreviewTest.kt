@@ -2,6 +2,7 @@ package dev.openeos.control.ui
 
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewMagnification
+import dev.openeos.control.data.CameraFeature
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -52,6 +53,17 @@ class CameraViewModelPreviewTest {
         assertFalse(viewModel.uiState.value.connected)
         assertFalse(viewModel.uiState.value.previewMode)
         assertEquals(null, viewModel.uiState.value.liveViewMagnification)
+        assertTrue(viewModel.uiState.value.operatorConfirmedFeatures.isEmpty())
+    }
+
+    @Test
+    fun offlinePreviewCannotCreatePhysicalCameraConfirmation() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+
+        viewModel.setOperatorConfirmation(CameraFeature.STILL_CAPTURE, true)
+
+        assertTrue(viewModel.uiState.value.operatorConfirmedFeatures.isEmpty())
     }
 
     @Test

@@ -10,6 +10,14 @@ Automated tests prove request construction, parsing, state transitions, and UI c
 
 Only the third level is a physical-result claim. The verifier never promotes an advertised feature to observed and never treats a successful response as an operator confirmation.
 
+## Guided Android Session
+
+Android exposes **Debug > Physical validation** while a camera is connected. A feature appears there only after the camera advertised it and the current backend observed a successful operation or valid payload. Check it only after seeing the expected result on the physical camera.
+
+Confirmations are memory-only and are cleared on disconnect, reconnect, or entry into Offline UI Preview. Simulator and Offline UI Preview sessions cannot create a physical validation record. **Copy physical validation record** produces privacy-safe Markdown containing the camera model, transport, advertised/observed/operator-confirmed states, and a SHA-256 identifier for the matching sanitized diagnostic report. It never includes the serial, camera URL, endpoint inventory, raw status, credentials, or a local path.
+
+This in-app record is a reviewable session note, not remote attestation. Keep the full diagnostic report private and use the verifier below before committing a physical-camera record to the repository.
+
 ## Capture A Report
 
 Use a current build, connect the physical camera, exercise the features under test, then copy the report from **Debug > Copy diagnostic report** in Android, iOS, or the PC control UI. Save the copied report outside the repository using a name such as `diagnostic-report-r6m3.txt` or `diagnostic-report-r6m3.json`; these names are ignored by Git.

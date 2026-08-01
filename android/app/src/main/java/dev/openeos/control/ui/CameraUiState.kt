@@ -97,6 +97,7 @@ data class CameraUiState(
     val focusPoint: FocusPoint? = null,
     val focusFeedback: FocusFeedback? = null,
     val lastClockSyncAtMillis: Long? = null,
+    val operatorConfirmedFeatures: Set<CameraFeature> = emptySet(),
     val error: String? = null,
     val errorOperation: CameraOperation? = null,
     val pendingOperations: Set<CameraOperation> = emptySet(),

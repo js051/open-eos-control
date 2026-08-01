@@ -5,6 +5,8 @@ All notable release-level changes to Open EOS Control are documented here.
 ## [Unreleased]
 
 - Added a complete Android 16/API 36 Pixel UI gate alongside the existing API 34 job. Both run the production Simulator path and retain device-frame plus user-view screenshots for fixed camera geometry, system rotation lock, Traditional Chinese, enlarged text, and orientation-aware reading surfaces.
+- Added an Android physical-camera validation checklist that exposes only advertised-and-observed features, requires explicit camera-side confirmation, rejects Simulator and Offline Preview sessions, clears confirmations across connections, and copies a privacy-safe Markdown record bound to the sanitized diagnostic by SHA-256.
+- Stabilized the Android rotation-lock launch test by setting and restoring the system auto-rotate preference independently from the display user-rotation lock.
 
 ## [0.1.8] - 2026-08-01
 
