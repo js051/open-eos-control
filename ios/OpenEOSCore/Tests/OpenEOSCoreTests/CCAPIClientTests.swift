@@ -1432,7 +1432,7 @@ final class CCAPIClientTests: XCTestCase {
         await transport.enqueueJSON(path: "/ccapi", body: deviceStatusDiscovery)
         await enqueueDeviceStatus(
             on: transport,
-            lens: "{\"mount\":true,\"name\":\"(oversizedName)\"}"
+            lens: "{\"mount\":true,\"name\":\"" + oversizedName + "\"}"
         )
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 

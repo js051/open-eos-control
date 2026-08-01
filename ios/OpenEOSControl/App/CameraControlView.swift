@@ -432,7 +432,9 @@ private struct CaptureBar: View {
     private var captureSupported: Bool {
         if camera.bulbMode && camera.bulbExposureActive { return true }
         if camera.captureMode == .video && camera.recording { return true }
-        camera.supports(camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording)
+        return camera.supports(
+            camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording
+        )
     }
 
     private var captureTemperatureAllowed: Bool {
