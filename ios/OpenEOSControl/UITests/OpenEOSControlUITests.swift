@@ -162,6 +162,8 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
         let liveView = app.images["live-view-decoded-frame"]
         XCTAssertTrue(liveView.waitForExistence(timeout: 30))
+        let liveViewInteraction = app.descendants(matching: .any)["live-view-interaction-surface"]
+        XCTAssertTrue(liveViewInteraction.waitForExistence(timeout: 8))
 
         app.buttons["exposure-iso"].tap()
         let iso1600 = app.buttons["setting-value-1600"]
@@ -195,8 +197,8 @@ final class OpenEOSControlUITests: XCTestCase {
                 state["half_pressed"] as? Bool == false
         }
 
-        XCTAssertTrue(waitForInteraction(liveView, timeout: 8))
-        liveView.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35)).tap()
+        XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
+        liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35)).tap()
         try await waitForSimulatorState { state in
             (state["focus"] as? [String: Any])?["count"] as? Int == 1
         }
@@ -208,8 +210,8 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
         tapAction.buttons["Click white balance"].tap()
         app.buttons["Done"].tap()
-        XCTAssertTrue(waitForInteraction(liveView, timeout: 8))
-        liveView.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
+        XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
+        liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
         try await waitForSimulatorState { state in
             (state["click_white_balance"] as? [String: Any])?["count"] as? Int == 1 &&
                 (state["exposure"] as? [String: Any])?["white_balance"] as? String == "click"
