@@ -120,6 +120,7 @@ private struct CameraOverlayHeader: View {
                 }
                 .buttonStyle(CameraIconButtonStyle())
                 .disabled(camera.isBusy(.focus))
+                .accessibilityIdentifier("autofocus-button")
             }
             Menu {
                 Button {
@@ -129,12 +130,14 @@ private struct CameraOverlayHeader: View {
                     Label("camera_media", systemImage: "photo.on.rectangle")
                 }
                 .disabled(!camera.supports(.mediaBrowser))
+                .accessibilityIdentifier("camera-media-menu-button")
                 Button {
                     camera.activeSheet = .focusDrive
                 } label: {
                     Label("focus_drive", systemImage: "arrow.left.and.right")
                 }
                 .disabled(!camera.supports(.focusDrive))
+                .accessibilityIdentifier("focus-drive-menu-button")
                 Button {
                     camera.activeSheet = .monitoring
                 } label: {
@@ -147,6 +150,7 @@ private struct CameraOverlayHeader: View {
                         Label("half_press_shutter", systemImage: "camera.aperture")
                     }
                     .disabled(camera.isBusy(.focus))
+                    .accessibilityIdentifier("half-press-button")
                 }
                 Button {
                     camera.screen = .debug
@@ -340,6 +344,7 @@ private struct CaptureBar: View {
                     }
                 }
                 .buttonStyle(CameraIconButtonStyle())
+                .accessibilityIdentifier("more-settings-button")
 
                 Spacer(minLength: 0)
 

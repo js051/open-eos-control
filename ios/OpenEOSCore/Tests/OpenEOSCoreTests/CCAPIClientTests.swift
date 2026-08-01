@@ -554,6 +554,37 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(json, ["value": "far3"])
     }
 
+    func testSimulatorFocusDriveUsesContractAndIsAdvertised() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/capabilities",
+            body: #"{"iso":["800"],"shutter":["1/50"],"aperture":["2.8"],"white_balance":["auto"]}"#
+        )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/focus/drive",
+            body: #"{"ok":true,"direction":"near","step":"large"}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        let result = try await client.driveFocus(direction: .near, step: .large)
+
+        XCTAssertTrue(capabilities.matrix.supports(.focusDrive))
+        XCTAssertTrue(capabilities.matrix.supports(.bulbExposure))
+        XCTAssertFalse(capabilities.matrix.planned.contains(.focusDrive))
+        XCTAssertEqual(result, FocusDriveResult(accepted: true, direction: .near, step: .large))
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.first { $0.path == "/ccapi/focus/drive" })
+        let body = try XCTUnwrap(request.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(json, ["direction": "near", "step": "large"])
+    }
+
     func testUnadvertisedFocusDriveFailsWithoutSendingACommand() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(

@@ -642,8 +642,19 @@ public actor CCAPIClient {
         step: FocusDriveStep
     ) async throws -> FocusDriveResult {
         try await ensureInitialized()
-        guard resolvedMode != .simulator else {
-            throw CCAPIError.unsupported(.focusDrive)
+        if resolvedMode == .simulator {
+            let value = try await requestJSON(
+                path: "/ccapi/focus/drive",
+                method: .post,
+                json: ["direction": direction.rawValue, "step": step.rawValue]
+            )
+            let result = FocusDriveResult(
+                accepted: value.bool("ok") ?? false,
+                direction: FocusDriveDirection(rawValue: value.string("direction")) ?? direction,
+                step: FocusDriveStep(rawValue: value.string("step")) ?? step
+            )
+            if result.accepted { observedFeatures.insert(.focusDrive) }
+            return result
         }
         guard let operation = focusDriveOperation() else {
             throw CCAPIError.unsupported(.focusDrive)
@@ -1733,13 +1744,14 @@ public actor CCAPIClient {
         ]
         let supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
-            .stillCapture, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus, .clickWhiteBalance,
+            .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
+            .clickWhiteBalance, .focusDrive,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete, .cameraClockSync,
         ]
         return CameraCapabilities(
             settings: controls,
-            matrix: CapabilityMatrix(supported: supported, planned: [.liveViewRTP, .focusDrive]),
+            matrix: CapabilityMatrix(supported: supported, planned: [.liveViewRTP]),
             liveView: LiveViewCapabilities(
                 sources: [.simulatorFrame],
                 defaultSource: .simulatorFrame,
