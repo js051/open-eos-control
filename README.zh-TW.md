@@ -208,9 +208,14 @@ http://localhost:18080
 - `GET /ccapi/capabilities`
 - `PATCH /ccapi/exposure`
 - `PATCH /ccapi/white-balance`
+- `POST /ccapi/clock/sync`
+- `POST /ccapi/capture/still`
 - `POST /ccapi/record/start`
 - `POST /ccapi/record/stop`
+- `POST /ccapi/bulb/start`
+- `POST /ccapi/bulb/stop`
 - `POST /ccapi/focus/tap`
+- `POST /ccapi/focus/drive`
 - `POST /ccapi/whitebalance/click`
 - `POST /ccapi/shutter/half-press`
 - `POST /ccapi/shutter/release`
@@ -218,6 +223,8 @@ http://localhost:18080
 - `GET /ccapi/media/{itemId}`
 - `DELETE /ccapi/media/{itemId}`
 - `GET /ccapi/liveview/frame`
+
+Android 必跑的裝置流程會使用僅供測試的 reset／state／mode endpoint，逐項確認正式 UI 操作確實抵達 backend；範圍包含 Live View、曝光、拍照／錄影、Tap AF、點選白平衡、AF-ON、半按快門、焦點驅動、Bulb、媒體預覽與刪除。這條可重現的 Simulator 路徑不能取代 R6 Mark III 真機驗證紀錄。
 
 ## Roadmap
 

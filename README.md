@@ -208,9 +208,14 @@ Useful endpoints:
 - `GET /ccapi/capabilities`
 - `PATCH /ccapi/exposure`
 - `PATCH /ccapi/white-balance`
+- `POST /ccapi/clock/sync`
+- `POST /ccapi/capture/still`
 - `POST /ccapi/record/start`
 - `POST /ccapi/record/stop`
+- `POST /ccapi/bulb/start`
+- `POST /ccapi/bulb/stop`
 - `POST /ccapi/focus/tap`
+- `POST /ccapi/focus/drive`
 - `POST /ccapi/whitebalance/click`
 - `POST /ccapi/shutter/half-press`
 - `POST /ccapi/shutter/release`
@@ -218,6 +223,8 @@ Useful endpoints:
 - `GET /ccapi/media/{itemId}`
 - `DELETE /ccapi/media/{itemId}`
 - `GET /ccapi/liveview/frame`
+
+The required Android device workflow uses the test-only reset/state/mode endpoints to assert that production UI actions reached the backend. It covers Live View, exposure, still/movie capture, Tap AF, Click WB, AF-ON, half-press, focus drive, Bulb, media preview and deletion. This reproducible Simulator path does not replace the physical R6 Mark III validation record.
 
 ## Roadmap
 

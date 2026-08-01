@@ -4,6 +4,7 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Expanded Android's required CCAPI Simulator device workflow through Tap AF, Click White Balance, balanced AF-ON and shutter half-press, validated manual focus drive, mode-gated Bulb start/stop, decoded media display preview, confirmed deletion, and backend-state assertions. The Simulator now rejects invalid focus-drive values and Bulb starts outside Bulb mode instead of reporting false success.
 - Refined Android's fixed Photo/Video mode rail with direction-aware labels, a rotating short selection underline, and a retained 48dp hit target inset from the physical edge. Sideways Traditional Chinese and 130% text now stay camera-like without a fixed selection rectangle turning into a clipped vertical block.
 - Added a complete Android 16/API 36 Pixel UI gate alongside the existing API 34 job. Both run the production Simulator path and retain device-frame plus user-view screenshots for fixed camera geometry, system rotation lock, Traditional Chinese, enlarged text, and orientation-aware reading surfaces.
 - Added an Android physical-camera validation checklist that exposes only advertised-and-observed features, requires explicit camera-side confirmation, rejects Simulator and Offline Preview sessions, clears confirmations across connections, and copies a privacy-safe Markdown record bound to the sanitized diagnostic by SHA-256.
