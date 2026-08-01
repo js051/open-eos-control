@@ -712,6 +712,7 @@
     localVideoMuted: false,
     liveMagnification: 1,
     liveGeneration: 0,
+    liveFrameAbortController: null,
     eventGeneration: 0,
     eventController: null,
     requestedFps: 1,
@@ -1531,6 +1532,7 @@
       const text = document.createElement("span");
       text.textContent = settingLabel(setting);
       const select = document.createElement("select");
+      select.dataset.settingKey = setting.key;
       select.disabled = cameraInteractionBusy();
       setting.values.forEach((value) => {
         const option = document.createElement("option");
@@ -2226,6 +2228,8 @@
   }
 
   function stopLiveLoop() {
+    state.liveFrameAbortController?.abort();
+    state.liveFrameAbortController = null;
     stopRtpAudio({ announce: false });
     state.liveActive = false;
     state.livePollingSuspended = false;
@@ -2251,9 +2255,12 @@
       generation === state.liveGeneration && state.session
     ) {
       const started = performance.now();
+      const controller = new AbortController();
+      state.liveFrameAbortController = controller;
       try {
         const blob = await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/frame`, {
           responseType: "blob",
+          signal: controller.signal,
         });
         if (!state.liveActive || state.livePollingSuspended || generation !== state.liveGeneration) return;
         const url = URL.createObjectURL(blob);
@@ -2283,7 +2290,7 @@
         state.lastFrameAt = new Date().toISOString();
         renderFrameIndicator();
       } catch (error) {
-        if (!state.liveActive || generation !== state.liveGeneration) return;
+        if (controller.signal.aborted || !state.liveActive || generation !== state.liveGeneration) return;
         const normalized = captureError(error);
         stopLiveLoop();
         setOperationState(normalized.message, true);
@@ -2294,6 +2301,8 @@
           // The frame error remains the primary diagnostic.
         }
         return;
+      } finally {
+        if (state.liveFrameAbortController === controller) state.liveFrameAbortController = null;
       }
       const elapsed = performance.now() - started;
       const delay = Math.max(0, 1000 / state.requestedFps - elapsed);

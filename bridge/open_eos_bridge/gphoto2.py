@@ -1670,28 +1670,37 @@ class GPhoto2Session:
                 self._live_view_magnification = None
 
     def live_view_frame(self) -> bytes:
-        with self._lock:
-            if not self._live_view_active:
-                raise BridgeError(
-                    "LIVE_VIEW_NOT_STARTED",
-                    "Start Live View before requesting a frame.",
-                    status_code=409,
-                    feature=CameraFeature.LIVE_VIEW.value,
-                    engine=self.engine_name,
-                )
-            if self._cached_live_view_frame is not None:
-                frame = self._cached_live_view_frame
-                self._cached_live_view_frame = None
-                return frame
-            if self._live_view_transport == "GPHOTO2_CAPTURE_MOVIE":
-                try:
-                    if self._live_view_stream is None:
-                        self._start_movie_stream()
-                    assert self._live_view_stream is not None
-                    return self._live_view_stream.read_frame()
-                except BridgeError as stream_error:
+        while True:
+            with self._lock:
+                if not self._live_view_active:
+                    raise BridgeError(
+                        "LIVE_VIEW_NOT_STARTED",
+                        "Start Live View before requesting a frame.",
+                        status_code=409,
+                        feature=CameraFeature.LIVE_VIEW.value,
+                        engine=self.engine_name,
+                    )
+                if self._cached_live_view_frame is not None:
+                    frame = self._cached_live_view_frame
+                    self._cached_live_view_frame = None
+                    return frame
+                if self._live_view_transport != "GPHOTO2_CAPTURE_MOVIE":
+                    return self._capture_preview()
+                if self._live_view_stream is None:
+                    self._start_movie_stream()
+                stream = self._live_view_stream
+                assert stream is not None
+
+            try:
+                return stream.read_frame()
+            except BridgeError as stream_error:
+                with self._lock:
+                    if not self._live_view_active:
+                        continue
+                    if self._live_view_stream is not stream:
+                        continue
                     self._fallback_to_capture_preview(stream_error)
-            return self._capture_preview()
+                    return self._capture_preview()
 
     def list_media(self) -> list[MediaItem]:
         with self._lock:
