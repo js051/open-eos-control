@@ -50,6 +50,34 @@ async function stopProcess(process) {
   if (process.exitCode === null) process.kill("SIGKILL");
 }
 
+async function readBridgeState(origin) {
+  const response = await fetch(`${origin}/__test/state`);
+  assert.equal(response.ok, true, `Bridge test state returned HTTP ${response.status}`);
+  return response.json();
+}
+
+async function waitForBridgeState(origin, predicate, description, timeoutMillis = 10_000) {
+  const deadline = Date.now() + timeoutMillis;
+  let latest = null;
+  while (Date.now() < deadline) {
+    latest = await readBridgeState(origin);
+    if (predicate(latest)) return latest;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${description}: ${JSON.stringify(latest)}`);
+}
+
+function commandIndex(state, expected, startAt = 0) {
+  return state.commands.findIndex(
+    (command, index) => index >= startAt && command.length === expected.length &&
+      command.every((argument, argumentIndex) => argument === expected[argumentIndex]),
+  );
+}
+
+function hasCommandContaining(state, argument) {
+  return state.commands.some((command) => command.includes(argument));
+}
+
 async function run() {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
@@ -253,6 +281,64 @@ async function run() {
     await page.click("#connect-button");
     await page.waitForSelector("#control-view:not([hidden])");
     assert.match(await page.locator("#camera-name").innerText(), /R6 Mark III/);
+
+    await page.click('.exposure-control[data-setting-key="iso"]');
+    await page.waitForSelector("#setting-dialog[open]");
+    await page.getByRole("button", { name: "800", exact: true }).click();
+    await waitForBridgeState(
+      origin,
+      (backend) => backend.values["/main/imgsettings/iso"] === "800" &&
+        commandIndex(backend, ["--set-config-value", "/main/imgsettings/iso=800"]) >= 0,
+      "the ISO control to reach GPhoto2Engine",
+    );
+
+    let backend = await readBridgeState(origin);
+    const autofocusStart = backend.commands.length;
+    await page.click("#autofocus-button");
+    backend = await waitForBridgeState(
+      origin,
+      (candidate) => commandIndex(
+        candidate,
+        ["--set-config-value", "/main/actions/autofocuscancel=1"],
+        autofocusStart,
+      ) >= 0,
+      "AF-ON to complete its drive and cancel sequence",
+    );
+    const autofocusDrive = commandIndex(
+      backend,
+      ["--set-config-value", "/main/actions/autofocusdrive=1"],
+      autofocusStart,
+    );
+    const autofocusCancel = commandIndex(
+      backend,
+      ["--set-config-value", "/main/actions/autofocuscancel=1"],
+      autofocusStart,
+    );
+    assert.ok(autofocusDrive >= autofocusStart && autofocusCancel > autofocusDrive);
+
+    const halfPressStart = backend.commands.length;
+    await page.click("#half-press-button");
+    backend = await waitForBridgeState(
+      origin,
+      (candidate) => commandIndex(
+        candidate,
+        ["--set-config-value", "/main/actions/eosremoterelease=Release Half"],
+        halfPressStart,
+      ) >= 0,
+      "half-press to release the shutter safely",
+    );
+    const halfPress = commandIndex(
+      backend,
+      ["--set-config-value", "/main/actions/eosremoterelease=Press Half"],
+      halfPressStart,
+    );
+    const halfRelease = commandIndex(
+      backend,
+      ["--set-config-value", "/main/actions/eosremoterelease=Release Half"],
+      halfPressStart,
+    );
+    assert.ok(halfPress >= halfPressStart && halfRelease > halfPress);
+
     await page.waitForSelector(".settings-command");
     assert.match(await page.locator(".settings-command").innerText(), /Camera date and time/);
     await page.click(".settings-command button");
@@ -401,6 +487,11 @@ async function run() {
     await page.click("#shutter-button");
     await page.waitForFunction(() => document.querySelector("#operation-state").textContent === "Photo captured");
     assert.equal(await page.locator("#local-video").isVisible(), true);
+    await waitForBridgeState(
+      origin,
+      (candidate) => hasCommandContaining(candidate, "--capture-image-and-download"),
+      "still capture to reach the host capture command",
+    );
 
     await page.click('.tab[data-view="diagnostics"]');
     await page.waitForSelector("#diagnostics-panel:not([hidden])");
@@ -442,6 +533,41 @@ async function run() {
     const visibleHash = createHash("sha256").update(visibleDiagnostic).digest("hex");
     assert.ok(copiedValidation.includes(`Diagnostic SHA-256: \`${visibleHash}\``));
 
+    await page.click('.tab[data-view="media"]');
+    await page.waitForSelector("#media-panel:not([hidden])");
+    const jpegMedia = page.locator(".media-row").filter({ hasText: "IMG_0001.JPG" });
+    await jpegMedia.waitFor({ state: "visible" });
+    await jpegMedia.locator("button.media-thumbnail").click();
+    await page.waitForSelector("#media-preview-dialog[open] #media-preview-image:not([hidden])");
+    await page.click("#media-preview-close");
+    await waitForBridgeState(
+      origin,
+      (candidate) => commandIndex(candidate, [
+        "--folder",
+        "/store_00010001/DCIM/100CANON",
+        "--get-file",
+        "IMG_0001.JPG",
+        "--stdout",
+      ]) >= 0,
+      "media preview to request the camera JPEG",
+    );
+    page.once("dialog", (dialog) => dialog.accept());
+    await jpegMedia.locator('button[aria-label="Delete IMG_0001.JPG"]').click();
+    await page.waitForFunction(() => (
+      !Array.from(document.querySelectorAll(".media-row"))
+        .some((row) => row.textContent.includes("IMG_0001.JPG"))
+    ));
+    await waitForBridgeState(
+      origin,
+      (candidate) => commandIndex(candidate, [
+        "--folder",
+        "/store_00010001/DCIM/100CANON",
+        "--delete-file",
+        "IMG_0001.JPG",
+      ]) >= 0,
+      "confirmed media deletion to reach GPhoto2Engine",
+    );
+
     await page.click('.tab[data-view="live"]');
     await page.selectOption("#preview-input-select", "CAMERA");
     await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.stoppedTracks === 2);
@@ -464,6 +590,97 @@ async function run() {
         `pageErrors=${JSON.stringify(pageErrors)}; ${error.message}`,
       );
     }
+
+    await waitForBridgeState(
+      origin,
+      (candidate) => candidate.values["/main/actions/viewfinder"] === "1" &&
+        hasCommandContaining(candidate, "--capture-movie"),
+      "camera Live View to enable the viewfinder and movie stream",
+    );
+
+    await page.waitForFunction(() => {
+      const large = document.querySelector('#focus-step-control button[data-step="LARGE"]');
+      const near = document.querySelector("#focus-near-button");
+      return large && near && !large.disabled && !near.disabled;
+    });
+    await page.click('#focus-step-control button[data-step="LARGE"]');
+    await page.click("#focus-near-button");
+    await waitForBridgeState(
+      origin,
+      (candidate) => candidate.values["/main/actions/manualfocusdrive"] === "Near 3" &&
+        commandIndex(candidate, ["--set-config-value", "/main/actions/manualfocusdrive=Near 3"]) >= 0,
+      "large near focus drive to reach GPhoto2Engine",
+    );
+
+    await page.click("#live-magnification-button");
+    await waitForBridgeState(
+      origin,
+      (candidate) => candidate.values["/main/actions/eoszoom"] === "5" &&
+        commandIndex(candidate, ["--set-config-value", "/main/actions/eoszoom=5"]) >= 0,
+      "5x Live View magnification to reach GPhoto2Engine",
+    );
+
+    await page.click("#video-mode-button");
+    await page.click("#shutter-button");
+    await waitForBridgeState(
+      origin,
+      (candidate) => candidate.values["/main/settings/movierecordtarget"] === "Card",
+      "video recording start to select the camera card",
+    );
+    await page.click("#shutter-button");
+    await waitForBridgeState(
+      origin,
+      (candidate) => candidate.values["/main/settings/movierecordtarget"] === "None" &&
+        commandIndex(candidate, ["--set-config-value", "/main/settings/movierecordtarget=None"]) >= 0,
+      "video recording stop to release the camera recorder",
+    );
+    await page.click("#photo-mode-button");
+
+    await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
+    await waitForBridgeState(
+      origin,
+      (candidate) => candidate.values["/main/capturesettings/autoexposuremode"] === "Bulb",
+      "the advertised Bulb shooting mode selection",
+    );
+    backend = await readBridgeState(origin);
+    const bulbStart = backend.commands.length;
+    await page.click("#shutter-button");
+    await waitForBridgeState(
+      origin,
+      (candidate) => commandIndex(
+        candidate,
+        ["--set-config-value", "/main/actions/eosremoterelease=Press Full"],
+        bulbStart,
+      ) >= 0,
+      "Bulb press-full command",
+    );
+    await page.click("#shutter-button");
+    backend = await waitForBridgeState(
+      origin,
+      (candidate) => commandIndex(
+        candidate,
+        ["--set-config-value", "/main/actions/eosremoterelease=Release Full"],
+        bulbStart,
+      ) >= 0,
+      "Bulb release-full command",
+    );
+    const bulbPress = commandIndex(
+      backend,
+      ["--set-config-value", "/main/actions/eosremoterelease=Press Full"],
+      bulbStart,
+    );
+    const bulbRelease = commandIndex(
+      backend,
+      ["--set-config-value", "/main/actions/eosremoterelease=Release Full"],
+      bulbStart,
+    );
+    assert.ok(bulbPress >= bulbStart && bulbRelease > bulbPress);
+    await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Manual");
+    await waitForBridgeState(
+      origin,
+      (candidate) => candidate.values["/main/capturesettings/autoexposuremode"] === "Manual",
+      "the camera shooting mode to return to Manual",
+    );
 
     let audioRequests = 0;
     await page.route("**/v1/session/*/status", async (route) => {
@@ -574,6 +791,12 @@ async function run() {
     await page.evaluate(() => globalThis.__openEosLocalVideoTest.releasePendingGetUserMedia());
     await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.stoppedTracks === 5);
     assert.equal(await page.evaluate(() => document.querySelector("#local-video").srcObject), null);
+    await waitForBridgeState(
+      origin,
+      (candidate) => candidate.values["/main/actions/viewfinder"] === "0" &&
+        candidate.movieStreams.length >= 1 && candidate.movieStreams.every((stream) => stream.closed),
+      "disconnect cleanup to close every camera movie stream",
+    );
     assert.deepEqual(pageErrors, []);
     await context.close();
   } finally {

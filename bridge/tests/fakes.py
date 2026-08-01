@@ -74,6 +74,7 @@ class FakeMovieStream:
     def __init__(self, chunks: list[bytes] | None = None) -> None:
         self._chunks = iter(chunks or [JPEG])
         self._closed = threading.Event()
+        self.waiting = threading.Event()
 
     @property
     def closed(self) -> bool:
@@ -86,6 +87,7 @@ class FakeMovieStream:
         try:
             return next(self._chunks)
         except StopIteration:
+            self.waiting.set()
             self._closed.wait()
             raise
 
@@ -161,13 +163,17 @@ class FakeRunner:
             return CommandOutput(MEDIA.encode())
         if command == ["--capture-preview", "--stdout"]:
             return CommandOutput(JPEG)
-        if command == [
-            "--folder",
-            "/store_00010001/DCIM/100CANON",
-            "--get-thumbnail",
-            "IMG_0001.JPG",
-            "--stdout",
-        ]:
+        if (
+            len(command) == 5
+            and command[:3]
+            == [
+                "--folder",
+                "/store_00010001/DCIM/100CANON",
+                "--get-thumbnail",
+            ]
+            and command[3] in {"IMG_0001.JPG", "IMG_0001.CR3"}
+            and command[4] == "--stdout"
+        ):
             return CommandOutput(THUMBNAIL)
         if command == [
             "--folder",
@@ -275,7 +281,9 @@ class FakeRunner:
                 self._radio("/main/capturesettings/aperture", "Aperture", ["2.8", "4", "5.6"]),
                 self._radio("/main/capturesettings/shutterspeed", "Shutter Speed", ["1/25", "1/50", "1/100"]),
                 self._radio(
-                    "/main/capturesettings/autoexposuremode", "Canon Auto Exposure Mode", ["P", "AV", "TV", "Manual"]
+                    "/main/capturesettings/autoexposuremode",
+                    "Canon Auto Exposure Mode",
+                    ["P", "AV", "TV", "Manual", "Bulb"],
                 ),
                 self._radio("/main/capturesettings/drivemode", "Drive Mode", ["Single", "Continuous high speed"]),
                 self._radio("/main/capturesettings/aspectratio", "Aspect Ratio", ["3:2", "16:9", "1.6x"]),

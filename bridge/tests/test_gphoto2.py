@@ -363,6 +363,29 @@ def test_event_polling_pauses_without_interrupting_gphoto2_live_view() -> None:
     session.stop_live_view()
 
 
+def test_live_view_frame_wait_does_not_block_camera_controls() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+    session.start_live_view(LiveViewStartRequest(fps=15))
+    stream = runner.movie_streams[-1]
+    assert session.live_view_frame() == JPEG
+
+    result: list[bytes] = []
+    reader = threading.Thread(target=lambda: result.append(session.live_view_frame()))
+    reader.start()
+    assert stream.waiting.wait(timeout=1.0)
+
+    focus = session.drive_focus("near", "large")
+    reader.join(timeout=2.0)
+
+    assert focus.accepted is True
+    assert runner.values["/main/actions/manualfocusdrive"] == "Near 3"
+    assert stream.closed is True
+    assert not reader.is_alive()
+    assert result == [JPEG]
+    session.stop_live_view()
+
+
 def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path: Path) -> None:
     runner = FakeRunner()
     session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
