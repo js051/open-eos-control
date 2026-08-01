@@ -1,6 +1,6 @@
 # Feature Status And Acceptance
 
-Last audited: 2026-07-31.
+Last audited: 2026-08-01.
 
 This is the canonical completeness ledger for Open EOS Control. A UI control, interface method, or simulator response alone does not make a feature complete.
 
@@ -70,7 +70,7 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 | Android Canon EOS Auto Lighting Optimizer | Implemented when advertised; device validation required | `AloMode (0xD1C1)` uses libgphoto2's `Generic32` table and UINT32 EOS event parsing. Android writes only the exact camera-advertised intersection of the pinned Standard/Low/High/Off, manual-exposure-disabled, and x1/x2/x3 values. The current R6 Mark III snapshot advertises only `x3`, so that state remains visible in diagnostics but no non-actionable control is shown. English/Traditional Chinese display labels never alter raw writes. |
 | Android Canon EOS image quality | Implemented when advertised; device validation required | Generic (`0xD120`), CF/CFexpress (`0xD121`) and SD (`0xD122`) ImageFormat events use bounded one/two-entry parsing; RAW/cRAW/JPEG labels, 28/44-byte writes, missing-capability, malformed-event and rejected-write paths are unit-tested against pinned libgphoto2 behavior and the R6 Mark III snapshot |
 | Android Canon EOS remaining vendor settings | Research | Any additional property codes, value mappings and state transitions are proven before controls are exposed |
-| Android Canon EOS USB Touch AF | Research | The implemented CCAPI `afframeposition` contract applies to network control only. The pinned R6 Mark III snapshot exposes DoAf/AfCancel but no Touch AF control, so no USB/PTP coordinate control is exposed until a writable command and R6 Mark III state semantics are proven |
+| Android Canon EOS USB Touch AF | Implemented when advertised; device validation required | Requires complete Canon Live View, a balanced autofocus path and camera-advertised `TouchAfPosition (0x915B)`. The parser reads sensor width/height only from bounded viewfinder block `0x0E`; normalized UI coordinates become integer sensor coordinates for parameters `[3, x, y]`, followed by balanced AF start/cancel. Missing geometry, invalid coordinates and rejected commands send no false success. The pinned R6 Mark III snapshot does not advertise `0x915B`, so support on that body remains explicitly unconfirmed until a physical DeviceInfo and tap result are recorded. |
 | Android Canon EOS USB Click White Balance | Research | The implemented CCAPI `clickwb` contract applies to network control only; no USB/PTP control is exposed until a verified Canon PTP coordinate command is available |
 | Desktop Bridge HTTP service | Implemented; device validation required | FastAPI service, loopback/Bearer security, stable errors, sessions, streaming responses and contract tests pass |
 | Windows standalone Desktop Bridge | Implemented; release validation required | A pinned PyInstaller build embeds the Python runtime, PyAV/FFmpeg and package static UI in one Windows x64 console executable. It opens only a ready loopback UI, preserves the LAN token gate without a process-list-visible token argument, carries product version resources, and is launched in Windows CI to verify the root UI, CSP, JavaScript, health version and both camera engines. USB still requires a system gphoto2 path. |

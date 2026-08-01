@@ -1768,6 +1768,134 @@ class UsbPtpCameraBackendTest {
         backend.close()
     }
 
+    @Test
+    fun canonTouchAutofocusMapsNormalizedPointToAdvertisedSensorGeometry() = runTest {
+        val transport = CanonEosScriptedTransport(
+            advertiseTouchAutofocus = true,
+            liveViewSensorSize = 6_000 to 4_000,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        assertTrue(backend.capabilities().matrix.supports(CameraFeature.TAP_FOCUS))
+        backend.startLiveView(LiveViewRequest())
+        backend.liveViewFrame(cacheKey = 1)
+        val result = backend.tapFocus(x = 0.25, y = 0.75)
+        val status = backend.status()
+
+        assertTrue(result.ok)
+        assertEquals(0.25, result.x, 0.0)
+        assertEquals(0.75, result.y, 0.0)
+        assertTrue(CameraFeature.TAP_FOCUS in backend.observedFeatures())
+        assertTrue(status.rawTransportJson.contains("\"canonLiveViewGeometry\":{\"width\":6000,\"height\":4000}"))
+        val touch = transport.sentContainers.single { container ->
+            container.type == PtpContainerType.COMMAND &&
+                container.code == CanonEosOperationCode.TOUCH_AF_POSITION
+        }
+        assertEquals(listOf(3L, 1_500L, 3_000L), touch.parameters())
+        val touchIndex = transport.sentContainers.indexOf(touch)
+        val autofocusIndex = transport.sentContainers.indexOfFirst { container ->
+            container.type == PtpContainerType.COMMAND && container.code == CanonEosOperationCode.DO_AF
+        }
+        val cancelIndex = transport.sentContainers.indexOfFirst { container ->
+            container.type == PtpContainerType.COMMAND && container.code == CanonEosOperationCode.AF_CANCEL
+        }
+        assertTrue(autofocusIndex > touchIndex)
+        assertTrue(cancelIndex > autofocusIndex)
+        backend.stopLiveView()
+        backend.close()
+    }
+
+    @Test
+    fun canonTouchAutofocusIsUnavailableWithoutAdvertisedOperation() = runTest {
+        val transport = CanonEosScriptedTransport(liveViewSensorSize = 6_000 to 4_000)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.tapFocus(x = 0.5, y = 0.5) }.exceptionOrNull()
+
+        assertFalse(backend.capabilities().matrix.supports(CameraFeature.TAP_FOCUS))
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(transport.hasOperation(CanonEosOperationCode.TOUCH_AF_POSITION))
+        backend.close()
+    }
+
+    @Test
+    fun canonTouchAutofocusRequiresActiveLiveViewAndValidCoordinates() = runTest {
+        val transport = CanonEosScriptedTransport(
+            advertiseTouchAutofocus = true,
+            liveViewSensorSize = 6_000 to 4_000,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val inactiveFailure = runCatching { backend.tapFocus(x = 0.5, y = 0.5) }.exceptionOrNull()
+        backend.startLiveView(LiveViewRequest())
+        val coordinateFailure = runCatching { backend.tapFocus(x = -0.1, y = 0.5) }.exceptionOrNull()
+
+        assertTrue(inactiveFailure is PtpProtocolException)
+        assertTrue(inactiveFailure?.message.orEmpty().contains("active Live View"))
+        assertTrue(coordinateFailure is PtpProtocolException)
+        assertTrue(coordinateFailure?.message.orEmpty().contains("normalized"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.TOUCH_AF_POSITION))
+        backend.stopLiveView()
+        backend.close()
+    }
+
+    @Test
+    fun canonTouchAutofocusRefusesToGuessMissingSensorGeometry() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseTouchAutofocus = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        backend.startLiveView(LiveViewRequest())
+
+        val failure = runCatching { backend.tapFocus(x = 0.5, y = 0.5) }.exceptionOrNull()
+
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("block 0x0E"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.TOUCH_AF_POSITION))
+        assertFalse(CameraFeature.TAP_FOCUS in backend.observedFeatures())
+        backend.stopLiveView()
+        backend.close()
+    }
+
+    @Test
+    fun canonTouchAutofocusDoesNotReportSuccessWhenCameraRejectsPosition() = runTest {
+        val transport = CanonEosScriptedTransport(
+            advertiseTouchAutofocus = true,
+            liveViewSensorSize = 6_000 to 4_000,
+            rejectOperationCode = CanonEosOperationCode.TOUCH_AF_POSITION,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        backend.startLiveView(LiveViewRequest())
+        backend.liveViewFrame(cacheKey = 1)
+
+        val failure = runCatching { backend.tapFocus(x = 0.5, y = 0.5) }.exceptionOrNull()
+
+        assertTrue(failure is PtpResponseException)
+        assertTrue(transport.hasOperation(CanonEosOperationCode.TOUCH_AF_POSITION))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.DO_AF))
+        assertFalse(CameraFeature.TAP_FOCUS in backend.observedFeatures())
+        backend.stopLiveView()
+        backend.close()
+    }
+
     private class ScriptedTransport(
         private val advertiseCapture: Boolean,
         private val advertiseDelete: Boolean = true,
@@ -1923,6 +2051,8 @@ class UsbPtpCameraBackendTest {
         private val advertiseDedicatedAutofocus: Boolean = true,
         private val advertiseRemoteRelease: Boolean = true,
         private val advertiseLiveViewMagnification: Boolean = true,
+        private val advertiseTouchAutofocus: Boolean = false,
+        private val liveViewSensorSize: Pair<Int, Int>? = null,
         private val rejectOperationCode: Int? = null,
         private val rejectHalfRemotePress: Boolean = false,
         private val rejectFullRemotePress: Boolean = false,
@@ -1962,6 +2092,7 @@ class UsbPtpCameraBackendTest {
                             advertiseHostTransferOperations,
                             advertiseLiveViewMagnification,
                             advertiseEventPolling,
+                            advertiseTouchAutofocus,
                         ),
                     )
                     incoming += ok(transaction)
@@ -1975,6 +2106,7 @@ class UsbPtpCameraBackendTest {
                 CanonEosOperationCode.ZOOM,
                 CanonEosOperationCode.DO_AF,
                 CanonEosOperationCode.AF_CANCEL,
+                CanonEosOperationCode.TOUCH_AF_POSITION,
                 CanonEosOperationCode.TRANSFER_COMPLETE,
                 CanonEosOperationCode.PC_HDD_CAPACITY,
                 -> incoming += if (container.code == rejectOperationCode) {
@@ -2048,7 +2180,12 @@ class UsbPtpCameraBackendTest {
                 }
 
                 CanonEosOperationCode.GET_VIEWFINDER_DATA -> {
-                    val payload = eosBlock(2, byteArrayOf(1, 2, 3)) + eosBlock(1, CANON_LIVE_VIEW_JPEG)
+                    val geometry = liveViewSensorSize?.let { (width, height) ->
+                        eosSensorGeometry(width, height)
+                    } ?: byteArrayOf()
+                    val payload = eosBlock(2, byteArrayOf(1, 2, 3)) +
+                        eosBlock(1, CANON_LIVE_VIEW_JPEG) +
+                        geometry
                     incoming += data(container.code, transaction, payload)
                     incoming += ok(transaction)
                 }
@@ -2242,6 +2379,14 @@ class UsbPtpCameraBackendTest {
         repeat(4) { index -> block[4 + index] = (type ushr (index * 8)).toByte() }
         data.copyInto(block, destinationOffset = 8)
     }
+
+    private fun eosSensorGeometry(width: Int, height: Int): ByteArray = eosBlock(
+        type = 0x0E,
+        data = ByteArray(8).also { data ->
+            repeat(4) { index -> data[index] = (width ushr (index * 8)).toByte() }
+            repeat(4) { index -> data[4 + index] = (height ushr (index * 8)).toByte() }
+        },
+    )
 
     private fun eosHostTransfer(item: HostCaptureObject): ByteArray {
         val lfn = item.eventCode == CanonEosEventCode.REQUEST_OBJECT_TRANSFER_64_LFN
@@ -2481,6 +2626,7 @@ class UsbPtpCameraBackendTest {
             advertiseHostTransferOperations: Boolean = false,
             advertiseLiveViewMagnification: Boolean = true,
             advertiseEventPolling: Boolean = true,
+            advertiseTouchAutofocus: Boolean = false,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
@@ -2514,6 +2660,9 @@ class UsbPtpCameraBackendTest {
                     }
                     if (advertiseLiveViewMagnification) {
                         add(CanonEosOperationCode.ZOOM)
+                    }
+                    if (advertiseTouchAutofocus) {
+                        add(CanonEosOperationCode.TOUCH_AF_POSITION)
                     }
                     if (advertiseHostTransferOperations) {
                         add(PtpOperationCode.GET_PARTIAL_OBJECT)

@@ -90,6 +90,16 @@ data class CanonEosSettingSpec(
     val fallbackLabel: String,
 )
 
+data class CanonEosLiveViewGeometry(
+    val width: Int,
+    val height: Int,
+)
+
+data class CanonEosLiveViewData(
+    val jpeg: ByteArray,
+    val geometry: CanonEosLiveViewGeometry?,
+)
+
 object CanonEosPtp {
     const val VENDOR_EXTENSION_ID = 0x0000000BL
     const val VIEWFINDER_REQUEST_BYTES = 0x00200000L
@@ -98,6 +108,11 @@ object CanonEosPtp {
     const val MOVIE_RECORD_TARGET_SDRAM = 3L
     const val MOVIE_RECORD_TARGET_CARD = 4L
     const val CAPTURE_DESTINATION_HOST = 4L
+
+    private const val VIEWFINDER_JPEG_BLOCK = 0x01L
+    private const val VIEWFINDER_JPEG_BLOCK_ALTERNATE = 0x0BL
+    private const val VIEWFINDER_SENSOR_GEOMETRY_BLOCK = 0x0EL
+    private const val MAX_VIEWFINDER_SENSOR_DIMENSION = 100_000L
 
     val settingSpecs = listOf(
         CanonEosSettingSpec(CanonEosPropertyCode.AUTO_EXPOSURE_MODE, "shootingmode", "Shooting mode"),
@@ -206,6 +221,11 @@ object CanonEosPtp {
 
     fun supportsLiveViewMagnification(info: PtpDeviceInfo): Boolean =
         supportsLiveView(info) && info.supports(CanonEosOperationCode.ZOOM)
+
+    fun supportsTouchAutofocus(info: PtpDeviceInfo): Boolean =
+        supportsLiveView(info) &&
+            info.supports(CanonEosOperationCode.TOUCH_AF_POSITION) &&
+            (supportsAutofocus(info) || supportsRemoteRelease(info))
 
     fun supportsPropertyControl(info: PtpDeviceInfo): Boolean =
         supportsRemotePreparation(info) && info.supports(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX)
@@ -507,8 +527,10 @@ object CanonEosPtp {
     private fun malformedImageFormat(offset: Int, reason: String): Nothing =
         throw PtpProtocolException("Canon EOS image format at byte $offset is malformed: $reason.")
 
-    fun liveViewJpeg(payload: ByteArray): ByteArray {
+    fun liveViewData(payload: ByteArray): CanonEosLiveViewData {
         var offset = 0
+        var jpeg: ByteArray? = null
+        var geometry: CanonEosLiveViewGeometry? = null
         while (offset + 8 <= payload.size) {
             val length = payload.u32Le(offset)
             val type = payload.u32Le(offset + 4)
@@ -518,17 +540,33 @@ object CanonEosPtp {
                         "for ${payload.size - offset} remaining bytes."
                 )
             }
-            if (type == 1L || type == 11L) {
-                val jpeg = payload.copyOfRange(offset + 8, offset + length.toInt())
-                if (jpeg.size < 4 || jpeg[0] != 0xFF.toByte() || jpeg[1] != 0xD8.toByte()) {
+            if ((type == VIEWFINDER_JPEG_BLOCK || type == VIEWFINDER_JPEG_BLOCK_ALTERNATE) && jpeg == null) {
+                val candidate = payload.copyOfRange(offset + 8, offset + length.toInt())
+                if (candidate.size < 4 || candidate[0] != 0xFF.toByte() || candidate[1] != 0xD8.toByte()) {
                     throw PtpProtocolException("Canon EOS viewfinder block type $type did not contain JPEG data.")
                 }
-                return jpeg
+                jpeg = candidate
+            } else if (type == VIEWFINDER_SENSOR_GEOMETRY_BLOCK && length >= 16L) {
+                val width = payload.u32Le(offset + 8)
+                val height = payload.u32Le(offset + 12)
+                if (
+                    width in 1..MAX_VIEWFINDER_SENSOR_DIMENSION &&
+                    height in 1..MAX_VIEWFINDER_SENSOR_DIMENSION
+                ) {
+                    geometry = CanonEosLiveViewGeometry(width.toInt(), height.toInt())
+                }
             }
             offset += length.toInt()
         }
-        throw PtpProtocolException("Canon EOS viewfinder response did not contain a JPEG block.")
+        return CanonEosLiveViewData(
+            jpeg = jpeg ?: throw PtpProtocolException(
+                "Canon EOS viewfinder response did not contain a JPEG block."
+            ),
+            geometry = geometry,
+        )
     }
+
+    fun liveViewJpeg(payload: ByteArray): ByteArray = liveViewData(payload).jpeg
 
     private fun propertyPayload(propertyCode: Int, value: Long, valueBytes: Int): ByteArray =
         ByteArray(12).also { payload ->

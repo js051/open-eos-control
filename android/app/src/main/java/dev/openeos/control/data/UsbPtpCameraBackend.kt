@@ -35,6 +35,7 @@ class UsbPtpCameraBackend(
     private var lastPropertyRefreshAtMillis = 0L
     private var canonRemotePrepared = false
     private var canonLiveViewActive = false
+    private var canonLiveViewGeometry: CanonEosLiveViewGeometry? = null
     private val canonProperties = mutableMapOf<Int, CanonEosPropertyState>()
     private var canonPropertyDiscoveryAttempted = false
     private var canonPropertyError: String? = null
@@ -87,6 +88,7 @@ class UsbPtpCameraBackend(
         lastPropertyRefreshAtMillis = 0L
         canonRemotePrepared = false
         canonLiveViewActive = false
+        canonLiveViewGeometry = null
         synchronized(canonProperties) { canonProperties.clear() }
         canonPropertyDiscoveryAttempted = false
         canonPropertyError = null
@@ -206,6 +208,7 @@ class UsbPtpCameraBackend(
         val supportsCanonLiveView = CanonEosPtp.supportsLiveView(info)
         val supportsCanonFocusDrive = CanonEosPtp.supportsFocusDrive(info)
         val supportsCanonLiveViewMagnification = CanonEosPtp.supportsLiveViewMagnification(info)
+        val supportsCanonTouchAutofocus = CanonEosPtp.supportsTouchAutofocus(info)
         val supportsCanonMovieRecording = CanonEosPtp.supportsMovieRecording(
             info,
             canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).availableValues,
@@ -237,6 +240,7 @@ class UsbPtpCameraBackend(
                 add(CameraFeature.LIVE_VIEW)
                 add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
             }
+            if (supportsCanonTouchAutofocus) add(CameraFeature.TAP_FOCUS)
             if (supportsCanonFocusDrive) add(CameraFeature.FOCUS_DRIVE)
             if (supportsCanonLiveViewMagnification) add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
             if (supportsCanonMovieRecording) add(CameraFeature.VIDEO_RECORDING)
@@ -306,6 +310,8 @@ class UsbPtpCameraBackend(
                         "Holds Canon EOS RemoteReleaseOn half/full until explicit RemoteReleaseOff full/half cleanup.",
                     CameraFeature.AUTOFOCUS to
                         "Prefers advertised Canon EOS DoAf/AfCancel and falls back to a balanced half-press sequence.",
+                    CameraFeature.TAP_FOCUS to
+                        "Requires advertised Canon EOS TouchAfPosition, complete Live View, a balanced AF path, and sensor geometry from viewfinder block 0x0E.",
                     CameraFeature.FOCUS_DRIVE to
                         "Uses Canon EOS DriveLens with the Near/Far 1-3 values documented by libgphoto2.",
                     CameraFeature.LIVE_VIEW_MAGNIFICATION to
@@ -791,6 +797,7 @@ class UsbPtpCameraBackend(
     override suspend fun startLiveView(request: LiveViewRequest) {
         if (!CanonEosPtp.supportsLiveView(requireDeviceInfo())) unsupported<Unit>(CameraFeature.LIVE_VIEW)
         if (canonLiveViewActive) return
+        canonLiveViewGeometry = null
         ensureCanonRemoteMode()
         val ptp = requireSession()
         ptp.executeDataOutOperation(
@@ -825,6 +832,7 @@ class UsbPtpCameraBackend(
             )
         } finally {
             canonLiveViewActive = false
+            canonLiveViewGeometry = null
         }
     }
 
@@ -832,7 +840,34 @@ class UsbPtpCameraBackend(
 
     override suspend fun stopRecording(): CameraStatus = setCanonMovieRecording(recording = false)
 
-    override suspend fun tapFocus(x: Double, y: Double): FocusResult = unsupported(CameraFeature.TAP_FOCUS)
+    override suspend fun tapFocus(x: Double, y: Double): FocusResult {
+        val info = requireDeviceInfo()
+        if (!CanonEosPtp.supportsTouchAutofocus(info)) unsupported<Unit>(CameraFeature.TAP_FOCUS)
+        if (!canonLiveViewActive) {
+            throw PtpProtocolException("Canon EOS USB Touch AF requires an active Live View session.")
+        }
+        if (!x.isFinite() || !y.isFinite() || x !in 0.0..1.0 || y !in 0.0..1.0) {
+            throw PtpProtocolException("Canon EOS USB Touch AF coordinates must be normalized to 0.0..1.0.")
+        }
+
+        val geometry = canonLiveViewGeometry ?: CanonEosPtp.liveViewData(readCanonViewfinderData())
+            .geometry
+            ?.also { canonLiveViewGeometry = it }
+            ?: throw PtpProtocolException(
+                "Canon EOS USB Touch AF requires sensor geometry from Live View block 0x0E."
+            )
+        val cameraX = (x * geometry.width.toDouble()).toLong()
+        val cameraY = (y * geometry.height.toDouble()).toLong()
+
+        ensureCanonRemoteMode()
+        requireSession().executeOperation(
+            CanonEosOperationCode.TOUCH_AF_POSITION,
+            listOf(CANON_TOUCH_AF_MODE, cameraX, cameraY),
+        )
+        autofocus()
+        observedFeatures.add(CameraFeature.TAP_FOCUS)
+        return FocusResult(ok = true, x = x, y = y)
+    }
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String =
         throw UnsupportedOperationException("USB PTP Live View frames are returned as in-memory JPEG data.")
@@ -840,8 +875,10 @@ class UsbPtpCameraBackend(
     override suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest): LiveViewFrame {
         if (!canonLiveViewActive) throw PtpProtocolException("Canon EOS USB Live View is not running.")
         val payload = readCanonViewfinderData()
+        val data = CanonEosPtp.liveViewData(payload)
+        data.geometry?.let { canonLiveViewGeometry = it }
         return LiveViewFrame(
-            bytes = CanonEosPtp.liveViewJpeg(payload),
+            bytes = data.jpeg,
             contentType = "image/jpeg",
             sourceUrl = "ptp-usb://canon-eos/viewfinder?frame=$cacheKey",
         ).also {
@@ -1481,6 +1518,14 @@ class UsbPtpCameraBackend(
         return JSONObject()
             .put("kind", "ptp-usb")
             .put("vendorExtensionId", info.vendorExtensionId.toInt().ptpHexCode(8))
+            .put(
+                "canonLiveViewGeometry",
+                canonLiveViewGeometry?.let { geometry ->
+                    JSONObject()
+                        .put("width", geometry.width)
+                        .put("height", geometry.height)
+                } ?: JSONObject.NULL,
+            )
             .put("operations", JSONArray(info.operations.sorted().map { it.ptpHexCode() }))
             .put("advertisedDeviceProperties", JSONArray(info.deviceProperties.sorted().map { it.ptpHexCode() }))
             .put("loadedProperties", properties)
@@ -1686,6 +1731,7 @@ private const val CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS = 3_000L
 private const val CANON_CLOCK_SYNC_TOLERANCE_SECONDS = 10L
 private const val CANON_EVENT_LONG_POLL_ATTEMPTS = 10
 private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L
+private const val CANON_TOUCH_AF_MODE = 3L
 private const val CANON_PROPERTY_DISCOVERY_ATTEMPTS = 10
 private const val CANON_PROPERTY_DISCOVERY_RETRY_MILLIS = 50L
 private const val CANON_CAPTURE_EVENT_TIMEOUT_MILLIS = 90_000L
