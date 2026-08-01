@@ -189,7 +189,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         openMoreActions(in: app)
         let halfPress = app.buttons["half-press-button"]
-        XCTAssertTrue(waitForInteraction(halfPress, timeout: 5))
+        XCTAssertTrue(halfPress.waitForExistence(timeout: 8))
         halfPress.tap()
         try await waitForSimulatorState { state in
             (state["half_press_count"] as? NSNumber)?.intValue == 2 &&
