@@ -25,8 +25,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 
 private val CameraSettingsMaxWidth = 680.dp
 private const val CameraSettingsHeightFraction = 0.68f
@@ -36,22 +34,13 @@ fun CameraSettingsSurface(
     onDismissRequest: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    Dialog(
-        onDismissRequest = onDismissRequest,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        ),
-    ) {
-        DarkSheetSystemBarsEffect()
-        BackHandler(onBack = onDismissRequest)
-        BoxWithConstraints(Modifier.fillMaxSize().testTag("camera-settings-root")) {
-            StableSettingsPanel(
-                availableHeight = maxHeight,
-                onDismissRequest = onDismissRequest,
-                content = content,
-            )
-        }
+    BackHandler(onBack = onDismissRequest)
+    BoxWithConstraints(Modifier.fillMaxSize().testTag("camera-settings-root")) {
+        StableSettingsPanel(
+            availableHeight = maxHeight,
+            onDismissRequest = onDismissRequest,
+            content = content,
+        )
     }
 }
 

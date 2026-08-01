@@ -198,6 +198,7 @@ jobs:
           path: |
             android/app/build/reports/androidTests/connected/debug
             android/app/build/outputs/androidTest-results/connected/debug
+            android/app/build/outputs/connected_android_test_additional_output
             ${{ runner.temp }}/android-camera-simulator.log
           if-no-files-found: ignore
           retention-days: 7
