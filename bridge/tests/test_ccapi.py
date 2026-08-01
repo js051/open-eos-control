@@ -22,7 +22,7 @@ from open_eos_bridge.ccapi import (
 )
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine
-from open_eos_bridge.models import CameraFeature, LiveViewStartRequest
+from open_eos_bridge.models import CameraFeature, CameraTemperatureStatus, LiveViewStartRequest
 from open_eos_bridge.rtp import RtpAudioChunk, RtpError, RtpSessionDescription
 
 from .fakes import FakeRunner
@@ -74,6 +74,13 @@ EVENT_DISCOVERY = {
     "ver110": [{"path": "/event/polling", "get": True, "delete": True}],
     "ver100": [*DISCOVERY["ver100"]],
 }
+DEVICE_STATUS_DISCOVERY = {
+    "ver100": [
+        *DISCOVERY["ver100"],
+        {"path": "/devicestatus/lens", "get": True},
+        {"path": "/devicestatus/temperature", "get": True},
+    ]
+}
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,8 @@ class FakeCcapiTransport:
         preview_content_type: str = "image/jpeg",
         zoom_response: object | None = None,
         movie_mode_response: object | None = None,
+        lens_response: object | None = None,
+        temperature_response: object | None = None,
     ) -> None:
         self.discovery = discovery or DISCOVERY
         self.developer_discovery = developer_discovery
@@ -114,6 +123,10 @@ class FakeCcapiTransport:
         self.preview_content_type = preview_content_type
         self.zoom_response = zoom_response
         self.movie_mode_response = movie_mode_response
+        self.lens_response = (
+            lens_response if lens_response is not None else {"mount": True, "name": "RF24-105mm F4 L IS USM"}
+        )
+        self.temperature_response = temperature_response if temperature_response is not None else {"status": "normal"}
         self.requests: list[RecordedRequest] = []
         self.settings = {
             "iso": {"value": "800", "ability": ["100", "800", "1600"]},
@@ -178,6 +191,10 @@ class FakeCcapiTransport:
             return _json_response({"batterylist": [{"level": 89, "quality": "good"}]})
         if method == "GET" and path == "/ccapi/ver100/devicestatus/storage":
             return _json_response({"storagelist": [{"name": "card1", "maxsize": 64_000, "spacesize": 32_000}]})
+        if method == "GET" and path == "/ccapi/ver100/devicestatus/lens":
+            return _json_response(self.lens_response)
+        if method == "GET" and path == "/ccapi/ver100/devicestatus/temperature":
+            return _json_response(self.temperature_response)
         if method == "GET" and path == "/ccapi/ver100/shooting/settings":
             return _json_response(self.settings)
         if method == "GET" and path == "/ccapi/ver100/shooting/control/zoom":
@@ -570,6 +587,127 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         {"cameradisplay": "on", "liveviewsize": "large"},
         {"cameradisplay": "on"},
     ]
+
+
+def test_ccapi_device_status_requires_advertised_strict_canon_payloads() -> None:
+    transport = FakeCcapiTransport(
+        discovery=DEVICE_STATUS_DISCOVERY,
+        temperature_response={"status": "frameratedown_and_restrictionmovierecording"},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    status = session.status()
+    capabilities = session.capabilities()
+
+    assert status.lens is not None
+    assert status.lens.mounted is True
+    assert status.lens.name == "RF24-105mm F4 L IS USM"
+    assert status.temperature is CameraTemperatureStatus.FRAME_RATE_DOWN_AND_RESTRICTION_MOVIE_RECORDING
+    assert status.temperature.movie_recording_allowed is False
+    assert CameraFeature.LENS_STATUS in capabilities.supported
+    assert CameraFeature.TEMPERATURE_STATUS in capabilities.supported
+
+
+def test_ccapi_malformed_device_status_remains_planned() -> None:
+    transport = FakeCcapiTransport(
+        discovery=DEVICE_STATUS_DISCOVERY,
+        lens_response={"mount": "true", "name": "RF24-105mm"},
+        temperature_response={"status": "hot"},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    status = session.status()
+    capabilities = session.capabilities()
+
+    assert status.lens is None
+    assert status.temperature is None
+    assert CameraFeature.LENS_STATUS not in capabilities.supported
+    assert CameraFeature.TEMPERATURE_STATUS not in capabilities.supported
+    assert CameraFeature.LENS_STATUS in capabilities.planned
+    assert CameraFeature.TEMPERATURE_STATUS in capabilities.planned
+
+
+def test_ccapi_oversized_lens_name_is_ignored_without_failing_status() -> None:
+    transport = FakeCcapiTransport(
+        discovery=DEVICE_STATUS_DISCOVERY,
+        lens_response={"mount": True, "name": "R" * 513},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    status = session.status()
+    capabilities = session.capabilities()
+
+    assert status.lens is None
+    assert CameraFeature.LENS_STATUS not in capabilities.supported
+    assert CameraFeature.LENS_STATUS in capabilities.planned
+
+
+@pytest.mark.parametrize(
+    ("temperature", "operation", "forbidden_path"),
+    [
+        ("disablerelease", "capture", "/shooting/control/shutterbutton"),
+        ("restrictionmovierecording", "record", "/shooting/control/recbutton"),
+        ("disableliveview", "liveview", "/shooting/liveview"),
+    ],
+)
+def test_ccapi_refreshes_temperature_before_restricted_start_commands(
+    temperature: str,
+    operation: str,
+    forbidden_path: str,
+) -> None:
+    transport = FakeCcapiTransport(
+        discovery=DEVICE_STATUS_DISCOVERY,
+        temperature_response={"status": temperature},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    with pytest.raises(BridgeError) as raised:
+        if operation == "capture":
+            session.capture_still()
+        elif operation == "record":
+            session.start_recording()
+        else:
+            session.start_live_view(LiveViewStartRequest(fps=15, source="CCAPI_JPEG_POLLING"))
+
+    assert raised.value.code == "CAMERA_TEMPERATURE_RESTRICTION"
+    assert not any(
+        request.method in {"POST", "PUT"} and request.path.endswith(forbidden_path)
+        for request in transport.requests
+    )
+
+
+def test_ccapi_temperature_restriction_does_not_block_recording_stop() -> None:
+    transport = FakeCcapiTransport(discovery=DEVICE_STATUS_DISCOVERY)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    assert session.start_recording().recording is True
+    transport.temperature_response = {"status": "restrictionmovierecording"}
+    assert session.stop_recording().recording is False
+
+    assert RecordedRequest(
+        "POST",
+        "/ccapi/ver100/shooting/control/recbutton",
+        {"action": "stop"},
+    ) in transport.requests
+
+
+def test_ccapi_malformed_temperature_refresh_does_not_clear_last_restriction() -> None:
+    transport = FakeCcapiTransport(
+        discovery=DEVICE_STATUS_DISCOVERY,
+        temperature_response={"status": "disablerelease"},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    with pytest.raises(BridgeError, match="temperature restriction"):
+        session.capture_still()
+    transport.temperature_response = {"status": "hot"}
+    with pytest.raises(BridgeError, match="temperature restriction"):
+        session.capture_still()
+
+    assert not any(
+        request.method == "POST" and request.path.endswith("/shooting/control/shutterbutton")
+        for request in transport.requests
+    )
 
 
 @pytest.mark.parametrize(

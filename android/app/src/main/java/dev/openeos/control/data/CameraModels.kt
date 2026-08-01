@@ -66,6 +66,8 @@ enum class CameraFeature(
     CAMERA_CLOCK_SYNC("Camera clock sync"),
     BATTERY_STATUS("Battery status"),
     STORAGE_STATUS("Storage status"),
+    LENS_STATUS("Lens status"),
+    TEMPERATURE_STATUS("Temperature status"),
     EVENT_POLLING("Camera event polling"),
     LIVE_VIEW("Live view"),
     LIVE_VIEW_JPEG_POLLING("Live view JPEG polling"),
@@ -120,6 +122,8 @@ data class CapabilityMatrix(
         ): CapabilityMatrix = CapabilityMatrix(
             supported = supported,
             planned = setOf(
+                CameraFeature.LENS_STATUS,
+                CameraFeature.TEMPERATURE_STATUS,
                 CameraFeature.EVENT_POLLING,
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
@@ -140,6 +144,10 @@ data class CapabilityMatrix(
                 CameraFeature.CAMERA_CLOCK_SYNC,
             ) - supported,
             reasons = mapOf(
+                CameraFeature.LENS_STATUS to
+                    "The camera must advertise GET devicestatus/lens and return Canon's documented mount/name payload.",
+                CameraFeature.TEMPERATURE_STATUS to
+                    "The camera must advertise GET devicestatus/temperature and return a documented Canon status value.",
                 CameraFeature.LIVE_VIEW_RTP to
                     "Requires advertised Canon RTP SDP/start endpoints plus a camera Wi-Fi route for native H.264 decoding.",
                 CameraFeature.EVENT_POLLING to
@@ -301,6 +309,44 @@ data class ExposureState(
     val whiteBalance: String,
 )
 
+data class LensStatus(
+    val mounted: Boolean,
+    val name: String,
+)
+
+enum class CameraTemperatureStatus(
+    val ccapiValue: String,
+) {
+    NORMAL("normal"),
+    WARNING("warning"),
+    FRAME_RATE_DOWN("frameratedown"),
+    DISABLE_LIVE_VIEW("disableliveview"),
+    DISABLE_RELEASE("disablerelease"),
+    STILL_QUALITY_WARNING("stillqualitywarning"),
+    RESTRICTION_MOVIE_RECORDING("restrictionmovierecording"),
+    WARNING_AND_RESTRICTION_MOVIE_RECORDING("warning_and_restrictionmovierecording"),
+    FRAME_RATE_DOWN_AND_RESTRICTION_MOVIE_RECORDING("frameratedown_and_restrictionmovierecording"),
+    DISABLE_LIVE_VIEW_AND_RESTRICTION_MOVIE_RECORDING("disableliveview_and_restrictionmovierecording"),
+    DISABLE_RELEASE_AND_RESTRICTION_MOVIE_RECORDING("disablerelease_and_restrictionmovierecording"),
+    STILL_QUALITY_WARNING_AND_RESTRICTION_MOVIE_RECORDING(
+        "stillqualitywarning_and_restrictionmovierecording",
+    ),
+    ;
+
+    val isNormal: Boolean get() = this == NORMAL
+    val liveViewAllowed: Boolean get() = "disableliveview" !in ccapiValue
+    val stillCaptureAllowed: Boolean get() = "disablerelease" !in ccapiValue
+    val movieRecordingAllowed: Boolean get() = "restrictionmovierecording" !in ccapiValue
+    val frameRateReduced: Boolean get() = ccapiValue.startsWith("frameratedown")
+    val stillQualityWarning: Boolean get() = ccapiValue.startsWith("stillqualitywarning")
+    val temperatureWarning: Boolean get() = ccapiValue == "warning" || ccapiValue.startsWith("warning_and_")
+
+    companion object {
+        fun fromCcapiValue(value: String): CameraTemperatureStatus? =
+            entries.firstOrNull { it.ccapiValue == value }
+    }
+}
+
 data class CameraStatus(
     val connected: Boolean,
     val batteryLevel: Int?,
@@ -318,6 +364,8 @@ data class CameraStatus(
     val rawStorageJson: String = "",
     val rawTransportJson: String = "",
     val bulbExposureActive: Boolean? = null,
+    val lens: LensStatus? = null,
+    val temperature: CameraTemperatureStatus? = null,
 )
 
 data class CameraEvent(

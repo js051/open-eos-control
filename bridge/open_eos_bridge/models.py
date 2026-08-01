@@ -41,6 +41,8 @@ class CameraFeature(StrEnum):
     CAMERA_CLOCK_SYNC = "CAMERA_CLOCK_SYNC"
     BATTERY_STATUS = "BATTERY_STATUS"
     STORAGE_STATUS = "STORAGE_STATUS"
+    LENS_STATUS = "LENS_STATUS"
+    TEMPERATURE_STATUS = "TEMPERATURE_STATUS"
     EVENT_POLLING = "EVENT_POLLING"
     LIVE_VIEW = "LIVE_VIEW"
     LIVE_VIEW_JPEG_POLLING = "LIVE_VIEW_JPEG_POLLING"
@@ -132,6 +134,40 @@ class StorageStatus(ApiModel):
     devices: int = Field(default=0, ge=0)
 
 
+class LensStatus(ApiModel):
+    mounted: bool
+    name: str = Field(default="", max_length=512)
+
+
+class CameraTemperatureStatus(StrEnum):
+    NORMAL = "normal"
+    WARNING = "warning"
+    FRAME_RATE_DOWN = "frameratedown"
+    DISABLE_LIVE_VIEW = "disableliveview"
+    DISABLE_RELEASE = "disablerelease"
+    STILL_QUALITY_WARNING = "stillqualitywarning"
+    RESTRICTION_MOVIE_RECORDING = "restrictionmovierecording"
+    WARNING_AND_RESTRICTION_MOVIE_RECORDING = "warning_and_restrictionmovierecording"
+    FRAME_RATE_DOWN_AND_RESTRICTION_MOVIE_RECORDING = "frameratedown_and_restrictionmovierecording"
+    DISABLE_LIVE_VIEW_AND_RESTRICTION_MOVIE_RECORDING = "disableliveview_and_restrictionmovierecording"
+    DISABLE_RELEASE_AND_RESTRICTION_MOVIE_RECORDING = "disablerelease_and_restrictionmovierecording"
+    STILL_QUALITY_WARNING_AND_RESTRICTION_MOVIE_RECORDING = (
+        "stillqualitywarning_and_restrictionmovierecording"
+    )
+
+    @property
+    def live_view_allowed(self) -> bool:
+        return "disableliveview" not in self.value
+
+    @property
+    def still_capture_allowed(self) -> bool:
+        return "disablerelease" not in self.value
+
+    @property
+    def movie_recording_allowed(self) -> bool:
+        return "restrictionmovierecording" not in self.value
+
+
 class ExposureState(ApiModel):
     iso: str = "-"
     shutter: str = "-"
@@ -147,6 +183,8 @@ class CameraStatus(ApiModel):
     mode: str = "unknown"
     media: StorageStatus
     exposure: ExposureState
+    lens: LensStatus | None = None
+    temperature: CameraTemperatureStatus | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
 

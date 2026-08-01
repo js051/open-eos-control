@@ -413,7 +413,7 @@ class CameraViewModel(
                 errorOperation = session.liveViewStartError?.let { CameraOperation.LIVE_VIEW },
             )
         }
-        if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
+        if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW) && session.status.temperature?.liveViewAllowed != false) {
             if (session.nativeLiveViewSession == null) {
                 refreshLiveViewFrameInternal(reportErrors = true)
                 startLiveViewLoopIfNeeded()
@@ -543,7 +543,11 @@ class CameraViewModel(
     }
 
     fun restartLiveView() = runCamera(CameraOperation.LIVE_VIEW) {
-        if (_uiState.value.previewMode || !_uiState.value.supports(CameraFeature.LIVE_VIEW)) return@runCamera
+        if (
+            _uiState.value.previewMode ||
+            !_uiState.value.supports(CameraFeature.LIVE_VIEW) ||
+            !_uiState.value.liveViewTemperatureAllowed
+        ) return@runCamera
         repository.restartLiveView()
         val capabilities = repository.refreshCapabilities()
         val nativeSession = repository.nativeLiveViewSession()
@@ -669,10 +673,10 @@ class CameraViewModel(
     }
 
     fun toggleBulbExposure() = runCamera(CameraOperation.CAPTURE) {
-        if (!_uiState.value.bulbMode || !_uiState.value.supports(CameraFeature.BULB_EXPOSURE)) {
+        val active = _uiState.value.bulbExposureActive
+        if (!_uiState.value.bulbMode || (!active && !_uiState.value.supports(CameraFeature.BULB_EXPOSURE))) {
             return@runCamera
         }
-        val active = _uiState.value.bulbExposureActive
         if (_uiState.value.previewMode) {
             val status = requireNotNull(_uiState.value.status).copy(bulbExposureActive = !active)
             _uiState.update {
@@ -1153,6 +1157,7 @@ class CameraViewModel(
             !_uiState.value.connected ||
             _uiState.value.previewMode ||
             !_uiState.value.supports(CameraFeature.LIVE_VIEW)
+            || !_uiState.value.liveViewTemperatureAllowed
             || _uiState.value.nativeLiveViewSession != null
         ) return
 
@@ -1247,6 +1252,7 @@ class CameraViewModel(
             state.previewMode ||
             !state.liveViewAutoRefresh ||
             !state.supports(CameraFeature.LIVE_VIEW)
+            || !state.liveViewTemperatureAllowed
             || state.nativeLiveViewSession != null
         ) return
 

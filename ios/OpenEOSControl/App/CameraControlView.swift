@@ -31,6 +31,8 @@ struct CameraControlView: View {
                     CameraOverlayHeader(controlRotation: controlRotation)
                         .padding(.top, proxy.safeAreaInsets.top + 4)
                         .padding(.horizontal, 10)
+                    TemperatureWarningOverlay(controlRotation: controlRotation)
+                        .padding(.top, 6)
                     Spacer(minLength: 0)
                     PortraitControlPanel(controlRotation: controlRotation)
                         .padding(.bottom, proxy.safeAreaInsets.bottom)
@@ -56,9 +58,12 @@ struct CameraControlView: View {
             ZStack(alignment: .top) {
                 LiveViewSurface()
                 if camera.hudVisible {
-                    CameraOverlayHeader(controlRotation: controlRotation)
-                        .padding(.top, proxy.safeAreaInsets.top + 4)
-                        .padding(.horizontal, 10)
+                    VStack(spacing: 6) {
+                        CameraOverlayHeader(controlRotation: controlRotation)
+                        TemperatureWarningOverlay(controlRotation: controlRotation)
+                    }
+                    .padding(.top, proxy.safeAreaInsets.top + 4)
+                    .padding(.horizontal, 10)
                 }
             }
             .frame(width: proxy.size.width * 0.7)
@@ -71,6 +76,44 @@ struct CameraControlView: View {
                     .background(Color.cameraBackground.opacity(0.97))
             }
         }
+    }
+}
+
+private struct TemperatureWarningOverlay: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
+    let controlRotation: Double
+
+    var body: some View {
+        if let temperature = camera.status?.temperature, !temperature.isNormal {
+            RotatingControl(degrees: controlRotation) {
+                HStack(spacing: 7) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(messages(for: temperature).joined(separator: " · "))
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+                }
+                .foregroundStyle(Color.cameraWarning)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .frame(maxWidth: 360, minHeight: 38)
+                .background(Color.black.opacity(0.82))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .accessibilityIdentifier("temperature-status-banner")
+        }
+    }
+
+    private func messages(for temperature: CameraTemperatureStatus) -> [String] {
+        var values: [String] = []
+        if temperature.temperatureWarning { values.append(language.string("camera_temperature_warning")) }
+        if temperature.frameRateReduced { values.append(language.string("temperature_frame_rate_reduced")) }
+        if !temperature.liveViewAllowed { values.append(language.string("temperature_live_view_unavailable")) }
+        if !temperature.stillCaptureAllowed { values.append(language.string("temperature_shutter_unavailable")) }
+        if !temperature.movieRecordingAllowed { values.append(language.string("temperature_movie_recording_restricted")) }
+        if temperature.stillQualityWarning { values.append(language.string("temperature_still_quality_warning")) }
+        return values.isEmpty ? [language.string("camera_temperature_warning")] : values
     }
 }
 
@@ -387,7 +430,19 @@ private struct CaptureBar: View {
     }
 
     private var captureSupported: Bool {
-        camera.supports(camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording)
+        if camera.bulbMode && camera.bulbExposureActive { return true }
+        if camera.captureMode == .video && camera.recording { return true }
+        return camera.supports(
+            camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording
+        )
+    }
+
+    private var captureTemperatureAllowed: Bool {
+        if camera.bulbMode && camera.bulbExposureActive { return true }
+        if camera.captureMode == .video && camera.recording { return true }
+        return camera.captureMode == .photo
+            ? camera.stillCaptureTemperatureAllowed
+            : camera.movieRecordingTemperatureAllowed
     }
 
     @ViewBuilder
@@ -440,8 +495,11 @@ private struct CaptureBar: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(!captureSupported || camera.isBusy(camera.captureMode == .photo ? .capture : .recording))
-        .opacity(captureSupported ? 1 : 0.38)
+        .disabled(
+            !captureSupported || !captureTemperatureAllowed ||
+                camera.isBusy(camera.captureMode == .photo ? .capture : .recording)
+        )
+        .opacity(captureSupported && captureTemperatureAllowed ? 1 : 0.38)
         .accessibilityIdentifier(camera.captureMode == .photo ? "shutter-button" : "record-button")
     }
 }

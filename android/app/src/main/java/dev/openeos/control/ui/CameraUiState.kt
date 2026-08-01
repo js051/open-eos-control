@@ -119,6 +119,15 @@ data class CameraUiState(
         get() = captureMode == CaptureMode.PHOTO &&
             (capabilities?.shootingModeSetting()?.value ?: status?.mode).orEmpty().isBulbModeValue()
 
+    val liveViewTemperatureAllowed: Boolean
+        get() = status?.temperature?.liveViewAllowed != false
+
+    val stillCaptureTemperatureAllowed: Boolean
+        get() = status?.temperature?.stillCaptureAllowed != false
+
+    val movieRecordingTemperatureAllowed: Boolean
+        get() = status?.temperature?.movieRecordingAllowed != false
+
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations || (bulbExposureActive && operation != CameraOperation.CAPTURE)
 }

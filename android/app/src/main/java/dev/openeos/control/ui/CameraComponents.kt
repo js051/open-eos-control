@@ -1715,23 +1715,30 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     val photo = state.captureMode == CaptureMode.PHOTO
     val bulb = photo && state.bulbMode
     val bulbActive = bulb && state.bulbExposureActive
-    val supported = state.supports(
+    val recordingActive = !photo && state.status?.recording == true
+    val supported = bulbActive || recordingActive || state.supports(
         when {
             bulb -> CameraFeature.BULB_EXPOSURE
             photo -> CameraFeature.STILL_CAPTURE
             else -> CameraFeature.VIDEO_RECORDING
-        }
+        },
     )
     val description = when {
         bulbActive -> stringResource(R.string.stop_bulb_exposure)
         bulb -> stringResource(R.string.start_bulb_exposure)
         photo -> stringResource(R.string.capture_photo)
-        state.status?.recording == true -> stringResource(R.string.stop_recording)
+        recordingActive -> stringResource(R.string.stop_recording)
         else -> stringResource(R.string.start_recording)
     }
     val color = if (bulb) AppWarning else if (photo) AppText else AppRecord
     val operation = if (photo) CameraOperation.CAPTURE else CameraOperation.RECORDING
     val processing = state.isBusy(operation)
+    val temperatureAllowed = when {
+        bulbActive -> true
+        photo -> state.stillCaptureTemperatureAllowed
+        recordingActive -> true
+        else -> state.movieRecordingTemperatureAllowed
+    }
     val haptic = LocalHapticFeedback.current
     LaunchedEffect(state.captureFeedback) {
         if (state.captureFeedback == CaptureFeedback.SUCCESS) {
@@ -1742,7 +1749,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
         Modifier.size(76.dp)
             .testTag("capture-button")
             .background(AppBackground, CircleShape)
-            .clickable(enabled = supported && !processing) {
+            .clickable(enabled = supported && temperatureAllowed && !processing) {
                 when {
                     bulb -> actions.toggleBulbExposure()
                     photo -> actions.captureStill()
@@ -1758,7 +1765,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
             Box(
                 Modifier.size(if (photo) 58.dp else 52.dp).background(
                     color,
-                    if (bulbActive || (!photo && state.status?.recording == true)) RoundedCornerShape(8.dp) else CircleShape,
+                    if (bulbActive || recordingActive) RoundedCornerShape(8.dp) else CircleShape,
                 )
             )
         }

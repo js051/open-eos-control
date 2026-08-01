@@ -637,6 +637,20 @@ class DesktopBridgeClient(
             rawStorageJson = media.toString(),
             rawTransportJson = raw.toString(),
             bulbExposureActive = body.optNullableBoolean("bulbExposureActive"),
+            lens = body.optJSONObject("lens")?.let { lens ->
+                val mounted = lens.opt("mounted") as? Boolean
+                val name = lens.opt("name") as? String
+                if (
+                    mounted != null && name != null && name.length <= 512 &&
+                    name.none { it.isISOControl() } && (!mounted || name.isNotBlank())
+                ) {
+                    LensStatus(mounted = mounted, name = name.takeIf { mounted }.orEmpty())
+                } else {
+                    null
+                }
+            },
+            temperature = body.optNullableString("temperature")
+                ?.let(CameraTemperatureStatus::fromCcapiValue),
         )
     }
 

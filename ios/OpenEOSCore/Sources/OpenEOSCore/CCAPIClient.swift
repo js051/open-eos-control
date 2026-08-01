@@ -46,6 +46,7 @@ private struct CCAPIDetailedLiveView {
 }
 
 public actor CCAPIClient {
+    private static let maxDeviceStatusTextCharacters = 512
     private static let maximumErrorBodyCharacters = 2_000
     private static let maximumMediaItems = 500
     private static let noAPIListValue = "No list of APIs"
@@ -93,6 +94,7 @@ public actor CCAPIClient {
     private var cachedModel = "Canon Camera"
     private var recording: Bool?
     private var bulbExposureActive = false
+    private var latestTemperatureStatus: CameraTemperatureStatus?
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.medium
     private var activeLiveViewSource: LiveViewSource?
@@ -241,7 +243,12 @@ public actor CCAPIClient {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let status = try parseSimulatorStatus(await requestJSON(path: "/ccapi/status"))
+            latestTemperatureStatus = status.temperature
             observedFeatures.formUnion([.batteryStatus, .storageStatus])
+            if status.lens == nil { observedFeatures.remove(.lensStatus) }
+            else { observedFeatures.insert(.lensStatus) }
+            if status.temperature == nil { observedFeatures.remove(.temperatureStatus) }
+            else { observedFeatures.insert(.temperatureStatus) }
             return status
         }
 
@@ -257,6 +264,28 @@ public actor CCAPIClient {
             required: false
         )
         if storage != nil { observedFeatures.insert(.storageStatus) }
+        let lensValue: JSONDictionary?
+        if let operation = operation(.get, suffix: "/devicestatus/lens") {
+            lensValue = try await firstJSON(paths: [operation.path], required: false)
+        } else {
+            lensValue = nil
+        }
+        let lens = parseLens(lensValue)
+        if lens == nil {
+            observedFeatures.remove(.lensStatus)
+        } else {
+            observedFeatures.insert(.lensStatus)
+        }
+        let temperatureValue: JSONDictionary?
+        if let operation = operation(.get, suffix: "/devicestatus/temperature") {
+            temperatureValue = try await firstJSON(paths: [operation.path], required: false)
+        } else {
+            temperatureValue = nil
+        }
+        if let refreshedTemperature = parseTemperature(temperatureValue) {
+            latestTemperatureStatus = refreshedTemperature
+            observedFeatures.insert(.temperatureStatus)
+        }
         let settings = try await loadShootingSettings()
         let batteryState = parseBattery(battery)
         let storageState = storage.map(parseStorage)
@@ -274,7 +303,9 @@ public actor CCAPIClient {
             storageFreeImages: storageState?.freeImages,
             storageDeviceCount: storageState?.devices,
             rawBatteryJSON: JSONString(battery),
-            rawStorageJSON: JSONString(storage)
+            rawStorageJSON: JSONString(storage),
+            lens: lens,
+            temperature: latestTemperatureStatus
         )
     }
 
@@ -330,6 +361,7 @@ public actor CCAPIClient {
         if cameraClockOperations() != nil { supported.insert(.cameraClockSync) }
 
         let allPlanned: Set<CameraFeature> = [
+            .lensStatus, .temperatureStatus,
             .eventPolling, .liveViewRTP, .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress,
             .movieModeControl,
             .videoRecording, .tapFocus,
@@ -344,6 +376,8 @@ public actor CCAPIClient {
                 supported: supported,
                 planned: allPlanned.subtracting(supported),
                 reasons: [
+                    .lensStatus: "The camera must advertise GET devicestatus/lens and return Canon's documented mount/name payload.",
+                    .temperatureStatus: "The camera must advertise GET devicestatus/temperature and return a documented Canon status value.",
                     .eventPolling: "The camera must advertise both GET and DELETE for the Canon event polling endpoint.",
                     .liveViewRTP: "Canon RTP needs advertised SDP/start endpoints and a reachable camera-Wi-Fi IPv4 address.",
                     .autofocus: "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation.",
@@ -463,6 +497,8 @@ public actor CCAPIClient {
 
     public func captureStill() async throws -> CameraStatus {
         try await ensureInitialized()
+        try await refreshTemperatureStatusForRestrictedCommand()
+        try requireTemperatureAllowsStillCapture()
         if resolvedMode == .simulator {
             _ = try await requestJSON(path: "/ccapi/capture/still", method: .post, json: ["af": true])
             observedFeatures.insert(.stillCapture)
@@ -546,6 +582,7 @@ public actor CCAPIClient {
         try await ensureInitialized()
         if bulbExposureActive { return try await status() }
         let baseline = try await status()
+        try requireTemperatureAllowsStillCapture()
         if resolvedMode == .simulator {
             do {
                 _ = try await requestJSON(path: "/ccapi/bulb/start", method: .post, json: [:])
@@ -712,6 +749,8 @@ public actor CCAPIClient {
 
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
         try await ensureInitialized()
+        try await refreshTemperatureStatusForRestrictedCommand()
+        try requireTemperatureAllowsLiveView()
         latestLiveViewGeometry = nil
         if resolvedMode == .simulator {
             activeLiveViewSource = .simulatorFrame
@@ -1780,8 +1819,41 @@ public actor CCAPIClient {
         }
     }
 
+    private func requireTemperatureAllowsLiveView() throws {
+        if latestTemperatureStatus?.liveViewAllowed == false {
+            throw CCAPIError.temperatureRestriction(.liveView)
+        }
+    }
+
+    private func refreshTemperatureStatusForRestrictedCommand() async throws {
+        guard resolvedMode != .simulator,
+              let operation = operation(.get, suffix: "/devicestatus/temperature") else { return }
+        if let refreshedTemperature = parseTemperature(
+            try await firstJSON(paths: [operation.path], required: false)
+        ) {
+            latestTemperatureStatus = refreshedTemperature
+            observedFeatures.insert(.temperatureStatus)
+        }
+    }
+
+    private func requireTemperatureAllowsStillCapture() throws {
+        if latestTemperatureStatus?.stillCaptureAllowed == false {
+            throw CCAPIError.temperatureRestriction(.stillCapture)
+        }
+    }
+
+    private func requireTemperatureAllowsMovieRecording() throws {
+        if latestTemperatureStatus?.movieRecordingAllowed == false {
+            throw CCAPIError.temperatureRestriction(.videoRecording)
+        }
+    }
+
     private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
         try await ensureInitialized()
+        if enabled {
+            try await refreshTemperatureStatusForRestrictedCommand()
+            try requireTemperatureAllowsMovieRecording()
+        }
         if resolvedMode == .simulator {
             _ = try await requestJSON(path: "/ccapi/record/\(enabled ? "start" : "stop")", method: .post, json: [:])
         } else {
@@ -1857,6 +1929,7 @@ public actor CCAPIClient {
             .clickWhiteBalance, .focusDrive,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete, .cameraClockSync,
+            .lensStatus, .temperatureStatus,
         ]
         if controls.contains(where: { $0.key == Self.zoomSettingKey }) {
             supported.insert(.zoomControl)
@@ -1909,7 +1982,9 @@ public actor CCAPIClient {
             storageTotalBytes: media.integer64("total_bytes") ?? media.integer64("totalBytes"),
             storageFreeBytes: media.integer64("free_bytes") ?? media.integer64("freeBytes"),
             storageFreeImages: media.integer64("free_images") ?? media.integer64("freeImages"),
-            storageDeviceCount: media.integer("devices")
+            storageDeviceCount: media.integer("devices"),
+            lens: value.object("lens").flatMap(parseBridgeLens),
+            temperature: CameraTemperatureStatus(rawValue: value.string("temperature", default: ""))
         )
     }
 
@@ -1928,6 +2003,36 @@ public actor CCAPIClient {
     private func settingObject(in settings: JSONDictionary?, aliases: [String]) -> JSONDictionary? {
         guard let settings else { return nil }
         return aliases.lazy.compactMap { settings.object($0) }.first
+    }
+
+    private func parseLens(_ value: JSONDictionary?) -> LensStatus? {
+        guard let value,
+              let mounted = value["mount"] as? Bool,
+              let name = value["name"] as? String,
+              validLensName(name, mounted: mounted) else {
+            return nil
+        }
+        return LensStatus(mounted: mounted, name: mounted ? name : "")
+    }
+
+    private func parseBridgeLens(_ value: JSONDictionary) -> LensStatus? {
+        guard let mounted = value["mounted"] as? Bool,
+              let name = value["name"] as? String,
+              validLensName(name, mounted: mounted) else {
+            return nil
+        }
+        return LensStatus(mounted: mounted, name: mounted ? name : "")
+    }
+
+    private func validLensName(_ name: String, mounted: Bool) -> Bool {
+        name.count <= Self.maxDeviceStatusTextCharacters &&
+            !name.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) } &&
+            (!mounted || !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private func parseTemperature(_ value: JSONDictionary?) -> CameraTemperatureStatus? {
+        guard let rawValue = value?["status"] as? String else { return nil }
+        return CameraTemperatureStatus(rawValue: rawValue)
     }
 
     private func parseBattery(_ value: JSONDictionary?) -> (level: Int?, status: String) {

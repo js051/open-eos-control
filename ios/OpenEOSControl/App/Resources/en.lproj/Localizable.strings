@@ -251,6 +251,15 @@
 "storage_free_bytes" = "Storage free bytes";
 "storage_free_images" = "Shots remaining";
 "storage_devices" = "Storage devices";
+"lens" = "Lens";
+"no_lens_mounted" = "No lens mounted";
+"temperature_status" = "Temperature status";
+"camera_temperature_warning" = "Camera temperature warning";
+"temperature_frame_rate_reduced" = "Frame rate reduced by the camera";
+"temperature_live_view_unavailable" = "Live View unavailable due to camera temperature";
+"temperature_shutter_unavailable" = "Shutter unavailable due to camera temperature";
+"temperature_movie_recording_restricted" = "Movie recording restricted due to camera temperature";
+"temperature_still_quality_warning" = "Still image quality may be reduced";
 "requested_fps" = "Requested FPS";
 "observed_fps" = "Observed FPS";
 "frame_bytes" = "Frame bytes";

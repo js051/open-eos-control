@@ -50,6 +50,7 @@ import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
+import dev.openeos.control.data.CameraTemperatureStatus
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CapabilityMatrix
 import dev.openeos.control.data.DesktopBridgeCamera
@@ -1726,6 +1727,42 @@ class CameraScreensTest {
 
         compose.onNodeWithTag("capture-mode-PHOTO").assertIsNotEnabled()
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsSelected().assertIsNotEnabled()
+    }
+
+    @Test
+    fun temperatureRestrictionDisablesStartsButKeepsRecordingStopAvailable() {
+        val base = connectedState()
+        var recordingToggleCount = 0
+        val state = mutableStateOf(
+            base.copy(
+                status = base.status?.copy(temperature = CameraTemperatureStatus.DISABLE_RELEASE),
+            ),
+        )
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    state.value,
+                    noOpActions().copy(toggleRecording = { recordingToggleCount += 1 }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("temperature-status-banner").assertIsDisplayed()
+        compose.onNodeWithTag("capture-button", useUnmergedTree = true).assertIsNotEnabled()
+
+        compose.runOnIdle {
+            state.value = state.value.copy(
+                captureMode = CaptureMode.VIDEO,
+                status = state.value.status?.copy(
+                    recording = true,
+                    temperature = CameraTemperatureStatus.RESTRICTION_MOVIE_RECORDING,
+                ),
+            )
+        }
+        compose.onNodeWithTag("capture-button", useUnmergedTree = true)
+            .assertIsEnabled()
+            .performClick()
+        compose.runOnIdle { assertEquals(1, recordingToggleCount) }
     }
 
     @Test

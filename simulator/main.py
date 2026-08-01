@@ -11,6 +11,21 @@ from fastapi import FastAPI, HTTPException, Query, Response
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field, StrictInt
 
+TemperatureStatusValue = Literal[
+    "normal",
+    "warning",
+    "frameratedown",
+    "disableliveview",
+    "disablerelease",
+    "stillqualitywarning",
+    "restrictionmovierecording",
+    "warning_and_restrictionmovierecording",
+    "frameratedown_and_restrictionmovierecording",
+    "disableliveview_and_restrictionmovierecording",
+    "disablerelease_and_restrictionmovierecording",
+    "stillqualitywarning_and_restrictionmovierecording",
+]
+
 app = FastAPI(title="Open EOS Control Fake Camera")
 
 
@@ -60,6 +75,7 @@ def initial_state() -> dict[str, object]:
         "record_stop_count": 0,
         "movie_mode": "off",
         "movie_mode_update_count": 0,
+        "temperature_status": "normal",
         "capture_count": 0,
         "clock_sync_count": 0,
         "camera_datetime": None,
@@ -144,6 +160,8 @@ def camera_status() -> dict[str, object]:
         "clock_sync_count": state["clock_sync_count"],
         "camera_datetime": state["camera_datetime"],
         "mode": state["mode"],
+        "lens": {"mounted": True, "name": "RF24-105mm F4 L IS USM"},
+        "temperature": state["temperature_status"],
         "media": {
             "available": True,
             "remaining_minutes": 120,
@@ -159,6 +177,17 @@ def camera_status() -> dict[str, object]:
 def validate_setting(key: str, value: str) -> None:
     if value not in capabilities[key]:
         raise HTTPException(status_code=422, detail=f"Unsupported {key}: {value}")
+
+
+def require_temperature_allows(operation: Literal["liveview", "release", "movie"]) -> None:
+    status = str(state["temperature_status"])
+    token = {
+        "liveview": "disableliveview",
+        "release": "disablerelease",
+        "movie": "restrictionmovierecording",
+    }[operation]
+    if token in status:
+        raise HTTPException(status_code=409, detail="Camera temperature restriction")
 
 
 @app.get("/health")
@@ -181,6 +210,7 @@ async def get_test_state() -> dict[str, object]:
         "record_stop_count": state["record_stop_count"],
         "movie_mode": state["movie_mode"],
         "movie_mode_update_count": state["movie_mode_update_count"],
+        "temperature_status": state["temperature_status"],
         "capture_count": state["capture_count"],
         "clock_sync_count": state["clock_sync_count"],
         "camera_datetime": state["camera_datetime"],
@@ -235,6 +265,13 @@ async def set_test_mode(mode: Literal["movie", "Bulb"]) -> dict[str, object]:
     state["mode"] = mode
     publish_event("shootingsettings")
     return camera_status()
+
+
+@app.post("/ccapi/test/temperature")
+async def set_test_temperature(status: TemperatureStatusValue) -> dict[str, str]:
+    state["temperature_status"] = status
+    publish_event("temperature")
+    return {"status": status}
 
 
 @app.get("/ccapi/info")
@@ -317,6 +354,7 @@ async def sync_camera_clock() -> dict[str, object]:
 
 @app.post("/ccapi/record/start")
 async def record_start() -> dict[str, bool]:
+    require_temperature_allows("movie")
     state["record_start_count"] += 1
     state["recording"] = True
     publish_event("recbutton")
@@ -333,6 +371,7 @@ async def record_stop() -> dict[str, bool]:
 
 @app.post("/ccapi/capture/still")
 async def capture_still() -> dict[str, bool | int]:
+    require_temperature_allows("release")
     state["capture_count"] += 1
     name = f"SIM_{state['capture_count'] + 2:04d}.PNG"
     state["media"].insert(
@@ -344,6 +383,7 @@ async def capture_still() -> dict[str, bool | int]:
 
 @app.post("/ccapi/bulb/start")
 async def bulb_start() -> dict[str, bool]:
+    require_temperature_allows("release")
     if state["mode"] != "Bulb":
         raise HTTPException(status_code=409, detail="Camera is not in Bulb mode")
     state["bulb_start_count"] += 1
@@ -454,6 +494,8 @@ CANON_DISCOVERY = {
         {"path": "/deviceinformation", "get": True},
         {"path": "/devicestatus/batterylist", "get": True},
         {"path": "/devicestatus/storage", "get": True},
+        {"path": "/devicestatus/lens", "get": True},
+        {"path": "/devicestatus/temperature", "get": True},
         {"path": "/shooting/settings", "get": True},
         {"path": "/shooting/settings/iso", "put": True},
         {"path": "/shooting/settings/tv", "put": True},
@@ -580,6 +622,16 @@ async def canon_storage() -> dict[str, list[dict[str, object]]]:
     }
 
 
+@app.get("/ccapi/ver100/devicestatus/lens")
+async def canon_lens() -> dict[str, object]:
+    return {"mount": True, "name": "RF24-105mm F4 L IS USM"}
+
+
+@app.get("/ccapi/ver100/devicestatus/temperature")
+async def canon_temperature() -> dict[str, str]:
+    return {"status": str(state["temperature_status"])}
+
+
 @app.get("/ccapi/ver100/shooting/settings")
 async def canon_shooting_settings() -> dict[str, dict[str, object]]:
     return canonical_settings()
@@ -633,6 +685,7 @@ async def canon_set_datetime(payload: dict[str, object]) -> dict[str, object]:
 
 @app.post("/ccapi/ver100/shooting/control/shutterbutton", status_code=204)
 async def canon_capture_still(payload: dict[str, object]) -> Response:
+    require_temperature_allows("release")
     if payload != {"af": True}:
         raise HTTPException(status_code=422, detail="Unsupported shutter payload")
     state["capture_count"] += 1
@@ -650,6 +703,7 @@ async def canon_manual_shutter(payload: dict[str, object]) -> Response:
         state["half_pressed"] = True
         state["half_press_count"] += 1
     elif action == "full_press" and autofocus is False:
+        require_temperature_allows("release")
         if state["mode"] != "Bulb":
             raise HTTPException(status_code=409, detail="Camera is not in Bulb mode")
         state["bulb_exposure_active"] = True
@@ -683,6 +737,7 @@ async def canon_autofocus(payload: dict[str, object]) -> Response:
 async def canon_recording(payload: dict[str, object]) -> Response:
     action = payload.get("action")
     if action == "start":
+        require_temperature_allows("movie")
         state["recording"] = True
         state["record_start_count"] += 1
     elif action == "stop":
@@ -761,6 +816,7 @@ async def canon_click_white_balance(payload: dict[str, object]) -> Response:
 
 @app.post("/ccapi/ver100/shooting/liveview", status_code=204)
 async def canon_start_live_view(payload: dict[str, object]) -> Response:
+    require_temperature_allows("liveview")
     if payload.get("cameradisplay") != "on":
         raise HTTPException(status_code=422, detail="Camera display must be enabled")
     if "liveviewsize" in payload and state["canonical_reject_live_view_size_once"]:

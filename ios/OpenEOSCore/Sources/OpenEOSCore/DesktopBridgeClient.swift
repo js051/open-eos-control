@@ -59,6 +59,7 @@ extension DesktopBridgeError: LocalizedError {
 }
 
 public actor DesktopBridgeClient {
+    private static let maxDeviceStatusTextCharacters = 512
     private static let serviceName = "open-eos-control-bridge"
     private static let maximumLiveViewFrameBytes = 12 * 1024 * 1024
     private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
@@ -571,6 +572,17 @@ public actor DesktopBridgeClient {
         let battery = body.dictionary("battery")
         let media = body.dictionary("media")
         let exposure = body.dictionary("exposure")
+        let lensBody = body.dictionary("lens")
+        let lens: LensStatus? = {
+            guard let mounted = lensBody.optionalBool("mounted"),
+                  let name = lensBody.string("name"),
+                  name.count <= Self.maxDeviceStatusTextCharacters,
+                  !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+                  !mounted || !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            return LensStatus(mounted: mounted, name: mounted ? name : "")
+        }()
         return CameraStatus(
             connected: body.optionalBool("connected") ?? true,
             batteryLevel: battery.int("level"),
@@ -591,7 +603,9 @@ public actor DesktopBridgeClient {
             storageFreeImages: media.int64("freeImages"),
             storageDeviceCount: media.int("devices"),
             rawBatteryJSON: Self.jsonString(battery),
-            rawStorageJSON: Self.jsonString(media)
+            rawStorageJSON: Self.jsonString(media),
+            lens: lens,
+            temperature: body.string("temperature").flatMap(CameraTemperatureStatus.init(rawValue:))
         )
     }
 
@@ -909,6 +923,9 @@ public enum DesktopBridgeDiagnosticReport {
             "storageFreeBytes=\(snapshot?.status.storageFreeBytes.map { String($0) } ?? "unknown")",
             "storageFreeImages=\(snapshot?.status.storageFreeImages.map { String($0) } ?? "unknown")",
             "storageDevices=\(snapshot?.status.storageDeviceCount.map { String($0) } ?? "unknown")",
+            "lensMounted=\(snapshot?.status.lens.map { String($0.mounted) } ?? "unknown")",
+            "lensName=\(snapshot?.status.lens?.name.nilIfEmpty ?? "none")",
+            "temperature=\(snapshot?.status.temperature?.rawValue ?? "unknown")",
             "requestedFps=\(liveView.requestedFPS)",
             "observedFps=\(String(format: "%.1f", liveView.observedFPS))",
             "frameBytes=\(liveView.frameBytes)",

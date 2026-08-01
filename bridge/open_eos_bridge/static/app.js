@@ -15,6 +15,8 @@
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
 
   const FEATURES = {
+    LENS_STATUS: "LENS_STATUS",
+    TEMPERATURE_STATUS: "TEMPERATURE_STATUS",
     EVENT_POLLING: "EVENT_POLLING",
     LIVE_VIEW: "LIVE_VIEW",
     LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION",
@@ -281,6 +283,14 @@
       operationFailed: "Operation failed",
       battery: "Battery",
       storage: "Storage",
+      lens: "Lens",
+      noLensMounted: "No lens mounted",
+      cameraTemperatureWarning: "Camera temperature warning",
+      temperatureFrameRateReduced: "Frame rate reduced by the camera",
+      temperatureLiveViewUnavailable: "Live View unavailable due to camera temperature",
+      temperatureShutterUnavailable: "Shutter unavailable due to camera temperature",
+      temperatureMovieRestricted: "Movie recording restricted due to camera temperature",
+      temperatureStillQualityWarning: "Still image quality may be reduced",
       freeImages: "{count} shots",
       notAvailable: "Not available",
       liveViewImage: "Camera Live View",
@@ -534,6 +544,14 @@
       operationFailed: "操作失敗",
       battery: "電池",
       storage: "儲存空間",
+      lens: "鏡頭",
+      noLensMounted: "未安裝鏡頭",
+      cameraTemperatureWarning: "相機溫度警告",
+      temperatureFrameRateReduced: "相機已降低畫面更新率",
+      temperatureLiveViewUnavailable: "相機過熱，即時預覽暫時無法使用",
+      temperatureShutterUnavailable: "相機過熱，快門暫時無法使用",
+      temperatureMovieRestricted: "相機過熱，短片錄影受限",
+      temperatureStillQualityWarning: "靜態影像畫質可能降低",
       freeImages: "可拍 {count} 張",
       notAvailable: "無資料",
       liveViewImage: "相機即時預覽",
@@ -815,6 +833,8 @@
     monitorHistogram: byId("monitor-histogram"),
     monitorWaveform: byId("monitor-waveform"),
     viewfinderPlaceholder: byId("viewfinder-placeholder"),
+    temperatureWarning: byId("temperature-warning"),
+    temperatureWarningText: byId("temperature-warning-text"),
     liveToggleButton: byId("live-toggle-button"),
     railLiveButton: byId("rail-live-button"),
     modeIndicator: byId("mode-indicator"),
@@ -1507,9 +1527,37 @@
     renderFps();
     renderTapAction();
     renderCaptureMode();
+    renderTemperatureStatus();
     syncBulbTimer();
     renderAvailability();
     renderDiagnostics();
+  }
+
+  function temperatureAllows(kind) {
+    const status = String(state.status?.temperature || "");
+    if (!status) return true;
+    if (kind === "liveview") return !status.includes("disableliveview");
+    if (kind === "release") return !status.includes("disablerelease");
+    if (kind === "movie") return !status.includes("restrictionmovierecording");
+    return true;
+  }
+
+  function renderTemperatureStatus() {
+    const status = String(state.status?.temperature || "");
+    if (!status || status === "normal") {
+      ui.temperatureWarning.hidden = true;
+      ui.temperatureWarningText.textContent = "";
+      return;
+    }
+    const messages = [];
+    if (status === "warning" || status.startsWith("warning_and_")) messages.push(t("cameraTemperatureWarning"));
+    if (status.startsWith("frameratedown")) messages.push(t("temperatureFrameRateReduced"));
+    if (!temperatureAllows("liveview")) messages.push(t("temperatureLiveViewUnavailable"));
+    if (!temperatureAllows("release")) messages.push(t("temperatureShutterUnavailable"));
+    if (!temperatureAllows("movie")) messages.push(t("temperatureMovieRestricted"));
+    if (status.startsWith("stillqualitywarning")) messages.push(t("temperatureStillQualityWarning"));
+    ui.temperatureWarningText.textContent = (messages.length ? messages : [t("cameraTemperatureWarning")]).join(" · ");
+    ui.temperatureWarning.hidden = false;
   }
 
   function renderExposure() {
@@ -1709,7 +1757,9 @@
     else if (cameraMode) state.captureMode = cameraMode;
     const bulb = state.captureMode === "photo" && isBulbMode();
     const bulbActive = bulb && Boolean(state.status?.bulbExposureActive);
-    if (!featureSupported(FEATURES.VIDEO_RECORDING) && state.captureMode === "video") state.captureMode = "photo";
+    if (!featureSupported(FEATURES.VIDEO_RECORDING) && !recording && state.captureMode === "video") {
+      state.captureMode = "photo";
+    }
     ui.photoModeButton.classList.toggle("active", state.captureMode === "photo");
     ui.videoModeButton.classList.toggle("active", state.captureMode === "video");
     ui.photoModeButton.setAttribute("aria-pressed", String(state.captureMode === "photo"));
@@ -1754,10 +1804,11 @@
     const isPhoto = state.captureMode === "photo";
     const bulb = isPhoto && isBulbMode();
     const bulbWasActive = bulb && Boolean(state.status?.bulbExposureActive);
-    const supported = bulb
+    const recordingWasActive = !isPhoto && Boolean(state.status?.recording);
+    const supported = bulbWasActive || recordingWasActive || (bulb
       ? featureSupported(FEATURES.BULB_EXPOSURE)
       : isPhoto ? featureSupported(FEATURES.STILL_CAPTURE)
-      : featureSupported(FEATURES.VIDEO_RECORDING);
+      : featureSupported(FEATURES.VIDEO_RECORDING));
     if (!supported) return;
     beginCameraInteraction();
     state.lastError = null;
@@ -3091,21 +3142,27 @@
     const bulbActive = Boolean(state.status?.bulbExposureActive);
     const interactionBusy = cameraInteractionBusy();
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
+    const recording = Boolean(state.status?.recording);
+    const videoAvailable = videoSupported || recording;
     ui.scanButton.disabled = state.busy;
     const connectionReady = state.connectionMode === "ccapi" ? validCcapiUrl() : Boolean(ui.cameraSelect.value);
     ui.connectButton.disabled = state.busy || !connectionReady;
     ui.refreshButton.disabled = !connected || interactionBusy || bulbActive;
     ui.disconnectButton.disabled = !connected || state.busy;
     ui.photoModeButton.disabled = interactionBusy || bulbActive || Boolean(state.status?.recording);
-    ui.videoModeButton.disabled = interactionBusy || bulbActive || !videoSupported;
-    ui.videoModeButton.hidden = !videoSupported;
-    ui.videoModeButton.parentElement.classList.toggle("single", !videoSupported);
-    const shutterSupported = state.captureMode === "photo" && isBulbMode()
+    ui.videoModeButton.disabled = interactionBusy || bulbActive || !videoAvailable;
+    ui.videoModeButton.hidden = !videoAvailable;
+    ui.videoModeButton.parentElement.classList.toggle("single", !videoAvailable);
+    const bulbActiveStop = state.captureMode === "photo" && isBulbMode() && bulbActive;
+    const shutterSupported = bulbActiveStop || recording || (state.captureMode === "photo" && isBulbMode()
       ? featureSupported(FEATURES.BULB_EXPOSURE)
       : state.captureMode === "photo" ? featureSupported(FEATURES.STILL_CAPTURE)
-      : videoSupported;
-    ui.shutterButton.disabled = interactionBusy || !shutterSupported;
-    ui.shutterButton.title = shutterSupported ? ui.shutterLabel.textContent : t("unsupported");
+      : videoSupported);
+    const temperatureAllowed = bulbActiveStop || recording || (
+      state.captureMode === "photo" ? temperatureAllows("release") : temperatureAllows("movie")
+    );
+    ui.shutterButton.disabled = interactionBusy || !shutterSupported || !temperatureAllowed;
+    ui.shutterButton.title = shutterSupported && temperatureAllowed ? ui.shutterLabel.textContent : t("unsupported");
     const autofocusSupported = featureSupported(FEATURES.AUTOFOCUS);
     ui.autofocusButton.hidden = !autofocusSupported;
     ui.autofocusButton.disabled = interactionBusy || bulbActive || !autofocusSupported;
@@ -3115,11 +3172,12 @@
     const cameraLiveSupported = featureSupported(FEATURES.LIVE_VIEW);
     const localLiveSupported = state.localVideoSupport.available;
     const selectedLiveSupported = localPreviewSelected() ? localLiveSupported : cameraLiveSupported;
+    const cameraLiveTemperatureAllowed = state.liveActive || temperatureAllows("liveview");
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       button.hidden = !cameraLiveSupported && !localLiveSupported;
       button.disabled = localPreviewSelected()
         ? state.localVideoBusy || !localLiveSupported
-        : interactionBusy || bulbActive || !selectedLiveSupported;
+        : interactionBusy || bulbActive || !selectedLiveSupported || !cameraLiveTemperatureAllowed;
     });
     const quickActionCount = [
       autofocusSupported,
@@ -3135,8 +3193,8 @@
     ui.focusFarButton.disabled = interactionBusy || bulbActive || !state.liveActive;
     ui.previewInputSelect.disabled = interactionBusy || state.localVideoBusy;
     ui.localVideoDeviceSelect.disabled = !localPreviewSelected() || !localLiveSupported || state.localVideoBusy;
-    ui.fpsSelect.disabled = localPreviewSelected() || interactionBusy || bulbActive || !cameraLiveSupported;
-    ui.liveSourceSelect.disabled = localPreviewSelected() || interactionBusy || bulbActive || !cameraLiveSupported;
+    ui.fpsSelect.disabled = localPreviewSelected() || interactionBusy || bulbActive || !cameraLiveSupported || !temperatureAllows("liveview");
+    ui.liveSourceSelect.disabled = localPreviewSelected() || interactionBusy || bulbActive || !cameraLiveSupported || !temperatureAllows("liveview");
     ui.tapActionSelect.disabled = localPreviewSelected() || interactionBusy || bulbActive || !state.liveActive;
     ui.monitoringButton.disabled = !connected;
     renderLiveMagnification();

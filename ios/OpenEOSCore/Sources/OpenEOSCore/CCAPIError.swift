@@ -7,6 +7,7 @@ public enum CCAPIError: Error, Equatable, Sendable {
     case http(statusCode: Int, method: String, url: String, body: String)
     case invalidResponse(String)
     case unsupported(CameraFeature)
+    case temperatureRestriction(CameraFeature)
     case invalidSetting(key: String, value: String)
     case outsideCameraOrigin(String)
     case destinationExists(String)
@@ -28,6 +29,8 @@ extension CCAPIError: LocalizedError {
             message
         case let .unsupported(feature):
             "The camera did not advertise \(feature.rawValue)."
+        case let .temperatureRestriction(feature):
+            "The camera reported a temperature restriction for \(feature.rawValue)."
         case let .invalidSetting(key, value):
             "The camera did not advertise value '\(value)' for setting '\(key)'."
         case let .outsideCameraOrigin(value):

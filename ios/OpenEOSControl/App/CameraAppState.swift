@@ -118,6 +118,9 @@ final class CameraAppState: ObservableObject {
     var capabilities: CameraCapabilities? { snapshot?.capabilities }
     var status: CameraStatus? { snapshot?.status }
     var info: CameraInfo? { snapshot?.info }
+    var liveViewTemperatureAllowed: Bool { status?.temperature?.liveViewAllowed != false }
+    var stillCaptureTemperatureAllowed: Bool { status?.temperature?.stillCaptureAllowed != false }
+    var movieRecordingTemperatureAllowed: Bool { status?.temperature?.movieRecordingAllowed != false }
     var effectiveLiveViewTapAction: LiveViewTapAction? {
         if liveViewTapAction == .whiteBalance, supports(.clickWhiteBalance) { return .whiteBalance }
         if supports(.tapFocus) { return .focus }
@@ -446,7 +449,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func startLiveView() async {
-        guard let session, supports(.liveView), begin(.liveView) else { return }
+        guard let session, supports(.liveView), liveViewTemperatureAllowed, begin(.liveView) else { return }
         defer { end(.liveView) }
         do {
             try await session.startLiveView(
@@ -482,7 +485,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func captureStill() async {
-        guard supports(.stillCapture), begin(.capture) else { return }
+        guard supports(.stillCapture), stillCaptureTemperatureAllowed, begin(.capture) else { return }
         defer { end(.capture) }
         if isPreview {
             showShutterFlash()
@@ -512,9 +515,10 @@ final class CameraAppState: ObservableObject {
     }
 
     func toggleBulbExposure() async {
-        guard bulbMode, supports(.bulbExposure), begin(.capture) else { return }
-        defer { end(.capture) }
         let wasActive = bulbExposureActive
+        guard bulbMode, (wasActive || supports(.bulbExposure)), begin(.capture) else { return }
+        defer { end(.capture) }
+        guard wasActive || stillCaptureTemperatureAllowed else { return }
         if isPreview {
             guard let snapshot else { return }
             updateStatus(snapshot.status.withBulbExposureActive(!wasActive))
@@ -576,8 +580,10 @@ final class CameraAppState: ObservableObject {
     }
 
     func toggleRecording() async {
-        guard supports(.videoRecording), begin(.recording) else { return }
+        let wasRecording = recording
+        guard (wasRecording || supports(.videoRecording)), begin(.recording) else { return }
         defer { end(.recording) }
+        guard wasRecording || movieRecordingTemperatureAllowed else { return }
         if isPreview {
             guard let snapshot else { return }
             self.snapshot = snapshot.replacing(status: snapshot.status.replacing(recording: !recording))
@@ -585,7 +591,7 @@ final class CameraAppState: ObservableObject {
         }
         guard let session else { return }
         do {
-            let newStatus = recording ? try await session.stopRecording() : try await session.startRecording()
+            let newStatus = wasRecording ? try await session.stopRecording() : try await session.startRecording()
             updateStatus(newStatus)
             lastError = nil
         } catch {
