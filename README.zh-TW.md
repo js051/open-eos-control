@@ -32,6 +32,7 @@ open-eos-control/
 - Connect、refresh、disconnect
 - 顯示相機身分、transport、profile 與電池；CCAPI、USB/PTP 或桌面橋接有回報時，亦顯示記憶卡數、總容量、可用容量及剩餘可拍張數
 - 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、協定版本、相機公告命令、可寫設定，以及本次工作階段中確實成功的操作
+- Android、iOS 與 PC 都提供工作階段限定的真機驗證，只列出相機已公告且本次操作確實成功的功能；必須再由操作人員確認相機端結果，模擬器／離線預覽不能充當證據，複製的隱私安全 Markdown 會以平台原生 SHA-256 綁定對應診斷報告
 - Android、iOS 與 PC 都提供依能力開放的相機日期／時間同步。直接 CCAPI 必須同時公告 GET 與 PUT `/functions/datetime`，寫入 Canon 指定的 RFC 1123 時間與 DST 狀態後再回讀驗證。Android 直接 USB 會透過 `SetDevicePropValueEx` 寫入相機公告的 Canon EOS `UTCTime (0xD17C)` 或 `CameraTime (0xD113)` UINT32，並要求收到相符的屬性事件。Desktop Bridge USB 必須同時取得相機公告的可寫 libgphoto2 `syncdatetimeutc`／`syncdatetime` action 與對應 `datetimeutc`／`datetime`，執行後強制重新讀取 config，且回報時間須落在操作時間區間前後十秒內。
 - Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon `GetEvent` 機身操作與相機時鐘同步。只有手機與記憶卡兩條路徑都可執行時才顯示拍攝儲存位置選擇；選擇手機會把 Canon 主機 RAM JPEG／RAW 原子傳輸至 App 私有 Media。另包含 Canon EOS 遠端快門、半按、保證取消的原生 AF-ON、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、自動關閉電源、自動亮度優化、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
 - Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、AF-ON、Live View、焦點移動，以及依能力提供的媒體縮圖／傳輸／刪除；libgphoto2 路徑也包含經 runtime 探測的 `gphoto2 --wait-event` 機身／媒體同步、R6 Mark III 自動對焦啟動／取消 action、各卡槽影像畫質、白平衡偏移、畫面比例、電動變焦速度、安全的自動關機與自動亮度優化選項，以及可選擇寫入記憶卡或將主機 RAM 拍攝原子轉存到 Bridge 媒體庫的儲存位置
@@ -227,7 +228,7 @@ http://localhost:18080
 
 ## 真機證據
 
-Android、iOS 與 PC 的診斷報告可以交給 repository 內的 R6 Mark III 嚴格 verifier。過期、集合不一致、證據截斷或含敏感資訊的報告會被拒絕；必要能力只有在相機公告且本次工作階段確實成功時才會通過。相機端實體結果仍必須另外由操作人員明確確認。完整流程與可審核的 Markdown／JSON 輸出請見[真機驗證](docs/device-validation.zh-TW.md)。
+Android、iOS 與 PC 都能在 App 內建立本次連線的真機確認紀錄，診斷報告也可以交給 repository 內的 R6 Mark III 嚴格 verifier。過期、集合不一致、證據截斷或含敏感資訊的報告會被拒絕；必要能力只有在相機公告且本次工作階段確實成功時才會通過。相機端實體結果仍必須由操作人員明確確認。完整流程與可審核的 Markdown／JSON 輸出請見[真機驗證](docs/device-validation.zh-TW.md)。
 
 功能是否真正完成以 [docs/feature-status.md](docs/feature-status.md) 為準；架構與後續路線請看 [docs/architecture.md](docs/architecture.md)、[docs/control-transports.md](docs/control-transports.md)、[docs/android-usb-ptp.md](docs/android-usb-ptp.md)、[docs/desktop-bridge-protocol.md](docs/desktop-bridge-protocol.md)、[docs/ios-ccapi.md](docs/ios-ccapi.md)、[docs/device-validation.zh-TW.md](docs/device-validation.zh-TW.md) 與 [docs/reference-projects.md](docs/reference-projects.md)。
 
