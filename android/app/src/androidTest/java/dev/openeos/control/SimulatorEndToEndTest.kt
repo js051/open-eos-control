@@ -3,6 +3,7 @@ package dev.openeos.control
 import androidx.annotation.StringRes
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONObject
@@ -64,6 +66,42 @@ class SimulatorEndToEndTest {
         compose.onNodeWithContentDescription(text(R.string.capture_photo)).performClick()
         waitForSimulatorState { state -> state.getInt("capture_count") == 1 }
 
+        compose.onNodeWithTag("live-view-frame").performTouchInput { click() }
+        waitForSimulatorState { state -> state.getJSONObject("focus").getInt("count") == 1 }
+
+        compose.onNodeWithContentDescription(text(R.string.tap_action_focus)).performClick()
+        waitForContentDescription(text(R.string.tap_action_white_balance))
+        compose.onNodeWithTag("live-view-frame").performTouchInput { click() }
+        waitForSimulatorState { state ->
+            state.getJSONObject("click_white_balance").getInt("count") == 1 &&
+                state.getJSONObject("exposure").getString("white_balance") == "click"
+        }
+
+        compose.onNodeWithContentDescription(text(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("autofocus").performScrollTo().performClick()
+        waitForSimulatorState { state ->
+            state.getInt("half_press_count") == 1 &&
+                state.getInt("shutter_release_count") == 1 &&
+                !state.getBoolean("half_pressed")
+        }
+        waitForEnabledNode("shutter-half-press")
+        compose.onNodeWithTag("shutter-half-press").performScrollTo().performClick()
+        waitForSimulatorState { state ->
+            state.getInt("half_press_count") == 2 &&
+                state.getInt("shutter_release_count") == 2 &&
+                !state.getBoolean("half_pressed")
+        }
+        waitForEnabledNode("focus-drive-FAR-LARGE")
+        compose.onNodeWithTag("focus-drive-FAR-LARGE").performScrollTo().performClick()
+        waitForSimulatorState { state ->
+            state.getJSONObject("focus_drive").let { focusDrive ->
+                focusDrive.getInt("count") == 1 &&
+                    focusDrive.getString("direction") == "far" &&
+                    focusDrive.getString("step") == "large"
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.dismiss)).performClick()
+
         waitForEnabledNode("capture-mode-VIDEO")
         compose.onNodeWithTag("capture-mode-VIDEO").performClick()
         waitForContentDescription(text(R.string.start_recording), useUnmergedTree = true)
@@ -84,10 +122,36 @@ class SimulatorEndToEndTest {
                 state.getInt("record_stop_count") == 1
         }
 
+        waitForEnabledNode("capture-mode-PHOTO")
+        compose.onNodeWithTag("capture-mode-PHOTO").performClick()
+        request("/ccapi/test/mode?mode=Bulb", method = "POST")
+        waitForContentDescription(text(R.string.start_bulb_exposure), useUnmergedTree = true)
+        compose.onNodeWithTag("capture-button", useUnmergedTree = true).performClick()
+        waitForSimulatorState { state ->
+            state.getBoolean("bulb_exposure_active") &&
+                state.getInt("bulb_start_count") == 1 &&
+                state.getInt("bulb_stop_count") == 0
+        }
+        waitForContentDescription(text(R.string.stop_bulb_exposure), useUnmergedTree = true)
+        compose.onNodeWithTag("capture-button", useUnmergedTree = true).performClick()
+        waitForSimulatorState { state ->
+            !state.getBoolean("bulb_exposure_active") &&
+                state.getInt("bulb_start_count") == 1 &&
+                state.getInt("bulb_stop_count") == 1
+        }
+        waitForNode("live-view-decoded-frame", timeoutMillis = 30_000)
+
         compose.onNodeWithContentDescription(text(R.string.more_actions)).performClick()
         compose.onNodeWithText(text(R.string.camera_media)).performClick()
         waitForText("SIM_0003.PNG")
         compose.onNodeWithText("SIM_0003.PNG").assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.preview_media, "SIM_0003.PNG")).performClick()
+        waitForContentDescription(text(R.string.media_preview_content, "SIM_0003.PNG"))
+        compose.onNodeWithContentDescription(text(R.string.close_media_preview)).performClick()
+        compose.onNodeWithContentDescription(text(R.string.delete_media, "SIM_0003.PNG")).performClick()
+        waitForText(text(R.string.delete_media_confirmation, "SIM_0003.PNG"))
+        compose.onNodeWithText(text(R.string.delete)).performClick()
+        waitForSimulatorState { state -> !state.hasMediaId("SIM_0003.PNG") }
         compose.onNodeWithContentDescription(text(R.string.back_to_camera)).performClick()
         compose.onNodeWithContentDescription(text(R.string.more_actions)).performClick()
         compose.onNodeWithText(text(R.string.disconnect)).performClick()
@@ -151,7 +215,13 @@ class SimulatorEndToEndTest {
         }
     }
 
-    private fun text(@StringRes resource: Int): String = compose.activity.getString(resource)
+    private fun JSONObject.hasMediaId(id: String): Boolean {
+        val ids = getJSONArray("media_ids")
+        return (0 until ids.length()).any { index -> ids.getString(index) == id }
+    }
+
+    private fun text(@StringRes resource: Int, vararg formatArgs: Any): String =
+        compose.activity.getString(resource, *formatArgs)
 
     private val simulatorPort: Int
         get() = InstrumentationRegistry.getArguments().getString("simulatorPort")

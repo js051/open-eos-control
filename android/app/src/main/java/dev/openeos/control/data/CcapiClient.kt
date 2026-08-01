@@ -885,7 +885,23 @@ class CcapiClient(
         step: FocusDriveStep,
     ): FocusDriveResult {
         if (!isRealCamera) {
-            error("Manual focus drive is not available in the simulator.")
+            val requestedDirection = direction.name.lowercase()
+            val requestedStep = step.name.lowercase()
+            val response = postJson(
+                "/ccapi/focus/drive",
+                JSONObject()
+                    .put("direction", requestedDirection)
+                    .put("step", requestedStep),
+            )
+            check(response.optBoolean("ok")) { "Simulator rejected manual focus drive." }
+            check(response.optString("direction") == requestedDirection) {
+                "Simulator returned a mismatched focus direction."
+            }
+            check(response.optString("step") == requestedStep) {
+                "Simulator returned a mismatched focus step."
+            }
+            observedFeatures.add(CameraFeature.FOCUS_DRIVE)
+            return FocusDriveResult(ok = true, direction = direction, step = step)
         }
         val operation = focusDriveOperation()
             ?: error("Camera did not advertise manual focus drive control.")
@@ -2328,6 +2344,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities = CameraCapabi
             CameraFeature.MEDIA_DELETE,
             CameraFeature.EVENT_POLLING,
             CameraFeature.CAMERA_CLOCK_SYNC,
+            CameraFeature.FOCUS_DRIVE,
         ),
     ),
     liveView = LiveViewCapabilities.simulator(),

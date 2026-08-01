@@ -2,6 +2,7 @@ import asyncio
 import struct
 import zlib
 from datetime import datetime
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -12,6 +13,11 @@ app = FastAPI(title="Open EOS Control Fake Camera")
 class FocusRequest(BaseModel):
     x: float = Field(ge=0.0, le=1.0)
     y: float = Field(ge=0.0, le=1.0)
+
+
+class FocusDriveRequest(BaseModel):
+    direction: Literal["near", "far"]
+    step: Literal["small", "medium", "large"]
 
 
 class ExposureUpdate(BaseModel):
@@ -41,10 +47,19 @@ def initial_state() -> dict[str, object]:
         "capture_count": 0,
         "clock_sync_count": 0,
         "camera_datetime": None,
+        "mode": "movie",
         "half_pressed": False,
+        "half_press_count": 0,
+        "shutter_release_count": 0,
         "bulb_exposure_active": False,
+        "bulb_start_count": 0,
+        "bulb_stop_count": 0,
         "focus_x": 0.5,
         "focus_y": 0.5,
+        "focus_count": 0,
+        "focus_drive_count": 0,
+        "focus_drive_direction": None,
+        "focus_drive_step": None,
         "click_wb_x": 0.5,
         "click_wb_y": 0.5,
         "click_wb_count": 0,
@@ -91,7 +106,7 @@ def camera_status() -> dict[str, object]:
         "capture_count": state["capture_count"],
         "clock_sync_count": state["clock_sync_count"],
         "camera_datetime": state["camera_datetime"],
-        "mode": "movie",
+        "mode": state["mode"],
         "media": {
             "available": True,
             "remaining_minutes": 120,
@@ -130,9 +145,23 @@ async def get_test_state() -> dict[str, object]:
         "capture_count": state["capture_count"],
         "clock_sync_count": state["clock_sync_count"],
         "camera_datetime": state["camera_datetime"],
+        "mode": state["mode"],
         "half_pressed": state["half_pressed"],
+        "half_press_count": state["half_press_count"],
+        "shutter_release_count": state["shutter_release_count"],
         "bulb_exposure_active": state["bulb_exposure_active"],
-        "focus": {"x": state["focus_x"], "y": state["focus_y"]},
+        "bulb_start_count": state["bulb_start_count"],
+        "bulb_stop_count": state["bulb_stop_count"],
+        "focus": {
+            "x": state["focus_x"],
+            "y": state["focus_y"],
+            "count": state["focus_count"],
+        },
+        "focus_drive": {
+            "count": state["focus_drive_count"],
+            "direction": state["focus_drive_direction"],
+            "step": state["focus_drive_step"],
+        },
         "click_white_balance": {
             "x": state["click_wb_x"],
             "y": state["click_wb_y"],
@@ -141,6 +170,13 @@ async def get_test_state() -> dict[str, object]:
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
     }
+
+
+@app.post("/ccapi/test/mode")
+async def set_test_mode(mode: Literal["movie", "Bulb"]) -> dict[str, object]:
+    state["mode"] = mode
+    publish_event("shootingsettings")
+    return camera_status()
 
 
 @app.get("/ccapi/info")
@@ -230,6 +266,9 @@ async def capture_still() -> dict[str, bool | int]:
 
 @app.post("/ccapi/bulb/start")
 async def bulb_start() -> dict[str, bool]:
+    if state["mode"] != "Bulb":
+        raise HTTPException(status_code=409, detail="Camera is not in Bulb mode")
+    state["bulb_start_count"] += 1
     state["bulb_exposure_active"] = True
     publish_event("shutterbutton")
     return {"ok": True, "bulb_exposure_active": True}
@@ -237,6 +276,7 @@ async def bulb_start() -> dict[str, bool]:
 
 @app.post("/ccapi/bulb/stop")
 async def bulb_stop() -> dict[str, bool]:
+    state["bulb_stop_count"] += 1
     state["bulb_exposure_active"] = False
     publish_event("shutterbutton")
     return {"ok": True, "bulb_exposure_active": False}
@@ -244,6 +284,7 @@ async def bulb_stop() -> dict[str, bool]:
 
 @app.post("/ccapi/shutter/half-press")
 async def shutter_half_press() -> dict[str, bool]:
+    state["half_press_count"] += 1
     state["half_pressed"] = True
     publish_event("shutterbutton")
     return {"ok": True, "half_pressed": True}
@@ -251,6 +292,7 @@ async def shutter_half_press() -> dict[str, bool]:
 
 @app.post("/ccapi/shutter/release")
 async def shutter_release() -> dict[str, bool]:
+    state["shutter_release_count"] += 1
     state["half_pressed"] = False
     publish_event("shutterbutton")
     return {"ok": True, "half_pressed": False}
@@ -260,8 +302,22 @@ async def shutter_release() -> dict[str, bool]:
 async def tap_focus(payload: FocusRequest) -> dict[str, float | bool]:
     state["focus_x"] = payload.x
     state["focus_y"] = payload.y
+    state["focus_count"] += 1
     publish_event("afframeposition")
     return {"ok": True, "x": payload.x, "y": payload.y}
+
+
+@app.post("/ccapi/focus/drive")
+async def drive_focus(payload: FocusDriveRequest) -> dict[str, object]:
+    state["focus_drive_count"] += 1
+    state["focus_drive_direction"] = payload.direction
+    state["focus_drive_step"] = payload.step
+    publish_event("focus")
+    return {
+        "ok": True,
+        "direction": payload.direction,
+        "step": payload.step,
+    }
 
 
 @app.post("/ccapi/whitebalance/click")

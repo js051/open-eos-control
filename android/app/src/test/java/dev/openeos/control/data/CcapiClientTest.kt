@@ -131,6 +131,7 @@ class CcapiClientTest {
         assertEquals(emptyList<CameraSettingControl>(), capabilities.advancedSettings)
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_CLOCK_SYNC))
+        assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_DRIVE))
         assertEquals(listOf(LiveViewSource.SIMULATOR_FRAME), capabilities.liveView.sources)
         assertEquals(2, capabilities.liveView.maxFps)
     }
@@ -810,6 +811,24 @@ class CcapiClientTest {
         assertTrue(result.ok)
         assertEquals(FocusDriveDirection.NEAR, result.direction)
         assertEquals(FocusDriveStep.MEDIUM, result.step)
+    }
+
+    @Test
+    fun simulatorFocusDriveUsesBackedEndpointAndVerifiesResponse() = runTest {
+        server.enqueue(jsonResponse("""{"ok":true,"direction":"far","step":"large"}"""))
+
+        val result = client.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.LARGE)
+        val request = server.takeRequest()
+        val body = JSONObject(request.body.readUtf8())
+
+        assertEquals("POST", request.method)
+        assertEquals("/ccapi/focus/drive", request.path)
+        assertEquals("far", body.getString("direction"))
+        assertEquals("large", body.getString("step"))
+        assertTrue(result.ok)
+        assertEquals(FocusDriveDirection.FAR, result.direction)
+        assertEquals(FocusDriveStep.LARGE, result.step)
+        assertTrue(CameraFeature.FOCUS_DRIVE in client.observedFeatureSnapshot())
     }
 
     @Test

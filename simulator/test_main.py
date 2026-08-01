@@ -25,6 +25,7 @@ def test_state_endpoint_is_sanitized_and_resettable() -> None:
     assert changed.json()["record_start_count"] == 1
     assert changed.json()["record_stop_count"] == 0
     assert changed.json()["capture_count"] == 1
+    assert changed.json()["mode"] == "movie"
     assert "event_history" not in changed.json()
     assert reset.json() == {"ok": True}
     assert restored.json()["exposure"]["iso"] == "800"
@@ -32,6 +33,8 @@ def test_state_endpoint_is_sanitized_and_resettable() -> None:
     assert restored.json()["record_start_count"] == 0
     assert restored.json()["record_stop_count"] == 0
     assert restored.json()["capture_count"] == 0
+    assert restored.json()["half_press_count"] == 0
+    assert restored.json()["focus_drive"]["count"] == 0
 
 
 def test_half_press_and_release_are_stateful() -> None:
@@ -43,6 +46,8 @@ def test_half_press_and_release_are_stateful() -> None:
     assert release.status_code == 200
     assert release.json()["half_pressed"] is False
     assert state["half_pressed"] is False
+    assert state["half_press_count"] == 1
+    assert state["shutter_release_count"] == 1
 
 
 def test_clock_sync_records_time_and_publishes_change() -> None:
@@ -59,14 +64,44 @@ def test_clock_sync_records_time_and_publishes_change() -> None:
 
 
 def test_bulb_start_and_stop_are_stateful() -> None:
+    mode = client.post("/ccapi/test/mode?mode=Bulb")
     started = client.post("/ccapi/bulb/start", json={})
     active_status = client.get("/ccapi/status")
     stopped = client.post("/ccapi/bulb/stop", json={})
 
+    assert mode.status_code == 200
+    assert mode.json()["mode"] == "Bulb"
     assert started.status_code == 200
     assert active_status.json()["bulb_exposure_active"] is True
     assert stopped.status_code == 200
     assert state["bulb_exposure_active"] is False
+    assert state["bulb_start_count"] == 1
+    assert state["bulb_stop_count"] == 1
+
+
+def test_bulb_start_rejects_non_bulb_mode() -> None:
+    response = client.post("/ccapi/bulb/start", json={})
+
+    assert response.status_code == 409
+    assert state["bulb_exposure_active"] is False
+    assert state["bulb_start_count"] == 0
+
+
+def test_focus_drive_records_validated_direction_and_step() -> None:
+    response = client.post(
+        "/ccapi/focus/drive",
+        json={"direction": "far", "step": "large"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "direction": "far", "step": "large"}
+    assert state["focus_drive_count"] == 1
+    assert state["focus_drive_direction"] == "far"
+    assert state["focus_drive_step"] == "large"
+    assert client.post(
+        "/ccapi/focus/drive",
+        json={"direction": "outside", "step": "large"},
+    ).status_code == 422
 
 
 def test_click_white_balance_records_the_point_and_updates_status() -> None:
@@ -77,6 +112,18 @@ def test_click_white_balance_records_the_point_and_updates_status() -> None:
     assert (state["click_wb_x"], state["click_wb_y"], state["click_wb_count"]) == (
         0.4,
         0.6,
+        1,
+    )
+
+
+def test_tap_focus_records_the_point_and_count() -> None:
+    response = client.post("/ccapi/focus/tap", json={"x": 0.25, "y": 0.75})
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "x": 0.25, "y": 0.75}
+    assert (state["focus_x"], state["focus_y"], state["focus_count"]) == (
+        0.25,
+        0.75,
         1,
     )
 

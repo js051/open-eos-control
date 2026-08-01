@@ -1085,7 +1085,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                             enabled = !state.isBusy(CameraOperation.FOCUS),
                             colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
                             shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.height(48.dp),
+                            modifier = Modifier.height(48.dp).testTag("autofocus"),
                         ) {
                             Icon(painterResource(LucideR.drawable.lucide_ic_focus), null, Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
@@ -1107,6 +1107,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                             shape = RoundedCornerShape(6.dp),
                             modifier = Modifier
                                 .height(48.dp)
+                                .testTag("shutter-half-press")
                                 .semantics { contentDescription = halfPressDescription },
                         ) {
                             Icon(painterResource(LucideR.drawable.lucide_ic_camera), null, Modifier.size(20.dp))
@@ -1285,6 +1286,7 @@ private fun FocusDriveDirectionRow(
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
+                    .testTag("focus-drive-${direction.name}-${step.name}")
                     .semantics { contentDescription = description },
             ) {
                 Icon(painterResource(icon), null, Modifier.size(16.dp))
