@@ -26,6 +26,7 @@
     AUTOFOCUS: "AUTOFOCUS",
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
     MOVIE_MODE_CONTROL: "MOVIE_MODE_CONTROL",
+    CARD_SELECTION_CONTROL: "CARD_SELECTION_CONTROL",
     VIDEO_RECORDING: "VIDEO_RECORDING",
     TAP_FOCUS: "TAP_FOCUS",
     CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE",
@@ -209,6 +210,8 @@
       autopoweroff: "Auto power off",
       capturetarget: "Capture target",
       capturestorage: "Recording card",
+      cardselectionstillimage: "Still-image card",
+      cardselectionmovie: "Movie card",
       highisonr: "High ISO noise reduction",
       alomode: "Auto Lighting Optimizer",
       continuousaf: "Continuous AF",
@@ -476,6 +479,8 @@
       autopoweroff: "自動關閉電源",
       capturetarget: "拍攝儲存位置",
       capturestorage: "拍攝記錄卡",
+      cardselectionstillimage: "相片記錄卡",
+      cardselectionmovie: "影片記錄卡",
       highisonr: "高 ISO 降噪",
       continuousaf: "連續自動對焦",
       movieservoaf: "短片伺服自動對焦",
@@ -1435,6 +1440,9 @@
     if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue];
     if (key === "capturetarget") messageKey = captureTargetValueKeys[rawValue.toLowerCase()];
     if (key === "capturestorage") messageKey = captureStorageValueKeys[rawValue.toLowerCase()];
+    if (["cardselectionstillimage", "cardselectionmovie"].includes(key)) {
+      messageKey = { none: "imageQualityNone", card1: "valueCard1", card2: "valueCard2" }[rawValue.toLowerCase()];
+    }
     if (
       [
         "stillimagequality",

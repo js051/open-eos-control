@@ -475,6 +475,8 @@
     <string name="ratio_1_1">1:1</string>
     <string name="ratio_4_3">4:3</string>
     <string name="setting_capture_storage">Recording card</string>
+    <string name="setting_still_image_card">Still-image card</string>
+    <string name="setting_movie_card">Movie card</string>
     <string name="camera_value_card_1">Card 1</string>
     <string name="camera_value_card_2">Card 2</string>
     <string name="physical_validation">Physical validation</string>

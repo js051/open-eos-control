@@ -239,6 +239,8 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "autopoweroff": "setting_auto_power_off"
     case "capturetarget": "setting_capture_target"
     case "capturestorage": "setting_capture_storage"
+    case "cardselectionstillimage": "setting_still_image_card"
+    case "cardselectionmovie": "setting_movie_card"
     case "highisonr": "setting_high_iso_noise_reduction"
     case "alomode": "setting_auto_lighting_optimizer"
     case "continuousaf": "setting_continuous_af"
@@ -291,6 +293,13 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
         return [
             "card 1": "camera_value_card_1",
             "card 2": "camera_value_card_2",
+        ][value.lowercased()]
+    }
+    if ["cardselectionstillimage", "cardselectionmovie"].contains(normalizedKey) {
+        return [
+            "none": "camera_value_none",
+            "card1": "camera_value_card_1",
+            "card2": "camera_value_card_2",
         ][value.lowercased()]
     }
     if [

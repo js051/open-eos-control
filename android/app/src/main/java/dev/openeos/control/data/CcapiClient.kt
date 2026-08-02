@@ -499,6 +499,9 @@ class CcapiClient(
             if (advancedSettings.any { it.key == MOVIE_MODE_SETTING_KEY }) {
                 supportedFeatures.add(CameraFeature.MOVIE_MODE_CONTROL)
             }
+            if (advancedSettings.any { it.key in CARD_SELECTION_SETTING_KEYS }) {
+                supportedFeatures.add(CameraFeature.CARD_SELECTION_CONTROL)
+            }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
             val supportsRtpLiveView = supportsRtpLiveView()
@@ -675,6 +678,10 @@ class CcapiClient(
             when {
                 key.equals(ZOOM_SETTING_KEY, ignoreCase = true) -> postZoomValue(value)
                 key.equals(MOVIE_MODE_SETTING_KEY, ignoreCase = true) -> postMovieModeValue(value)
+                key.lowercase() in CARD_SELECTION_SETTING_KEYS -> {
+                    loadShootingSettings()
+                    putSettingValue(listOf(key.lowercase()), value)
+                }
                 else -> putSettingValue(listOf(key), value)
             }
             status()
@@ -690,6 +697,17 @@ class CcapiClient(
                     require(value in MOVIE_MODE_VALUES) { "Movie mode must be on or off." }
                     postOk("/ccapi/movie-mode", JSONObject().put("action", value))
                 }
+                key.equals(STILL_CARD_SELECTION_SETTING_KEY, ignoreCase = true) -> {
+                    require(value in CARD_SELECTION_VALUES) { "Still-image card value is not supported." }
+                    putOk("/ccapi/card-selection/stillimage", JSONObject().put("value", value))
+                }
+                key.equals(MOVIE_CARD_SELECTION_SETTING_KEY, ignoreCase = true) -> {
+                    require(value in CARD_SELECTION_VALUES) { "Movie card value is not supported." }
+                    putOk("/ccapi/card-selection/movie", JSONObject().put("value", value))
+                }
+                else -> throw UnsupportedOperationException(
+                    "${featureForSetting(key).label} is not supported by the simulator.",
+                )
             }
             status()
         }
@@ -1342,6 +1360,8 @@ class CcapiClient(
         "wb", "whitebalance", "white_balance" -> CameraFeature.WHITE_BALANCE_CONTROL
         MOVIE_MODE_SETTING_KEY -> CameraFeature.MOVIE_MODE_CONTROL
         ZOOM_SETTING_KEY -> CameraFeature.ZOOM_CONTROL
+        STILL_CARD_SELECTION_SETTING_KEY, MOVIE_CARD_SELECTION_SETTING_KEY ->
+            CameraFeature.CARD_SELECTION_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
     }
 
@@ -1361,6 +1381,16 @@ class CcapiClient(
             .sortedByDescending { it.apiVersionNumber() }
         return reads.firstNotNullOfOrNull { read ->
             apiOperations.firstOrNull { it.method == "POST" && it.path == read.path }
+                ?.let { write -> read to write }
+        }
+    }
+
+    private fun cardSelectionOperations(pathSuffix: String): Pair<CcapiApiOperation, CcapiApiOperation>? {
+        val reads = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith(pathSuffix) }
+            .sortedByDescending { it.apiVersionNumber() }
+        return reads.firstNotNullOfOrNull { read ->
+            apiOperations.firstOrNull { it.method == "PUT" && it.path == read.path }
                 ?.let { write -> read to write }
         }
     }
@@ -1855,6 +1885,7 @@ class CcapiClient(
         structuredSettingPathsByKey.clear()
         structuredSettingValuesByKey.clear()
         structuredSettingCurrentValues.clear()
+        observedFeatures.remove(CameraFeature.CARD_SELECTION_CONTROL)
         settingsLoaded = false
         val merged = JSONObject()
 
@@ -1962,6 +1993,25 @@ class CcapiClient(
                 settingPathsByKey[MOVIE_MODE_SETTING_KEY] = write.path
                 settingValuesByKey[MOVIE_MODE_SETTING_KEY] = MOVIE_MODE_VALUES
                 merged.put(MOVIE_MODE_SETTING_KEY, movieMode)
+            }
+        }
+
+        CARD_SELECTION_ENDPOINTS.forEach { (key, pathSuffix) ->
+            cardSelectionOperations(pathSuffix)?.let { (read, write) ->
+                val cardSelection = try {
+                    getJson(read.path).toValidatedCardSelectionSetting()
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    null
+                }
+                if (cardSelection != null) {
+                    val values = cardSelection.getJSONArray("ability").toStringList().toSet()
+                    settingPathsByKey[key] = write.path
+                    settingValuesByKey[key] = values
+                    merged.put(key, cardSelection)
+                    observedFeatures.add(CameraFeature.CARD_SELECTION_CONTROL)
+                }
             }
         }
 
@@ -2559,6 +2609,18 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
 }
 
 private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
+    fun simulatorCardSelection(key: String): CameraSettingControl? = optJSONObject(key)
+        ?.toValidatedCardSelectionSetting()
+        ?.let { setting ->
+            CameraSettingControl(
+                key = key,
+                label = key.toSettingLabel(),
+                value = setting.getString("value"),
+                values = setting.getJSONArray("ability").toStringList(),
+            )
+        }
+    val stillCardSelection = simulatorCardSelection(STILL_CARD_SELECTION_SETTING_KEY)
+    val movieCardSelection = simulatorCardSelection(MOVIE_CARD_SELECTION_SETTING_KEY)
     val movieModeControl = optJSONObject(MOVIE_MODE_SETTING_KEY)
         ?.toValidatedMovieModeSetting()
         ?.let { setting ->
@@ -2597,13 +2659,23 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.TEMPERATURE_STATUS,
         ) +
         (if (zoomControl != null) setOf(CameraFeature.ZOOM_CONTROL) else emptySet()) +
-        (if (movieModeControl != null) setOf(CameraFeature.MOVIE_MODE_CONTROL) else emptySet())
+        (if (movieModeControl != null) setOf(CameraFeature.MOVIE_MODE_CONTROL) else emptySet()) +
+        (if (stillCardSelection != null || movieCardSelection != null) {
+            setOf(CameraFeature.CARD_SELECTION_CONTROL)
+        } else {
+            emptySet()
+        })
     return CameraCapabilities(
         iso = getJSONArray("iso").toStringList(),
         shutter = getJSONArray("shutter").toStringList(),
         aperture = getJSONArray("aperture").toStringList(),
         whiteBalance = getJSONArray("white_balance").toStringList(),
-        advancedSettings = listOfNotNull(movieModeControl, zoomControl),
+        advancedSettings = listOfNotNull(
+            movieModeControl,
+            zoomControl,
+            stillCardSelection,
+            movieCardSelection,
+        ),
         matrix = CapabilityMatrix.ccapiNetwork(supported),
         liveView = LiveViewCapabilities.simulator(),
     )
@@ -2739,6 +2811,8 @@ private fun String.toSettingLabel(): String =
         "meteringmode" -> "Metering"
         "picturestyle" -> "Picture style"
         MOVIE_MODE_SETTING_KEY -> "Movie mode"
+        STILL_CARD_SELECTION_SETTING_KEY -> "Still-image card"
+        MOVIE_CARD_SELECTION_SETTING_KEY -> "Movie card"
         "shootingmode" -> "Shooting mode"
         "stillimagequality" -> "Image quality"
         "stillimagequality.raw" -> "RAW quality"
@@ -2778,6 +2852,17 @@ private const val ZOOM_PATH_SUFFIX = "/shooting/control/zoom"
 private const val MOVIE_MODE_SETTING_KEY = "moviemode"
 private const val MOVIE_MODE_PATH_SUFFIX = "/shooting/control/moviemode"
 private val MOVIE_MODE_VALUES = linkedSetOf("off", "on")
+private const val STILL_CARD_SELECTION_SETTING_KEY = "cardselectionstillimage"
+private const val MOVIE_CARD_SELECTION_SETTING_KEY = "cardselectionmovie"
+private val CARD_SELECTION_VALUES = linkedSetOf("none", "card1", "card2")
+private val CARD_SELECTION_SETTING_KEYS = setOf(
+    STILL_CARD_SELECTION_SETTING_KEY,
+    MOVIE_CARD_SELECTION_SETTING_KEY,
+)
+private val CARD_SELECTION_ENDPOINTS = linkedMapOf(
+    STILL_CARD_SELECTION_SETTING_KEY to "/functions/cardselection/stillimage",
+    MOVIE_CARD_SELECTION_SETTING_KEY to "/functions/cardselection/movie",
+)
 private const val MAX_STRUCTURED_SETTING_OPTIONS = 256
 
 private fun Any?.toExactJsonInt(): Int? = when (this) {
@@ -2804,6 +2889,22 @@ private fun JSONObject.toValidatedMovieModeSetting(): JSONObject? {
     return JSONObject()
         .put("value", status)
         .put("ability", org.json.JSONArray(MOVIE_MODE_VALUES.toList()))
+}
+
+private fun JSONObject.toValidatedCardSelectionSetting(): JSONObject? {
+    val current = opt("value") as? String ?: return null
+    val rawAbility = optJSONArray("ability") ?: return null
+    val values = runCatching { rawAbility.toStringList() }.getOrNull() ?: return null
+    if (
+        current !in CARD_SELECTION_VALUES ||
+        values.size < 2 ||
+        values.toSet().size != values.size ||
+        values.any { it !in CARD_SELECTION_VALUES } ||
+        current !in values
+    ) return null
+    return JSONObject()
+        .put("value", current)
+        .put("ability", org.json.JSONArray(values))
 }
 
 private fun JSONObject.toValidatedZoomSetting(): JSONObject? {

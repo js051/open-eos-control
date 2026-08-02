@@ -267,6 +267,12 @@ async function run() {
       (state) => state.movie_mode === "on" && state.movie_mode_update_count === 1,
       "Canon movie mode on",
     );
+    await page.selectOption('#advanced-settings select[data-setting-key="cardselectionmovie"]', "card1");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.movie_card_selection === "card1" && state.card_selection_update_count === 1,
+      "Canon movie card selection",
+    );
     await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2:00:00 remaining"));
     await page.click("#shutter-button");
     await waitForSimulatorState(
@@ -285,6 +291,12 @@ async function run() {
       simulatorOrigin,
       (state) => state.movie_mode === "off" && state.movie_mode_update_count === 2,
       "Canon movie mode off",
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="cardselectionstillimage"]', "card2");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.still_card_selection === "card2" && state.card_selection_update_count === 2,
+      "Canon still-image card selection",
     );
     await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2417 shots"));
 

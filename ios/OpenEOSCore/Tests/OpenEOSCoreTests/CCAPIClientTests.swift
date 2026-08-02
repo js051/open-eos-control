@@ -1183,6 +1183,138 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertFalse(capabilities.matrix.supports(.movieModeControl))
     }
 
+    func testCanonCardSelectionRequiresMatchingGetPutAndWritesOnlyAdvertisedValue() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/functions/cardselection/stillimage","get":true,"put":true},{"path":"/functions/cardselection/movie","get":true,"put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/cardselection/stillimage",
+            body: #"{"value":"card1","ability":["none","card1","card2"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/cardselection/movie",
+            body: #"{"value":"card2","ability":["card1","card2"]}"#
+        )
+        for _ in 0..<2 {
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/functions/cardselection/stillimage",
+                body: #"{"value":"card1","ability":["none","card1","card2"]}"#
+            )
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/functions/cardselection/movie",
+                body: #"{"value":"card2","ability":["card1","card2"]}"#
+            )
+        }
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/ccapi/ver100/functions/cardselection/stillimage",
+            body: #"{"value":"card2"}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/batterylist",
+            body: #"{"batterylist":[{"level":89}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/devicestatus/storage",
+            body: #"{"storagelist":[{"name":"card1","spacesize":32000000000}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/cardselection/stillimage",
+            body: #"{"value":"card2","ability":["none","card1","card2"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/cardselection/movie",
+            body: #"{"value":"card2","ability":["card1","card2"]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertEqual(capabilities.setting("cardselectionstillimage")?.value, "card1")
+        XCTAssertEqual(
+            capabilities.setting("cardselectionstillimage")?.values,
+            ["none", "card1", "card2"]
+        )
+        XCTAssertEqual(capabilities.setting("cardselectionmovie")?.value, "card2")
+        XCTAssertTrue(capabilities.matrix.supports(.cardSelectionControl))
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("cardselectionstillimage"))
+        let requestCount = await transport.requests().count
+        do {
+            _ = try await client.setSetting(key: "cardselectionstillimage", value: "card3")
+            XCTFail("Expected an unadvertised card value to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidSetting(key: "cardselectionstillimage", value: "card3")
+            )
+        }
+        let requestsAfterRejection = await transport.requests()
+        XCTAssertEqual(requestsAfterRejection.count, requestCount + 3)
+        XCTAssertFalse(requestsAfterRejection.contains(where: { $0.method == "PUT" }))
+
+        _ = try await client.setSetting(key: "cardselectionstillimage", value: "card2")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first {
+            $0.method == "PUT" && $0.path == "/ccapi/ver100/functions/cardselection/stillimage"
+        })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(object, ["value": "card2"])
+    }
+
+    func testCanonCardSelectionRejectsMalformedAbilityAndCrossVersionPairing() async throws {
+        let malformed = MockCameraHTTPTransport()
+        await malformed.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/cardselection/stillimage","get":true,"put":true}]}"#
+        )
+        await malformed.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await malformed.enqueueJSON(
+            path: "/ccapi/ver100/functions/cardselection/stillimage",
+            body: #"{"value":"card1","ability":["card1","card1"]}"#
+        )
+        let malformedClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: malformed
+        )
+
+        var capabilities = try await malformedClient.capabilities()
+
+        XCTAssertNil(capabilities.setting("cardselectionstillimage"))
+        XCTAssertFalse(capabilities.matrix.supports(.cardSelectionControl))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.cardSelectionControl))
+
+        let crossVersion = MockCameraHTTPTransport()
+        await crossVersion.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/cardselection/stillimage","get":true}],"ver110":[{"path":"/functions/cardselection/stillimage","put":true}]}"#
+        )
+        await crossVersion.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let crossVersionClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: crossVersion
+        )
+
+        capabilities = try await crossVersionClient.capabilities()
+
+        XCTAssertNil(capabilities.setting("cardselectionstillimage"))
+        XCTAssertFalse(capabilities.matrix.supports(.cardSelectionControl))
+        let crossVersionRequestCount = await crossVersion.requests().count
+        XCTAssertEqual(crossVersionRequestCount, 2)
+    }
+
     func testStillImageQualityWritesCanonObjectAndPreservesCompanionFormat() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)

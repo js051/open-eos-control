@@ -187,13 +187,18 @@ final class CameraAppTests: XCTestCase {
                 values: ["Internal RAM", "Memory card"]
             ),
             CameraSetting(key: "capturestorage", label: "Recording card", value: "CFe", values: ["CFe", "SD"]),
+            CameraSetting(key: "cardselectionstillimage", label: "Still-image card", value: "card1", values: ["none", "card1", "card2"]),
+            CameraSetting(key: "cardselectionmovie", label: "Movie card", value: "card2", values: ["none", "card1", "card2"]),
         ]
 
         XCTAssertEqual(
             advancedSettingsForMode(settings, mode: .photo).map(\.key),
-            ["drivemode", "meteringmode", "capturetarget", "capturestorage"]
+            ["drivemode", "meteringmode", "capturetarget", "capturestorage", "cardselectionstillimage"]
         )
-        XCTAssertEqual(advancedSettingsForMode(settings, mode: .video).map(\.key), ["moviequality", "meteringmode"])
+        XCTAssertEqual(
+            advancedSettingsForMode(settings, mode: .video).map(\.key),
+            ["moviequality", "meteringmode", "cardselectionmovie"]
+        )
 
         let movieMode = try! XCTUnwrap(captureModeSetting(settings))
         XCTAssertEqual(appCaptureMode(for: movieMode), .photo)
@@ -213,6 +218,8 @@ final class CameraAppTests: XCTestCase {
             "alomode": "setting_auto_lighting_optimizer",
             "capturetarget": "setting_capture_target",
             "capturestorage": "setting_capture_storage",
+            "cardselectionstillimage": "setting_still_image_card",
+            "cardselectionmovie": "setting_movie_card",
             "stillimagequality.raw": "setting_image_quality_raw",
             "stillimagequality.jpeg": "setting_image_quality_jpeg",
             "stillimagequalitysd": "setting_image_quality_sd",
@@ -238,6 +245,14 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(
             settingValueLocalizationKey(key: "capturestorage", value: "Card 2"),
             "camera_value_card_2"
+        )
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "cardselectionstillimage", value: "card1"),
+            "camera_value_card_1"
+        )
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "cardselectionmovie", value: "none"),
+            "camera_value_none"
         )
         XCTAssertEqual(
             settingValueLocalizationKey(key: "stillimagequalitycf", value: "cRAW + Large Fine JPEG"),

@@ -140,6 +140,39 @@ class CcapiClientTest {
     }
 
     @Test
+    fun simulatorCardSelectionCapabilityWritesRealSimulatorEndpoint() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "iso":["100","800","1600"],
+                    "shutter":["1/50","1/100"],
+                    "aperture":["2.8","4.0"],
+                    "white_balance":["auto","daylight"],
+                    "cardselectionstillimage":{"value":"card1","ability":["none","card1","card2"]},
+                    "cardselectionmovie":{"value":"card2","ability":["card1","card2"]}
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse(STATUS_JSON))
+
+        val capabilities = client.capabilities()
+        assertEquals("card1", capabilities.advancedSettings.single {
+            it.key == "cardselectionstillimage"
+        }.value)
+        assertTrue(capabilities.matrix.supports(CameraFeature.CARD_SELECTION_CONTROL))
+
+        client.setSetting("cardselectionmovie", "card1")
+
+        server.takeRequest()
+        val write = server.takeRequest()
+        assertEquals("PUT", write.method)
+        assertEquals("/ccapi/card-selection/movie", write.path)
+        assertEquals("card1", JSONObject(write.body.readUtf8()).getString("value"))
+        assertEquals("/ccapi/status", server.takeRequest().path)
+    }
+
+    @Test
     fun setExposureSendsPatchBody() = runTest {
         server.enqueue(jsonResponse(STATUS_JSON.replace("\"800\"", "\"1600\"")))
 
@@ -1283,6 +1316,101 @@ class CcapiClientTest {
 
         assertFalse(capabilities.matrix.supports(CameraFeature.MOVIE_MODE_CONTROL))
         assertTrue(capabilities.advancedSettings.none { it.key == "moviemode" })
+    }
+
+    @Test
+    fun canonCardSelectionRequiresMatchingGetPutAndWritesOnlyAdvertisedValue() = runTest {
+        val discovery = """{"ver100":[
+            {"path":"/shooting/settings","get":true},
+            {"path":"/functions/cardselection/stillimage","get":true,"put":true},
+            {"path":"/functions/cardselection/movie","get":true,"put":true}
+        ]}""".trimIndent()
+        server.enqueue(jsonResponse(discovery))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":"card1","ability":["none","card1","card2"]}"""))
+        server.enqueue(jsonResponse("""{"value":"card2","ability":["card1","card2"]}"""))
+        repeat(2) {
+            server.enqueue(jsonResponse("{}"))
+            server.enqueue(jsonResponse("""{"value":"card1","ability":["none","card1","card2"]}"""))
+            server.enqueue(jsonResponse("""{"value":"card2","ability":["card1","card2"]}"""))
+        }
+        server.enqueue(jsonResponse("""{"value":"card2"}"""))
+        server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":"card2","ability":["none","card1","card2"]}"""))
+        server.enqueue(jsonResponse("""{"value":"card2","ability":["card1","card2"]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        val still = capabilities.advancedSettings.single { it.key == "cardselectionstillimage" }
+        val movie = capabilities.advancedSettings.single { it.key == "cardselectionmovie" }
+        assertEquals("card1", still.value)
+        assertEquals(listOf("none", "card1", "card2"), still.values)
+        assertEquals("card2", movie.value)
+        assertTrue(capabilities.matrix.supports(CameraFeature.CARD_SELECTION_CONTROL))
+        assertTrue("cardselectionstillimage" in capabilities.evidence.writableSettings)
+        val requestCount = server.requestCount
+        val invalid = runCatching {
+            client.setSetting("cardselectionstillimage", "card3")
+        }.exceptionOrNull()
+        assertTrue(invalid is IllegalStateException)
+        assertEquals(requestCount + 3, server.requestCount)
+
+        client.setSetting("cardselectionstillimage", "card2")
+
+        repeat(10) { server.takeRequest() }
+        val write = server.takeRequest()
+        assertEquals("PUT", write.method)
+        assertEquals("/ccapi/ver100/functions/cardselection/stillimage", write.path)
+        assertEquals("card2", JSONObject(write.body.readUtf8()).getString("value"))
+    }
+
+    @Test
+    fun canonCardSelectionRejectsMalformedAbilityAndCrossVersionPairing() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/functions/cardselection/stillimage","get":true,"put":true}
+                ]}""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":"card1","ability":["card1","card1"]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        var capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.CARD_SELECTION_CONTROL))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.CARD_SELECTION_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key.startsWith("cardselection") })
+
+        server.shutdown()
+        server = MockWebServer().also { it.start() }
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver100":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/functions/cardselection/stillimage","get":true}
+                    ],
+                    "ver110":[{"path":"/functions/cardselection/stillimage","put":true}]
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.CARD_SELECTION_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key.startsWith("cardselection") })
+        assertEquals(2, server.requestCount)
     }
 
     @Test

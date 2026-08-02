@@ -294,7 +294,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
-        app.buttons["Disconnect"].tap()
+        tapMenuAction(app.buttons["disconnect-menu-button"])
         XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
     }
 
@@ -367,7 +367,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
-        app.buttons["Disconnect"].tap()
+        tapMenuAction(app.buttons["disconnect-menu-button"])
         XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
         try await waitForSimulatorState { state in
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
@@ -409,6 +409,12 @@ final class OpenEOSControlUITests: XCTestCase {
         let moreActions = app.buttons["more-actions-button"]
         XCTAssertTrue(waitForInteraction(moreActions, timeout: 8))
         moreActions.tap()
+    }
+
+    private func tapMenuAction(_ element: XCUIElement) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        XCTAssertFalse(element.frame.isEmpty)
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     private func waitForLabel(_ element: XCUIElement, containing value: String, timeout: TimeInterval) -> Bool {

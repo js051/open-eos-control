@@ -117,6 +117,8 @@
 "setting_auto_power_off" = "Auto power off";
 "setting_capture_target" = "Capture target";
 "setting_capture_storage" = "Recording card";
+"setting_still_image_card" = "Still-image card";
+"setting_movie_card" = "Movie card";
 "setting_high_iso_noise_reduction" = "High ISO noise reduction";
 "setting_auto_lighting_optimizer" = "Auto Lighting Optimizer";
 "setting_continuous_af" = "Continuous AF";
