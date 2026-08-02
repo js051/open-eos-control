@@ -518,6 +518,71 @@ def test_sound_recording_controls_use_documented_string_abilities_and_mode_gates
     assert test_state["attenuator"] == {"value": "manual", "update_count": 1}
 
 
+def test_focus_bracketing_contract_uses_exact_types_ranges_and_photo_mode_gate() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    root = client.get("/ccapi/ver100/shooting/settings/focusbracketing")
+    shots = client.get("/ccapi/ver100/shooting/settings/focusbracketing/numberofshots")
+    increment = client.get("/ccapi/ver100/shooting/settings/focusbracketing/focusincrement")
+    smoothing = client.get("/ccapi/ver100/shooting/settings/focusbracketing/exposuresmoothing")
+    root_update = client.put(
+        "/ccapi/ver100/shooting/settings/focusbracketing",
+        json={"value": "enable"},
+    )
+    shots_update = client.put(
+        "/ccapi/ver100/shooting/settings/focusbracketing/numberofshots",
+        json={"value": 250},
+    )
+    increment_update = client.put(
+        "/ccapi/focus-bracketing/focus-increment",
+        json={"value": 7},
+    )
+    smoothing_update = client.put(
+        "/ccapi/focus-bracketing/exposure-smoothing",
+        json={"value": "enable"},
+    )
+    invalid_string = client.put(
+        "/ccapi/ver100/shooting/settings/focusbracketing/numberofshots",
+        json={"value": "100"},
+    )
+    invalid_range = client.put(
+        "/ccapi/ver100/shooting/settings/focusbracketing/numberofshots",
+        json={"value": 1000},
+    )
+    client.post("/ccapi/movie-mode", json={"action": "on"})
+    unavailable_get = client.get("/ccapi/ver100/shooting/settings/focusbracketing")
+    unavailable_put = client.put(
+        "/ccapi/focus-bracketing/number-of-shots",
+        json={"value": 300},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    for path in (
+        "/shooting/settings/focusbracketing",
+        "/shooting/settings/focusbracketing/numberofshots",
+        "/shooting/settings/focusbracketing/focusincrement",
+        "/shooting/settings/focusbracketing/exposuresmoothing",
+    ):
+        assert {"path": path, "get": True, "put": True} in discovery
+    assert root.json() == {"value": "disable", "ability": ["enable", "disable"]}
+    assert shots.json() == {"value": 100, "ability": {"min": 2, "max": 999, "step": 1}}
+    assert increment.json() == {"value": 4, "ability": {"min": 1, "max": 10, "step": 1}}
+    assert smoothing.json() == {"value": "disable", "ability": ["enable", "disable"]}
+    assert root_update.json() == {"value": "enable"}
+    assert shots_update.json() == {"value": 250}
+    assert increment_update.status_code == 204
+    assert smoothing_update.status_code == 204
+    assert invalid_string.status_code == 400
+    assert invalid_range.status_code == 400
+    assert unavailable_get.status_code == 503
+    assert unavailable_put.status_code == 503
+    assert test_state["focus_bracketing"] == {"value": "enable", "update_count": 1}
+    assert test_state["focus_bracketing_shots"] == {"value": 250, "update_count": 1}
+    assert test_state["focus_bracketing_increment"] == {"value": 7, "update_count": 1}
+    assert test_state["focus_bracketing_exposure_smoothing"] == {"value": "enable", "update_count": 1}
+
+
 def test_movie_mode_contract_uses_on_off_action_and_mutates_both_routes() -> None:
     client.post("/ccapi/test/reset")
 

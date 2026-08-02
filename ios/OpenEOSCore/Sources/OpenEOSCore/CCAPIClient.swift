@@ -109,6 +109,45 @@ public actor CCAPIClient {
     ]
     private static let soundRecordingSettingKeys = Set(soundRecordingEndpoints.map { $0.key })
     private static let maximumStructuredSettingOptions = 256
+    private static let maximumFocusBracketingOptions = 1024
+    private static let focusBracketingSettingKey = "focusbracketing"
+    private static let focusBracketingNumberSettingKey = "focusbracketingnumberofshots"
+    private static let focusBracketingIncrementSettingKey = "focusbracketingfocusincrement"
+    private static let focusBracketingSmoothingSettingKey = "focusbracketingexposuresmoothing"
+    private static let focusBracketingStringEndpoints = [
+        (
+            key: focusBracketingSettingKey,
+            suffix: "/shooting/settings/focusbracketing",
+            simulatorPath: "/ccapi/focus-bracketing",
+            values: Set(["enable", "disable"])
+        ),
+        (
+            key: focusBracketingSmoothingSettingKey,
+            suffix: "/shooting/settings/focusbracketing/exposuresmoothing",
+            simulatorPath: "/ccapi/focus-bracketing/exposure-smoothing",
+            values: Set(["enable", "disable"])
+        ),
+    ]
+    private static let focusBracketingIntegerEndpoints = [
+        (
+            key: focusBracketingNumberSettingKey,
+            suffix: "/shooting/settings/focusbracketing/numberofshots",
+            simulatorPath: "/ccapi/focus-bracketing/number-of-shots"
+        ),
+        (
+            key: focusBracketingIncrementSettingKey,
+            suffix: "/shooting/settings/focusbracketing/focusincrement",
+            simulatorPath: "/ccapi/focus-bracketing/focus-increment"
+        ),
+    ]
+    private static let focusBracketingStringSettingKeys = Set(focusBracketingStringEndpoints.map { $0.key })
+    private static let focusBracketingIntegerSettingKeys = Set(focusBracketingIntegerEndpoints.map { $0.key })
+    private static let focusBracketingSettingKeys =
+        focusBracketingStringSettingKeys.union(focusBracketingIntegerSettingKeys)
+    private static let simulatorFocusBracketingValues = [
+        focusBracketingNumberSettingKey: Set((2...999).map(String.init)),
+        focusBracketingIncrementSettingKey: Set((1...10).map(String.init)),
+    ]
 
     private let baseURL: URL
     private let baseURLString: String
@@ -395,6 +434,9 @@ public actor CCAPIClient {
         if controls.contains(where: { $0.key == Self.soundRecordingLevelSettingKey }) {
             supported.insert(.soundRecordingLevelControl)
         }
+        if controls.contains(where: { $0.key == Self.focusBracketingSettingKey }) {
+            supported.insert(.focusBracketingControl)
+        }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
@@ -437,6 +479,7 @@ public actor CCAPIClient {
             .mediaDelete, .cameraClockSync, .zoomControl, .cardSelectionControl,
             .soundRecordingControl,
             .soundRecordingLevelControl,
+            .focusBracketingControl,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
         return CameraCapabilities(
@@ -458,6 +501,7 @@ public actor CCAPIClient {
                     .cardSelectionControl: "The camera must advertise matching GET and PUT Canon card-selection endpoints and valid card abilities.",
                     .soundRecordingControl: "The camera must advertise matching GET and PUT Canon sound-recording-setting endpoints and valid documented abilities.",
                     .soundRecordingLevelControl: "The camera must advertise matching GET and PUT Canon sound-recording-level endpoints and a valid integer range.",
+                    .focusBracketingControl: "The camera must advertise matching GET and PUT Canon focus-bracketing endpoints and valid documented abilities.",
                     .movieModeControl: "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                 ]
@@ -564,6 +608,20 @@ public actor CCAPIClient {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
                 try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
+            case let focusKey where Self.focusBracketingStringSettingKeys.contains(focusKey):
+                guard let endpoint = Self.focusBracketingStringEndpoints.first(where: { $0.key == focusKey }),
+                      endpoint.values.contains(value) else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
+            case let focusKey where Self.focusBracketingIntegerSettingKeys.contains(focusKey):
+                guard let endpoint = Self.focusBracketingIntegerEndpoints.first(where: { $0.key == focusKey }),
+                      let integer = Int(value),
+                      String(integer) == value,
+                      Self.simulatorFocusBracketingValues[focusKey]?.contains(value) == true else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": integer])
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
@@ -574,7 +632,8 @@ public actor CCAPIClient {
         let settings: JSONDictionary?
         if Self.cardSelectionSettingKeys.contains(key.lowercased()) ||
             Self.soundRecordingSettingKeys.contains(key.lowercased()) ||
-            key.lowercased() == Self.soundRecordingLevelSettingKey {
+            key.lowercased() == Self.soundRecordingLevelSettingKey ||
+            Self.focusBracketingSettingKeys.contains(key.lowercased()) {
             settings = try await loadShootingSettings()
         } else {
             settings = try await cachedOrLoadShootingSettings()
@@ -602,6 +661,13 @@ public actor CCAPIClient {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             _ = try await requestJSON(path: path, method: .put, json: ["value": level])
+            cachedSettings = nil
+        } else if Self.focusBracketingIntegerSettingKeys.contains(key) {
+            guard let path = settingPaths[key],
+                  let integer = Int(value), String(integer) == value else {
+                throw CCAPIError.invalidSetting(key: key, value: value)
+            }
+            _ = try await requestJSON(path: path, method: .put, json: ["value": integer])
             cachedSettings = nil
         } else if let structured = structuredSettingParts(key) {
             try await putStructuredSettingValue(
@@ -1409,6 +1475,20 @@ public actor CCAPIClient {
         return nil
     }
 
+    private func readWriteSettingOperations(
+        suffix: String
+    ) -> (read: CCAPIOperation, write: CCAPIOperation)? {
+        let reads = operations
+            .filter { $0.method == .get && $0.path.hasSuffix(suffix) }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for read in reads {
+            if let write = operations.first(where: { $0.method == .put && $0.path == read.path }) {
+                return (read, write)
+            }
+        }
+        return nil
+    }
+
     private func directShutterOperation() -> CCAPIOperation? {
         operation(.post, suffix: "/shooting/control/shutterbutton")
     }
@@ -1747,6 +1827,7 @@ public actor CCAPIClient {
         observedFeatures.remove(.cardSelectionControl)
         observedFeatures.remove(.soundRecordingControl)
         observedFeatures.remove(.soundRecordingLevelControl)
+        observedFeatures.remove(.focusBracketingControl)
         settingsLoaded = false
         var merged: JSONDictionary = [:]
         let paths = enforceAdvertisedOperations
@@ -1759,6 +1840,7 @@ public actor CCAPIClient {
                 let settingPath = "\(prefix)/shooting/settings/\(key)"
                 if !Self.soundRecordingSettingKeys.contains(key),
                    key != Self.soundRecordingLevelSettingKey,
+                   !Self.focusBracketingSettingKeys.contains(key),
                    !enforceAdvertisedOperations || operations.contains(CCAPIOperation(method: .put, path: settingPath)) {
                     settingPaths[key] = settingPaths[key] ?? settingPath
                 }
@@ -1801,6 +1883,33 @@ public actor CCAPIClient {
             settingPaths[Self.soundRecordingLevelSettingKey] = operations.write.path
             merged[Self.soundRecordingLevelSettingKey] = soundRecordingLevel
             observedFeatures.insert(.soundRecordingLevelControl)
+        }
+        var focusBracketingAvailable = false
+        for endpoint in Self.focusBracketingStringEndpoints {
+            if endpoint.key != Self.focusBracketingSettingKey, !focusBracketingAvailable { continue }
+            guard let operations = readWriteSettingOperations(suffix: endpoint.suffix),
+                  let raw = try await firstJSON(paths: [operations.read.path], required: false),
+                  let setting = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values) else {
+                continue
+            }
+            settingPaths[endpoint.key] = operations.write.path
+            merged[endpoint.key] = setting
+            if endpoint.key == Self.focusBracketingSettingKey {
+                focusBracketingAvailable = true
+                observedFeatures.insert(.focusBracketingControl)
+            }
+        }
+        if focusBracketingAvailable {
+            for endpoint in Self.focusBracketingIntegerEndpoints {
+                guard let operations = readWriteSettingOperations(suffix: endpoint.suffix),
+                      let raw = try await firstJSON(paths: [operations.read.path], required: false),
+                      let setting = Self.validatedIntegerRangeSetting(
+                          raw,
+                          maximumOptions: Self.maximumFocusBracketingOptions
+                      ) else { continue }
+                settingPaths[endpoint.key] = operations.write.path
+                merged[endpoint.key] = setting
+            }
         }
         settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
@@ -1871,7 +1980,10 @@ public actor CCAPIClient {
         }
     }
 
-    private static func boundedIntegerRangeValues(_ range: JSONDictionary?) -> [String] {
+    private static func boundedIntegerRangeValues(
+        _ range: JSONDictionary?,
+        maximumOptions: Int = maximumStructuredSettingOptions
+    ) -> [String] {
         guard let range,
               let minimum = strictInteger(range["min"]),
               let maximum = strictInteger(range["max"]),
@@ -1881,7 +1993,7 @@ public actor CCAPIClient {
         let (distance, overflow) = maximum.subtractingReportingOverflow(minimum)
         guard !overflow else { return [] }
         let (count, countOverflow) = (distance / step).addingReportingOverflow(1)
-        guard !countOverflow, count >= 1, count <= maximumStructuredSettingOptions else { return [] }
+        guard !countOverflow, count >= 1, count <= maximumOptions else { return [] }
         return (0..<count).map { String(minimum + ($0 * step)) }
     }
 
@@ -1889,10 +2001,13 @@ public actor CCAPIClient {
         validatedIntegerRangeSetting(value)
     }
 
-    private static func validatedIntegerRangeSetting(_ value: JSONDictionary) -> JSONDictionary? {
+    private static func validatedIntegerRangeSetting(
+        _ value: JSONDictionary,
+        maximumOptions: Int = maximumStructuredSettingOptions
+    ) -> JSONDictionary? {
         guard let current = strictInteger(value["value"]),
               let ability = value.object("ability") else { return nil }
-        let values = boundedIntegerRangeValues(ability)
+        let values = boundedIntegerRangeValues(ability, maximumOptions: maximumOptions)
         let currentValue = String(current)
         guard values.count >= 2, values.contains(currentValue) else { return nil }
         return ["value": currentValue, "ability": values]
@@ -2045,6 +2160,7 @@ public actor CCAPIClient {
         case Self.stillCardSelectionSettingKey, Self.movieCardSelectionSettingKey: .cardSelectionControl
         case let soundKey where Self.soundRecordingSettingKeys.contains(soundKey): .soundRecordingControl
         case Self.soundRecordingLevelSettingKey: .soundRecordingLevelControl
+        case let focusKey where Self.focusBracketingSettingKeys.contains(focusKey): .focusBracketingControl
         default: .advancedSettings
         }
     }
@@ -2174,6 +2290,26 @@ public actor CCAPIClient {
            ) {
             controls.append(control)
         }
+        var focusBracketingAvailable = false
+        for endpoint in Self.focusBracketingStringEndpoints {
+            if endpoint.key != Self.focusBracketingSettingKey, !focusBracketingAvailable { continue }
+            guard let raw = value.object(endpoint.key),
+                  let normalized = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values),
+                  let control = control(endpoint.key, Self.settingLabel(endpoint.key), normalized) else { continue }
+            controls.append(control)
+            if endpoint.key == Self.focusBracketingSettingKey { focusBracketingAvailable = true }
+        }
+        if focusBracketingAvailable {
+            for endpoint in Self.focusBracketingIntegerEndpoints {
+                guard let raw = value.object(endpoint.key),
+                      let normalized = Self.validatedIntegerRangeSetting(
+                          raw,
+                          maximumOptions: Self.maximumFocusBracketingOptions
+                      ),
+                      let control = control(endpoint.key, Self.settingLabel(endpoint.key), normalized) else { continue }
+                controls.append(control)
+            }
+        }
         var supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
@@ -2196,6 +2332,9 @@ public actor CCAPIClient {
         }
         if controls.contains(where: { $0.key == Self.soundRecordingLevelSettingKey }) {
             supported.insert(.soundRecordingLevelControl)
+        }
+        if controls.contains(where: { $0.key == Self.focusBracketingSettingKey }) {
+            supported.insert(.focusBracketingControl)
         }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
@@ -2624,6 +2763,10 @@ public actor CCAPIClient {
             Self.windFilterSettingKey: "Wind filter",
             Self.attenuatorSettingKey: "Attenuator",
             Self.soundRecordingLevelSettingKey: "Sound recording level",
+            Self.focusBracketingSettingKey: "Focus bracketing",
+            Self.focusBracketingNumberSettingKey: "Focus bracketing shots",
+            Self.focusBracketingIncrementSettingKey: "Focus increment",
+            Self.focusBracketingSmoothingSettingKey: "Exposure smoothing",
         ]
         if let label = known[key] { return label }
         return key.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").capitalized

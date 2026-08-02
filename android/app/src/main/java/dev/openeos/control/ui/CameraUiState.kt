@@ -210,7 +210,7 @@ fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): Li
         val key = setting.key.lowercase()
         if (setting.key.isMovieModeKey()) return@filter false
         val isVideo = key in videoOnlyKeys || videoTokens.any(key::contains)
-        val isPhoto = photoTokens.any(key::contains)
+        val isPhoto = key.startsWith("focusbracketing") || photoTokens.any(key::contains)
         when (mode) {
             CaptureMode.PHOTO -> !isVideo
             CaptureMode.VIDEO -> !isPhoto

@@ -1435,7 +1435,11 @@ private fun RangeSettingRow(setting: CameraSettingControl, actions: CameraAction
                 if (selectedValue != setting.value) actions.setCameraSetting(setting.key, selectedValue)
             },
             valueRange = 0f..setting.values.lastIndex.toFloat(),
-            steps = (setting.values.size - 2).coerceAtLeast(0),
+            steps = if (setting.values.size <= 101) {
+                (setting.values.size - 2).coerceAtLeast(0)
+            } else {
+                0
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
@@ -1477,6 +1481,10 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "soundrecordinglevel" -> stringResource(R.string.setting_sound_recording_level)
     "windfilter" -> stringResource(R.string.setting_wind_filter)
     "attenuator" -> stringResource(R.string.setting_attenuator)
+    "focusbracketing" -> stringResource(R.string.setting_focus_bracketing)
+    "focusbracketingnumberofshots" -> stringResource(R.string.setting_focus_bracketing_shots)
+    "focusbracketingfocusincrement" -> stringResource(R.string.setting_focus_bracketing_increment)
+    "focusbracketingexposuresmoothing" -> stringResource(R.string.setting_focus_bracketing_exposure_smoothing)
     "zoomspeed" -> stringResource(R.string.setting_power_zoom_speed)
     "autopoweroff" -> stringResource(R.string.setting_auto_power_off)
     "capturetarget" -> stringResource(R.string.setting_capture_target)
@@ -1490,4 +1498,9 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     else -> setting.label
 }
 
-private val RANGE_SETTING_KEYS = setOf("zoom", "soundrecordinglevel")
+private val RANGE_SETTING_KEYS = setOf(
+    "zoom",
+    "soundrecordinglevel",
+    "focusbracketingnumberofshots",
+    "focusbracketingfocusincrement",
+)

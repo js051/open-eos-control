@@ -109,6 +109,7 @@ class FakeCcapiTransport:
         zoom_response: object | None = None,
         sound_recording_level_response: object | None = None,
         sound_recording_responses: dict[str, object] | None = None,
+        focus_bracketing_responses: dict[str, object] | None = None,
         movie_mode_response: object | None = None,
         card_selection_responses: dict[str, object] | None = None,
         recordable_response: object | None = None,
@@ -129,6 +130,7 @@ class FakeCcapiTransport:
         self.zoom_response = zoom_response
         self.sound_recording_level_response = sound_recording_level_response
         self.sound_recording_responses = sound_recording_responses or {}
+        self.focus_bracketing_responses = focus_bracketing_responses or {}
         self.movie_mode_response = movie_mode_response
         self.card_selection_responses = card_selection_responses or {}
         self.recordable_response = (
@@ -168,6 +170,12 @@ class FakeCcapiTransport:
             "soundrecording": "manual",
             "windfilter": "auto",
             "attenuator": "disable",
+        }
+        self.focus_bracketing: dict[str, str | int] = {
+            "focusbracketing": "disable",
+            "focusbracketingnumberofshots": 100,
+            "focusbracketingfocusincrement": 4,
+            "focusbracketingexposuresmoothing": "disable",
         }
         self.movie_mode = "off"
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
@@ -261,6 +269,34 @@ class FakeCcapiTransport:
                 assert payload is not None and payload.get("value") in abilities[key]
                 self.sound_recording[key] = str(payload["value"])
                 return _json_response({"value": self.sound_recording[key]})
+        focus_paths = {
+            "/ccapi/ver100/shooting/settings/focusbracketing": "focusbracketing",
+            "/ccapi/ver100/shooting/settings/focusbracketing/numberofshots": "focusbracketingnumberofshots",
+            "/ccapi/ver100/shooting/settings/focusbracketing/focusincrement": "focusbracketingfocusincrement",
+            "/ccapi/ver100/shooting/settings/focusbracketing/exposuresmoothing": "focusbracketingexposuresmoothing",
+        }
+        if path in focus_paths:
+            key = focus_paths[path]
+            if method == "GET":
+                response = self.focus_bracketing_responses.get(key)
+                if response is not None:
+                    return _json_response(response)
+                abilities: dict[str, object] = {
+                    "focusbracketing": ["enable", "disable"],
+                    "focusbracketingnumberofshots": {"min": 2, "max": 999, "step": 1},
+                    "focusbracketingfocusincrement": {"min": 1, "max": 10, "step": 1},
+                    "focusbracketingexposuresmoothing": ["enable", "disable"],
+                }
+                return _json_response({"value": self.focus_bracketing[key], "ability": abilities[key]})
+            if method == "PUT":
+                assert payload is not None
+                value = payload.get("value")
+                if key in {"focusbracketingnumberofshots", "focusbracketingfocusincrement"}:
+                    assert isinstance(value, int) and not isinstance(value, bool)
+                else:
+                    assert value in {"enable", "disable"}
+                self.focus_bracketing[key] = value
+                return _json_response({"value": value})
         if method == "GET" and path == "/ccapi/ver100/shooting/control/moviemode":
             if self.movie_mode_response is not None:
                 return _json_response(self.movie_mode_response)
@@ -1014,6 +1050,116 @@ def test_ccapi_sound_recording_controls_do_not_treat_aggregate_as_endpoint_get()
     assert CameraFeature.SOUND_RECORDING_CONTROL not in capabilities.supported
     assert not any(setting.key == "windfilter" for setting in capabilities.settings)
     assert len(transport.requests) == 3
+
+
+def test_ccapi_focus_bracketing_requires_exact_pairs_and_refreshes_integer_write() -> None:
+    paths = [
+        "/shooting/settings/focusbracketing",
+        "/shooting/settings/focusbracketing/numberofshots",
+        "/shooting/settings/focusbracketing/focusincrement",
+        "/shooting/settings/focusbracketing/exposuresmoothing",
+    ]
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            *({"path": path, "get": True, "put": True} for path in paths),
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    controls = {setting.key: setting for setting in capabilities.settings}
+
+    assert CameraFeature.FOCUS_BRACKETING_CONTROL in capabilities.supported
+    assert controls["focusbracketing"].values == ["enable", "disable"]
+    assert controls["focusbracketingnumberofshots"].values == [str(value) for value in range(2, 1000)]
+    assert controls["focusbracketingfocusincrement"].values == [str(value) for value in range(1, 11)]
+    assert controls["focusbracketingexposuresmoothing"].value == "disable"
+    assert set(controls).intersection(
+        {
+            "focusbracketing",
+            "focusbracketingnumberofshots",
+            "focusbracketingfocusincrement",
+            "focusbracketingexposuresmoothing",
+        }
+    ).issubset(
+        capabilities.evidence.writable_settings
+    )
+
+    session.set_setting("focusbracketingnumberofshots", "250")
+
+    assert transport.focus_bracketing["focusbracketingnumberofshots"] == 250
+    assert RecordedRequest(
+        "PUT",
+        "/ccapi/ver100/shooting/settings/focusbracketing/numberofshots",
+        {"value": 250},
+    ) in transport.requests
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    transport.focus_bracketing_responses["focusbracketingnumberofshots"] = {
+        "value": 100,
+        "ability": {"min": 2, "max": 200, "step": 1},
+    }
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("focusbracketingnumberofshots", "250")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+
+def test_ccapi_focus_bracketing_malformed_root_hides_group_without_child_reads() -> None:
+    paths = [
+        "/shooting/settings/focusbracketing",
+        "/shooting/settings/focusbracketing/numberofshots",
+        "/shooting/settings/focusbracketing/focusincrement",
+        "/shooting/settings/focusbracketing/exposuresmoothing",
+    ]
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            *({"path": path, "get": True, "put": True} for path in paths),
+        ]
+    }
+    transport = FakeCcapiTransport(
+        discovery=discovery,
+        focus_bracketing_responses={
+            "focusbracketing": {"value": "disable", "ability": ["disable", "disable"]},
+        },
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.FOCUS_BRACKETING_CONTROL not in capabilities.supported
+    assert CameraFeature.FOCUS_BRACKETING_CONTROL in capabilities.planned
+    assert not any(setting.key.startswith("focusbracketing") for setting in capabilities.settings)
+    focus_reads = [
+        request.path
+        for request in transport.requests
+        if request.method == "GET" and "/focusbracketing" in request.path
+    ]
+    assert focus_reads == ["/ccapi/ver100/shooting/settings/focusbracketing"]
+
+
+def test_ccapi_focus_bracketing_does_not_combine_versions_or_use_aggregate_get() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/shooting/settings/focusbracketing", "get": True},
+            ],
+            "ver110": [{"path": "/shooting/settings/focusbracketing", "put": True}],
+        }
+    )
+    transport.settings["focusbracketing"] = {
+        "value": "disable",
+        "ability": ["enable", "disable"],
+    }
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.FOCUS_BRACKETING_CONTROL not in capabilities.supported
+    assert not any(setting.key.startswith("focusbracketing") for setting in capabilities.settings)
+    assert not any("focusbracketing" in request.path for request in transport.requests)
 
 
 def test_ccapi_movie_mode_requires_matching_get_post_and_writes_action() -> None:

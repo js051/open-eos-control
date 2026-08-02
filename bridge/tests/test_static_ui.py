@@ -215,6 +215,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'CARD_SELECTION_CONTROL: "CARD_SELECTION_CONTROL"' in script
     assert 'SOUND_RECORDING_LEVEL_CONTROL: "SOUND_RECORDING_LEVEL_CONTROL"' in script
     assert 'SOUND_RECORDING_CONTROL: "SOUND_RECORDING_CONTROL"' in script
+    assert 'FOCUS_BRACKETING_CONTROL: "FOCUS_BRACKETING_CONTROL"' in script
     assert 'LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION"' in script
     assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
@@ -229,7 +230,10 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "await writable.abort(error)" in script
     assert "cancelMediaDownload({ silent: true })" in script
     assert "cameraInteractionBusy()" in script
-    assert 'if (["zoom", "soundrecordinglevel"].includes(setting.key))' in script
+    assert '"focusbracketingnumberofshots",' in script
+    assert '"focusbracketingfocusincrement",' in script
+    assert 'return !key.startsWith("focusbracketing")' in script
+    assert '"#advanced-settings select, #advanced-settings input[type=range]"' in script
     assert 'if (key === "moviemode") return false' in script
     assert 'const movieMode = settingByKey("moviemode")' in script
     assert 'range.type = "range"' in script

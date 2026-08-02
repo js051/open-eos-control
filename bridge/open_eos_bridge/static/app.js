@@ -29,6 +29,7 @@
     CARD_SELECTION_CONTROL: "CARD_SELECTION_CONTROL",
     SOUND_RECORDING_CONTROL: "SOUND_RECORDING_CONTROL",
     SOUND_RECORDING_LEVEL_CONTROL: "SOUND_RECORDING_LEVEL_CONTROL",
+    FOCUS_BRACKETING_CONTROL: "FOCUS_BRACKETING_CONTROL",
     VIDEO_RECORDING: "VIDEO_RECORDING",
     TAP_FOCUS: "TAP_FOCUS",
     CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE",
@@ -212,6 +213,10 @@
       soundrecordinglevel: "Sound recording level",
       windfilter: "Wind filter",
       attenuator: "Attenuator",
+      focusbracketing: "Focus bracketing",
+      focusbracketingnumberofshots: "Number of shots",
+      focusbracketingfocusincrement: "Focus increment",
+      focusbracketingexposuresmoothing: "Exposure smoothing",
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
       capturetarget: "Capture target",
@@ -487,6 +492,10 @@
       soundrecordinglevel: "錄音音量",
       windfilter: "風聲抑制",
       attenuator: "衰減器",
+      focusbracketing: "對焦包圍拍攝",
+      focusbracketingnumberofshots: "拍攝張數",
+      focusbracketingfocusincrement: "對焦增量",
+      focusbracketingexposuresmoothing: "曝光平滑",
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
       capturetarget: "拍攝儲存位置",
@@ -1657,7 +1666,12 @@
       const label = document.createElement("label");
       const text = document.createElement("span");
       text.textContent = settingLabel(setting);
-      if (["zoom", "soundrecordinglevel"].includes(setting.key)) {
+      if ([
+        "zoom",
+        "soundrecordinglevel",
+        "focusbracketingnumberofshots",
+        "focusbracketingfocusincrement",
+      ].includes(setting.key)) {
         const control = document.createElement("span");
         control.className = "range-setting";
         const range = document.createElement("input");
@@ -1735,7 +1749,7 @@
     if (state.captureMode === "photo") {
       return !videoOnlyKeys.has(key) && !videoTokens.some((token) => key.includes(token));
     }
-    return !photoTokens.some((token) => key.includes(token));
+    return !key.startsWith("focusbracketing") && !photoTokens.some((token) => key.includes(token));
   }
 
   function openSettingDialog(setting) {
@@ -3239,8 +3253,8 @@
     document.querySelectorAll("#exposure-strip .exposure-control").forEach((button) => {
       button.disabled = interactionBusy || bulbActive || !settingByKey(button.dataset.settingKey);
     });
-    document.querySelectorAll("#advanced-settings select").forEach((select) => {
-      select.disabled = interactionBusy || bulbActive;
+    document.querySelectorAll("#advanced-settings select, #advanced-settings input[type=range]").forEach((control) => {
+      control.disabled = interactionBusy || bulbActive;
     });
     document.querySelectorAll("#advanced-settings .settings-command button").forEach((button) => {
       button.disabled = interactionBusy || bulbActive || !featureSupported(FEATURES.CAMERA_CLOCK_SYNC);

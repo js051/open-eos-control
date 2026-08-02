@@ -19,6 +19,7 @@ class OfflinePreviewTest {
         assertTrue(state.supports(CameraFeature.VIDEO_RECORDING))
         assertTrue(state.supports(CameraFeature.SOUND_RECORDING_CONTROL))
         assertTrue(state.supports(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL))
+        assertTrue(state.supports(CameraFeature.FOCUS_BRACKETING_CONTROL))
         assertEquals(
             listOf("auto", "manual", "disable"),
             state.capabilities?.advancedSettings.orEmpty().single { it.key == "soundrecording" }.values,
@@ -28,8 +29,19 @@ class OfflinePreviewTest {
             (0..63).map(Int::toString),
             state.capabilities?.advancedSettings.orEmpty().single { it.key == "soundrecordinglevel" }.values,
         )
+        assertEquals(
+            (2..999).map(Int::toString),
+            state.capabilities?.advancedSettings.orEmpty().single { it.key == "focusbracketingnumberofshots" }.values,
+        )
+        assertEquals(
+            (1..10).map(Int::toString),
+            state.capabilities?.advancedSettings.orEmpty().single { it.key == "focusbracketingfocusincrement" }.values,
+        )
         assertTrue(settingsForMode(state.capabilities?.advancedSettings.orEmpty(), CaptureMode.PHOTO).none {
             it.key in setOf("soundrecording", "soundrecordinglevel", "windfilter", "attenuator")
+        })
+        assertTrue(settingsForMode(state.capabilities?.advancedSettings.orEmpty(), CaptureMode.VIDEO).none {
+            it.key.startsWith("focusbracketing")
         })
         assertFalse(state.pendingOperations.isNotEmpty())
     }

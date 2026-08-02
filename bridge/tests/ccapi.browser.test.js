@@ -267,6 +267,22 @@ async function run() {
       (state) => state.movie_mode === "on" && state.movie_mode_update_count === 1,
       "Canon movie mode on",
     );
+    const focusBracketingKeys = [
+      "focusbracketing",
+      "focusbracketingnumberofshots",
+      "focusbracketingfocusincrement",
+      "focusbracketingexposuresmoothing",
+    ];
+    await page.waitForFunction((keys) => keys.every(
+      (key) => !document.querySelector(`#advanced-settings [data-setting-key="${key}"]`),
+    ), focusBracketingKeys);
+    for (const key of focusBracketingKeys) {
+      assert.equal(
+        await page.locator(`#advanced-settings [data-setting-key="${key}"]`).count(),
+        0,
+        `${key} must be hidden in Video mode`,
+      );
+    }
     const soundLevel = page.locator(
       '#advanced-settings input[type="range"][data-setting-key="soundrecordinglevel"]',
     );
@@ -325,15 +341,78 @@ async function run() {
       (state) => state.movie_mode === "off" && state.movie_mode_update_count === 2,
       "Canon movie mode off",
     );
-    await soundLevel.waitFor({ state: "detached" });
-    assert.equal(await soundLevel.count(), 0, "Sound recording level must be hidden in Photo mode");
-    for (const key of ["soundrecording", "windfilter", "attenuator"]) {
+    const soundRecordingKeys = ["soundrecording", "soundrecordinglevel", "windfilter", "attenuator"];
+    await page.waitForFunction(({ hiddenKeys, visibleKeys }) => {
+      const settings = document.querySelector("#advanced-settings");
+      const photoMode = document.querySelector("#photo-mode-button");
+      return photoMode?.classList.contains("active") &&
+        hiddenKeys.every((key) => !settings?.querySelector(`[data-setting-key="${key}"]`)) &&
+        visibleKeys.every((key) => settings?.querySelector(`[data-setting-key="${key}"]`));
+    }, { hiddenKeys: soundRecordingKeys, visibleKeys: focusBracketingKeys });
+    for (const key of soundRecordingKeys) {
       assert.equal(
         await page.locator(`#advanced-settings [data-setting-key="${key}"]`).count(),
         0,
         `${key} must be hidden in Photo mode`,
       );
     }
+    await page.selectOption('#advanced-settings select[data-setting-key="focusbracketing"]', "enable");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.focus_bracketing.value === "enable" &&
+        state.focus_bracketing.update_count === 1,
+      "Canon focus bracketing string write",
+    );
+    const shotsRangeSelector =
+      '#advanced-settings input[type="range"][data-setting-key="focusbracketingnumberofshots"]';
+    await page.waitForFunction((selector) => {
+      const input = document.querySelector(selector);
+      return input && !input.disabled;
+    }, shotsRangeSelector);
+    await page.locator(shotsRangeSelector).evaluate((input) => {
+      input.value = "248";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.focus_bracketing_shots.value === 250 &&
+        state.focus_bracketing_shots.update_count === 1,
+      "Canon focus bracketing shot count integer write",
+    );
+    const incrementRangeSelector =
+      '#advanced-settings input[type="range"][data-setting-key="focusbracketingfocusincrement"]';
+    await page.waitForFunction((selector) => {
+      const input = document.querySelector(selector);
+      return input && !input.disabled;
+    }, incrementRangeSelector);
+    await page.locator(incrementRangeSelector).evaluate((input) => {
+      input.value = "6";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.focus_bracketing_increment.value === 7 &&
+        state.focus_bracketing_increment.update_count === 1,
+      "Canon focus bracketing increment integer write",
+    );
+    const smoothingSelector =
+      '#advanced-settings select[data-setting-key="focusbracketingexposuresmoothing"]';
+    await page.waitForFunction((selector) => {
+      const input = document.querySelector(selector);
+      return input && !input.disabled;
+    }, smoothingSelector);
+    await page.selectOption(
+      smoothingSelector,
+      "enable",
+    );
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.focus_bracketing_exposure_smoothing.value === "enable" &&
+        state.focus_bracketing_exposure_smoothing.update_count === 1,
+      "Canon focus bracketing exposure smoothing string write",
+    );
     await page.selectOption('#advanced-settings select[data-setting-key="cardselectionstillimage"]', "card2");
     await waitForSimulatorState(
       simulatorOrigin,

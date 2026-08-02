@@ -155,7 +155,7 @@ func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) 
         let key = setting.key.lowercased()
         switch mode {
         case .photo: return !videoOnlyKeys.contains(key) && !videoTokens.contains(where: key.contains)
-        case .video: return !photoTokens.contains(where: key.contains)
+        case .video: return !key.hasPrefix("focusbracketing") && !photoTokens.contains(where: key.contains)
         }
     }
 }
@@ -246,6 +246,10 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "soundrecording": "setting_sound_recording"
     case "windfilter": "setting_wind_filter"
     case "attenuator": "setting_attenuator"
+    case "focusbracketing": "setting_focus_bracketing"
+    case "focusbracketingnumberofshots": "setting_focus_bracketing_shots"
+    case "focusbracketingfocusincrement": "setting_focus_bracketing_increment"
+    case "focusbracketingexposuresmoothing": "setting_focus_bracketing_exposure_smoothing"
     case "highisonr": "setting_high_iso_noise_reduction"
     case "alomode": "setting_auto_lighting_optimizer"
     case "continuousaf": "setting_continuous_af"

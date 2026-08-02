@@ -1352,6 +1352,10 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "soundrecordinglevel", label: "Sound recording level", value: "32", values: (0...63).map(String.init)),
             CameraSetting(key: "windfilter", label: "Wind filter", value: "auto", values: ["auto", "enable", "disable"]),
             CameraSetting(key: "attenuator", label: "Attenuator", value: "disable", values: ["enable", "disable", "auto", "manual"]),
+            CameraSetting(key: "focusbracketing", label: "Focus bracketing", value: "disable", values: ["enable", "disable"]),
+            CameraSetting(key: "focusbracketingnumberofshots", label: "Focus bracketing shots", value: "100", values: (2...999).map(String.init)),
+            CameraSetting(key: "focusbracketingfocusincrement", label: "Focus increment", value: "4", values: (1...10).map(String.init)),
+            CameraSetting(key: "focusbracketingexposuresmoothing", label: "Exposure smoothing", value: "disable", values: ["enable", "disable"]),
             CameraSetting(key: "zoom", label: "Zoom", value: "50", values: (0...100).map(String.init)),
             CameraSetting(key: "moviequality", label: "Movie quality", value: "4K", values: ["4K", "FHD"]),
             CameraSetting(key: "framerate", label: "Frame rate", value: "59.94p", values: ["23.98p", "29.97p", "59.94p"]),
@@ -1362,7 +1366,8 @@ final class CameraAppState: ObservableObject {
             .tapFocus, .clickWhiteBalance,
             .liveViewMagnification,
             .exposureControl, .whiteBalanceControl, .zoomControl, .cardSelectionControl,
-            .soundRecordingControl, .soundRecordingLevelControl, .advancedSettings, .mediaBrowser, .mediaDownload,
+            .soundRecordingControl, .soundRecordingLevelControl, .focusBracketingControl,
+            .advancedSettings, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]
         let capabilities = CameraCapabilities(

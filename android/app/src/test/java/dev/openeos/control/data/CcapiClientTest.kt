@@ -1471,6 +1471,117 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonFocusBracketingRequiresExactPairsAndWritesIntegerAfterRefresh() = runTest {
+        val discovery = """{"ver100":[
+            {"path":"/devicestatus/batterylist","get":true},
+            {"path":"/devicestatus/storage","get":true},
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/focusbracketing","get":true,"put":true},
+            {"path":"/shooting/settings/focusbracketing/numberofshots","get":true,"put":true},
+            {"path":"/shooting/settings/focusbracketing/focusincrement","get":true,"put":true},
+            {"path":"/shooting/settings/focusbracketing/exposuresmoothing","get":true,"put":true}
+        ]}""".trimIndent()
+        val root = """{"value":"disable","ability":["enable","disable"]}"""
+        val smoothing = """{"value":"disable","ability":["enable","disable"]}"""
+        val shots = """{"value":100,"ability":{"min":2,"max":999,"step":1}}"""
+        val increment = """{"value":4,"ability":{"min":1,"max":10,"step":1}}"""
+        server.enqueue(jsonResponse(discovery))
+        server.enqueue(jsonResponse("{}"))
+        listOf(root, smoothing, shots, increment).forEach { server.enqueue(jsonResponse(it)) }
+        server.enqueue(jsonResponse("{}"))
+        listOf(root, smoothing, shots, increment).forEach { server.enqueue(jsonResponse(it)) }
+        server.enqueue(jsonResponse("""{"value":250}"""))
+        server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("{}"))
+        listOf(root, smoothing, shots.replace("100", "250"), increment).forEach { server.enqueue(jsonResponse(it)) }
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.FOCUS_BRACKETING_CONTROL))
+        assertEquals("disable", capabilities.advancedSettings.single { it.key == "focusbracketing" }.value)
+        assertEquals(
+            (2..999).map(Int::toString),
+            capabilities.advancedSettings.single { it.key == "focusbracketingnumberofshots" }.values,
+        )
+        assertEquals(
+            (1..10).map(Int::toString),
+            capabilities.advancedSettings.single { it.key == "focusbracketingfocusincrement" }.values,
+        )
+        assertTrue("focusbracketing" in capabilities.evidence.writableSettings)
+
+        client.setSetting("focusbracketingnumberofshots", "250")
+
+        val requests = generateSequence { server.takeRequest(100, TimeUnit.MILLISECONDS) }.toList()
+        val write = requests.single { it.method == "PUT" }
+        assertEquals("/ccapi/ver100/shooting/settings/focusbracketing/numberofshots", write.path)
+        val payload = JSONObject(write.body.readUtf8())
+        assertEquals(250, payload.getInt("value"))
+        assertTrue(payload.get("value") is Int)
+        assertTrue(requests.count { it.path == "/ccapi/ver100/shooting/settings/focusbracketing/numberofshots" } >= 3)
+    }
+
+    @Test
+    fun canonFocusBracketingRejectsMalformedRootAndDoesNotProbeChildren() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/settings/focusbracketing","get":true,"put":true},
+                    {"path":"/shooting/settings/focusbracketing/numberofshots","get":true,"put":true},
+                    {"path":"/shooting/settings/focusbracketing/focusincrement","get":true,"put":true},
+                    {"path":"/shooting/settings/focusbracketing/exposuresmoothing","get":true,"put":true}
+                ]}""".trimIndent(),
+            ),
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"focusbracketing":{"value":"disable","ability":["enable","disable"]}}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"value":"disable","ability":["disable","disable"]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.FOCUS_BRACKETING_CONTROL))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.FOCUS_BRACKETING_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key.startsWith("focusbracketing") })
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun canonFocusBracketingDoesNotCombineGetPutAcrossVersions() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver100":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/shooting/settings/focusbracketing","get":true}
+                    ],
+                    "ver110":[{"path":"/shooting/settings/focusbracketing","put":true}]
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"focusbracketing":{"value":"disable","ability":["enable","disable"]}}""",
+            ),
+        )
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.FOCUS_BRACKETING_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key.startsWith("focusbracketing") })
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun canonMovieModeRequiresMatchingGetPostAndWritesAction() = runTest {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},
