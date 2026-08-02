@@ -141,8 +141,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
     @MainActor
     func testDirectCCAPIControlsReachTheRunningCameraSimulator() async throws {
-        let health = try? await simulatorRequest(path: "/health")
-        let available = health?["ok"] as? Bool == true
+        let available = await waitForSimulatorHealth()
         guard available else {
             #if OEC_REQUIRE_SIMULATOR_E2E
             XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
@@ -219,10 +218,12 @@ final class OpenEOSControlUITests: XCTestCase {
 
         openMoreActions(in: app)
         let focusDrive = app.buttons["focus-drive-menu-button"]
-        XCTAssertTrue(waitForInteraction(focusDrive, timeout: 5))
-        focusDrive.tap()
+        guard tapMenuAction(focusDrive) else { return }
         let driveNearLarge = app.buttons["focus-drive-near-large"]
-        XCTAssertTrue(waitForInteraction(driveNearLarge, timeout: 5))
+        guard waitForInteraction(driveNearLarge, timeout: 5) else {
+            XCTFail("The focus-drive sheet did not become interactive")
+            return
+        }
         driveNearLarge.tap()
         try await waitForSimulatorState { state in
             guard let focus = state["focus_drive"] as? [String: Any] else { return false }
@@ -300,8 +301,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
     @MainActor
     func testCanonicalCCAPIEventsRefreshTheProductionUI() async throws {
-        let health = try? await simulatorRequest(path: "/health")
-        let available = health?["ok"] as? Bool == true
+        let available = await waitForSimulatorHealth()
         guard available else {
             #if OEC_REQUIRE_SIMULATOR_E2E
             XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
@@ -411,10 +411,18 @@ final class OpenEOSControlUITests: XCTestCase {
         moreActions.tap()
     }
 
-    private func tapMenuAction(_ element: XCUIElement) {
-        XCTAssertTrue(element.waitForExistence(timeout: 5))
-        XCTAssertFalse(element.frame.isEmpty)
+    @discardableResult
+    private func tapMenuAction(_ element: XCUIElement) -> Bool {
+        guard element.waitForExistence(timeout: 5) else {
+            XCTFail("The requested menu action does not exist")
+            return false
+        }
+        guard element.isEnabled, !element.frame.isEmpty else {
+            XCTFail("The requested menu action is disabled or has no tappable frame")
+            return false
+        }
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        return true
     }
 
     private func waitForLabel(_ element: XCUIElement, containing value: String, timeout: TimeInterval) -> Bool {
@@ -440,11 +448,24 @@ final class OpenEOSControlUITests: XCTestCase {
         throw SimulatorTestError.timeout
     }
 
+    private func waitForSimulatorHealth(timeout: TimeInterval = 10) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let health = try? await simulatorRequest(path: "/health", timeoutInterval: 1),
+               health["ok"] as? Bool == true {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        } while Date() < deadline
+        return false
+    }
+
     private func simulatorRequest(
         path: String,
         method: String = "GET",
         queryItems: [URLQueryItem] = [],
-        jsonBody: [String: Any]? = nil
+        jsonBody: [String: Any]? = nil,
+        timeoutInterval: TimeInterval = 5
     ) async throws -> [String: Any] {
         let normalizedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let pathURL = simulatorURL.appendingPathComponent(normalizedPath)
@@ -458,7 +479,7 @@ final class OpenEOSControlUITests: XCTestCase {
         } else if method == "POST" {
             request.httpBody = Data()
         }
-        request.timeoutInterval = 5
+        request.timeoutInterval = timeoutInterval
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             throw SimulatorTestError.invalidResponse
