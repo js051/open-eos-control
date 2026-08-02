@@ -1150,7 +1150,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun soundRecordingLevelSliderAppearsOnlyInVideoSettings() {
+    fun soundRecordingControlsAppearOnlyInVideoSettings() {
         val state = mutableStateOf(CameraUiState().withOfflinePreview())
         val picker = mutableStateOf<SettingPicker?>(null)
         val actions = noOpActions().copy(
@@ -1164,12 +1164,24 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onAllNodesWithTag("advanced-setting-soundrecording").assertCountEquals(0)
         compose.onAllNodesWithTag("advanced-setting-soundrecordinglevel").assertCountEquals(0)
+        compose.onAllNodesWithTag("advanced-setting-windfilter").assertCountEquals(0)
+        compose.onAllNodesWithTag("advanced-setting-attenuator").assertCountEquals(0)
         compose.runOnIdle {
             picker.value = null
             state.value = state.value.copy(captureMode = CaptureMode.VIDEO)
         }
         compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("advanced-setting-soundrecording")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-windfilter")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-attenuator")
+            .performScrollTo()
+            .assertIsDisplayed()
         compose.onNodeWithTag("advanced-setting-soundrecordinglevel")
             .performScrollTo()
             .assertIsDisplayed()

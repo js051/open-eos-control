@@ -585,6 +585,7 @@ class DesktopBridgeClient(
         "iso", "shutter", "aperture" -> CameraFeature.EXPOSURE_CONTROL
         "whitebalance" -> CameraFeature.WHITE_BALANCE_CONTROL
         "cardselectionstillimage", "cardselectionmovie" -> CameraFeature.CARD_SELECTION_CONTROL
+        "soundrecording", "windfilter", "attenuator" -> CameraFeature.SOUND_RECORDING_CONTROL
         "soundrecordinglevel" -> CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
     }

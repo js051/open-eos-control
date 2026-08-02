@@ -34,6 +34,7 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "capturetarget" -> captureTargetValueLabels[value]
         "capturestorage" -> captureStorageValueLabels[value]
         "cardselectionstillimage", "cardselectionmovie" -> cardSelectionValueLabels[value]
+        "soundrecording", "windfilter", "attenuator" -> soundRecordingValueLabels[value]
         "aeb" -> toggleValueLabels[value]
         "stillimagequality", "stillimagequalityraw", "stillimagequalityjpeg", "stillimagequalityheif",
         "stillimagequalitysd", "stillimagequalitycf" ->
@@ -89,6 +90,13 @@ private val toggleValueLabels = mapOf(
     "on" to R.string.camera_value_on,
     "disabled" to R.string.camera_value_off,
     "enabled" to R.string.camera_value_on,
+)
+
+private val soundRecordingValueLabels = mapOf(
+    "auto" to R.string.camera_value_auto,
+    "manual" to R.string.camera_value_manual,
+    "enable" to R.string.camera_value_enable,
+    "disable" to R.string.camera_value_disable,
 )
 
 private val afOperationValueLabels = mapOf(

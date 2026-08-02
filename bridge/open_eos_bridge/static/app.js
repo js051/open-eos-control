@@ -27,6 +27,7 @@
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
     MOVIE_MODE_CONTROL: "MOVIE_MODE_CONTROL",
     CARD_SELECTION_CONTROL: "CARD_SELECTION_CONTROL",
+    SOUND_RECORDING_CONTROL: "SOUND_RECORDING_CONTROL",
     SOUND_RECORDING_LEVEL_CONTROL: "SOUND_RECORDING_LEVEL_CONTROL",
     VIDEO_RECORDING: "VIDEO_RECORDING",
     TAP_FOCUS: "TAP_FOCUS",
@@ -207,7 +208,10 @@
       colorspace: "Color space",
       aspectratio: "Aspect ratio",
       zoom: "Zoom",
+      soundrecording: "Sound recording",
       soundrecordinglevel: "Sound recording level",
+      windfilter: "Wind filter",
+      attenuator: "Attenuator",
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
       capturetarget: "Capture target",
@@ -220,6 +224,8 @@
       movieservoaf: "Movie Servo AF",
       aeb: "Auto exposure bracketing",
       valueAuto: "Auto",
+      valueManual: "Manual",
+      valueEnable: "Enable",
       valueOn: "On",
       valueOff: "Off",
       valueLow: "Low",
@@ -477,7 +483,10 @@
       colorspace: "色彩空間",
       aspectratio: "畫面比例",
       zoom: "變焦",
+      soundrecording: "錄音模式",
       soundrecordinglevel: "錄音音量",
+      windfilter: "風聲抑制",
+      attenuator: "衰減器",
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
       capturetarget: "拍攝儲存位置",
@@ -489,6 +498,8 @@
       movieservoaf: "短片伺服自動對焦",
       aeb: "自動包圍曝光",
       valueAuto: "自動",
+      valueManual: "手動",
+      valueEnable: "啟用",
       valueOn: "開啟",
       valueOff: "關閉",
       valueLow: "低",
@@ -615,6 +626,9 @@
 
   const commonSettingValueKeys = {
     auto: "valueAuto",
+    manual: "valueManual",
+    enable: "valueEnable",
+    disable: "valueDisable",
     on: "valueOn",
     off: "valueOff",
     low: "valueLow",
@@ -1716,8 +1730,11 @@
     const key = setting.key.toLowerCase();
     if (key === "moviemode") return false;
     const videoTokens = ["movie", "video", "frame", "codec", "record", "sound"];
+    const videoOnlyKeys = new Set(["windfilter", "attenuator"]);
     const photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage"];
-    if (state.captureMode === "photo") return !videoTokens.some((token) => key.includes(token));
+    if (state.captureMode === "photo") {
+      return !videoOnlyKeys.has(key) && !videoTokens.some((token) => key.includes(token));
+    }
     return !photoTokens.some((token) => key.includes(token));
   }
 

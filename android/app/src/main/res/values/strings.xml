@@ -236,6 +236,9 @@
     <string name="setting_zoom">Zoom</string>
     <string name="zoom_value">%1$s%%</string>
     <string name="setting_sound_recording_level">Sound recording level</string>
+    <string name="setting_sound_recording">Sound recording</string>
+    <string name="setting_wind_filter">Wind filter</string>
+    <string name="setting_attenuator">Attenuator</string>
     <string name="setting_auto_power_off">Auto power off</string>
     <string name="setting_capture_target">Capture target</string>
     <string name="setting_high_iso_noise_reduction">High ISO noise reduction</string>
@@ -282,6 +285,8 @@
     <string name="focus_farther">Far</string>
     <string name="focus_drive_step">%1$s focus, step %2$d</string>
     <string name="camera_value_auto">Auto</string>
+    <string name="camera_value_manual">Manual</string>
+    <string name="camera_value_enable">Enable</string>
     <string name="camera_value_bulb">Bulb</string>
     <string name="camera_value_time">Time</string>
     <string name="camera_value_daylight">Daylight</string>

@@ -1348,6 +1348,129 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonSoundRecordingControlsRequireMatchingPairAndRefreshBeforeStringWrite() = runTest {
+        val discovery = """{"ver100":[
+            {"path":"/devicestatus/batterylist","get":true},
+            {"path":"/devicestatus/storage","get":true},
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/soundrecording/windfilter","get":true,"put":true}
+        ]}""".trimIndent()
+        val advertised = """{"value":"auto","ability":["auto","enable","disable"]}"""
+        server.enqueue(jsonResponse(discovery))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse(advertised))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":"auto","ability":["auto","disable"]}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse(advertised))
+        server.enqueue(jsonResponse("""{"value":"enable"}"""))
+        server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val windFilter = capabilities.advancedSettings.single { it.key == "windfilter" }
+
+        assertEquals("auto", windFilter.value)
+        assertEquals(listOf("auto", "enable", "disable"), windFilter.values)
+        assertTrue(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_CONTROL))
+        assertTrue("windfilter" in capabilities.evidence.writableSettings)
+
+        val invalid = runCatching { client.setSetting("windfilter", "enable") }.exceptionOrNull()
+        assertTrue(invalid is IllegalStateException)
+        assertTrue(invalid?.message.orEmpty().contains("not advertised"))
+
+        client.setSetting("windfilter", "enable")
+
+        val requests = generateSequence { server.takeRequest(100, java.util.concurrent.TimeUnit.MILLISECONDS) }
+            .toList()
+        val write = requests.single { it.method == "PUT" }
+        assertEquals("/ccapi/ver100/shooting/settings/soundrecording/windfilter", write.path)
+        assertEquals("enable", JSONObject(write.body.readUtf8()).getString("value"))
+    }
+
+    @Test
+    fun canonSoundRecordingControlsRejectMalformedStringAbilities() = runTest {
+        val discovery = """{"ver100":[
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/soundrecording/attenuator","get":true,"put":true}
+        ]}""".trimIndent()
+        val malformedResponses = listOf(
+            """{"value":"on","ability":["enable","disable"]}""",
+            """{"value":"auto","ability":["auto","auto"]}""",
+            """{"value":"auto","ability":["auto"]}""",
+            """{"value":"auto","ability":["auto",1]}""",
+            """{"value":1,"ability":["auto","disable"]}""",
+        )
+
+        malformedResponses.forEachIndexed { index, response ->
+            if (index > 0) {
+                server.shutdown()
+                server = MockWebServer().also { it.start() }
+            }
+            server.enqueue(jsonResponse(discovery))
+            server.enqueue(jsonResponse("{}"))
+            server.enqueue(jsonResponse(response))
+            client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+            client.initialize()
+            val capabilities = client.capabilities()
+
+            assertFalse(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_CONTROL))
+            assertTrue(capabilities.matrix.isPlanned(CameraFeature.SOUND_RECORDING_CONTROL))
+            assertTrue(capabilities.advancedSettings.none { it.key == "attenuator" })
+        }
+    }
+
+    @Test
+    fun canonSoundRecordingControlsDoNotCombineGetPutAcrossVersions() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver100":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/shooting/settings/soundrecording","get":true}
+                    ],
+                    "ver110":[{"path":"/shooting/settings/soundrecording","put":true}]
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "soundrecording" })
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun canonSoundRecordingControlsDoNotUseAggregateSettingsAsEndpointGet() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/settings/soundrecording/windfilter","put":true}
+                ]}""".trimIndent(),
+            ),
+        )
+        server.enqueue(
+            jsonResponse("""{"windfilter":{"value":"auto","ability":["auto","enable","disable"]}}"""),
+        )
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "windfilter" })
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun canonMovieModeRequiresMatchingGetPostAndWritesAction() = runTest {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},

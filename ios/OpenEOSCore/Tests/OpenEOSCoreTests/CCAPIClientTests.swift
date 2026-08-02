@@ -1215,6 +1215,130 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertFalse(requests.contains(where: { $0.path.contains("soundrecording/level") }))
     }
 
+    func testCanonSoundRecordingControlsRequireMatchingPairAndRefreshBeforeStringWrite() async throws {
+        let transport = MockCameraHTTPTransport()
+        let path = "/ccapi/ver100/shooting/settings/soundrecording/windfilter"
+        let advertised = #"{"value":"auto","ability":["auto","enable","disable"]}"#
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/soundrecording/windfilter","get":true,"put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(path: path, body: advertised)
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(path: path, body: #"{"value":"auto","ability":["auto","disable"]}"#)
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(path: path, body: advertised)
+        await transport.enqueueJSON(method: "PUT", path: path, body: #"{"value":"enable"}"#)
+        await enqueueStatus(on: transport)
+        await transport.enqueueJSON(path: path, body: #"{"value":"enable","ability":["auto","enable","disable"]}"#)
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        XCTAssertEqual(capabilities.setting("windfilter")?.values, ["auto", "enable", "disable"])
+        XCTAssertTrue(capabilities.matrix.supports(.soundRecordingControl))
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("windfilter"))
+
+        do {
+            _ = try await client.setSetting(key: "windfilter", value: "enable")
+            XCTFail("Expected a stale wind-filter option to be rejected")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .invalidSetting(key: "windfilter", value: "enable"))
+        }
+
+        _ = try await client.setSetting(key: "windfilter", value: "enable")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first { $0.method == "PUT" && $0.path == path })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["value"] as? String, "enable")
+    }
+
+    func testCanonSoundRecordingControlsRejectMalformedStringAbilities() async throws {
+        let responses = [
+            #"{"value":"on","ability":["enable","disable"]}"#,
+            #"{"value":"auto","ability":["auto","auto"]}"#,
+            #"{"value":"auto","ability":["auto"]}"#,
+            #"{"value":"auto","ability":["auto",1]}"#,
+            #"{"value":1,"ability":["auto","disable"]}"#,
+        ]
+
+        for response in responses {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(
+                path: "/ccapi",
+                body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/soundrecording/attenuator","get":true,"put":true}]}"#
+            )
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/shooting/settings/soundrecording/attenuator",
+                body: response
+            )
+            let client = try CCAPIClient(
+                baseURL: "http://192.168.1.2:8080",
+                mode: .camera,
+                transport: transport
+            )
+
+            let capabilities = try await client.capabilities()
+
+            XCTAssertNil(capabilities.setting("attenuator"))
+            XCTAssertFalse(capabilities.matrix.supports(.soundRecordingControl))
+            XCTAssertTrue(capabilities.matrix.planned.contains(.soundRecordingControl))
+        }
+    }
+
+    func testCanonSoundRecordingControlsDoNotCombineGetPutAcrossVersions() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/soundrecording","get":true}],"ver110":[{"path":"/shooting/settings/soundrecording","put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertNil(capabilities.setting("soundrecording"))
+        XCTAssertFalse(capabilities.matrix.supports(.soundRecordingControl))
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertFalse(requests.contains(where: { $0.path.hasSuffix("/soundrecording") }))
+    }
+
+    func testCanonSoundRecordingControlsDoNotTreatAggregateSettingsAsEndpointGet() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/soundrecording/windfilter","put":true}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings",
+            body: #"{"windfilter":{"value":"auto","ability":["auto","enable","disable"]}}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertNil(capabilities.setting("windfilter"))
+        XCTAssertFalse(capabilities.matrix.supports(.soundRecordingControl))
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 2)
+    }
+
     func testCanonMovieModeRequiresMatchingGetPostAndWritesAction() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(

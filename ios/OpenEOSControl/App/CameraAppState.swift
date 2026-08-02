@@ -1348,7 +1348,10 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "capturestorage", label: "Recording card", value: "CFe", values: ["CFe", "SD"]),
             CameraSetting(key: "cardselectionstillimage", label: "Still-image card", value: "card1", values: ["none", "card1", "card2"]),
             CameraSetting(key: "cardselectionmovie", label: "Movie card", value: "card2", values: ["none", "card1", "card2"]),
+            CameraSetting(key: "soundrecording", label: "Sound recording", value: "manual", values: ["auto", "manual", "disable"]),
             CameraSetting(key: "soundrecordinglevel", label: "Sound recording level", value: "32", values: (0...63).map(String.init)),
+            CameraSetting(key: "windfilter", label: "Wind filter", value: "auto", values: ["auto", "enable", "disable"]),
+            CameraSetting(key: "attenuator", label: "Attenuator", value: "disable", values: ["enable", "disable", "auto", "manual"]),
             CameraSetting(key: "zoom", label: "Zoom", value: "50", values: (0...100).map(String.init)),
             CameraSetting(key: "moviequality", label: "Movie quality", value: "4K", values: ["4K", "FHD"]),
             CameraSetting(key: "framerate", label: "Frame rate", value: "59.94p", values: ["23.98p", "29.97p", "59.94p"]),
@@ -1359,7 +1362,7 @@ final class CameraAppState: ObservableObject {
             .tapFocus, .clickWhiteBalance,
             .liveViewMagnification,
             .exposureControl, .whiteBalanceControl, .zoomControl, .cardSelectionControl,
-            .soundRecordingLevelControl, .advancedSettings, .mediaBrowser, .mediaDownload,
+            .soundRecordingControl, .soundRecordingLevelControl, .advancedSettings, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]
         let capabilities = CameraCapabilities(

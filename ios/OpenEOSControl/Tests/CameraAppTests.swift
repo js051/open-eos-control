@@ -189,7 +189,10 @@ final class CameraAppTests: XCTestCase {
             CameraSetting(key: "capturestorage", label: "Recording card", value: "CFe", values: ["CFe", "SD"]),
             CameraSetting(key: "cardselectionstillimage", label: "Still-image card", value: "card1", values: ["none", "card1", "card2"]),
             CameraSetting(key: "cardselectionmovie", label: "Movie card", value: "card2", values: ["none", "card1", "card2"]),
+            CameraSetting(key: "soundrecording", label: "Sound recording", value: "manual", values: ["auto", "manual", "disable"]),
             CameraSetting(key: "soundrecordinglevel", label: "Sound recording level", value: "32", values: (0...63).map(String.init)),
+            CameraSetting(key: "windfilter", label: "Wind filter", value: "auto", values: ["auto", "enable", "disable"]),
+            CameraSetting(key: "attenuator", label: "Attenuator", value: "disable", values: ["enable", "disable", "auto", "manual"]),
         ]
 
         XCTAssertEqual(
@@ -198,7 +201,10 @@ final class CameraAppTests: XCTestCase {
         )
         XCTAssertEqual(
             advancedSettingsForMode(settings, mode: .video).map(\.key),
-            ["moviequality", "meteringmode", "cardselectionmovie", "soundrecordinglevel"]
+            [
+                "moviequality", "meteringmode", "cardselectionmovie", "soundrecording",
+                "soundrecordinglevel", "windfilter", "attenuator",
+            ]
         )
 
         let movieMode = try! XCTUnwrap(captureModeSetting(settings))
@@ -214,7 +220,10 @@ final class CameraAppTests: XCTestCase {
             "wbshift.mg": "setting_white_balance_shift_mg",
             "aspectratio": "setting_aspect_ratio",
             "zoom": "setting_zoom",
+            "soundrecording": "setting_sound_recording",
             "soundrecordinglevel": "setting_sound_recording_level",
+            "windfilter": "setting_wind_filter",
+            "attenuator": "setting_attenuator",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
             "alomode": "setting_auto_lighting_optimizer",
@@ -265,6 +274,9 @@ final class CameraAppTests: XCTestCase {
             "camera_value_large_fine"
         )
         XCTAssertEqual(settingValueLocalizationKey(key: "continuousaf", value: "Off"), "camera_value_off")
+        XCTAssertEqual(settingValueLocalizationKey(key: "soundrecording", value: "manual"), "camera_value_manual")
+        XCTAssertEqual(settingValueLocalizationKey(key: "windfilter", value: "enable"), "camera_value_enable")
+        XCTAssertEqual(settingValueLocalizationKey(key: "attenuator", value: "disable"), "camera_value_disable")
         XCTAssertEqual(settingValueLocalizationKey(key: "alomode", value: "Standard"), "camera_value_standard")
         XCTAssertEqual(
             settingValueLocalizationKey(key: "alomode", value: "High (disabled in manual exposure)"),
@@ -309,11 +321,16 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveViewMagnification))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingLevelControl))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingControl))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
         XCTAssertEqual(
             snapshot.capabilities.settings.first(where: { $0.key == "capturestorage" })?.values,
             ["CFe", "SD"]
+        )
+        XCTAssertEqual(
+            snapshot.capabilities.setting("soundrecording")?.values,
+            ["auto", "manual", "disable"]
         )
         XCTAssertEqual(
             snapshot.capabilities.setting("soundrecordinglevel")?.values,

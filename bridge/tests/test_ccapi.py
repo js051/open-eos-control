@@ -108,6 +108,7 @@ class FakeCcapiTransport:
         preview_content_type: str = "image/jpeg",
         zoom_response: object | None = None,
         sound_recording_level_response: object | None = None,
+        sound_recording_responses: dict[str, object] | None = None,
         movie_mode_response: object | None = None,
         card_selection_responses: dict[str, object] | None = None,
         recordable_response: object | None = None,
@@ -127,6 +128,7 @@ class FakeCcapiTransport:
         self.preview_content_type = preview_content_type
         self.zoom_response = zoom_response
         self.sound_recording_level_response = sound_recording_level_response
+        self.sound_recording_responses = sound_recording_responses or {}
         self.movie_mode_response = movie_mode_response
         self.card_selection_responses = card_selection_responses or {}
         self.recordable_response = (
@@ -162,6 +164,11 @@ class FakeCcapiTransport:
         }
         self.zoom = 50
         self.sound_recording_level = 32
+        self.sound_recording = {
+            "soundrecording": "manual",
+            "windfilter": "auto",
+            "attenuator": "disable",
+        }
         self.movie_mode = "off"
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
         self.reject_live_view_size = True
@@ -232,6 +239,28 @@ class FakeCcapiTransport:
             assert isinstance(value, int) and not isinstance(value, bool)
             self.sound_recording_level = value
             return _json_response({"value": value})
+        sound_match = re.fullmatch(
+            r"/ccapi/ver100/shooting/settings/soundrecording(?:/(windfilter|attenuator))?",
+            path,
+        )
+        if sound_match:
+            key = sound_match.group(1) or "soundrecording"
+            abilities = {
+                "soundrecording": ["auto", "manual", "disable"],
+                "windfilter": ["auto", "enable", "disable"],
+                "attenuator": ["enable", "disable", "auto", "manual"],
+            }
+            if method == "GET":
+                response = self.sound_recording_responses.get(key)
+                return _json_response(
+                    response
+                    if response is not None
+                    else {"value": self.sound_recording[key], "ability": abilities[key]}
+                )
+            if method == "PUT":
+                assert payload is not None and payload.get("value") in abilities[key]
+                self.sound_recording[key] = str(payload["value"])
+                return _json_response({"value": self.sound_recording[key]})
         if method == "GET" and path == "/ccapi/ver100/shooting/control/moviemode":
             if self.movie_mode_response is not None:
                 return _json_response(self.movie_mode_response)
@@ -867,6 +896,124 @@ def test_ccapi_sound_recording_level_does_not_combine_get_put_across_versions() 
     assert CameraFeature.SOUND_RECORDING_LEVEL_CONTROL not in capabilities.supported
     assert not any(setting.key == "soundrecordinglevel" for setting in capabilities.settings)
     assert not any("soundrecording/level" in request.path for request in transport.requests)
+
+
+def test_ccapi_sound_recording_controls_require_matching_pairs_and_refresh_before_write() -> None:
+    paths = [
+        "/shooting/settings/soundrecording",
+        "/shooting/settings/soundrecording/windfilter",
+        "/shooting/settings/soundrecording/attenuator",
+    ]
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            *({"path": path, "get": True, "put": True} for path in paths),
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    controls = {setting.key: setting for setting in capabilities.settings}
+
+    assert controls["soundrecording"].values == ["auto", "manual", "disable"]
+    assert controls["windfilter"].value == "auto"
+    assert controls["attenuator"].values == ["enable", "disable", "auto", "manual"]
+    assert CameraFeature.SOUND_RECORDING_CONTROL in capabilities.supported
+    assert {"soundrecording", "windfilter", "attenuator"}.issubset(
+        capabilities.evidence.writable_settings
+    )
+
+    session.set_setting("windfilter", "enable")
+    assert transport.sound_recording["windfilter"] == "enable"
+    assert RecordedRequest(
+        "PUT",
+        "/ccapi/ver100/shooting/settings/soundrecording/windfilter",
+        {"value": "enable"},
+    ) in transport.requests
+
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    transport.sound_recording_responses["windfilter"] = {
+        "value": "auto",
+        "ability": ["auto", "disable"],
+    }
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("windfilter", "enable")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"value": "on", "ability": ["auto", "enable", "disable"]},
+        {"value": "auto", "ability": ["auto", "auto"]},
+        {"value": "auto", "ability": ["auto"]},
+        {"value": "auto", "ability": ["auto", 1]},
+        {"value": 1, "ability": ["auto", "disable"]},
+    ],
+)
+def test_ccapi_sound_recording_controls_hide_malformed_contract(response: object) -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {
+                "path": "/shooting/settings/soundrecording/windfilter",
+                "get": True,
+                "put": True,
+            },
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery, sound_recording_responses={"windfilter": response})
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.SOUND_RECORDING_CONTROL not in capabilities.supported
+    assert CameraFeature.SOUND_RECORDING_CONTROL in capabilities.planned
+    assert not any(setting.key == "windfilter" for setting in capabilities.settings)
+
+
+def test_ccapi_sound_recording_controls_do_not_combine_versions() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/shooting/settings/soundrecording/attenuator", "get": True},
+            ],
+            "ver110": [
+                {"path": "/shooting/settings/soundrecording/attenuator", "put": True},
+            ],
+        }
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.SOUND_RECORDING_CONTROL not in capabilities.supported
+    assert not any(setting.key == "attenuator" for setting in capabilities.settings)
+    assert not any("soundrecording/attenuator" in request.path for request in transport.requests)
+
+
+def test_ccapi_sound_recording_controls_do_not_treat_aggregate_as_endpoint_get() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/shooting/settings/soundrecording/windfilter", "put": True},
+            ],
+        }
+    )
+    transport.settings["windfilter"] = {
+        "value": "auto",
+        "ability": ["auto", "enable", "disable"],
+    }
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.SOUND_RECORDING_CONTROL not in capabilities.supported
+    assert not any(setting.key == "windfilter" for setting in capabilities.settings)
+    assert len(transport.requests) == 3
 
 
 def test_ccapi_movie_mode_requires_matching_get_post_and_writes_action() -> None:

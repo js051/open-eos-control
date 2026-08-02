@@ -92,6 +92,23 @@ CARD_SELECTION_ENDPOINTS = {
 }
 SOUND_RECORDING_LEVEL_SETTING_KEY = "soundrecordinglevel"
 SOUND_RECORDING_LEVEL_PATH_SUFFIX = "/shooting/settings/soundrecording/level"
+SOUND_RECORDING_SETTING_KEY = "soundrecording"
+WIND_FILTER_SETTING_KEY = "windfilter"
+ATTENUATOR_SETTING_KEY = "attenuator"
+SOUND_RECORDING_ENDPOINTS = {
+    SOUND_RECORDING_SETTING_KEY: (
+        "/shooting/settings/soundrecording",
+        frozenset({"auto", "manual", "disable"}),
+    ),
+    WIND_FILTER_SETTING_KEY: (
+        "/shooting/settings/soundrecording/windfilter",
+        frozenset({"auto", "enable", "disable"}),
+    ),
+    ATTENUATOR_SETTING_KEY: (
+        "/shooting/settings/soundrecording/attenuator",
+        frozenset({"enable", "disable", "auto", "manual"}),
+    ),
+}
 MAX_STRUCTURED_SETTING_OPTIONS = 256
 CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
@@ -111,6 +128,9 @@ SETTING_LABELS = {
     STILL_CARD_SELECTION_SETTING_KEY: "Still-image card",
     MOVIE_CARD_SELECTION_SETTING_KEY: "Movie card",
     SOUND_RECORDING_LEVEL_SETTING_KEY: "Sound recording level",
+    SOUND_RECORDING_SETTING_KEY: "Sound recording",
+    WIND_FILTER_SETTING_KEY: "Wind filter",
+    ATTENUATOR_SETTING_KEY: "Attenuator",
     "shutter": "Tv",
     "aperture": "Av",
     "whitebalance": "WB",
@@ -597,6 +617,8 @@ class CcapiSession:
                 supported.add(CameraFeature.CARD_SELECTION_CONTROL)
             if SOUND_RECORDING_LEVEL_SETTING_KEY in control_keys:
                 supported.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+            if control_keys & SOUND_RECORDING_ENDPOINTS.keys():
+                supported.add(CameraFeature.SOUND_RECORDING_CONTROL)
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             jpeg_live_view_supported = self._supports_jpeg_live_view()
@@ -673,6 +695,7 @@ class CcapiSession:
                 CameraFeature.CAMERA_CLOCK_SYNC,
                 CameraFeature.ZOOM_CONTROL,
                 CameraFeature.CARD_SELECTION_CONTROL,
+                CameraFeature.SOUND_RECORDING_CONTROL,
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
             }
             live_sizes = (
@@ -718,6 +741,10 @@ class CcapiSession:
                     CameraFeature.CARD_SELECTION_CONTROL.value: (
                         "The camera must advertise matching GET and PUT Canon card-selection endpoints "
                         "and valid card abilities."
+                    ),
+                    CameraFeature.SOUND_RECORDING_CONTROL.value: (
+                        "The camera must advertise matching GET and PUT Canon sound-recording-setting "
+                        "endpoints and valid documented abilities."
                     ),
                     CameraFeature.SOUND_RECORDING_LEVEL_CONTROL.value: (
                         "The camera must advertise matching GET and PUT Canon sound-recording-level endpoints "
@@ -799,7 +826,9 @@ class CcapiSession:
             self._ensure_initialized()
             canonical = SETTING_ALIASES.get(key, key)
             settings = self._load_settings(
-                canonical in CARD_SELECTION_ENDPOINTS or canonical == SOUND_RECORDING_LEVEL_SETTING_KEY
+                canonical in CARD_SELECTION_ENDPOINTS
+                or canonical in SOUND_RECORDING_ENDPOINTS
+                or canonical == SOUND_RECORDING_LEVEL_SETTING_KEY
             )
             control = next(
                 (item for item in self._camera_settings(settings) if item.key == canonical),
@@ -1635,6 +1664,7 @@ class CcapiSession:
         merged: dict[str, object] = {}
         setting_paths: dict[str, str] = {}
         self._observed.discard(CameraFeature.CARD_SELECTION_CONTROL)
+        self._observed.discard(CameraFeature.SOUND_RECORDING_CONTROL)
         self._observed.discard(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
         for path in self._versioned_paths("/shooting/settings"):
             value = self._first_json([path])
@@ -1646,7 +1676,11 @@ class CcapiSession:
                 if key not in merged:
                     merged[key] = setting
                     setting_path = f"{prefix}/shooting/settings/{raw_key}"
-                    if CcapiOperation("PUT", setting_path) in self._operations:
+                    if (
+                        key not in SOUND_RECORDING_ENDPOINTS
+                        and key != SOUND_RECORDING_LEVEL_SETTING_KEY
+                        and CcapiOperation("PUT", setting_path) in self._operations
+                    ):
                         setting_paths[key] = setting_path
         zoom_operations = self._zoom_operations()
         if zoom_operations is not None:
@@ -1673,6 +1707,16 @@ class CcapiSession:
                 merged[key] = card_selection
                 setting_paths[key] = write.path
                 self._observed.add(CameraFeature.CARD_SELECTION_CONTROL)
+        for key, (suffix, allowed_values) in SOUND_RECORDING_ENDPOINTS.items():
+            operations = self._sound_recording_operations(suffix)
+            if operations is None:
+                continue
+            read, write = operations
+            setting = _validated_string_ability_setting(self._first_json([read.path]), allowed_values)
+            if setting is not None:
+                merged[key] = setting
+                setting_paths[key] = write.path
+                self._observed.add(CameraFeature.SOUND_RECORDING_CONTROL)
         sound_operations = self._sound_recording_level_operations()
         if sound_operations is not None:
             read, write = sound_operations
@@ -1961,6 +2005,22 @@ class CcapiSession:
                 operation
                 for operation in self._operations
                 if operation.method == "GET" and operation.path.endswith(SOUND_RECORDING_LEVEL_PATH_SUFFIX)
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            write = CcapiOperation("PUT", read.path)
+            if write in self._operations:
+                return read, write
+        return None
+
+    def _sound_recording_operations(self, suffix: str) -> tuple[CcapiOperation, CcapiOperation] | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith(suffix)
             ),
             key=lambda operation: _path_version(operation.path),
             reverse=True,
@@ -2582,6 +2642,26 @@ def _validated_card_selection_setting(raw: object) -> dict[str, object] | None:
     return {"value": current, "ability": values}
 
 
+def _validated_string_ability_setting(
+    raw: object,
+    allowed_values: frozenset[str],
+) -> dict[str, object] | None:
+    if not isinstance(raw, dict):
+        return None
+    current = raw.get("value")
+    ability = raw.get("ability")
+    if not isinstance(current, str) or not isinstance(ability, list) or len(ability) < 2:
+        return None
+    if not all(isinstance(item, str) for item in ability):
+        return None
+    values = list(ability)
+    if len(set(values)) != len(values) or any(item not in allowed_values for item in values):
+        return None
+    if current not in values:
+        return None
+    return {"value": current, "ability": values}
+
+
 def _structured_setting_parts(key: str) -> tuple[str, str] | None:
     for base_key, fields in (
         (IMAGE_QUALITY_SETTING_KEY, IMAGE_QUALITY_FIELDS),
@@ -2630,6 +2710,8 @@ def _feature_for_setting(key: str) -> CameraFeature:
         return CameraFeature.ZOOM_CONTROL
     if key == SOUND_RECORDING_LEVEL_SETTING_KEY:
         return CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
+    if key in SOUND_RECORDING_ENDPOINTS:
+        return CameraFeature.SOUND_RECORDING_CONTROL
     if key in CARD_SELECTION_ENDPOINTS:
         return CameraFeature.CARD_SELECTION_CONTROL
     return CameraFeature.ADVANCED_SETTINGS
