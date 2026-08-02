@@ -211,6 +211,7 @@ private struct CameraOverlayHeader: View {
                 } label: {
                     Label("disconnect", systemImage: "xmark.circle")
                 }
+                .accessibilityIdentifier("disconnect-menu-button")
             } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "ellipsis")
