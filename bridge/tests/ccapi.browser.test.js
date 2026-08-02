@@ -283,10 +283,52 @@ async function run() {
         `${key} must be hidden in Video mode`,
       );
     }
+    const movieSettingKeys = ["moviequality", "highframerate", "moviecropping", "movieformat"];
+    await page.waitForFunction((keys) => keys.every(
+      (key) => document.querySelector(`#advanced-settings [data-setting-key="${key}"]`),
+    ), movieSettingKeys);
+    assert.deepEqual(
+      await page.locator('#advanced-settings select[data-setting-key="moviequality"] option').allInnerTexts(),
+      ["3840x2160 / 59.94p / IPB", "1920x1080 / 29.97p / IPB"],
+    );
+    await page.selectOption(
+      '#advanced-settings select[data-setting-key="moviequality"]',
+      "1920x1080_2997_ipb_standard",
+    );
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.movie_quality.value === "1920x1080_2997_ipb_standard" &&
+        state.movie_quality.update_count === 1,
+      "Canon movie quality string write",
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="highframerate"]', "enable");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.high_frame_rate.value === "enable" && state.high_frame_rate.update_count === 1,
+      "Canon high frame rate string write",
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="moviecropping"]', "enable");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.movie_cropping.value === "enable" && state.movie_cropping.update_count === 1,
+      "Canon movie cropping string write",
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="movieformat"]', "raw");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.movie_format.value === "raw" && state.movie_format.update_count === 1,
+      "Canon movie format string write",
+    );
     const soundLevel = page.locator(
       '#advanced-settings input[type="range"][data-setting-key="soundrecordinglevel"]',
     );
     await soundLevel.waitFor({ state: "visible" });
+    await page.waitForFunction(() => {
+      const input = document.querySelector(
+        '#advanced-settings input[type="range"][data-setting-key="soundrecordinglevel"]',
+      );
+      return input && !input.disabled;
+    });
     await soundLevel.evaluate((input) => {
       input.value = "48";
       input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -348,8 +390,8 @@ async function run() {
       return photoMode?.classList.contains("active") &&
         hiddenKeys.every((key) => !settings?.querySelector(`[data-setting-key="${key}"]`)) &&
         visibleKeys.every((key) => settings?.querySelector(`[data-setting-key="${key}"]`));
-    }, { hiddenKeys: soundRecordingKeys, visibleKeys: focusBracketingKeys });
-    for (const key of soundRecordingKeys) {
+    }, { hiddenKeys: [...soundRecordingKeys, ...movieSettingKeys], visibleKeys: focusBracketingKeys });
+    for (const key of [...soundRecordingKeys, ...movieSettingKeys]) {
       assert.equal(
         await page.locator(`#advanced-settings [data-setting-key="${key}"]`).count(),
         0,

@@ -1238,6 +1238,48 @@ class CameraScreensTest {
     }
 
     @Test
+    fun movieSettingsAppearOnlyInVideoModeWithReadableQualityValues() {
+        val state = mutableStateOf(
+            CameraUiState().withOfflinePreview().copy(captureMode = CaptureMode.VIDEO),
+        )
+        val picker = mutableStateOf<SettingPicker?>(null)
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.value.copy(activeSettingPicker = picker.value), actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("advanced-setting-moviequality")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText("3840x2160 / 59.94p / IPB").assertIsDisplayed()
+        for ((key, label) in listOf(
+            "highframerate" to resourceText(R.string.setting_high_frame_rate),
+            "moviecropping" to resourceText(R.string.setting_movie_cropping),
+            "movieformat" to resourceText(R.string.setting_movie_format),
+        )) {
+            compose.onNodeWithTag("advanced-setting-$key")
+                .performScrollTo()
+                .assertIsDisplayed()
+            compose.onNodeWithText(label).assertIsDisplayed()
+        }
+
+        compose.runOnIdle {
+            picker.value = null
+            state.value = state.value.copy(captureMode = CaptureMode.PHOTO)
+        }
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        for (key in listOf("moviequality", "highframerate", "moviecropping", "movieformat")) {
+            compose.onAllNodesWithTag("advanced-setting-$key").assertCountEquals(0)
+        }
+    }
+
+    @Test
     fun offlinePreviewExposesCanonManualFocusDriveControls() {
         val picker = mutableStateOf<SettingPicker?>(null)
         var requestedFocusDrive: Pair<FocusDriveDirection, FocusDriveStep>? = null

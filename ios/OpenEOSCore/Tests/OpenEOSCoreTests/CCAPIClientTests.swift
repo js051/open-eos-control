@@ -1448,6 +1448,96 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
     }
 
+    func testCanonMovieSettingsRequireExactPairsAndWriteStringAfterRefresh() async throws {
+        let transport = MockCameraHTTPTransport()
+        let qualityPath = "/ccapi/ver100/shooting/settings/moviequality"
+        let highFrameRatePath = "/ccapi/ver110/shooting/settings/highframerate"
+        let croppingPath = "/ccapi/ver110/shooting/settings/moviecropping"
+        let formatPath = "/ccapi/ver110/shooting/settings/movieformat"
+        let quality = #"{"value":"3840x2160_5994_ipb_standard","ability":["3840x2160_5994_ipb_standard","1920x1080_2997_ipb_standard"]}"#
+        let toggle = #"{"value":"disable","ability":["enable","disable"]}"#
+        let format = #"{"value":"mp4","ability":["raw","mp4"]}"#
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/moviequality","get":true,"put":true}],"ver110":[{"path":"/shooting/settings/highframerate","get":true,"put":true},{"path":"/shooting/settings/moviecropping","get":true,"put":true},{"path":"/shooting/settings/movieformat","get":true,"put":true}]}"#
+        )
+        for _ in 0..<2 {
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            for (path, body) in [
+                (qualityPath, quality),
+                (highFrameRatePath, toggle),
+                (croppingPath, toggle),
+                (formatPath, format),
+            ] {
+                await transport.enqueueJSON(path: path, body: body)
+            }
+        }
+        await transport.enqueueJSON(method: "PUT", path: formatPath, body: #"{"value":"raw"}"#)
+        await enqueueStatus(on: transport)
+        for (path, body) in [
+            (qualityPath, quality),
+            (highFrameRatePath, toggle),
+            (croppingPath, toggle),
+            (formatPath, #"{"value":"raw","ability":["raw","mp4"]}"#),
+        ] {
+            await transport.enqueueJSON(path: path, body: body)
+        }
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertTrue(capabilities.matrix.supports(.movieSettingsControl))
+        XCTAssertEqual(
+            capabilities.setting("moviequality")?.values,
+            ["3840x2160_5994_ipb_standard", "1920x1080_2997_ipb_standard"]
+        )
+        XCTAssertEqual(capabilities.setting("highframerate")?.values, ["enable", "disable"])
+        XCTAssertEqual(capabilities.setting("moviecropping")?.value, "disable")
+        XCTAssertEqual(capabilities.setting("movieformat")?.values, ["raw", "mp4"])
+        XCTAssertTrue(
+            Set(["moviequality", "highframerate", "moviecropping", "movieformat"])
+                .isSubset(of: Set(capabilities.evidence.writableSettings))
+        )
+
+        _ = try await client.setSetting(key: "movieformat", value: "raw")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first { $0.method == "PUT" && $0.path == formatPath })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["value"] as? String, "raw")
+        XCTAssertGreaterThanOrEqual(requests.filter { $0.path == formatPath }.count, 3)
+    }
+
+    func testCanonMovieSettingsDoNotCombineVersionsOrTrustAggregateOnly() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/moviequality","get":true}],"ver110":[{"path":"/shooting/settings/moviequality","put":true}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings",
+            body: #"{"moviequality":{"value":"3840x2160_5994_ipb_standard","ability":["3840x2160_5994_ipb_standard","1920x1080_2997_ipb_standard"]}}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertFalse(capabilities.matrix.supports(.movieSettingsControl))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.movieSettingsControl))
+        XCTAssertNil(capabilities.setting("moviequality"))
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 2)
+    }
+
     func testCanonMovieModeRequiresMatchingGetPostAndWritesAction() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(

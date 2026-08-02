@@ -7,6 +7,20 @@ import org.junit.Test
 
 class CameraValueLabelsTest {
     @Test
+    fun movieQualityTokenUsesReadableCameraStyleSummary() {
+        assertEquals(
+            "3840x2160 / 59.94p / IPB",
+            movieQualityDisplayValue("3840x2160_5994_ipb_standard"),
+        )
+        assertEquals(
+            "FHD / 29.97p / IPB / Lite / Cropped",
+            movieQualityDisplayValue("fhd_2997_ipb_light_crop", lightLabel = "Lite", cropLabel = "Cropped"),
+        )
+        assertEquals("4096x2160 / 120.00p / ALL-I", movieQualityDisplayValue("4096x2160_12000_alli_standard"))
+        assertNull(movieQualityDisplayValue("4K Fine 59.94p"))
+    }
+
+    @Test
     fun resolvesCameraAdvertisedValuesBySettingContext() {
         val cases = listOf(
             Triple("whitebalance", "Shadow", R.string.camera_value_shade),

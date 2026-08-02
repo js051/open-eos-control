@@ -388,6 +388,9 @@ class DiagnosticsTest {
         val settings = listOf(
             CameraSettingControl("shootingmode", "Shooting mode", "Manual", listOf("P", "Manual", "Movie")),
             CameraSettingControl("moviequality", "Movie quality", "4K", listOf("4K", "FHD")),
+            CameraSettingControl("highframerate", "High frame rate", "disable", listOf("enable", "disable")),
+            CameraSettingControl("moviecropping", "Movie cropping", "disable", listOf("enable", "disable")),
+            CameraSettingControl("movieformat", "Movie format", "mp4", listOf("raw", "mp4")),
             CameraSettingControl("drivemode", "Drive", "single", listOf("single", "continuous")),
             CameraSettingControl("stillimagequalitycf", "CF quality", "RAW", listOf("RAW", "JPEG")),
             CameraSettingControl("colorspace", "Color space", "sRGB", listOf("sRGB", "AdobeRGB")),
@@ -441,6 +444,9 @@ class DiagnosticsTest {
             listOf(
                 "shootingmode",
                 "moviequality",
+                "highframerate",
+                "moviecropping",
+                "movieformat",
                 "zoomspeed",
                 "autopoweroff",
                 "exposurecompensation",

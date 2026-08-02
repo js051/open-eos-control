@@ -148,6 +148,48 @@ public actor CCAPIClient {
         focusBracketingNumberSettingKey: Set((2...999).map(String.init)),
         focusBracketingIncrementSettingKey: Set((1...10).map(String.init)),
     ]
+    private static let maximumStringSettingOptions = 256
+    private static let maximumStringSettingValueLength = 128
+    private static let movieQualitySettingKey = "moviequality"
+    private static let highFrameRateSettingKey = "highframerate"
+    private static let movieCroppingSettingKey = "moviecropping"
+    private static let movieFormatSettingKey = "movieformat"
+    private static let movieSettingEndpoints: [(
+        key: String,
+        suffix: String,
+        simulatorPath: String,
+        values: Set<String>?
+    )] = [
+        (movieQualitySettingKey, "/shooting/settings/moviequality", "/ccapi/movie-settings/quality", nil),
+        (
+            highFrameRateSettingKey,
+            "/shooting/settings/highframerate",
+            "/ccapi/movie-settings/high-frame-rate",
+            Set(["enable", "disable"])
+        ),
+        (
+            movieCroppingSettingKey,
+            "/shooting/settings/moviecropping",
+            "/ccapi/movie-settings/cropping",
+            Set(["enable", "disable"])
+        ),
+        (
+            movieFormatSettingKey,
+            "/shooting/settings/movieformat",
+            "/ccapi/movie-settings/format",
+            Set(["raw", "mp4"])
+        ),
+    ]
+    private static let movieSettingKeys = Set(movieSettingEndpoints.map(\.key))
+    private static let simulatorMovieSettingValues = [
+        movieQualitySettingKey: Set([
+            "3840x2160_5994_ipb_standard",
+            "1920x1080_2997_ipb_standard",
+        ]),
+        highFrameRateSettingKey: Set(["enable", "disable"]),
+        movieCroppingSettingKey: Set(["enable", "disable"]),
+        movieFormatSettingKey: Set(["raw", "mp4"]),
+    ]
 
     private let baseURL: URL
     private let baseURLString: String
@@ -437,6 +479,9 @@ public actor CCAPIClient {
         if controls.contains(where: { $0.key == Self.focusBracketingSettingKey }) {
             supported.insert(.focusBracketingControl)
         }
+        if controls.contains(where: { Self.movieSettingKeys.contains($0.key) }) {
+            supported.insert(.movieSettingsControl)
+        }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
@@ -480,6 +525,7 @@ public actor CCAPIClient {
             .soundRecordingControl,
             .soundRecordingLevelControl,
             .focusBracketingControl,
+            .movieSettingsControl,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
         return CameraCapabilities(
@@ -502,6 +548,7 @@ public actor CCAPIClient {
                     .soundRecordingControl: "The camera must advertise matching GET and PUT Canon sound-recording-setting endpoints and valid documented abilities.",
                     .soundRecordingLevelControl: "The camera must advertise matching GET and PUT Canon sound-recording-level endpoints and a valid integer range.",
                     .focusBracketingControl: "The camera must advertise matching GET and PUT Canon focus-bracketing endpoints and valid documented abilities.",
+                    .movieSettingsControl: "The camera must advertise matching GET and PUT Canon movie-setting endpoints and valid documented abilities.",
                     .movieModeControl: "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                 ]
@@ -622,6 +669,12 @@ public actor CCAPIClient {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
                 try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": integer])
+            case let movieKey where Self.movieSettingKeys.contains(movieKey):
+                guard let endpoint = Self.movieSettingEndpoints.first(where: { $0.key == movieKey }),
+                      Self.simulatorMovieSettingValues[movieKey]?.contains(value) == true else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
@@ -633,7 +686,8 @@ public actor CCAPIClient {
         if Self.cardSelectionSettingKeys.contains(key.lowercased()) ||
             Self.soundRecordingSettingKeys.contains(key.lowercased()) ||
             key.lowercased() == Self.soundRecordingLevelSettingKey ||
-            Self.focusBracketingSettingKeys.contains(key.lowercased()) {
+            Self.focusBracketingSettingKeys.contains(key.lowercased()) ||
+            Self.movieSettingKeys.contains(key.lowercased()) {
             settings = try await loadShootingSettings()
         } else {
             settings = try await cachedOrLoadShootingSettings()
@@ -1828,6 +1882,7 @@ public actor CCAPIClient {
         observedFeatures.remove(.soundRecordingControl)
         observedFeatures.remove(.soundRecordingLevelControl)
         observedFeatures.remove(.focusBracketingControl)
+        observedFeatures.remove(.movieSettingsControl)
         settingsLoaded = false
         var merged: JSONDictionary = [:]
         let paths = enforceAdvertisedOperations
@@ -1841,6 +1896,7 @@ public actor CCAPIClient {
                 if !Self.soundRecordingSettingKeys.contains(key),
                    key != Self.soundRecordingLevelSettingKey,
                    !Self.focusBracketingSettingKeys.contains(key),
+                   !Self.movieSettingKeys.contains(key),
                    !enforceAdvertisedOperations || operations.contains(CCAPIOperation(method: .put, path: settingPath)) {
                     settingPaths[key] = settingPaths[key] ?? settingPath
                 }
@@ -1910,6 +1966,16 @@ public actor CCAPIClient {
                 settingPaths[endpoint.key] = operations.write.path
                 merged[endpoint.key] = setting
             }
+        }
+        for endpoint in Self.movieSettingEndpoints {
+            guard let operations = readWriteSettingOperations(suffix: endpoint.suffix),
+                  let raw = try await firstJSON(paths: [operations.read.path], required: false),
+                  let setting = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values) else {
+                continue
+            }
+            settingPaths[endpoint.key] = operations.write.path
+            merged[endpoint.key] = setting
+            observedFeatures.insert(.movieSettingsControl)
         }
         settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
@@ -2034,15 +2100,20 @@ public actor CCAPIClient {
 
     private static func validatedStringAbilitySetting(
         _ value: JSONDictionary,
-        allowedValues: Set<String>
+        allowedValues: Set<String>?
     ) -> JSONDictionary? {
         guard let current = value["value"] as? String,
               let rawAbility = value["ability"] as? [Any] else { return nil }
         let values = rawAbility.compactMap { $0 as? String }
         guard values.count == rawAbility.count,
               values.count >= 2,
+              values.count <= maximumStringSettingOptions,
               Set(values).count == values.count,
-              values.allSatisfy(allowedValues.contains),
+              values.allSatisfy({ item in
+                  !item.isEmpty &&
+                      item.count <= maximumStringSettingValueLength &&
+                      (allowedValues?.contains(item) ?? true)
+              }),
               values.contains(current) else { return nil }
         return ["value": current, "ability": values]
     }
@@ -2161,6 +2232,7 @@ public actor CCAPIClient {
         case let soundKey where Self.soundRecordingSettingKeys.contains(soundKey): .soundRecordingControl
         case Self.soundRecordingLevelSettingKey: .soundRecordingLevelControl
         case let focusKey where Self.focusBracketingSettingKeys.contains(focusKey): .focusBracketingControl
+        case let movieKey where Self.movieSettingKeys.contains(movieKey): .movieSettingsControl
         default: .advancedSettings
         }
     }
@@ -2310,6 +2382,12 @@ public actor CCAPIClient {
                 controls.append(control)
             }
         }
+        for endpoint in Self.movieSettingEndpoints {
+            guard let raw = value.object(endpoint.key),
+                  let normalized = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values),
+                  let control = control(endpoint.key, Self.settingLabel(endpoint.key), normalized) else { continue }
+            controls.append(control)
+        }
         var supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
@@ -2335,6 +2413,9 @@ public actor CCAPIClient {
         }
         if controls.contains(where: { $0.key == Self.focusBracketingSettingKey }) {
             supported.insert(.focusBracketingControl)
+        }
+        if controls.contains(where: { Self.movieSettingKeys.contains($0.key) }) {
+            supported.insert(.movieSettingsControl)
         }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
@@ -2750,7 +2831,7 @@ public actor CCAPIClient {
             "afmethod": "AF method", "afoperation": "AF operation", "drivemode": "Drive mode",
             "meteringmode": "Metering", "picturestyle": "Picture style", "moviemode": "Movie mode",
             "shootingmode": "Shooting mode",
-            "stillimagequality": "Image quality", "moviequality": "Movie quality",
+            "stillimagequality": "Image quality",
             "stillimagequality.raw": "RAW quality", "stillimagequality.jpeg": "JPEG quality",
             "stillimagequality.heif": "HEIF quality",
             "wbshift.ba": "WB shift B/A", "wbshift.mg": "WB shift M/G",
@@ -2767,6 +2848,10 @@ public actor CCAPIClient {
             Self.focusBracketingNumberSettingKey: "Focus bracketing shots",
             Self.focusBracketingIncrementSettingKey: "Focus increment",
             Self.focusBracketingSmoothingSettingKey: "Exposure smoothing",
+            Self.movieQualitySettingKey: "Movie quality",
+            Self.highFrameRateSettingKey: "High frame rate",
+            Self.movieCroppingSettingKey: "Movie cropping",
+            Self.movieFormatSettingKey: "Movie recording format",
         ]
         if let label = known[key] { return label }
         return key.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").capitalized

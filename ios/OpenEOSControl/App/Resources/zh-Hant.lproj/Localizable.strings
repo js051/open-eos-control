@@ -103,6 +103,11 @@
 "setting_image_quality_sd" = "SD 卡影像畫質";
 "setting_image_quality_cf" = "CF／CFexpress 卡影像畫質";
 "setting_movie_quality" = "短片畫質";
+"setting_high_frame_rate" = "高格率";
+"setting_movie_cropping" = "短片裁切";
+"setting_movie_format" = "短片錄影格式";
+"camera_value_light" = "輕量";
+"camera_value_crop" = "裁切";
 "setting_frame_rate" = "影片格率";
 "setting_exposure_compensation" = "曝光補償";
 "setting_color_temperature" = "色溫";

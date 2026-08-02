@@ -30,6 +30,7 @@
     SOUND_RECORDING_CONTROL: "SOUND_RECORDING_CONTROL",
     SOUND_RECORDING_LEVEL_CONTROL: "SOUND_RECORDING_LEVEL_CONTROL",
     FOCUS_BRACKETING_CONTROL: "FOCUS_BRACKETING_CONTROL",
+    MOVIE_SETTINGS_CONTROL: "MOVIE_SETTINGS_CONTROL",
     VIDEO_RECORDING: "VIDEO_RECORDING",
     TAP_FOCUS: "TAP_FOCUS",
     CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE",
@@ -217,6 +218,12 @@
       focusbracketingnumberofshots: "Number of shots",
       focusbracketingfocusincrement: "Focus increment",
       focusbracketingexposuresmoothing: "Exposure smoothing",
+      moviequality: "Movie quality",
+      highframerate: "High frame rate",
+      moviecropping: "Movie cropping",
+      movieformat: "Movie recording format",
+      movieQualityLight: "Light",
+      movieQualityCrop: "Crop",
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
       capturetarget: "Capture target",
@@ -496,6 +503,12 @@
       focusbracketingnumberofshots: "拍攝張數",
       focusbracketingfocusincrement: "對焦增量",
       focusbracketingexposuresmoothing: "曝光平滑",
+      moviequality: "短片畫質",
+      highframerate: "高格率",
+      moviecropping: "短片裁切",
+      movieformat: "短片錄影格式",
+      movieQualityLight: "輕量",
+      movieQualityCrop: "裁切",
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
       capturetarget: "拍攝儲存位置",
@@ -1458,6 +1471,7 @@
   function settingValueLabel(settingOrKey, value) {
     const key = typeof settingOrKey === "string" ? settingOrKey : settingOrKey.key;
     const rawValue = String(value);
+    if (key === "moviequality") return movieQualityDisplayValue(rawValue) || rawValue;
     if (key === "zoom") return `${rawValue}%`;
     let messageKey = commonSettingValueKeys[rawValue.toLowerCase()];
     if (key === "alomode") {
@@ -1482,6 +1496,25 @@
       messageKey = imageQualityValueKeys[rawValue];
     }
     return messageKey ? t(messageKey) : rawValue;
+  }
+
+  function movieQualityDisplayValue(rawValue) {
+    const parts = String(rawValue).split("_");
+    if (parts.length < 4 || parts.length > 5 || parts.some((part) => !part)) return null;
+    const size = { "4k": "4K", fhd: "FHD", hd: "HD" }[parts[0].toLowerCase()] || parts[0];
+    if (!/^\d{4,5}$/.test(parts[1])) return null;
+    const frameRateHundredths = Number(parts[1]);
+    const frameRate = `${Math.floor(frameRateHundredths / 100)}.${String(frameRateHundredths % 100).padStart(2, "0")}p`;
+    const compression = { raw: "RAW", alli: "ALL-I", ipb: "IPB" }[parts[2].toLowerCase()];
+    if (!frameRate || !compression) return null;
+    const labels = [size, frameRate, compression];
+    if (parts[3].toLowerCase() === "light") labels.push(t("movieQualityLight"));
+    else if (parts[3].toLowerCase() !== "standard") return null;
+    if (parts.length === 5) {
+      if (parts[4].toLowerCase() !== "crop") return null;
+      labels.push(t("movieQualityCrop"));
+    }
+    return labels.join(" / ");
   }
 
   function currentSettingValue(setting) {

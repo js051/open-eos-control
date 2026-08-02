@@ -1582,6 +1582,90 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonMovieSettingsRequireExactPairsAndWriteStringAfterRefresh() = runTest {
+        val discovery = """{
+            "ver100":[
+                {"path":"/devicestatus/batterylist","get":true},
+                {"path":"/devicestatus/storage","get":true},
+                {"path":"/shooting/settings","get":true},
+                {"path":"/shooting/settings/moviequality","get":true,"put":true}
+            ],
+            "ver110":[
+                {"path":"/shooting/settings/highframerate","get":true,"put":true},
+                {"path":"/shooting/settings/moviecropping","get":true,"put":true},
+                {"path":"/shooting/settings/movieformat","get":true,"put":true}
+            ]
+        }""".trimIndent()
+        val quality = """{"value":"3840x2160_5994_ipb_standard","ability":["3840x2160_5994_ipb_standard","1920x1080_2997_ipb_standard"]}"""
+        val toggle = """{"value":"disable","ability":["enable","disable"]}"""
+        val format = """{"value":"mp4","ability":["raw","mp4"]}"""
+        fun enqueueSettings(movieFormat: String = format) {
+            server.enqueue(jsonResponse("{}"))
+            listOf(quality, toggle, toggle, movieFormat).forEach { server.enqueue(jsonResponse(it)) }
+        }
+        server.enqueue(jsonResponse(discovery))
+        enqueueSettings()
+        enqueueSettings()
+        server.enqueue(jsonResponse("""{"value":"raw"}"""))
+        server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        enqueueSettings(format.replace("\"value\":\"mp4\"", "\"value\":\"raw\""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.MOVIE_SETTINGS_CONTROL))
+        assertEquals(
+            listOf("3840x2160_5994_ipb_standard", "1920x1080_2997_ipb_standard"),
+            capabilities.advancedSettings.single { it.key == "moviequality" }.values,
+        )
+        assertEquals(listOf("enable", "disable"), capabilities.advancedSettings.single { it.key == "highframerate" }.values)
+        assertEquals("disable", capabilities.advancedSettings.single { it.key == "moviecropping" }.value)
+        assertEquals(listOf("raw", "mp4"), capabilities.advancedSettings.single { it.key == "movieformat" }.values)
+        assertTrue(setOf("moviequality", "highframerate", "moviecropping", "movieformat").all {
+            it in capabilities.evidence.writableSettings
+        })
+
+        client.setSetting("movieformat", "raw")
+
+        val requests = generateSequence { server.takeRequest(100, TimeUnit.MILLISECONDS) }.toList()
+        val write = requests.single { it.method == "PUT" }
+        assertEquals("/ccapi/ver110/shooting/settings/movieformat", write.path)
+        assertEquals("raw", JSONObject(write.body.readUtf8()).getString("value"))
+        assertTrue(requests.count { it.path == "/ccapi/ver110/shooting/settings/movieformat" } >= 3)
+    }
+
+    @Test
+    fun canonMovieSettingsDoNotCombineVersionsOrTrustAggregateOnly() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver100":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/shooting/settings/moviequality","get":true}
+                    ],
+                    "ver110":[{"path":"/shooting/settings/moviequality","put":true}]
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"moviequality":{"value":"3840x2160_5994_ipb_standard","ability":["3840x2160_5994_ipb_standard","1920x1080_2997_ipb_standard"]}}""",
+            ),
+        )
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.MOVIE_SETTINGS_CONTROL))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.MOVIE_SETTINGS_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "moviequality" })
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun canonMovieModeRequiresMatchingGetPostAndWritesAction() = runTest {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},

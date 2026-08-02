@@ -110,6 +110,7 @@ class FakeCcapiTransport:
         sound_recording_level_response: object | None = None,
         sound_recording_responses: dict[str, object] | None = None,
         focus_bracketing_responses: dict[str, object] | None = None,
+        movie_setting_responses: dict[str, object] | None = None,
         movie_mode_response: object | None = None,
         card_selection_responses: dict[str, object] | None = None,
         recordable_response: object | None = None,
@@ -131,6 +132,7 @@ class FakeCcapiTransport:
         self.sound_recording_level_response = sound_recording_level_response
         self.sound_recording_responses = sound_recording_responses or {}
         self.focus_bracketing_responses = focus_bracketing_responses or {}
+        self.movie_setting_responses = movie_setting_responses or {}
         self.movie_mode_response = movie_mode_response
         self.card_selection_responses = card_selection_responses or {}
         self.recordable_response = (
@@ -176,6 +178,12 @@ class FakeCcapiTransport:
             "focusbracketingnumberofshots": 100,
             "focusbracketingfocusincrement": 4,
             "focusbracketingexposuresmoothing": "disable",
+        }
+        self.movie_settings = {
+            "moviequality": "3840x2160_5994_ipb_standard",
+            "highframerate": "disable",
+            "moviecropping": "disable",
+            "movieformat": "mp4",
         }
         self.movie_mode = "off"
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
@@ -297,6 +305,34 @@ class FakeCcapiTransport:
                     assert value in {"enable", "disable"}
                 self.focus_bracketing[key] = value
                 return _json_response({"value": value})
+        movie_paths = {
+            "/ccapi/ver100/shooting/settings/moviequality": "moviequality",
+            "/ccapi/ver110/shooting/settings/highframerate": "highframerate",
+            "/ccapi/ver110/shooting/settings/moviecropping": "moviecropping",
+            "/ccapi/ver110/shooting/settings/movieformat": "movieformat",
+        }
+        if path in movie_paths:
+            key = movie_paths[path]
+            abilities = {
+                "moviequality": [
+                    "3840x2160_5994_ipb_standard",
+                    "1920x1080_2997_ipb_standard",
+                ],
+                "highframerate": ["enable", "disable"],
+                "moviecropping": ["enable", "disable"],
+                "movieformat": ["raw", "mp4"],
+            }
+            if method == "GET":
+                response = self.movie_setting_responses.get(key)
+                return _json_response(
+                    response
+                    if response is not None
+                    else {"value": self.movie_settings[key], "ability": abilities[key]}
+                )
+            if method == "PUT":
+                assert payload is not None and payload.get("value") in abilities[key]
+                self.movie_settings[key] = str(payload["value"])
+                return _json_response({"value": self.movie_settings[key]})
         if method == "GET" and path == "/ccapi/ver100/shooting/control/moviemode":
             if self.movie_mode_response is not None:
                 return _json_response(self.movie_mode_response)
@@ -1160,6 +1196,104 @@ def test_ccapi_focus_bracketing_does_not_combine_versions_or_use_aggregate_get()
     assert CameraFeature.FOCUS_BRACKETING_CONTROL not in capabilities.supported
     assert not any(setting.key.startswith("focusbracketing") for setting in capabilities.settings)
     assert not any("focusbracketing" in request.path for request in transport.requests)
+
+
+def test_ccapi_movie_settings_require_exact_pairs_and_refresh_before_write() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/shooting/settings/moviequality", "get": True, "put": True},
+        ],
+        "ver110": [
+            {"path": "/shooting/settings/highframerate", "get": True, "put": True},
+            {"path": "/shooting/settings/moviecropping", "get": True, "put": True},
+            {"path": "/shooting/settings/movieformat", "get": True, "put": True},
+        ],
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    controls = {setting.key: setting for setting in capabilities.settings}
+
+    assert CameraFeature.MOVIE_SETTINGS_CONTROL in capabilities.supported
+    assert controls["moviequality"].values == [
+        "3840x2160_5994_ipb_standard",
+        "1920x1080_2997_ipb_standard",
+    ]
+    assert controls["highframerate"].values == ["enable", "disable"]
+    assert controls["moviecropping"].value == "disable"
+    assert controls["movieformat"].values == ["raw", "mp4"]
+    assert {"moviequality", "highframerate", "moviecropping", "movieformat"}.issubset(
+        capabilities.evidence.writable_settings
+    )
+
+    session.set_setting("movieformat", "raw")
+
+    assert transport.movie_settings["movieformat"] == "raw"
+    assert RecordedRequest(
+        "PUT",
+        "/ccapi/ver110/shooting/settings/movieformat",
+        {"value": "raw"},
+    ) in transport.requests
+
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    transport.movie_setting_responses["moviequality"] = {
+        "value": "3840x2160_5994_ipb_standard",
+        "ability": ["3840x2160_5994_ipb_standard", "1920x1080_2500_ipb_standard"],
+    }
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("moviequality", "1920x1080_2997_ipb_standard")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"value": "enable", "ability": ["enable", "enable"]},
+        {"value": "enable", "ability": ["enable", "unsupported"]},
+        {"value": 1, "ability": ["enable", "disable"]},
+    ],
+)
+def test_ccapi_movie_settings_hide_malformed_contract(response: object) -> None:
+    discovery = {
+        "ver100": [*DISCOVERY["ver100"]],
+        "ver110": [{"path": "/shooting/settings/highframerate", "get": True, "put": True}],
+    }
+    transport = FakeCcapiTransport(
+        discovery=discovery,
+        movie_setting_responses={"highframerate": response},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.MOVIE_SETTINGS_CONTROL not in capabilities.supported
+    assert CameraFeature.MOVIE_SETTINGS_CONTROL in capabilities.planned
+    assert not any(setting.key == "highframerate" for setting in capabilities.settings)
+
+
+def test_ccapi_movie_settings_do_not_combine_versions_or_use_aggregate_get() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/shooting/settings/moviequality", "get": True},
+            ],
+            "ver110": [{"path": "/shooting/settings/moviequality", "put": True}],
+        }
+    )
+    transport.settings["moviequality"] = {
+        "value": "3840x2160_5994_ipb_standard",
+        "ability": ["3840x2160_5994_ipb_standard", "1920x1080_2997_ipb_standard"],
+    }
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.MOVIE_SETTINGS_CONTROL not in capabilities.supported
+    assert not any(setting.key == "moviequality" for setting in capabilities.settings)
+    assert not any("moviequality" in request.path for request in transport.requests)
 
 
 def test_ccapi_movie_mode_requires_matching_get_post_and_writes_action() -> None:

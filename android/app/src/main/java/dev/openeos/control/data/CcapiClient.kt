@@ -511,6 +511,9 @@ class CcapiClient(
             if (advancedSettings.any { it.key == FOCUS_BRACKETING_SETTING_KEY }) {
                 supportedFeatures.add(CameraFeature.FOCUS_BRACKETING_CONTROL)
             }
+            if (advancedSettings.any { it.key in MOVIE_SETTING_KEYS }) {
+                supportedFeatures.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
+            }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
             val supportsRtpLiveView = supportsRtpLiveView()
@@ -707,6 +710,10 @@ class CcapiClient(
                     loadShootingSettings()
                     putIntegerSettingValue(key.lowercase(), value)
                 }
+                key.lowercase() in MOVIE_SETTING_KEYS -> {
+                    loadShootingSettings()
+                    putSettingValue(listOf(key.lowercase()), value)
+                }
                 else -> putSettingValue(listOf(key), value)
             }
             status()
@@ -767,6 +774,16 @@ class CcapiClient(
                     putOk(
                         "/ccapi/${FOCUS_BRACKETING_INTEGER_ENDPOINTS.getValue(canonical).simulatorPath}",
                         JSONObject().put("value", integer),
+                    )
+                }
+                key.lowercase() in MOVIE_SETTING_KEYS -> {
+                    val canonical = key.lowercase()
+                    require(value in MOVIE_SIMULATOR_VALUES.getValue(canonical)) {
+                        "${canonical.toSettingLabel()} value is not supported."
+                    }
+                    putOk(
+                        "/ccapi/${MOVIE_SETTING_ENDPOINTS.getValue(canonical).simulatorPath}",
+                        JSONObject().put("value", value),
                     )
                 }
                 else -> throw UnsupportedOperationException(
@@ -1429,6 +1446,7 @@ class CcapiClient(
         in SOUND_RECORDING_SETTING_KEYS -> CameraFeature.SOUND_RECORDING_CONTROL
         SOUND_RECORDING_LEVEL_SETTING_KEY -> CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
         in FOCUS_BRACKETING_SETTING_KEYS -> CameraFeature.FOCUS_BRACKETING_CONTROL
+        in MOVIE_SETTING_KEYS -> CameraFeature.MOVIE_SETTINGS_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
     }
 
@@ -1987,6 +2005,7 @@ class CcapiClient(
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_CONTROL)
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
         observedFeatures.remove(CameraFeature.FOCUS_BRACKETING_CONTROL)
+        observedFeatures.remove(CameraFeature.MOVIE_SETTINGS_CONTROL)
         settingsLoaded = false
         val merged = JSONObject()
 
@@ -2013,6 +2032,7 @@ class CcapiClient(
                     key !in SOUND_RECORDING_SETTING_KEYS &&
                     key != SOUND_RECORDING_LEVEL_SETTING_KEY &&
                     key !in FOCUS_BRACKETING_SETTING_KEYS &&
+                    key !in MOVIE_SETTING_KEYS &&
                     (!enforceAdvertisedOperations || apiOperations.contains(CcapiApiOperation("PUT", settingPath)))
                 ) {
                     settingPathsByKey.putIfAbsent(key, settingPath)
@@ -2193,6 +2213,24 @@ class CcapiClient(
                         settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                         merged.put(key, setting)
                     }
+                }
+            }
+        }
+
+        MOVIE_SETTING_ENDPOINTS.forEach { (key, definition) ->
+            readWriteSettingOperations(definition.pathSuffix)?.let { (read, write) ->
+                val setting = try {
+                    getJson(read.path).toValidatedStringAbilitySetting(definition.values)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    null
+                }
+                if (setting != null) {
+                    settingPathsByKey[key] = write.path
+                    settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
+                    merged.put(key, setting)
+                    observedFeatures.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
                 }
             }
         }
@@ -2883,6 +2921,18 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             }
         }
     }
+    val movieSettingControls = MOVIE_SETTING_ENDPOINTS.mapNotNull { (key, definition) ->
+        optJSONObject(key)
+            ?.toValidatedStringAbilitySetting(definition.values)
+            ?.let { setting ->
+                CameraSettingControl(
+                    key = key,
+                    label = key.toSettingLabel(),
+                    value = setting.getString("value"),
+                    values = setting.getJSONArray("ability").toStringList(),
+                )
+            }
+    }
     val movieModeControl = optJSONObject(MOVIE_MODE_SETTING_KEY)
         ?.toValidatedMovieModeSetting()
         ?.let { setting ->
@@ -2941,6 +2991,11 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             setOf(CameraFeature.FOCUS_BRACKETING_CONTROL)
         } else {
             emptySet()
+        }) +
+        (if (movieSettingControls.isNotEmpty()) {
+            setOf(CameraFeature.MOVIE_SETTINGS_CONTROL)
+        } else {
+            emptySet()
         })
     return CameraCapabilities(
         iso = getJSONArray("iso").toStringList(),
@@ -2955,6 +3010,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             *soundRecordingControls.toTypedArray(),
             soundRecordingLevel,
             *focusBracketingControls.toTypedArray(),
+            *movieSettingControls.toTypedArray(),
         ),
         matrix = CapabilityMatrix.ccapiNetwork(supported),
         liveView = LiveViewCapabilities.simulator(),
@@ -3101,6 +3157,10 @@ private fun String.toSettingLabel(): String =
         FOCUS_BRACKETING_NUMBER_SETTING_KEY -> "Focus bracketing shots"
         FOCUS_BRACKETING_INCREMENT_SETTING_KEY -> "Focus increment"
         FOCUS_BRACKETING_SMOOTHING_SETTING_KEY -> "Exposure smoothing"
+        MOVIE_QUALITY_SETTING_KEY -> "Movie quality"
+        HIGH_FRAME_RATE_SETTING_KEY -> "High frame rate"
+        MOVIE_CROPPING_SETTING_KEY -> "Movie cropping"
+        MOVIE_FORMAT_SETTING_KEY -> "Movie recording format"
         "shootingmode" -> "Shooting mode"
         "stillimagequality" -> "Image quality"
         "stillimagequality.raw" -> "RAW quality"
@@ -3225,6 +3285,48 @@ private val FOCUS_BRACKETING_SIMULATOR_VALUES = mapOf(
     FOCUS_BRACKETING_NUMBER_SETTING_KEY to (2..999).map(Int::toString).toSet(),
     FOCUS_BRACKETING_INCREMENT_SETTING_KEY to (1..10).map(Int::toString).toSet(),
 )
+private const val MAX_STRING_SETTING_OPTIONS = 256
+private const val MAX_STRING_SETTING_VALUE_LENGTH = 128
+private const val MOVIE_QUALITY_SETTING_KEY = "moviequality"
+private const val HIGH_FRAME_RATE_SETTING_KEY = "highframerate"
+private const val MOVIE_CROPPING_SETTING_KEY = "moviecropping"
+private const val MOVIE_FORMAT_SETTING_KEY = "movieformat"
+private data class MovieSettingEndpoint(
+    val pathSuffix: String,
+    val simulatorPath: String,
+    val values: Set<String>? = null,
+)
+private val MOVIE_SETTING_ENDPOINTS = linkedMapOf(
+    MOVIE_QUALITY_SETTING_KEY to MovieSettingEndpoint(
+        pathSuffix = "/shooting/settings/moviequality",
+        simulatorPath = "movie-settings/quality",
+    ),
+    HIGH_FRAME_RATE_SETTING_KEY to MovieSettingEndpoint(
+        pathSuffix = "/shooting/settings/highframerate",
+        simulatorPath = "movie-settings/high-frame-rate",
+        values = linkedSetOf("enable", "disable"),
+    ),
+    MOVIE_CROPPING_SETTING_KEY to MovieSettingEndpoint(
+        pathSuffix = "/shooting/settings/moviecropping",
+        simulatorPath = "movie-settings/cropping",
+        values = linkedSetOf("enable", "disable"),
+    ),
+    MOVIE_FORMAT_SETTING_KEY to MovieSettingEndpoint(
+        pathSuffix = "/shooting/settings/movieformat",
+        simulatorPath = "movie-settings/format",
+        values = linkedSetOf("raw", "mp4"),
+    ),
+)
+private val MOVIE_SETTING_KEYS = MOVIE_SETTING_ENDPOINTS.keys
+private val MOVIE_SIMULATOR_VALUES = mapOf(
+    MOVIE_QUALITY_SETTING_KEY to setOf(
+        "3840x2160_5994_ipb_standard",
+        "1920x1080_2997_ipb_standard",
+    ),
+    HIGH_FRAME_RATE_SETTING_KEY to setOf("enable", "disable"),
+    MOVIE_CROPPING_SETTING_KEY to setOf("enable", "disable"),
+    MOVIE_FORMAT_SETTING_KEY to setOf("raw", "mp4"),
+)
 
 private fun Any?.toExactJsonInt(): Int? = when (this) {
     is Byte -> toInt()
@@ -3270,14 +3372,19 @@ private fun JSONObject.toValidatedCardSelectionSetting(): JSONObject? {
         .put("ability", org.json.JSONArray(values))
 }
 
-private fun JSONObject.toValidatedStringAbilitySetting(allowedValues: Set<String>): JSONObject? {
+private fun JSONObject.toValidatedStringAbilitySetting(allowedValues: Set<String>?): JSONObject? {
     val current = opt("value") as? String ?: return null
     val rawAbility = optJSONArray("ability") ?: return null
     val values = runCatching { rawAbility.toStringList() }.getOrNull() ?: return null
     if (
         values.size < 2 ||
+        values.size > MAX_STRING_SETTING_OPTIONS ||
         values.toSet().size != values.size ||
-        values.any { it !in allowedValues } ||
+        values.any {
+            it.isBlank() ||
+                it.length > MAX_STRING_SETTING_VALUE_LENGTH ||
+                (allowedValues != null && it !in allowedValues)
+        } ||
         current !in values
     ) return null
     return JSONObject()

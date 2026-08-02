@@ -223,6 +223,11 @@
     <string name="setting_image_quality_sd">SD image quality</string>
     <string name="setting_image_quality_cf">CF/CFexpress image quality</string>
     <string name="setting_movie_quality">Movie quality</string>
+    <string name="setting_high_frame_rate">High frame rate</string>
+    <string name="setting_movie_cropping">Movie cropping</string>
+    <string name="setting_movie_format">Movie recording format</string>
+    <string name="camera_value_light">Light</string>
+    <string name="camera_value_crop">Crop</string>
     <string name="setting_movie_servo_af">Movie Servo AF</string>
     <string name="setting_color_temperature">Color temperature</string>
     <string name="setting_exposure_compensation">Exposure compensation</string>

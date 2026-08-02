@@ -20,6 +20,7 @@ class OfflinePreviewTest {
         assertTrue(state.supports(CameraFeature.SOUND_RECORDING_CONTROL))
         assertTrue(state.supports(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL))
         assertTrue(state.supports(CameraFeature.FOCUS_BRACKETING_CONTROL))
+        assertTrue(state.supports(CameraFeature.MOVIE_SETTINGS_CONTROL))
         assertEquals(
             listOf("auto", "manual", "disable"),
             state.capabilities?.advancedSettings.orEmpty().single { it.key == "soundrecording" }.values,
@@ -42,6 +43,9 @@ class OfflinePreviewTest {
         })
         assertTrue(settingsForMode(state.capabilities?.advancedSettings.orEmpty(), CaptureMode.VIDEO).none {
             it.key.startsWith("focusbracketing")
+        })
+        assertTrue(settingsForMode(state.capabilities?.advancedSettings.orEmpty(), CaptureMode.PHOTO).none {
+            it.key in setOf("moviequality", "highframerate", "moviecropping", "movieformat")
         })
         assertFalse(state.pendingOperations.isNotEmpty())
     }
