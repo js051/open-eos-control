@@ -1863,7 +1863,10 @@ public actor CCAPIClient {
 
     private static func strictInteger(_ value: Any?) -> Int? {
         guard let number = value as? NSNumber,
-              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              ["c", "s", "i", "l", "q", "C", "S", "I", "L", "Q"].contains(
+                  String(cString: number.objCType)
+              ) else { return nil }
         return Int(number.stringValue)
     }
 
