@@ -2831,7 +2831,7 @@ public actor CCAPIClient {
             "afmethod": "AF method", "afoperation": "AF operation", "drivemode": "Drive mode",
             "meteringmode": "Metering", "picturestyle": "Picture style", "moviemode": "Movie mode",
             "shootingmode": "Shooting mode",
-            "stillimagequality": "Image quality", "moviequality": "Movie quality",
+            "stillimagequality": "Image quality",
             "stillimagequality.raw": "RAW quality", "stillimagequality.jpeg": "JPEG quality",
             "stillimagequality.heif": "HEIF quality",
             "wbshift.ba": "WB shift B/A", "wbshift.mg": "WB shift M/G",
