@@ -285,4 +285,9 @@
     <string name="temperature_shutter_unavailable">相機過熱，快門暫時無法使用</string>
     <string name="temperature_movie_recording_restricted">相機過熱，短片錄影受限</string>
     <string name="temperature_still_quality_warning">靜態影像畫質可能降低</string>
+    <string name="setting_high_frame_rate">高格率</string>
+    <string name="setting_movie_cropping">短片裁切</string>
+    <string name="setting_movie_format">短片錄影格式</string>
+    <string name="camera_value_light">輕量</string>
+    <string name="camera_value_crop">裁切</string>
 </resources>

@@ -8,8 +8,54 @@ import java.util.Locale
 
 @Composable
 internal fun localizedCameraValue(settingKey: String?, rawValue: String): String {
+    if (settingKey.orEmpty().normalizedCameraKey() == "moviequality") {
+        movieQualityDisplayValue(
+            rawValue = rawValue,
+            lightLabel = stringResource(R.string.camera_value_light),
+            cropLabel = stringResource(R.string.camera_value_crop),
+        )?.let { return it }
+    }
     val resource = cameraValueLabelResource(settingKey, rawValue) ?: return rawValue
     return stringResource(resource)
+}
+
+internal fun movieQualityDisplayValue(
+    rawValue: String,
+    lightLabel: String = "Light",
+    cropLabel: String = "Crop",
+): String? {
+    val parts = rawValue.split('_')
+    if (parts.size !in 4..5 || parts.any(String::isBlank)) return null
+    val size = when (parts[0].lowercase(Locale.ROOT)) {
+        "4k" -> "4K"
+        "fhd" -> "FHD"
+        "hd" -> "HD"
+        else -> parts[0]
+    }
+    val frameRate = parts[1].toMovieFrameRateLabel() ?: return null
+    val compression = when (parts[2].lowercase(Locale.ROOT)) {
+        "raw" -> "RAW"
+        "alli" -> "ALL-I"
+        "ipb" -> "IPB"
+        else -> return null
+    }
+    val labels = mutableListOf(size, frameRate, compression)
+    when (parts[3].lowercase(Locale.ROOT)) {
+        "standard" -> Unit
+        "light" -> labels.add(lightLabel)
+        else -> return null
+    }
+    if (parts.size == 5) {
+        if (!parts[4].equals("crop", ignoreCase = true)) return null
+        labels.add(cropLabel)
+    }
+    return labels.joinToString(" / ")
+}
+
+private fun String.toMovieFrameRateLabel(): String? {
+    if (length !in 4..5 || any { !it.isDigit() }) return null
+    val hundredths = toIntOrNull() ?: return null
+    return String.format(Locale.ROOT, "%d.%02dp", hundredths / 100, hundredths % 100)
 }
 
 @StringRes

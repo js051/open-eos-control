@@ -226,6 +226,9 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "stillimagequalitysd": "setting_image_quality_sd"
     case "stillimagequalitycf": "setting_image_quality_cf"
     case "moviequality": "setting_movie_quality"
+    case "highframerate": "setting_high_frame_rate"
+    case "moviecropping": "setting_movie_cropping"
+    case "movieformat": "setting_movie_format"
     case "framerate": "setting_frame_rate"
     case "exposurecompensation": "setting_exposure_compensation"
     case "colortemperature": "setting_color_temperature"
@@ -347,4 +350,44 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
         ][value]
     }
     return common[value.lowercased()]
+}
+
+func movieQualityDisplayValue(
+    _ rawValue: String,
+    lightLabel: String = "Light",
+    cropLabel: String = "Crop"
+) -> String? {
+    let parts = rawValue.split(separator: "_", omittingEmptySubsequences: false).map(String.init)
+    guard (4...5).contains(parts.count), parts.allSatisfy({ !$0.isEmpty }) else { return nil }
+    let size: String
+    switch parts[0].lowercased() {
+    case "4k": size = "4K"
+    case "fhd": size = "FHD"
+    case "hd": size = "HD"
+    default: size = parts[0]
+    }
+    guard
+        (4...5).contains(parts[1].count),
+        parts[1].allSatisfy(\.isNumber),
+        let frameRateHundredths = Int(parts[1])
+    else { return nil }
+    let frameRate = String(format: "%d.%02dp", frameRateHundredths / 100, frameRateHundredths % 100)
+    let compression: String
+    switch parts[2].lowercased() {
+    case "raw": compression = "RAW"
+    case "alli": compression = "ALL-I"
+    case "ipb": compression = "IPB"
+    default: return nil
+    }
+    var labels = [size, frameRate, compression]
+    switch parts[3].lowercased() {
+    case "standard": break
+    case "light": labels.append(lightLabel)
+    default: return nil
+    }
+    if parts.count == 5 {
+        guard parts[4].lowercased() == "crop" else { return nil }
+        labels.append(cropLabel)
+    }
+    return labels.joined(separator: " / ")
 }

@@ -74,6 +74,12 @@ CARD_SELECTION_ABILITY = ["none", "card1", "card2"]
 FOCUS_BRACKETING_ABILITY = ["enable", "disable"]
 FOCUS_BRACKETING_SHOTS_ABILITY = {"min": 2, "max": 999, "step": 1}
 FOCUS_BRACKETING_INCREMENT_ABILITY = {"min": 1, "max": 10, "step": 1}
+MOVIE_QUALITY_ABILITY = [
+    "3840x2160_5994_ipb_standard",
+    "1920x1080_2997_ipb_standard",
+]
+ENABLE_DISABLE_ABILITY = ["enable", "disable"]
+MOVIE_FORMAT_ABILITY = ["raw", "mp4"]
 
 def initial_state() -> dict[str, object]:
     return {
@@ -125,6 +131,14 @@ def initial_state() -> dict[str, object]:
         "focus_bracketing_increment_update_count": 0,
         "focus_bracketing_exposure_smoothing": "disable",
         "focus_bracketing_exposure_smoothing_update_count": 0,
+        "movie_quality": MOVIE_QUALITY_ABILITY[0],
+        "movie_quality_update_count": 0,
+        "high_frame_rate": "disable",
+        "high_frame_rate_update_count": 0,
+        "movie_cropping": "disable",
+        "movie_cropping_update_count": 0,
+        "movie_format": "mp4",
+        "movie_format_update_count": 0,
         "canonical_af_start_count": 0,
         "canonical_af_stop_count": 0,
         "canonical_focus_position": None,
@@ -313,6 +327,22 @@ async def get_test_state() -> dict[str, object]:
             "value": state["focus_bracketing_exposure_smoothing"],
             "update_count": state["focus_bracketing_exposure_smoothing_update_count"],
         },
+        "movie_quality": {
+            "value": state["movie_quality"],
+            "update_count": state["movie_quality_update_count"],
+        },
+        "high_frame_rate": {
+            "value": state["high_frame_rate"],
+            "update_count": state["high_frame_rate_update_count"],
+        },
+        "movie_cropping": {
+            "value": state["movie_cropping"],
+            "update_count": state["movie_cropping_update_count"],
+        },
+        "movie_format": {
+            "value": state["movie_format"],
+            "update_count": state["movie_format_update_count"],
+        },
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
         "canonical": {
@@ -406,6 +436,10 @@ async def get_capabilities() -> dict[str, object]:
             "value": state["focus_bracketing_exposure_smoothing"],
             "ability": FOCUS_BRACKETING_ABILITY,
         },
+        "moviequality": {"value": state["movie_quality"], "ability": MOVIE_QUALITY_ABILITY},
+        "highframerate": {"value": state["high_frame_rate"], "ability": ENABLE_DISABLE_ABILITY},
+        "moviecropping": {"value": state["movie_cropping"], "ability": ENABLE_DISABLE_ABILITY},
+        "movieformat": {"value": state["movie_format"], "ability": MOVIE_FORMAT_ABILITY},
     }
     if state["sound_recording"] != "disable":
         result["windfilter"] = {"value": state["wind_filter"], "ability": WIND_FILTER_ABILITY}
@@ -486,6 +520,14 @@ def focus_bracketing_unavailable() -> JSONResponse | None:
     if state["recording"]:
         return JSONResponse(status_code=503, content={"message": "During shooting or recording"})
     if state["movie_mode"] == "on":
+        return JSONResponse(status_code=503, content={"message": "Mode not supported"})
+    return None
+
+
+def movie_setting_unavailable() -> JSONResponse | None:
+    if state["recording"]:
+        return JSONResponse(status_code=503, content={"message": "During shooting or recording"})
+    if state["mode"] != "movie":
         return JSONResponse(status_code=503, content={"message": "Mode not supported"})
     return None
 
@@ -610,6 +652,65 @@ async def update_simulator_focus_bracketing_smoothing(payload: dict[str, object]
     ):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return Response(status_code=204)
+
+
+def update_movie_setting(
+    payload: dict[str, object],
+    *,
+    state_key: str,
+    ability: list[str],
+    event_key: str,
+) -> JSONResponse | None:
+    unavailable = movie_setting_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(payload, state_key=state_key, ability=ability, event_key=event_key):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return None
+
+
+@app.put("/ccapi/movie-settings/quality", status_code=204)
+async def update_simulator_movie_quality(payload: dict[str, object]) -> Response:
+    error = update_movie_setting(
+        payload,
+        state_key="movie_quality",
+        ability=MOVIE_QUALITY_ABILITY,
+        event_key="moviequality",
+    )
+    return error or Response(status_code=204)
+
+
+@app.put("/ccapi/movie-settings/high-frame-rate", status_code=204)
+async def update_simulator_high_frame_rate(payload: dict[str, object]) -> Response:
+    error = update_movie_setting(
+        payload,
+        state_key="high_frame_rate",
+        ability=ENABLE_DISABLE_ABILITY,
+        event_key="highframerate",
+    )
+    return error or Response(status_code=204)
+
+
+@app.put("/ccapi/movie-settings/cropping", status_code=204)
+async def update_simulator_movie_cropping(payload: dict[str, object]) -> Response:
+    error = update_movie_setting(
+        payload,
+        state_key="movie_cropping",
+        ability=ENABLE_DISABLE_ABILITY,
+        event_key="moviecropping",
+    )
+    return error or Response(status_code=204)
+
+
+@app.put("/ccapi/movie-settings/format", status_code=204)
+async def update_simulator_movie_format(payload: dict[str, object]) -> Response:
+    error = update_movie_setting(
+        payload,
+        state_key="movie_format",
+        ability=MOVIE_FORMAT_ABILITY,
+        event_key="movieformat",
+    )
+    return error or Response(status_code=204)
 
 
 def update_card_selection(kind: Literal["stillimage", "movie"], payload: dict[str, object]) -> bool:
@@ -817,6 +918,7 @@ CANON_DISCOVERY = {
         {"path": "/shooting/settings/focusbracketing/numberofshots", "get": True, "put": True},
         {"path": "/shooting/settings/focusbracketing/focusincrement", "get": True, "put": True},
         {"path": "/shooting/settings/focusbracketing/exposuresmoothing", "get": True, "put": True},
+        {"path": "/shooting/settings/moviequality", "get": True, "put": True},
         {"path": "/functions/datetime", "get": True, "put": True},
         {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
         {"path": "/functions/cardselection/movie", "get": True, "put": True},
@@ -836,6 +938,9 @@ CANON_DISCOVERY = {
     ],
     "ver110": [
         {"path": "/event/polling", "get": True, "delete": True},
+        {"path": "/shooting/settings/highframerate", "get": True, "put": True},
+        {"path": "/shooting/settings/moviecropping", "get": True, "put": True},
+        {"path": "/shooting/settings/movieformat", "get": True, "put": True},
     ],
 }
 
@@ -848,6 +953,10 @@ def canonical_settings() -> dict[str, dict[str, object]]:
         "tv": {"value": exposure["shutter"], "ability": capabilities["shutter"]},
         "av": {"value": exposure["aperture"], "ability": capabilities["aperture"]},
         "wb": {"value": exposure["white_balance"], "ability": capabilities["white_balance"]},
+        "moviequality": {"value": state["movie_quality"], "ability": MOVIE_QUALITY_ABILITY},
+        "highframerate": {"value": state["high_frame_rate"], "ability": ENABLE_DISABLE_ABILITY},
+        "moviecropping": {"value": state["movie_cropping"], "ability": ENABLE_DISABLE_ABILITY},
+        "movieformat": {"value": state["movie_format"], "ability": MOVIE_FORMAT_ABILITY},
         "shootingmode": {
             "value": state["mode"],
             "ability": ["Manual", "Bulb", "movie"],
@@ -988,6 +1097,16 @@ async def canon_set_shooting_setting(key: str, payload: dict[str, object]) -> Re
         ):
             return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
         return JSONResponse(content={"value": state["focus_bracketing"]})
+    if key == "moviequality":
+        error = update_movie_setting(
+            payload,
+            state_key="movie_quality",
+            ability=MOVIE_QUALITY_ABILITY,
+            event_key="moviequality",
+        )
+        if error is not None:
+            return error
+        return JSONResponse(content={"value": state["movie_quality"]})
     if key == "shootingmode":
         if value not in {"Manual", "Bulb", "movie"}:
             raise HTTPException(status_code=422, detail=f"Unsupported shootingmode: {value}")
@@ -1174,6 +1293,77 @@ async def canon_set_focus_bracketing_smoothing(payload: dict[str, object]) -> Re
     ):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return JSONResponse(content={"value": state["focus_bracketing_exposure_smoothing"]})
+
+
+@app.get("/ccapi/ver100/shooting/settings/moviequality")
+async def canon_get_movie_quality() -> Response:
+    unavailable = movie_setting_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(content={"value": state["movie_quality"], "ability": MOVIE_QUALITY_ABILITY})
+
+
+@app.get("/ccapi/ver110/shooting/settings/highframerate")
+async def canon_get_high_frame_rate() -> Response:
+    unavailable = movie_setting_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(content={"value": state["high_frame_rate"], "ability": ENABLE_DISABLE_ABILITY})
+
+
+@app.put("/ccapi/ver110/shooting/settings/highframerate")
+async def canon_set_high_frame_rate(payload: dict[str, object]) -> Response:
+    error = update_movie_setting(
+        payload,
+        state_key="high_frame_rate",
+        ability=ENABLE_DISABLE_ABILITY,
+        event_key="highframerate",
+    )
+    if error is not None:
+        return error
+    return JSONResponse(content={"value": state["high_frame_rate"]})
+
+
+@app.get("/ccapi/ver110/shooting/settings/moviecropping")
+async def canon_get_movie_cropping() -> Response:
+    unavailable = movie_setting_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(content={"value": state["movie_cropping"], "ability": ENABLE_DISABLE_ABILITY})
+
+
+@app.put("/ccapi/ver110/shooting/settings/moviecropping")
+async def canon_set_movie_cropping(payload: dict[str, object]) -> Response:
+    error = update_movie_setting(
+        payload,
+        state_key="movie_cropping",
+        ability=ENABLE_DISABLE_ABILITY,
+        event_key="moviecropping",
+    )
+    if error is not None:
+        return error
+    return JSONResponse(content={"value": state["movie_cropping"]})
+
+
+@app.get("/ccapi/ver110/shooting/settings/movieformat")
+async def canon_get_movie_format() -> Response:
+    unavailable = movie_setting_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(content={"value": state["movie_format"], "ability": MOVIE_FORMAT_ABILITY})
+
+
+@app.put("/ccapi/ver110/shooting/settings/movieformat")
+async def canon_set_movie_format(payload: dict[str, object]) -> Response:
+    error = update_movie_setting(
+        payload,
+        state_key="movie_format",
+        ability=MOVIE_FORMAT_ABILITY,
+        event_key="movieformat",
+    )
+    if error is not None:
+        return error
+    return JSONResponse(content={"value": state["movie_format"]})
 
 
 @app.get("/ccapi/ver100/functions/datetime")

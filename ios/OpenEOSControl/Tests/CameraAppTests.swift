@@ -178,6 +178,9 @@ final class CameraAppTests: XCTestCase {
             CameraSetting(key: "moviemode", label: "Movie mode", value: "off", values: ["off", "on"]),
             CameraSetting(key: "drivemode", label: "Drive", value: "single", values: ["single", "continuous"]),
             CameraSetting(key: "moviequality", label: "Movie", value: "4K", values: ["4K", "FHD"]),
+            CameraSetting(key: "highframerate", label: "High frame rate", value: "disable", values: ["enable", "disable"]),
+            CameraSetting(key: "moviecropping", label: "Movie cropping", value: "disable", values: ["enable", "disable"]),
+            CameraSetting(key: "movieformat", label: "Movie format", value: "mp4", values: ["raw", "mp4"]),
             CameraSetting(key: "meteringmode", label: "Metering", value: "eval", values: ["eval", "spot"]),
             CameraSetting(key: "alomode", label: "ALO", value: "x3", values: ["x3"]),
             CameraSetting(
@@ -210,7 +213,8 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(
             advancedSettingsForMode(settings, mode: .video).map(\.key),
             [
-                "moviequality", "meteringmode", "cardselectionmovie", "soundrecording",
+                "moviequality", "highframerate", "moviecropping", "movieformat", "meteringmode",
+                "cardselectionmovie", "soundrecording",
                 "soundrecordinglevel", "windfilter", "attenuator",
             ]
         )
@@ -236,6 +240,9 @@ final class CameraAppTests: XCTestCase {
             "focusbracketingnumberofshots": "setting_focus_bracketing_shots",
             "focusbracketingfocusincrement": "setting_focus_bracketing_increment",
             "focusbracketingexposuresmoothing": "setting_focus_bracketing_exposure_smoothing",
+            "highframerate": "setting_high_frame_rate",
+            "moviecropping": "setting_movie_cropping",
+            "movieformat": "setting_movie_format",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
             "alomode": "setting_auto_lighting_optimizer",
@@ -681,6 +688,23 @@ final class CameraAppTests: XCTestCase {
             )
         )
     }
+
+    func testMovieQualityTokenUsesReadableCameraStyleSummary() {
+        XCTAssertEqual(
+            movieQualityDisplayValue("3840x2160_5994_ipb_standard"),
+            "3840x2160 / 59.94p / IPB"
+        )
+        XCTAssertEqual(
+            movieQualityDisplayValue("fhd_2997_ipb_light_crop", lightLabel: "Lite", cropLabel: "Cropped"),
+            "FHD / 29.97p / IPB / Lite / Cropped"
+        )
+        XCTAssertEqual(
+            movieQualityDisplayValue("4096x2160_12000_alli_standard"),
+            "4096x2160 / 120.00p / ALL-I"
+        )
+        XCTAssertNil(movieQualityDisplayValue("4K Fine 59.94p"))
+    }
+
 }
 
 private final class RTPAudioStatusRecorder: @unchecked Sendable {

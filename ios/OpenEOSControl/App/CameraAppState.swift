@@ -1356,8 +1356,16 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "focusbracketingnumberofshots", label: "Focus bracketing shots", value: "100", values: (2...999).map(String.init)),
             CameraSetting(key: "focusbracketingfocusincrement", label: "Focus increment", value: "4", values: (1...10).map(String.init)),
             CameraSetting(key: "focusbracketingexposuresmoothing", label: "Exposure smoothing", value: "disable", values: ["enable", "disable"]),
+            CameraSetting(key: "highframerate", label: "High frame rate", value: "disable", values: ["enable", "disable"]),
+            CameraSetting(key: "moviecropping", label: "Movie cropping", value: "disable", values: ["enable", "disable"]),
+            CameraSetting(key: "movieformat", label: "Movie recording format", value: "mp4", values: ["raw", "mp4"]),
             CameraSetting(key: "zoom", label: "Zoom", value: "50", values: (0...100).map(String.init)),
-            CameraSetting(key: "moviequality", label: "Movie quality", value: "4K", values: ["4K", "FHD"]),
+            CameraSetting(
+                key: "moviequality",
+                label: "Movie quality",
+                value: "3840x2160_5994_ipb_standard",
+                values: ["3840x2160_5994_ipb_standard", "1920x1080_2997_ipb_standard"]
+            ),
             CameraSetting(key: "framerate", label: "Frame rate", value: "59.94p", values: ["23.98p", "29.97p", "59.94p"]),
         ]
         let supported: Set<CameraFeature> = [
@@ -1367,6 +1375,7 @@ final class CameraAppState: ObservableObject {
             .liveViewMagnification,
             .exposureControl, .whiteBalanceControl, .zoomControl, .cardSelectionControl,
             .soundRecordingControl, .soundRecordingLevelControl, .focusBracketingControl,
+            .movieSettingsControl,
             .advancedSettings, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]

@@ -103,6 +103,11 @@
 "setting_image_quality_sd" = "SD image quality";
 "setting_image_quality_cf" = "CF/CFexpress image quality";
 "setting_movie_quality" = "Movie quality";
+"setting_high_frame_rate" = "High frame rate";
+"setting_movie_cropping" = "Movie cropping";
+"setting_movie_format" = "Movie recording format";
+"camera_value_light" = "Light";
+"camera_value_crop" = "Crop";
 "setting_frame_rate" = "Frame rate";
 "setting_exposure_compensation" = "Exposure compensation";
 "setting_color_temperature" = "Color temperature";

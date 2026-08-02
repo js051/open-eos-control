@@ -108,6 +108,16 @@ class SimulatorEndToEndTest {
         waitForSimulatorState { state ->
             state.getString("movie_mode") == "on" && state.getInt("movie_mode_update_count") == 1
         }
+        compose.onNodeWithContentDescription(text(R.string.more_settings)).performClick()
+        setMovieSetting(
+            key = "moviequality",
+            value = "1920x1080_2997_ipb_standard",
+            stateKey = "movie_quality",
+        )
+        setMovieSetting(key = "highframerate", value = "enable", stateKey = "high_frame_rate")
+        setMovieSetting(key = "moviecropping", value = "enable", stateKey = "movie_cropping")
+        setMovieSetting(key = "movieformat", value = "raw", stateKey = "movie_format")
+        compose.onNodeWithContentDescription(text(R.string.dismiss)).performClick()
         waitForContentDescription(text(R.string.start_recording), useUnmergedTree = true)
         compose.onNodeWithTag("capture-button", useUnmergedTree = true)
             .performClick()
@@ -256,6 +266,18 @@ class SimulatorEndToEndTest {
     private fun waitForSimulatorState(predicate: (JSONObject) -> Boolean) {
         compose.waitUntil(timeoutMillis = 30_000) {
             runCatching { predicate(request("/ccapi/test/state")) }.getOrDefault(false)
+        }
+    }
+
+    private fun setMovieSetting(key: String, value: String, stateKey: String) {
+        compose.onNodeWithTag("advanced-setting-$key").performScrollTo()
+        compose.onNodeWithTag("advanced-setting-value-$key-$value")
+            .performScrollTo()
+            .performClick()
+        waitForSimulatorState { state ->
+            state.getJSONObject(stateKey).let { setting ->
+                setting.getString("value") == value && setting.getInt("update_count") == 1
+            }
         }
     }
 

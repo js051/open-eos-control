@@ -317,9 +317,7 @@ def test_canonical_ccapi_event_polling_delivers_partial_changes_and_stops() -> N
     stopped = client.delete("/ccapi/ver110/event/polling")
     test_state = client.get("/ccapi/test/state").json()["canonical"]
 
-    assert discovery["ver110"] == [
-        {"path": "/event/polling", "get": True, "delete": True}
-    ]
+    assert {"path": "/event/polling", "get": True, "delete": True} in discovery["ver110"]
     assert changed.status_code == 200
     assert event.status_code == 200
     assert event.json() == {"shootingsettings": {}}
@@ -581,6 +579,68 @@ def test_focus_bracketing_contract_uses_exact_types_ranges_and_photo_mode_gate()
     assert test_state["focus_bracketing_shots"] == {"value": 250, "update_count": 1}
     assert test_state["focus_bracketing_increment"] == {"value": 7, "update_count": 1}
     assert test_state["focus_bracketing_exposure_smoothing"] == {"value": "enable", "update_count": 1}
+
+
+def test_movie_settings_use_versioned_string_contracts_and_movie_mode_gate() -> None:
+    discovery = client.get("/ccapi").json()
+    quality = client.get("/ccapi/ver100/shooting/settings/moviequality")
+    high_frame_rate = client.get("/ccapi/ver110/shooting/settings/highframerate")
+    cropping = client.get("/ccapi/ver110/shooting/settings/moviecropping")
+    movie_format = client.get("/ccapi/ver110/shooting/settings/movieformat")
+
+    quality_update = client.put(
+        "/ccapi/ver100/shooting/settings/moviequality",
+        json={"value": "1920x1080_2997_ipb_standard"},
+    )
+    high_frame_rate_update = client.put(
+        "/ccapi/ver110/shooting/settings/highframerate",
+        json={"value": "enable"},
+    )
+    cropping_update = client.put(
+        "/ccapi/movie-settings/cropping",
+        json={"value": "enable"},
+    )
+    format_update = client.put(
+        "/ccapi/movie-settings/format",
+        json={"value": "raw"},
+    )
+    invalid = client.put(
+        "/ccapi/ver110/shooting/settings/movieformat",
+        json={"value": "mov"},
+    )
+    client.post("/ccapi/test/mode?mode=Bulb")
+    unavailable = client.get("/ccapi/ver110/shooting/settings/moviecropping")
+    unavailable_update = client.put(
+        "/ccapi/movie-settings/high-frame-rate",
+        json={"value": "disable"},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert {"path": "/shooting/settings/moviequality", "get": True, "put": True} in discovery["ver100"]
+    for path in (
+        "/shooting/settings/highframerate",
+        "/shooting/settings/moviecropping",
+        "/shooting/settings/movieformat",
+    ):
+        assert {"path": path, "get": True, "put": True} in discovery["ver110"]
+    assert quality.json() == {
+        "value": "3840x2160_5994_ipb_standard",
+        "ability": ["3840x2160_5994_ipb_standard", "1920x1080_2997_ipb_standard"],
+    }
+    assert high_frame_rate.json() == {"value": "disable", "ability": ["enable", "disable"]}
+    assert cropping.json() == {"value": "disable", "ability": ["enable", "disable"]}
+    assert movie_format.json() == {"value": "mp4", "ability": ["raw", "mp4"]}
+    assert quality_update.json() == {"value": "1920x1080_2997_ipb_standard"}
+    assert high_frame_rate_update.json() == {"value": "enable"}
+    assert cropping_update.status_code == 204
+    assert format_update.status_code == 204
+    assert invalid.status_code == 400
+    assert unavailable.status_code == 503
+    assert unavailable_update.status_code == 503
+    assert test_state["movie_quality"] == {"value": "1920x1080_2997_ipb_standard", "update_count": 1}
+    assert test_state["high_frame_rate"] == {"value": "enable", "update_count": 1}
+    assert test_state["movie_cropping"] == {"value": "enable", "update_count": 1}
+    assert test_state["movie_format"] == {"value": "raw", "update_count": 1}
 
 
 def test_movie_mode_contract_uses_on_off_action_and_mutates_both_routes() -> None:

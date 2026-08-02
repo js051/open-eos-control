@@ -828,6 +828,14 @@ private struct MoreSettingsView: View {
     }
 
     private func localizedSettingValue(_ setting: CameraSetting, value: String) -> LocalizedStringKey {
-        LocalizedStringKey(settingValueLocalizationKey(key: setting.key, value: value) ?? value)
+        if setting.key.lowercased() == "moviequality",
+           let display = movieQualityDisplayValue(
+               value,
+               lightLabel: language.string("camera_value_light"),
+               cropLabel: language.string("camera_value_crop")
+           ) {
+            return LocalizedStringKey(display)
+        }
+        return LocalizedStringKey(settingValueLocalizationKey(key: setting.key, value: value) ?? value)
     }
 }
