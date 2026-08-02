@@ -115,6 +115,9 @@
 "setting_power_zoom_speed" = "電動變焦速度";
 "setting_zoom" = "變焦";
 "setting_sound_recording_level" = "錄音音量";
+"setting_sound_recording" = "錄音模式";
+"setting_wind_filter" = "風聲抑制";
+"setting_attenuator" = "衰減器";
 "setting_auto_power_off" = "自動關閉電源";
 "setting_capture_target" = "拍攝儲存位置";
 "setting_capture_storage" = "拍攝記錄卡";
@@ -127,6 +130,8 @@
 "setting_aeb" = "自動包圍曝光";
 
 "camera_value_auto" = "自動";
+"camera_value_manual" = "手動";
+"camera_value_enable" = "啟用";
 "camera_value_on" = "開啟";
 "camera_value_off" = "關閉";
 "camera_value_low" = "低";

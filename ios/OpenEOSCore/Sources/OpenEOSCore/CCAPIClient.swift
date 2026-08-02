@@ -84,6 +84,30 @@ public actor CCAPIClient {
     private static let soundRecordingLevelSettingKey = "soundrecordinglevel"
     private static let soundRecordingLevelPathSuffix = "/shooting/settings/soundrecording/level"
     private static let simulatorSoundRecordingLevelValues = Set((0...63).map(String.init))
+    private static let soundRecordingSettingKey = "soundrecording"
+    private static let windFilterSettingKey = "windfilter"
+    private static let attenuatorSettingKey = "attenuator"
+    private static let soundRecordingEndpoints = [
+        (
+            key: soundRecordingSettingKey,
+            suffix: "/shooting/settings/soundrecording",
+            simulatorPath: "/ccapi/sound-recording",
+            values: Set(["auto", "manual", "disable"])
+        ),
+        (
+            key: windFilterSettingKey,
+            suffix: "/shooting/settings/soundrecording/windfilter",
+            simulatorPath: "/ccapi/wind-filter",
+            values: Set(["auto", "enable", "disable"])
+        ),
+        (
+            key: attenuatorSettingKey,
+            suffix: "/shooting/settings/soundrecording/attenuator",
+            simulatorPath: "/ccapi/attenuator",
+            values: Set(["enable", "disable", "auto", "manual"])
+        ),
+    ]
+    private static let soundRecordingSettingKeys = Set(soundRecordingEndpoints.map { $0.key })
     private static let maximumStructuredSettingOptions = 256
 
     private let baseURL: URL
@@ -365,6 +389,9 @@ public actor CCAPIClient {
         if controls.contains(where: { Self.cardSelectionSettingKeys.contains($0.key) }) {
             supported.insert(.cardSelectionControl)
         }
+        if controls.contains(where: { Self.soundRecordingSettingKeys.contains($0.key) }) {
+            supported.insert(.soundRecordingControl)
+        }
         if controls.contains(where: { $0.key == Self.soundRecordingLevelSettingKey }) {
             supported.insert(.soundRecordingLevelControl)
         }
@@ -408,6 +435,7 @@ public actor CCAPIClient {
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete, .cameraClockSync, .zoomControl, .cardSelectionControl,
+            .soundRecordingControl,
             .soundRecordingLevelControl,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
@@ -428,6 +456,7 @@ public actor CCAPIClient {
                     .focusDrive: "The camera did not advertise the verified CCAPI POST drivefocus operation.",
                     .zoomControl: "The camera must advertise readable and writable Canon zoom control in the same API version.",
                     .cardSelectionControl: "The camera must advertise matching GET and PUT Canon card-selection endpoints and valid card abilities.",
+                    .soundRecordingControl: "The camera must advertise matching GET and PUT Canon sound-recording-setting endpoints and valid documented abilities.",
                     .soundRecordingLevelControl: "The camera must advertise matching GET and PUT Canon sound-recording-level endpoints and a valid integer range.",
                     .movieModeControl: "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
@@ -529,6 +558,12 @@ public actor CCAPIClient {
                     method: .put,
                     json: ["value": level]
                 )
+            case let soundKey where Self.soundRecordingSettingKeys.contains(soundKey):
+                guard let endpoint = Self.soundRecordingEndpoints.first(where: { $0.key == soundKey }),
+                      endpoint.values.contains(value) else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
@@ -538,6 +573,7 @@ public actor CCAPIClient {
 
         let settings: JSONDictionary?
         if Self.cardSelectionSettingKeys.contains(key.lowercased()) ||
+            Self.soundRecordingSettingKeys.contains(key.lowercased()) ||
             key.lowercased() == Self.soundRecordingLevelSettingKey {
             settings = try await loadShootingSettings()
         } else {
@@ -1359,6 +1395,20 @@ public actor CCAPIClient {
         return nil
     }
 
+    private func soundRecordingOperations(
+        suffix: String
+    ) -> (read: CCAPIOperation, write: CCAPIOperation)? {
+        let reads = operations
+            .filter { $0.method == .get && $0.path.hasSuffix(suffix) }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for read in reads {
+            if let write = operations.first(where: { $0.method == .put && $0.path == read.path }) {
+                return (read, write)
+            }
+        }
+        return nil
+    }
+
     private func directShutterOperation() -> CCAPIOperation? {
         operation(.post, suffix: "/shooting/control/shutterbutton")
     }
@@ -1695,6 +1745,7 @@ public actor CCAPIClient {
     private func loadShootingSettings() async throws -> JSONDictionary? {
         settingPaths.removeAll()
         observedFeatures.remove(.cardSelectionControl)
+        observedFeatures.remove(.soundRecordingControl)
         observedFeatures.remove(.soundRecordingLevelControl)
         settingsLoaded = false
         var merged: JSONDictionary = [:]
@@ -1706,7 +1757,9 @@ public actor CCAPIClient {
             let prefix = String(path.dropLast("/shooting/settings".count))
             for (key, setting) in value {
                 let settingPath = "\(prefix)/shooting/settings/\(key)"
-                if !enforceAdvertisedOperations || operations.contains(CCAPIOperation(method: .put, path: settingPath)) {
+                if !Self.soundRecordingSettingKeys.contains(key),
+                   key != Self.soundRecordingLevelSettingKey,
+                   !enforceAdvertisedOperations || operations.contains(CCAPIOperation(method: .put, path: settingPath)) {
                     settingPaths[key] = settingPaths[key] ?? settingPath
                 }
                 if merged[key] == nil { merged[key] = setting }
@@ -1731,6 +1784,16 @@ public actor CCAPIClient {
             settingPaths[key] = operations.write.path
             merged[key] = cardSelection
             observedFeatures.insert(.cardSelectionControl)
+        }
+        for endpoint in Self.soundRecordingEndpoints {
+            guard let operations = soundRecordingOperations(suffix: endpoint.suffix),
+                  let raw = try await firstJSON(paths: [operations.read.path], required: false),
+                  let setting = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values) else {
+                continue
+            }
+            settingPaths[endpoint.key] = operations.write.path
+            merged[endpoint.key] = setting
+            observedFeatures.insert(.soundRecordingControl)
         }
         if let operations = soundRecordingLevelOperations(),
            let raw = try await firstJSON(paths: [operations.read.path], required: false),
@@ -1854,6 +1917,21 @@ public actor CCAPIClient {
         return ["value": current, "ability": values]
     }
 
+    private static func validatedStringAbilitySetting(
+        _ value: JSONDictionary,
+        allowedValues: Set<String>
+    ) -> JSONDictionary? {
+        guard let current = value["value"] as? String,
+              let rawAbility = value["ability"] as? [Any] else { return nil }
+        let values = rawAbility.compactMap { $0 as? String }
+        guard values.count == rawAbility.count,
+              values.count >= 2,
+              Set(values).count == values.count,
+              values.allSatisfy(allowedValues.contains),
+              values.contains(current) else { return nil }
+        return ["value": current, "ability": values]
+    }
+
     private func zoomControl(_ value: JSONDictionary) -> CameraSetting? {
         let values = value.array("ability")?.strings ?? []
         let current = value.string("value")
@@ -1965,6 +2043,7 @@ public actor CCAPIClient {
         case Self.movieModeSettingKey: .movieModeControl
         case Self.zoomSettingKey: .zoomControl
         case Self.stillCardSelectionSettingKey, Self.movieCardSelectionSettingKey: .cardSelectionControl
+        case let soundKey where Self.soundRecordingSettingKeys.contains(soundKey): .soundRecordingControl
         case Self.soundRecordingLevelSettingKey: .soundRecordingLevelControl
         default: .advancedSettings
         }
@@ -2080,6 +2159,12 @@ public actor CCAPIClient {
                   let control = control(key, Self.settingLabel(key), normalized) else { continue }
             controls.append(control)
         }
+        for endpoint in Self.soundRecordingEndpoints {
+            guard let raw = value.object(endpoint.key),
+                  let normalized = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values),
+                  let control = control(endpoint.key, Self.settingLabel(endpoint.key), normalized) else { continue }
+            controls.append(control)
+        }
         if let raw = value.object(Self.soundRecordingLevelSettingKey),
            let normalized = Self.validatedIntegerRangeSetting(raw),
            let control = control(
@@ -2105,6 +2190,9 @@ public actor CCAPIClient {
         }
         if controls.contains(where: { Self.cardSelectionSettingKeys.contains($0.key) }) {
             supported.insert(.cardSelectionControl)
+        }
+        if controls.contains(where: { Self.soundRecordingSettingKeys.contains($0.key) }) {
+            supported.insert(.soundRecordingControl)
         }
         if controls.contains(where: { $0.key == Self.soundRecordingLevelSettingKey }) {
             supported.insert(.soundRecordingLevelControl)
@@ -2532,6 +2620,9 @@ public actor CCAPIClient {
             "zoom": "Zoom",
             Self.stillCardSelectionSettingKey: "Still-image card",
             Self.movieCardSelectionSettingKey: "Movie card",
+            Self.soundRecordingSettingKey: "Sound recording",
+            Self.windFilterSettingKey: "Wind filter",
+            Self.attenuatorSettingKey: "Attenuator",
             Self.soundRecordingLevelSettingKey: "Sound recording level",
         ]
         if let label = known[key] { return label }

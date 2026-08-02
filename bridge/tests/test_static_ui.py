@@ -214,6 +214,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'MOVIE_MODE_CONTROL: "MOVIE_MODE_CONTROL"' in script
     assert 'CARD_SELECTION_CONTROL: "CARD_SELECTION_CONTROL"' in script
     assert 'SOUND_RECORDING_LEVEL_CONTROL: "SOUND_RECORDING_LEVEL_CONTROL"' in script
+    assert 'SOUND_RECORDING_CONTROL: "SOUND_RECORDING_CONTROL"' in script
     assert 'LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION"' in script
     assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script

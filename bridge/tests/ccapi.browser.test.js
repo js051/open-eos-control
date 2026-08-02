@@ -282,6 +282,24 @@ async function run() {
         state.sound_recording_level.update_count === 1,
       "Canon sound recording level integer write",
     );
+    await page.selectOption('#advanced-settings select[data-setting-key="windfilter"]', "enable");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.wind_filter.value === "enable" && state.wind_filter.update_count === 1,
+      "Canon wind filter string write",
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="attenuator"]', "manual");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.attenuator.value === "manual" && state.attenuator.update_count === 1,
+      "Canon attenuator string write",
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="soundrecording"]', "auto");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.sound_recording.value === "auto" && state.sound_recording.update_count === 1,
+      "Canon sound recording mode string write",
+    );
     await page.selectOption('#advanced-settings select[data-setting-key="cardselectionmovie"]', "card1");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -309,6 +327,13 @@ async function run() {
     );
     await soundLevel.waitFor({ state: "detached" });
     assert.equal(await soundLevel.count(), 0, "Sound recording level must be hidden in Photo mode");
+    for (const key of ["soundrecording", "windfilter", "attenuator"]) {
+      assert.equal(
+        await page.locator(`#advanced-settings [data-setting-key="${key}"]`).count(),
+        0,
+        `${key} must be hidden in Photo mode`,
+      );
+    }
     await page.selectOption('#advanced-settings select[data-setting-key="cardselectionstillimage"]', "card2");
     await waitForSimulatorState(
       simulatorOrigin,

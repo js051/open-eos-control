@@ -470,6 +470,54 @@ def test_sound_recording_level_contract_uses_integer_value_and_mutates_both_rout
     assert test_state["sound_recording_level"] == {"value": 24, "update_count": 2}
 
 
+def test_sound_recording_controls_use_documented_string_abilities_and_mode_gates() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    sound = client.get("/ccapi/ver100/shooting/settings/soundrecording")
+    wind = client.get("/ccapi/ver100/shooting/settings/soundrecording/windfilter")
+    attenuator = client.get("/ccapi/ver100/shooting/settings/soundrecording/attenuator")
+    wind_update = client.put(
+        "/ccapi/ver100/shooting/settings/soundrecording/windfilter",
+        json={"value": "enable"},
+    )
+    attenuator_update = client.put("/ccapi/attenuator", json={"value": "manual"})
+    invalid = client.put("/ccapi/wind-filter", json={"value": "on"})
+    disable = client.put(
+        "/ccapi/ver100/shooting/settings/soundrecording",
+        json={"value": "disable"},
+    )
+    unavailable_wind = client.get("/ccapi/ver100/shooting/settings/soundrecording/windfilter")
+    unavailable_level = client.get("/ccapi/ver100/shooting/settings/soundrecording/level")
+    simulator_capabilities = client.get("/ccapi/capabilities").json()
+    test_state = client.get("/ccapi/test/state").json()
+
+    for path in (
+        "/shooting/settings/soundrecording",
+        "/shooting/settings/soundrecording/windfilter",
+        "/shooting/settings/soundrecording/attenuator",
+    ):
+        assert {"path": path, "get": True, "put": True} in discovery
+    assert sound.json() == {"value": "manual", "ability": ["auto", "manual", "disable"]}
+    assert wind.json() == {"value": "auto", "ability": ["auto", "enable", "disable"]}
+    assert attenuator.json() == {
+        "value": "disable",
+        "ability": ["enable", "disable", "auto", "manual"],
+    }
+    assert wind_update.json() == {"value": "enable"}
+    assert attenuator_update.status_code == 204
+    assert invalid.status_code == 400
+    assert disable.json() == {"value": "disable"}
+    assert unavailable_wind.status_code == 503
+    assert unavailable_level.status_code == 503
+    assert "windfilter" not in simulator_capabilities
+    assert "attenuator" not in simulator_capabilities
+    assert "soundrecordinglevel" not in simulator_capabilities
+    assert test_state["sound_recording"] == {"value": "disable", "update_count": 1}
+    assert test_state["wind_filter"] == {"value": "enable", "update_count": 1}
+    assert test_state["attenuator"] == {"value": "manual", "update_count": 1}
+
+
 def test_movie_mode_contract_uses_on_off_action_and_mutates_both_routes() -> None:
     client.post("/ccapi/test/reset")
 

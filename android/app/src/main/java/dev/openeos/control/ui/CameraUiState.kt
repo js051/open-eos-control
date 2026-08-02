@@ -201,6 +201,7 @@ internal fun String.isBulbModeValue(): Boolean = cameraModeToken() == "bulb"
 
 fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): List<CameraSettingControl> {
     val videoTokens = listOf("movie", "video", "frame", "codec", "record", "sound")
+    val videoOnlyKeys = setOf("windfilter", "attenuator")
     val photoTokens = listOf(
         "still", "photo", "drive", "imagequality", "colorspace", "highisonr", "aeb", "aspect", "capturetarget",
         "capturestorage",
@@ -208,7 +209,7 @@ fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): Li
     return settings.filter { it.values.distinct().size > 1 }.filter { setting ->
         val key = setting.key.lowercase()
         if (setting.key.isMovieModeKey()) return@filter false
-        val isVideo = videoTokens.any(key::contains)
+        val isVideo = key in videoOnlyKeys || videoTokens.any(key::contains)
         val isPhoto = photoTokens.any(key::contains)
         when (mode) {
             CaptureMode.PHOTO -> !isVideo

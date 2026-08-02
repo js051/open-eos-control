@@ -146,6 +146,7 @@ extension ExposureState {
 func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) -> [CameraSetting] {
     let primary = Set(["iso", "shutter", "aperture", "whitebalance"])
     let videoTokens = ["movie", "video", "frame", "codec", "record", "sound"]
+    let videoOnlyKeys = Set(["windfilter", "attenuator"])
     let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage"]
     return settings.filter { setting in
         guard Set(setting.values).count > 1 else { return false }
@@ -153,7 +154,7 @@ func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) 
         guard setting.key.lowercased() != "moviemode" else { return false }
         let key = setting.key.lowercased()
         switch mode {
-        case .photo: return !videoTokens.contains(where: key.contains)
+        case .photo: return !videoOnlyKeys.contains(key) && !videoTokens.contains(where: key.contains)
         case .video: return !photoTokens.contains(where: key.contains)
         }
     }
@@ -242,6 +243,9 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "cardselectionstillimage": "setting_still_image_card"
     case "cardselectionmovie": "setting_movie_card"
     case "soundrecordinglevel": "setting_sound_recording_level"
+    case "soundrecording": "setting_sound_recording"
+    case "windfilter": "setting_wind_filter"
+    case "attenuator": "setting_attenuator"
     case "highisonr": "setting_high_iso_noise_reduction"
     case "alomode": "setting_auto_lighting_optimizer"
     case "continuousaf": "setting_continuous_af"
@@ -261,6 +265,9 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
         "normal": "camera_value_normal",
         "high": "camera_value_high",
         "standard": "camera_value_standard",
+        "manual": "camera_value_manual",
+        "enable": "camera_value_enable",
+        "disable": "camera_value_disable",
     ]
     if normalizedKey == "alomode" {
         return [

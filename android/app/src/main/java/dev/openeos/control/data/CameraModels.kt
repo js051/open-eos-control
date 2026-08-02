@@ -87,6 +87,7 @@ enum class CameraFeature(
     WHITE_BALANCE_CONTROL("White balance control"),
     ZOOM_CONTROL("Zoom control"),
     CARD_SELECTION_CONTROL("Card selection control"),
+    SOUND_RECORDING_CONTROL("Sound recording control"),
     SOUND_RECORDING_LEVEL_CONTROL("Sound recording level control"),
     ADVANCED_SETTINGS("Advanced camera settings"),
     MEDIA_BROWSER("Media browser"),
@@ -141,6 +142,7 @@ data class CapabilityMatrix(
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.ZOOM_CONTROL,
                 CameraFeature.CARD_SELECTION_CONTROL,
+                CameraFeature.SOUND_RECORDING_CONTROL,
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
@@ -171,6 +173,8 @@ data class CapabilityMatrix(
                     "The camera must advertise readable and writable Canon zoom control in the same API version.",
                 CameraFeature.CARD_SELECTION_CONTROL to
                     "The camera must advertise matching GET and PUT Canon card-selection endpoints and valid card abilities.",
+                CameraFeature.SOUND_RECORDING_CONTROL to
+                    "The camera must advertise matching GET and PUT Canon sound-recording-setting endpoints and valid documented abilities.",
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL to
                     "The camera must advertise matching GET and PUT Canon sound-recording-level endpoints and a valid integer range.",
                 CameraFeature.MOVIE_MODE_CONTROL to
@@ -232,6 +236,7 @@ data class CapabilityMatrix(
                 CameraFeature.FOCUS_DRIVE,
                 CameraFeature.EXPOSURE_CONTROL,
                 CameraFeature.CARD_SELECTION_CONTROL,
+                CameraFeature.SOUND_RECORDING_CONTROL,
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
