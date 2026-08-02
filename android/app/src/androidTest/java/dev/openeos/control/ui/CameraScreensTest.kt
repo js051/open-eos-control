@@ -1150,6 +1150,35 @@ class CameraScreensTest {
     }
 
     @Test
+    fun soundRecordingLevelSliderAppearsOnlyInVideoSettings() {
+        val state = mutableStateOf(CameraUiState().withOfflinePreview())
+        val picker = mutableStateOf<SettingPicker?>(null)
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.value.copy(activeSettingPicker = picker.value), actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onAllNodesWithTag("advanced-setting-soundrecordinglevel").assertCountEquals(0)
+        compose.runOnIdle {
+            picker.value = null
+            state.value = state.value.copy(captureMode = CaptureMode.VIDEO)
+        }
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("advanced-setting-soundrecordinglevel")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-values-soundrecordinglevel").assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.setting_sound_recording_level)).assertIsDisplayed()
+        compose.onNodeWithText("32").assertIsDisplayed()
+    }
+
+    @Test
     fun offlinePreviewExposesCanonManualFocusDriveControls() {
         val picker = mutableStateOf<SettingPicker?>(null)
         var requestedFocusDrive: Pair<FocusDriveDirection, FocusDriveStep>? = null

@@ -267,6 +267,21 @@ async function run() {
       (state) => state.movie_mode === "on" && state.movie_mode_update_count === 1,
       "Canon movie mode on",
     );
+    const soundLevel = page.locator(
+      '#advanced-settings input[type="range"][data-setting-key="soundrecordinglevel"]',
+    );
+    await soundLevel.waitFor({ state: "visible" });
+    await soundLevel.evaluate((input) => {
+      input.value = "48";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.sound_recording_level.value === 48 &&
+        state.sound_recording_level.update_count === 1,
+      "Canon sound recording level integer write",
+    );
     await page.selectOption('#advanced-settings select[data-setting-key="cardselectionmovie"]', "card1");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -292,6 +307,8 @@ async function run() {
       (state) => state.movie_mode === "off" && state.movie_mode_update_count === 2,
       "Canon movie mode off",
     );
+    await soundLevel.waitFor({ state: "detached" });
+    assert.equal(await soundLevel.count(), 0, "Sound recording level must be hidden in Photo mode");
     await page.selectOption('#advanced-settings select[data-setting-key="cardselectionstillimage"]', "card2");
     await waitForSimulatorState(
       simulatorOrigin,

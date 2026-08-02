@@ -189,6 +189,7 @@ final class CameraAppTests: XCTestCase {
             CameraSetting(key: "capturestorage", label: "Recording card", value: "CFe", values: ["CFe", "SD"]),
             CameraSetting(key: "cardselectionstillimage", label: "Still-image card", value: "card1", values: ["none", "card1", "card2"]),
             CameraSetting(key: "cardselectionmovie", label: "Movie card", value: "card2", values: ["none", "card1", "card2"]),
+            CameraSetting(key: "soundrecordinglevel", label: "Sound recording level", value: "32", values: (0...63).map(String.init)),
         ]
 
         XCTAssertEqual(
@@ -197,7 +198,7 @@ final class CameraAppTests: XCTestCase {
         )
         XCTAssertEqual(
             advancedSettingsForMode(settings, mode: .video).map(\.key),
-            ["moviequality", "meteringmode", "cardselectionmovie"]
+            ["moviequality", "meteringmode", "cardselectionmovie", "soundrecordinglevel"]
         )
 
         let movieMode = try! XCTUnwrap(captureModeSetting(settings))
@@ -213,6 +214,7 @@ final class CameraAppTests: XCTestCase {
             "wbshift.mg": "setting_white_balance_shift_mg",
             "aspectratio": "setting_aspect_ratio",
             "zoom": "setting_zoom",
+            "soundrecordinglevel": "setting_sound_recording_level",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
             "alomode": "setting_auto_lighting_optimizer",
@@ -306,11 +308,16 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveViewMagnification))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingLevelControl))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
         XCTAssertEqual(
             snapshot.capabilities.settings.first(where: { $0.key == "capturestorage" })?.values,
             ["CFe", "SD"]
+        )
+        XCTAssertEqual(
+            snapshot.capabilities.setting("soundrecordinglevel")?.values,
+            (0...63).map(String.init)
         )
     }
 
@@ -500,6 +507,20 @@ final class CameraAppTests: XCTestCase {
         await state.setCaptureMode(.photo)
         XCTAssertEqual(state.captureMode, .photo)
         XCTAssertEqual(state.capabilities?.setting("moviemode")?.value, "off")
+    }
+
+    func testOfflinePreviewUpdatesSoundRecordingLevelWithoutCameraHardware() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        await state.setCaptureMode(.video)
+        await state.setSetting(key: "soundrecordinglevel", value: "48")
+
+        XCTAssertEqual(state.capabilities?.setting("soundrecordinglevel")?.value, "48")
+        XCTAssertNil(state.lastError)
     }
 
     func testOfflinePreviewClickWhiteBalanceUpdatesTheVisibleValue() async {

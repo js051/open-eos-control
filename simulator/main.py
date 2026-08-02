@@ -66,6 +66,7 @@ capabilities = {
 }
 
 ZOOM_ABILITY = {"min": 0, "max": 100, "step": 1}
+SOUND_RECORDING_LEVEL_ABILITY = {"min": 0, "max": 63, "step": 1}
 CARD_SELECTION_ABILITY = ["none", "card1", "card2"]
 
 def initial_state() -> dict[str, object]:
@@ -102,6 +103,8 @@ def initial_state() -> dict[str, object]:
         "click_wb_count": 0,
         "zoom": 50,
         "zoom_update_count": 0,
+        "sound_recording_level": 32,
+        "sound_recording_level_update_count": 0,
         "canonical_af_start_count": 0,
         "canonical_af_stop_count": 0,
         "canonical_focus_position": None,
@@ -258,6 +261,10 @@ async def get_test_state() -> dict[str, object]:
             "value": state["zoom"],
             "update_count": state["zoom_update_count"],
         },
+        "sound_recording_level": {
+            "value": state["sound_recording_level"],
+            "update_count": state["sound_recording_level_update_count"],
+        },
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
         "canonical": {
@@ -326,6 +333,10 @@ async def get_capabilities() -> dict[str, object]:
         **capabilities,
         "moviemode": {"status": state["movie_mode"], "ability": ["off", "on"]},
         "zoom": {"value": state["zoom"], "ability": ZOOM_ABILITY},
+        "soundrecordinglevel": {
+            "value": state["sound_recording_level"],
+            "ability": SOUND_RECORDING_LEVEL_ABILITY,
+        },
         "cardselectionstillimage": {
             "value": state["still_card_selection"],
             "ability": CARD_SELECTION_ABILITY,
@@ -351,6 +362,25 @@ async def update_zoom(payload: ZoomUpdate) -> dict[str, object]:
     state["zoom_update_count"] += 1
     publish_event("zoom")
     return {"value": state["zoom"]}
+
+
+def update_sound_recording_level(payload: dict[str, object]) -> bool:
+    value = payload.get("value")
+    if set(payload) != {"value"} or isinstance(value, bool) or not isinstance(value, int):
+        return False
+    if value < SOUND_RECORDING_LEVEL_ABILITY["min"] or value > SOUND_RECORDING_LEVEL_ABILITY["max"]:
+        return False
+    state["sound_recording_level"] = value
+    state["sound_recording_level_update_count"] += 1
+    publish_event("soundrecordinglevel")
+    return True
+
+
+@app.put("/ccapi/sound-recording-level", status_code=204)
+async def update_simulator_sound_recording_level(payload: dict[str, object]) -> Response:
+    if not update_sound_recording_level(payload):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
 
 
 def update_card_selection(kind: Literal["stillimage", "movie"], payload: dict[str, object]) -> bool:
@@ -550,6 +580,7 @@ CANON_DISCOVERY = {
         {"path": "/shooting/settings/av", "put": True},
         {"path": "/shooting/settings/wb", "put": True},
         {"path": "/shooting/settings/shootingmode", "put": True},
+        {"path": "/shooting/settings/soundrecording/level", "get": True, "put": True},
         {"path": "/functions/datetime", "get": True, "put": True},
         {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
         {"path": "/functions/cardselection/movie", "get": True, "put": True},
@@ -719,6 +750,21 @@ async def canon_set_shooting_setting(key: str, payload: dict[str, object]) -> Re
         exposure[state_key] = value
     publish_event("shootingsettings")
     return Response(status_code=204)
+
+
+@app.get("/ccapi/ver100/shooting/settings/soundrecording/level")
+async def canon_get_sound_recording_level() -> dict[str, object]:
+    return {
+        "value": state["sound_recording_level"],
+        "ability": SOUND_RECORDING_LEVEL_ABILITY,
+    }
+
+
+@app.put("/ccapi/ver100/shooting/settings/soundrecording/level")
+async def canon_set_sound_recording_level(payload: dict[str, object]) -> Response:
+    if not update_sound_recording_level(payload):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["sound_recording_level"]})
 
 
 @app.get("/ccapi/ver100/functions/datetime")

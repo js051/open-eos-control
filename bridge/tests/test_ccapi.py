@@ -107,6 +107,7 @@ class FakeCcapiTransport:
         preview_body: bytes = JPEG,
         preview_content_type: str = "image/jpeg",
         zoom_response: object | None = None,
+        sound_recording_level_response: object | None = None,
         movie_mode_response: object | None = None,
         card_selection_responses: dict[str, object] | None = None,
         recordable_response: object | None = None,
@@ -125,6 +126,7 @@ class FakeCcapiTransport:
         self.preview_body = preview_body
         self.preview_content_type = preview_content_type
         self.zoom_response = zoom_response
+        self.sound_recording_level_response = sound_recording_level_response
         self.movie_mode_response = movie_mode_response
         self.card_selection_responses = card_selection_responses or {}
         self.recordable_response = (
@@ -159,6 +161,7 @@ class FakeCcapiTransport:
             },
         }
         self.zoom = 50
+        self.sound_recording_level = 32
         self.movie_mode = "off"
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
         self.reject_live_view_size = True
@@ -217,6 +220,18 @@ class FakeCcapiTransport:
             assert payload is not None and isinstance(payload.get("value"), int)
             self.zoom = payload["value"]
             return _json_response({"value": self.zoom})
+        if method == "GET" and path == "/ccapi/ver100/shooting/settings/soundrecording/level":
+            if self.sound_recording_level_response is not None:
+                return _json_response(self.sound_recording_level_response)
+            return _json_response(
+                {"value": self.sound_recording_level, "ability": {"min": 0, "max": 63, "step": 1}}
+            )
+        if method == "PUT" and path == "/ccapi/ver100/shooting/settings/soundrecording/level":
+            assert payload is not None
+            value = payload.get("value")
+            assert isinstance(value, int) and not isinstance(value, bool)
+            self.sound_recording_level = value
+            return _json_response({"value": value})
         if method == "GET" and path == "/ccapi/ver100/shooting/control/moviemode":
             if self.movie_mode_response is not None:
                 return _json_response(self.movie_mode_response)
@@ -764,6 +779,94 @@ def test_ccapi_zoom_hides_malformed_or_unbounded_ranges(zoom_response: object) -
     assert not any(setting.key == "zoom" for setting in capabilities.settings)
     with pytest.raises(BridgeError, match="ZOOM_CONTROL"):
         session.set_setting("zoom", "50")
+
+
+def test_ccapi_sound_recording_level_requires_matching_get_put_and_writes_integer() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/shooting/settings/soundrecording/level", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    sound_level = next(setting for setting in capabilities.settings if setting.key == "soundrecordinglevel")
+
+    assert sound_level.value == "32"
+    assert sound_level.values == [str(value) for value in range(64)]
+    assert CameraFeature.SOUND_RECORDING_LEVEL_CONTROL in capabilities.supported
+    assert "soundrecordinglevel" in capabilities.evidence.writable_settings
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("soundrecordinglevel", "64")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+    session.set_setting("soundrecordinglevel", "48")
+
+    assert transport.sound_recording_level == 48
+    assert RecordedRequest(
+        "PUT",
+        "/ccapi/ver100/shooting/settings/soundrecording/level",
+        {"value": 48},
+    ) in transport.requests
+
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    transport.sound_recording_level_response = {
+        "value": 32,
+        "ability": {"min": 0, "max": 40, "step": 1},
+    }
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("soundrecordinglevel", "48")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"value": False, "ability": {"min": 0, "max": 63, "step": 1}},
+        {"value": 32.0, "ability": {"min": 0, "max": 63, "step": 1}},
+        {"value": 32, "ability": {"min": 0, "max": 1_000, "step": 1}},
+        {"value": 32, "ability": {"min": 0, "max": 63, "step": 0}},
+        {"value": 33, "ability": {"min": 0, "max": 63, "step": 2}},
+        {"value": 32, "ability": {"min": 32, "max": 32, "step": 1}},
+    ],
+)
+def test_ccapi_sound_recording_level_hides_malformed_contract(response: object) -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/shooting/settings/soundrecording/level", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery, sound_recording_level_response=response)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.SOUND_RECORDING_LEVEL_CONTROL not in capabilities.supported
+    assert CameraFeature.SOUND_RECORDING_LEVEL_CONTROL in capabilities.planned
+    assert not any(setting.key == "soundrecordinglevel" for setting in capabilities.settings)
+
+
+def test_ccapi_sound_recording_level_does_not_combine_get_put_across_versions() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/shooting/settings/soundrecording/level", "get": True},
+            ],
+            "ver110": [{"path": "/shooting/settings/soundrecording/level", "put": True}],
+        }
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.SOUND_RECORDING_LEVEL_CONTROL not in capabilities.supported
+    assert not any(setting.key == "soundrecordinglevel" for setting in capabilities.settings)
+    assert not any("soundrecording/level" in request.path for request in transport.requests)
 
 
 def test_ccapi_movie_mode_requires_matching_get_post_and_writes_action() -> None:

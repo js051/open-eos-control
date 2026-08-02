@@ -241,6 +241,7 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "capturestorage": "setting_capture_storage"
     case "cardselectionstillimage": "setting_still_image_card"
     case "cardselectionmovie": "setting_movie_card"
+    case "soundrecordinglevel": "setting_sound_recording_level"
     case "highisonr": "setting_high_iso_noise_reduction"
     case "alomode": "setting_auto_lighting_optimizer"
     case "continuousaf": "setting_continuous_af"

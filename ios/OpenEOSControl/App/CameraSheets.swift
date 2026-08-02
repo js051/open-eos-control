@@ -623,7 +623,7 @@ private struct MoreSettingsView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
-    @State private var pendingZoomIndices: [String: Double] = [:]
+    @State private var pendingRangeIndices: [String: Double] = [:]
 
     var body: some View {
         NavigationStack {
@@ -733,8 +733,8 @@ private struct MoreSettingsView: View {
 
     @ViewBuilder
     private func settingRow(_ setting: CameraSetting) -> some View {
-        if setting.key.lowercased() == "zoom" {
-            zoomSettingRow(setting)
+        if ["zoom", "soundrecordinglevel"].contains(setting.key.lowercased()) {
+            rangeSettingRow(setting)
         } else {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -771,15 +771,15 @@ private struct MoreSettingsView: View {
         }
     }
 
-    private func zoomSettingRow(_ setting: CameraSetting) -> some View {
+    private func rangeSettingRow(_ setting: CameraSetting) -> some View {
         let currentIndex = setting.values.firstIndex(of: currentValue(for: setting)) ?? 0
         let pendingIndex = min(
-            max(Int((pendingZoomIndices[setting.key] ?? Double(currentIndex)).rounded()), 0),
+            max(Int((pendingRangeIndices[setting.key] ?? Double(currentIndex)).rounded()), 0),
             setting.values.count - 1
         )
         let selection = Binding<Double>(
-            get: { pendingZoomIndices[setting.key] ?? Double(currentIndex) },
-            set: { pendingZoomIndices[setting.key] = $0 }
+            get: { pendingRangeIndices[setting.key] ?? Double(currentIndex) },
+            set: { pendingRangeIndices[setting.key] = $0 }
         )
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -787,7 +787,7 @@ private struct MoreSettingsView: View {
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Color.cameraText)
                 Spacer()
-                Text("\(setting.values[pendingIndex])%")
+                Text(verbatim: rangeSettingValue(setting, value: setting.values[pendingIndex]))
                     .font(.callout.weight(.bold))
                     .foregroundStyle(Color.cameraAccent)
             }
@@ -798,16 +798,20 @@ private struct MoreSettingsView: View {
             ) { editing in
                 guard !editing else { return }
                 let selected = setting.values[pendingIndex]
-                pendingZoomIndices[setting.key] = nil
+                pendingRangeIndices[setting.key] = nil
                 guard selected != currentValue(for: setting) else { return }
                 Task { await camera.setSetting(key: setting.key, value: selected) }
             }
             .tint(Color.cameraAccent)
             .disabled(camera.isBusy(.setting))
-            .accessibilityLabel(Text("setting_zoom"))
-            .accessibilityValue(Text("\(setting.values[pendingIndex])%"))
+            .accessibilityLabel(Text(localizedSettingLabel(setting)))
+            .accessibilityValue(Text(verbatim: rangeSettingValue(setting, value: setting.values[pendingIndex])))
         }
         .frame(minHeight: 72)
+    }
+
+    private func rangeSettingValue(_ setting: CameraSetting, value: String) -> String {
+        setting.key.lowercased() == "zoom" ? "\(value)%" : value
     }
 
     private func currentValue(for setting: CameraSetting) -> String {

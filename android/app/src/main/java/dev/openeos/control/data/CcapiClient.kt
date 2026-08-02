@@ -502,6 +502,9 @@ class CcapiClient(
             if (advancedSettings.any { it.key in CARD_SELECTION_SETTING_KEYS }) {
                 supportedFeatures.add(CameraFeature.CARD_SELECTION_CONTROL)
             }
+            if (advancedSettings.any { it.key == SOUND_RECORDING_LEVEL_SETTING_KEY }) {
+                supportedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+            }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
             val supportsRtpLiveView = supportsRtpLiveView()
@@ -682,6 +685,10 @@ class CcapiClient(
                     loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
+                key.equals(SOUND_RECORDING_LEVEL_SETTING_KEY, ignoreCase = true) -> {
+                    loadShootingSettings()
+                    putIntegerSettingValue(SOUND_RECORDING_LEVEL_SETTING_KEY, value)
+                }
                 else -> putSettingValue(listOf(key), value)
             }
             status()
@@ -704,6 +711,12 @@ class CcapiClient(
                 key.equals(MOVIE_CARD_SELECTION_SETTING_KEY, ignoreCase = true) -> {
                     require(value in CARD_SELECTION_VALUES) { "Movie card value is not supported." }
                     putOk("/ccapi/card-selection/movie", JSONObject().put("value", value))
+                }
+                key.equals(SOUND_RECORDING_LEVEL_SETTING_KEY, ignoreCase = true) -> {
+                    val level = value.toIntOrNull()
+                        ?.takeIf { it.toString() == value && value in SOUND_RECORDING_LEVEL_VALUES }
+                        ?: error("Sound recording level is not supported.")
+                    putOk("/ccapi/sound-recording-level", JSONObject().put("value", level))
                 }
                 else -> throw UnsupportedOperationException(
                     "${featureForSetting(key).label} is not supported by the simulator.",
@@ -1362,6 +1375,7 @@ class CcapiClient(
         ZOOM_SETTING_KEY -> CameraFeature.ZOOM_CONTROL
         STILL_CARD_SELECTION_SETTING_KEY, MOVIE_CARD_SELECTION_SETTING_KEY ->
             CameraFeature.CARD_SELECTION_CONTROL
+        SOUND_RECORDING_LEVEL_SETTING_KEY -> CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
     }
 
@@ -1388,6 +1402,16 @@ class CcapiClient(
     private fun cardSelectionOperations(pathSuffix: String): Pair<CcapiApiOperation, CcapiApiOperation>? {
         val reads = apiOperations
             .filter { it.method == "GET" && it.path.endsWith(pathSuffix) }
+            .sortedByDescending { it.apiVersionNumber() }
+        return reads.firstNotNullOfOrNull { read ->
+            apiOperations.firstOrNull { it.method == "PUT" && it.path == read.path }
+                ?.let { write -> read to write }
+        }
+    }
+
+    private fun soundRecordingLevelOperations(): Pair<CcapiApiOperation, CcapiApiOperation>? {
+        val reads = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith(SOUND_RECORDING_LEVEL_PATH_SUFFIX) }
             .sortedByDescending { it.apiVersionNumber() }
         return reads.firstNotNullOfOrNull { read ->
             apiOperations.firstOrNull { it.method == "PUT" && it.path == read.path }
@@ -1886,6 +1910,7 @@ class CcapiClient(
         structuredSettingValuesByKey.clear()
         structuredSettingCurrentValues.clear()
         observedFeatures.remove(CameraFeature.CARD_SELECTION_CONTROL)
+        observedFeatures.remove(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
         settingsLoaded = false
         val merged = JSONObject()
 
@@ -2015,6 +2040,23 @@ class CcapiClient(
             }
         }
 
+        soundRecordingLevelOperations()?.let { (read, write) ->
+            val soundRecordingLevel = try {
+                getJson(read.path).toValidatedIntegerRangeSetting()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                null
+            }
+            if (soundRecordingLevel != null) {
+                val values = soundRecordingLevel.getJSONArray("ability").toStringList().toSet()
+                settingPathsByKey[SOUND_RECORDING_LEVEL_SETTING_KEY] = write.path
+                settingValuesByKey[SOUND_RECORDING_LEVEL_SETTING_KEY] = values
+                merged.put(SOUND_RECORDING_LEVEL_SETTING_KEY, soundRecordingLevel)
+                observedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+            }
+        }
+
         settingsLoaded = true
         return if (merged.length() > 0) merged else null
     }
@@ -2040,6 +2082,19 @@ class CcapiClient(
             error("Value '$value' is not advertised for movie mode.")
         }
         postOk(path, JSONObject().put("action", value))
+    }
+
+    private suspend fun putIntegerSettingValue(key: String, value: String) {
+        if (!settingsLoaded) loadShootingSettings()
+        val path = settingPathsByKey[key]
+            ?: error("Camera did not advertise writable ${key.toSettingLabel()} control.")
+        if (value !in settingValuesByKey[key].orEmpty()) {
+            error("Value '$value' is not advertised for ${key.toSettingLabel()}.")
+        }
+        val integer = value.toIntOrNull()
+            ?.takeIf { it.toString() == value }
+            ?: error("${key.toSettingLabel()} must be an integer advertised by the camera.")
+        putOk(path, JSONObject().put("value", integer))
     }
 
     private suspend fun putSettingValue(candidateKeys: List<String>, value: String) {
@@ -2621,6 +2676,16 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
         }
     val stillCardSelection = simulatorCardSelection(STILL_CARD_SELECTION_SETTING_KEY)
     val movieCardSelection = simulatorCardSelection(MOVIE_CARD_SELECTION_SETTING_KEY)
+    val soundRecordingLevel = optJSONObject(SOUND_RECORDING_LEVEL_SETTING_KEY)
+        ?.toValidatedIntegerRangeSetting()
+        ?.let { setting ->
+            CameraSettingControl(
+                key = SOUND_RECORDING_LEVEL_SETTING_KEY,
+                label = SOUND_RECORDING_LEVEL_SETTING_KEY.toSettingLabel(),
+                value = setting.getString("value"),
+                values = setting.getJSONArray("ability").toStringList(),
+            )
+        }
     val movieModeControl = optJSONObject(MOVIE_MODE_SETTING_KEY)
         ?.toValidatedMovieModeSetting()
         ?.let { setting ->
@@ -2664,6 +2729,11 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             setOf(CameraFeature.CARD_SELECTION_CONTROL)
         } else {
             emptySet()
+        }) +
+        (if (soundRecordingLevel != null) {
+            setOf(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+        } else {
+            emptySet()
         })
     return CameraCapabilities(
         iso = getJSONArray("iso").toStringList(),
@@ -2675,6 +2745,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             zoomControl,
             stillCardSelection,
             movieCardSelection,
+            soundRecordingLevel,
         ),
         matrix = CapabilityMatrix.ccapiNetwork(supported),
         liveView = LiveViewCapabilities.simulator(),
@@ -2813,6 +2884,7 @@ private fun String.toSettingLabel(): String =
         MOVIE_MODE_SETTING_KEY -> "Movie mode"
         STILL_CARD_SELECTION_SETTING_KEY -> "Still-image card"
         MOVIE_CARD_SELECTION_SETTING_KEY -> "Movie card"
+        SOUND_RECORDING_LEVEL_SETTING_KEY -> "Sound recording level"
         "shootingmode" -> "Shooting mode"
         "stillimagequality" -> "Image quality"
         "stillimagequality.raw" -> "RAW quality"
@@ -2863,6 +2935,9 @@ private val CARD_SELECTION_ENDPOINTS = linkedMapOf(
     STILL_CARD_SELECTION_SETTING_KEY to "/functions/cardselection/stillimage",
     MOVIE_CARD_SELECTION_SETTING_KEY to "/functions/cardselection/movie",
 )
+private const val SOUND_RECORDING_LEVEL_SETTING_KEY = "soundrecordinglevel"
+private const val SOUND_RECORDING_LEVEL_PATH_SUFFIX = "/shooting/settings/soundrecording/level"
+private val SOUND_RECORDING_LEVEL_VALUES = (0..63).map(Int::toString).toSet()
 private const val MAX_STRUCTURED_SETTING_OPTIONS = 256
 
 private fun Any?.toExactJsonInt(): Int? = when (this) {
@@ -2908,6 +2983,10 @@ private fun JSONObject.toValidatedCardSelectionSetting(): JSONObject? {
 }
 
 private fun JSONObject.toValidatedZoomSetting(): JSONObject? {
+    return toValidatedIntegerRangeSetting()
+}
+
+private fun JSONObject.toValidatedIntegerRangeSetting(): JSONObject? {
     val current = opt("value").toExactJsonInt() ?: return null
     val ability = optJSONObject("ability") ?: return null
     val values = ability.toBoundedIntegerRangeValues()

@@ -1094,6 +1094,127 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requestCount, 2)
     }
 
+    func testCanonSoundRecordingLevelRequiresMatchingGetPutAndWritesIntegerValue() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/soundrecording/level","get":true,"put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings/soundrecording/level",
+            body: #"{"value":32,"ability":{"min":0,"max":63,"step":1}}"#
+        )
+        for _ in 0..<2 {
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/shooting/settings/soundrecording/level",
+                body: #"{"value":32,"ability":{"min":0,"max":63,"step":1}}"#
+            )
+        }
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/settings/soundrecording/level",
+            body: #"{"value":48}"#
+        )
+        await enqueueStatus(on: transport)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings/soundrecording/level",
+            body: #"{"value":48,"ability":{"min":0,"max":63,"step":1}}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        XCTAssertEqual(capabilities.setting("soundrecordinglevel")?.value, "32")
+        XCTAssertEqual(capabilities.setting("soundrecordinglevel")?.values, (0...63).map(String.init))
+        XCTAssertTrue(capabilities.matrix.supports(.soundRecordingLevelControl))
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("soundrecordinglevel"))
+        let requestCount = await transport.requests().count
+        do {
+            _ = try await client.setSetting(key: "soundrecordinglevel", value: "64")
+            XCTFail("Expected an unadvertised sound-recording level to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidSetting(key: "soundrecordinglevel", value: "64")
+            )
+        }
+        let requestsAfterRejection = await transport.requests()
+        XCTAssertEqual(requestsAfterRejection.count, requestCount + 2)
+        XCTAssertFalse(requestsAfterRejection.contains(where: { $0.method == "PUT" }))
+
+        _ = try await client.setSetting(key: "soundrecordinglevel", value: "48")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first {
+            $0.method == "PUT" && $0.path == "/ccapi/ver100/shooting/settings/soundrecording/level"
+        })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["value"] as? Int, 48)
+    }
+
+    func testCanonSoundRecordingLevelRejectsMalformedRanges() async throws {
+        let responses = [
+            #"{"value":false,"ability":{"min":0,"max":63,"step":1}}"#,
+            #"{"value":32.0,"ability":{"min":0,"max":63,"step":1}}"#,
+            #"{"value":32,"ability":{"min":0,"max":1000,"step":1}}"#,
+            #"{"value":32,"ability":{"min":0,"max":63,"step":0}}"#,
+            #"{"value":33,"ability":{"min":0,"max":63,"step":2}}"#,
+            #"{"value":32,"ability":{"min":32,"max":32,"step":1}}"#,
+        ]
+
+        for response in responses {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(
+                path: "/ccapi",
+                body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/soundrecording/level","get":true,"put":true}]}"#
+            )
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/shooting/settings/soundrecording/level",
+                body: response
+            )
+            let client = try CCAPIClient(
+                baseURL: "http://192.168.1.2:8080",
+                mode: .camera,
+                transport: transport
+            )
+
+            let capabilities = try await client.capabilities()
+
+            XCTAssertNil(capabilities.setting("soundrecordinglevel"))
+            XCTAssertFalse(capabilities.matrix.supports(.soundRecordingLevelControl))
+            XCTAssertTrue(capabilities.matrix.planned.contains(.soundRecordingLevelControl))
+        }
+    }
+
+    func testCanonSoundRecordingLevelDoesNotCombineGetPutAcrossVersions() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/soundrecording/level","get":true}],"ver110":[{"path":"/shooting/settings/soundrecording/level","put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertNil(capabilities.setting("soundrecordinglevel"))
+        XCTAssertFalse(capabilities.matrix.supports(.soundRecordingLevelControl))
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertFalse(requests.contains(where: { $0.path.contains("soundrecording/level") }))
+    }
+
     func testCanonMovieModeRequiresMatchingGetPostAndWritesAction() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(

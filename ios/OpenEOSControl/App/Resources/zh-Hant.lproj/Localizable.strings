@@ -114,6 +114,7 @@
 "setting_aspect_ratio" = "畫面比例";
 "setting_power_zoom_speed" = "電動變焦速度";
 "setting_zoom" = "變焦";
+"setting_sound_recording_level" = "錄音音量";
 "setting_auto_power_off" = "自動關閉電源";
 "setting_capture_target" = "拍攝儲存位置";
 "setting_capture_storage" = "拍攝記錄卡";
