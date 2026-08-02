@@ -431,6 +431,45 @@ def test_zoom_contract_uses_integer_value_and_mutates_both_simulator_routes() ->
     assert test_state["zoom"] == {"value": 25, "update_count": 2}
 
 
+def test_sound_recording_level_contract_uses_integer_value_and_mutates_both_routes() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    ability = client.get("/ccapi/ver100/shooting/settings/soundrecording/level")
+    canonical = client.put(
+        "/ccapi/ver100/shooting/settings/soundrecording/level",
+        json={"value": 48},
+    )
+    simulator = client.put("/ccapi/sound-recording-level", json={"value": 24})
+    invalid_string = client.put(
+        "/ccapi/ver100/shooting/settings/soundrecording/level",
+        json={"value": "32"},
+    )
+    invalid_bool = client.put(
+        "/ccapi/ver100/shooting/settings/soundrecording/level",
+        json={"value": True},
+    )
+    invalid_range = client.put(
+        "/ccapi/ver100/shooting/settings/soundrecording/level",
+        json={"value": 64},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert {
+        "path": "/shooting/settings/soundrecording/level",
+        "get": True,
+        "put": True,
+    } in discovery
+    assert ability.json() == {"value": 32, "ability": {"min": 0, "max": 63, "step": 1}}
+    assert canonical.json() == {"value": 48}
+    assert simulator.status_code == 204
+    assert invalid_string.status_code == 400
+    assert invalid_bool.status_code == 400
+    assert invalid_range.status_code == 400
+    assert invalid_range.json() == {"message": "Invalid parameter"}
+    assert test_state["sound_recording_level"] == {"value": 24, "update_count": 2}
+
+
 def test_movie_mode_contract_uses_on_off_action_and_mutates_both_routes() -> None:
     client.post("/ccapi/test/reset")
 

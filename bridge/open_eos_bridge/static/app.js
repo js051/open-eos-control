@@ -27,6 +27,7 @@
     SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
     MOVIE_MODE_CONTROL: "MOVIE_MODE_CONTROL",
     CARD_SELECTION_CONTROL: "CARD_SELECTION_CONTROL",
+    SOUND_RECORDING_LEVEL_CONTROL: "SOUND_RECORDING_LEVEL_CONTROL",
     VIDEO_RECORDING: "VIDEO_RECORDING",
     TAP_FOCUS: "TAP_FOCUS",
     CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE",
@@ -206,6 +207,7 @@
       colorspace: "Color space",
       aspectratio: "Aspect ratio",
       zoom: "Zoom",
+      soundrecordinglevel: "Sound recording level",
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
       capturetarget: "Capture target",
@@ -475,6 +477,7 @@
       colorspace: "色彩空間",
       aspectratio: "畫面比例",
       zoom: "變焦",
+      soundrecordinglevel: "錄音音量",
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
       capturetarget: "拍攝儲存位置",
@@ -1521,6 +1524,7 @@
 
   function renderSession() {
     if (!state.session || !state.capabilities || !state.status) return;
+    renderCaptureMode();
     ui.cameraName.textContent = state.info?.model || state.session.camera?.model || "Canon EOS";
     const battery = state.status.battery || {};
     ui.batteryValue.textContent = battery.level == null ? (battery.status || "-") : `${battery.level}%`;
@@ -1544,7 +1548,6 @@
     renderLiveSource();
     renderFps();
     renderTapAction();
-    renderCaptureMode();
     renderTemperatureStatus();
     syncBulbTimer();
     renderAvailability();
@@ -1640,7 +1643,7 @@
       const label = document.createElement("label");
       const text = document.createElement("span");
       text.textContent = settingLabel(setting);
-      if (setting.key === "zoom") {
+      if (["zoom", "soundrecordinglevel"].includes(setting.key)) {
         const control = document.createElement("span");
         control.className = "range-setting";
         const range = document.createElement("input");

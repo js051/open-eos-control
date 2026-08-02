@@ -1243,6 +1243,111 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonSoundRecordingLevelRequiresMatchingGetPutAndWritesIntegerValue() = runTest {
+        val discovery = """{"ver100":[
+            {"path":"/devicestatus/batterylist","get":true},
+            {"path":"/devicestatus/storage","get":true},
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/soundrecording/level","get":true,"put":true}
+        ]}""".trimIndent()
+        server.enqueue(jsonResponse(discovery))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":32,"ability":{"min":0,"max":63,"step":1}}"""))
+        repeat(2) {
+            server.enqueue(jsonResponse("{}"))
+            server.enqueue(jsonResponse("""{"value":32,"ability":{"min":0,"max":63,"step":1}}"""))
+        }
+        server.enqueue(jsonResponse("""{"value":48}"""))
+        server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":48,"ability":{"min":0,"max":63,"step":1}}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val soundLevel = capabilities.advancedSettings.single { it.key == "soundrecordinglevel" }
+
+        assertEquals("32", soundLevel.value)
+        assertEquals((0..63).map(Int::toString), soundLevel.values)
+        assertTrue(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL))
+        assertTrue("soundrecordinglevel" in capabilities.evidence.writableSettings)
+        val requestCount = server.requestCount
+        val invalid = runCatching { client.setSetting("soundrecordinglevel", "64") }.exceptionOrNull()
+        assertTrue(invalid is IllegalStateException)
+        assertTrue(invalid?.message.orEmpty().contains("not advertised"))
+        assertEquals(requestCount + 2, server.requestCount)
+
+        client.setSetting("soundrecordinglevel", "48")
+
+        repeat(7) { server.takeRequest() }
+        val write = server.takeRequest()
+        val body = JSONObject(write.body.readUtf8())
+        assertEquals("PUT", write.method)
+        assertEquals("/ccapi/ver100/shooting/settings/soundrecording/level", write.path)
+        assertEquals(48, body.getInt("value"))
+        assertTrue(body.get("value") is Int)
+    }
+
+    @Test
+    fun canonSoundRecordingLevelRejectsMalformedRanges() = runTest {
+        val discovery = """{"ver100":[
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/soundrecording/level","get":true,"put":true}
+        ]}""".trimIndent()
+        val malformedResponses = listOf(
+            """{"value":false,"ability":{"min":0,"max":63,"step":1}}""",
+            """{"value":32.0,"ability":{"min":0,"max":63,"step":1}}""",
+            """{"value":32,"ability":{"min":0,"max":1000,"step":1}}""",
+            """{"value":32,"ability":{"min":0,"max":63,"step":0}}""",
+            """{"value":33,"ability":{"min":0,"max":63,"step":2}}""",
+            """{"value":32,"ability":{"min":32,"max":32,"step":1}}""",
+        )
+
+        malformedResponses.forEachIndexed { index, response ->
+            if (index > 0) {
+                server.shutdown()
+                server = MockWebServer().also { it.start() }
+            }
+            server.enqueue(jsonResponse(discovery))
+            server.enqueue(jsonResponse("{}"))
+            server.enqueue(jsonResponse(response))
+            client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+            client.initialize()
+            val capabilities = client.capabilities()
+
+            assertFalse(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL))
+            assertTrue(capabilities.matrix.isPlanned(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL))
+            assertTrue(capabilities.advancedSettings.none { it.key == "soundrecordinglevel" })
+        }
+    }
+
+    @Test
+    fun canonSoundRecordingLevelDoesNotCombineGetPutAcrossVersions() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver100":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/shooting/settings/soundrecording/level","get":true}
+                    ],
+                    "ver110":[{"path":"/shooting/settings/soundrecording/level","put":true}]
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "soundrecordinglevel" })
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun canonMovieModeRequiresMatchingGetPostAndWritesAction() = runTest {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},

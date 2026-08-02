@@ -1359,8 +1359,8 @@ private fun FocusDriveDirectionRow(
 
 @Composable
 private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraActions) {
-    if (setting.key.equals("zoom", ignoreCase = true)) {
-        ZoomSettingRow(setting, actions)
+    if (setting.key.lowercase() in RANGE_SETTING_KEYS) {
+        RangeSettingRow(setting, actions)
         return
     }
     val selectedIndex = setting.values.indexOf(setting.value).coerceAtLeast(0)
@@ -1401,7 +1401,7 @@ private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraAct
 }
 
 @Composable
-private fun ZoomSettingRow(setting: CameraSettingControl, actions: CameraActions) {
+private fun RangeSettingRow(setting: CameraSettingControl, actions: CameraActions) {
     val currentIndex = setting.values.indexOf(setting.value).coerceAtLeast(0)
     val settingLabel = cameraSettingLabel(setting)
     var pendingIndex by remember(setting.key) { mutableFloatStateOf(currentIndex.toFloat()) }
@@ -1410,6 +1410,11 @@ private fun ZoomSettingRow(setting: CameraSettingControl, actions: CameraActions
     }
     val selectedIndex = pendingIndex.roundToInt().coerceIn(setting.values.indices)
     val selectedValue = setting.values[selectedIndex]
+    val selectedValueLabel = if (setting.key.equals("zoom", ignoreCase = true)) {
+        stringResource(R.string.zoom_value, selectedValue)
+    } else {
+        selectedValue
+    }
     Column(
         modifier = Modifier.testTag("advanced-setting-${setting.key}"),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -1421,7 +1426,7 @@ private fun ZoomSettingRow(setting: CameraSettingControl, actions: CameraActions
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            Text(stringResource(R.string.zoom_value, selectedValue), color = AppAccent, fontWeight = FontWeight.Bold)
+            Text(selectedValueLabel, color = AppAccent, fontWeight = FontWeight.Bold)
         }
         Slider(
             value = pendingIndex,
@@ -1435,7 +1440,7 @@ private fun ZoomSettingRow(setting: CameraSettingControl, actions: CameraActions
                 .fillMaxWidth()
                 .height(48.dp)
                 .testTag("advanced-setting-values-${setting.key}")
-                .semantics { contentDescription = settingLabel },
+                .semantics { contentDescription = "$settingLabel $selectedValueLabel" },
         )
     }
 }
@@ -1468,6 +1473,7 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "colorspace" -> stringResource(R.string.setting_color_space)
     "aspectratio" -> stringResource(R.string.setting_aspect_ratio)
     "zoom" -> stringResource(R.string.setting_zoom)
+    "soundrecordinglevel" -> stringResource(R.string.setting_sound_recording_level)
     "zoomspeed" -> stringResource(R.string.setting_power_zoom_speed)
     "autopoweroff" -> stringResource(R.string.setting_auto_power_off)
     "capturetarget" -> stringResource(R.string.setting_capture_target)
@@ -1480,3 +1486,5 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "ae" -> stringResource(R.string.setting_ae_mode)
     else -> setting.label
 }
+
+private val RANGE_SETTING_KEYS = setOf("zoom", "soundrecordinglevel")

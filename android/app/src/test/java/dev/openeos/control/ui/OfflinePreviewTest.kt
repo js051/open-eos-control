@@ -17,7 +17,12 @@ class OfflinePreviewTest {
         assertEquals(null, state.transport)
         assertTrue(state.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(state.supports(CameraFeature.VIDEO_RECORDING))
+        assertTrue(state.supports(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL))
         assertTrue(state.capabilities?.advancedSettings.orEmpty().any { it.key == "autopoweroff" })
+        assertEquals(
+            (0..63).map(Int::toString),
+            state.capabilities?.advancedSettings.orEmpty().single { it.key == "soundrecordinglevel" }.values,
+        )
         assertFalse(state.pendingOperations.isNotEmpty())
     }
 }

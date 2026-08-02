@@ -114,6 +114,7 @@
 "setting_aspect_ratio" = "Aspect ratio";
 "setting_power_zoom_speed" = "Power zoom speed";
 "setting_zoom" = "Zoom";
+"setting_sound_recording_level" = "Sound recording level";
 "setting_auto_power_off" = "Auto power off";
 "setting_capture_target" = "Capture target";
 "setting_capture_storage" = "Recording card";

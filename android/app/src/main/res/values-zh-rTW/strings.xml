@@ -266,6 +266,7 @@
     <string name="physical_validation_copied">已複製真機驗證紀錄</string>
     <string name="setting_zoom">變焦</string>
     <string name="zoom_value">%1$s%%</string>
+    <string name="setting_sound_recording_level">錄音音量</string>
     <string name="lens">鏡頭</string>
     <string name="no_lens_mounted">未安裝鏡頭</string>
     <string name="temperature_status">溫度狀態</string>
