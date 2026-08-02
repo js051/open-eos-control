@@ -1339,6 +1339,115 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
     }
 
+    func testCanonFocusBracketingRequiresExactPairsAndWritesIntegerAfterRefresh() async throws {
+        let transport = MockCameraHTTPTransport()
+        let rootPath = "/ccapi/ver100/shooting/settings/focusbracketing"
+        let smoothingPath = "\(rootPath)/exposuresmoothing"
+        let shotsPath = "\(rootPath)/numberofshots"
+        let incrementPath = "\(rootPath)/focusincrement"
+        let root = #"{"value":"disable","ability":["enable","disable"]}"#
+        let smoothing = #"{"value":"disable","ability":["enable","disable"]}"#
+        let shots = #"{"value":100,"ability":{"min":2,"max":999,"step":1}}"#
+        let increment = #"{"value":4,"ability":{"min":1,"max":10,"step":1}}"#
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/focusbracketing","get":true,"put":true},{"path":"/shooting/settings/focusbracketing/numberofshots","get":true,"put":true},{"path":"/shooting/settings/focusbracketing/focusincrement","get":true,"put":true},{"path":"/shooting/settings/focusbracketing/exposuresmoothing","get":true,"put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        for (path, body) in [(rootPath, root), (smoothingPath, smoothing), (shotsPath, shots), (incrementPath, increment)] {
+            await transport.enqueueJSON(path: path, body: body)
+        }
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        for (path, body) in [(rootPath, root), (smoothingPath, smoothing), (shotsPath, shots), (incrementPath, increment)] {
+            await transport.enqueueJSON(path: path, body: body)
+        }
+        await transport.enqueueJSON(method: "PUT", path: shotsPath, body: #"{"value":250}"#)
+        await enqueueStatus(on: transport)
+        for (path, body) in [
+            (rootPath, root),
+            (smoothingPath, smoothing),
+            (shotsPath, #"{"value":250,"ability":{"min":2,"max":999,"step":1}}"#),
+            (incrementPath, increment),
+        ] {
+            await transport.enqueueJSON(path: path, body: body)
+        }
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertTrue(capabilities.matrix.supports(.focusBracketingControl))
+        XCTAssertEqual(capabilities.setting("focusbracketing")?.values, ["enable", "disable"])
+        XCTAssertEqual(capabilities.setting("focusbracketingnumberofshots")?.values, (2...999).map(String.init))
+        XCTAssertEqual(capabilities.setting("focusbracketingfocusincrement")?.values, (1...10).map(String.init))
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("focusbracketing"))
+
+        _ = try await client.setSetting(key: "focusbracketingnumberofshots", value: "250")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first { $0.method == "PUT" && $0.path == shotsPath })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["value"] as? Int, 250)
+        XCTAssertGreaterThanOrEqual(requests.filter { $0.path == shotsPath }.count, 3)
+    }
+
+    func testCanonFocusBracketingMalformedRootHidesGroupWithoutChildReads() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/focusbracketing","get":true,"put":true},{"path":"/shooting/settings/focusbracketing/numberofshots","get":true,"put":true},{"path":"/shooting/settings/focusbracketing/focusincrement","get":true,"put":true},{"path":"/shooting/settings/focusbracketing/exposuresmoothing","get":true,"put":true}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings",
+            body: #"{"focusbracketing":{"value":"disable","ability":["enable","disable"]}}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings/focusbracketing",
+            body: #"{"value":"disable","ability":["disable","disable"]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertFalse(capabilities.matrix.supports(.focusBracketingControl))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.focusBracketingControl))
+        XCTAssertFalse(capabilities.settings.contains { $0.key.hasPrefix("focusbracketing") })
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.filter { $0.path.contains("/focusbracketing") }.count, 1)
+    }
+
+    func testCanonFocusBracketingDoesNotCombineGetPutAcrossVersions() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/focusbracketing","get":true}],"ver110":[{"path":"/shooting/settings/focusbracketing","put":true}]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings",
+            body: #"{"focusbracketing":{"value":"disable","ability":["enable","disable"]}}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertFalse(capabilities.matrix.supports(.focusBracketingControl))
+        XCTAssertNil(capabilities.setting("focusbracketing"))
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 2)
+    }
+
     func testCanonMovieModeRequiresMatchingGetPostAndWritesAction() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(

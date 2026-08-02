@@ -71,6 +71,9 @@ SOUND_RECORDING_ABILITY = ["auto", "manual", "disable"]
 WIND_FILTER_ABILITY = ["auto", "enable", "disable"]
 ATTENUATOR_ABILITY = ["enable", "disable", "auto", "manual"]
 CARD_SELECTION_ABILITY = ["none", "card1", "card2"]
+FOCUS_BRACKETING_ABILITY = ["enable", "disable"]
+FOCUS_BRACKETING_SHOTS_ABILITY = {"min": 2, "max": 999, "step": 1}
+FOCUS_BRACKETING_INCREMENT_ABILITY = {"min": 1, "max": 10, "step": 1}
 
 def initial_state() -> dict[str, object]:
     return {
@@ -114,6 +117,14 @@ def initial_state() -> dict[str, object]:
         "wind_filter_update_count": 0,
         "attenuator": "disable",
         "attenuator_update_count": 0,
+        "focus_bracketing": "disable",
+        "focus_bracketing_update_count": 0,
+        "focus_bracketing_shots": 100,
+        "focus_bracketing_shots_update_count": 0,
+        "focus_bracketing_increment": 4,
+        "focus_bracketing_increment_update_count": 0,
+        "focus_bracketing_exposure_smoothing": "disable",
+        "focus_bracketing_exposure_smoothing_update_count": 0,
         "canonical_af_start_count": 0,
         "canonical_af_stop_count": 0,
         "canonical_focus_position": None,
@@ -286,6 +297,22 @@ async def get_test_state() -> dict[str, object]:
             "value": state["attenuator"],
             "update_count": state["attenuator_update_count"],
         },
+        "focus_bracketing": {
+            "value": state["focus_bracketing"],
+            "update_count": state["focus_bracketing_update_count"],
+        },
+        "focus_bracketing_shots": {
+            "value": state["focus_bracketing_shots"],
+            "update_count": state["focus_bracketing_shots_update_count"],
+        },
+        "focus_bracketing_increment": {
+            "value": state["focus_bracketing_increment"],
+            "update_count": state["focus_bracketing_increment_update_count"],
+        },
+        "focus_bracketing_exposure_smoothing": {
+            "value": state["focus_bracketing_exposure_smoothing"],
+            "update_count": state["focus_bracketing_exposure_smoothing_update_count"],
+        },
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
         "canonical": {
@@ -363,6 +390,22 @@ async def get_capabilities() -> dict[str, object]:
             "value": state["movie_card_selection"],
             "ability": CARD_SELECTION_ABILITY,
         },
+        "focusbracketing": {
+            "value": state["focus_bracketing"],
+            "ability": FOCUS_BRACKETING_ABILITY,
+        },
+        "focusbracketingnumberofshots": {
+            "value": state["focus_bracketing_shots"],
+            "ability": FOCUS_BRACKETING_SHOTS_ABILITY,
+        },
+        "focusbracketingfocusincrement": {
+            "value": state["focus_bracketing_increment"],
+            "ability": FOCUS_BRACKETING_INCREMENT_ABILITY,
+        },
+        "focusbracketingexposuresmoothing": {
+            "value": state["focus_bracketing_exposure_smoothing"],
+            "ability": FOCUS_BRACKETING_ABILITY,
+        },
     }
     if state["sound_recording"] != "disable":
         result["windfilter"] = {"value": state["wind_filter"], "ability": WIND_FILTER_ABILITY}
@@ -417,6 +460,34 @@ def update_string_setting(
     state[f"{state_key}_update_count"] += 1
     publish_event(event_key)
     return True
+
+
+def update_integer_setting(
+    payload: dict[str, object],
+    *,
+    state_key: str,
+    ability: dict[str, int],
+    event_key: str,
+) -> bool:
+    value = payload.get("value")
+    if set(payload) != {"value"} or isinstance(value, bool) or not isinstance(value, int):
+        return False
+    if value < ability["min"] or value > ability["max"]:
+        return False
+    if (value - ability["min"]) % ability["step"] != 0:
+        return False
+    state[state_key] = value
+    state[f"{state_key}_update_count"] += 1
+    publish_event(event_key)
+    return True
+
+
+def focus_bracketing_unavailable() -> JSONResponse | None:
+    if state["recording"]:
+        return JSONResponse(status_code=503, content={"message": "During shooting or recording"})
+    if state["movie_mode"] == "on":
+        return JSONResponse(status_code=503, content={"message": "Mode not supported"})
+    return None
 
 
 def sound_recording_unavailable(*, requires_manual: bool = False) -> JSONResponse | None:
@@ -477,6 +548,66 @@ async def update_simulator_sound_recording_level(payload: dict[str, object]) -> 
     if unavailable is not None:
         return unavailable
     if not update_sound_recording_level(payload):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/focus-bracketing", status_code=204)
+async def update_simulator_focus_bracketing(payload: dict[str, object]) -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="focus_bracketing",
+        ability=FOCUS_BRACKETING_ABILITY,
+        event_key="focusbracketing",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/focus-bracketing/number-of-shots", status_code=204)
+async def update_simulator_focus_bracketing_shots(payload: dict[str, object]) -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_integer_setting(
+        payload,
+        state_key="focus_bracketing_shots",
+        ability=FOCUS_BRACKETING_SHOTS_ABILITY,
+        event_key="focusbracketingnumberofshots",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/focus-bracketing/focus-increment", status_code=204)
+async def update_simulator_focus_bracketing_increment(payload: dict[str, object]) -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_integer_setting(
+        payload,
+        state_key="focus_bracketing_increment",
+        ability=FOCUS_BRACKETING_INCREMENT_ABILITY,
+        event_key="focusbracketingfocusincrement",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/focus-bracketing/exposure-smoothing", status_code=204)
+async def update_simulator_focus_bracketing_smoothing(payload: dict[str, object]) -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="focus_bracketing_exposure_smoothing",
+        ability=FOCUS_BRACKETING_ABILITY,
+        event_key="focusbracketingexposuresmoothing",
+    ):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return Response(status_code=204)
 
@@ -682,6 +813,10 @@ CANON_DISCOVERY = {
         {"path": "/shooting/settings/soundrecording/level", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording/windfilter", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording/attenuator", "get": True, "put": True},
+        {"path": "/shooting/settings/focusbracketing", "get": True, "put": True},
+        {"path": "/shooting/settings/focusbracketing/numberofshots", "get": True, "put": True},
+        {"path": "/shooting/settings/focusbracketing/focusincrement", "get": True, "put": True},
+        {"path": "/shooting/settings/focusbracketing/exposuresmoothing", "get": True, "put": True},
         {"path": "/functions/datetime", "get": True, "put": True},
         {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
         {"path": "/functions/cardselection/movie", "get": True, "put": True},
@@ -841,6 +976,18 @@ async def canon_set_shooting_setting(key: str, payload: dict[str, object]) -> Re
         ):
             return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
         return JSONResponse(content={"value": state["sound_recording"]})
+    if key == "focusbracketing":
+        unavailable = focus_bracketing_unavailable()
+        if unavailable is not None:
+            return unavailable
+        if not update_string_setting(
+            payload,
+            state_key="focus_bracketing",
+            ability=FOCUS_BRACKETING_ABILITY,
+            event_key="focusbracketing",
+        ):
+            return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+        return JSONResponse(content={"value": state["focus_bracketing"]})
     if key == "shootingmode":
         if value not in {"Manual", "Bulb", "movie"}:
             raise HTTPException(status_code=422, detail=f"Unsupported shootingmode: {value}")
@@ -936,6 +1083,97 @@ async def canon_set_attenuator(payload: dict[str, object]) -> Response:
     ):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return JSONResponse(content={"value": state["attenuator"]})
+
+
+@app.get("/ccapi/ver100/shooting/settings/focusbracketing")
+async def canon_get_focus_bracketing() -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(
+        content={"value": state["focus_bracketing"], "ability": FOCUS_BRACKETING_ABILITY}
+    )
+
+
+@app.get("/ccapi/ver100/shooting/settings/focusbracketing/numberofshots")
+async def canon_get_focus_bracketing_shots() -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(
+        content={"value": state["focus_bracketing_shots"], "ability": FOCUS_BRACKETING_SHOTS_ABILITY}
+    )
+
+
+@app.put("/ccapi/ver100/shooting/settings/focusbracketing/numberofshots")
+async def canon_set_focus_bracketing_shots(payload: dict[str, object]) -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_integer_setting(
+        payload,
+        state_key="focus_bracketing_shots",
+        ability=FOCUS_BRACKETING_SHOTS_ABILITY,
+        event_key="focusbracketingnumberofshots",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["focus_bracketing_shots"]})
+
+
+@app.get("/ccapi/ver100/shooting/settings/focusbracketing/focusincrement")
+async def canon_get_focus_bracketing_increment() -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(
+        content={
+            "value": state["focus_bracketing_increment"],
+            "ability": FOCUS_BRACKETING_INCREMENT_ABILITY,
+        }
+    )
+
+
+@app.put("/ccapi/ver100/shooting/settings/focusbracketing/focusincrement")
+async def canon_set_focus_bracketing_increment(payload: dict[str, object]) -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_integer_setting(
+        payload,
+        state_key="focus_bracketing_increment",
+        ability=FOCUS_BRACKETING_INCREMENT_ABILITY,
+        event_key="focusbracketingfocusincrement",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["focus_bracketing_increment"]})
+
+
+@app.get("/ccapi/ver100/shooting/settings/focusbracketing/exposuresmoothing")
+async def canon_get_focus_bracketing_smoothing() -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(
+        content={
+            "value": state["focus_bracketing_exposure_smoothing"],
+            "ability": FOCUS_BRACKETING_ABILITY,
+        }
+    )
+
+
+@app.put("/ccapi/ver100/shooting/settings/focusbracketing/exposuresmoothing")
+async def canon_set_focus_bracketing_smoothing(payload: dict[str, object]) -> Response:
+    unavailable = focus_bracketing_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="focus_bracketing_exposure_smoothing",
+        ability=FOCUS_BRACKETING_ABILITY,
+        event_key="focusbracketingexposuresmoothing",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["focus_bracketing_exposure_smoothing"]})
 
 
 @app.get("/ccapi/ver100/functions/datetime")

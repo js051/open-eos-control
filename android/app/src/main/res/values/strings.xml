@@ -239,6 +239,10 @@
     <string name="setting_sound_recording">Sound recording</string>
     <string name="setting_wind_filter">Wind filter</string>
     <string name="setting_attenuator">Attenuator</string>
+    <string name="setting_focus_bracketing">Focus bracketing</string>
+    <string name="setting_focus_bracketing_shots">Number of shots</string>
+    <string name="setting_focus_bracketing_increment">Focus increment</string>
+    <string name="setting_focus_bracketing_exposure_smoothing">Exposure smoothing</string>
     <string name="setting_auto_power_off">Auto power off</string>
     <string name="setting_capture_target">Capture target</string>
     <string name="setting_high_iso_noise_reduction">High ISO noise reduction</string>

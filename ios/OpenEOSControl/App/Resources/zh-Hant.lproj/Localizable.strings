@@ -118,6 +118,10 @@
 "setting_sound_recording" = "錄音模式";
 "setting_wind_filter" = "風聲抑制";
 "setting_attenuator" = "衰減器";
+"setting_focus_bracketing" = "對焦包圍拍攝";
+"setting_focus_bracketing_shots" = "拍攝張數";
+"setting_focus_bracketing_increment" = "對焦增量";
+"setting_focus_bracketing_exposure_smoothing" = "曝光平滑";
 "setting_auto_power_off" = "自動關閉電源";
 "setting_capture_target" = "拍攝儲存位置";
 "setting_capture_storage" = "拍攝記錄卡";

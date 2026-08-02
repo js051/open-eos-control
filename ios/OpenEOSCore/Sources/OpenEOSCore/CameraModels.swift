@@ -28,6 +28,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case cardSelectionControl = "CARD_SELECTION_CONTROL"
     case soundRecordingControl = "SOUND_RECORDING_CONTROL"
     case soundRecordingLevelControl = "SOUND_RECORDING_LEVEL_CONTROL"
+    case focusBracketingControl = "FOCUS_BRACKETING_CONTROL"
     case advancedSettings = "ADVANCED_SETTINGS"
     case mediaBrowser = "MEDIA_BROWSER"
     case mediaThumbnail = "MEDIA_THUMBNAIL"

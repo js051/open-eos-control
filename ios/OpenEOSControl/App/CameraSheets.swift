@@ -733,7 +733,12 @@ private struct MoreSettingsView: View {
 
     @ViewBuilder
     private func settingRow(_ setting: CameraSetting) -> some View {
-        if ["zoom", "soundrecordinglevel"].contains(setting.key.lowercased()) {
+        if [
+            "zoom",
+            "soundrecordinglevel",
+            "focusbracketingnumberofshots",
+            "focusbracketingfocusincrement",
+        ].contains(setting.key.lowercased()) {
             rangeSettingRow(setting)
         } else {
             HStack(spacing: 12) {

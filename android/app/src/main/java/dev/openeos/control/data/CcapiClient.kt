@@ -508,6 +508,9 @@ class CcapiClient(
             if (advancedSettings.any { it.key == SOUND_RECORDING_LEVEL_SETTING_KEY }) {
                 supportedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
             }
+            if (advancedSettings.any { it.key == FOCUS_BRACKETING_SETTING_KEY }) {
+                supportedFeatures.add(CameraFeature.FOCUS_BRACKETING_CONTROL)
+            }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
             val supportsRtpLiveView = supportsRtpLiveView()
@@ -696,6 +699,14 @@ class CcapiClient(
                     loadShootingSettings()
                     putIntegerSettingValue(SOUND_RECORDING_LEVEL_SETTING_KEY, value)
                 }
+                key.lowercase() in FOCUS_BRACKETING_STRING_SETTING_KEYS -> {
+                    loadShootingSettings()
+                    putSettingValue(listOf(key.lowercase()), value)
+                }
+                key.lowercase() in FOCUS_BRACKETING_INTEGER_SETTING_KEYS -> {
+                    loadShootingSettings()
+                    putIntegerSettingValue(key.lowercase(), value)
+                }
                 else -> putSettingValue(listOf(key), value)
             }
             status()
@@ -734,6 +745,29 @@ class CcapiClient(
                         ?.takeIf { it.toString() == value && value in SOUND_RECORDING_LEVEL_VALUES }
                         ?: error("Sound recording level is not supported.")
                     putOk("/ccapi/sound-recording-level", JSONObject().put("value", level))
+                }
+                key.lowercase() in FOCUS_BRACKETING_STRING_SETTING_KEYS -> {
+                    val canonical = key.lowercase()
+                    require(value in FOCUS_BRACKETING_STRING_ENDPOINTS.getValue(canonical).values) {
+                        "${canonical.toSettingLabel()} value is not supported."
+                    }
+                    putOk(
+                        "/ccapi/${FOCUS_BRACKETING_STRING_ENDPOINTS.getValue(canonical).simulatorPath}",
+                        JSONObject().put("value", value),
+                    )
+                }
+                key.lowercase() in FOCUS_BRACKETING_INTEGER_SETTING_KEYS -> {
+                    val canonical = key.lowercase()
+                    val integer = value.toIntOrNull()
+                        ?.takeIf {
+                            it.toString() == value &&
+                                value in FOCUS_BRACKETING_SIMULATOR_VALUES.getValue(canonical)
+                        }
+                        ?: error("${canonical.toSettingLabel()} is not supported.")
+                    putOk(
+                        "/ccapi/${FOCUS_BRACKETING_INTEGER_ENDPOINTS.getValue(canonical).simulatorPath}",
+                        JSONObject().put("value", integer),
+                    )
                 }
                 else -> throw UnsupportedOperationException(
                     "${featureForSetting(key).label} is not supported by the simulator.",
@@ -1394,6 +1428,7 @@ class CcapiClient(
             CameraFeature.CARD_SELECTION_CONTROL
         in SOUND_RECORDING_SETTING_KEYS -> CameraFeature.SOUND_RECORDING_CONTROL
         SOUND_RECORDING_LEVEL_SETTING_KEY -> CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
+        in FOCUS_BRACKETING_SETTING_KEYS -> CameraFeature.FOCUS_BRACKETING_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
     }
 
@@ -1443,6 +1478,17 @@ class CcapiClient(
             .sortedByDescending { it.apiVersionNumber() }
         return reads.firstNotNullOfOrNull { read ->
             apiOperations.firstOrNull { it.method == "PUT" && it.path == read.path }
+                ?.let { write -> read to write }
+        }
+    }
+
+    private fun readWriteSettingOperations(pathSuffix: String): Pair<CcapiApiOperation, CcapiApiOperation>? {
+        val reads = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith(pathSuffix) }
+            .sortedByDescending { it.apiVersionNumber() }
+        return reads.firstNotNullOfOrNull { read ->
+            CcapiApiOperation("PUT", read.path)
+                .takeIf(apiOperations::contains)
                 ?.let { write -> read to write }
         }
     }
@@ -1940,6 +1986,7 @@ class CcapiClient(
         observedFeatures.remove(CameraFeature.CARD_SELECTION_CONTROL)
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_CONTROL)
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+        observedFeatures.remove(CameraFeature.FOCUS_BRACKETING_CONTROL)
         settingsLoaded = false
         val merged = JSONObject()
 
@@ -1965,6 +2012,7 @@ class CcapiClient(
                 if (
                     key !in SOUND_RECORDING_SETTING_KEYS &&
                     key != SOUND_RECORDING_LEVEL_SETTING_KEY &&
+                    key !in FOCUS_BRACKETING_SETTING_KEYS &&
                     (!enforceAdvertisedOperations || apiOperations.contains(CcapiApiOperation("PUT", settingPath)))
                 ) {
                     settingPathsByKey.putIfAbsent(key, settingPath)
@@ -2105,6 +2153,47 @@ class CcapiClient(
                 settingValuesByKey[SOUND_RECORDING_LEVEL_SETTING_KEY] = values
                 merged.put(SOUND_RECORDING_LEVEL_SETTING_KEY, soundRecordingLevel)
                 observedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+            }
+        }
+
+        var focusBracketingAvailable = false
+        FOCUS_BRACKETING_STRING_ENDPOINTS.forEach { (key, definition) ->
+            if (key != FOCUS_BRACKETING_SETTING_KEY && !focusBracketingAvailable) return@forEach
+            readWriteSettingOperations(definition.pathSuffix)?.let { (read, write) ->
+                val setting = try {
+                    getJson(read.path).toValidatedStringAbilitySetting(definition.values)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    null
+                }
+                if (setting != null) {
+                    settingPathsByKey[key] = write.path
+                    settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
+                    merged.put(key, setting)
+                    if (key == FOCUS_BRACKETING_SETTING_KEY) {
+                        focusBracketingAvailable = true
+                        observedFeatures.add(CameraFeature.FOCUS_BRACKETING_CONTROL)
+                    }
+                }
+            }
+        }
+        if (focusBracketingAvailable) {
+            FOCUS_BRACKETING_INTEGER_ENDPOINTS.forEach { (key, definition) ->
+                readWriteSettingOperations(definition.pathSuffix)?.let { (read, write) ->
+                    val setting = try {
+                        getJson(read.path).toValidatedIntegerRangeSetting(MAX_FOCUS_BRACKETING_OPTIONS)
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (setting != null) {
+                        settingPathsByKey[key] = write.path
+                        settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
+                        merged.put(key, setting)
+                    }
+                }
             }
         }
 
@@ -2749,6 +2838,51 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
                 values = setting.getJSONArray("ability").toStringList(),
             )
         }
+    val focusBracketingControls = buildList {
+        val rootDefinition = FOCUS_BRACKETING_STRING_ENDPOINTS.getValue(FOCUS_BRACKETING_SETTING_KEY)
+        val root = optJSONObject(FOCUS_BRACKETING_SETTING_KEY)
+            ?.toValidatedStringAbilitySetting(rootDefinition.values)
+        if (root != null) {
+            add(
+                CameraSettingControl(
+                    key = FOCUS_BRACKETING_SETTING_KEY,
+                    label = FOCUS_BRACKETING_SETTING_KEY.toSettingLabel(),
+                    value = root.getString("value"),
+                    values = root.getJSONArray("ability").toStringList(),
+                ),
+            )
+            FOCUS_BRACKETING_STRING_ENDPOINTS
+                .filterKeys { it != FOCUS_BRACKETING_SETTING_KEY }
+                .forEach { (key, definition) ->
+                    optJSONObject(key)
+                        ?.toValidatedStringAbilitySetting(definition.values)
+                        ?.let { setting ->
+                            add(
+                                CameraSettingControl(
+                                    key = key,
+                                    label = key.toSettingLabel(),
+                                    value = setting.getString("value"),
+                                    values = setting.getJSONArray("ability").toStringList(),
+                                ),
+                            )
+                        }
+                }
+            FOCUS_BRACKETING_INTEGER_ENDPOINTS.forEach { (key, _) ->
+                optJSONObject(key)
+                    ?.toValidatedIntegerRangeSetting(MAX_FOCUS_BRACKETING_OPTIONS)
+                    ?.let { setting ->
+                        add(
+                            CameraSettingControl(
+                                key = key,
+                                label = key.toSettingLabel(),
+                                value = setting.getString("value"),
+                                values = setting.getJSONArray("ability").toStringList(),
+                            ),
+                        )
+                    }
+            }
+        }
+    }
     val movieModeControl = optJSONObject(MOVIE_MODE_SETTING_KEY)
         ?.toValidatedMovieModeSetting()
         ?.let { setting ->
@@ -2802,6 +2936,11 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             setOf(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
         } else {
             emptySet()
+        }) +
+        (if (focusBracketingControls.any { it.key == FOCUS_BRACKETING_SETTING_KEY }) {
+            setOf(CameraFeature.FOCUS_BRACKETING_CONTROL)
+        } else {
+            emptySet()
         })
     return CameraCapabilities(
         iso = getJSONArray("iso").toStringList(),
@@ -2815,6 +2954,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             movieCardSelection,
             *soundRecordingControls.toTypedArray(),
             soundRecordingLevel,
+            *focusBracketingControls.toTypedArray(),
         ),
         matrix = CapabilityMatrix.ccapiNetwork(supported),
         liveView = LiveViewCapabilities.simulator(),
@@ -2957,6 +3097,10 @@ private fun String.toSettingLabel(): String =
         WIND_FILTER_SETTING_KEY -> "Wind filter"
         ATTENUATOR_SETTING_KEY -> "Attenuator"
         SOUND_RECORDING_LEVEL_SETTING_KEY -> "Sound recording level"
+        FOCUS_BRACKETING_SETTING_KEY -> "Focus bracketing"
+        FOCUS_BRACKETING_NUMBER_SETTING_KEY -> "Focus bracketing shots"
+        FOCUS_BRACKETING_INCREMENT_SETTING_KEY -> "Focus increment"
+        FOCUS_BRACKETING_SMOOTHING_SETTING_KEY -> "Exposure smoothing"
         "shootingmode" -> "Shooting mode"
         "stillimagequality" -> "Image quality"
         "stillimagequality.raw" -> "RAW quality"
@@ -3037,6 +3181,50 @@ private val SOUND_RECORDING_ENDPOINTS = linkedMapOf(
 )
 private val SOUND_RECORDING_SETTING_KEYS = SOUND_RECORDING_ENDPOINTS.keys
 private const val MAX_STRUCTURED_SETTING_OPTIONS = 256
+private const val MAX_FOCUS_BRACKETING_OPTIONS = 1024
+private const val FOCUS_BRACKETING_SETTING_KEY = "focusbracketing"
+private const val FOCUS_BRACKETING_NUMBER_SETTING_KEY = "focusbracketingnumberofshots"
+private const val FOCUS_BRACKETING_INCREMENT_SETTING_KEY = "focusbracketingfocusincrement"
+private const val FOCUS_BRACKETING_SMOOTHING_SETTING_KEY = "focusbracketingexposuresmoothing"
+private data class FocusBracketingStringEndpoint(
+    val pathSuffix: String,
+    val simulatorPath: String,
+    val values: Set<String>,
+)
+private data class FocusBracketingIntegerEndpoint(
+    val pathSuffix: String,
+    val simulatorPath: String,
+)
+private val FOCUS_BRACKETING_STRING_ENDPOINTS = linkedMapOf(
+    FOCUS_BRACKETING_SETTING_KEY to FocusBracketingStringEndpoint(
+        pathSuffix = "/shooting/settings/focusbracketing",
+        simulatorPath = "focus-bracketing",
+        values = linkedSetOf("enable", "disable"),
+    ),
+    FOCUS_BRACKETING_SMOOTHING_SETTING_KEY to FocusBracketingStringEndpoint(
+        pathSuffix = "/shooting/settings/focusbracketing/exposuresmoothing",
+        simulatorPath = "focus-bracketing/exposure-smoothing",
+        values = linkedSetOf("enable", "disable"),
+    ),
+)
+private val FOCUS_BRACKETING_INTEGER_ENDPOINTS = linkedMapOf(
+    FOCUS_BRACKETING_NUMBER_SETTING_KEY to FocusBracketingIntegerEndpoint(
+        pathSuffix = "/shooting/settings/focusbracketing/numberofshots",
+        simulatorPath = "focus-bracketing/number-of-shots",
+    ),
+    FOCUS_BRACKETING_INCREMENT_SETTING_KEY to FocusBracketingIntegerEndpoint(
+        pathSuffix = "/shooting/settings/focusbracketing/focusincrement",
+        simulatorPath = "focus-bracketing/focus-increment",
+    ),
+)
+private val FOCUS_BRACKETING_STRING_SETTING_KEYS = FOCUS_BRACKETING_STRING_ENDPOINTS.keys
+private val FOCUS_BRACKETING_INTEGER_SETTING_KEYS = FOCUS_BRACKETING_INTEGER_ENDPOINTS.keys
+private val FOCUS_BRACKETING_SETTING_KEYS =
+    FOCUS_BRACKETING_STRING_SETTING_KEYS + FOCUS_BRACKETING_INTEGER_SETTING_KEYS
+private val FOCUS_BRACKETING_SIMULATOR_VALUES = mapOf(
+    FOCUS_BRACKETING_NUMBER_SETTING_KEY to (2..999).map(Int::toString).toSet(),
+    FOCUS_BRACKETING_INCREMENT_SETTING_KEY to (1..10).map(Int::toString).toSet(),
+)
 
 private fun Any?.toExactJsonInt(): Int? = when (this) {
     is Byte -> toInt()
@@ -3046,13 +3234,15 @@ private fun Any?.toExactJsonInt(): Int? = when (this) {
     else -> null
 }
 
-private fun JSONObject.toBoundedIntegerRangeValues(): List<String> {
+private fun JSONObject.toBoundedIntegerRangeValues(
+    maximumOptions: Int = MAX_STRUCTURED_SETTING_OPTIONS,
+): List<String> {
     val minimum = opt("min").toExactJsonInt() ?: return emptyList()
     val maximum = opt("max").toExactJsonInt() ?: return emptyList()
     val step = opt("step").toExactJsonInt() ?: return emptyList()
     if (step <= 0 || minimum > maximum) return emptyList()
     val count = ((maximum.toLong() - minimum.toLong()) / step.toLong()) + 1L
-    if (count !in 1..MAX_STRUCTURED_SETTING_OPTIONS.toLong()) return emptyList()
+    if (count !in 1..maximumOptions.toLong()) return emptyList()
     return List(count.toInt()) { index -> (minimum.toLong() + index.toLong() * step).toString() }
 }
 
@@ -3099,10 +3289,12 @@ private fun JSONObject.toValidatedZoomSetting(): JSONObject? {
     return toValidatedIntegerRangeSetting()
 }
 
-private fun JSONObject.toValidatedIntegerRangeSetting(): JSONObject? {
+private fun JSONObject.toValidatedIntegerRangeSetting(
+    maximumOptions: Int = MAX_STRUCTURED_SETTING_OPTIONS,
+): JSONObject? {
     val current = opt("value").toExactJsonInt() ?: return null
     val ability = optJSONObject("ability") ?: return null
-    val values = ability.toBoundedIntegerRangeValues()
+    val values = ability.toBoundedIntegerRangeValues(maximumOptions)
     val currentValue = current.toString()
     if (values.size < 2 || currentValue !in values) return null
     return JSONObject()

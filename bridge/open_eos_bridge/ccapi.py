@@ -110,6 +110,26 @@ SOUND_RECORDING_ENDPOINTS = {
     ),
 }
 MAX_STRUCTURED_SETTING_OPTIONS = 256
+MAX_FOCUS_BRACKETING_OPTIONS = 1024
+FOCUS_BRACKETING_SETTING_KEY = "focusbracketing"
+FOCUS_BRACKETING_NUMBER_SETTING_KEY = "focusbracketingnumberofshots"
+FOCUS_BRACKETING_INCREMENT_SETTING_KEY = "focusbracketingfocusincrement"
+FOCUS_BRACKETING_SMOOTHING_SETTING_KEY = "focusbracketingexposuresmoothing"
+FOCUS_BRACKETING_STRING_ENDPOINTS = {
+    FOCUS_BRACKETING_SETTING_KEY: (
+        "/shooting/settings/focusbracketing",
+        frozenset({"enable", "disable"}),
+    ),
+    FOCUS_BRACKETING_SMOOTHING_SETTING_KEY: (
+        "/shooting/settings/focusbracketing/exposuresmoothing",
+        frozenset({"enable", "disable"}),
+    ),
+}
+FOCUS_BRACKETING_INTEGER_ENDPOINTS = {
+    FOCUS_BRACKETING_NUMBER_SETTING_KEY: "/shooting/settings/focusbracketing/numberofshots",
+    FOCUS_BRACKETING_INCREMENT_SETTING_KEY: "/shooting/settings/focusbracketing/focusincrement",
+}
+FOCUS_BRACKETING_SETTING_KEYS = FOCUS_BRACKETING_STRING_ENDPOINTS.keys() | FOCUS_BRACKETING_INTEGER_ENDPOINTS.keys()
 CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
 SETTING_ALIASES = {
@@ -131,6 +151,10 @@ SETTING_LABELS = {
     SOUND_RECORDING_SETTING_KEY: "Sound recording",
     WIND_FILTER_SETTING_KEY: "Wind filter",
     ATTENUATOR_SETTING_KEY: "Attenuator",
+    FOCUS_BRACKETING_SETTING_KEY: "Focus bracketing",
+    FOCUS_BRACKETING_NUMBER_SETTING_KEY: "Focus bracketing shots",
+    FOCUS_BRACKETING_INCREMENT_SETTING_KEY: "Focus increment",
+    FOCUS_BRACKETING_SMOOTHING_SETTING_KEY: "Exposure smoothing",
     "shutter": "Tv",
     "aperture": "Av",
     "whitebalance": "WB",
@@ -619,6 +643,8 @@ class CcapiSession:
                 supported.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
             if control_keys & SOUND_RECORDING_ENDPOINTS.keys():
                 supported.add(CameraFeature.SOUND_RECORDING_CONTROL)
+            if FOCUS_BRACKETING_SETTING_KEY in control_keys:
+                supported.add(CameraFeature.FOCUS_BRACKETING_CONTROL)
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             jpeg_live_view_supported = self._supports_jpeg_live_view()
@@ -697,6 +723,7 @@ class CcapiSession:
                 CameraFeature.CARD_SELECTION_CONTROL,
                 CameraFeature.SOUND_RECORDING_CONTROL,
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
+                CameraFeature.FOCUS_BRACKETING_CONTROL,
             }
             live_sizes = (
                 [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
@@ -749,6 +776,10 @@ class CcapiSession:
                     CameraFeature.SOUND_RECORDING_LEVEL_CONTROL.value: (
                         "The camera must advertise matching GET and PUT Canon sound-recording-level endpoints "
                         "and a valid integer range."
+                    ),
+                    CameraFeature.FOCUS_BRACKETING_CONTROL.value: (
+                        "The camera must advertise matching GET and PUT Canon focus-bracketing endpoints "
+                        "and valid documented abilities."
                     ),
                     CameraFeature.MOVIE_MODE_CONTROL.value: (
                         "The camera must advertise readable and writable Canon movie mode control "
@@ -829,6 +860,7 @@ class CcapiSession:
                 canonical in CARD_SELECTION_ENDPOINTS
                 or canonical in SOUND_RECORDING_ENDPOINTS
                 or canonical == SOUND_RECORDING_LEVEL_SETTING_KEY
+                or canonical in FOCUS_BRACKETING_SETTING_KEYS
             )
             control = next(
                 (item for item in self._camera_settings(settings) if item.key == canonical),
@@ -885,6 +917,24 @@ class CcapiSession:
                         engine=self.engine_name,
                     )
                 self._request_json("PUT", path, {"value": level})
+            elif canonical in FOCUS_BRACKETING_INTEGER_ENDPOINTS:
+                try:
+                    integer = int(value)
+                except ValueError as error:
+                    raise BridgeError(
+                        "INVALID_SETTING_VALUE",
+                        f"{control.label} must be an integer advertised by the camera.",
+                        status_code=422,
+                        engine=self.engine_name,
+                    ) from error
+                if str(integer) != value:
+                    raise BridgeError(
+                        "INVALID_SETTING_VALUE",
+                        f"{control.label} must be an integer advertised by the camera.",
+                        status_code=422,
+                        engine=self.engine_name,
+                    )
+                self._request_json("PUT", path, {"value": integer})
             elif structured:
                 base_key, field = structured
                 raw = settings.get(base_key)
@@ -1666,6 +1716,7 @@ class CcapiSession:
         self._observed.discard(CameraFeature.CARD_SELECTION_CONTROL)
         self._observed.discard(CameraFeature.SOUND_RECORDING_CONTROL)
         self._observed.discard(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+        self._observed.discard(CameraFeature.FOCUS_BRACKETING_CONTROL)
         for path in self._versioned_paths("/shooting/settings"):
             value = self._first_json([path])
             if not isinstance(value, dict):
@@ -1679,6 +1730,7 @@ class CcapiSession:
                     if (
                         key not in SOUND_RECORDING_ENDPOINTS
                         and key != SOUND_RECORDING_LEVEL_SETTING_KEY
+                        and key not in FOCUS_BRACKETING_SETTING_KEYS
                         and CcapiOperation("PUT", setting_path) in self._operations
                     ):
                         setting_paths[key] = setting_path
@@ -1725,6 +1777,35 @@ class CcapiSession:
                 merged[SOUND_RECORDING_LEVEL_SETTING_KEY] = sound_recording_level
                 setting_paths[SOUND_RECORDING_LEVEL_SETTING_KEY] = write.path
                 self._observed.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+        focus_bracketing_available = False
+        for key, (suffix, allowed_values) in FOCUS_BRACKETING_STRING_ENDPOINTS.items():
+            if key != FOCUS_BRACKETING_SETTING_KEY and not focus_bracketing_available:
+                continue
+            operations = self._read_write_setting_operations(suffix)
+            if operations is None:
+                continue
+            read, write = operations
+            setting = _validated_string_ability_setting(self._first_json([read.path]), allowed_values)
+            if setting is None:
+                continue
+            merged[key] = setting
+            setting_paths[key] = write.path
+            if key == FOCUS_BRACKETING_SETTING_KEY:
+                focus_bracketing_available = True
+                self._observed.add(CameraFeature.FOCUS_BRACKETING_CONTROL)
+        if focus_bracketing_available:
+            for key, suffix in FOCUS_BRACKETING_INTEGER_ENDPOINTS.items():
+                operations = self._read_write_setting_operations(suffix)
+                if operations is None:
+                    continue
+                read, write = operations
+                setting = _validated_integer_range_setting(
+                    self._first_json([read.path]),
+                    maximum_options=MAX_FOCUS_BRACKETING_OPTIONS,
+                )
+                if setting is not None:
+                    merged[key] = setting
+                    setting_paths[key] = write.path
         self._settings_cache = merged
         self._setting_paths = setting_paths
         return merged
@@ -2016,6 +2097,22 @@ class CcapiSession:
         return None
 
     def _sound_recording_operations(self, suffix: str) -> tuple[CcapiOperation, CcapiOperation] | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith(suffix)
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            write = CcapiOperation("PUT", read.path)
+            if write in self._operations:
+                return read, write
+        return None
+
+    def _read_write_setting_operations(self, suffix: str) -> tuple[CcapiOperation, CcapiOperation] | None:
         reads = sorted(
             (
                 operation
@@ -2582,7 +2679,11 @@ def _structured_wb_shift_controls(raw: dict[str, object]) -> list[CameraSetting]
     return controls
 
 
-def _bounded_integer_range_values(raw: object) -> list[str]:
+def _bounded_integer_range_values(
+    raw: object,
+    *,
+    maximum_options: int = MAX_STRUCTURED_SETTING_OPTIONS,
+) -> list[str]:
     if not isinstance(raw, dict):
         return []
     minimum = raw.get("min")
@@ -2594,18 +2695,22 @@ def _bounded_integer_range_values(raw: object) -> list[str]:
     if step <= 0 or minimum > maximum:
         return []
     count = ((maximum - minimum) // step) + 1
-    if count < 1 or count > MAX_STRUCTURED_SETTING_OPTIONS:
+    if count < 1 or count > maximum_options:
         return []
     return [str(minimum + index * step) for index in range(count)]
 
 
-def _validated_integer_range_setting(raw: object) -> dict[str, object] | None:
+def _validated_integer_range_setting(
+    raw: object,
+    *,
+    maximum_options: int = MAX_STRUCTURED_SETTING_OPTIONS,
+) -> dict[str, object] | None:
     if not isinstance(raw, dict):
         return None
     current = raw.get("value")
     if isinstance(current, bool) or not isinstance(current, int):
         return None
-    values = _bounded_integer_range_values(raw.get("ability"))
+    values = _bounded_integer_range_values(raw.get("ability"), maximum_options=maximum_options)
     current_value = str(current)
     if len(values) < 2 or current_value not in values:
         return None
@@ -2712,6 +2817,8 @@ def _feature_for_setting(key: str) -> CameraFeature:
         return CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
     if key in SOUND_RECORDING_ENDPOINTS:
         return CameraFeature.SOUND_RECORDING_CONTROL
+    if key in FOCUS_BRACKETING_SETTING_KEYS:
+        return CameraFeature.FOCUS_BRACKETING_CONTROL
     if key in CARD_SELECTION_ENDPOINTS:
         return CameraFeature.CARD_SELECTION_CONTROL
     return CameraFeature.ADVANCED_SETTINGS

@@ -89,6 +89,7 @@ enum class CameraFeature(
     CARD_SELECTION_CONTROL("Card selection control"),
     SOUND_RECORDING_CONTROL("Sound recording control"),
     SOUND_RECORDING_LEVEL_CONTROL("Sound recording level control"),
+    FOCUS_BRACKETING_CONTROL("Focus bracketing control"),
     ADVANCED_SETTINGS("Advanced camera settings"),
     MEDIA_BROWSER("Media browser"),
     MEDIA_THUMBNAIL("Media thumbnail"),
@@ -144,6 +145,7 @@ data class CapabilityMatrix(
                 CameraFeature.CARD_SELECTION_CONTROL,
                 CameraFeature.SOUND_RECORDING_CONTROL,
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
+                CameraFeature.FOCUS_BRACKETING_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
@@ -177,6 +179,8 @@ data class CapabilityMatrix(
                     "The camera must advertise matching GET and PUT Canon sound-recording-setting endpoints and valid documented abilities.",
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL to
                     "The camera must advertise matching GET and PUT Canon sound-recording-level endpoints and a valid integer range.",
+                CameraFeature.FOCUS_BRACKETING_CONTROL to
+                    "The camera must advertise matching GET and PUT Canon focus-bracketing endpoints and valid documented abilities.",
                 CameraFeature.MOVIE_MODE_CONTROL to
                     "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                 CameraFeature.CAMERA_CLOCK_SYNC to
@@ -238,6 +242,7 @@ data class CapabilityMatrix(
                 CameraFeature.CARD_SELECTION_CONTROL,
                 CameraFeature.SOUND_RECORDING_CONTROL,
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
+                CameraFeature.FOCUS_BRACKETING_CONTROL,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,

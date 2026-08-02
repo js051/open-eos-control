@@ -272,6 +272,10 @@
     <string name="setting_sound_recording">錄音模式</string>
     <string name="setting_wind_filter">風聲抑制</string>
     <string name="setting_attenuator">衰減器</string>
+    <string name="setting_focus_bracketing">對焦包圍拍攝</string>
+    <string name="setting_focus_bracketing_shots">拍攝張數</string>
+    <string name="setting_focus_bracketing_increment">對焦增量</string>
+    <string name="setting_focus_bracketing_exposure_smoothing">曝光平滑</string>
     <string name="lens">鏡頭</string>
     <string name="no_lens_mounted">未安裝鏡頭</string>
     <string name="temperature_status">溫度狀態</string>

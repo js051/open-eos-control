@@ -193,11 +193,19 @@ final class CameraAppTests: XCTestCase {
             CameraSetting(key: "soundrecordinglevel", label: "Sound recording level", value: "32", values: (0...63).map(String.init)),
             CameraSetting(key: "windfilter", label: "Wind filter", value: "auto", values: ["auto", "enable", "disable"]),
             CameraSetting(key: "attenuator", label: "Attenuator", value: "disable", values: ["enable", "disable", "auto", "manual"]),
+            CameraSetting(key: "focusbracketing", label: "Focus bracketing", value: "disable", values: ["enable", "disable"]),
+            CameraSetting(key: "focusbracketingnumberofshots", label: "Number of shots", value: "100", values: (2...999).map(String.init)),
+            CameraSetting(key: "focusbracketingfocusincrement", label: "Focus increment", value: "4", values: (1...10).map(String.init)),
+            CameraSetting(key: "focusbracketingexposuresmoothing", label: "Exposure smoothing", value: "disable", values: ["enable", "disable"]),
         ]
 
         XCTAssertEqual(
             advancedSettingsForMode(settings, mode: .photo).map(\.key),
-            ["drivemode", "meteringmode", "capturetarget", "capturestorage", "cardselectionstillimage"]
+            [
+                "drivemode", "meteringmode", "capturetarget", "capturestorage", "cardselectionstillimage",
+                "focusbracketing", "focusbracketingnumberofshots", "focusbracketingfocusincrement",
+                "focusbracketingexposuresmoothing",
+            ]
         )
         XCTAssertEqual(
             advancedSettingsForMode(settings, mode: .video).map(\.key),
@@ -224,6 +232,10 @@ final class CameraAppTests: XCTestCase {
             "soundrecordinglevel": "setting_sound_recording_level",
             "windfilter": "setting_wind_filter",
             "attenuator": "setting_attenuator",
+            "focusbracketing": "setting_focus_bracketing",
+            "focusbracketingnumberofshots": "setting_focus_bracketing_shots",
+            "focusbracketingfocusincrement": "setting_focus_bracketing_increment",
+            "focusbracketingexposuresmoothing": "setting_focus_bracketing_exposure_smoothing",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
             "alomode": "setting_auto_lighting_optimizer",
@@ -322,6 +334,7 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveViewMagnification))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingLevelControl))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingControl))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusBracketingControl))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
         XCTAssertEqual(
@@ -335,6 +348,14 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(
             snapshot.capabilities.setting("soundrecordinglevel")?.values,
             (0...63).map(String.init)
+        )
+        XCTAssertEqual(
+            snapshot.capabilities.setting("focusbracketingnumberofshots")?.values,
+            (2...999).map(String.init)
+        )
+        XCTAssertEqual(
+            snapshot.capabilities.setting("focusbracketingfocusincrement")?.values,
+            (1...10).map(String.init)
         )
     }
 
@@ -537,6 +558,25 @@ final class CameraAppTests: XCTestCase {
         await state.setSetting(key: "soundrecordinglevel", value: "48")
 
         XCTAssertEqual(state.capabilities?.setting("soundrecordinglevel")?.value, "48")
+        XCTAssertNil(state.lastError)
+    }
+
+    func testOfflinePreviewUpdatesFocusBracketingWithoutCameraHardware() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        await state.setSetting(key: "focusbracketing", value: "enable")
+        await state.setSetting(key: "focusbracketingnumberofshots", value: "250")
+        await state.setSetting(key: "focusbracketingfocusincrement", value: "7")
+        await state.setSetting(key: "focusbracketingexposuresmoothing", value: "enable")
+
+        XCTAssertEqual(state.capabilities?.setting("focusbracketing")?.value, "enable")
+        XCTAssertEqual(state.capabilities?.setting("focusbracketingnumberofshots")?.value, "250")
+        XCTAssertEqual(state.capabilities?.setting("focusbracketingfocusincrement")?.value, "7")
+        XCTAssertEqual(state.capabilities?.setting("focusbracketingexposuresmoothing")?.value, "enable")
         XCTAssertNil(state.lastError)
     }
 

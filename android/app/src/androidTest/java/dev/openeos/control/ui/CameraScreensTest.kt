@@ -1191,6 +1191,53 @@ class CameraScreensTest {
     }
 
     @Test
+    fun focusBracketingControlsAppearOnlyInPhotoSettingsAndUseRanges() {
+        val state = mutableStateOf(CameraUiState().withOfflinePreview())
+        val picker = mutableStateOf<SettingPicker?>(null)
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.value.copy(activeSettingPicker = picker.value), actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("advanced-setting-focusbracketing")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-focusbracketingnumberofshots")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-values-focusbracketingnumberofshots")
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-focusbracketingfocusincrement")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-values-focusbracketingfocusincrement")
+            .assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-focusbracketingexposuresmoothing")
+            .performScrollTo()
+            .assertIsDisplayed()
+
+        compose.runOnIdle {
+            picker.value = null
+            state.value = state.value.copy(captureMode = CaptureMode.VIDEO)
+        }
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        for (key in listOf(
+            "focusbracketing",
+            "focusbracketingnumberofshots",
+            "focusbracketingfocusincrement",
+            "focusbracketingexposuresmoothing",
+        )) {
+            compose.onAllNodesWithTag("advanced-setting-$key").assertCountEquals(0)
+        }
+    }
+
+    @Test
     fun offlinePreviewExposesCanonManualFocusDriveControls() {
         val picker = mutableStateOf<SettingPicker?>(null)
         var requestedFocusDrive: Pair<FocusDriveDirection, FocusDriveStep>? = null
