@@ -49,6 +49,7 @@ LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast �
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 雙卡選擇。Photo 與 Video 分別顯示相片／影片記錄卡；只有相機在同一 API 版本公告成對 GET／PUT，且回傳 `none`、`card1`、`card2` 的有效選項時才出現，寫入保留精確協定值，畸形或只有單一選項的回應不會形成可操作控制
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 錄音音量控制。Video 設定只有在相機於同一 API 版本公告成對 GET／PUT，並回傳有效的有界整數範圍後，才顯示類似 0–63 的離散滑桿；每次寫入前會重新讀取範圍並送出 Canon 要求的整數 `value`。Still 模式、錄音設定不是手動、錄影進行中、畸形或過期能力都會維持真實的不可用／錯誤狀態
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 錄音模式、風聲抑制與衰減器。Video 設定只顯示同一 API 版本成對 GET／PUT 所回傳且符合 Canon 文件的字串選項；寫入前會重新讀取 ability，忙碌、錄影中、Still 模式或錄音停用等相機錯誤不會被偽裝成成功
+- Android、iOS 與 PC 依能力提供 Canon CCAPI 機身提示音與螢幕自動關閉時間。More Settings 只顯示同一 API 版本成對 GET／PUT 回傳的 Canon 文件值；每次寫入前會重新讀取兩個資源並保留精確字串，畸形、過期、單一選項、跨版本、忙碌或錄影中狀態不會被偽裝成成功
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 對焦包圍拍攝。Photo 設定只有在相機於同一 API 版本公告成對 GET／PUT，且根開關回傳有效文件值後，才顯示開關、類似 2–999 張的拍攝張數滑桿、對焦增量滑桿與曝光平滑；每次寫入前會重新讀取四個資源並送出精確字串或整數。Movie 模式、忙碌／拍攝中、畸形 ability 或過期值都維持真實的不可用／錯誤狀態
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 短片畫質、高格率、短片裁切與錄影格式。Video 設定只接受同一 API 版本成對 GET／PUT 回傳的有效字串 ability，每次寫入前重新讀取全部已公告短片資源；Canon 短片畫質 token 會顯示為可讀的尺寸／格率／壓縮摘要，但寫回相機時仍保留原始值。Still 模式、錄影中、畸形、過期或跨版本狀態都維持不可用或真實失敗
 - 可選跟隨系統、英文或繁體中文；相機公告的設定值會本地化顯示，寫入時仍保留精確的協定原值

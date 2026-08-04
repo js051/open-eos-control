@@ -226,6 +226,8 @@
       movieQualityCrop: "Crop",
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
+      beep: "Beep",
+      displayoff: "Auto display off",
       capturetarget: "Capture target",
       capturestorage: "Recording card",
       cardselectionstillimage: "Still-image card",
@@ -249,13 +251,17 @@
       valueHighDisabledManual: "High (disabled in manual exposure)",
       valueOffDisabledManual: "Off (disabled in manual exposure)",
       valueDisable: "Disable",
+      valueDisableTouch: "Touch sounds off",
       valueInternalRam: "Computer",
       valueMemoryCard: "Memory card",
       valueCard1: "Card 1",
       valueCard2: "Card 2",
       duration15Seconds: "15 seconds",
+      duration10Seconds: "10 seconds",
+      duration20Seconds: "20 seconds",
       duration30Seconds: "30 seconds",
       duration1Minute: "1 minute",
+      duration2Minutes: "2 minutes",
       duration3Minutes: "3 minutes",
       duration5Minutes: "5 minutes",
       duration10Minutes: "10 minutes",
@@ -511,6 +517,8 @@
       movieQualityCrop: "裁切",
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
+      beep: "提示音",
+      displayoff: "螢幕自動關閉",
       capturetarget: "拍攝儲存位置",
       capturestorage: "拍攝記錄卡",
       cardselectionstillimage: "相片記錄卡",
@@ -528,13 +536,17 @@
       valueNormal: "標準",
       valueHigh: "高",
       valueDisable: "停用",
+      valueDisableTouch: "關閉觸控提示音",
       valueInternalRam: "電腦",
       valueMemoryCard: "記憶卡",
       valueCard1: "記憶卡 1",
       valueCard2: "記憶卡 2",
       duration15Seconds: "15 秒",
+      duration10Seconds: "10 秒",
+      duration20Seconds: "20 秒",
       duration30Seconds: "30 秒",
       duration1Minute: "1 分鐘",
+      duration2Minutes: "2 分鐘",
       duration3Minutes: "3 分鐘",
       duration5Minutes: "5 分鐘",
       duration10Minutes: "10 分鐘",
@@ -673,6 +685,14 @@
     300: "duration5Minutes",
     600: "duration10Minutes",
     1800: "duration30Minutes",
+  };
+  const displayOffValueKeys = {
+    10: "duration10Seconds",
+    20: "duration20Seconds",
+    30: "duration30Seconds",
+    60: "duration1Minute",
+    120: "duration2Minutes",
+    180: "duration3Minutes",
   };
   const imageQualityValueKeys = {
     none: "imageQualityNone",
@@ -1478,6 +1498,8 @@
       messageKey = autoLightingOptimizerValueKeys[rawValue.toLowerCase()] || messageKey;
     }
     if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue];
+    if (key === "beep" && rawValue.toLowerCase() === "disabletouch") messageKey = "valueDisableTouch";
+    if (key === "displayoff") messageKey = displayOffValueKeys[rawValue];
     if (key === "capturetarget") messageKey = captureTargetValueKeys[rawValue.toLowerCase()];
     if (key === "capturestorage") messageKey = captureStorageValueKeys[rawValue.toLowerCase()];
     if (["cardselectionstillimage", "cardselectionmovie"].includes(key)) {

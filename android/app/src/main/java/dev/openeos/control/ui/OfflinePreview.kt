@@ -60,6 +60,8 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             CameraSettingControl("soundrecordinglevel", "Sound recording level", "32", (0..63).map(Int::toString)),
             CameraSettingControl("windfilter", "Wind filter", "auto", listOf("auto", "enable", "disable")),
             CameraSettingControl("attenuator", "Attenuator", "disable", listOf("enable", "disable", "auto", "manual")),
+            CameraSettingControl("beep", "Beep", "enable", listOf("enable", "disable", "disabletouch")),
+            CameraSettingControl("displayoff", "Auto display off", "60", listOf("10", "20", "30", "60", "120", "180")),
             CameraSettingControl("focusbracketing", "Focus bracketing", "disable", listOf("enable", "disable")),
             CameraSettingControl("focusbracketingnumberofshots", "Focus bracketing shots", "100", (2..999).map(Int::toString)),
             CameraSettingControl("focusbracketingfocusincrement", "Focus increment", "4", (1..10).map(Int::toString)),

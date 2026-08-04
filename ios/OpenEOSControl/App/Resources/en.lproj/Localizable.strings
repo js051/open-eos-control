@@ -128,6 +128,8 @@
 "setting_focus_bracketing_increment" = "Focus increment";
 "setting_focus_bracketing_exposure_smoothing" = "Exposure smoothing";
 "setting_auto_power_off" = "Auto power off";
+"setting_beep" = "Beep";
+"setting_display_off" = "Auto display off";
 "setting_capture_target" = "Capture target";
 "setting_capture_storage" = "Recording card";
 "setting_still_image_card" = "Still-image card";
@@ -152,13 +154,17 @@
 "camera_value_high_disabled_manual" = "High (disabled in manual exposure)";
 "camera_value_off_disabled_manual" = "Off (disabled in manual exposure)";
 "camera_value_disable" = "Disable";
+"camera_value_disable_touch" = "Touch sounds off";
 "camera_value_internal_ram" = "Computer";
 "camera_value_memory_card" = "Memory card";
 "camera_value_card_1" = "Card 1";
 "camera_value_card_2" = "Card 2";
 "camera_value_15_seconds" = "15 seconds";
+"camera_value_10_seconds" = "10 seconds";
+"camera_value_20_seconds" = "20 seconds";
 "camera_value_30_seconds" = "30 seconds";
 "camera_value_1_minute" = "1 minute";
+"camera_value_2_minutes" = "2 minutes";
 "camera_value_3_minutes" = "3 minutes";
 "camera_value_5_minutes" = "5 minutes";
 "camera_value_10_minutes" = "10 minutes";

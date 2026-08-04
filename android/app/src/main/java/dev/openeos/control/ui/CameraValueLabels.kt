@@ -77,6 +77,8 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "highisonr" -> highIsoNoiseReductionValueLabels[value]
         "alomode" -> autoLightingOptimizerValueLabels[value]
         "autopoweroff" -> autoPowerOffValueLabels[value]
+        "beep" -> beepValueLabels[value]
+        "displayoff" -> displayOffValueLabels[value]
         "capturetarget" -> captureTargetValueLabels[value]
         "capturestorage" -> captureStorageValueLabels[value]
         "cardselectionstillimage", "cardselectionmovie" -> cardSelectionValueLabels[value]
@@ -271,6 +273,21 @@ private val autoPowerOffValueLabels = mapOf(
     "10 minutes" to R.string.camera_value_10_minutes,
     "30 minutes" to R.string.camera_value_30_minutes,
     "disable" to R.string.camera_value_disable,
+)
+
+private val beepValueLabels = mapOf(
+    "enable" to R.string.camera_value_enable,
+    "disable" to R.string.camera_value_disable,
+    "disabletouch" to R.string.camera_value_disable_touch,
+)
+
+private val displayOffValueLabels = mapOf(
+    "10" to R.string.camera_value_10_seconds,
+    "20" to R.string.camera_value_20_seconds,
+    "30" to R.string.camera_value_30_seconds,
+    "60" to R.string.camera_value_1_minute,
+    "120" to R.string.camera_value_2_minutes,
+    "180" to R.string.camera_value_3_minutes,
 )
 
 private val captureTargetValueLabels = mapOf(

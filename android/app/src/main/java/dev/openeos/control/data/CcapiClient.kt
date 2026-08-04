@@ -697,6 +697,10 @@ class CcapiClient(
                     loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
+                key.lowercase() in DEVICE_FUNCTION_SETTING_KEYS -> {
+                    loadShootingSettings()
+                    putSettingValue(listOf(key.lowercase()), value)
+                }
                 key.lowercase() in SOUND_RECORDING_SETTING_KEYS -> {
                     loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
@@ -739,6 +743,14 @@ class CcapiClient(
                 key.equals(MOVIE_CARD_SELECTION_SETTING_KEY, ignoreCase = true) -> {
                     require(value in CARD_SELECTION_VALUES) { "Movie card value is not supported." }
                     putOk("/ccapi/card-selection/movie", JSONObject().put("value", value))
+                }
+                key.lowercase() in DEVICE_FUNCTION_SETTING_KEYS -> {
+                    val canonical = key.lowercase()
+                    val endpoint = DEVICE_FUNCTION_SETTING_ENDPOINTS.getValue(canonical)
+                    require(value in endpoint.values) {
+                        "${canonical.toSettingLabel()} value is not supported."
+                    }
+                    putOk(endpoint.simulatorPath, JSONObject().put("value", value))
                 }
                 key.lowercase() in SOUND_RECORDING_SETTING_KEYS -> {
                     val canonical = key.lowercase()
@@ -2034,6 +2046,7 @@ class CcapiClient(
                 if (
                     key !in SOUND_RECORDING_SETTING_KEYS &&
                     key != SOUND_RECORDING_LEVEL_SETTING_KEY &&
+                    key !in DEVICE_FUNCTION_SETTING_KEYS &&
                     key !in FOCUS_BRACKETING_SETTING_KEYS &&
                     key !in MOVIE_SETTING_KEYS &&
                     (!enforceAdvertisedOperations || apiOperations.contains(CcapiApiOperation("PUT", settingPath)))
@@ -2140,6 +2153,23 @@ class CcapiClient(
                     settingValuesByKey[key] = values
                     merged.put(key, cardSelection)
                     observedFeatures.add(CameraFeature.CARD_SELECTION_CONTROL)
+                }
+            }
+        }
+
+        DEVICE_FUNCTION_SETTING_ENDPOINTS.forEach { (key, definition) ->
+            readWriteSettingOperations(definition.pathSuffix)?.let { (read, write) ->
+                val setting = try {
+                    getJson(read.path).toValidatedStringAbilitySetting(definition.values)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    null
+                }
+                if (setting != null) {
+                    settingPathsByKey[key] = write.path
+                    settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
+                    merged.put(key, setting)
                 }
             }
         }
@@ -2857,6 +2887,18 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
         }
     val stillCardSelection = simulatorCardSelection(STILL_CARD_SELECTION_SETTING_KEY)
     val movieCardSelection = simulatorCardSelection(MOVIE_CARD_SELECTION_SETTING_KEY)
+    val deviceFunctionControls = DEVICE_FUNCTION_SETTING_ENDPOINTS.mapNotNull { (key, definition) ->
+        optJSONObject(key)
+            ?.toValidatedStringAbilitySetting(definition.values)
+            ?.let { setting ->
+                CameraSettingControl(
+                    key = key,
+                    label = key.toSettingLabel(),
+                    value = setting.getString("value"),
+                    values = setting.getJSONArray("ability").toStringList(),
+                )
+            }
+    }
     val soundRecordingControls = SOUND_RECORDING_ENDPOINTS.mapNotNull { (key, definition) ->
         optJSONObject(key)
             ?.toValidatedStringAbilitySetting(definition.values)
@@ -3010,6 +3052,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             zoomControl,
             stillCardSelection,
             movieCardSelection,
+            *deviceFunctionControls.toTypedArray(),
             *soundRecordingControls.toTypedArray(),
             soundRecordingLevel,
             *focusBracketingControls.toTypedArray(),
@@ -3152,6 +3195,8 @@ private fun String.toSettingLabel(): String =
         MOVIE_MODE_SETTING_KEY -> "Movie mode"
         STILL_CARD_SELECTION_SETTING_KEY -> "Still-image card"
         MOVIE_CARD_SELECTION_SETTING_KEY -> "Movie card"
+        BEEP_SETTING_KEY -> "Beep"
+        DISPLAY_OFF_SETTING_KEY -> "Auto display off"
         SOUND_RECORDING_SETTING_KEY -> "Sound recording"
         WIND_FILTER_SETTING_KEY -> "Wind filter"
         ATTENUATOR_SETTING_KEY -> "Attenuator"
@@ -3214,6 +3259,28 @@ private val CARD_SELECTION_ENDPOINTS = linkedMapOf(
     STILL_CARD_SELECTION_SETTING_KEY to "/functions/cardselection/stillimage",
     MOVIE_CARD_SELECTION_SETTING_KEY to "/functions/cardselection/movie",
 )
+private const val BEEP_SETTING_KEY = "beep"
+private const val DISPLAY_OFF_SETTING_KEY = "displayoff"
+
+private data class DeviceFunctionSettingEndpoint(
+    val pathSuffix: String,
+    val simulatorPath: String,
+    val values: Set<String>,
+)
+
+private val DEVICE_FUNCTION_SETTING_ENDPOINTS = linkedMapOf(
+    BEEP_SETTING_KEY to DeviceFunctionSettingEndpoint(
+        pathSuffix = "/functions/beep",
+        simulatorPath = "/ccapi/device-settings/beep",
+        values = setOf("enable", "disable", "disabletouch"),
+    ),
+    DISPLAY_OFF_SETTING_KEY to DeviceFunctionSettingEndpoint(
+        pathSuffix = "/functions/displayoff",
+        simulatorPath = "/ccapi/device-settings/display-off",
+        values = setOf("10", "20", "30", "60", "120", "180"),
+    ),
+)
+private val DEVICE_FUNCTION_SETTING_KEYS = DEVICE_FUNCTION_SETTING_ENDPOINTS.keys
 private const val SOUND_RECORDING_LEVEL_SETTING_KEY = "soundrecordinglevel"
 private const val SOUND_RECORDING_LEVEL_PATH_SUFFIX = "/shooting/settings/soundrecording/level"
 private val SOUND_RECORDING_LEVEL_VALUES = (0..63).map(Int::toString).toSet()

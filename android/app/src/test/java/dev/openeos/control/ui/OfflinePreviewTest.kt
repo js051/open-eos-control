@@ -31,6 +31,14 @@ class OfflinePreviewTest {
             state.capabilities?.advancedSettings.orEmpty().single { it.key == "soundrecordinglevel" }.values,
         )
         assertEquals(
+            listOf("enable", "disable", "disabletouch"),
+            state.capabilities?.advancedSettings.orEmpty().single { it.key == "beep" }.values,
+        )
+        assertEquals(
+            listOf("10", "20", "30", "60", "120", "180"),
+            state.capabilities?.advancedSettings.orEmpty().single { it.key == "displayoff" }.values,
+        )
+        assertEquals(
             (2..999).map(Int::toString),
             state.capabilities?.advancedSettings.orEmpty().single { it.key == "focusbracketingnumberofshots" }.values,
         )
@@ -47,6 +55,10 @@ class OfflinePreviewTest {
         assertTrue(settingsForMode(state.capabilities?.advancedSettings.orEmpty(), CaptureMode.PHOTO).none {
             it.key in setOf("moviequality", "highframerate", "moviecropping", "movieformat")
         })
+        CaptureMode.entries.forEach { mode ->
+            assertTrue(settingsForMode(state.capabilities?.advancedSettings.orEmpty(), mode).any { it.key == "beep" })
+            assertTrue(settingsForMode(state.capabilities?.advancedSettings.orEmpty(), mode).any { it.key == "displayoff" })
+        }
         assertFalse(state.pendingOperations.isNotEmpty())
     }
 }

@@ -1191,6 +1191,47 @@ class CameraScreensTest {
     }
 
     @Test
+    fun deviceFunctionSettingsRemainAvailableInPhotoAndVideoAndSendRawValues() {
+        val state = mutableStateOf(CameraUiState().withOfflinePreview())
+        val picker = mutableStateOf<SettingPicker?>(null)
+        var request: Pair<String, String>? = null
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            closePicker = { picker.value = null },
+            setCameraSetting = { key, value -> request = key to value },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.value.copy(activeSettingPicker = picker.value), actions)
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("advanced-setting-beep").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.setting_beep)).assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-value-beep-disabletouch")
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertEquals("beep" to "disabletouch", request) }
+
+        compose.onNodeWithTag("advanced-setting-displayoff").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.setting_display_off)).assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-values-displayoff").performScrollToIndex(4)
+        compose.onNodeWithTag("advanced-setting-value-displayoff-120")
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertEquals("displayoff" to "120", request) }
+
+        compose.runOnIdle {
+            picker.value = null
+            state.value = state.value.copy(captureMode = CaptureMode.VIDEO)
+        }
+        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("advanced-setting-beep").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-displayoff").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun focusBracketingControlsAppearOnlyInPhotoSettingsAndUseRanges() {
         val state = mutableStateOf(CameraUiState().withOfflinePreview())
         val picker = mutableStateOf<SettingPicker?>(null)

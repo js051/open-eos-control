@@ -1510,6 +1510,106 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
     }
 
+    func testCanonDeviceFunctionSettingsRequirePairsRefreshAndWriteAdvertisedValue() async throws {
+        let transport = MockCameraHTTPTransport()
+        let beepPath = "/ccapi/ver100/functions/beep"
+        let displayPath = "/ccapi/ver100/functions/displayoff"
+        let beep = #"{"value":"enable","ability":["enable","disable","disabletouch"]}"#
+        let display = #"{"value":"60","ability":["10","20","30","60","120","180"]}"#
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/functions/beep","get":true,"put":true},{"path":"/functions/displayoff","get":true,"put":true}]}"#
+        )
+        for _ in 0..<2 {
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(path: beepPath, body: beep)
+            await transport.enqueueJSON(path: displayPath, body: display)
+        }
+        await transport.enqueueJSON(method: "PUT", path: beepPath, body: #"{"value":"disabletouch"}"#)
+        await enqueueStatus(on: transport)
+        await transport.enqueueJSON(
+            path: beepPath,
+            body: #"{"value":"disabletouch","ability":["enable","disable","disabletouch"]}"#
+        )
+        await transport.enqueueJSON(path: displayPath, body: display)
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertEqual(capabilities.setting("beep")?.values, ["enable", "disable", "disabletouch"])
+        XCTAssertEqual(capabilities.setting("displayoff")?.value, "60")
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("beep"))
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("displayoff"))
+
+        _ = try await client.setSetting(key: "beep", value: "disabletouch")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first { $0.method == "PUT" && $0.path == beepPath })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(object, ["value": "disabletouch"])
+        XCTAssertGreaterThanOrEqual(requests.filter { $0.path == beepPath }.count, 4)
+    }
+
+    func testCanonDeviceFunctionSettingsRejectMalformedAndCrossVersionContracts() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/beep","get":true},{"path":"/functions/displayoff","get":true,"put":true}],"ver110":[{"path":"/functions/beep","put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/displayoff",
+            body: #"{"value":"60","ability":["60","future"]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertNil(capabilities.setting("beep"))
+        XCTAssertNil(capabilities.setting("displayoff"))
+        let requests = await transport.requests()
+        XCTAssertFalse(requests.contains { $0.path.hasSuffix("/functions/beep") })
+        XCTAssertEqual(requests.count, 3)
+    }
+
+    func testSimulatorDeviceFunctionSettingsUseBackedEndpoint() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/capabilities",
+            body: #"{"iso":["800"],"shutter":["1/50"],"aperture":["2.8"],"white_balance":["auto"],"beep":{"value":"enable","ability":["enable","disable","disabletouch"]},"displayoff":{"value":"60","ability":["10","20","30","60","120","180"]}}"#
+        )
+        await transport.enqueue(method: "PUT", path: "/ccapi/device-settings/beep", status: 204, body: Data())
+        await transport.enqueueJSON(
+            path: "/ccapi/status",
+            body: #"{"connected":true,"battery":{"level":82,"status":"good"},"media":{"available":true,"remaining_minutes":120},"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"auto"}}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        _ = try await client.setSetting(key: "beep", value: "disabletouch")
+
+        XCTAssertEqual(capabilities.setting("beep")?.value, "enable")
+        XCTAssertEqual(capabilities.setting("displayoff")?.value, "60")
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.first { $0.path == "/ccapi/device-settings/beep" })
+        let body = try XCTUnwrap(request.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(object, ["value": "disabletouch"])
+    }
+
     func testCanonMovieSettingsRequireExactPairsAndWriteStringAfterRefresh() async throws {
         let transport = MockCameraHTTPTransport()
         let qualityPath = "/ccapi/ver100/shooting/settings/moviequality"

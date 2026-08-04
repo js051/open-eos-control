@@ -241,6 +241,8 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "zoom": "setting_zoom"
     case "zoomspeed": "setting_power_zoom_speed"
     case "autopoweroff": "setting_auto_power_off"
+    case "beep": "setting_beep"
+    case "displayoff": "setting_display_off"
     case "capturetarget": "setting_capture_target"
     case "capturestorage": "setting_capture_storage"
     case "cardselectionstillimage": "setting_still_image_card"
@@ -294,6 +296,19 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
             "300": "camera_value_5_minutes",
             "600": "camera_value_10_minutes",
             "1800": "camera_value_30_minutes",
+        ][value]
+    }
+    if normalizedKey == "beep", value.lowercased() == "disabletouch" {
+        return "camera_value_disable_touch"
+    }
+    if normalizedKey == "displayoff" {
+        return [
+            "10": "camera_value_10_seconds",
+            "20": "camera_value_20_seconds",
+            "30": "camera_value_30_seconds",
+            "60": "camera_value_1_minute",
+            "120": "camera_value_2_minutes",
+            "180": "camera_value_3_minutes",
         ][value]
     }
     if normalizedKey == "capturetarget" {

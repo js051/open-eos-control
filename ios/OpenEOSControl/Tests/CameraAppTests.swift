@@ -196,6 +196,8 @@ final class CameraAppTests: XCTestCase {
             CameraSetting(key: "soundrecordinglevel", label: "Sound recording level", value: "32", values: (0...63).map(String.init)),
             CameraSetting(key: "windfilter", label: "Wind filter", value: "auto", values: ["auto", "enable", "disable"]),
             CameraSetting(key: "attenuator", label: "Attenuator", value: "disable", values: ["enable", "disable", "auto", "manual"]),
+            CameraSetting(key: "beep", label: "Beep", value: "enable", values: ["enable", "disable", "disabletouch"]),
+            CameraSetting(key: "displayoff", label: "Auto display off", value: "60", values: ["10", "20", "30", "60", "120", "180"]),
             CameraSetting(key: "focusbracketing", label: "Focus bracketing", value: "disable", values: ["enable", "disable"]),
             CameraSetting(key: "focusbracketingnumberofshots", label: "Number of shots", value: "100", values: (2...999).map(String.init)),
             CameraSetting(key: "focusbracketingfocusincrement", label: "Focus increment", value: "4", values: (1...10).map(String.init)),
@@ -206,6 +208,7 @@ final class CameraAppTests: XCTestCase {
             advancedSettingsForMode(settings, mode: .photo).map(\.key),
             [
                 "drivemode", "meteringmode", "capturetarget", "capturestorage", "cardselectionstillimage",
+                "beep", "displayoff",
                 "focusbracketing", "focusbracketingnumberofshots", "focusbracketingfocusincrement",
                 "focusbracketingexposuresmoothing",
             ]
@@ -215,7 +218,7 @@ final class CameraAppTests: XCTestCase {
             [
                 "moviequality", "highframerate", "moviecropping", "movieformat", "meteringmode",
                 "cardselectionmovie", "soundrecording",
-                "soundrecordinglevel", "windfilter", "attenuator",
+                "soundrecordinglevel", "windfilter", "attenuator", "beep", "displayoff",
             ]
         )
 
@@ -245,6 +248,8 @@ final class CameraAppTests: XCTestCase {
             "movieformat": "setting_movie_format",
             "zoomspeed": "setting_power_zoom_speed",
             "autopoweroff": "setting_auto_power_off",
+            "beep": "setting_beep",
+            "displayoff": "setting_display_off",
             "alomode": "setting_auto_lighting_optimizer",
             "capturetarget": "setting_capture_target",
             "capturestorage": "setting_capture_storage",
@@ -296,6 +301,9 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(settingValueLocalizationKey(key: "soundrecording", value: "manual"), "camera_value_manual")
         XCTAssertEqual(settingValueLocalizationKey(key: "windfilter", value: "enable"), "camera_value_enable")
         XCTAssertEqual(settingValueLocalizationKey(key: "attenuator", value: "disable"), "camera_value_disable")
+        XCTAssertEqual(settingValueLocalizationKey(key: "beep", value: "disabletouch"), "camera_value_disable_touch")
+        XCTAssertEqual(settingValueLocalizationKey(key: "displayoff", value: "20"), "camera_value_20_seconds")
+        XCTAssertEqual(settingValueLocalizationKey(key: "displayoff", value: "120"), "camera_value_2_minutes")
         XCTAssertEqual(settingValueLocalizationKey(key: "alomode", value: "Standard"), "camera_value_standard")
         XCTAssertEqual(
             settingValueLocalizationKey(key: "alomode", value: "High (disabled in manual exposure)"),
@@ -565,6 +573,21 @@ final class CameraAppTests: XCTestCase {
         await state.setSetting(key: "soundrecordinglevel", value: "48")
 
         XCTAssertEqual(state.capabilities?.setting("soundrecordinglevel")?.value, "48")
+        XCTAssertNil(state.lastError)
+    }
+
+    func testOfflinePreviewUpdatesDeviceFunctionSettingsWithoutCameraHardware() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        await state.setSetting(key: "beep", value: "disabletouch")
+        await state.setSetting(key: "displayoff", value: "120")
+
+        XCTAssertEqual(state.capabilities?.setting("beep")?.value, "disabletouch")
+        XCTAssertEqual(state.capabilities?.setting("displayoff")?.value, "120")
         XCTAssertNil(state.lastError)
     }
 
