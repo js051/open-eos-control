@@ -119,6 +119,7 @@ class CameraRepository(
                 networkDiagnostics = backend.networkDiagnostics,
                 liveViewFrameUrl = liveViewFrameUrl,
                 liveViewRequest = liveViewRequest,
+                activeLiveViewSource = backend.activeLiveViewSource,
                 nativeLiveViewSession = backend.nativeLiveViewSession,
                 liveViewStartError = liveViewStartError,
             )
@@ -264,6 +265,7 @@ data class CameraSession(
     val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty,
     val liveViewFrameUrl: String?,
     val liveViewRequest: LiveViewRequest,
+    val activeLiveViewSource: LiveViewSource? = null,
     val nativeLiveViewSession: NativeLiveViewSession? = null,
     val liveViewStartError: String? = null,
 )

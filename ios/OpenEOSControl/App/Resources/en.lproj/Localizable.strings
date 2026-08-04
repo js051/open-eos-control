@@ -335,6 +335,7 @@
 "live_view_source" = "Live View source";
 "source_auto" = "Auto";
 "source_rtp" = "RTP H.264";
+"source_multipart" = "Multipart JPEG";
 "source_jpeg" = "JPEG";
 "source_bridge" = "Bridge";
 "source_simulator" = "Simulator";

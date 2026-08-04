@@ -156,7 +156,7 @@ The event payload is partial and never replaces `CameraStatus`. Android, iOS, an
 }
 ```
 
-The response includes the effective `source`, so clients can distinguish an `AUTO` request that selected `CCAPI_RTP` from one that fell back to `CCAPI_JPEG_POLLING`.
+The response includes the effective `source`, so clients can distinguish an `AUTO` request that selected `CCAPI_RTP`, `CCAPI_MULTIPART`, or `CCAPI_JPEG_POLLING`.
 
 `POST /liveview/magnification` accepts `{"value":1}` or `{"value":5}` and returns the accepted value. It is capability-gated and requires active Live View. The libgphoto2 engine exposes it only when a writable `eoszoom` runtime widget exists. Canon CCAPI `GET`/`POST /shooting/control/zoom` is exposed separately as the generic `zoom` camera setting and `ZOOM_CONTROL`; it never masquerades as Live View magnification.
 
@@ -195,6 +195,8 @@ The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --std
 
 The CCAPI engine advertises `CCAPI_JPEG_POLLING` from 1 through 30 FPS and defaults the PC UI to 15 FPS. It starts Live View with `cameradisplay` and the selected size, retries once without `liveviewsize` only when the camera returns HTTP 400, and then reads the first complete bounded JPEG from the advertised `flip`, `flipdetail`, or Live View endpoint. When coordinate Tap AF or Click White Balance is advertised, `flipdetail?kind=both` is preferred so the same bounded response supplies the JPEG and Canon image-position metadata. Requested FPS controls client polling; observed FPS remains a separate UI metric.
 
+The CCAPI engine advertises `CCAPI_MULTIPART` only for a same-version quartet of regular Live View POST/DELETE and multipart GET/DELETE operations. It opens Canon's persistent `multipart/x-mixed-replace` stream, validates bounded `image/jpeg` parts with complete JPEG markers, drains continuously on a background reader and retains only the latest frame for `/liveview/frame`. Requested FPS caps Bridge output rather than camera production. Stop first closes the local reader, then requires Canon's exact HTTP 200 multipart DELETE before deleting regular Live View. AUTO tries RTP, multipart and polling in that order, with complete cleanup between attempts.
+
 The CCAPI engine also advertises `CCAPI_RTP` only when discovery contains `GET /shooting/liveview/rtpsessiondesc` and `POST /shooting/liveview/rtp`, the camera route resolves to a usable local IPv4 address, and the installed PyAV runtime can create an H.264 decoder. It validates the SDP H.264/90 kHz stream, binds the advertised UDP port before posting `{"action":"start","ipaddress":"..."}`, parses RFC 3550 and RFC 6184 single NAL/STAP-A/FU-A packets, waits for SPS/PPS plus a keyframe, decodes every access unit, and converts only FPS-eligible decoded frames to JPEG. Start is not reported successful until the first frame is actually decoded; a timeout closes the receiver, sends Canon's stop body, and lets AUTO fall back to JPEG. Stop, failed HTTP start, session close, and AUTO fallback all clean up both sides. `GET /liveview/frame` remains `image/jpeg`, so existing Bridge clients need no video-container decoder.
 
 If the same SDP advertises Canon's `MP4A-LATM/48000` audio port, omission of `cpresent` is treated as RFC 6416's default in-band configuration. The Bridge binds audio independently, validates RTP sequence/timestamp/marker boundaries, drops incomplete elements, wraps each completed `audioMuxElement` in LOAS framing, and decodes it with PyAV/FFmpeg. Explicit out-of-band `cpresent=0` remains unavailable instead of being guessed. Decoded output is bounded 48 kHz, stereo, signed 16-bit little-endian PCM; audio bind/decode failure is recorded under `CameraStatus.raw.rtpAudio` but never tears down ready video.
@@ -216,7 +218,7 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - normalized UI Tap AF mapped through detailed Live View `image` geometry to integer `positionx`/`positiony`, then sent only through advertised `PUT /shooting/liveview/afframeposition`
 - normalized UI Click White Balance mapped through the same geometry, then sent only through advertised `POST /shooting/liveview/clickwb`
 - bounded `event/polling` on an independent wait path, with v1.0 `continue=on`, v1.1+ `timeout=long`, explicit `DELETE`, and authoritative state refresh by clients
-- bounded JPEG Live View lifecycle and frame extraction
+- bounded JPEG polling and persistent multipart Live View lifecycles with frame extraction
 - advertised RTP H.264 lifecycle, UDP reception, RFC 3550/RFC 6184 depacketization and PyAV decode-to-JPEG output; independently advertised PC `MP4A-LATM/48000` reception, RFC 6416 reassembly, PyAV decode and bounded PCM delivery
 - bounded/paged storage traversal plus opaque same-origin media IDs, streamed downloads, and deletion only when the camera advertises a matching `DELETE` operation
 

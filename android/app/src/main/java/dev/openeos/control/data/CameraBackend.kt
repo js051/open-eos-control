@@ -60,6 +60,8 @@ interface CameraControlBackend {
     val networkDiagnostics: CameraNetworkDiagnostics
     val nativeLiveViewSession: NativeLiveViewSession?
         get() = null
+    val activeLiveViewSource: LiveViewSource?
+        get() = null
 
     fun observedFeatures(): Set<CameraFeature> = emptySet()
 
@@ -135,6 +137,9 @@ class CcapiCameraBackend(
 
     override val nativeLiveViewSession: NativeLiveViewSession?
         get() = client.nativeLiveViewSession
+
+    override val activeLiveViewSource: LiveViewSource?
+        get() = client.currentLiveViewSource()
 
     override fun observedFeatures(): Set<CameraFeature> = client.observedFeatureSnapshot()
 

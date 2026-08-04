@@ -1111,6 +1111,7 @@ private fun liveViewSizeLabel(size: LiveViewSize): String = stringResource(
 private fun liveViewSourceLabel(source: LiveViewSource): String = stringResource(
     when (source) {
         LiveViewSource.CCAPI_RTP -> R.string.live_view_source_rtp
+        LiveViewSource.CCAPI_MULTIPART -> R.string.live_view_source_multipart
         LiveViewSource.CCAPI_JPEG_POLLING -> R.string.live_view_source_jpeg
         LiveViewSource.USB_PTP_PREVIEW -> R.string.live_view_source_usb
         LiveViewSource.DESKTOP_BRIDGE_STREAM -> R.string.live_view_source_bridge

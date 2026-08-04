@@ -335,6 +335,7 @@
 "live_view_source" = "Live View 來源";
 "source_auto" = "自動";
 "source_rtp" = "RTP H.264";
+"source_multipart" = "Multipart JPEG";
 "source_jpeg" = "JPEG";
 "source_bridge" = "電腦橋接";
 "source_simulator" = "模擬器";

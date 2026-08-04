@@ -53,6 +53,13 @@ private data class CcapiApiOperation(
     val path: String,
 )
 
+private data class CcapiMultipartOperations(
+    val startLiveView: CcapiApiOperation,
+    val stopLiveView: CcapiApiOperation,
+    val openStream: CcapiApiOperation,
+    val closeStream: CcapiApiOperation,
+)
+
 private data class CcapiLiveViewGeometry(
     val positionX: Int,
     val positionY: Int,
@@ -113,6 +120,10 @@ class CcapiClient(
         .readTimeout(CCAPI_EVENT_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .callTimeout(CCAPI_EVENT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
+    private val multipartHttpClient = this.httpClient.newBuilder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
     private val activeEventCall = AtomicReference<Call?>(null)
 
     var isRealCamera = false
@@ -139,12 +150,15 @@ class CcapiClient(
     private var activeLiveViewSize = LiveViewSize.MEDIUM
     private var latestLiveViewGeometry: CcapiLiveViewGeometry? = null
     private var activeLiveViewSource: LiveViewSource? = null
+    private var multipartLiveViewSession: CcapiMultipartLiveViewSession? = null
     private var simulatorEventSequence = 0L
 
     var nativeLiveViewSession: NativeLiveViewSession? = null
         private set
 
     fun observedFeatureSnapshot(): Set<CameraFeature> = observedFeatures.toSet()
+
+    fun currentLiveViewSource(): LiveViewSource? = activeLiveViewSource
 
     suspend fun close() {
         runCatching { stopEventPolling() }
@@ -520,8 +534,12 @@ class CcapiClient(
             }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
+            val supportsMultipartLiveView = supportsMultipartLiveView()
             val supportsRtpLiveView = supportsRtpLiveView()
-            if (supportsJpegLiveView || supportsRtpLiveView || CameraFeature.LIVE_VIEW in observedFeatures) {
+            if (
+                supportsJpegLiveView || supportsMultipartLiveView || supportsRtpLiveView ||
+                CameraFeature.LIVE_VIEW in observedFeatures
+            ) {
                 supportedFeatures.add(CameraFeature.LIVE_VIEW)
             }
             if (supportsJpegLiveView) {
@@ -529,6 +547,9 @@ class CcapiClient(
             }
             if (supportsRtpLiveView) {
                 supportedFeatures.add(CameraFeature.LIVE_VIEW_RTP)
+            }
+            if (supportsMultipartLiveView) {
+                supportedFeatures.add(CameraFeature.LIVE_VIEW_MULTIPART)
             }
             if (recordingOperation() != null) {
                 supportedFeatures.add(CameraFeature.VIDEO_RECORDING)
@@ -1278,30 +1299,40 @@ class CcapiClient(
         requireLiveViewAllowed()
         if (isRealCamera) {
             latestLiveViewGeometry = null
-            val requestedSource = request.source
-            val source = when (requestedSource) {
-                LiveViewSource.AUTO -> if (supportsRtpLiveView()) {
-                    LiveViewSource.CCAPI_RTP
-                } else {
-                    LiveViewSource.CCAPI_JPEG_POLLING
+            val sources = when (request.source) {
+                LiveViewSource.AUTO -> buildList {
+                    if (supportsRtpLiveView()) add(LiveViewSource.CCAPI_RTP)
+                    if (supportsMultipartLiveView()) add(LiveViewSource.CCAPI_MULTIPART)
+                    if (!enforceAdvertisedOperations || supportsCompleteLiveView()) {
+                        add(LiveViewSource.CCAPI_JPEG_POLLING)
+                    }
                 }
-
                 LiveViewSource.CCAPI_JPEG_POLLING,
+                LiveViewSource.CCAPI_MULTIPART,
                 LiveViewSource.CCAPI_RTP,
-                -> requestedSource
-
-                else -> error("${requestedSource.label} is not available through the CCAPI network backend.")
+                -> listOf(request.source)
+                else -> error("${request.source.label} is not available through the CCAPI network backend.")
             }
-
-            if (source == LiveViewSource.CCAPI_RTP) {
+            check(sources.isNotEmpty()) { "Camera did not advertise a complete Live View CCAPI lifecycle." }
+            val failures = mutableListOf<Throwable>()
+            for (source in sources) {
                 try {
-                    startRtpLiveView(request)
+                    when (source) {
+                        LiveViewSource.CCAPI_RTP -> startRtpLiveView(request)
+                        LiveViewSource.CCAPI_MULTIPART -> startMultipartLiveView(request)
+                        LiveViewSource.CCAPI_JPEG_POLLING -> startJpegLiveView(request)
+                        else -> error("${source.label} is not available through the CCAPI network backend.")
+                    }
                     return
                 } catch (exception: Exception) {
-                    if (requestedSource != LiveViewSource.AUTO || !supportsCompleteLiveView()) throw exception
+                    failures += exception
+                    if (request.source != LiveViewSource.AUTO) throw exception
                 }
             }
-            startJpegLiveView(request)
+            throw IllegalStateException(
+                "Every advertised CCAPI Live View source failed: ${failures.joinToString { it.message ?: it.javaClass.simpleName }}",
+                failures.lastOrNull(),
+            )
         }
     }
 
@@ -1310,6 +1341,7 @@ class CcapiClient(
         if (isRealCamera) {
             when (activeLiveViewSource) {
                 LiveViewSource.CCAPI_RTP -> stopRtpLiveView()
+                LiveViewSource.CCAPI_MULTIPART -> stopMultipartLiveView()
                 LiveViewSource.CCAPI_JPEG_POLLING -> {
                     if (!enforceAdvertisedOperations || supportsApi("DELETE", "/shooting/liveview")) {
                         runCatching { deleteOk(apiPath("DELETE", "/shooting/liveview")) }
@@ -1381,6 +1413,15 @@ class CcapiClient(
         liveViewFrameUrls(cacheKey, request).first()
 
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame {
+        if (isRealCamera && activeLiveViewSource == LiveViewSource.CCAPI_MULTIPART) {
+            return withContext(Dispatchers.IO) {
+                checkNotNull(multipartLiveViewSession) { "Canon multipart Live View session is not active." }
+                    .nextFrame()
+            }.also {
+                observedFeatures.add(CameraFeature.LIVE_VIEW)
+                observedFeatures.add(CameraFeature.LIVE_VIEW_MULTIPART)
+            }
+        }
         val errors = mutableListOf<String>()
 
         liveViewFrameUrls(cacheKey, request).forEach { sourceUrl ->
@@ -1419,6 +1460,9 @@ class CcapiClient(
                 }
 
                 LiveViewSource.CCAPI_JPEG_POLLING -> liveViewFramePaths().map { "$baseUrl$it" }
+
+                LiveViewSource.CCAPI_MULTIPART ->
+                    error("CCAPI multipart Live View renders through its persistent frame reader.")
 
                 LiveViewSource.CCAPI_RTP -> error("CCAPI RTP Live View renders through the native H.264 surface, not the JPEG frame reader.")
 
@@ -1707,9 +1751,33 @@ class CcapiClient(
             !rtpDestinationAddress.isNullOrBlank() &&
             rtpSessionFactory != null
 
+    private fun multipartLiveViewOperations(): CcapiMultipartOperations? {
+        val reads = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith("/shooting/liveview/multipart") }
+            .sortedByDescending { it.apiVersionNumber() }
+        reads.forEach { read ->
+            val prefix = read.path.removeSuffix("/shooting/liveview/multipart")
+            val operations = CcapiMultipartOperations(
+                startLiveView = CcapiApiOperation("POST", "$prefix/shooting/liveview"),
+                stopLiveView = CcapiApiOperation("DELETE", "$prefix/shooting/liveview"),
+                openStream = read,
+                closeStream = CcapiApiOperation("DELETE", read.path),
+            )
+            if (
+                operations.startLiveView in apiOperations &&
+                operations.stopLiveView in apiOperations &&
+                operations.closeStream in apiOperations
+            ) return operations
+        }
+        return null
+    }
+
+    private fun supportsMultipartLiveView(): Boolean = multipartLiveViewOperations() != null
+
     private fun ccapiLiveViewCapabilities(): LiveViewCapabilities {
         val sources = buildList {
             if (supportsRtpLiveView()) add(LiveViewSource.CCAPI_RTP)
+            if (supportsMultipartLiveView()) add(LiveViewSource.CCAPI_MULTIPART)
             if (supportsCompleteLiveView()) add(LiveViewSource.CCAPI_JPEG_POLLING)
         }
         return LiveViewCapabilities.ccapiNetwork().copy(
@@ -1722,7 +1790,16 @@ class CcapiClient(
         if (enforceAdvertisedOperations && !supportsCompleteLiveView()) {
             error("Camera did not advertise a complete Live View JPEG start, frame, and stop lifecycle.")
         }
-        val path = apiPath("POST", "/shooting/liveview")
+        startCcapiLiveView(request)
+        activeLiveViewSource = LiveViewSource.CCAPI_JPEG_POLLING
+        observedFeatures.add(CameraFeature.LIVE_VIEW)
+        observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+    }
+
+    private suspend fun startCcapiLiveView(
+        request: LiveViewRequest,
+        path: String = apiPath("POST", "/shooting/liveview"),
+    ) {
         val requestedPayload = JSONObject()
             .put("cameradisplay", "on")
             .put("liveviewsize", request.size.ccapiValue)
@@ -1735,9 +1812,73 @@ class CcapiClient(
             liveViewSizeControlSupported = false
         }
         activeLiveViewSize = request.size
-        activeLiveViewSource = LiveViewSource.CCAPI_JPEG_POLLING
-        observedFeatures.add(CameraFeature.LIVE_VIEW)
-        observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+    }
+
+    private suspend fun startMultipartLiveView(request: LiveViewRequest) {
+        val operation = multipartLiveViewOperations()
+            ?: error("Camera did not advertise matching Canon multipart Live View GET and DELETE endpoints.")
+        startCcapiLiveView(request, operation.startLiveView.path)
+        val sourceUrl = "$baseUrl${operation.openStream.path}"
+        val streamRequest = Request.Builder()
+            .url(sourceUrl)
+            .get()
+            .header("Accept", "multipart/x-mixed-replace")
+            .header("Cache-Control", "no-cache")
+            .build()
+        try {
+            val session = withContext(Dispatchers.IO) {
+                val call = multipartHttpClient.newCall(streamRequest)
+                val response = try {
+                    call.execute()
+                } catch (exception: Exception) {
+                    call.cancel()
+                    throw exception
+                }
+                if (response.code != 200) {
+                    val preview = response.body?.string().orEmpty().trim().take(MAX_ERROR_BODY_CHARS)
+                    response.close()
+                    throw CcapiHttpException(
+                        response.code,
+                        "Camera request failed: GET $sourceUrl returned HTTP ${response.code}\nBody: $preview",
+                    )
+                }
+                val boundary = try {
+                    parseCcapiMultipartBoundary(response.header("content-type"))
+                } catch (exception: Exception) {
+                    response.close()
+                    call.cancel()
+                    throw exception
+                }
+                CcapiMultipartLiveViewSession(call, response, sourceUrl, boundary)
+            }
+            multipartLiveViewSession?.close()
+            multipartLiveViewSession = session
+            activeLiveViewSource = LiveViewSource.CCAPI_MULTIPART
+        } catch (exception: Exception) {
+            withContext(NonCancellable) {
+                runCatching { deleteOk(operation.closeStream.path) }
+                runCatching { deleteOk(operation.stopLiveView.path) }
+            }
+            throw exception
+        }
+    }
+
+    private suspend fun stopMultipartLiveView() {
+        multipartLiveViewSession?.close()
+        multipartLiveViewSession = null
+        val operations = multipartLiveViewOperations()
+        try {
+            if (operations != null) {
+                requestOk(
+                    Request.Builder().url("$baseUrl${operations.closeStream.path}").delete().build(),
+                    expectedStatusCode = 200,
+                )
+            }
+        } finally {
+            if (!enforceAdvertisedOperations || supportsApi("DELETE", "/shooting/liveview")) {
+                runCatching { deleteOk(operations?.stopLiveView?.path ?: apiPath("DELETE", "/shooting/liveview")) }
+            }
+        }
     }
 
     private suspend fun startRtpLiveView(request: LiveViewRequest) {
