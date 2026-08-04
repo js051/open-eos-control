@@ -568,6 +568,9 @@ class CcapiClient(
             if (cameraClockOperations() != null) {
                 supportedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC)
             }
+            if (sensorCleaningOperation() != null) {
+                supportedFeatures.add(CameraFeature.SENSOR_CLEANING)
+            }
             if (cameraSleepWritePath != null) {
                 supportedFeatures.add(CameraFeature.CAMERA_SLEEP)
             }
@@ -833,6 +836,28 @@ class CcapiClient(
             postOk("/ccapi/camera-sleep", JSONObject())
         }
         observedFeatures.add(CameraFeature.CAMERA_SLEEP)
+    }
+
+    suspend fun cleanSensor(autoPowerOff: Boolean) {
+        if (isRealCamera) {
+            val operation = sensorCleaningOperation()
+                ?: throw UnsupportedOperationException(
+                    "${CameraFeature.SENSOR_CLEANING.label} is not supported by this camera's advertised CCAPI.",
+                )
+            runCatching { stopEventPolling() }
+            stopLiveView()
+            postOk(
+                operation.path,
+                JSONObject().put("autopoweroff", autoPowerOff),
+                expectedStatusCode = 200,
+            )
+        } else {
+            postOk(
+                "/ccapi/sensor-cleaning",
+                JSONObject().put("autopoweroff", autoPowerOff),
+            )
+        }
+        observedFeatures.add(CameraFeature.SENSOR_CLEANING)
     }
 
     suspend fun syncCameraClock(): CameraStatus {
@@ -1425,6 +1450,10 @@ class CcapiClient(
         }
         return null
     }
+
+    private fun sensorCleaningOperation(): CcapiApiOperation? = apiOperations
+        .filter { it.method == "POST" && it.path.endsWith("/functions/sensorcleaning") }
+        .maxByOrNull { it.apiVersionNumber() }
 
     private fun parseCameraClock(json: JSONObject): Pair<ZonedDateTime, Boolean> {
         val rawDateTime = json.opt("datetime") as? String
@@ -2473,11 +2502,16 @@ class CcapiClient(
             .build(),
     )
 
-    private suspend fun postOk(path: String, payload: JSONObject): Unit = requestOk(
+    private suspend fun postOk(
+        path: String,
+        payload: JSONObject,
+        expectedStatusCode: Int? = null,
+    ): Unit = requestOk(
         Request.Builder()
             .url("$baseUrl$path")
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build(),
+        expectedStatusCode = expectedStatusCode,
     )
 
     private suspend fun putOk(
@@ -3078,6 +3112,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.MEDIA_DELETE,
             CameraFeature.EVENT_POLLING,
             CameraFeature.CAMERA_CLOCK_SYNC,
+            CameraFeature.SENSOR_CLEANING,
             CameraFeature.FOCUS_DRIVE,
             CameraFeature.RECORDABLE_STATUS,
             CameraFeature.LENS_STATUS,

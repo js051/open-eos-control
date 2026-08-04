@@ -132,6 +132,13 @@
 "camera_sleep_hint" = "結束 CCAPI 連線並立即讓相機進入省電休眠。";
 "camera_sleep_confirm_title" = "讓相機進入休眠？";
 "camera_sleep_confirm_message" = "Live View 與目前的相機連線將會結束。再次連線前，請先在相機上將其喚醒。";
+"sensor_cleaning" = "清潔相機感光元件";
+"sensor_cleaning_hint" = "執行相機內建的感光元件清潔程序；清潔期間會暫停 Live View。";
+"sensor_cleaning_confirm_title" = "清潔相機感光元件？";
+"sensor_cleaning_confirm_message" = "清潔期間無法拍照或錄影。";
+"sensor_cleaning_keep_power" = "清潔感光元件";
+"sensor_cleaning_power_off" = "清潔後關閉相機";
+"clean_now" = "立即清潔";
 "sleep_now" = "立即休眠";
 "setting_beep" = "提示音";
 "setting_display_off" = "螢幕自動關閉";

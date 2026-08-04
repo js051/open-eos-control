@@ -1459,6 +1459,56 @@ class CameraScreensTest {
     }
 
     @Test
+    fun moreSettingsConfirmsAdvertisedSensorCleaningAndPowerOffChoice() {
+        var requestedAutoPowerOff: Boolean? = null
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities)
+        val state = base.copy(
+            activeSettingPicker = SettingPicker.MORE,
+            capabilities = capabilities.copy(
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported + CameraFeature.SENSOR_CLEANING,
+                ),
+            ),
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    state,
+                    noOpActions().copy(cleanSensor = { requestedAutoPowerOff = it }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("sensor-cleaning")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performClick()
+        compose.runOnIdle { assertEquals(null, requestedAutoPowerOff) }
+        compose.onNodeWithText(resourceText(R.string.sensor_cleaning_power_off)).performClick()
+        compose.onNodeWithTag("sensor-cleaning-confirm")
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertEquals(true, requestedAutoPowerOff) }
+    }
+
+    @Test
+    fun offlinePreviewSensorCleaningIsVisibleButDisabled() {
+        val state = CameraUiState().withOfflinePreview().copy(activeSettingPicker = SettingPicker.MORE)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state, noOpActions())
+            }
+        }
+
+        compose.onNodeWithTag("sensor-cleaning")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+    }
+
+    @Test
     fun moreSettingsHidesShutterHalfPressWhenTheCameraDoesNotAdvertiseIt() {
         val picker = mutableStateOf<SettingPicker?>(null)
         val preview = CameraUiState().withOfflinePreview()

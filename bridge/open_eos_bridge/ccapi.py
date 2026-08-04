@@ -760,6 +760,8 @@ class CcapiSession:
                 supported.add(CameraFeature.EVENT_POLLING)
             if self._camera_clock_operations() is not None:
                 supported.add(CameraFeature.CAMERA_CLOCK_SYNC)
+            if self._operation("POST", "/functions/sensorcleaning") is not None:
+                supported.add(CameraFeature.SENSOR_CLEANING)
             if self._camera_sleep_path is not None:
                 supported.add(CameraFeature.CAMERA_SLEEP)
 
@@ -784,6 +786,7 @@ class CcapiSession:
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
+                CameraFeature.SENSOR_CLEANING,
                 CameraFeature.CAMERA_SLEEP,
                 CameraFeature.ZOOM_CONTROL,
                 CameraFeature.CARD_SELECTION_CONTROL,
@@ -824,6 +827,9 @@ class CcapiSession:
                     CameraFeature.CAMERA_CLOCK_SYNC.value: (
                         "The camera must advertise both GET and PUT for the Canon date-time endpoint "
                         "in the same API version."
+                    ),
+                    CameraFeature.SENSOR_CLEANING.value: (
+                        "The camera must advertise the Canon POST sensor-cleaning endpoint."
                     ),
                     CameraFeature.CAMERA_SLEEP.value: (
                         "The camera must advertise matching GET and PUT Auto Power Off endpoints and "
@@ -1067,6 +1073,27 @@ class CcapiSession:
             )
             self._settings_cache = None
             self._observed.add(CameraFeature.CAMERA_SLEEP)
+
+    def clean_sensor(self, auto_power_off: bool) -> None:
+        with self._lock:
+            self._ensure_initialized()
+            operation = self._operation("POST", "/functions/sensorcleaning")
+            if operation is None:
+                raise unsupported(
+                    CameraFeature.SENSOR_CLEANING.value,
+                    self.engine_name,
+                    "The camera did not advertise the Canon POST sensor-cleaning endpoint.",
+                )
+            self.stop_event_polling()
+            if self._live_view_active:
+                self._stop_live_view_locked()
+            self._request_ok(
+                operation.method,
+                operation.path,
+                {"autopoweroff": auto_power_off},
+                expected_status=200,
+            )
+            self._observed.add(CameraFeature.SENSOR_CLEANING)
 
     def sync_camera_clock(self) -> CameraStatus:
         with self._lock:

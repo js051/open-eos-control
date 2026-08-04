@@ -41,6 +41,7 @@
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
     MEDIA_DELETE: "MEDIA_DELETE",
     CAMERA_CLOCK_SYNC: "CAMERA_CLOCK_SYNC",
+    SENSOR_CLEANING: "SENSOR_CLEANING",
     CAMERA_SLEEP: "CAMERA_SLEEP",
   };
   const CORE_SETTINGS = ["iso", "shutter", "aperture", "whitebalance"];
@@ -137,6 +138,13 @@
       cameraClockSyncedAt: "Verified at {time}",
       syncNow: "Sync now",
       cameraClockSynced: "Camera date and time verified",
+      sensorCleaning: "Clean camera sensor",
+      sensorCleaningHint: "Runs the camera's built-in sensor-cleaning cycle. Live View pauses while cleaning is in progress.",
+      sensorCleaningNow: "Clean now",
+      sensorCleaningPowerOff: "Clean and turn off",
+      sensorCleaningConfirm: "Run the camera's built-in sensor-cleaning cycle now? Shooting and recording are unavailable during cleaning.",
+      sensorCleaningPowerOffConfirm: "Clean the sensor and turn off the camera afterward? Live View and this connection will end.",
+      sensorCleaningComplete: "Sensor cleaning completed",
       cameraSleep: "Put camera to sleep",
       cameraSleepHint: "Ends CCAPI and immediately puts the camera into power-saving sleep.",
       cameraSleepNow: "Sleep now",
@@ -433,6 +441,13 @@
       cameraClockSyncedAt: "已於 {time} 驗證",
       syncNow: "立即同步",
       cameraClockSynced: "已驗證相機日期與時間",
+      sensorCleaning: "清潔相機感光元件",
+      sensorCleaningHint: "執行相機內建的感光元件清潔程序；清潔期間會暫停 Live View。",
+      sensorCleaningNow: "立即清潔",
+      sensorCleaningPowerOff: "清潔後關機",
+      sensorCleaningConfirm: "要立即執行相機內建的感光元件清潔程序嗎？清潔期間無法拍照或錄影。",
+      sensorCleaningPowerOffConfirm: "要清潔感光元件並在完成後關閉相機嗎？Live View 與目前連線將會結束。",
+      sensorCleaningComplete: "感光元件清潔已完成",
       cameraSleep: "讓相機進入休眠",
       cameraSleepHint: "結束 CCAPI 連線並立即讓相機進入省電休眠。",
       cameraSleepNow: "立即休眠",
@@ -1697,6 +1712,7 @@
       (setting) => !CORE_SETTINGS.includes(setting.key) && settingMatchesCaptureMode(setting),
     );
     const clockSupported = featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+    const sensorCleaningSupported = featureSupported(FEATURES.SENSOR_CLEANING);
     const sleepSupported = featureSupported(FEATURES.CAMERA_SLEEP);
     if (clockSupported) {
       const row = document.createElement("div");
@@ -1722,6 +1738,39 @@
       button.disabled = cameraInteractionBusy();
       button.addEventListener("click", () => syncCameraClock(button));
       row.append(copy, button);
+      ui.advancedSettings.append(row);
+    }
+    if (sensorCleaningSupported) {
+      const row = document.createElement("div");
+      row.className = "settings-command";
+      const copy = document.createElement("span");
+      const title = document.createElement("strong");
+      title.textContent = t("sensorCleaning");
+      const detail = document.createElement("small");
+      detail.textContent = t("sensorCleaningHint");
+      copy.append(title, detail);
+      const actions = document.createElement("div");
+      actions.className = "settings-command-actions";
+      const cleanButton = document.createElement("button");
+      cleanButton.type = "button";
+      cleanButton.className = "button secondary";
+      cleanButton.dataset.cameraCommand = "sensor-cleaning";
+      cleanButton.textContent = t("sensorCleaningNow");
+      cleanButton.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || Boolean(state.status?.bulbExposureActive);
+      cleanButton.addEventListener("click", () => {
+        if (window.confirm(t("sensorCleaningConfirm"))) void cleanSensor(cleanButton, false);
+      });
+      const powerOffButton = document.createElement("button");
+      powerOffButton.type = "button";
+      powerOffButton.className = "button danger";
+      powerOffButton.dataset.cameraCommand = "sensor-cleaning";
+      powerOffButton.textContent = t("sensorCleaningPowerOff");
+      powerOffButton.disabled = cleanButton.disabled;
+      powerOffButton.addEventListener("click", () => {
+        if (window.confirm(t("sensorCleaningPowerOffConfirm"))) void cleanSensor(powerOffButton, true);
+      });
+      actions.append(cleanButton, powerOffButton);
+      row.append(copy, actions);
       ui.advancedSettings.append(row);
     }
     if (sleepSupported) {
@@ -1752,7 +1801,7 @@
       ui.advancedSettings.append(row);
       window.OpenEosIcons?.render(row);
     }
-    if (!settings.length && !clockSupported && !sleepSupported) {
+    if (!settings.length && !clockSupported && !sensorCleaningSupported && !sleepSupported) {
       const empty = document.createElement("p");
       empty.className = "supporting";
       empty.textContent = t("notAvailable");
@@ -1866,6 +1915,57 @@
       }
       resetSession();
       showToast(t("cameraSleepComplete"));
+    } catch (error) {
+      const normalized = captureError(error);
+      state.busy = false;
+      startEventLoop();
+      if (wasLive) await startLiveView({ announce: false });
+      state.lastError = normalized.message;
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+      renderSession();
+    }
+  }
+
+  async function cleanSensor(source, autoPowerOff) {
+    if (
+      !state.session ||
+      cameraInteractionBusy() ||
+      !featureSupported(FEATURES.SENSOR_CLEANING) ||
+      state.status?.recording ||
+      state.status?.bulbExposureActive
+    ) return;
+    const sessionId = state.session.id;
+    const wasLive = state.liveActive;
+    beginCameraInteraction();
+    state.lastError = null;
+    source.disabled = true;
+    setOperationState(t("busy"));
+    stopLiveLoop();
+    await stopEventLoop(sessionId);
+    renderAvailability();
+    try {
+      await api(`/v1/session/${encodeURIComponent(sessionId)}/maintenance/sensor-cleaning`, {
+        method: "POST",
+        json: { autoPowerOff },
+      });
+      if (autoPowerOff) {
+        try {
+          await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+        } catch (_) {
+          // The camera can become unreachable after the accepted cleaning command.
+        }
+        resetSession();
+      } else {
+        state.status = await api(`/v1/session/${encodeURIComponent(sessionId)}/status`);
+        await refreshCapabilityEvidence();
+        state.busy = false;
+        startEventLoop();
+        if (wasLive) await startLiveView({ announce: false });
+        setOperationState(t("ready"));
+        renderSession();
+      }
+      showToast(t("sensorCleaningComplete"));
     } catch (error) {
       const normalized = captureError(error);
       state.busy = false;
@@ -3398,8 +3498,11 @@
       const command = button.dataset.cameraCommand;
       const supported = command === "sleep"
         ? featureSupported(FEATURES.CAMERA_SLEEP)
-        : featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
-      button.disabled = interactionBusy || bulbActive || !supported || (command === "sleep" && recording);
+        : command === "sensor-cleaning"
+          ? featureSupported(FEATURES.SENSOR_CLEANING)
+          : featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+      button.disabled = interactionBusy || bulbActive || !supported ||
+        ((command === "sleep" || command === "sensor-cleaning") && recording);
     });
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
       button.disabled = interactionBusy || bulbActive || !state.liveActive;

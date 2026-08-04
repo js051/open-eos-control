@@ -165,6 +165,8 @@ class CameraRepository(
 
     suspend fun syncCameraClock(): CameraStatus = backend.syncCameraClock()
 
+    suspend fun cleanSensor(autoPowerOff: Boolean) = backend.cleanSensor(autoPowerOff)
+
     suspend fun sleepCamera() = backend.sleepCamera()
 
     suspend fun refreshCapabilities(): CameraCapabilities = backend.capabilities().forCamera(

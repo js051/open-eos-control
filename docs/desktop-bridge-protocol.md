@@ -44,6 +44,7 @@ POST /v1/session/{id}/recording/stop
 POST /v1/session/{id}/focus/tap
 POST /v1/session/{id}/whitebalance/click
 POST /v1/session/{id}/focus/drive
+POST /v1/session/{id}/maintenance/sensor-cleaning
 POST /v1/session/{id}/power/sleep
 GET  /v1/session/{id}/media
 GET  /v1/session/{id}/media/{itemId}/thumbnail
@@ -172,6 +173,8 @@ Direct CCAPI movie recording settings are exposed as `moviequality`, `highframer
 Direct CCAPI camera beep and display-off timeout are exposed as generic `beep` and `displayoff` advanced settings. Each requires an exact same-version GET/PUT pair at `/functions/beep` or `/functions/displayoff`, at least two unique documented strings containing the current value, and a fresh group read before `PUT /v1/session/{id}/setting` forwards the exact token. Both settings remain available in Photo and Video contexts. Malformed, stale, single-choice and cross-version contracts never produce a camera write; immediate auto-power-off is a separate disconnecting action and is not represented by `displayoff`.
 
 Direct CCAPI Auto Power Off is exposed as generic `autopoweroff` plus a separately gated `CAMERA_SLEEP` capability. The timed setting requires an exact same-version `GET`/`PUT /functions/autopoweroff` pair, a current value inside a complete unique ability and at least two documented non-immediate choices. Every setting write re-reads that resource and forwards only `30`, `60`, `120`, `180`, `300`, `600`, or `disable`. `POST /v1/session/{id}/power/sleep` is available only when the live ability explicitly contains `immediately`; the engine sends that exact PUT value, requires Canon's HTTP 202 response and then ends the session. Clients must confirm this destructive action and stop local Live View/event/media work first. The libgphoto2 engine returns `UNSUPPORTED_FEATURE` for this route because its proven timed Auto Power Off config does not establish an immediate-sleep command.
+
+Direct CCAPI sensor cleaning is exposed only as `SENSOR_CLEANING` when discovery advertises `POST /functions/sensorcleaning`. `POST /v1/session/{id}/maintenance/sensor-cleaning` accepts `{"autoPowerOff":false}` at the Bridge boundary, forwards Canon's exact `{"autopoweroff":false}` body, requires HTTP 200, and stops CCAPI event polling and Live View before sending the command. Clients restore their active session only after a non-power-off success; clean-and-power-off ends the session. The libgphoto2 engine returns `UNSUPPORTED_FEATURE` because no verified public CLI contract is available.
 
 The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --stdout` process and incrementally extracts bounded JPEG frames from its concatenated MJPEG output. It accepts a 1-30 FPS output cap but does not claim the camera and USB link delivered that rate. Commands that need exclusive camera access stop the movie process first; the next frame request automatically starts a fresh process. Startup, early termination, malformed-frame, size-limit, or frame-timeout failures switch the session to bounded `--capture-preview --stdout` transactions and reduce effective `requestedFps` to at most 5. `CameraStatus.raw.liveViewTransport` and `liveViewFallbackReason` distinguish these paths.
 

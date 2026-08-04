@@ -120,6 +120,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
                 CameraFeature.MOVIE_SETTINGS_CONTROL,
                 CameraFeature.CARD_SELECTION_CONTROL,
                 CameraFeature.ADVANCED_SETTINGS,
+                CameraFeature.SENSOR_CLEANING,
                 CameraFeature.CAMERA_SLEEP,
                 CameraFeature.MEDIA_BROWSER,
                 CameraFeature.MEDIA_DOWNLOAD,

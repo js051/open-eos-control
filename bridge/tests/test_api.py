@@ -31,6 +31,8 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert "Bearer ${state.token}" in script.text
     assert "CAMERA_CLOCK_SYNC" in script.text
     assert "/clock/sync" in script.text
+    assert "SENSOR_CLEANING" in script.text
+    assert "/maintenance/sensor-cleaning" in script.text
     assert "CAMERA_SLEEP" in script.text
     assert "/power/sleep" in script.text
     assert media_transfer.status_code == 200
@@ -324,6 +326,22 @@ def test_gphoto2_sleep_route_is_explicitly_unsupported() -> None:
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "UNSUPPORTED_FEATURE"
     assert response.json()["error"]["feature"] == "CAMERA_SLEEP"
+
+
+def test_gphoto2_sensor_cleaning_route_is_explicitly_unsupported() -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    with TestClient(create_app(engine=GPhoto2Engine(FakeRunner()), token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        response = client.post(
+            f"/v1/session/{session_id}/maintenance/sensor-cleaning",
+            headers=headers,
+            json={"autoPowerOff": False},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "UNSUPPORTED_FEATURE"
+    assert response.json()["error"]["feature"] == "SENSOR_CLEANING"
 
 
 def test_request_validation_uses_stable_bridge_error_shape() -> None:

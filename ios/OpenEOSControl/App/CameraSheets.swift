@@ -625,6 +625,7 @@ private struct MoreSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pendingRangeIndices: [String: Double] = [:]
     @State private var showSleepConfirmation = false
+    @State private var showSensorCleaningConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -638,6 +639,10 @@ private struct MoreSettingsView: View {
                         cameraClockRow
                         Divider().overlay(Color.cameraBorder)
                     }
+                    if camera.supports(.sensorCleaning) {
+                        sensorCleaningRow
+                        Divider().overlay(Color.cameraBorder)
+                    }
                     if camera.supports(.cameraSleep) {
                         cameraSleepRow
                         Divider().overlay(Color.cameraBorder)
@@ -645,6 +650,7 @@ private struct MoreSettingsView: View {
                     if settings.isEmpty &&
                         !camera.supports(.clickWhiteBalance) &&
                         !camera.supports(.cameraClockSync) &&
+                        !camera.supports(.sensorCleaning) &&
                         !camera.supports(.cameraSleep) {
                         ContentUnavailableView("no_settings", systemImage: "slider.horizontal.3")
                             .padding(.top, 48)
@@ -675,6 +681,21 @@ private struct MoreSettingsView: View {
             }
         } message: {
             Text("camera_sleep_confirm_message")
+        }
+        .confirmationDialog(
+            "sensor_cleaning_confirm_title",
+            isPresented: $showSensorCleaningConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("sensor_cleaning_keep_power") {
+                Task { await camera.cleanSensor(autoPowerOff: false) }
+            }
+            Button("sensor_cleaning_power_off", role: .destructive) {
+                Task { await camera.cleanSensor(autoPowerOff: true) }
+            }
+            Button("cancel", role: .cancel) {}
+        } message: {
+            Text("sensor_cleaning_confirm_message")
         }
     }
 
@@ -770,6 +791,36 @@ private struct MoreSettingsView: View {
                 !camera.busyOperations.isEmpty
             )
             .accessibilityIdentifier("camera-sleep")
+        }
+        .frame(minHeight: 72)
+    }
+
+    private var sensorCleaningRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("sensor_cleaning")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Color.cameraText)
+                Text("sensor_cleaning_hint")
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraSecondaryText)
+            }
+            Spacer(minLength: 8)
+            Button {
+                showSensorCleaningConfirmation = true
+            } label: {
+                Label("clean_now", systemImage: "arrow.triangle.2.circlepath")
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.cameraAccent)
+            .disabled(
+                camera.isPreview ||
+                camera.recording ||
+                camera.bulbExposureActive ||
+                !camera.busyOperations.isEmpty
+            )
+            .accessibilityIdentifier("sensor-cleaning")
         }
         .frame(minHeight: 72)
     }

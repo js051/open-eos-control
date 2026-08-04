@@ -47,6 +47,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func cleanSensor(autoPowerOff: Bool) async throws {
+        switch self {
+        case let .ccapi(client): try await client.cleanSensor(autoPowerOff: autoPowerOff)
+        case let .desktopBridge(client): try await client.cleanSensor(autoPowerOff: autoPowerOff)
+        }
+    }
+
     func sleepCamera() async throws {
         switch self {
         case let .ccapi(client): try await client.sleepCamera()

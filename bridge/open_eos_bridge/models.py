@@ -39,6 +39,7 @@ class CameraModelPriority(StrEnum):
 class CameraFeature(StrEnum):
     CAMERA_IDENTITY = "CAMERA_IDENTITY"
     CAMERA_CLOCK_SYNC = "CAMERA_CLOCK_SYNC"
+    SENSOR_CLEANING = "SENSOR_CLEANING"
     CAMERA_SLEEP = "CAMERA_SLEEP"
     BATTERY_STATUS = "BATTERY_STATUS"
     STORAGE_STATUS = "STORAGE_STATUS"
@@ -267,6 +268,10 @@ class CameraCapabilities(ApiModel):
 
 class SettingUpdate(ApiModel):
     value: str = Field(min_length=1, max_length=512)
+
+
+class SensorCleaningRequest(ApiModel):
+    auto_power_off: bool = False
 
 
 class LiveViewStartRequest(ApiModel):

@@ -132,6 +132,13 @@
 "camera_sleep_hint" = "Ends the CCAPI connection and immediately puts the camera into power-saving sleep.";
 "camera_sleep_confirm_title" = "Put camera to sleep?";
 "camera_sleep_confirm_message" = "Live View and the current camera connection will end. Wake the camera physically before reconnecting.";
+"sensor_cleaning" = "Clean camera sensor";
+"sensor_cleaning_hint" = "Runs the camera's built-in sensor-cleaning cycle. Live View pauses while cleaning is in progress.";
+"sensor_cleaning_confirm_title" = "Clean the camera sensor?";
+"sensor_cleaning_confirm_message" = "The camera cannot shoot or record during the cleaning cycle.";
+"sensor_cleaning_keep_power" = "Clean sensor";
+"sensor_cleaning_power_off" = "Clean and turn off camera";
+"clean_now" = "Clean now";
 "sleep_now" = "Sleep now";
 "setting_beep" = "Beep";
 "setting_display_off" = "Auto display off";

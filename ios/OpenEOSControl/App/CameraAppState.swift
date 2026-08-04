@@ -540,6 +540,41 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    func cleanSensor(autoPowerOff: Bool) async {
+        guard
+            !isPreview,
+            supports(.sensorCleaning),
+            !recording,
+            !bulbExposureActive,
+            busyOperations.isEmpty,
+            begin(.maintenance)
+        else { return }
+        defer { end(.maintenance) }
+        guard let session else { return }
+
+        let wasLiveViewActive = activeLiveViewSource != nil
+        stopLiveViewLoop()
+        stopEventLoop()
+        do {
+            try await session.cleanSensor(autoPowerOff: autoPowerOff)
+            if autoPowerOff {
+                await disconnect()
+            } else {
+                snapshot = try await session.connectSnapshot()
+                clampLiveViewRequest()
+                beginEventLoop(session: session)
+                activeLiveViewSource = nil
+                if wasLiveViewActive { await startLiveView() }
+                lastError = nil
+            }
+        } catch {
+            record(error)
+            beginEventLoop(session: session)
+            activeLiveViewSource = nil
+            if wasLiveViewActive { await startLiveView() }
+        }
+    }
+
     func toggleBulbExposure() async {
         let wasActive = bulbExposureActive
         guard bulbMode, (wasActive || supports(.bulbExposure)), begin(.capture) else { return }
@@ -1405,7 +1440,7 @@ final class CameraAppState: ObservableObject {
             .exposureControl, .whiteBalanceControl, .zoomControl, .cardSelectionControl,
             .soundRecordingControl, .soundRecordingLevelControl, .focusBracketingControl,
             .movieSettingsControl,
-            .advancedSettings, .cameraSleep, .mediaBrowser, .mediaDownload,
+            .advancedSettings, .sensorCleaning, .cameraSleep, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]
         let capabilities = CameraCapabilities(

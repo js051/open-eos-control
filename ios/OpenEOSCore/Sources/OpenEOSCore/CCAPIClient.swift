@@ -548,6 +548,7 @@ public actor CCAPIClient {
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
         if eventPollingOperations() != nil { supported.insert(.eventPolling) }
         if cameraClockOperations() != nil { supported.insert(.cameraClockSync) }
+        if operation(.post, suffix: "/functions/sensorcleaning") != nil { supported.insert(.sensorCleaning) }
         if cameraSleepPath != nil { supported.insert(.cameraSleep) }
 
         let allPlanned: Set<CameraFeature> = [
@@ -559,6 +560,7 @@ public actor CCAPIClient {
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete, .cameraClockSync, .zoomControl, .cardSelectionControl,
+            .sensorCleaning,
             .cameraSleep,
             .soundRecordingControl,
             .soundRecordingLevelControl,
@@ -589,6 +591,7 @@ public actor CCAPIClient {
                     .movieSettingsControl: "The camera must advertise matching GET and PUT Canon movie-setting endpoints and valid documented abilities.",
                     .movieModeControl: "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
+                    .sensorCleaning: "The camera must advertise the Canon POST sensor-cleaning endpoint.",
                     .cameraSleep: "The camera must advertise matching GET and PUT Auto Power Off endpoints and include immediately in its current ability.",
                 ]
             ),
@@ -803,6 +806,31 @@ public actor CCAPIClient {
         )
         cachedSettings = nil
         observedFeatures.insert(.cameraSleep)
+    }
+
+    public func cleanSensor(autoPowerOff: Bool) async throws {
+        try await ensureInitialized()
+        if resolvedMode == .simulator {
+            try await requestOK(
+                path: "/ccapi/sensor-cleaning",
+                method: .post,
+                json: ["autopoweroff": autoPowerOff]
+            )
+            observedFeatures.insert(.sensorCleaning)
+            return
+        }
+        guard let operation = operation(.post, suffix: "/functions/sensorcleaning") else {
+            throw CCAPIError.unsupported(.sensorCleaning)
+        }
+        await stopEventPolling()
+        await stopLiveView()
+        try await requestOK(
+            path: operation.path,
+            method: .post,
+            json: ["autopoweroff": autoPowerOff],
+            expectedStatusCode: 200
+        )
+        observedFeatures.insert(.sensorCleaning)
     }
 
     public func captureStill() async throws -> CameraStatus {
@@ -2513,6 +2541,7 @@ public actor CCAPIClient {
             .recordableStatus, .lensStatus, .temperatureStatus,
         ]
         if simulatorCameraSleepSupported { supported.insert(.cameraSleep) }
+        supported.insert(.sensorCleaning)
         if controls.contains(where: { $0.key == Self.zoomSettingKey }) {
             supported.insert(.zoomControl)
         }

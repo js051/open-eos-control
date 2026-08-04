@@ -1251,6 +1251,7 @@ class GPhoto2Session:
                     CameraFeature.LIVE_VIEW_RTP,
                     CameraFeature.LIVE_VIEW_MAGNIFICATION,
                     CameraFeature.CAMERA_CLOCK_SYNC,
+                    CameraFeature.SENSOR_CLEANING,
                     CameraFeature.CAMERA_SLEEP,
                 )
                 if feature not in supported
@@ -1278,6 +1279,9 @@ class GPhoto2Session:
                     ),
                     CameraFeature.CAMERA_SLEEP.value: (
                         "The public libgphoto2 CLI contract does not expose a verified immediate camera-sleep action."
+                    ),
+                    CameraFeature.SENSOR_CLEANING.value: (
+                        "The public libgphoto2 CLI contract does not expose a verified sensor-cleaning action."
                     ),
                     CameraFeature.LIVE_VIEW_MAGNIFICATION.value: (
                         "Requires an advertised writable Canon EOS eoszoom action and active Live View."
@@ -1376,6 +1380,14 @@ class GPhoto2Session:
             CameraFeature.CAMERA_SLEEP.value,
             self.engine_name,
             "The public libgphoto2 CLI contract does not expose a verified immediate camera-sleep action.",
+        )
+
+    def clean_sensor(self, auto_power_off: bool) -> None:
+        del auto_power_off
+        raise unsupported(
+            CameraFeature.SENSOR_CLEANING.value,
+            self.engine_name,
+            "The public libgphoto2 CLI contract does not expose a verified sensor-cleaning action.",
         )
 
     def sync_camera_clock(self) -> CameraStatus:

@@ -33,6 +33,7 @@ from .models import (
     LiveViewStartRequest,
     LiveViewState,
     MediaList,
+    SensorCleaningRequest,
     SessionCreated,
     SessionCreateRequest,
     SettingUpdate,
@@ -200,6 +201,11 @@ def create_app(
     @router.post("/session/{session_id}/clock/sync", response_model=CameraStatus)
     def sync_camera_clock(session_id: str) -> CameraStatus:
         return manager.get(session_id).sync_camera_clock()
+
+    @router.post("/session/{session_id}/maintenance/sensor-cleaning", status_code=204)
+    def clean_sensor(session_id: str, payload: SensorCleaningRequest) -> Response:
+        manager.get(session_id).clean_sensor(payload.auto_power_off)
+        return Response(status_code=204)
 
     @router.post("/session/{session_id}/power/sleep", status_code=204)
     def sleep_camera(session_id: str) -> Response:

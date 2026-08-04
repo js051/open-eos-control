@@ -291,6 +291,16 @@ class DesktopBridgeClient(
         postJson(sessionEndpoint("clock", "sync"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC) }
 
+    suspend fun cleanSensor(autoPowerOff: Boolean) {
+        requestOk(
+            Request.Builder()
+                .url(sessionEndpoint("maintenance", "sensor-cleaning"))
+                .post(JSONObject().put("autoPowerOff", autoPowerOff).toString().toRequestBody(jsonMediaType))
+                .build(),
+        )
+        observedFeatures.add(CameraFeature.SENSOR_CLEANING)
+    }
+
     suspend fun sleepCamera() {
         requestOk(
             Request.Builder()

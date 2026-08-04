@@ -1093,6 +1093,13 @@ input:disabled {
   padding-inline: 12px;
 }
 
+.settings-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .setting-row select,
 .settings-list select {
   height: 48px;
