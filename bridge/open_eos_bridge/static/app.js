@@ -891,6 +891,11 @@
   let mediaThumbnailObserver = null;
   let mediaTransferRenderTimer = null;
 
+  function releaseObjectUrl(url) {
+    if (!url) return;
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   const byId = (id) => document.getElementById(id);
   const ui = {
     connectionView: byId("connection-view"),
@@ -2670,7 +2675,7 @@
     state.lastFrameAt = null;
     state.monitorAnalysisError = null;
     ui.liveImage.removeAttribute("src");
-    if (state.liveObjectUrl) URL.revokeObjectURL(state.liveObjectUrl);
+    releaseObjectUrl(state.liveObjectUrl);
     state.liveObjectUrl = null;
     clearMonitoringLayers();
     renderLiveState();
@@ -2697,13 +2702,13 @@
         if (!state.liveActive || state.livePollingSuspended || generation !== state.liveGeneration) {
           if (previous) ui.liveImage.src = previous;
           else ui.liveImage.removeAttribute("src");
-          URL.revokeObjectURL(url);
+          releaseObjectUrl(url);
           return;
         }
         state.liveObjectUrl = url;
         ui.liveImage.hidden = false;
         ui.viewfinderPlaceholder.hidden = true;
-        if (previous) window.setTimeout(() => URL.revokeObjectURL(previous), 1000);
+        releaseObjectUrl(previous);
         renderMonitoringFrame();
         const now = performance.now();
         state.frameTimes.push(now);
@@ -3701,8 +3706,8 @@
       if (generation !== state.mediaGeneration || !state.media.some((candidate) => candidate.id === item.id)) return;
       const url = URL.createObjectURL(blob);
       const previous = state.mediaThumbnailUrls.get(item.id);
-      if (previous) URL.revokeObjectURL(previous);
       state.mediaThumbnailUrls.set(item.id, url);
+      releaseObjectUrl(previous);
     } catch (_) {
       if (generation === state.mediaGeneration) state.mediaThumbnailFailures.add(item.id);
     } finally {
@@ -3743,7 +3748,8 @@
 
   function clearMediaThumbnails() {
     mediaThumbnailObserver?.disconnect();
-    state.mediaThumbnailUrls.forEach((url) => URL.revokeObjectURL(url));
+    ui.mediaList.querySelectorAll("img[src]").forEach((image) => image.removeAttribute("src"));
+    state.mediaThumbnailUrls.forEach((url) => releaseObjectUrl(url));
     state.mediaThumbnailUrls.clear();
     state.mediaThumbnailLoads.clear();
     state.mediaThumbnailFailures.clear();
@@ -3752,10 +3758,10 @@
 
   function clearMediaPreview() {
     state.mediaPreviewGeneration += 1;
-    if (state.mediaPreviewUrl) URL.revokeObjectURL(state.mediaPreviewUrl);
+    ui.mediaPreviewImage.removeAttribute("src");
+    releaseObjectUrl(state.mediaPreviewUrl);
     state.mediaPreviewUrl = null;
     state.mediaPreviewItem = null;
-    ui.mediaPreviewImage.removeAttribute("src");
     ui.mediaPreviewImage.alt = "";
     ui.mediaPreviewImage.hidden = true;
     ui.mediaPreviewLoading.hidden = false;
@@ -3793,9 +3799,9 @@
       ui.mediaPreviewLoading.hidden = true;
     } catch (error) {
       if (generation !== state.mediaPreviewGeneration) return;
-      if (state.mediaPreviewUrl) URL.revokeObjectURL(state.mediaPreviewUrl);
-      state.mediaPreviewUrl = null;
       ui.mediaPreviewImage.removeAttribute("src");
+      releaseObjectUrl(state.mediaPreviewUrl);
+      state.mediaPreviewUrl = null;
       ui.mediaPreviewImage.hidden = true;
       const normalized = captureError(error);
       ui.mediaPreviewLoading.hidden = true;
@@ -3869,7 +3875,7 @@
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    releaseObjectUrl(url);
   }
 
   async function downloadMedia(item) {
@@ -3977,12 +3983,12 @@
       );
       state.media = state.media.filter((candidate) => candidate.id !== item.id);
       const thumbnailUrl = state.mediaThumbnailUrls.get(item.id);
-      if (thumbnailUrl) URL.revokeObjectURL(thumbnailUrl);
       state.mediaThumbnailUrls.delete(item.id);
       state.mediaThumbnailLoads.delete(item.id);
       state.mediaThumbnailFailures.delete(item.id);
       if (state.mediaPreviewItem?.id === item.id) closeMediaPreview();
       renderMedia();
+      releaseObjectUrl(thumbnailUrl);
       showToast(t("deleted", { name: item.name }));
     } catch (error) {
       const normalized = captureError(error);
