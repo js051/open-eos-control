@@ -50,6 +50,7 @@ enum CameraOperation: Hashable {
     case refresh
     case setting
     case clock
+    case power
     case capture
     case recording
     case focus
@@ -292,6 +293,7 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
             "15": "camera_value_15_seconds",
             "30": "camera_value_30_seconds",
             "60": "camera_value_1_minute",
+            "120": "camera_value_2_minutes",
             "180": "camera_value_3_minutes",
             "300": "camera_value_5_minutes",
             "600": "camera_value_10_minutes",

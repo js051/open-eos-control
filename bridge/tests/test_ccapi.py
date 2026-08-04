@@ -102,6 +102,7 @@ class FakeCcapiTransport:
         reject_bulb_press: bool = False,
         reject_event_stop: bool = False,
         reject_rtp_start: bool = False,
+        camera_sleep_status: int = 202,
         thumbnail_body: bytes = JPEG,
         thumbnail_content_type: str = "image/jpeg",
         preview_body: bytes = JPEG,
@@ -125,6 +126,7 @@ class FakeCcapiTransport:
         self.reject_bulb_press = reject_bulb_press
         self.reject_event_stop = reject_event_stop
         self.reject_rtp_start = reject_rtp_start
+        self.camera_sleep_status = camera_sleep_status
         self.thumbnail_body = thumbnail_body
         self.thumbnail_content_type = thumbnail_content_type
         self.preview_body = preview_body
@@ -189,7 +191,8 @@ class FakeCcapiTransport:
         }
         self.movie_mode = "off"
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
-        self.device_functions = {"beep": "enable", "displayoff": "60"}
+        self.device_functions = {"beep": "enable", "displayoff": "60", "autopoweroff": "180"}
+        self.camera_sleep_count = 0
         self.reject_live_view_size = True
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.closed = False
@@ -358,12 +361,13 @@ class FakeCcapiTransport:
             assert payload is not None and payload.get("value") in {"none", "card1", "card2"}
             self.card_selection[kind] = str(payload["value"])
             return _json_response({"value": self.card_selection[kind]})
-        device_function_match = re.fullmatch(r"/ccapi/ver100/functions/(beep|displayoff)", path)
+        device_function_match = re.fullmatch(r"/ccapi/ver100/functions/(beep|displayoff|autopoweroff)", path)
         if device_function_match:
             key = device_function_match.group(1)
             abilities = {
                 "beep": ["enable", "disable", "disabletouch"],
                 "displayoff": ["10", "20", "30", "60", "120", "180"],
+                "autopoweroff": ["30", "60", "120", "180", "300", "600", "disable", "immediately"],
             }
             if method == "GET":
                 response = self.device_function_responses.get(key)
@@ -374,6 +378,9 @@ class FakeCcapiTransport:
                 )
             if method == "PUT":
                 assert payload is not None and payload.get("value") in abilities[key]
+                if key == "autopoweroff" and payload["value"] == "immediately":
+                    self.camera_sleep_count += 1
+                    return _json_response({}, status=self.camera_sleep_status)
                 self.device_functions[key] = str(payload["value"])
                 return _json_response({"value": self.device_functions[key]})
         if method == "PUT" and path == "/ccapi/ver100/functions/datetime":
@@ -1251,6 +1258,95 @@ def test_ccapi_device_function_settings_require_pairs_and_refresh_before_write()
     with pytest.raises(BridgeError, match="not advertised"):
         session.set_setting("beep", "disabletouch")
     assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+
+def test_ccapi_auto_power_off_exposes_safe_values_and_separate_sleep_action() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/autopoweroff", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    control = next(setting for setting in capabilities.settings if setting.key == "autopoweroff")
+
+    assert control.value == "180"
+    assert control.values == ["30", "60", "120", "180", "300", "600", "disable"]
+    assert "immediately" not in control.values
+    assert CameraFeature.CAMERA_SLEEP in capabilities.supported
+    assert "autopoweroff" in capabilities.evidence.writable_settings
+
+    session.set_setting("autopoweroff", "300")
+    session.sleep_camera()
+
+    assert transport.device_functions["autopoweroff"] == "300"
+    assert transport.camera_sleep_count == 1
+    assert RecordedRequest(
+        "PUT",
+        "/ccapi/ver100/functions/autopoweroff",
+        {"value": "immediately"},
+    ) in transport.requests
+    assert CameraFeature.CAMERA_SLEEP in session.capabilities().evidence.observed_features
+
+
+def test_ccapi_camera_sleep_requires_canon_accepted_status() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/autopoweroff", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery, camera_sleep_status=200)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    assert CameraFeature.CAMERA_SLEEP in session.capabilities().supported
+    with pytest.raises(BridgeError, match="expected HTTP 202"):
+        session.sleep_camera()
+
+    assert CameraFeature.CAMERA_SLEEP not in session.capabilities().evidence.observed_features
+
+
+def test_ccapi_auto_power_off_requires_valid_current_and_explicit_immediate_ability() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/autopoweroff", "get": True, "put": True},
+        ]
+    }
+    timed_only = FakeCcapiTransport(
+        discovery=discovery,
+        device_function_responses={
+            "autopoweroff": {"value": "180", "ability": ["30", "60", "180", "disable"]},
+        },
+    )
+    timed_session = CcapiEngine(lambda _username, _password: timed_only).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    timed_capabilities = timed_session.capabilities()
+
+    assert any(setting.key == "autopoweroff" for setting in timed_capabilities.settings)
+    assert CameraFeature.CAMERA_SLEEP not in timed_capabilities.supported
+    assert CameraFeature.CAMERA_SLEEP in timed_capabilities.planned
+    with pytest.raises(BridgeError, match="immediately"):
+        timed_session.sleep_camera()
+    assert timed_only.camera_sleep_count == 0
+
+    malformed = FakeCcapiTransport(
+        discovery=discovery,
+        device_function_responses={
+            "autopoweroff": {"value": "future", "ability": ["30", "180", "future", "immediately"]},
+        },
+    )
+    malformed_capabilities = CcapiEngine(lambda _username, _password: malformed).open_connection(
+        "http://192.168.1.2:8080"
+    ).capabilities()
+
+    assert not any(setting.key == "autopoweroff" for setting in malformed_capabilities.settings)
+    assert CameraFeature.CAMERA_SLEEP not in malformed_capabilities.supported
 
 
 @pytest.mark.parametrize(

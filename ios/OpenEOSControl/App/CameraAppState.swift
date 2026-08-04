@@ -514,6 +514,32 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    func sleepCamera() async {
+        guard
+            !isPreview,
+            supports(.cameraSleep),
+            !recording,
+            !bulbExposureActive,
+            busyOperations.isEmpty,
+            begin(.power)
+        else { return }
+        defer { end(.power) }
+        guard let session else { return }
+
+        let wasLiveViewActive = activeLiveViewSource != nil
+        stopLiveViewLoop()
+        stopEventLoop()
+        resetMediaDownloadState()
+        do {
+            try await session.sleepCamera()
+            await disconnect()
+        } catch {
+            record(error)
+            beginEventLoop(session: session)
+            if wasLiveViewActive { await startLiveView() }
+        }
+    }
+
     func toggleBulbExposure() async {
         let wasActive = bulbExposureActive
         guard bulbMode, (wasActive || supports(.bulbExposure)), begin(.capture) else { return }
@@ -1354,6 +1380,7 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "attenuator", label: "Attenuator", value: "disable", values: ["enable", "disable", "auto", "manual"]),
             CameraSetting(key: "beep", label: "Beep", value: "enable", values: ["enable", "disable", "disabletouch"]),
             CameraSetting(key: "displayoff", label: "Auto display off", value: "60", values: ["10", "20", "30", "60", "120", "180"]),
+            CameraSetting(key: "autopoweroff", label: "Auto power off", value: "180", values: ["30", "60", "120", "180", "300", "600", "disable"]),
             CameraSetting(key: "focusbracketing", label: "Focus bracketing", value: "disable", values: ["enable", "disable"]),
             CameraSetting(key: "focusbracketingnumberofshots", label: "Focus bracketing shots", value: "100", values: (2...999).map(String.init)),
             CameraSetting(key: "focusbracketingfocusincrement", label: "Focus increment", value: "4", values: (1...10).map(String.init)),
@@ -1378,7 +1405,7 @@ final class CameraAppState: ObservableObject {
             .exposureControl, .whiteBalanceControl, .zoomControl, .cardSelectionControl,
             .soundRecordingControl, .soundRecordingLevelControl, .focusBracketingControl,
             .movieSettingsControl,
-            .advancedSettings, .mediaBrowser, .mediaDownload,
+            .advancedSettings, .cameraSleep, .mediaBrowser, .mediaDownload,
             .mediaDelete,
         ]
         let capabilities = CameraCapabilities(

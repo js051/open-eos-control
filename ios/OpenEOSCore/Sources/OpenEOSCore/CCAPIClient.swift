@@ -83,6 +83,9 @@ public actor CCAPIClient {
     )
     private static let beepSettingKey = "beep"
     private static let displayOffSettingKey = "displayoff"
+    private static let autoPowerOffSettingKey = "autopoweroff"
+    private static let autoPowerOffImmediately = "immediately"
+    private static let autoPowerOffSettingValues = Set(["30", "60", "120", "180", "300", "600", "disable"])
     private static let deviceFunctionSettingEndpoints = [
         (
             key: beepSettingKey,
@@ -95,6 +98,12 @@ public actor CCAPIClient {
             suffix: "/functions/displayoff",
             simulatorPath: "/ccapi/device-settings/display-off",
             values: Set(["10", "20", "30", "60", "120", "180"])
+        ),
+        (
+            key: autoPowerOffSettingKey,
+            suffix: "/functions/autopoweroff",
+            simulatorPath: "/ccapi/device-settings/auto-power-off",
+            values: autoPowerOffSettingValues.union([autoPowerOffImmediately])
         ),
     ]
     private static let deviceFunctionSettingKeys = Set(deviceFunctionSettingEndpoints.map { $0.key })
@@ -222,6 +231,7 @@ public actor CCAPIClient {
     private var operations = Set<CCAPIOperation>()
     private var observedFeatures = Set<CameraFeature>()
     private var settingPaths: [String: String] = [:]
+    private var cameraSleepPath: String?
     private var cachedSettings: JSONDictionary?
     private var enforceAdvertisedOperations = false
     private var settingsLoaded = false
@@ -538,6 +548,7 @@ public actor CCAPIClient {
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
         if eventPollingOperations() != nil { supported.insert(.eventPolling) }
         if cameraClockOperations() != nil { supported.insert(.cameraClockSync) }
+        if cameraSleepPath != nil { supported.insert(.cameraSleep) }
 
         let allPlanned: Set<CameraFeature> = [
             .recordableStatus,
@@ -548,6 +559,7 @@ public actor CCAPIClient {
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
             .mediaDelete, .cameraClockSync, .zoomControl, .cardSelectionControl,
+            .cameraSleep,
             .soundRecordingControl,
             .soundRecordingLevelControl,
             .focusBracketingControl,
@@ -577,6 +589,7 @@ public actor CCAPIClient {
                     .movieSettingsControl: "The camera must advertise matching GET and PUT Canon movie-setting endpoints and valid documented abilities.",
                     .movieModeControl: "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
+                    .cameraSleep: "The camera must advertise matching GET and PUT Auto Power Off endpoints and include immediately in its current ability.",
                 ]
             ),
             liveView: LiveViewCapabilities(
@@ -666,7 +679,7 @@ public actor CCAPIClient {
                 )
             case let deviceKey where Self.deviceFunctionSettingKeys.contains(deviceKey):
                 guard let endpoint = Self.deviceFunctionSettingEndpoints.first(where: { $0.key == deviceKey }),
-                      endpoint.values.contains(value) else {
+                      endpoint.values.subtracting(Set([Self.autoPowerOffImmediately])).contains(value) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
                 try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
@@ -768,6 +781,28 @@ public actor CCAPIClient {
         }
         observedFeatures.insert(featureForSetting(key))
         return try await status()
+    }
+
+    public func sleepCamera() async throws {
+        try await ensureInitialized()
+        if resolvedMode == .simulator {
+            try await requestOK(path: "/ccapi/camera-sleep", method: .post, json: [:])
+            observedFeatures.insert(.cameraSleep)
+            return
+        }
+        await stopEventPolling()
+        await stopLiveView()
+        cachedSettings = nil
+        _ = try await loadShootingSettings()
+        guard let cameraSleepPath else { throw CCAPIError.unsupported(.cameraSleep) }
+        try await requestOK(
+            path: cameraSleepPath,
+            method: .put,
+            json: ["value": Self.autoPowerOffImmediately],
+            expectedStatusCode: 202
+        )
+        cachedSettings = nil
+        observedFeatures.insert(.cameraSleep)
     }
 
     public func captureStill() async throws -> CameraStatus {
@@ -1877,7 +1912,9 @@ public actor CCAPIClient {
                 "\(operation.method.rawValue) \(path)".prefix(Self.maximumCapabilityEvidenceItemCharacters)
             )
         }.removingDuplicates().sorted()
-        let writableSettings = settingPaths.keys.map {
+        let writableSettings = Set(settingPaths.keys)
+            .union(cameraSleepPath == nil ? Set<String>() : Set([Self.autoPowerOffSettingKey]))
+            .map {
             String(
                 $0.replacingOccurrences(of: "\r", with: "")
                     .replacingOccurrences(of: "\n", with: "")
@@ -1911,6 +1948,7 @@ public actor CCAPIClient {
 
     private func loadShootingSettings() async throws -> JSONDictionary? {
         settingPaths.removeAll()
+        cameraSleepPath = nil
         observedFeatures.remove(.cardSelectionControl)
         observedFeatures.remove(.soundRecordingControl)
         observedFeatures.remove(.soundRecordingLevelControl)
@@ -1963,8 +2001,19 @@ public actor CCAPIClient {
                   let setting = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values) else {
                 continue
             }
-            settingPaths[endpoint.key] = operations.write.path
-            merged[endpoint.key] = setting
+            let ability = setting.array("ability")?.strings ?? []
+            if endpoint.key == Self.autoPowerOffSettingKey,
+               ability.contains(Self.autoPowerOffImmediately) {
+                cameraSleepPath = operations.write.path
+            }
+            let settingValues = ability.filter {
+                endpoint.values.subtracting(Set([Self.autoPowerOffImmediately])).contains($0)
+            }
+            let current = setting.string("value")
+            if settingValues.count >= 2, settingValues.contains(current) {
+                settingPaths[endpoint.key] = operations.write.path
+                merged[endpoint.key] = ["value": current, "ability": settingValues]
+            }
         }
         for endpoint in Self.soundRecordingEndpoints {
             guard let operations = soundRecordingOperations(suffix: endpoint.suffix),
@@ -2390,11 +2439,29 @@ public actor CCAPIClient {
                   let control = control(key, Self.settingLabel(key), normalized) else { continue }
             controls.append(control)
         }
+        var simulatorCameraSleepSupported = false
         for endpoint in Self.deviceFunctionSettingEndpoints {
             guard let raw = value.object(endpoint.key),
-                  let normalized = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values),
-                  let control = control(endpoint.key, Self.settingLabel(endpoint.key), normalized) else { continue }
-            controls.append(control)
+                  let normalized = Self.validatedStringAbilitySetting(raw, allowedValues: endpoint.values) else {
+                continue
+            }
+            let ability = normalized.array("ability")?.strings ?? []
+            if endpoint.key == Self.autoPowerOffSettingKey,
+               ability.contains(Self.autoPowerOffImmediately) {
+                simulatorCameraSleepSupported = true
+            }
+            let settingValues = ability.filter {
+                endpoint.values.subtracting(Set([Self.autoPowerOffImmediately])).contains($0)
+            }
+            let current = normalized.string("value")
+            guard settingValues.count >= 2,
+                  settingValues.contains(current),
+                  let deviceControl = control(
+                      endpoint.key,
+                      Self.settingLabel(endpoint.key),
+                      ["value": current, "ability": settingValues]
+                  ) else { continue }
+            controls.append(deviceControl)
         }
         for endpoint in Self.soundRecordingEndpoints {
             guard let raw = value.object(endpoint.key),
@@ -2445,6 +2512,7 @@ public actor CCAPIClient {
             .mediaDelete, .cameraClockSync,
             .recordableStatus, .lensStatus, .temperatureStatus,
         ]
+        if simulatorCameraSleepSupported { supported.insert(.cameraSleep) }
         if controls.contains(where: { $0.key == Self.zoomSettingKey }) {
             supported.insert(.zoomControl)
         }
@@ -2755,11 +2823,18 @@ public actor CCAPIClient {
         path: String,
         method: HTTPMethod,
         json: JSONDictionary? = nil,
-        timeoutInterval: TimeInterval = 10
+        timeoutInterval: TimeInterval = 10,
+        expectedStatusCode: Int? = nil
     ) async throws {
         let request = try request(path: path, method: method, json: json, timeoutInterval: timeoutInterval)
         let response = try await transport.send(request)
         try validate(response, request: request)
+        if let expectedStatusCode, response.statusCode != expectedStatusCode {
+            throw CCAPIError.invalidResponse(
+                "Camera request \(method.rawValue) \(path) returned HTTP \(response.statusCode); " +
+                    "expected HTTP \(expectedStatusCode)."
+            )
+        }
     }
 
     private func request(
@@ -2891,6 +2966,7 @@ public actor CCAPIClient {
             Self.movieCardSelectionSettingKey: "Movie card",
             Self.beepSettingKey: "Beep",
             Self.displayOffSettingKey: "Auto display off",
+            Self.autoPowerOffSettingKey: "Auto power off",
             Self.soundRecordingSettingKey: "Sound recording",
             Self.windFilterSettingKey: "Wind filter",
             Self.attenuatorSettingKey: "Attenuator",

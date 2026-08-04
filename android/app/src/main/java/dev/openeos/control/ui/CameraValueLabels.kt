@@ -265,6 +265,12 @@ private val autoLightingOptimizerValueLabels = mapOf(
 )
 
 private val autoPowerOffValueLabels = mapOf(
+    "30" to R.string.camera_value_30_seconds,
+    "60" to R.string.camera_value_1_minute,
+    "120" to R.string.camera_value_2_minutes,
+    "180" to R.string.camera_value_3_minutes,
+    "300" to R.string.camera_value_5_minutes,
+    "600" to R.string.camera_value_10_minutes,
     "15 seconds" to R.string.camera_value_15_seconds,
     "30 seconds" to R.string.camera_value_30_seconds,
     "1 minute" to R.string.camera_value_1_minute,

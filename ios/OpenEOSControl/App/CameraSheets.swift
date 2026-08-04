@@ -624,6 +624,7 @@ private struct MoreSettingsView: View {
     @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
     @State private var pendingRangeIndices: [String: Double] = [:]
+    @State private var showSleepConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -637,9 +638,14 @@ private struct MoreSettingsView: View {
                         cameraClockRow
                         Divider().overlay(Color.cameraBorder)
                     }
+                    if camera.supports(.cameraSleep) {
+                        cameraSleepRow
+                        Divider().overlay(Color.cameraBorder)
+                    }
                     if settings.isEmpty &&
                         !camera.supports(.clickWhiteBalance) &&
-                        !camera.supports(.cameraClockSync) {
+                        !camera.supports(.cameraClockSync) &&
+                        !camera.supports(.cameraSleep) {
                         ContentUnavailableView("no_settings", systemImage: "slider.horizontal.3")
                             .padding(.top, 48)
                     } else {
@@ -662,6 +668,14 @@ private struct MoreSettingsView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .alert("camera_sleep_confirm_title", isPresented: $showSleepConfirmation) {
+            Button("cancel", role: .cancel) {}
+            Button("sleep_now", role: .destructive) {
+                Task { await camera.sleepCamera() }
+            }
+        } message: {
+            Text("camera_sleep_confirm_message")
+        }
     }
 
     private var settings: [CameraSetting] {
@@ -729,6 +743,35 @@ private struct MoreSettingsView: View {
         formatter.dateStyle = .none
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    private var cameraSleepRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("camera_sleep")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Color.cameraText)
+                Text("camera_sleep_hint")
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraSecondaryText)
+            }
+            Spacer(minLength: 8)
+            Button(role: .destructive) {
+                showSleepConfirmation = true
+            } label: {
+                Label("sleep_now", systemImage: "power")
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .disabled(
+                camera.isPreview ||
+                camera.recording ||
+                camera.bulbExposureActive ||
+                !camera.busyOperations.isEmpty
+            )
+            .accessibilityIdentifier("camera-sleep")
+        }
+        .frame(minHeight: 72)
     }
 
     @ViewBuilder

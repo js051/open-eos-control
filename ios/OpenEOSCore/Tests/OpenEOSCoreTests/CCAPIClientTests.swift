@@ -1610,6 +1610,131 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(object, ["value": "disabletouch"])
     }
 
+    func testSimulatorAutoPowerOffSeparatesTimedSettingAndSleepAction() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/capabilities",
+            body: #"{"iso":["800"],"shutter":["1/50"],"aperture":["2.8"],"white_balance":["auto"],"autopoweroff":{"value":"180","ability":["30","60","120","180","300","600","disable","immediately"]}}"#
+        )
+        await transport.enqueue(method: "POST", path: "/ccapi/camera-sleep", status: 204, body: Data())
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        try await client.sleepCamera()
+
+        XCTAssertEqual(
+            capabilities.setting("autopoweroff")?.values,
+            ["30", "60", "120", "180", "300", "600", "disable"]
+        )
+        XCTAssertFalse(capabilities.setting("autopoweroff")?.values.contains("immediately") == true)
+        XCTAssertTrue(capabilities.matrix.supports(.cameraSleep))
+        let requests = await transport.requests()
+        XCTAssertTrue(requests.contains { $0.method == "POST" && $0.path == "/ccapi/camera-sleep" })
+    }
+
+    func testCanonAutoPowerOffUsesFreshAbilityAndSeparateImmediateAction() async throws {
+        let transport = MockCameraHTTPTransport()
+        let path = "/ccapi/ver100/functions/autopoweroff"
+        let response = #"{"value":"180","ability":["30","60","120","180","300","600","disable","immediately"]}"#
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/autopoweroff","get":true,"put":true}]}"#
+        )
+        for _ in 0..<2 {
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(path: path, body: response)
+        }
+        await transport.enqueue(method: "PUT", path: path, status: 202, body: Data("{}".utf8))
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        try await client.sleepCamera()
+
+        XCTAssertEqual(
+            capabilities.setting("autopoweroff")?.values,
+            ["30", "60", "120", "180", "300", "600", "disable"]
+        )
+        XCTAssertTrue(capabilities.matrix.supports(.cameraSleep))
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first { $0.method == "PUT" && $0.path == path })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(object, ["value": "immediately"])
+        XCTAssertGreaterThanOrEqual(requests.filter { $0.path == path }.count, 3)
+    }
+
+    func testCanonCameraSleepRequiresAcceptedStatus() async throws {
+        let transport = MockCameraHTTPTransport()
+        let path = "/ccapi/ver100/functions/autopoweroff"
+        let response = #"{"value":"180","ability":["30","60","120","180","300","600","disable","immediately"]}"#
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/autopoweroff","get":true,"put":true}]}"#
+        )
+        for _ in 0..<2 {
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(path: path, body: response)
+        }
+        await transport.enqueue(method: "PUT", path: path, status: 200, body: Data("{}".utf8))
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        _ = try await client.capabilities()
+        do {
+            try await client.sleepCamera()
+            XCTFail("Expected camera sleep to require Canon's HTTP 202 acceptance")
+        } catch let error as CCAPIError {
+            guard case let .invalidResponse(message) = error else {
+                return XCTFail("Unexpected camera sleep error: \(error)")
+            }
+            XCTAssertTrue(message.contains("expected HTTP 202"))
+        }
+    }
+
+    func testCanonAutoPowerOffWithoutImmediateAbilityHidesSleepOnly() async throws {
+        let transport = MockCameraHTTPTransport()
+        let path = "/ccapi/ver100/functions/autopoweroff"
+        let response = #"{"value":"180","ability":["30","60","180","disable"]}"#
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/autopoweroff","get":true,"put":true}]}"#
+        )
+        for _ in 0..<2 {
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(path: path, body: response)
+        }
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertNotNil(capabilities.setting("autopoweroff"))
+        XCTAssertFalse(capabilities.matrix.supports(.cameraSleep))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.cameraSleep))
+        do {
+            try await client.sleepCamera()
+            XCTFail("Expected camera sleep to require immediately in the live ability")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.cameraSleep))
+        }
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
     func testCanonMovieSettingsRequireExactPairsAndWriteStringAfterRefresh() async throws {
         let transport = MockCameraHTTPTransport()
         let qualityPath = "/ccapi/ver100/shooting/settings/moviequality"

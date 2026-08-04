@@ -128,6 +128,11 @@
 "setting_focus_bracketing_increment" = "Focus increment";
 "setting_focus_bracketing_exposure_smoothing" = "Exposure smoothing";
 "setting_auto_power_off" = "Auto power off";
+"camera_sleep" = "Put camera to sleep";
+"camera_sleep_hint" = "Ends the CCAPI connection and immediately puts the camera into power-saving sleep.";
+"camera_sleep_confirm_title" = "Put camera to sleep?";
+"camera_sleep_confirm_message" = "Live View and the current camera connection will end. Wake the camera physically before reconnecting.";
+"sleep_now" = "Sleep now";
 "setting_beep" = "Beep";
 "setting_display_off" = "Auto display off";
 "setting_capture_target" = "Capture target";

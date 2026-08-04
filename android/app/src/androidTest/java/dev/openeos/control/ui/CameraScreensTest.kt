@@ -1410,6 +1410,55 @@ class CameraScreensTest {
     }
 
     @Test
+    fun moreSettingsConfirmsAdvertisedCameraSleepBeforeDispatch() {
+        var sleepRequested = false
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities)
+        val state = base.copy(
+            activeSettingPicker = SettingPicker.MORE,
+            capabilities = capabilities.copy(
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported + CameraFeature.CAMERA_SLEEP,
+                ),
+            ),
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    state,
+                    noOpActions().copy(sleepCamera = { sleepRequested = true }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("camera-sleep")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performClick()
+        compose.runOnIdle { assertFalse(sleepRequested) }
+        compose.onNodeWithTag("camera-sleep-confirm")
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertTrue(sleepRequested) }
+    }
+
+    @Test
+    fun offlinePreviewCameraSleepIsVisibleButDisabled() {
+        val state = CameraUiState().withOfflinePreview().copy(activeSettingPicker = SettingPicker.MORE)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state, noOpActions())
+            }
+        }
+
+        compose.onNodeWithTag("camera-sleep")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+    }
+
+    @Test
     fun moreSettingsHidesShutterHalfPressWhenTheCameraDoesNotAdvertiseIt() {
         val picker = mutableStateOf<SettingPicker?>(null)
         val preview = CameraUiState().withOfflinePreview()

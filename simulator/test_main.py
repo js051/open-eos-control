@@ -499,6 +499,51 @@ def test_device_function_settings_use_documented_values_and_mutate_both_routes()
     assert test_state["display_off"] == {"value": "20", "update_count": 2}
 
 
+def test_auto_power_off_separates_timed_setting_from_immediate_sleep_action() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    ability = client.get("/ccapi/ver100/functions/autopoweroff")
+    canonical_timed = client.put(
+        "/ccapi/ver100/functions/autopoweroff",
+        json={"value": "300"},
+    )
+    simulator_timed = client.put(
+        "/ccapi/device-settings/auto-power-off",
+        json={"value": "600"},
+    )
+    invalid_timed_action = client.put(
+        "/ccapi/device-settings/auto-power-off",
+        json={"value": "immediately"},
+    )
+    canonical_sleep = client.put(
+        "/ccapi/ver100/functions/autopoweroff",
+        json={"value": "immediately"},
+    )
+    simulator_sleep = client.post("/ccapi/camera-sleep", json={})
+    client.post("/ccapi/record/start")
+    busy_sleep = client.put(
+        "/ccapi/ver100/functions/autopoweroff",
+        json={"value": "immediately"},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert {"path": "/functions/autopoweroff", "get": True, "put": True} in discovery
+    assert ability.json() == {
+        "value": "180",
+        "ability": ["30", "60", "120", "180", "300", "600", "disable", "immediately"],
+    }
+    assert canonical_timed.json() == {"value": "300"}
+    assert simulator_timed.status_code == 204
+    assert invalid_timed_action.status_code == 400
+    assert canonical_sleep.status_code == 202
+    assert canonical_sleep.json() == {}
+    assert simulator_sleep.status_code == 204
+    assert busy_sleep.status_code == 503
+    assert test_state["auto_power_off"] == {"value": "600", "update_count": 2}
+    assert test_state["camera_sleep_count"] == 2
+
+
 def test_sound_recording_controls_use_documented_string_abilities_and_mode_gates() -> None:
     client.post("/ccapi/test/reset")
 

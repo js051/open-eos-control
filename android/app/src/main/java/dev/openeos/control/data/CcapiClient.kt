@@ -129,6 +129,7 @@ class CcapiClient(
     private val structuredSettingPathsByKey = mutableMapOf<String, String>()
     private val structuredSettingValuesByKey = mutableMapOf<String, Set<String>>()
     private val structuredSettingCurrentValues = mutableMapOf<String, JSONObject>()
+    private var cameraSleepWritePath: String? = null
     private val apiOperations = linkedSetOf<CcapiApiOperation>()
     private val observedFeatures = mutableSetOf<CameraFeature>()
     private var enforceAdvertisedOperations = false
@@ -567,6 +568,9 @@ class CcapiClient(
             if (cameraClockOperations() != null) {
                 supportedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC)
             }
+            if (cameraSleepWritePath != null) {
+                supportedFeatures.add(CameraFeature.CAMERA_SLEEP)
+            }
 
             val liveViewCapabilities = ccapiLiveViewCapabilities().let { capabilities ->
                 if (liveViewSizeControlSupported) {
@@ -747,7 +751,7 @@ class CcapiClient(
                 key.lowercase() in DEVICE_FUNCTION_SETTING_KEYS -> {
                     val canonical = key.lowercase()
                     val endpoint = DEVICE_FUNCTION_SETTING_ENDPOINTS.getValue(canonical)
-                    require(value in endpoint.values) {
+                    require(value in endpoint.settingValues) {
                         "${canonical.toSettingLabel()} value is not supported."
                     }
                     putOk(endpoint.simulatorPath, JSONObject().put("value", value))
@@ -809,6 +813,26 @@ class CcapiClient(
         }
         observedFeatures.add(featureForSetting(key))
         return status
+    }
+
+    suspend fun sleepCamera() {
+        if (isRealCamera) {
+            runCatching { stopEventPolling() }
+            stopLiveView()
+            loadShootingSettings()
+            val path = cameraSleepWritePath
+                ?: throw UnsupportedOperationException(
+                    "${CameraFeature.CAMERA_SLEEP.label} is not supported by this camera's advertised CCAPI ability.",
+                )
+            putOk(
+                path = path,
+                payload = JSONObject().put("value", AUTO_POWER_OFF_IMMEDIATELY),
+                expectedStatusCode = 202,
+            )
+        } else {
+            postOk("/ccapi/camera-sleep", JSONObject())
+        }
+        observedFeatures.add(CameraFeature.CAMERA_SLEEP)
     }
 
     suspend fun syncCameraClock(): CameraStatus {
@@ -1432,7 +1456,10 @@ class CcapiClient(
             .distinct()
             .sorted()
             .toList()
-        val writableSettings = settingPathsByKey.keys
+        val writableSettings = (
+            settingPathsByKey.keys +
+                if (cameraSleepWritePath != null) setOf(AUTO_POWER_OFF_SETTING_KEY) else emptySet()
+            )
             .asSequence()
             .map { it.replace("\r", "").replace("\n", "").take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS) }
             .distinct()
@@ -2016,6 +2043,7 @@ class CcapiClient(
         structuredSettingPathsByKey.clear()
         structuredSettingValuesByKey.clear()
         structuredSettingCurrentValues.clear()
+        cameraSleepWritePath = null
         observedFeatures.remove(CameraFeature.CARD_SELECTION_CONTROL)
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_CONTROL)
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
@@ -2167,9 +2195,22 @@ class CcapiClient(
                     null
                 }
                 if (setting != null) {
-                    settingPathsByKey[key] = write.path
-                    settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
-                    merged.put(key, setting)
+                    val ability = setting.getJSONArray("ability").toStringList()
+                    if (key == AUTO_POWER_OFF_SETTING_KEY && AUTO_POWER_OFF_IMMEDIATELY in ability) {
+                        cameraSleepWritePath = write.path
+                    }
+                    val settingValues = ability.filter { it in definition.settingValues }
+                    val current = setting.getString("value")
+                    if (settingValues.size >= 2 && current in settingValues) {
+                        settingPathsByKey[key] = write.path
+                        settingValuesByKey[key] = settingValues.toSet()
+                        merged.put(
+                            key,
+                            JSONObject()
+                                .put("value", current)
+                                .put("ability", org.json.JSONArray(settingValues)),
+                        )
+                    }
                 }
             }
         }
@@ -2439,11 +2480,16 @@ class CcapiClient(
             .build(),
     )
 
-    private suspend fun putOk(path: String, payload: JSONObject): Unit = requestOk(
+    private suspend fun putOk(
+        path: String,
+        payload: JSONObject,
+        expectedStatusCode: Int? = null,
+    ): Unit = requestOk(
         Request.Builder()
             .url("$baseUrl$path")
             .put(payload.toString().toRequestBody(jsonMediaType))
             .build(),
+        expectedStatusCode = expectedStatusCode,
     )
 
     private suspend fun deleteOk(path: String): Unit = requestOk(
@@ -2499,13 +2545,23 @@ class CcapiClient(
         }
     }
 
-    private suspend fun requestOk(request: Request): Unit = withContext(Dispatchers.IO) {
+    private suspend fun requestOk(
+        request: Request,
+        expectedStatusCode: Int? = null,
+    ): Unit = withContext(Dispatchers.IO) {
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw CcapiHttpException(
                     statusCode = response.code,
                     message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
+                )
+            }
+            if (expectedStatusCode != null && response.code != expectedStatusCode) {
+                throw CcapiHttpException(
+                    statusCode = response.code,
+                    message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}; " +
+                        "expected HTTP $expectedStatusCode.\nBody: $body",
                 )
             }
         }
@@ -2887,17 +2943,29 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
         }
     val stillCardSelection = simulatorCardSelection(STILL_CARD_SELECTION_SETTING_KEY)
     val movieCardSelection = simulatorCardSelection(MOVIE_CARD_SELECTION_SETTING_KEY)
-    val deviceFunctionControls = DEVICE_FUNCTION_SETTING_ENDPOINTS.mapNotNull { (key, definition) ->
+    val deviceFunctionSettings = DEVICE_FUNCTION_SETTING_ENDPOINTS.mapNotNull { (key, definition) ->
         optJSONObject(key)
             ?.toValidatedStringAbilitySetting(definition.values)
-            ?.let { setting ->
-                CameraSettingControl(
-                    key = key,
-                    label = key.toSettingLabel(),
-                    value = setting.getString("value"),
-                    values = setting.getJSONArray("ability").toStringList(),
-                )
-            }
+            ?.let { key to it }
+    }.toMap()
+    val simulatorCameraSleepSupported = deviceFunctionSettings[AUTO_POWER_OFF_SETTING_KEY]
+        ?.getJSONArray("ability")
+        ?.toStringList()
+        ?.contains(AUTO_POWER_OFF_IMMEDIATELY) == true
+    val deviceFunctionControls = deviceFunctionSettings.mapNotNull { (key, setting) ->
+        val definition = DEVICE_FUNCTION_SETTING_ENDPOINTS.getValue(key)
+        val values = setting.getJSONArray("ability").toStringList().filter { it in definition.settingValues }
+        val current = setting.getString("value")
+        if (values.size < 2 || current !in values) {
+            null
+        } else {
+            CameraSettingControl(
+                key = key,
+                label = key.toSettingLabel(),
+                value = current,
+                values = values,
+            )
+        }
     }
     val soundRecordingControls = SOUND_RECORDING_ENDPOINTS.mapNotNull { (key, definition) ->
         optJSONObject(key)
@@ -3015,6 +3083,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.LENS_STATUS,
             CameraFeature.TEMPERATURE_STATUS,
         ) +
+        (if (simulatorCameraSleepSupported) setOf(CameraFeature.CAMERA_SLEEP) else emptySet()) +
         (if (zoomControl != null) setOf(CameraFeature.ZOOM_CONTROL) else emptySet()) +
         (if (movieModeControl != null) setOf(CameraFeature.MOVIE_MODE_CONTROL) else emptySet()) +
         (if (stillCardSelection != null || movieCardSelection != null) {
@@ -3197,6 +3266,7 @@ private fun String.toSettingLabel(): String =
         MOVIE_CARD_SELECTION_SETTING_KEY -> "Movie card"
         BEEP_SETTING_KEY -> "Beep"
         DISPLAY_OFF_SETTING_KEY -> "Auto display off"
+        AUTO_POWER_OFF_SETTING_KEY -> "Auto power off"
         SOUND_RECORDING_SETTING_KEY -> "Sound recording"
         WIND_FILTER_SETTING_KEY -> "Wind filter"
         ATTENUATOR_SETTING_KEY -> "Attenuator"
@@ -3261,12 +3331,17 @@ private val CARD_SELECTION_ENDPOINTS = linkedMapOf(
 )
 private const val BEEP_SETTING_KEY = "beep"
 private const val DISPLAY_OFF_SETTING_KEY = "displayoff"
+private const val AUTO_POWER_OFF_SETTING_KEY = "autopoweroff"
+private const val AUTO_POWER_OFF_IMMEDIATELY = "immediately"
 
 private data class DeviceFunctionSettingEndpoint(
     val pathSuffix: String,
     val simulatorPath: String,
     val values: Set<String>,
-)
+) {
+    val settingValues: Set<String>
+        get() = values - AUTO_POWER_OFF_IMMEDIATELY
+}
 
 private val DEVICE_FUNCTION_SETTING_ENDPOINTS = linkedMapOf(
     BEEP_SETTING_KEY to DeviceFunctionSettingEndpoint(
@@ -3278,6 +3353,11 @@ private val DEVICE_FUNCTION_SETTING_ENDPOINTS = linkedMapOf(
         pathSuffix = "/functions/displayoff",
         simulatorPath = "/ccapi/device-settings/display-off",
         values = setOf("10", "20", "30", "60", "120", "180"),
+    ),
+    AUTO_POWER_OFF_SETTING_KEY to DeviceFunctionSettingEndpoint(
+        pathSuffix = "/functions/autopoweroff",
+        simulatorPath = "/ccapi/device-settings/auto-power-off",
+        values = setOf("30", "60", "120", "180", "300", "600", "disable", AUTO_POWER_OFF_IMMEDIATELY),
     ),
 )
 private val DEVICE_FUNCTION_SETTING_KEYS = DEVICE_FUNCTION_SETTING_ENDPOINTS.keys

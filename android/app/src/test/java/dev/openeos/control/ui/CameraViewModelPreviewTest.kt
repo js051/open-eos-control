@@ -67,6 +67,20 @@ class CameraViewModelPreviewTest {
     }
 
     @Test
+    fun offlinePreviewShowsButCannotExecuteCameraSleep() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+
+        assertTrue(viewModel.uiState.value.supports(CameraFeature.CAMERA_SLEEP))
+        viewModel.sleepCamera()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.connected)
+        assertTrue(viewModel.uiState.value.previewMode)
+        assertFalse(CameraOperation.POWER in viewModel.uiState.value.pendingOperations)
+    }
+
+    @Test
     fun captureModeSwitchWritesAdvertisedPreviewModeAndRestoresPreviousPhotoMode() = runTest(dispatcher) {
         val viewModel = CameraViewModel()
         viewModel.enterOfflinePreview()

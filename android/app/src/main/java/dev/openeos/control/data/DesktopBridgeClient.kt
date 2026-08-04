@@ -291,6 +291,16 @@ class DesktopBridgeClient(
         postJson(sessionEndpoint("clock", "sync"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC) }
 
+    suspend fun sleepCamera() {
+        requestOk(
+            Request.Builder()
+                .url(sessionEndpoint("power", "sleep"))
+                .post(JSONObject().toString().toRequestBody(jsonMediaType))
+                .build(),
+        )
+        observedFeatures.add(CameraFeature.CAMERA_SLEEP)
+    }
+
     suspend fun captureStill(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("capture", "still"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }

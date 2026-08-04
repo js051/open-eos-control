@@ -47,6 +47,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func sleepCamera() async throws {
+        switch self {
+        case let .ccapi(client): try await client.sleepCamera()
+        case let .desktopBridge(client): try await client.sleepCamera()
+        }
+    }
+
     func captureStill() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.captureStill()

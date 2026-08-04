@@ -128,6 +128,11 @@
 "setting_focus_bracketing_increment" = "對焦增量";
 "setting_focus_bracketing_exposure_smoothing" = "曝光平滑";
 "setting_auto_power_off" = "自動關閉電源";
+"camera_sleep" = "讓相機進入休眠";
+"camera_sleep_hint" = "結束 CCAPI 連線並立即讓相機進入省電休眠。";
+"camera_sleep_confirm_title" = "讓相機進入休眠？";
+"camera_sleep_confirm_message" = "Live View 與目前的相機連線將會結束。再次連線前，請先在相機上將其喚醒。";
+"sleep_now" = "立即休眠";
 "setting_beep" = "提示音";
 "setting_display_off" = "螢幕自動關閉";
 "setting_capture_target" = "拍攝儲存位置";

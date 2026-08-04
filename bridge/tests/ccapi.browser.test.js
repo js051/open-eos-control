@@ -384,6 +384,16 @@ async function run() {
       (state) => state.display_off.value === "120" && state.display_off.update_count === 1,
       "Canon auto display off setting",
     );
+    assert.deepEqual(
+      await page.locator('#advanced-settings select[data-setting-key="autopoweroff"] option').allInnerTexts(),
+      ["30 seconds", "1 minute", "2 minutes", "3 minutes", "5 minutes", "10 minutes", "Disable"],
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="autopoweroff"]', "300");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.auto_power_off.value === "300" && state.auto_power_off.update_count === 1,
+      "Canon auto power off timed setting",
+    );
     await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2:00:00 remaining"));
     await page.click("#shutter-button");
     await waitForSimulatorState(
@@ -535,15 +545,19 @@ async function run() {
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
     await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-ccapi-e2e.png"), fullPage: true });
 
-    await page.click("#disconnect-button");
+    await page.click('.tab[data-view="live"]');
+    await page.waitForSelector('[data-camera-command="sleep"]:not([disabled])');
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.click('[data-camera-command="sleep"]');
     await page.waitForSelector("#connection-view:not([hidden])");
     const finalState = await waitForSimulatorState(
       simulatorOrigin,
-      (state) => !state.canonical.live_view_active &&
+      (state) => state.camera_sleep_count === 1 &&
+        !state.canonical.live_view_active &&
         state.canonical.live_view_stop_count === 1 &&
         state.canonical.event_delete_count >= 1 &&
         state.canonical.event_active_requests === 0,
-      "CCAPI disconnect to stop Canon Live View and event polling",
+      "CCAPI camera sleep to stop Live View, event polling, and disconnect",
     );
     assert.equal(finalState.canonical.af_start_count, finalState.canonical.af_stop_count);
     assert.equal(finalState.half_press_count, finalState.shutter_release_count);

@@ -300,6 +300,10 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
+    public func sleepCamera() async throws {
+        try await requestOK(sessionEndpoint(["power", "sleep"]), method: "POST")
+    }
+
     public func captureStill() async throws -> CameraStatus {
         let body = try await postJSON(sessionEndpoint(["capture", "still"]), payload: [:])
         return parseStatus(body)
