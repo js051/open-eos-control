@@ -117,6 +117,19 @@ async function run() {
     page.on("console", (message) => {
       if (message.type() === "error") pageErrors.push(message.text());
     });
+    await page.addInitScript(() => {
+      const revokeObjectUrl = URL.revokeObjectURL.bind(URL);
+      window.__objectUrlRevocationViolations = [];
+      URL.revokeObjectURL = (url) => {
+        const references = Array.from(document.querySelectorAll("[src], [href]"))
+          .filter((element) => [element.getAttribute("src"), element.getAttribute("href")].includes(url))
+          .map((element) => `${element.tagName.toLowerCase()}#${element.id || "unknown"}`);
+        if (references.length) {
+          window.__objectUrlRevocationViolations.push({ url, references });
+        }
+        revokeObjectUrl(url);
+      };
+    });
 
     await page.goto(bridgeOrigin, { waitUntil: "networkidle" });
     await page.click("#ccapi-mode-button");
@@ -575,6 +588,8 @@ async function run() {
     );
     assert.equal(finalState.canonical.af_start_count, finalState.canonical.af_stop_count);
     assert.equal(finalState.half_press_count, finalState.shutter_release_count);
+    await page.waitForTimeout(1100);
+    assert.deepEqual(await page.evaluate(() => window.__objectUrlRevocationViolations), []);
     assert.deepEqual(pageErrors, []);
     await context.close();
   } finally {
