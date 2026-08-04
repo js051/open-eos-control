@@ -280,14 +280,23 @@ public actor CCAPIClient {
         for path in ["/ccapi", "/ccapi/"] {
             do {
                 let rootDiscovery = try await requestJSON(path: path)
-                if rootDiscovery.string("value") == Self.noAPIListValue {
-                    let discovery = try await requestJSON(path: Self.developerAPIPath)
-                    parseDiscovery(
-                        discovery,
-                        source: "GET \(Self.developerAPIPath) (Canon developer API fallback)"
-                    )
-                } else {
+                if rootDiscovery.string("value") != Self.noAPIListValue {
                     parseDiscovery(rootDiscovery, source: "GET \(path)")
+                    if !operations.isEmpty {
+                        initialized = true
+                        return
+                    }
+                }
+
+                let discovery = try await requestJSON(path: Self.developerAPIPath)
+                parseDiscovery(
+                    discovery,
+                    source: "GET \(Self.developerAPIPath) (Canon developer API fallback)"
+                )
+                guard !operations.isEmpty else {
+                    throw CCAPIError.invalidResponse(
+                        "Camera developer API \(Self.developerAPIPath) did not advertise any valid operations."
+                    )
                 }
                 initialized = true
                 return
