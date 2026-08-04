@@ -956,6 +956,18 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
     assert unsafe_current.value == "-"
 
 
+def test_gphoto2_does_not_claim_unverified_immediate_camera_sleep() -> None:
+    session = GPhoto2Engine(FakeRunner()).open()
+
+    assert CameraFeature.CAMERA_SLEEP not in session.capabilities().supported
+    assert CameraFeature.CAMERA_SLEEP in session.capabilities().planned
+    with pytest.raises(BridgeError) as rejected:
+        session.sleep_camera()
+
+    assert rejected.value.code == "UNSUPPORTED_FEATURE"
+    assert "verified immediate" in rejected.value.message
+
+
 def test_auto_lighting_optimizer_hides_single_or_unknown_choices() -> None:
     class AloSnapshotRunner(FakeRunner):
         def __init__(self, choices: list[str]) -> None:

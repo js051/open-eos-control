@@ -39,6 +39,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -47,6 +48,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1121,6 +1123,33 @@ private fun liveViewSourceLabel(source: LiveViewSource): String = stringResource
 @Composable
 private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
+    var showSleepConfirmation by remember { mutableStateOf(false) }
+    if (showSleepConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showSleepConfirmation = false },
+            title = { Text(stringResource(R.string.camera_sleep_confirm_title)) },
+            text = { Text(stringResource(R.string.camera_sleep_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSleepConfirmation = false
+                        actions.sleepCamera()
+                    },
+                    modifier = Modifier.testTag("camera-sleep-confirm"),
+                ) {
+                    Text(stringResource(R.string.sleep_now), color = AppRecord)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSleepConfirmation = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            containerColor = AppSurface,
+            titleContentColor = AppText,
+            textContentColor = AppSubtleText,
+        )
+    }
     CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
     ) {
@@ -1219,13 +1248,49 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                if (state.supports(CameraFeature.CAMERA_SLEEP)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.camera_sleep),
+                                color = AppText,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(stringResource(R.string.camera_sleep_hint), color = AppSubtleText)
+                        }
+                        Button(
+                            onClick = { showSleepConfirmation = true },
+                            enabled = !state.previewMode &&
+                                state.status?.recording != true &&
+                                !state.bulbExposureActive &&
+                                !state.busy,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AppSurfaceHigh,
+                                contentColor = AppRecord,
+                            ),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("camera-sleep"),
+                        ) {
+                            Icon(
+                                painterResource(LucideR.drawable.lucide_ic_power),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.sleep_now))
+                        }
+                    }
+                }
                 if (
                     settings.isEmpty() &&
                     !state.supports(CameraFeature.CLICK_WHITE_BALANCE) &&
                     !state.supports(CameraFeature.AUTOFOCUS) &&
                     !state.supports(CameraFeature.SHUTTER_HALF_PRESS) &&
                     !state.supports(CameraFeature.FOCUS_DRIVE) &&
-                    !state.supports(CameraFeature.CAMERA_CLOCK_SYNC)
+                    !state.supports(CameraFeature.CAMERA_CLOCK_SYNC) &&
+                    !state.supports(CameraFeature.CAMERA_SLEEP)
                 ) {
                     Text(stringResource(R.string.no_settings), color = AppSubtleText)
                 }

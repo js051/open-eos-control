@@ -201,6 +201,11 @@ def create_app(
     def sync_camera_clock(session_id: str) -> CameraStatus:
         return manager.get(session_id).sync_camera_clock()
 
+    @router.post("/session/{session_id}/power/sleep", status_code=204)
+    def sleep_camera(session_id: str) -> Response:
+        manager.get(session_id).sleep_camera()
+        return Response(status_code=204)
+
     @router.post("/session/{session_id}/capture/still", response_model=CameraStatus)
     def capture_still(session_id: str) -> CameraStatus:
         return manager.get(session_id).capture_still()

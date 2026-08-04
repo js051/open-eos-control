@@ -204,6 +204,135 @@ class CcapiClientTest {
     }
 
     @Test
+    fun simulatorAutoPowerOffSeparatesTimedSettingAndSleepAction() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "iso":["100","800"],
+                    "shutter":["1/50","1/100"],
+                    "aperture":["2.8","4.0"],
+                    "white_balance":["auto","daylight"],
+                    "autopoweroff":{
+                        "value":"180",
+                        "ability":["30","60","120","180","300","600","disable","immediately"]
+                    }
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        val capabilities = client.capabilities()
+        client.sleepCamera()
+
+        val setting = capabilities.advancedSettings.single { it.key == "autopoweroff" }
+        assertEquals(listOf("30", "60", "120", "180", "300", "600", "disable"), setting.values)
+        assertFalse("immediately" in setting.values)
+        assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_SLEEP))
+        server.takeRequest()
+        val sleep = server.takeRequest()
+        assertEquals("POST", sleep.method)
+        assertEquals("/ccapi/camera-sleep", sleep.path)
+        assertEquals(0, JSONObject(sleep.body.readUtf8()).length())
+        assertTrue(CameraFeature.CAMERA_SLEEP in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realAutoPowerOffUsesFreshAbilityAndSeparateImmediateAction() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/functions/autopoweroff","get":true,"put":true}
+                ]}""",
+            ),
+        )
+        repeat(2) {
+            server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+            server.enqueue(
+                jsonResponse(
+                    """{"value":"180","ability":["30","60","120","180","300","600","disable","immediately"]}""",
+                ),
+            )
+        }
+        server.enqueue(MockResponse().setResponseCode(202).setBody("{}"))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        client.sleepCamera()
+
+        val setting = capabilities.advancedSettings.single { it.key == "autopoweroff" }
+        assertEquals(listOf("30", "60", "120", "180", "300", "600", "disable"), setting.values)
+        assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_SLEEP))
+        repeat(5) { server.takeRequest() }
+        val sleep = server.takeRequest()
+        assertEquals("PUT", sleep.method)
+        assertEquals("/ccapi/ver100/functions/autopoweroff", sleep.path)
+        assertEquals("immediately", JSONObject(sleep.body.readUtf8()).getString("value"))
+        assertTrue(CameraFeature.CAMERA_SLEEP in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realCameraSleepRequiresCanonAcceptedStatus() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/functions/autopoweroff","get":true,"put":true}
+                ]}""",
+            ),
+        )
+        repeat(2) {
+            server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+            server.enqueue(
+                jsonResponse(
+                    """{"value":"180","ability":["30","60","120","180","300","600","disable","immediately"]}""",
+                ),
+            )
+        }
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        client.initialize()
+        client.capabilities()
+        val failure = runCatching { client.sleepCamera() }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message?.contains("expected HTTP 202") == true)
+        assertFalse(CameraFeature.CAMERA_SLEEP in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realAutoPowerOffWithoutImmediateAbilityKeepsTimedSettingButHidesSleep() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/functions/autopoweroff","get":true,"put":true}
+                ]}""",
+            ),
+        )
+        repeat(2) {
+            server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+            server.enqueue(
+                jsonResponse("""{"value":"180","ability":["30","60","180","disable"]}"""),
+            )
+        }
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertTrue(capabilities.advancedSettings.any { it.key == "autopoweroff" })
+        assertFalse(capabilities.matrix.supports(CameraFeature.CAMERA_SLEEP))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.CAMERA_SLEEP))
+        val failure = runCatching { client.sleepCamera() }.exceptionOrNull()
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(CameraFeature.CAMERA_SLEEP in client.observedFeatureSnapshot())
+        assertEquals(5, server.requestCount)
+    }
+
+    @Test
     fun realDeviceFunctionSettingsRequirePairsRefreshAndWriteAdvertisedValue() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(

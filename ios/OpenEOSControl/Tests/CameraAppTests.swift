@@ -268,6 +268,10 @@ final class CameraAppTests: XCTestCase {
             settingValueLocalizationKey(key: "autopoweroff", value: "1800"),
             "camera_value_30_minutes"
         )
+        XCTAssertEqual(
+            settingValueLocalizationKey(key: "autopoweroff", value: "120"),
+            "camera_value_2_minutes"
+        )
         XCTAssertNil(settingValueLocalizationKey(key: "autopoweroff", value: "4294967295"))
         XCTAssertEqual(
             settingValueLocalizationKey(key: "capturetarget", value: "Internal RAM"),
@@ -350,6 +354,7 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingLevelControl))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingControl))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusBracketingControl))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.cameraSleep))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
         XCTAssertEqual(
@@ -510,6 +515,21 @@ final class CameraAppTests: XCTestCase {
 
         XCTAssertTrue(state.operatorConfirmedFeatures.isEmpty)
         XCTAssertEqual(state.physicalValidation.sessionStatus, .offlinePreview)
+    }
+
+    func testOfflinePreviewCannotExecuteCameraSleep() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        XCTAssertTrue(state.supports(.cameraSleep))
+        await state.sleepCamera()
+
+        XCTAssertTrue(state.connected)
+        XCTAssertTrue(state.isPreview)
+        XCTAssertFalse(state.isBusy(.power))
     }
 
     func testOfflineMediaDownloadCompletesAndClearsActiveTransferState() async throws {

@@ -249,6 +249,11 @@
     <string name="setting_focus_bracketing_increment">Focus increment</string>
     <string name="setting_focus_bracketing_exposure_smoothing">Exposure smoothing</string>
     <string name="setting_auto_power_off">Auto power off</string>
+    <string name="camera_sleep">Put camera to sleep</string>
+    <string name="camera_sleep_hint">Ends the CCAPI connection and immediately puts the camera into power-saving sleep.</string>
+    <string name="camera_sleep_confirm_title">Put camera to sleep?</string>
+    <string name="camera_sleep_confirm_message">Live View and the current camera connection will end. Wake the camera physically before reconnecting.</string>
+    <string name="sleep_now">Sleep now</string>
     <string name="setting_beep">Beep</string>
     <string name="setting_display_off">Auto display off</string>
     <string name="setting_capture_target">Capture target</string>

@@ -651,6 +651,39 @@ class CameraViewModel(
         }
     }
 
+    fun sleepCamera() {
+        val state = _uiState.value
+        if (
+            !state.connected ||
+            state.previewMode ||
+            !state.supports(CameraFeature.CAMERA_SLEEP) ||
+            state.status?.recording == true ||
+            state.bulbExposureActive ||
+            state.busy
+        ) return
+
+        stopLiveViewLoop()
+        stopEventPollingLoop()
+        detachNativeLiveViewListener()
+        cancelMediaDownload()
+        cancelMediaThumbnailLoads()
+        runCamera(
+            operation = CameraOperation.POWER,
+            onError = {
+                if (_uiState.value.connected) {
+                    startEventPollingIfSupported()
+                    restartLiveView()
+                }
+            },
+        ) {
+            repository.sleepCamera()
+            runCatching { repository.disconnect() }
+            resetFrameMetrics()
+            lastPhotoShootingMode = null
+            _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+        }
+    }
+
     fun toggleRecording() = updateStatus(CameraOperation.RECORDING) {
         if (_uiState.value.previewMode) {
             return@updateStatus _uiState.value.status!!.copy(

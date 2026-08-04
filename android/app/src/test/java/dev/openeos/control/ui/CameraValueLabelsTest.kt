@@ -39,6 +39,8 @@ class CameraValueLabelsTest {
                 R.string.camera_value_high_disabled_manual,
             ),
             Triple("autopoweroff", "30 minutes", R.string.camera_value_30_minutes),
+            Triple("autopoweroff", "30", R.string.camera_value_30_seconds),
+            Triple("autopoweroff", "120", R.string.camera_value_2_minutes),
             Triple("autopoweroff", "Disable", R.string.camera_value_disable),
             Triple("beep", "disabletouch", R.string.camera_value_disable_touch),
             Triple("displayoff", "20", R.string.camera_value_20_seconds),

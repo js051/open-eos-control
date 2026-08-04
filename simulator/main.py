@@ -73,6 +73,8 @@ ATTENUATOR_ABILITY = ["enable", "disable", "auto", "manual"]
 CARD_SELECTION_ABILITY = ["none", "card1", "card2"]
 BEEP_ABILITY = ["enable", "disable", "disabletouch"]
 DISPLAY_OFF_ABILITY = ["10", "20", "30", "60", "120", "180"]
+AUTO_POWER_OFF_SETTING_ABILITY = ["30", "60", "120", "180", "300", "600", "disable"]
+AUTO_POWER_OFF_ABILITY = [*AUTO_POWER_OFF_SETTING_ABILITY, "immediately"]
 FOCUS_BRACKETING_ABILITY = ["enable", "disable"]
 FOCUS_BRACKETING_SHOTS_ABILITY = {"min": 2, "max": 999, "step": 1}
 FOCUS_BRACKETING_INCREMENT_ABILITY = {"min": 1, "max": 10, "step": 1}
@@ -99,6 +101,9 @@ def initial_state() -> dict[str, object]:
         "beep_update_count": 0,
         "display_off": "60",
         "display_off_update_count": 0,
+        "auto_power_off": "180",
+        "auto_power_off_update_count": 0,
+        "camera_sleep_count": 0,
         "temperature_status": "normal",
         "capture_count": 0,
         "clock_sync_count": 0,
@@ -279,6 +284,11 @@ async def get_test_state() -> dict[str, object]:
             "value": state["display_off"],
             "update_count": state["display_off_update_count"],
         },
+        "auto_power_off": {
+            "value": state["auto_power_off"],
+            "update_count": state["auto_power_off_update_count"],
+        },
+        "camera_sleep_count": state["camera_sleep_count"],
         "temperature_status": state["temperature_status"],
         "capture_count": state["capture_count"],
         "clock_sync_count": state["clock_sync_count"],
@@ -456,6 +466,7 @@ async def get_capabilities() -> dict[str, object]:
         "movieformat": {"value": state["movie_format"], "ability": MOVIE_FORMAT_ABILITY},
         "beep": {"value": state["beep"], "ability": BEEP_ABILITY},
         "displayoff": {"value": state["display_off"], "ability": DISPLAY_OFF_ABILITY},
+        "autopoweroff": {"value": state["auto_power_off"], "ability": AUTO_POWER_OFF_ABILITY},
     }
     if state["sound_recording"] != "disable":
         result["windfilter"] = {"value": state["wind_filter"], "ability": WIND_FILTER_ABILITY}
@@ -584,6 +595,31 @@ async def update_simulator_display_off(payload: dict[str, object]) -> Response:
         event_key="displayoff",
     ):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/device-settings/auto-power-off", status_code=204)
+async def update_simulator_auto_power_off(payload: dict[str, object]) -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="auto_power_off",
+        ability=AUTO_POWER_OFF_SETTING_ABILITY,
+        event_key="autopoweroff",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.post("/ccapi/camera-sleep", status_code=204)
+async def simulator_camera_sleep() -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    state["camera_sleep_count"] += 1
+    publish_event("autopoweroff")
     return Response(status_code=204)
 
 
@@ -969,6 +1005,7 @@ CANON_DISCOVERY = {
         {"path": "/functions/datetime", "get": True, "put": True},
         {"path": "/functions/beep", "get": True, "put": True},
         {"path": "/functions/displayoff", "get": True, "put": True},
+        {"path": "/functions/autopoweroff", "get": True, "put": True},
         {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
         {"path": "/functions/cardselection/movie", "get": True, "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
@@ -1466,6 +1503,30 @@ async def canon_set_display_off(payload: dict[str, object]) -> Response:
     ):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return JSONResponse(content={"value": state["display_off"]})
+
+
+@app.get("/ccapi/ver100/functions/autopoweroff")
+async def canon_get_auto_power_off() -> dict[str, object]:
+    return {"value": state["auto_power_off"], "ability": AUTO_POWER_OFF_ABILITY}
+
+
+@app.put("/ccapi/ver100/functions/autopoweroff")
+async def canon_set_auto_power_off(payload: dict[str, object]) -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if payload == {"value": "immediately"}:
+        state["camera_sleep_count"] += 1
+        publish_event("autopoweroff")
+        return JSONResponse(status_code=202, content={})
+    if not update_string_setting(
+        payload,
+        state_key="auto_power_off",
+        ability=AUTO_POWER_OFF_SETTING_ABILITY,
+        event_key="autopoweroff",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["auto_power_off"]})
 
 
 @app.get("/ccapi/ver100/functions/cardselection/stillimage")

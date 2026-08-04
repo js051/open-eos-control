@@ -41,6 +41,7 @@
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
     MEDIA_DELETE: "MEDIA_DELETE",
     CAMERA_CLOCK_SYNC: "CAMERA_CLOCK_SYNC",
+    CAMERA_SLEEP: "CAMERA_SLEEP",
   };
   const CORE_SETTINGS = ["iso", "shutter", "aperture", "whitebalance"];
   const LANGUAGE_KEY = "open-eos-control-language";
@@ -136,6 +137,11 @@
       cameraClockSyncedAt: "Verified at {time}",
       syncNow: "Sync now",
       cameraClockSynced: "Camera date and time verified",
+      cameraSleep: "Put camera to sleep",
+      cameraSleepHint: "Ends CCAPI and immediately puts the camera into power-saving sleep.",
+      cameraSleepNow: "Sleep now",
+      cameraSleepConfirm: "Put the camera to sleep now? Live View and this connection will end. Wake the camera physically before reconnecting.",
+      cameraSleepComplete: "Camera entered sleep mode",
       diagnosticSafe: "Authentication secrets and camera serial are excluded",
       physicalValidation: "Physical validation",
       physicalValidationHint: "Only camera-advertised features observed successfully in this connection can be confirmed. Check a feature after seeing the physical camera perform it.",
@@ -427,6 +433,11 @@
       cameraClockSyncedAt: "已於 {time} 驗證",
       syncNow: "立即同步",
       cameraClockSynced: "已驗證相機日期與時間",
+      cameraSleep: "讓相機進入休眠",
+      cameraSleepHint: "結束 CCAPI 連線並立即讓相機進入省電休眠。",
+      cameraSleepNow: "立即休眠",
+      cameraSleepConfirm: "要立即讓相機進入休眠嗎？Live View 與目前連線將會結束；再次連線前，請先在相機上將其喚醒。",
+      cameraSleepComplete: "相機已進入休眠",
       diagnosticSafe: "診斷內容不包含驗證機密與相機序號",
       physicalValidation: "真機驗證",
       physicalValidationHint: "僅能確認相機已公告，且在本次連線中成功觀測的功能。請在看見實體相機確實執行後再勾選。",
@@ -681,6 +692,7 @@
     15: "duration15Seconds",
     30: "duration30Seconds",
     60: "duration1Minute",
+    120: "duration2Minutes",
     180: "duration3Minutes",
     300: "duration5Minutes",
     600: "duration10Minutes",
@@ -1497,7 +1509,7 @@
     if (key === "alomode") {
       messageKey = autoLightingOptimizerValueKeys[rawValue.toLowerCase()] || messageKey;
     }
-    if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue];
+    if (key === "autopoweroff") messageKey = autoPowerOffValueKeys[rawValue] || messageKey;
     if (key === "beep" && rawValue.toLowerCase() === "disabletouch") messageKey = "valueDisableTouch";
     if (key === "displayoff") messageKey = displayOffValueKeys[rawValue];
     if (key === "capturetarget") messageKey = captureTargetValueKeys[rawValue.toLowerCase()];
@@ -1685,6 +1697,7 @@
       (setting) => !CORE_SETTINGS.includes(setting.key) && settingMatchesCaptureMode(setting),
     );
     const clockSupported = featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+    const sleepSupported = featureSupported(FEATURES.CAMERA_SLEEP);
     if (clockSupported) {
       const row = document.createElement("div");
       row.className = "settings-command";
@@ -1704,13 +1717,42 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "button secondary";
+      button.dataset.cameraCommand = "clock";
       button.textContent = t("syncNow");
       button.disabled = cameraInteractionBusy();
       button.addEventListener("click", () => syncCameraClock(button));
       row.append(copy, button);
       ui.advancedSettings.append(row);
     }
-    if (!settings.length && !clockSupported) {
+    if (sleepSupported) {
+      const row = document.createElement("div");
+      row.className = "settings-command";
+      const copy = document.createElement("span");
+      const title = document.createElement("strong");
+      title.textContent = t("cameraSleep");
+      const detail = document.createElement("small");
+      detail.textContent = t("cameraSleepHint");
+      copy.append(title, detail);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button danger";
+      button.dataset.cameraCommand = "sleep";
+      button.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || Boolean(state.status?.bulbExposureActive);
+      const icon = document.createElement("span");
+      icon.className = "icon";
+      icon.dataset.icon = "power";
+      icon.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.textContent = t("cameraSleepNow");
+      button.append(icon, label);
+      button.addEventListener("click", () => {
+        if (window.confirm(t("cameraSleepConfirm"))) void sleepCamera(button);
+      });
+      row.append(copy, button);
+      ui.advancedSettings.append(row);
+      window.OpenEosIcons?.render(row);
+    }
+    if (!settings.length && !clockSupported && !sleepSupported) {
       const empty = document.createElement("p");
       empty.className = "supporting";
       empty.textContent = t("notAvailable");
@@ -1791,6 +1833,47 @@
       showToast(normalized.message, true);
     } finally {
       state.busy = false;
+      renderSession();
+    }
+  }
+
+  async function sleepCamera(source) {
+    if (
+      !state.session ||
+      cameraInteractionBusy() ||
+      !featureSupported(FEATURES.CAMERA_SLEEP) ||
+      state.status?.recording ||
+      state.status?.bulbExposureActive
+    ) return;
+    const sessionId = state.session.id;
+    const wasLive = state.liveActive;
+    beginCameraInteraction();
+    state.lastError = null;
+    source.disabled = true;
+    setOperationState(t("busy"));
+    stopLiveLoop();
+    await stopEventLoop(sessionId);
+    renderAvailability();
+    try {
+      await api(`/v1/session/${encodeURIComponent(sessionId)}/power/sleep`, {
+        method: "POST",
+        json: {},
+      });
+      try {
+        await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+      } catch (_) {
+        // The camera may already be unreachable; the accepted sleep command remains authoritative.
+      }
+      resetSession();
+      showToast(t("cameraSleepComplete"));
+    } catch (error) {
+      const normalized = captureError(error);
+      state.busy = false;
+      startEventLoop();
+      if (wasLive) await startLiveView({ announce: false });
+      state.lastError = normalized.message;
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
       renderSession();
     }
   }
@@ -3312,7 +3395,11 @@
       control.disabled = interactionBusy || bulbActive;
     });
     document.querySelectorAll("#advanced-settings .settings-command button").forEach((button) => {
-      button.disabled = interactionBusy || bulbActive || !featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+      const command = button.dataset.cameraCommand;
+      const supported = command === "sleep"
+        ? featureSupported(FEATURES.CAMERA_SLEEP)
+        : featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+      button.disabled = interactionBusy || bulbActive || !supported || (command === "sleep" && recording);
     });
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
       button.disabled = interactionBusy || bulbActive || !state.liveActive;

@@ -148,6 +148,17 @@ input:disabled {
   background: var(--record);
 }
 
+.button.danger {
+  color: #fff;
+  border-color: #78464a;
+  background: #5a292d;
+}
+
+.button.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: #713238;
+}
+
 .icon-button {
   position: relative;
   display: inline-grid;

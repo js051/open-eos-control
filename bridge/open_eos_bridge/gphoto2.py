@@ -1251,6 +1251,7 @@ class GPhoto2Session:
                     CameraFeature.LIVE_VIEW_RTP,
                     CameraFeature.LIVE_VIEW_MAGNIFICATION,
                     CameraFeature.CAMERA_CLOCK_SYNC,
+                    CameraFeature.CAMERA_SLEEP,
                 )
                 if feature not in supported
             }
@@ -1274,6 +1275,9 @@ class GPhoto2Session:
                     ),
                     CameraFeature.CLICK_WHITE_BALANCE.value: (
                         "The libgphoto2 CLI engine has no verified Live View coordinate Click WB command."
+                    ),
+                    CameraFeature.CAMERA_SLEEP.value: (
+                        "The public libgphoto2 CLI contract does not expose a verified immediate camera-sleep action."
                     ),
                     CameraFeature.LIVE_VIEW_MAGNIFICATION.value: (
                         "Requires an advertised writable Canon EOS eoszoom action and active Live View."
@@ -1366,6 +1370,13 @@ class GPhoto2Session:
             self._set_config_value(config, selected_value, refresh=False)
             self._observed.add(_feature_for_setting(key))
             return self.status()
+
+    def sleep_camera(self) -> None:
+        raise unsupported(
+            CameraFeature.CAMERA_SLEEP.value,
+            self.engine_name,
+            "The public libgphoto2 CLI contract does not expose a verified immediate camera-sleep action.",
+        )
 
     def sync_camera_clock(self) -> CameraStatus:
         with self._lock:

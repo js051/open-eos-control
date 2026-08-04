@@ -6,7 +6,7 @@ import XCTest
 final class DesktopBridgeClientTests: XCTestCase {
     private let health = #"{"ok":true,"service":"open-eos-control-bridge","version":"0.1.0","authRequired":true,"loopbackOnly":false,"engines":{}}"#
     private let status = #"{"connected":true,"battery":{"level":82,"status":"good"},"recording":false,"mode":"Manual","recordableShots":120,"remainingRecordingSeconds":3600,"media":{"available":true,"totalBytes":1000,"freeBytes":800,"freeImages":123,"devices":1},"exposure":{"iso":"400","shutter":"1/50","aperture":"2.8","whiteBalance":"Auto"},"raw":{"transport":"usb","recordable":{"recordableshots":120,"remainingtime":3600}}}"#
-    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso"],"observedFeatures":["BATTERY_STATUS"],"truncated":false}}"#
+    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","CAMERA_SLEEP","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso"],"observedFeatures":["BATTERY_STATUS"],"truncated":false}}"#
 
     func testDiscoveryValidatesServiceAndUsesBearerAuthentication() async throws {
         let transport = MockCameraHTTPTransport()
@@ -121,6 +121,7 @@ final class DesktopBridgeClientTests: XCTestCase {
             path: "/v1/session/session_123/liveview/stop",
             body: #"{"active":false}"#
         )
+        await transport.enqueue(method: "POST", path: "/v1/session/session_123/power/sleep", status: 204)
         await transport.enqueue(method: "DELETE", path: "/v1/session/session_123", status: 204)
 
         let client = try DesktopBridgeClient(
@@ -147,6 +148,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaThumbnail))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaPreview))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.cameraSleep))
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.stillCapture))
         XCTAssertEqual(snapshot.capabilities.liveView.sources, [.desktopBridgeStream])
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 12)
@@ -209,6 +211,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         )
         try await client.deleteMedia(item)
         await client.stopLiveView()
+        try await client.sleepCamera()
         await client.close()
 
         let requests = await transport.requests()
@@ -219,6 +222,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/start") })
         XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/stop") })
         XCTAssertTrue(requests.contains { $0.path.hasSuffix("/clock/sync") && $0.method == "POST" })
+        XCTAssertTrue(requests.contains { $0.path.hasSuffix("/power/sleep") && $0.method == "POST" })
 
         let settingBody = try XCTUnwrap(requests.first { $0.path.hasSuffix("/settings/iso") }?.body)
         XCTAssertEqual(

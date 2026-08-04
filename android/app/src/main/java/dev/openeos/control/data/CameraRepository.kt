@@ -165,6 +165,8 @@ class CameraRepository(
 
     suspend fun syncCameraClock(): CameraStatus = backend.syncCameraClock()
 
+    suspend fun sleepCamera() = backend.sleepCamera()
+
     suspend fun refreshCapabilities(): CameraCapabilities = backend.capabilities().forCamera(
         activeInfo ?: backend.info().also { activeInfo = it }
     )

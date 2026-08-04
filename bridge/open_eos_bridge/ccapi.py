@@ -92,6 +92,9 @@ CARD_SELECTION_ENDPOINTS = {
 }
 BEEP_SETTING_KEY = "beep"
 DISPLAY_OFF_SETTING_KEY = "displayoff"
+AUTO_POWER_OFF_SETTING_KEY = "autopoweroff"
+AUTO_POWER_OFF_IMMEDIATELY = "immediately"
+AUTO_POWER_OFF_SETTING_VALUES = frozenset({"30", "60", "120", "180", "300", "600", "disable"})
 DEVICE_FUNCTION_SETTING_ENDPOINTS = {
     BEEP_SETTING_KEY: (
         "/functions/beep",
@@ -100,6 +103,10 @@ DEVICE_FUNCTION_SETTING_ENDPOINTS = {
     DISPLAY_OFF_SETTING_KEY: (
         "/functions/displayoff",
         frozenset({"10", "20", "30", "60", "120", "180"}),
+    ),
+    AUTO_POWER_OFF_SETTING_KEY: (
+        "/functions/autopoweroff",
+        AUTO_POWER_OFF_SETTING_VALUES | {AUTO_POWER_OFF_IMMEDIATELY},
     ),
 }
 SOUND_RECORDING_LEVEL_SETTING_KEY = "soundrecordinglevel"
@@ -183,6 +190,7 @@ SETTING_LABELS = {
     MOVIE_CARD_SELECTION_SETTING_KEY: "Movie card",
     BEEP_SETTING_KEY: "Beep",
     DISPLAY_OFF_SETTING_KEY: "Auto display off",
+    AUTO_POWER_OFF_SETTING_KEY: "Auto power off",
     SOUND_RECORDING_LEVEL_SETTING_KEY: "Sound recording level",
     SOUND_RECORDING_SETTING_KEY: "Sound recording",
     WIND_FILTER_SETTING_KEY: "Wind filter",
@@ -458,6 +466,7 @@ class CcapiSession:
         self._cached_info: CameraInfo | None = None
         self._settings_cache: dict[str, object] | None = None
         self._setting_paths: dict[str, str] = {}
+        self._camera_sleep_path: str | None = None
         self._discovery_source = "unknown"
         self._recording: bool | None = None
         self._bulb_exposure_active = False
@@ -751,6 +760,8 @@ class CcapiSession:
                 supported.add(CameraFeature.EVENT_POLLING)
             if self._camera_clock_operations() is not None:
                 supported.add(CameraFeature.CAMERA_CLOCK_SYNC)
+            if self._camera_sleep_path is not None:
+                supported.add(CameraFeature.CAMERA_SLEEP)
 
             candidates = {
                 CameraFeature.RECORDABLE_STATUS,
@@ -773,6 +784,7 @@ class CcapiSession:
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
+                CameraFeature.CAMERA_SLEEP,
                 CameraFeature.ZOOM_CONTROL,
                 CameraFeature.CARD_SELECTION_CONTROL,
                 CameraFeature.SOUND_RECORDING_CONTROL,
@@ -812,6 +824,10 @@ class CcapiSession:
                     CameraFeature.CAMERA_CLOCK_SYNC.value: (
                         "The camera must advertise both GET and PUT for the Canon date-time endpoint "
                         "in the same API version."
+                    ),
+                    CameraFeature.CAMERA_SLEEP.value: (
+                        "The camera must advertise matching GET and PUT Auto Power Off endpoints and "
+                        "include immediately in its current ability."
                     ),
                     CameraFeature.LIVE_VIEW_RTP.value: (self._rtp_capability_reason()),
                     CameraFeature.FOCUS_DRIVE.value: (
@@ -1028,6 +1044,29 @@ class CcapiSession:
             self._settings_cache = None
             self._observed.add(_feature_for_setting(canonical))
             return self.status()
+
+    def sleep_camera(self) -> None:
+        with self._lock:
+            self._ensure_initialized()
+            self.stop_event_polling()
+            if self._live_view_active:
+                self._stop_live_view_locked()
+            self._settings_cache = None
+            self._load_settings(force=True)
+            if self._camera_sleep_path is None:
+                raise unsupported(
+                    CameraFeature.CAMERA_SLEEP.value,
+                    self.engine_name,
+                    "The camera did not advertise immediately in a readable and writable Auto Power Off ability.",
+                )
+            self._request_ok(
+                "PUT",
+                self._camera_sleep_path,
+                {"value": AUTO_POWER_OFF_IMMEDIATELY},
+                expected_status=202,
+            )
+            self._settings_cache = None
+            self._observed.add(CameraFeature.CAMERA_SLEEP)
 
     def sync_camera_clock(self) -> CameraStatus:
         with self._lock:
@@ -1774,6 +1813,7 @@ class CcapiSession:
             return self._settings_cache
         merged: dict[str, object] = {}
         setting_paths: dict[str, str] = {}
+        self._camera_sleep_path = None
         self._observed.discard(CameraFeature.CARD_SELECTION_CONTROL)
         self._observed.discard(CameraFeature.SOUND_RECORDING_CONTROL)
         self._observed.discard(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
@@ -1830,8 +1870,19 @@ class CcapiSession:
             read, write = operations
             setting = _validated_string_ability_setting(self._first_json([read.path]), allowed_values)
             if setting is not None:
-                merged[key] = setting
-                setting_paths[key] = write.path
+                raw_ability = setting.get("ability")
+                ability = (
+                    [item for item in raw_ability if isinstance(item, str)]
+                    if isinstance(raw_ability, list)
+                    else []
+                )
+                if key == AUTO_POWER_OFF_SETTING_KEY and AUTO_POWER_OFF_IMMEDIATELY in ability:
+                    self._camera_sleep_path = write.path
+                setting_values = [item for item in ability if item in allowed_values - {AUTO_POWER_OFF_IMMEDIATELY}]
+                current = setting.get("value")
+                if len(setting_values) >= 2 and current in setting_values:
+                    merged[key] = {"value": current, "ability": setting_values}
+                    setting_paths[key] = write.path
         for key, (suffix, allowed_values) in SOUND_RECORDING_ENDPOINTS.items():
             operations = self._sound_recording_operations(suffix)
             if operations is None:
@@ -1991,7 +2042,11 @@ class CcapiSession:
         writable_settings = sorted(
             {
                 key.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
-                for key in self._setting_paths
+                for key in (
+                    {*self._setting_paths, AUTO_POWER_OFF_SETTING_KEY}
+                    if self._camera_sleep_path is not None
+                    else self._setting_paths
+                )
             }
         )
         return CapabilityEvidence(
@@ -2056,8 +2111,16 @@ class CcapiSession:
         payload: dict[str, object] | None = None,
         *,
         timeout: float = 15.0,
+        expected_status: int | None = None,
     ) -> None:
-        self._request(method, path, payload, timeout=timeout)
+        response = self._request(method, path, payload, timeout=timeout)
+        if expected_status is not None and response.status != expected_status:
+            raise BridgeError(
+                "INVALID_CCAPI_RESPONSE",
+                f"Camera request {method} {path} returned HTTP {response.status}; expected HTTP {expected_status}.",
+                status_code=502,
+                engine=self.engine_name,
+            )
 
     def _request(
         self,

@@ -31,6 +31,8 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert "Bearer ${state.token}" in script.text
     assert "CAMERA_CLOCK_SYNC" in script.text
     assert "/clock/sync" in script.text
+    assert "CAMERA_SLEEP" in script.text
+    assert "/power/sleep" in script.text
     assert media_transfer.status_code == 200
     assert media_transfer.headers["content-type"].startswith(("text/javascript", "application/javascript"))
     assert "readResponse" in media_transfer.text
@@ -310,6 +312,18 @@ def test_edsdk_request_is_explicitly_unavailable() -> None:
 
     assert response.status_code == 501
     assert response.json()["error"]["engine"] == "edsdk"
+
+
+def test_gphoto2_sleep_route_is_explicitly_unsupported() -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    with TestClient(create_app(engine=GPhoto2Engine(FakeRunner()), token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        response = client.post(f"/v1/session/{session_id}/power/sleep", headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "UNSUPPORTED_FEATURE"
+    assert response.json()["error"]["feature"] == "CAMERA_SLEEP"
 
 
 def test_request_validation_uses_stable_bridge_error_shape() -> None:
