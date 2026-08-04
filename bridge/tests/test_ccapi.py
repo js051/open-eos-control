@@ -1768,6 +1768,49 @@ def test_ccapi_discovery_loads_canon_developer_api_list_when_root_omits_operatio
     assert "/ccapi/ver100/shooting/settings" in request_paths
 
 
+def test_ccapi_discovery_loads_developer_api_when_firmware_returns_version_without_commands() -> None:
+    transport = FakeCcapiTransport(
+        discovery={"api": ["/ccapi/ver100"], "version": "ver100", "ver100": []},
+        developer_discovery=DISCOVERY,
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.LIVE_VIEW in capabilities.supported
+    assert CameraFeature.STILL_CAPTURE in capabilities.supported
+    assert CameraFeature.VIDEO_RECORDING in capabilities.supported
+    assert capabilities.evidence.advertised_commands
+    assert capabilities.evidence.source == "GET /ccapi/ver100/topurlfordev (Canon developer API fallback)"
+    request_paths = [request.path for request in transport.requests]
+    assert request_paths[:2] == [
+        "/ccapi",
+        "/ccapi/ver100/topurlfordev",
+    ]
+    assert "/ccapi/ver100/shooting/settings" in request_paths
+
+
+def test_ccapi_discovery_rejects_empty_developer_api_list_without_inventing_capabilities() -> None:
+    transport = FakeCcapiTransport(
+        discovery={"ver100": []},
+        developer_discovery={"ver100": []},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.STILL_CAPTURE not in capabilities.supported
+    assert CameraFeature.STILL_CAPTURE in capabilities.planned
+    assert capabilities.evidence.advertised_commands == []
+    assert capabilities.evidence.source == "GET /ccapi/ver100/deviceinformation (identity fallback)"
+    request_paths = [request.path for request in transport.requests]
+    assert request_paths[:3] == [
+        "/ccapi",
+        "/ccapi/ver100/topurlfordev",
+        "/ccapi/",
+    ]
+
+
 def test_ccapi_discovery_developer_api_failure_does_not_invent_capabilities() -> None:
     transport = FakeCcapiTransport(discovery={"value": "No list of APIs"})
     session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")

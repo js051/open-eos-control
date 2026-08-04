@@ -475,19 +475,31 @@ class CcapiSession:
                             status_code=502,
                             engine=self.engine_name,
                         )
-                    if value.get("value") == CCAPI_NO_API_LIST_VALUE:
-                        value = self._request_json("GET", CCAPI_DEVELOPER_API_PATH)
-                        if not isinstance(value, dict):
-                            raise BridgeError(
-                                "INVALID_CCAPI_RESPONSE",
-                                f"Camera developer API {CCAPI_DEVELOPER_API_PATH} did not return a JSON object.",
-                                status_code=502,
-                                engine=self.engine_name,
-                            )
-                        source = f"GET {CCAPI_DEVELOPER_API_PATH} (Canon developer API fallback)"
-                    else:
-                        source = f"GET {path}"
-                    self._parse_discovery(value, source=source)
+                    if value.get("value") != CCAPI_NO_API_LIST_VALUE:
+                        self._parse_discovery(value, source=f"GET {path}")
+                        if self._operations:
+                            self._initialized = True
+                            return
+
+                    value = self._request_json("GET", CCAPI_DEVELOPER_API_PATH)
+                    if not isinstance(value, dict):
+                        raise BridgeError(
+                            "INVALID_CCAPI_RESPONSE",
+                            f"Camera developer API {CCAPI_DEVELOPER_API_PATH} did not return a JSON object.",
+                            status_code=502,
+                            engine=self.engine_name,
+                        )
+                    self._parse_discovery(
+                        value,
+                        source=f"GET {CCAPI_DEVELOPER_API_PATH} (Canon developer API fallback)",
+                    )
+                    if not self._operations:
+                        raise BridgeError(
+                            "INVALID_CCAPI_RESPONSE",
+                            f"Camera developer API {CCAPI_DEVELOPER_API_PATH} did not advertise any valid operations.",
+                            status_code=502,
+                            engine=self.engine_name,
+                        )
                     self._initialized = True
                     return
                 except BridgeError as error:

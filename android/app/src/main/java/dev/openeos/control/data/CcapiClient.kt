@@ -235,26 +235,29 @@ class CcapiClient(
         throw IllegalStateException(errorMessage)
     }
 
-    private suspend fun discoverApiAt(path: String, errors: MutableList<String>): Boolean = try {
-        val rootDiscovery = getJson(path)
-        val needsDeveloperApi = rootDiscovery.optString("value") == CCAPI_NO_API_LIST_VALUE
-        val discovery = if (needsDeveloperApi) {
-            getJson(CCAPI_DEVELOPER_API_PATH)
-        } else {
-            rootDiscovery
+    private suspend fun discoverApiAt(path: String, errors: MutableList<String>): Boolean {
+        return try {
+            val rootDiscovery = getJson(path)
+            if (rootDiscovery.optString("value") != CCAPI_NO_API_LIST_VALUE) {
+                parseDiscoveryResponse(rootDiscovery, "GET $path")
+                if (apiOperations.isNotEmpty()) return true
+            }
+
+            val developerDiscovery = getJson(CCAPI_DEVELOPER_API_PATH)
+            parseDiscoveryResponse(
+                developerDiscovery,
+                "GET $CCAPI_DEVELOPER_API_PATH (Canon developer API fallback)",
+            )
+            check(apiOperations.isNotEmpty()) {
+                "Camera developer API $CCAPI_DEVELOPER_API_PATH did not advertise any valid operations."
+            }
+            true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            errors.add("GET $path failed: ${error.message}")
+            false
         }
-        val source = if (needsDeveloperApi) {
-            "GET $CCAPI_DEVELOPER_API_PATH (Canon developer API fallback)"
-        } else {
-            "GET $path"
-        }
-        parseDiscoveryResponse(discovery, source)
-        true
-    } catch (error: CancellationException) {
-        throw error
-    } catch (error: Exception) {
-        errors.add("GET $path failed: ${error.message}")
-        false
     }
 
     private fun parseDiscoveryResponse(json: JSONObject, source: String) {
