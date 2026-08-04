@@ -2669,9 +2669,9 @@
     state.liveMagnification = 1;
     state.lastFrameAt = null;
     state.monitorAnalysisError = null;
+    ui.liveImage.removeAttribute("src");
     if (state.liveObjectUrl) URL.revokeObjectURL(state.liveObjectUrl);
     state.liveObjectUrl = null;
-    ui.liveImage.removeAttribute("src");
     clearMonitoringLayers();
     renderLiveState();
   }
