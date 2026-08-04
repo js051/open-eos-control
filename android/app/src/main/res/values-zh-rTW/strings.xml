@@ -290,4 +290,10 @@
     <string name="setting_movie_format">短片錄影格式</string>
     <string name="camera_value_light">輕量</string>
     <string name="camera_value_crop">裁切</string>
+    <string name="setting_beep">提示音</string>
+    <string name="setting_display_off">螢幕自動關閉</string>
+    <string name="camera_value_10_seconds">10 秒</string>
+    <string name="camera_value_20_seconds">20 秒</string>
+    <string name="camera_value_2_minutes">2 分鐘</string>
+    <string name="camera_value_disable_touch">關閉觸控提示音</string>
 </resources>

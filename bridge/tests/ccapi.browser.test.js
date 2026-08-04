@@ -364,6 +364,26 @@ async function run() {
       (state) => state.movie_card_selection === "card1" && state.card_selection_update_count === 1,
       "Canon movie card selection",
     );
+    assert.deepEqual(
+      await page.locator('#advanced-settings select[data-setting-key="beep"] option').allInnerTexts(),
+      ["Enable", "Disable", "Touch sounds off"],
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="beep"]', "disabletouch");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.beep.value === "disabletouch" && state.beep.update_count === 1,
+      "Canon beep setting",
+    );
+    assert.deepEqual(
+      await page.locator('#advanced-settings select[data-setting-key="displayoff"] option').allInnerTexts(),
+      ["10 seconds", "20 seconds", "30 seconds", "1 minute", "2 minutes", "3 minutes"],
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="displayoff"]', "120");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.display_off.value === "120" && state.display_off.update_count === 1,
+      "Canon auto display off setting",
+    );
     await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2:00:00 remaining"));
     await page.click("#shutter-button");
     await waitForSimulatorState(

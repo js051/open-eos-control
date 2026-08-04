@@ -113,6 +113,7 @@ class FakeCcapiTransport:
         movie_setting_responses: dict[str, object] | None = None,
         movie_mode_response: object | None = None,
         card_selection_responses: dict[str, object] | None = None,
+        device_function_responses: dict[str, object] | None = None,
         recordable_response: object | None = None,
         lens_response: object | None = None,
         temperature_response: object | None = None,
@@ -135,6 +136,7 @@ class FakeCcapiTransport:
         self.movie_setting_responses = movie_setting_responses or {}
         self.movie_mode_response = movie_mode_response
         self.card_selection_responses = card_selection_responses or {}
+        self.device_function_responses = device_function_responses or {}
         self.recordable_response = (
             recordable_response
             if recordable_response is not None
@@ -187,6 +189,7 @@ class FakeCcapiTransport:
         }
         self.movie_mode = "off"
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
+        self.device_functions = {"beep": "enable", "displayoff": "60"}
         self.reject_live_view_size = True
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.closed = False
@@ -355,6 +358,24 @@ class FakeCcapiTransport:
             assert payload is not None and payload.get("value") in {"none", "card1", "card2"}
             self.card_selection[kind] = str(payload["value"])
             return _json_response({"value": self.card_selection[kind]})
+        device_function_match = re.fullmatch(r"/ccapi/ver100/functions/(beep|displayoff)", path)
+        if device_function_match:
+            key = device_function_match.group(1)
+            abilities = {
+                "beep": ["enable", "disable", "disabletouch"],
+                "displayoff": ["10", "20", "30", "60", "120", "180"],
+            }
+            if method == "GET":
+                response = self.device_function_responses.get(key)
+                return _json_response(
+                    response
+                    if response is not None
+                    else {"value": self.device_functions[key], "ability": abilities[key]}
+                )
+            if method == "PUT":
+                assert payload is not None and payload.get("value") in abilities[key]
+                self.device_functions[key] = str(payload["value"])
+                return _json_response({"value": self.device_functions[key]})
         if method == "PUT" and path == "/ccapi/ver100/functions/datetime":
             assert payload is not None
             self.camera_clock = payload
@@ -1196,6 +1217,89 @@ def test_ccapi_focus_bracketing_does_not_combine_versions_or_use_aggregate_get()
     assert CameraFeature.FOCUS_BRACKETING_CONTROL not in capabilities.supported
     assert not any(setting.key.startswith("focusbracketing") for setting in capabilities.settings)
     assert not any("focusbracketing" in request.path for request in transport.requests)
+
+
+def test_ccapi_device_function_settings_require_pairs_and_refresh_before_write() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/beep", "get": True, "put": True},
+            {"path": "/functions/displayoff", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    controls = {setting.key: setting for setting in capabilities.settings}
+
+    assert CameraFeature.ADVANCED_SETTINGS in capabilities.supported
+    assert controls["beep"].values == ["enable", "disable", "disabletouch"]
+    assert controls["displayoff"].values == ["10", "20", "30", "60", "120", "180"]
+    assert {"beep", "displayoff"}.issubset(capabilities.evidence.writable_settings)
+
+    session.set_setting("beep", "disabletouch")
+
+    assert transport.device_functions["beep"] == "disabletouch"
+    assert RecordedRequest("PUT", "/ccapi/ver100/functions/beep", {"value": "disabletouch"}) in transport.requests
+
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    transport.device_function_responses["beep"] = {
+        "value": "enable",
+        "ability": ["enable", "disable"],
+    }
+    with pytest.raises(BridgeError, match="not advertised"):
+        session.set_setting("beep", "disabletouch")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"value": "enable", "ability": ["enable", "enable"]},
+        {"value": "enable", "ability": ["enable", "future"]},
+        {"value": 1, "ability": ["enable", "disable"]},
+    ],
+)
+def test_ccapi_device_function_settings_hide_malformed_contract(response: object) -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/beep", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(
+        discovery=discovery,
+        device_function_responses={"beep": response},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert not any(setting.key == "beep" for setting in capabilities.settings)
+    assert "beep" not in capabilities.evidence.writable_settings
+
+
+def test_ccapi_device_function_settings_do_not_combine_versions_or_use_aggregate_get() -> None:
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                {"path": "/shooting/settings", "get": True},
+                {"path": "/functions/beep", "get": True},
+            ],
+            "ver110": [{"path": "/functions/beep", "put": True}],
+        }
+    )
+    transport.settings["beep"] = {
+        "value": "enable",
+        "ability": ["enable", "disable", "disabletouch"],
+    }
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert not any(setting.key == "beep" for setting in capabilities.settings)
+    assert not any(request.path.endswith("/functions/beep") for request in transport.requests)
 
 
 def test_ccapi_movie_settings_require_exact_pairs_and_refresh_before_write() -> None:

@@ -109,14 +109,16 @@ class SimulatorEndToEndTest {
             state.getString("movie_mode") == "on" && state.getInt("movie_mode_update_count") == 1
         }
         compose.onNodeWithContentDescription(text(R.string.more_settings)).performClick()
-        setMovieSetting(
+        setAdvancedSetting(key = "beep", value = "disabletouch", stateKey = "beep")
+        setAdvancedSetting(key = "displayoff", value = "120", stateKey = "display_off")
+        setAdvancedSetting(
             key = "moviequality",
             value = "1920x1080_2997_ipb_standard",
             stateKey = "movie_quality",
         )
-        setMovieSetting(key = "highframerate", value = "enable", stateKey = "high_frame_rate")
-        setMovieSetting(key = "moviecropping", value = "enable", stateKey = "movie_cropping")
-        setMovieSetting(key = "movieformat", value = "raw", stateKey = "movie_format")
+        setAdvancedSetting(key = "highframerate", value = "enable", stateKey = "high_frame_rate")
+        setAdvancedSetting(key = "moviecropping", value = "enable", stateKey = "movie_cropping")
+        setAdvancedSetting(key = "movieformat", value = "raw", stateKey = "movie_format")
         compose.onNodeWithContentDescription(text(R.string.dismiss)).performClick()
         waitForContentDescription(text(R.string.start_recording), useUnmergedTree = true)
         compose.onNodeWithTag("capture-button", useUnmergedTree = true)
@@ -269,7 +271,7 @@ class SimulatorEndToEndTest {
         }
     }
 
-    private fun setMovieSetting(key: String, value: String, stateKey: String) {
+    private fun setAdvancedSetting(key: String, value: String, stateKey: String) {
         compose.onNodeWithTag("advanced-setting-$key").performScrollTo()
         compose.onNodeWithTag("advanced-setting-value-$key-$value")
             .performScrollTo()

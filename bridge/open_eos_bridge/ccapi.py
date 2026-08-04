@@ -90,6 +90,18 @@ CARD_SELECTION_ENDPOINTS = {
     STILL_CARD_SELECTION_SETTING_KEY: "/functions/cardselection/stillimage",
     MOVIE_CARD_SELECTION_SETTING_KEY: "/functions/cardselection/movie",
 }
+BEEP_SETTING_KEY = "beep"
+DISPLAY_OFF_SETTING_KEY = "displayoff"
+DEVICE_FUNCTION_SETTING_ENDPOINTS = {
+    BEEP_SETTING_KEY: (
+        "/functions/beep",
+        frozenset({"enable", "disable", "disabletouch"}),
+    ),
+    DISPLAY_OFF_SETTING_KEY: (
+        "/functions/displayoff",
+        frozenset({"10", "20", "30", "60", "120", "180"}),
+    ),
+}
 SOUND_RECORDING_LEVEL_SETTING_KEY = "soundrecordinglevel"
 SOUND_RECORDING_LEVEL_PATH_SUFFIX = "/shooting/settings/soundrecording/level"
 SOUND_RECORDING_SETTING_KEY = "soundrecording"
@@ -169,6 +181,8 @@ SETTING_LABELS = {
     "iso": "ISO",
     STILL_CARD_SELECTION_SETTING_KEY: "Still-image card",
     MOVIE_CARD_SELECTION_SETTING_KEY: "Movie card",
+    BEEP_SETTING_KEY: "Beep",
+    DISPLAY_OFF_SETTING_KEY: "Auto display off",
     SOUND_RECORDING_LEVEL_SETTING_KEY: "Sound recording level",
     SOUND_RECORDING_SETTING_KEY: "Sound recording",
     WIND_FILTER_SETTING_KEY: "Wind filter",
@@ -903,6 +917,7 @@ class CcapiSession:
             canonical = SETTING_ALIASES.get(key, key)
             settings = self._load_settings(
                 canonical in CARD_SELECTION_ENDPOINTS
+                or canonical in DEVICE_FUNCTION_SETTING_ENDPOINTS
                 or canonical in SOUND_RECORDING_ENDPOINTS
                 or canonical == SOUND_RECORDING_LEVEL_SETTING_KEY
                 or canonical in FOCUS_BRACKETING_SETTING_KEYS
@@ -1777,6 +1792,7 @@ class CcapiSession:
                     if (
                         key not in SOUND_RECORDING_ENDPOINTS
                         and key != SOUND_RECORDING_LEVEL_SETTING_KEY
+                        and key not in DEVICE_FUNCTION_SETTING_ENDPOINTS
                         and key not in FOCUS_BRACKETING_SETTING_KEYS
                         and key not in MOVIE_SETTING_KEYS
                         and CcapiOperation("PUT", setting_path) in self._operations
@@ -1807,6 +1823,15 @@ class CcapiSession:
                 merged[key] = card_selection
                 setting_paths[key] = write.path
                 self._observed.add(CameraFeature.CARD_SELECTION_CONTROL)
+        for key, (suffix, allowed_values) in DEVICE_FUNCTION_SETTING_ENDPOINTS.items():
+            operations = self._read_write_setting_operations(suffix)
+            if operations is None:
+                continue
+            read, write = operations
+            setting = _validated_string_ability_setting(self._first_json([read.path]), allowed_values)
+            if setting is not None:
+                merged[key] = setting
+                setting_paths[key] = write.path
         for key, (suffix, allowed_values) in SOUND_RECORDING_ENDPOINTS.items():
             operations = self._sound_recording_operations(suffix)
             if operations is None:

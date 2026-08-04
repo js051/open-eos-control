@@ -173,6 +173,97 @@ class CcapiClientTest {
     }
 
     @Test
+    fun simulatorDeviceFunctionSettingsUseBackedEndpoints() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "iso":["100","800"],
+                    "shutter":["1/50","1/100"],
+                    "aperture":["2.8","4.0"],
+                    "white_balance":["auto","daylight"],
+                    "beep":{"value":"enable","ability":["enable","disable","disabletouch"]},
+                    "displayoff":{"value":"60","ability":["10","20","30","60","120","180"]}
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse(STATUS_JSON))
+
+        val capabilities = client.capabilities()
+        assertEquals("enable", capabilities.advancedSettings.single { it.key == "beep" }.value)
+        assertEquals("60", capabilities.advancedSettings.single { it.key == "displayoff" }.value)
+
+        client.setSetting("beep", "disabletouch")
+
+        server.takeRequest()
+        val write = server.takeRequest()
+        assertEquals("PUT", write.method)
+        assertEquals("/ccapi/device-settings/beep", write.path)
+        assertEquals("disabletouch", JSONObject(write.body.readUtf8()).getString("value"))
+        assertEquals("/ccapi/status", server.takeRequest().path)
+    }
+
+    @Test
+    fun realDeviceFunctionSettingsRequirePairsRefreshAndWriteAdvertisedValue() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/functions/beep","get":true,"put":true},
+                    {"path":"/functions/displayoff","get":true,"put":true}
+                ]}""",
+            ),
+        )
+        repeat(2) {
+            server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+            server.enqueue(jsonResponse("""{"value":"enable","ability":["enable","disable","disabletouch"]}"""))
+            server.enqueue(jsonResponse("""{"value":"60","ability":["10","20","30","60","120","180"]}"""))
+        }
+        server.enqueue(jsonResponse("""{"value":"disabletouch"}"""))
+        enqueueRealStatus()
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        client.setSetting("beep", "disabletouch")
+
+        assertEquals("enable", capabilities.advancedSettings.single { it.key == "beep" }.value)
+        assertEquals("60", capabilities.advancedSettings.single { it.key == "displayoff" }.value)
+        repeat(7) { server.takeRequest() }
+        val write = server.takeRequest()
+        assertEquals("PUT", write.method)
+        assertEquals("/ccapi/ver100/functions/beep", write.path)
+        assertEquals("disabletouch", JSONObject(write.body.readUtf8()).getString("value"))
+        assertTrue(CameraFeature.ADVANCED_SETTINGS in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realDeviceFunctionSettingsRejectMalformedOrCrossVersionContracts() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver100":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/functions/beep","get":true},
+                        {"path":"/functions/displayoff","get":true,"put":true}
+                    ],
+                    "ver110":[{"path":"/functions/beep","put":true}]
+                }""",
+            ),
+        )
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(jsonResponse("""{"value":"60","ability":["60","future"]}"""))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.advancedSettings.any { it.key == "beep" })
+        assertFalse(capabilities.advancedSettings.any { it.key == "displayoff" })
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
     fun setExposureSendsPatchBody() = runTest {
         server.enqueue(jsonResponse(STATUS_JSON.replace("\"800\"", "\"1600\"")))
 

@@ -468,6 +468,37 @@ def test_sound_recording_level_contract_uses_integer_value_and_mutates_both_rout
     assert test_state["sound_recording_level"] == {"value": 24, "update_count": 2}
 
 
+def test_device_function_settings_use_documented_values_and_mutate_both_routes() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    beep = client.get("/ccapi/ver100/functions/beep")
+    display = client.get("/ccapi/ver100/functions/displayoff")
+    canonical_beep = client.put("/ccapi/ver100/functions/beep", json={"value": "disable"})
+    simulator_beep = client.put("/ccapi/device-settings/beep", json={"value": "disabletouch"})
+    canonical_display = client.put("/ccapi/ver100/functions/displayoff", json={"value": "120"})
+    simulator_display = client.put("/ccapi/device-settings/display-off", json={"value": "20"})
+    invalid_beep = client.put("/ccapi/ver100/functions/beep", json={"value": "future"})
+    invalid_display = client.put("/ccapi/ver100/functions/displayoff", json={"value": 60})
+    client.post("/ccapi/record/start")
+    busy = client.put("/ccapi/ver100/functions/beep", json={"value": "enable"})
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert {"path": "/functions/beep", "get": True, "put": True} in discovery
+    assert {"path": "/functions/displayoff", "get": True, "put": True} in discovery
+    assert beep.json() == {"value": "enable", "ability": ["enable", "disable", "disabletouch"]}
+    assert display.json() == {"value": "60", "ability": ["10", "20", "30", "60", "120", "180"]}
+    assert canonical_beep.json() == {"value": "disable"}
+    assert simulator_beep.status_code == 204
+    assert canonical_display.json() == {"value": "120"}
+    assert simulator_display.status_code == 204
+    assert invalid_beep.status_code == 400
+    assert invalid_display.status_code == 400
+    assert busy.status_code == 503
+    assert test_state["beep"] == {"value": "disabletouch", "update_count": 2}
+    assert test_state["display_off"] == {"value": "20", "update_count": 2}
+
+
 def test_sound_recording_controls_use_documented_string_abilities_and_mode_gates() -> None:
     client.post("/ccapi/test/reset")
 

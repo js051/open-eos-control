@@ -249,6 +249,8 @@
     <string name="setting_focus_bracketing_increment">Focus increment</string>
     <string name="setting_focus_bracketing_exposure_smoothing">Exposure smoothing</string>
     <string name="setting_auto_power_off">Auto power off</string>
+    <string name="setting_beep">Beep</string>
+    <string name="setting_display_off">Auto display off</string>
     <string name="setting_capture_target">Capture target</string>
     <string name="setting_high_iso_noise_reduction">High ISO noise reduction</string>
     <string name="setting_auto_lighting_optimizer">Auto Lighting Optimizer</string>
@@ -320,13 +322,17 @@
     <string name="camera_value_off">Off</string>
     <string name="camera_value_on">On</string>
     <string name="camera_value_15_seconds">15 sec.</string>
+    <string name="camera_value_10_seconds">10 sec.</string>
+    <string name="camera_value_20_seconds">20 sec.</string>
     <string name="camera_value_30_seconds">30 sec.</string>
     <string name="camera_value_1_minute">1 min.</string>
+    <string name="camera_value_2_minutes">2 min.</string>
     <string name="camera_value_3_minutes">3 min.</string>
     <string name="camera_value_5_minutes">5 min.</string>
     <string name="camera_value_10_minutes">10 min.</string>
     <string name="camera_value_30_minutes">30 min.</string>
     <string name="camera_value_disable">Disable</string>
+    <string name="camera_value_disable_touch">Touch sounds off</string>
     <string name="camera_value_internal_ram">Computer</string>
     <string name="camera_value_phone">Phone</string>
     <string name="camera_value_memory_card">Memory card</string>

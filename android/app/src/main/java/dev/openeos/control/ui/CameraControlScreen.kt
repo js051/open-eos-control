@@ -1490,6 +1490,8 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "focusbracketingexposuresmoothing" -> stringResource(R.string.setting_focus_bracketing_exposure_smoothing)
     "zoomspeed" -> stringResource(R.string.setting_power_zoom_speed)
     "autopoweroff" -> stringResource(R.string.setting_auto_power_off)
+    "beep" -> stringResource(R.string.setting_beep)
+    "displayoff" -> stringResource(R.string.setting_display_off)
     "capturetarget" -> stringResource(R.string.setting_capture_target)
     "capturestorage" -> stringResource(R.string.setting_capture_storage)
     "cardselectionstillimage" -> stringResource(R.string.setting_still_image_card)

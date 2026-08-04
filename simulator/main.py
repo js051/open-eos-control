@@ -71,6 +71,8 @@ SOUND_RECORDING_ABILITY = ["auto", "manual", "disable"]
 WIND_FILTER_ABILITY = ["auto", "enable", "disable"]
 ATTENUATOR_ABILITY = ["enable", "disable", "auto", "manual"]
 CARD_SELECTION_ABILITY = ["none", "card1", "card2"]
+BEEP_ABILITY = ["enable", "disable", "disabletouch"]
+DISPLAY_OFF_ABILITY = ["10", "20", "30", "60", "120", "180"]
 FOCUS_BRACKETING_ABILITY = ["enable", "disable"]
 FOCUS_BRACKETING_SHOTS_ABILITY = {"min": 2, "max": 999, "step": 1}
 FOCUS_BRACKETING_INCREMENT_ABILITY = {"min": 1, "max": 10, "step": 1}
@@ -93,6 +95,10 @@ def initial_state() -> dict[str, object]:
         "still_card_selection": "card1",
         "movie_card_selection": "card2",
         "card_selection_update_count": 0,
+        "beep": "enable",
+        "beep_update_count": 0,
+        "display_off": "60",
+        "display_off_update_count": 0,
         "temperature_status": "normal",
         "capture_count": 0,
         "clock_sync_count": 0,
@@ -265,6 +271,14 @@ async def get_test_state() -> dict[str, object]:
         "still_card_selection": state["still_card_selection"],
         "movie_card_selection": state["movie_card_selection"],
         "card_selection_update_count": state["card_selection_update_count"],
+        "beep": {
+            "value": state["beep"],
+            "update_count": state["beep_update_count"],
+        },
+        "display_off": {
+            "value": state["display_off"],
+            "update_count": state["display_off_update_count"],
+        },
         "temperature_status": state["temperature_status"],
         "capture_count": state["capture_count"],
         "clock_sync_count": state["clock_sync_count"],
@@ -440,6 +454,8 @@ async def get_capabilities() -> dict[str, object]:
         "highframerate": {"value": state["high_frame_rate"], "ability": ENABLE_DISABLE_ABILITY},
         "moviecropping": {"value": state["movie_cropping"], "ability": ENABLE_DISABLE_ABILITY},
         "movieformat": {"value": state["movie_format"], "ability": MOVIE_FORMAT_ABILITY},
+        "beep": {"value": state["beep"], "ability": BEEP_ABILITY},
+        "displayoff": {"value": state["display_off"], "ability": DISPLAY_OFF_ABILITY},
     }
     if state["sound_recording"] != "disable":
         result["windfilter"] = {"value": state["wind_filter"], "ability": WIND_FILTER_ABILITY}
@@ -538,6 +554,37 @@ def sound_recording_unavailable(*, requires_manual: bool = False) -> JSONRespons
     if state["sound_recording"] == "disable" or (requires_manual and state["sound_recording"] != "manual"):
         return JSONResponse(status_code=503, content={"message": "Mode not supported"})
     return None
+
+
+def device_function_unavailable() -> JSONResponse | None:
+    if state["recording"]:
+        return JSONResponse(status_code=503, content={"message": "During shooting or recording"})
+    return None
+
+
+@app.put("/ccapi/device-settings/beep", status_code=204)
+async def update_simulator_beep(payload: dict[str, object]) -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(payload, state_key="beep", ability=BEEP_ABILITY, event_key="beep"):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/device-settings/display-off", status_code=204)
+async def update_simulator_display_off(payload: dict[str, object]) -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="display_off",
+        ability=DISPLAY_OFF_ABILITY,
+        event_key="displayoff",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
 
 
 @app.put("/ccapi/sound-recording", status_code=204)
@@ -920,6 +967,8 @@ CANON_DISCOVERY = {
         {"path": "/shooting/settings/focusbracketing/exposuresmoothing", "get": True, "put": True},
         {"path": "/shooting/settings/moviequality", "get": True, "put": True},
         {"path": "/functions/datetime", "get": True, "put": True},
+        {"path": "/functions/beep", "get": True, "put": True},
+        {"path": "/functions/displayoff", "get": True, "put": True},
         {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
         {"path": "/functions/cardselection/movie", "get": True, "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
@@ -1382,6 +1431,41 @@ async def canon_set_datetime(payload: dict[str, object]) -> dict[str, object]:
     state["clock_sync_count"] += 1
     publish_event("datetime")
     return dict(payload)
+
+
+@app.get("/ccapi/ver100/functions/beep")
+async def canon_get_beep() -> dict[str, object]:
+    return {"value": state["beep"], "ability": BEEP_ABILITY}
+
+
+@app.put("/ccapi/ver100/functions/beep")
+async def canon_set_beep(payload: dict[str, object]) -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(payload, state_key="beep", ability=BEEP_ABILITY, event_key="beep"):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["beep"]})
+
+
+@app.get("/ccapi/ver100/functions/displayoff")
+async def canon_get_display_off() -> dict[str, object]:
+    return {"value": state["display_off"], "ability": DISPLAY_OFF_ABILITY}
+
+
+@app.put("/ccapi/ver100/functions/displayoff")
+async def canon_set_display_off(payload: dict[str, object]) -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="display_off",
+        ability=DISPLAY_OFF_ABILITY,
+        event_key="displayoff",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["display_off"]})
 
 
 @app.get("/ccapi/ver100/functions/cardselection/stillimage")
