@@ -166,6 +166,8 @@ struct CCAPIMultipartParser {
 }
 
 final class CCAPIMultipartLiveViewSession: @unchecked Sendable {
+    private static let firstFrameTimeoutNanoseconds: UInt64 = 5_000_000_000
+
     private var iterator: AsyncThrowingStream<Data, Error>.Iterator
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private let worker: Task<Void, Never>
@@ -198,6 +200,23 @@ final class CCAPIMultipartLiveViewSession: @unchecked Sendable {
             throw CCAPIError.invalidResponse("Canon multipart Live View stream ended before the next frame.")
         }
         return frame
+    }
+
+    func validatedFirstFrame() async throws -> Data {
+        try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask { [self] in try await nextFrame() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: Self.firstFrameTimeoutNanoseconds)
+                throw CCAPIError.invalidResponse(
+                    "Canon multipart Live View did not return a valid JPEG frame within 5 seconds."
+                )
+            }
+            defer { group.cancelAll() }
+            guard let frame = try await group.next() else {
+                throw CCAPIError.invalidResponse("Canon multipart Live View did not return a first frame.")
+            }
+            return frame
+        }
     }
 
     func close() {

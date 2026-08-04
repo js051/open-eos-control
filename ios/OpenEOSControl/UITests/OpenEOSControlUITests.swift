@@ -340,7 +340,7 @@ final class OpenEOSControlUITests: XCTestCase {
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
             return ((canonical["event_poll_count"] as? NSNumber)?.intValue ?? 0) >= 1 &&
                 (canonical["event_active_requests"] as? NSNumber)?.intValue == 1 &&
-                (canonical["live_view_start_count"] as? NSNumber)?.intValue == 1
+                ((canonical["live_view_start_count"] as? NSNumber)?.intValue ?? 0) >= 1
         }
 
         _ = try await simulatorRequest(
@@ -373,7 +373,7 @@ final class OpenEOSControlUITests: XCTestCase {
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
             return ((canonical["event_delete_count"] as? NSNumber)?.intValue ?? 0) >= 1 &&
                 (canonical["event_active_requests"] as? NSNumber)?.intValue == 0 &&
-                (canonical["live_view_stop_count"] as? NSNumber)?.intValue == 1
+                ((canonical["live_view_stop_count"] as? NSNumber)?.intValue ?? 0) >= 1
         }
     }
 

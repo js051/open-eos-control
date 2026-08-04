@@ -252,6 +252,7 @@ public actor CCAPIClient {
     private var activeLiveViewSource: LiveViewSource?
     private var rtpSession: (any CCAPIRTPSession)?
     private var multipartSession: CCAPIMultipartLiveViewSession?
+    private var pendingMultipartFrame: Data?
     private var nativeGeometryCacheKey: Int64 = 0
     private var latestLiveViewGeometry: CCAPILiveViewGeometry?
     private var simulatorEventSequence: Int64 = 0
@@ -1148,6 +1149,7 @@ public actor CCAPIClient {
     private func startJPEGLiveView(_ request: LiveViewRequest) async throws {
         guard supportsCompleteLiveView() else { throw CCAPIError.unsupported(.liveView) }
         try await startCCAPILiveView(request, path: apiPath(.post, suffix: "/shooting/liveview"))
+        pendingMultipartFrame = nil
         activeLiveViewSource = .ccapiJPEGPolling
         observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
     }
@@ -1174,6 +1176,7 @@ public actor CCAPIClient {
         }
         try await startCCAPILiveView(request, path: operations.startLiveView.path)
         var stream: CameraHTTPStreamResponse?
+        var candidateSession: CCAPIMultipartLiveViewSession?
         do {
             var value = try self.request(
                 path: operations.openStream.path,
@@ -1194,11 +1197,17 @@ public actor CCAPIClient {
             }
             let boundary = try CCAPIMultipartLiveView.boundary(from: response.header("content-type"))
             let session = CCAPIMultipartLiveViewSession(response: response, boundary: boundary)
+            candidateSession = session
             stream = nil
+            let firstFrame = try await session.validatedFirstFrame()
             multipartSession?.close()
             multipartSession = session
+            candidateSession = nil
+            pendingMultipartFrame = firstFrame
             activeLiveViewSource = .ccapiMultipart
+            observedFeatures.formUnion([.liveView, .liveViewMultipart])
         } catch {
+            candidateSession?.close()
             stream?.cancel()
             try? await requestOK(
                 path: operations.closeStream.path,
@@ -1250,7 +1259,13 @@ public actor CCAPIClient {
             guard let multipartSession else {
                 throw CCAPIError.invalidResponse("Canon multipart Live View session is missing.")
             }
-            let frame = try await multipartSession.nextFrame()
+            let frame: Data
+            if let pendingMultipartFrame {
+                frame = pendingMultipartFrame
+                self.pendingMultipartFrame = nil
+            } else {
+                frame = try await multipartSession.nextFrame()
+            }
             observedFeatures.formUnion([.liveView, .liveViewMultipart])
             guard let sourceURL = URL(
                 string: baseURLString + (multipartLiveViewOperations()?.openStream.path ?? "")
@@ -2031,6 +2046,7 @@ public actor CCAPIClient {
     private func stopMultipartLiveView() async {
         multipartSession?.close()
         multipartSession = nil
+        pendingMultipartFrame = nil
         guard let operations = multipartLiveViewOperations() else { return }
         do {
             try await requestOK(

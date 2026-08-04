@@ -73,6 +73,8 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
         try await client.startLiveView(LiveViewRequest(fps: 15, source: .auto))
         let active = await client.currentLiveViewSource()
         XCTAssertEqual(active, .ccapiMultipart)
+        let observedAfterStart = try await client.capabilities()
+        XCTAssertTrue(observedAfterStart.evidence.observedFeatures.contains(.liveViewMultipart))
         let frame = try await client.liveViewFrame(cacheKey: 1)
         XCTAssertEqual(frame.data, jpeg)
         XCTAssertEqual(frame.contentType, "image/jpeg")
@@ -122,6 +124,49 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
         }
         let requests = await transport.requests()
         XCTAssertEqual(requests.count, 1)
+    }
+
+    func testAutoFallsBackToJPEGPollingWhenMultipartFirstFrameIsInvalid() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: Self.discovery)
+        await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/liveview", body: Data())
+        await transport.enqueue(
+            path: "/ccapi/ver110/shooting/liveview/multipart",
+            headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
+            body: Data("--canon\nContent-Type: image/jpeg\nContent-Length: 3\n\nno\n--canon--\n".utf8)
+        )
+        await transport.enqueueJSON(
+            method: "DELETE",
+            path: "/ccapi/ver110/shooting/liveview/multipart",
+            body: "{}"
+        )
+        await transport.enqueue(method: "DELETE", path: "/ccapi/ver110/shooting/liveview", body: Data())
+        await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/liveview", body: Data())
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        try await client.startLiveView(LiveViewRequest(source: .auto))
+
+        let active = await client.currentLiveViewSource()
+        XCTAssertEqual(active, .ccapiJPEGPolling)
+        let capabilities = try await client.capabilities()
+        XCTAssertFalse(capabilities.evidence.observedFeatures.contains(.liveViewMultipart))
+        XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.liveViewJPEGPolling))
+        let requests = await transport.requests()
+        XCTAssertEqual(
+            requests.map { "\($0.method) \($0.path)" },
+            [
+                "GET /ccapi",
+                "POST /ccapi/ver110/shooting/liveview",
+                "GET /ccapi/ver110/shooting/liveview/multipart",
+                "DELETE /ccapi/ver110/shooting/liveview/multipart",
+                "DELETE /ccapi/ver110/shooting/liveview",
+                "POST /ccapi/ver110/shooting/liveview",
+            ]
+        )
     }
 
     private func multipart(boundary: String, frame: Data) -> Data {
