@@ -74,6 +74,7 @@ enum class CameraFeature(
     EVENT_POLLING("Camera event polling"),
     LIVE_VIEW("Live view"),
     LIVE_VIEW_JPEG_POLLING("Live view JPEG polling"),
+    LIVE_VIEW_MULTIPART("Live view multipart stream"),
     LIVE_VIEW_RTP("Live view RTP"),
     LIVE_VIEW_MAGNIFICATION("Live view magnification"),
     STILL_CAPTURE("Still capture"),
@@ -134,6 +135,7 @@ data class CapabilityMatrix(
                 CameraFeature.LENS_STATUS,
                 CameraFeature.TEMPERATURE_STATUS,
                 CameraFeature.EVENT_POLLING,
+                CameraFeature.LIVE_VIEW_MULTIPART,
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
                 CameraFeature.BULB_EXPOSURE,
@@ -168,6 +170,8 @@ data class CapabilityMatrix(
                     "The camera must advertise GET devicestatus/temperature and return a documented Canon status value.",
                 CameraFeature.LIVE_VIEW_RTP to
                     "Requires advertised Canon RTP SDP/start endpoints plus a camera Wi-Fi route for native H.264 decoding.",
+                CameraFeature.LIVE_VIEW_MULTIPART to
+                    "Requires matching GET and DELETE Canon multipart Live View endpoints in one API version.",
                 CameraFeature.EVENT_POLLING to
                     "The camera must advertise both GET and DELETE for the Canon event polling endpoint.",
                 CameraFeature.TAP_FOCUS to
@@ -275,6 +279,7 @@ enum class LiveViewSource(
 ) {
     AUTO("Auto"),
     CCAPI_JPEG_POLLING("CCAPI JPEG polling"),
+    CCAPI_MULTIPART("CCAPI multipart"),
     CCAPI_RTP("CCAPI RTP"),
     USB_PTP_PREVIEW("USB/PTP preview"),
     DESKTOP_BRIDGE_STREAM("Desktop bridge stream"),

@@ -384,7 +384,7 @@ class CameraViewModel(
         )
         repository.updateLiveViewRequest(fps = supportedFps)
         configureNativeLiveViewSession(session.nativeLiveViewSession, supportedFps)
-        val activeSource = session.nativeLiveViewSession?.source ?: when {
+        val activeSource = session.activeLiveViewSource ?: session.nativeLiveViewSession?.source ?: when {
             session.liveViewRequest.source != LiveViewSource.AUTO -> session.liveViewRequest.source
             LiveViewSource.CCAPI_JPEG_POLLING in session.capabilities.liveView.sources -> LiveViewSource.CCAPI_JPEG_POLLING
             else -> session.capabilities.liveView.defaultSource

@@ -40,8 +40,38 @@ public struct CameraHTTPDownloadResponse: Sendable {
     }
 }
 
+public struct CameraHTTPStreamResponse: Sendable {
+    public let statusCode: Int
+    public let headers: [String: String]
+    public let chunks: AsyncThrowingStream<Data, Error>
+    private let cancelAction: @Sendable () -> Void
+
+    public init(
+        statusCode: Int,
+        headers: [String: String] = [:],
+        chunks: AsyncThrowingStream<Data, Error>,
+        cancel: @escaping @Sendable () -> Void = {}
+    ) {
+        self.statusCode = statusCode
+        self.headers = headers.reduce(into: [:]) { result, entry in
+            result[entry.key.lowercased()] = entry.value
+        }
+        self.chunks = chunks
+        cancelAction = cancel
+    }
+
+    public func header(_ name: String) -> String? {
+        headers[name.lowercased()]
+    }
+
+    public func cancel() {
+        cancelAction()
+    }
+}
+
 public protocol CameraHTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse
+    func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse
     func download(
         _ request: URLRequest,
@@ -50,6 +80,19 @@ public protocol CameraHTTPTransport: Sendable {
 }
 
 public extension CameraHTTPTransport {
+    func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
+        let response = try await send(request)
+        let chunks = AsyncThrowingStream<Data, Error> { continuation in
+            if !response.body.isEmpty { continuation.yield(response.body) }
+            continuation.finish()
+        }
+        return CameraHTTPStreamResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            chunks: chunks
+        )
+    }
+
     func download(
         _ request: URLRequest,
         progress: @escaping CameraMediaProgressHandler
@@ -65,16 +108,18 @@ public extension CameraHTTPTransport {
 
 public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecked Sendable {
     private let session: URLSession
+    private let streamConfiguration: URLSessionConfiguration
 
     public init(configuration: URLSessionConfiguration = .ephemeral) {
         configuration.waitsForConnectivity = true
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = 10
         configuration.timeoutIntervalForResource = 120
-        configuration.httpMaximumConnectionsPerHost = 2
+        configuration.httpMaximumConnectionsPerHost = 4
         configuration.httpShouldSetCookies = false
         configuration.urlCache = nil
         configuration.urlCredentialStorage = nil
+        streamConfiguration = configuration.copy() as! URLSessionConfiguration
         session = URLSession(configuration: configuration)
     }
 
@@ -82,6 +127,15 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
         let (data, response) = try await session.data(for: request)
         let http = try Self.httpResponse(response)
         return CameraHTTPResponse(statusCode: http.statusCode, headers: Self.headers(http), body: data)
+    }
+
+    public func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
+        let handle = CameraHTTPStreamTaskHandle(configuration: streamConfiguration)
+        return try await withTaskCancellationHandler {
+            try await handle.start(request)
+        } onCancel: {
+            handle.cancel()
+        }
     }
 
     public func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse {
@@ -170,6 +224,106 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
         response.allHeaderFields.reduce(into: [:]) { result, entry in
             result[String(describing: entry.key).lowercased()] = String(describing: entry.value)
         }
+    }
+}
+
+private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let configuration: URLSessionConfiguration
+    private let lock = NSLock()
+    private let chunks: AsyncThrowingStream<Data, Error>
+    private let chunksContinuation: AsyncThrowingStream<Data, Error>.Continuation
+    private var responseContinuation: CheckedContinuation<CameraHTTPStreamResponse, Error>?
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+    private var responseDelivered = false
+
+    init(configuration: URLSessionConfiguration) {
+        self.configuration = configuration.copy() as! URLSessionConfiguration
+        let pair = AsyncThrowingStream<Data, Error>.makeStream()
+        chunks = pair.stream
+        chunksContinuation = pair.continuation
+        super.init()
+    }
+
+    func start(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            responseContinuation = continuation
+            let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+            let task = session.dataTask(with: request)
+            self.session = session
+            self.task = task
+            lock.unlock()
+            task.resume()
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        let task = task
+        let session = session
+        lock.unlock()
+        task?.cancel()
+        session?.invalidateAndCancel()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let http = response as? HTTPURLResponse else {
+            finish(error: CCAPIError.invalidResponse("Camera stream response was not HTTP."))
+            completionHandler(.cancel)
+            return
+        }
+        let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+            result[String(describing: entry.key).lowercased()] = String(describing: entry.value)
+        }
+        lock.lock()
+        let continuation = responseContinuation
+        responseContinuation = nil
+        responseDelivered = true
+        lock.unlock()
+        continuation?.resume(
+            returning: CameraHTTPStreamResponse(
+                statusCode: http.statusCode,
+                headers: headers,
+                chunks: chunks,
+                cancel: { [self] in cancel() }
+            )
+        )
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        chunksContinuation.yield(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        finish(error: error)
+    }
+
+    private func finish(error: Error?) {
+        lock.lock()
+        let continuation = responseContinuation
+        responseContinuation = nil
+        let delivered = responseDelivered
+        task = nil
+        let session = session
+        self.session = nil
+        lock.unlock()
+
+        if !delivered {
+            continuation?.resume(throwing: error ?? CCAPIError.invalidResponse("Camera stream ended before HTTP headers."))
+        }
+        if let error {
+            chunksContinuation.finish(throwing: error)
+        } else {
+            chunksContinuation.finish()
+        }
+        session?.finishTasksAndInvalidate()
     }
 }
 

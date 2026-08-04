@@ -12,13 +12,16 @@ from fastapi.testclient import TestClient
 
 from open_eos_bridge.app import create_app
 from open_eos_bridge.ccapi import (
+    MAX_LIVE_VIEW_FRAME_BYTES,
     MAX_MEDIA_PREVIEW_BYTES,
     MAX_MEDIA_THUMBNAIL_BYTES,
     CcapiEngine,
+    CcapiMultipartReader,
     CcapiResponse,
     CcapiStreamResponse,
     UrllibCcapiTransport,
     normalize_base_url,
+    parse_multipart_boundary,
 )
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine
@@ -68,6 +71,12 @@ RTP_DISCOVERY = {
         *DISCOVERY["ver100"],
         {"path": "/shooting/liveview/rtpsessiondesc", "get": True},
         {"path": "/shooting/liveview/rtp", "post": True},
+    ]
+}
+MULTIPART_DISCOVERY = {
+    "ver100": [
+        *DISCOVERY["ver100"],
+        {"path": "/shooting/liveview/multipart", "get": True, "delete": True},
     ]
 }
 EVENT_DISCOVERY = {
@@ -408,6 +417,8 @@ class FakeCcapiTransport:
                 self.reject_live_view_size = False
                 return _json_response({"message": "Invalid parameter"}, status=400)
             return CcapiResponse(204, {}, b"")
+        if method == "DELETE" and path == "/ccapi/ver100/shooting/liveview/multipart":
+            return _json_response({}, status=200)
         if method == "GET" and path == "/ccapi/ver100/shooting/liveview/rtpsessiondesc":
             return CcapiResponse(200, {"content-type": "application/sdp"}, RTP_SDP.encode())
         if method == "POST" and path == "/ccapi/ver100/shooting/liveview/rtp":
@@ -484,6 +495,19 @@ class FakeCcapiTransport:
         del headers, timeout
         path = _request_path(url)
         self.requests.append(RecordedRequest(method, path, None))
+        if method == "GET" and path == "/ccapi/ver100/shooting/liveview/multipart":
+            multipart = (
+                b"--canon\nContent-Type: image/jpeg\nContent-Length: "
+                + str(len(JPEG)).encode()
+                + b"\n\n"
+                + JPEG
+                + b"\n--canon--\n"
+            )
+            return CcapiStreamResponse(
+                200,
+                {"content-type": "multipart/x-mixed-replace;boundary=canon"},
+                BytesIO(multipart),
+            )
         if path.endswith("IMG_0001.JPG"):
             return CcapiStreamResponse(
                 200,
@@ -1894,6 +1918,105 @@ def test_ccapi_rtp_capability_and_exact_lifecycle_are_end_to_end() -> None:
     assert not any(
         request.path == "/ccapi/ver100/shooting/liveview" and request.method == "POST" for request in transport.requests
     )
+
+
+def test_ccapi_multipart_parser_accepts_lf_and_quoted_boundary() -> None:
+    boundary = parse_multipart_boundary('multipart/x-mixed-replace; charset=binary; boundary="canon"')
+    body = (
+        b"--canon\nContent-Type: image/jpeg\nContent-Length: "
+        + str(len(JPEG)).encode()
+        + b"\n\n"
+        + JPEG
+        + b"\n--canon--\n"
+    )
+    reader = CcapiMultipartReader(BytesIO(body), boundary)
+
+    assert reader.next_frame() == JPEG
+    assert reader.next_frame() is None
+
+
+@pytest.mark.parametrize(
+    ("content_type", "message"),
+    [
+        ("image/jpeg", "multipart/x-mixed-replace"),
+        ("multipart/x-mixed-replace", "boundary"),
+        ("multipart/x-mixed-replace;boundary=bad boundary", "ASCII boundary"),
+    ],
+)
+def test_ccapi_multipart_parser_rejects_invalid_content_type(content_type: str, message: str) -> None:
+    with pytest.raises(BridgeError, match=message):
+        parse_multipart_boundary(content_type)
+
+
+def test_ccapi_multipart_parser_rejects_invalid_or_oversized_frames() -> None:
+    invalid_length = BytesIO(b"--b\nContent-Type: image/jpeg\nContent-Length: -1\n\nx\n--b--\n")
+    oversized = BytesIO(
+        b"--b\nContent-Type: image/jpeg\nContent-Length: "
+        + str(MAX_LIVE_VIEW_FRAME_BYTES + 1).encode()
+        + b"\n\n"
+    )
+
+    with pytest.raises(BridgeError, match="Content-Length"):
+        CcapiMultipartReader(invalid_length, "b").next_frame()
+    with pytest.raises(BridgeError, match="safety limit"):
+        CcapiMultipartReader(oversized, "b").next_frame()
+
+
+def test_ccapi_multipart_capability_and_exact_lifecycle_are_end_to_end() -> None:
+    transport = FakeCcapiTransport(discovery=MULTIPART_DISCOVERY)
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        rtp_session_factory=None,
+        route_resolver=lambda _url: "192.168.1.20",
+        sleeper=lambda _: None,
+    ).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    assert CameraFeature.LIVE_VIEW_MULTIPART in capabilities.supported
+    assert capabilities.live_view.sources == ["CCAPI_MULTIPART", "CCAPI_JPEG_POLLING"]
+    assert capabilities.live_view.default_source == "CCAPI_MULTIPART"
+
+    session.start_live_view(LiveViewStartRequest(fps=15, source="AUTO"))
+    assert session.live_view_source == "CCAPI_MULTIPART"
+    assert CameraFeature.LIVE_VIEW_MULTIPART not in session.capabilities().evidence.observed_features
+    assert session.live_view_frame() == JPEG
+    assert CameraFeature.LIVE_VIEW_MULTIPART in session.capabilities().evidence.observed_features
+    session.stop_live_view()
+
+    lifecycle = [
+        (request.method, request.path)
+        for request in transport.requests
+        if request.path in {
+            "/ccapi/ver100/shooting/liveview",
+            "/ccapi/ver100/shooting/liveview/multipart",
+        }
+    ]
+    assert lifecycle == [
+        ("POST", "/ccapi/ver100/shooting/liveview"),
+        ("POST", "/ccapi/ver100/shooting/liveview"),
+        ("GET", "/ccapi/ver100/shooting/liveview/multipart"),
+        ("DELETE", "/ccapi/ver100/shooting/liveview/multipart"),
+        ("DELETE", "/ccapi/ver100/shooting/liveview"),
+    ]
+
+
+def test_ccapi_multipart_requires_one_api_version_for_the_complete_lifecycle() -> None:
+    split_discovery = {
+        "ver100": [*DISCOVERY["ver100"]],
+        "ver110": [{"path": "/shooting/liveview/multipart", "get": True, "delete": True}],
+    }
+    transport = FakeCcapiTransport(discovery=split_discovery)
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        rtp_session_factory=None,
+    ).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+    assert CameraFeature.LIVE_VIEW_MULTIPART not in capabilities.supported
+    assert CameraFeature.LIVE_VIEW_MULTIPART in capabilities.planned
+    with pytest.raises(BridgeError) as failure:
+        session.start_live_view(LiveViewStartRequest(source="CCAPI_MULTIPART"))
+    assert failure.value.feature == CameraFeature.LIVE_VIEW_MULTIPART.value
 
 
 def test_ccapi_auto_falls_back_to_jpeg_when_local_rtp_start_fails() -> None:

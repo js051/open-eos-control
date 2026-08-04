@@ -13,6 +13,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case eventPolling = "EVENT_POLLING"
     case liveView = "LIVE_VIEW"
     case liveViewJPEGPolling = "LIVE_VIEW_JPEG_POLLING"
+    case liveViewMultipart = "LIVE_VIEW_MULTIPART"
     case liveViewRTP = "LIVE_VIEW_RTP"
     case liveViewMagnification = "LIVE_VIEW_MAGNIFICATION"
     case stillCapture = "STILL_CAPTURE"
@@ -293,6 +294,7 @@ public struct CameraSetting: Identifiable, Equatable, Sendable {
 public enum LiveViewSource: String, Codable, Sendable {
     case auto
     case ccapiJPEGPolling
+    case ccapiMultipart
     case ccapiRTP
     case desktopBridgeStream
     case simulatorFrame

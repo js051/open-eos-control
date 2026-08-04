@@ -1,6 +1,17 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
-from main import app, initial_state, state
+from main import (
+    CANON_DISCOVERY,
+    app,
+    canon_live_view_multipart,
+    canon_start_live_view,
+    canon_stop_live_view,
+    canon_stop_live_view_multipart,
+    initial_state,
+    state,
+)
 
 client = TestClient(app)
 
@@ -257,6 +268,41 @@ def test_canonical_ccapi_discovery_settings_and_live_view_contract() -> None:
         "event_delete_count": 0,
         "event_active_requests": 0,
     }
+
+
+def test_canonical_multipart_live_view_streams_exact_jpeg_parts_and_stops() -> None:
+    assert {
+        "path": "/shooting/liveview/multipart",
+        "get": True,
+        "delete": True,
+    } in CANON_DISCOVERY["ver100"]
+
+    async def scenario() -> tuple[object, object, object, object, bytes]:
+        await canon_start_live_view({"cameradisplay": "on"})
+        stream = await canon_live_view_multipart()
+        already_started = await canon_live_view_multipart()
+        chunk = await anext(stream.body_iterator)
+        stopped = await canon_stop_live_view_multipart()
+        await stream.body_iterator.aclose()
+        regular_stopped = await canon_stop_live_view()
+        return stream, already_started, stopped, regular_stopped, chunk
+
+    stream, already_started, stopped, regular_stopped, chunk = asyncio.run(scenario())
+
+    assert stream.status_code == 200
+    assert stream.headers["content-type"] == "multipart/x-mixed-replace;boundary=boundary"
+    assert already_started.status_code == 503
+    assert stopped.status_code == 200
+    assert regular_stopped.status_code == 204
+    header, jpeg = chunk.split(b"\n\n", 1)
+    jpeg = jpeg.removesuffix(b"\n")
+    assert header.startswith(b"--boundary\nContent-Type: image/jpeg\n")
+    assert f"Content-Length: {len(jpeg)}".encode() in header
+    assert jpeg.startswith(b"\xff\xd8") and jpeg.endswith(b"\xff\xd9")
+    assert state["canonical_multipart_start_count"] == 1
+    assert state["canonical_multipart_stop_count"] == 1
+    assert state["canonical_multipart_frame_count"] == 1
+    assert state["canonical_multipart_active"] is False
 
 
 def test_canonical_lens_and_temperature_status_match_documented_shapes() -> None:

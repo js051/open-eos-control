@@ -44,7 +44,7 @@ open-eos-control/
 - PC 控制介面透過浮點 WebGL2 3D texture 與明確的三線性插值，對 Bridge 解碼影格與本機 UVC／HDMI 視訊輸入套用匯入的 3D `.cube` LUT，再執行同一套有界 120x80 分析。監看輔助視窗也提供直方圖／亮度波形圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與變形鏡頭反擠壓，不會改動相機命令或偽造拍攝結果。本機視訊只替換取景畫面，Bridge session 仍持續控制相機；裝置 ID／名稱及 LUT 檔名／標題只留在記憶體且不會寫入診斷。相機媒體下載會顯示位元組進度並可取消；一般檔案使用串流式瀏覽器下載 fallback，未知大小或至少 64 MiB 的檔案則在瀏覽器支援時直接寫入具暫存保護的目的檔。
 
 LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast 資料列、`DOMAIN_MIN`／`DOMAIN_MAX` 或 `LUT_3D_INPUT_RANGE`、有限數值與三線性顯示插值。混合 1D／shaper LUT 或超過 16 MiB 的檔案會回報明確錯誤；專案不重新散布 Canon 或第三方 LUT。
-- Android、iOS 與 PC 上依能力開放的 Canon CCAPI RTP H.264 Live View：使用可達路由的 UDP、RFC 3550／RFC 6184 封包處理、手機原生顯示或 PC PyAV 解碼，可切換自動／RTP／JPEG 來源並限制 1-30 FPS 顯示／輸出幀率。三個平台也會處理相機公告、使用帶內設定的 RFC 6416 `MP4A-LATM/48000` 音訊，且都預設靜音；Android 使用 Media3 LATM 解析、`MediaCodec` 與 `AudioTrack`，iOS 使用有界 Swift LATM 解析器、`AVAudioConverter` 與 `AVAudioEngine`，PC 則將有界 PCM 送至 WebAudio。手機端只有在使用者明確開啟後才解碼播放，App 進入背景時會再次靜音；只有相機同時公告兩個 RTP endpoint，且本機有可達 IPv4 與可用影像 decoder 時才會出現 RTP
+- Android、iOS 與 PC 上依能力開放的 Canon CCAPI Live View，AUTO 依序嘗試 RTP H.264、持續 multipart JPEG、JPEG 輪詢，並限制 1-30 FPS 顯示／輸出幀率。Multipart 必須在同一 API 版本完整公告一般 Live View 啟停與 `GET`／`DELETE /shooting/liveview/multipart`，背景會持續排空資料但只保留最新一張有界完整 JPEG；只有 AUTO 會在啟動失敗時降級。RTP 使用可達路由的 UDP、RFC 3550／RFC 6184、手機原生顯示或 PC PyAV 解碼；各來源只會在完整能力條件成立時顯示
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質、有界 B/A／M/G 白平衡偏移，以及相機同版本同時公告 GET／POST 時才出現的官方 0-100 變焦控制。變焦使用整數 POST；普通 EOS／鏡頭組合未提供此端點時會完全隱藏
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 雙卡選擇。Photo 與 Video 分別顯示相片／影片記錄卡；只有相機在同一 API 版本公告成對 GET／PUT，且回傳 `none`、`card1`、`card2` 的有效選項時才出現，寫入保留精確協定值，畸形或只有單一選項的回應不會形成可操作控制
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 錄音音量控制。Video 設定只有在相機於同一 API 版本公告成對 GET／PUT，並回傳有效的有界整數範圍後，才顯示類似 0–63 的離散滑桿；每次寫入前會重新讀取範圍並送出 Canon 要求的整數 `value`。Still 模式、錄音設定不是手動、錄影進行中、畸形或過期能力都會維持真實的不可用／錯誤狀態
@@ -133,14 +133,14 @@ iOS App 會在 iPhone Simulator 完成編譯與測試，但 Release 不會附上
 
 ## iOS App 與相機 Core
 
-`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；除了完整 JPEG Live View 生命週期，也會在相機公告兩個 RTP operation 時驗證 Canon SDP、RFC 3550 與 RFC 6184 H.264 access unit，並負責精確清理 RTP start／stop。Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、Live View、拍照、相機時鐘同步、Bulb 計時開始／停止、獨立自動對焦、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及含版本、產生時間、公告／實測差異與有界能力證據的診斷報告；帳密與相機序號都會遮蔽。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
+`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；除了完整 JPEG 輪詢與持續 multipart Live View 生命週期，也會在相機公告兩個 RTP operation 時驗證 Canon SDP、RFC 3550 與 RFC 6184 H.264 access unit，並負責精確清理 RTP start／stop。Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、Live View、拍照、相機時鐘同步、Bulb 計時開始／停止、獨立自動對焦、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及含版本、產生時間、公告／實測差異與有界能力證據的診斷報告；帳密與相機序號都會遮蔽。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
 
 ```bash
 cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG 或相機公告的 RTP H.264 Live View、曝光設定 sheet、具真實位元組進度與取消操作的檔案式媒體傳輸、需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。RTP 會使用和相機同子網的 Wi-Fi IPv4、限定 Wi-Fi 的 Network.framework UDP listener、系統原生 sample-buffer 顯示、自動／JPEG／RTP 選擇與 1-30 FPS 顯示上限；若 SDP 另行公告帶內 `MP4A-LATM/48000`，App 會獨立接收並以 `AVAudioConverter`／`AVAudioEngine` 提供預設靜音、前景限定的相機音訊。自動模式若 RTP 啟動失敗，會先完整清理再退回 JPEG。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
+`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG 輪詢／multipart 或相機公告的 RTP H.264 Live View、曝光設定 sheet、具真實位元組進度與取消操作的檔案式媒體傳輸、需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。RTP 使用同子網 Wi-Fi IPv4、限定 Wi-Fi 的 Network.framework UDP listener 與原生 sample-buffer 顯示；multipart 使用 URLSession 串流 delegate 與最新幀合併。AUTO 依 RTP、multipart、輪詢順序完整清理後降級，FPS 維持 1-30 顯示上限。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
 
 在具備 Xcode 與 XcodeGen 的 macOS 主機執行：
 

@@ -746,6 +746,7 @@ public actor DesktopBridgeClient {
         switch normalizedEnumValue(value) {
         case "AUTO": .auto
         case "CCAPIJPEGPOLLING", "CCAPI_JPEG_POLLING": .ccapiJPEGPolling
+        case "CCAPIMULTIPART", "CCAPI_MULTIPART": .ccapiMultipart
         case "CCAPIRTP", "CCAPI_RTP": .ccapiRTP
         case "DESKTOPBRIDGESTREAM", "DESKTOP_BRIDGE_STREAM": .desktopBridgeStream
         case "SIMULATORFRAME", "SIMULATOR_FRAME": .simulatorFrame
@@ -791,6 +792,7 @@ public actor DesktopBridgeClient {
         switch source {
         case .auto: "AUTO"
         case .ccapiJPEGPolling: "CCAPI_JPEG_POLLING"
+        case .ccapiMultipart: "CCAPI_MULTIPART"
         case .ccapiRTP: "CCAPI_RTP"
         case .desktopBridgeStream: "DESKTOP_BRIDGE_STREAM"
         case .simulatorFrame: "SIMULATOR_FRAME"

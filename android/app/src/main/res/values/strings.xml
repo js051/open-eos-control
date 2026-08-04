@@ -60,6 +60,7 @@
     <string name="live_view_source">Stream source</string>
     <string name="live_view_source_auto">Automatic</string>
     <string name="live_view_source_rtp">RTP H.264</string>
+    <string name="live_view_source_multipart">Multipart JPEG</string>
     <string name="live_view_source_jpeg">JPEG polling</string>
     <string name="live_view_source_usb">USB preview</string>
     <string name="live_view_source_bridge">Desktop bridge</string>

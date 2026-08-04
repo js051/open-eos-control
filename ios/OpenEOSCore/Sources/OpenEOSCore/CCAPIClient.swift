@@ -24,6 +24,13 @@ private struct CCAPIOperation: Hashable, Sendable {
     let path: String
 }
 
+private struct CCAPIMultipartOperations: Sendable {
+    let startLiveView: CCAPIOperation
+    let stopLiveView: CCAPIOperation
+    let openStream: CCAPIOperation
+    let closeStream: CCAPIOperation
+}
+
 private struct CCAPILiveViewGeometry: Sendable {
     let positionX: Int
     let positionY: Int
@@ -244,6 +251,7 @@ public actor CCAPIClient {
     private var activeLiveViewSize = LiveViewSize.medium
     private var activeLiveViewSource: LiveViewSource?
     private var rtpSession: (any CCAPIRTPSession)?
+    private var multipartSession: CCAPIMultipartLiveViewSession?
     private var nativeGeometryCacheKey: Int64 = 0
     private var latestLiveViewGeometry: CCAPILiveViewGeometry?
     private var simulatorEventSequence: Int64 = 0
@@ -522,11 +530,13 @@ public actor CCAPIClient {
             supported.insert(.advancedSettings)
         }
         let supportsJPEGLiveView = supportsCompleteLiveView()
+        let supportsMultipartLiveView = supportsMultipartLiveView()
         let supportsRTPLiveView = supportsRTPLiveView()
-        if supportsJPEGLiveView || supportsRTPLiveView || observedFeatures.contains(.liveView) {
+        if supportsJPEGLiveView || supportsMultipartLiveView || supportsRTPLiveView || observedFeatures.contains(.liveView) {
             supported.insert(.liveView)
         }
         if supportsJPEGLiveView { supported.insert(.liveViewJPEGPolling) }
+        if supportsMultipartLiveView { supported.insert(.liveViewMultipart) }
         if supportsRTPLiveView { supported.insert(.liveViewRTP) }
         if recordingOperation() != nil { supported.insert(.videoRecording) }
         if directShutterOperation() != nil || manualShutterOperation() != nil {
@@ -554,7 +564,8 @@ public actor CCAPIClient {
         let allPlanned: Set<CameraFeature> = [
             .recordableStatus,
             .lensStatus, .temperatureStatus,
-            .eventPolling, .liveViewRTP, .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress,
+            .eventPolling, .liveViewMultipart, .liveViewRTP,
+            .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress,
             .movieModeControl,
             .videoRecording, .tapFocus,
             .clickWhiteBalance,
@@ -578,6 +589,7 @@ public actor CCAPIClient {
                     .lensStatus: "The camera must advertise GET devicestatus/lens and return Canon's documented mount/name payload.",
                     .temperatureStatus: "The camera must advertise GET devicestatus/temperature and return a documented Canon status value.",
                     .eventPolling: "The camera must advertise both GET and DELETE for the Canon event polling endpoint.",
+                    .liveViewMultipart: "The camera must advertise matching GET and DELETE Canon multipart Live View endpoints with the regular lifecycle in one API version.",
                     .liveViewRTP: "Canon RTP needs advertised SDP/start endpoints and a reachable camera-Wi-Fi IPv4 address.",
                     .autofocus: "The camera advertised neither CCAPI POST autofocus nor a verified manual half-press operation.",
                     .tapFocus: "The camera must advertise PUT afframeposition and detailed Live View metadata for coordinate Tap AF.",
@@ -1095,33 +1107,52 @@ public actor CCAPIClient {
             observedFeatures.insert(.liveView)
             return
         }
-        let requestedSource = request.source
-        let selectedSource: LiveViewSource
-        switch requestedSource {
+        let sources: [LiveViewSource]
+        switch request.source {
         case .auto:
-            selectedSource = supportsRTPLiveView() ? .ccapiRTP : .ccapiJPEGPolling
-        case .ccapiRTP, .ccapiJPEGPolling:
-            selectedSource = requestedSource
+            sources = [
+                supportsRTPLiveView() ? .ccapiRTP : nil,
+                supportsMultipartLiveView() ? .ccapiMultipart : nil,
+                supportsCompleteLiveView() ? .ccapiJPEGPolling : nil,
+            ].compactMap { $0 }
+        case .ccapiRTP, .ccapiMultipart, .ccapiJPEGPolling:
+            sources = [request.source]
         default:
             throw CCAPIError.invalidResponse(
-                "\(requestedSource.rawValue) is not available through the CCAPI network client."
+                "\(request.source.rawValue) is not available through the CCAPI network client."
             )
         }
-
-        if selectedSource == .ccapiRTP {
+        guard !sources.isEmpty else { throw CCAPIError.unsupported(.liveView) }
+        var lastError: Error?
+        for source in sources {
             do {
-                try await startRTPLiveView(request)
+                switch source {
+                case .ccapiRTP:
+                    try await startRTPLiveView(request)
+                case .ccapiMultipart:
+                    try await startMultipartLiveView(request)
+                case .ccapiJPEGPolling:
+                    try await startJPEGLiveView(request)
+                default:
+                    throw CCAPIError.invalidResponse("Unsupported CCAPI Live View source.")
+                }
                 return
             } catch {
-                guard requestedSource == .auto, supportsCompleteLiveView() else { throw error }
+                lastError = error
+                guard request.source == .auto else { throw error }
             }
         }
-        try await startJPEGLiveView(request)
+        throw lastError ?? CCAPIError.unsupported(.liveView)
     }
 
     private func startJPEGLiveView(_ request: LiveViewRequest) async throws {
         guard supportsCompleteLiveView() else { throw CCAPIError.unsupported(.liveView) }
-        let path = apiPath(.post, suffix: "/shooting/liveview")
+        try await startCCAPILiveView(request, path: apiPath(.post, suffix: "/shooting/liveview"))
+        activeLiveViewSource = .ccapiJPEGPolling
+        observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
+    }
+
+    private func startCCAPILiveView(_ request: LiveViewRequest, path: String) async throws {
         do {
             try await requestOK(
                 path: path,
@@ -1135,8 +1166,48 @@ public actor CCAPIClient {
             liveViewSizeControlSupported = false
         }
         activeLiveViewSize = request.size
-        activeLiveViewSource = .ccapiJPEGPolling
-        observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
+    }
+
+    private func startMultipartLiveView(_ request: LiveViewRequest) async throws {
+        guard let operations = multipartLiveViewOperations() else {
+            throw CCAPIError.unsupported(.liveViewMultipart)
+        }
+        try await startCCAPILiveView(request, path: operations.startLiveView.path)
+        var stream: CameraHTTPStreamResponse?
+        do {
+            var value = try self.request(
+                path: operations.openStream.path,
+                method: .get,
+                timeoutInterval: 60
+            )
+            value.setValue("multipart/x-mixed-replace", forHTTPHeaderField: "Accept")
+            value.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            let response = try await transport.openStream(value)
+            stream = response
+            guard response.statusCode == 200 else {
+                throw CCAPIError.http(
+                    statusCode: response.statusCode,
+                    method: "GET",
+                    url: value.url?.absoluteString ?? operations.openStream.path,
+                    body: ""
+                )
+            }
+            let boundary = try CCAPIMultipartLiveView.boundary(from: response.header("content-type"))
+            let session = CCAPIMultipartLiveViewSession(response: response, boundary: boundary)
+            stream = nil
+            multipartSession?.close()
+            multipartSession = session
+            activeLiveViewSource = .ccapiMultipart
+        } catch {
+            stream?.cancel()
+            try? await requestOK(
+                path: operations.closeStream.path,
+                method: .delete,
+                expectedStatusCode: 200
+            )
+            try? await requestOK(path: operations.stopLiveView.path, method: .delete)
+            throw error
+        }
     }
 
     public func stopLiveView() async {
@@ -1149,6 +1220,8 @@ public actor CCAPIClient {
         switch activeLiveViewSource {
         case .ccapiRTP:
             await stopRTPLiveView()
+        case .ccapiMultipart:
+            await stopMultipartLiveView()
         case .ccapiJPEGPolling:
             if !enforceAdvertisedOperations || supports(.delete, suffix: "/shooting/liveview") {
                 try? await requestOK(path: apiPath(.delete, suffix: "/shooting/liveview"), method: .delete)
@@ -1173,6 +1246,23 @@ public actor CCAPIClient {
 
     public func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
         try await ensureInitialized()
+        if activeLiveViewSource == .ccapiMultipart {
+            guard let multipartSession else {
+                throw CCAPIError.invalidResponse("Canon multipart Live View session is missing.")
+            }
+            let frame = try await multipartSession.nextFrame()
+            observedFeatures.formUnion([.liveView, .liveViewMultipart])
+            guard let sourceURL = URL(
+                string: baseURLString + (multipartLiveViewOperations()?.openStream.path ?? "")
+            ) else {
+                throw CCAPIError.invalidResponse("Canon multipart Live View source URL is invalid.")
+            }
+            return LiveViewFrame(
+                data: frame,
+                contentType: "image/jpeg",
+                sourceURL: sourceURL
+            )
+        }
         if activeLiveViewSource == .ccapiRTP {
             throw CCAPIError.invalidResponse(
                 "CCAPI RTP Live View renders through the native H.264 surface, not the JPEG frame reader."
@@ -1819,7 +1909,8 @@ public actor CCAPIClient {
     }
 
     private func ensureLiveViewGeometryForNativeStream() async throws {
-        guard latestLiveViewGeometry == nil, activeLiveViewSource == .ccapiRTP else { return }
+        guard latestLiveViewGeometry == nil,
+              activeLiveViewSource == .ccapiRTP || activeLiveViewSource == .ccapiMultipart else { return }
         guard let detail = detailedLiveViewOperation() else {
             throw CCAPIError.invalidResponse(
                 "Coordinate control needs the camera's detailed Live View endpoint."
@@ -1848,6 +1939,31 @@ public actor CCAPIClient {
             !liveViewFramePaths().isEmpty
     }
 
+    private func multipartLiveViewOperations() -> CCAPIMultipartOperations? {
+        let reads = operations
+            .filter { $0.method == .get && $0.path.hasSuffix("/shooting/liveview/multipart") }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for read in reads {
+            let prefix = String(read.path.dropLast("/shooting/liveview/multipart".count))
+            let result = CCAPIMultipartOperations(
+                startLiveView: CCAPIOperation(method: .post, path: "\(prefix)/shooting/liveview"),
+                stopLiveView: CCAPIOperation(method: .delete, path: "\(prefix)/shooting/liveview"),
+                openStream: read,
+                closeStream: CCAPIOperation(method: .delete, path: read.path)
+            )
+            if operations.contains(result.startLiveView),
+               operations.contains(result.stopLiveView),
+               operations.contains(result.closeStream) {
+                return result
+            }
+        }
+        return nil
+    }
+
+    private func supportsMultipartLiveView() -> Bool {
+        multipartLiveViewOperations() != nil
+    }
+
     private func supportsRTPLiveView() -> Bool {
         supports(.get, suffix: "/shooting/liveview/rtpsessiondesc") &&
             supports(.post, suffix: "/shooting/liveview/rtp") &&
@@ -1858,6 +1974,7 @@ public actor CCAPIClient {
     private func ccapiLiveViewSources() -> [LiveViewSource] {
         var sources: [LiveViewSource] = []
         if supportsRTPLiveView() { sources.append(.ccapiRTP) }
+        if supportsMultipartLiveView() { sources.append(.ccapiMultipart) }
         if supportsCompleteLiveView() { sources.append(.ccapiJPEGPolling) }
         return sources
     }
@@ -1909,6 +2026,23 @@ public actor CCAPIClient {
         }
         if let session = rtpSession { await session.close() }
         rtpSession = nil
+    }
+
+    private func stopMultipartLiveView() async {
+        multipartSession?.close()
+        multipartSession = nil
+        guard let operations = multipartLiveViewOperations() else { return }
+        do {
+            try await requestOK(
+                path: operations.closeStream.path,
+                method: .delete,
+                expectedStatusCode: 200
+            )
+        } catch {
+            try? await requestOK(path: operations.stopLiveView.path, method: .delete)
+            return
+        }
+        try? await requestOK(path: operations.stopLiveView.path, method: .delete)
     }
 
     private func supportsMediaDelete() -> Bool {

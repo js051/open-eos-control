@@ -1039,6 +1039,90 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonMultipartLiveViewUsesAdvertisedPersistentLifecycle() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x21, 0xFF.toByte(), 0xD9.toByte())
+        val multipart = Buffer()
+            .writeUtf8("--canon\nContent-Type: image/jpeg\nContent-Length: ${jpeg.size}\n\n")
+            .write(jpeg)
+            .writeUtf8("\n--canon--\n")
+        server.enqueue(jsonResponse(DISCOVERY_MULTIPART_JSON))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("content-type", "multipart/x-mixed-replace;boundary=canon")
+                .setChunkedBody(multipart, 3),
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        client.startLiveView(LiveViewRequest(source = LiveViewSource.AUTO))
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MULTIPART))
+        assertEquals(
+            listOf(LiveViewSource.CCAPI_MULTIPART, LiveViewSource.CCAPI_JPEG_POLLING),
+            capabilities.liveView.sources,
+        )
+        assertFalse(CameraFeature.LIVE_VIEW_MULTIPART in client.observedFeatureSnapshot())
+        val frame = client.liveViewFrame(cacheKey = 1)
+        assertArrayEquals(jpeg, frame.bytes)
+        assertEquals("image/jpeg", frame.contentType)
+        assertEquals(
+            "${server.url("/").toString().trimEnd('/')}/ccapi/ver110/shooting/liveview/multipart",
+            frame.sourceUrl,
+        )
+        assertTrue(CameraFeature.LIVE_VIEW_MULTIPART in client.observedFeatureSnapshot())
+
+        client.stopLiveView()
+
+        val requests = List(5) { server.takeRequest() }
+        assertEquals(
+            listOf(
+                "/ccapi",
+                "/ccapi/ver110/shooting/liveview",
+                "/ccapi/ver110/shooting/liveview/multipart",
+                "/ccapi/ver110/shooting/liveview/multipart",
+                "/ccapi/ver110/shooting/liveview",
+            ),
+            requests.map { it.path },
+        )
+        assertEquals(listOf("GET", "POST", "GET", "DELETE", "DELETE"), requests.map { it.method })
+    }
+
+    @Test
+    fun multipartCapabilityRequiresAllOperationsInTheSameApiVersion() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(
+            jsonResponse(
+                """{
+                  "ver100":[{"path":"/shooting/liveview","post":true,"delete":true}],
+                  "ver110":[{"path":"/shooting/liveview/multipart","get":true,"delete":true}]
+                }""",
+            ),
+        )
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val failure = runCatching {
+            client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_MULTIPART))
+        }.exceptionOrNull()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MULTIPART))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_MULTIPART))
+        assertTrue(failure?.message.orEmpty().contains("matching Canon multipart"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun version100EventPollingUsesContinueMode() = runTest {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -3132,6 +3216,16 @@ class CcapiClientTest {
                 {"path":"/shooting/liveview/flip","get":true},
                 {"path":"/shooting/liveview/rtpsessiondesc","get":true},
                 {"path":"/shooting/liveview/rtp","post":true}
+              ]
+            }
+        """
+
+        const val DISCOVERY_MULTIPART_JSON = """
+            {
+              "ver110": [
+                {"path":"/shooting/liveview","post":true,"delete":true},
+                {"path":"/shooting/liveview/flip","get":true},
+                {"path":"/shooting/liveview/multipart","get":true,"delete":true}
               ]
             }
         """

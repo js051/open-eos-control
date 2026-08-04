@@ -402,6 +402,7 @@ private struct LiveViewSettingsView: View {
     private func localizedSource(_ source: LiveViewSource) -> LocalizedStringKey {
         switch source {
         case .ccapiRTP: "source_rtp"
+        case .ccapiMultipart: "source_multipart"
         case .ccapiJPEGPolling: "source_jpeg"
         case .desktopBridgeStream: "source_bridge"
         case .simulatorFrame: "source_simulator"

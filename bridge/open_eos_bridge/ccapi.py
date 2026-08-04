@@ -56,6 +56,10 @@ MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_ERROR_BYTES = 2_000
 MAX_LIVE_VIEW_SCAN_BYTES = 16 * 1024 * 1024
 MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024
+MAX_MULTIPART_BOUNDARY_CHARS = 200
+MAX_MULTIPART_LINE_BYTES = 8 * 1024
+MAX_MULTIPART_HEADER_BYTES = 16 * 1024
+MAX_MULTIPART_HEADER_COUNT = 32
 MAX_RTP_SESSION_DESCRIPTION_BYTES = 64 * 1024
 RTP_AUDIO_FEATURE = "LIVE_VIEW_RTP_AUDIO"
 MAX_MEDIA_ITEMS = 500
@@ -268,6 +272,190 @@ class CcapiStreamResponse:
         self.body.close()
 
 
+@dataclass(frozen=True)
+class CcapiMultipartOperations:
+    start_live_view: CcapiOperation
+    stop_live_view: CcapiOperation
+    open_stream: CcapiOperation
+    close_stream: CcapiOperation
+
+
+def parse_multipart_boundary(content_type: str | None) -> str:
+    parts = [part.strip() for part in (content_type or "").split(";")]
+    if not parts or parts[0].casefold() != "multipart/x-mixed-replace":
+        raise _multipart_error(
+            f"Canon multipart Live View returned {content_type or 'no Content-Type'}; "
+            "expected multipart/x-mixed-replace."
+        )
+    raw_boundary = next(
+        (
+            part.split("=", 1)[1].strip()
+            for part in parts[1:]
+            if "=" in part and part.split("=", 1)[0].strip().casefold() == "boundary"
+        ),
+        "",
+    )
+    if len(raw_boundary) >= 2 and raw_boundary.startswith('"') and raw_boundary.endswith('"'):
+        raw_boundary = raw_boundary[1:-1]
+    boundary = raw_boundary.removeprefix("--")
+    if (
+        not boundary
+        or len(boundary) > MAX_MULTIPART_BOUNDARY_CHARS
+        or any(ord(character) not in range(33, 127) or character == '"' for character in boundary)
+    ):
+        raise _multipart_error("Canon multipart Live View returned a missing or invalid ASCII boundary.")
+    return boundary
+
+
+class CcapiMultipartReader:
+    def __init__(self, body: BinaryIO, boundary: str) -> None:
+        self._body = body
+        self._delimiter = f"--{boundary}"
+        self._closing_delimiter = f"--{boundary}--"
+
+    def next_frame(self) -> bytes | None:
+        if not self._seek_boundary():
+            return None
+        headers: dict[str, str] = {}
+        header_bytes = 0
+        while True:
+            line = self._read_line()
+            if line is None:
+                raise _multipart_error("Canon multipart Live View ended while reading part headers.")
+            if not line:
+                break
+            header_bytes += len(line)
+            if header_bytes > MAX_MULTIPART_HEADER_BYTES or len(headers) >= MAX_MULTIPART_HEADER_COUNT:
+                raise _multipart_error("Canon multipart Live View part headers exceeded the safety limit.")
+            if ":" not in line:
+                raise _multipart_error("Canon multipart Live View returned a malformed part header.")
+            name, value = line.split(":", 1)
+            name = name.strip().casefold()
+            if not name or name in headers:
+                raise _multipart_error("Canon multipart Live View returned a duplicate or empty part header.")
+            headers[name] = value.strip()
+        if headers.get("content-type", "").split(";", 1)[0].strip().casefold() != "image/jpeg":
+            raise _multipart_error("Canon multipart Live View part is not image/jpeg.")
+        length_text = headers.get("content-length", "")
+        if not length_text.isascii() or not length_text.isdigit():
+            raise _multipart_error("Canon multipart Live View returned an invalid Content-Length.")
+        length = int(length_text)
+        if not 1 <= length <= MAX_LIVE_VIEW_FRAME_BYTES:
+            raise _multipart_error(
+                f"Canon multipart Live View frame length {length} is outside the safety limit."
+            )
+        frame = bytearray()
+        while len(frame) < length:
+            chunk = self._body.read(length - len(frame))
+            if not chunk:
+                raise _multipart_error("Canon multipart Live View ended before the JPEG frame was complete.")
+            frame.extend(chunk)
+        value = bytes(frame)
+        if len(value) < 4 or not value.startswith(b"\xff\xd8") or not value.endswith(b"\xff\xd9"):
+            raise _multipart_error("Canon multipart Live View part did not contain a complete JPEG frame.")
+        return value
+
+    def _seek_boundary(self) -> bool:
+        scanned = 0
+        while True:
+            line = self._read_line()
+            if line is None:
+                raise _multipart_error("Canon multipart Live View ended before the next boundary.")
+            scanned += len(line)
+            if scanned > MAX_MULTIPART_HEADER_BYTES:
+                raise _multipart_error("Canon multipart Live View preamble exceeded the safety limit.")
+            if line == self._delimiter:
+                return True
+            if line == self._closing_delimiter:
+                return False
+
+    def _read_line(self) -> str | None:
+        value = self._body.readline(MAX_MULTIPART_LINE_BYTES + 2)
+        if not value:
+            return None
+        if len(value) > MAX_MULTIPART_LINE_BYTES + 1 or not value.endswith(b"\n"):
+            raise _multipart_error("Canon multipart Live View line exceeded the safety limit or was incomplete.")
+        return value[:-1].removesuffix(b"\r").decode("latin-1")
+
+
+class CcapiMultipartSession:
+    def __init__(self, response: CcapiStreamResponse, boundary: str) -> None:
+        self._response = response
+        self._boundary = boundary
+        self._condition = threading.Condition()
+        self._latest_frame: bytes | None = None
+        self._produced_generation = 0
+        self._consumed_generation = 0
+        self._terminal_error: Exception | None = None
+        self._closed = False
+        self._worker = threading.Thread(target=self._drain, name="ccapi-multipart-live-view", daemon=True)
+        self._worker.start()
+
+    def next_frame(self, timeout: float = 15.0) -> bytes:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while (
+                not self._closed
+                and self._produced_generation <= self._consumed_generation
+                and self._terminal_error is None
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _multipart_error("Timed out waiting for the next Canon multipart Live View frame.")
+                self._condition.wait(remaining)
+            if self._produced_generation > self._consumed_generation:
+                assert self._latest_frame is not None
+                self._consumed_generation = self._produced_generation
+                return self._latest_frame
+            if self._terminal_error is not None:
+                if isinstance(self._terminal_error, BridgeError):
+                    raise self._terminal_error
+                raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
+            raise _multipart_error("Canon multipart Live View stream is closed.")
+
+    def close(self) -> None:
+        with self._condition:
+            if self._closed:
+                return
+            self._closed = True
+            self._condition.notify_all()
+        with suppress(Exception):
+            self._response.close()
+
+    def _drain(self) -> None:
+        try:
+            reader = CcapiMultipartReader(self._response.body, self._boundary)
+            while True:
+                with self._condition:
+                    if self._closed:
+                        return
+                frame = reader.next_frame()
+                if frame is None:
+                    raise _multipart_error("Canon multipart Live View stream ended unexpectedly.")
+                with self._condition:
+                    self._latest_frame = frame
+                    self._produced_generation += 1
+                    self._condition.notify_all()
+        except Exception as error:
+            with self._condition:
+                if not self._closed:
+                    self._terminal_error = error
+                self._condition.notify_all()
+        finally:
+            with suppress(Exception):
+                self._response.close()
+
+
+def _multipart_error(message: str) -> BridgeError:
+    return BridgeError(
+        "INVALID_LIVE_VIEW_MULTIPART",
+        message,
+        status_code=502,
+        feature=CameraFeature.LIVE_VIEW_MULTIPART.value,
+        engine=ENGINE_NAME,
+    )
+
+
 class CcapiTransport(Protocol):
     def request(
         self,
@@ -474,6 +662,7 @@ class CcapiSession:
         self._live_view_active = False
         self._active_live_view_source: str | None = None
         self._rtp_session: RtpLiveViewSession | None = None
+        self._multipart_session: CcapiMultipartSession | None = None
         self._live_view_size_control = True
         self._active_live_view_size = "MEDIUM"
         self._requested_fps = 1
@@ -586,6 +775,9 @@ class CcapiSession:
                 with suppress(Exception):
                     self._rtp_session.close()
                 self._rtp_session = None
+            if self._multipart_session is not None:
+                self._multipart_session.close()
+                self._multipart_session = None
             self._settings_cache = None
             self._media_cache.clear()
             self.transport.close()
@@ -711,13 +903,16 @@ class CcapiSession:
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             jpeg_live_view_supported = self._supports_jpeg_live_view()
+            multipart_live_view_supported = self._supports_multipart_live_view()
             rtp_live_view_supported = self._supports_rtp_live_view()
-            if jpeg_live_view_supported or rtp_live_view_supported:
+            if jpeg_live_view_supported or multipart_live_view_supported or rtp_live_view_supported:
                 supported.add(CameraFeature.LIVE_VIEW)
             if jpeg_live_view_supported:
                 supported.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
             if rtp_live_view_supported:
                 supported.add(CameraFeature.LIVE_VIEW_RTP)
+            if multipart_live_view_supported:
+                supported.add(CameraFeature.LIVE_VIEW_MULTIPART)
             if self._operation("POST", "/shooting/control/recbutton") or self._operation(
                 "PUT", "/shooting/control/recbutton"
             ):
@@ -770,6 +965,7 @@ class CcapiSession:
                 CameraFeature.LENS_STATUS,
                 CameraFeature.TEMPERATURE_STATUS,
                 CameraFeature.EVENT_POLLING,
+                CameraFeature.LIVE_VIEW_MULTIPART,
                 CameraFeature.LIVE_VIEW_RTP,
                 CameraFeature.STILL_CAPTURE,
                 CameraFeature.BULB_EXPOSURE,
@@ -801,6 +997,8 @@ class CcapiSession:
             live_sources = []
             if rtp_live_view_supported:
                 live_sources.append("CCAPI_RTP")
+            if multipart_live_view_supported:
+                live_sources.append("CCAPI_MULTIPART")
             if jpeg_live_view_supported:
                 live_sources.append("CCAPI_JPEG_POLLING")
             model = self.info().model
@@ -836,6 +1034,10 @@ class CcapiSession:
                         "include immediately in its current ability."
                     ),
                     CameraFeature.LIVE_VIEW_RTP.value: (self._rtp_capability_reason()),
+                    CameraFeature.LIVE_VIEW_MULTIPART.value: (
+                        "The camera must advertise matching GET and DELETE Canon multipart Live View "
+                        "endpoints together with the regular Live View lifecycle in one API version."
+                    ),
                     CameraFeature.FOCUS_DRIVE.value: (
                         "The camera did not advertise the verified CCAPI POST drivefocus operation."
                     ),
@@ -1287,36 +1489,64 @@ class CcapiSession:
             source = request.source.upper()
             if source == "DESKTOP_BRIDGE_STREAM":
                 source = "AUTO"
-            if source not in {"AUTO", "CCAPI_RTP", "CCAPI_JPEG_POLLING"}:
+            if source not in {"AUTO", "CCAPI_RTP", "CCAPI_MULTIPART", "CCAPI_JPEG_POLLING"}:
                 raise BridgeError("INVALID_LIVE_VIEW_SOURCE", "Unsupported CCAPI Live View source.", status_code=422)
             size = request.size.upper()
             if size not in {"SMALL", "MEDIUM", "LARGE"}:
                 raise BridgeError("INVALID_LIVE_VIEW_SIZE", "Unsupported CCAPI Live View size.", status_code=422)
 
             jpeg_supported = self._supports_jpeg_live_view()
+            multipart_supported = self._supports_multipart_live_view()
             rtp_supported = self._supports_rtp_live_view()
-            selected = "CCAPI_RTP" if source == "AUTO" and rtp_supported else source
-            if selected == "AUTO":
-                selected = "CCAPI_JPEG_POLLING"
-            if selected == "CCAPI_RTP":
-                if not rtp_supported:
-                    raise unsupported(
-                        CameraFeature.LIVE_VIEW_RTP.value,
-                        self.engine_name,
-                        self._rtp_capability_reason(),
+            candidates = (
+                [
+                    candidate
+                    for candidate, available in (
+                        ("CCAPI_RTP", rtp_supported),
+                        ("CCAPI_MULTIPART", multipart_supported),
+                        ("CCAPI_JPEG_POLLING", jpeg_supported),
                     )
+                    if available
+                ]
+                if source == "AUTO"
+                else [source]
+            )
+            failures: list[BridgeError] = []
+            for selected in candidates:
                 try:
-                    self._start_rtp_live_view(request)
+                    if selected == "CCAPI_RTP":
+                        if not rtp_supported:
+                            raise unsupported(
+                                CameraFeature.LIVE_VIEW_RTP.value,
+                                self.engine_name,
+                                self._rtp_capability_reason(),
+                            )
+                        self._start_rtp_live_view(request)
+                    elif selected == "CCAPI_MULTIPART":
+                        if not multipart_supported:
+                            raise unsupported(CameraFeature.LIVE_VIEW_MULTIPART.value, self.engine_name)
+                        self._start_multipart_live_view(request, size)
+                    else:
+                        if not jpeg_supported:
+                            raise unsupported(CameraFeature.LIVE_VIEW.value, self.engine_name)
+                        self._start_jpeg_live_view(request, size)
                     return
-                except BridgeError:
-                    if source != "AUTO" or not jpeg_supported:
+                except BridgeError as error:
+                    failures.append(error)
+                    if source != "AUTO":
                         raise
-            if not jpeg_supported:
+            if failures:
+                raise failures[-1]
+            else:
                 raise unsupported(CameraFeature.LIVE_VIEW.value, self.engine_name)
-            self._start_jpeg_live_view(request, size)
 
     def _start_jpeg_live_view(self, request: LiveViewStartRequest, size: str) -> None:
-        path = self._api_path("POST", "/shooting/liveview")
+        self._start_ccapi_live_view(request, size, self._api_path("POST", "/shooting/liveview"))
+        self._live_view_active = True
+        self._active_live_view_source = "CCAPI_JPEG_POLLING"
+        self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+
+    def _start_ccapi_live_view(self, request: LiveViewStartRequest, size: str, path: str) -> None:
         try:
             self._request_ok("POST", path, {"cameradisplay": "on", "liveviewsize": size.casefold()})
             self._live_view_size_control = True
@@ -1327,9 +1557,43 @@ class CcapiSession:
             self._live_view_size_control = False
         self._active_live_view_size = size
         self._requested_fps = max(1, min(30, request.fps))
-        self._live_view_active = True
-        self._active_live_view_source = "CCAPI_JPEG_POLLING"
-        self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+
+    def _start_multipart_live_view(self, request: LiveViewStartRequest, size: str) -> None:
+        operations = self._multipart_live_view_operations()
+        if operations is None:
+            raise unsupported(CameraFeature.LIVE_VIEW_MULTIPART.value, self.engine_name)
+        self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+        response: CcapiStreamResponse | None = None
+        try:
+            response = self.transport.open_stream(
+                "GET",
+                self._url(operations.open_stream.path),
+                headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"},
+                timeout=60.0,
+            )
+            if response.status != 200:
+                payload = response.body.read(MAX_ERROR_BYTES)
+                raise _CcapiHTTPError(
+                    "GET",
+                    operations.open_stream.path,
+                    CcapiResponse(response.status, response.headers, payload),
+                )
+            boundary = parse_multipart_boundary(response.headers.get("content-type"))
+            session = CcapiMultipartSession(response, boundary)
+            response = None
+            if self._multipart_session is not None:
+                self._multipart_session.close()
+            self._multipart_session = session
+            self._live_view_active = True
+            self._active_live_view_source = "CCAPI_MULTIPART"
+        except Exception:
+            if response is not None:
+                response.close()
+            with suppress(BridgeError):
+                self._request_ok("DELETE", operations.close_stream.path, expected_status=200)
+            with suppress(BridgeError):
+                self._request_ok("DELETE", operations.stop_live_view.path)
+            raise
 
     def _start_rtp_live_view(self, request: LiveViewStartRequest) -> None:
         factory = self._rtp_session_factory
@@ -1400,6 +1664,16 @@ class CcapiSession:
                     self._api_path("POST", "/shooting/liveview/rtp"),
                     {"action": "stop", "ipaddress": ""},
                 )
+            elif source == "CCAPI_MULTIPART":
+                if self._multipart_session is not None:
+                    self._multipart_session.close()
+                    self._multipart_session = None
+                operations = self._multipart_live_view_operations()
+                if operations is not None:
+                    try:
+                        self._request_ok("DELETE", operations.close_stream.path, expected_status=200)
+                    finally:
+                        self._request_ok("DELETE", operations.stop_live_view.path)
             else:
                 self._request_ok("DELETE", self._api_path("DELETE", "/shooting/liveview"))
         finally:
@@ -1407,6 +1681,9 @@ class CcapiSession:
                 with suppress(Exception):
                     self._rtp_session.close()
                 self._rtp_session = None
+            if self._multipart_session is not None:
+                self._multipart_session.close()
+                self._multipart_session = None
             self._live_view_active = False
             self._active_live_view_source = None
 
@@ -1421,7 +1698,8 @@ class CcapiSession:
                     feature=CameraFeature.LIVE_VIEW.value,
                     engine=self.engine_name,
                 )
-            if self._active_live_view_source == "CCAPI_RTP":
+            source = self._active_live_view_source
+            if source == "CCAPI_RTP":
                 session = self._rtp_session
                 if session is None:
                     raise BridgeError(
@@ -1431,8 +1709,22 @@ class CcapiSession:
                         feature=CameraFeature.LIVE_VIEW_RTP.value,
                         engine=self.engine_name,
                     )
+            elif source == "CCAPI_MULTIPART":
+                session = self._multipart_session
+                if session is None:
+                    raise _multipart_error("Canon multipart Live View is active without a reader session.")
             else:
                 return self._jpeg_live_view_frame()
+        if source == "CCAPI_MULTIPART":
+            try:
+                frame = session.next_frame(timeout=15.0)
+                with self._lock:
+                    self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_MULTIPART})
+                return frame
+            except BridgeError as error:
+                with self._lock:
+                    self._last_error = error.message
+                raise
         try:
             return session.read_frame(timeout=5.0)
         except (RtpError, OSError, RuntimeError) as error:
@@ -2378,6 +2670,35 @@ class CcapiSession:
             )
         )
 
+    def _multipart_live_view_operations(self) -> CcapiMultipartOperations | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith("/shooting/liveview/multipart")
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            prefix = read.path.removesuffix("/shooting/liveview/multipart")
+            operations = CcapiMultipartOperations(
+                start_live_view=CcapiOperation("POST", f"{prefix}/shooting/liveview"),
+                stop_live_view=CcapiOperation("DELETE", f"{prefix}/shooting/liveview"),
+                open_stream=read,
+                close_stream=CcapiOperation("DELETE", read.path),
+            )
+            if {
+                operations.start_live_view,
+                operations.stop_live_view,
+                operations.close_stream,
+            }.issubset(self._operations):
+                return operations
+        return None
+
+    def _supports_multipart_live_view(self) -> bool:
+        return self._multipart_live_view_operations() is not None
+
     def _supports_rtp_live_view(self) -> bool:
         return bool(
             self._supports("GET", "/shooting/liveview/rtpsessiondesc")
@@ -2398,7 +2719,10 @@ class CcapiSession:
         return "Canon CCAPI RTP H.264 Live View is available."
 
     def _ensure_live_view_geometry_for_native_stream(self) -> None:
-        if self._active_live_view_source != "CCAPI_RTP" or self._latest_live_view_geometry is not None:
+        if (
+            self._active_live_view_source not in {"CCAPI_RTP", "CCAPI_MULTIPART"}
+            or self._latest_live_view_geometry is not None
+        ):
             return
         detail = self._operation("GET", "/shooting/liveview/flipdetail")
         if detail is None:
@@ -2424,14 +2748,22 @@ class CcapiSession:
         return bool(
             self._operation("PUT", "/shooting/liveview/afframeposition")
             and self._operation("GET", "/shooting/liveview/flipdetail")
-            and (self._supports_jpeg_live_view() or self._supports_rtp_live_view())
+            and (
+                self._supports_jpeg_live_view()
+                or self._supports_multipart_live_view()
+                or self._supports_rtp_live_view()
+            )
         )
 
     def _supports_coordinate_click_white_balance(self) -> bool:
         return bool(
             self._operation("POST", "/shooting/liveview/clickwb")
             and self._operation("GET", "/shooting/liveview/flipdetail")
-            and (self._supports_jpeg_live_view() or self._supports_rtp_live_view())
+            and (
+                self._supports_jpeg_live_view()
+                or self._supports_multipart_live_view()
+                or self._supports_rtp_live_view()
+            )
         )
 
     def _needs_live_view_geometry(self) -> bool:

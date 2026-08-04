@@ -114,6 +114,7 @@
       liveViewSource: "Source",
       liveViewSourceAuto: "Auto",
       liveViewSourceRtp: "RTP H.264",
+      liveViewSourceMultipart: "Multipart JPEG",
       liveViewSourceJpeg: "JPEG polling",
       liveViewSourceBridge: "Desktop preview",
       frameRate: "Frame rate",
@@ -417,6 +418,7 @@
       liveViewSource: "畫面來源",
       liveViewSourceAuto: "自動",
       liveViewSourceRtp: "RTP H.264",
+      liveViewSourceMultipart: "Multipart JPEG",
       liveViewSourceJpeg: "JPEG 輪詢",
       liveViewSourceBridge: "電腦預覽",
       frameRate: "影格率",
@@ -2546,6 +2548,7 @@
     const labels = {
       AUTO: "liveViewSourceAuto",
       CCAPI_RTP: "liveViewSourceRtp",
+      CCAPI_MULTIPART: "liveViewSourceMultipart",
       CCAPI_JPEG_POLLING: "liveViewSourceJpeg",
       DESKTOP_BRIDGE_STREAM: "liveViewSourceBridge",
     };

@@ -8,7 +8,7 @@ from io import BytesIO
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
@@ -163,6 +163,10 @@ def initial_state() -> dict[str, object]:
         "canonical_live_view_active": False,
         "canonical_live_view_start_count": 0,
         "canonical_live_view_stop_count": 0,
+        "canonical_multipart_active": False,
+        "canonical_multipart_start_count": 0,
+        "canonical_multipart_stop_count": 0,
+        "canonical_multipart_frame_count": 0,
         "canonical_live_view_size_rejections": 0,
         "canonical_reject_live_view_size_once": True,
         "canonical_event_cursor": 0,
@@ -298,6 +302,12 @@ async def get_test_state() -> dict[str, object]:
         "sensor_cleaning": {
             "count": state["sensor_cleaning_count"],
             "auto_power_off": state["sensor_cleaning_auto_power_off"],
+        },
+        "multipart_live_view": {
+            "active": state["canonical_multipart_active"],
+            "start_count": state["canonical_multipart_start_count"],
+            "stop_count": state["canonical_multipart_stop_count"],
+            "frame_count": state["canonical_multipart_frame_count"],
         },
         "temperature_status": state["temperature_status"],
         "capture_count": state["capture_count"],
@@ -1040,6 +1050,7 @@ CANON_DISCOVERY = {
         {"path": "/shooting/liveview", "post": True, "delete": True},
         {"path": "/shooting/liveview/flip", "get": True},
         {"path": "/shooting/liveview/flipdetail", "get": True},
+        {"path": "/shooting/liveview/multipart", "get": True, "delete": True},
         {"path": "/shooting/liveview/afframeposition", "put": True},
         {"path": "/shooting/liveview/clickwb", "post": True},
         {"path": "/contents", "get": True, "delete": True},
@@ -1733,9 +1744,48 @@ async def canon_start_live_view(payload: dict[str, object]) -> Response:
 
 @app.delete("/ccapi/ver100/shooting/liveview", status_code=204)
 async def canon_stop_live_view() -> Response:
+    state["canonical_multipart_active"] = False
     state["canonical_live_view_active"] = False
     state["canonical_live_view_stop_count"] += 1
     return Response(status_code=204)
+
+
+@app.get("/ccapi/ver100/shooting/liveview/multipart")
+async def canon_live_view_multipart() -> StreamingResponse:
+    if not state["canonical_live_view_active"]:
+        return JSONResponse(status_code=503, content={"message": "Live view not started"})
+    if state["canonical_multipart_active"]:
+        return JSONResponse(status_code=503, content={"message": "Already started"})
+    state["canonical_multipart_active"] = True
+    state["canonical_multipart_start_count"] += 1
+
+    async def frames():
+        while state["canonical_multipart_active"] and state["canonical_live_view_active"]:
+            jpeg = camera_frame_jpeg()
+            state["canonical_multipart_frame_count"] += 1
+            yield (
+                b"--boundary\n"
+                b"Content-Type: image/jpeg\n"
+                + f"Content-Length: {len(jpeg)}\n\n".encode("ascii")
+                + jpeg
+                + b"\n"
+            )
+            await asyncio.sleep(1 / 30)
+
+    return StreamingResponse(
+        frames(),
+        status_code=200,
+        headers={"Content-Type": "multipart/x-mixed-replace;boundary=boundary"},
+    )
+
+
+@app.delete("/ccapi/ver100/shooting/liveview/multipart")
+async def canon_stop_live_view_multipart() -> Response:
+    if not state["canonical_multipart_active"]:
+        return JSONResponse(status_code=503, content={"message": "Live view not started"})
+    state["canonical_multipart_active"] = False
+    state["canonical_multipart_stop_count"] += 1
+    return JSONResponse(status_code=200, content={})
 
 
 @app.get("/ccapi/ver100/shooting/liveview/flip")
