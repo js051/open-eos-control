@@ -1124,6 +1124,59 @@ private fun liveViewSourceLabel(source: LiveViewSource): String = stringResource
 private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
     var showSleepConfirmation by remember { mutableStateOf(false) }
+    var showSensorCleaningConfirmation by remember { mutableStateOf(false) }
+    var sensorCleaningAutoPowerOff by remember { mutableStateOf(false) }
+    if (showSensorCleaningConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showSensorCleaningConfirmation = false },
+            title = { Text(stringResource(R.string.sensor_cleaning_confirm_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(stringResource(R.string.sensor_cleaning_confirm_message))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .toggleable(
+                                value = sensorCleaningAutoPowerOff,
+                                role = Role.Switch,
+                                onValueChange = { sensorCleaningAutoPowerOff = it },
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(R.string.sensor_cleaning_power_off),
+                            modifier = Modifier.weight(1f),
+                            color = AppText,
+                        )
+                        Switch(
+                            checked = sensorCleaningAutoPowerOff,
+                            onCheckedChange = null,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSensorCleaningConfirmation = false
+                        actions.cleanSensor(sensorCleaningAutoPowerOff)
+                    },
+                    modifier = Modifier.testTag("sensor-cleaning-confirm"),
+                ) {
+                    Text(stringResource(R.string.clean_now), color = AppAccent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSensorCleaningConfirmation = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            containerColor = AppSurface,
+            titleContentColor = AppText,
+            textContentColor = AppSubtleText,
+        )
+    }
     if (showSleepConfirmation) {
         AlertDialog(
             onDismissRequest = { showSleepConfirmation = false },
@@ -1248,6 +1301,44 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                if (state.supports(CameraFeature.SENSOR_CLEANING)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.sensor_cleaning),
+                                color = AppText,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(stringResource(R.string.sensor_cleaning_hint), color = AppSubtleText)
+                        }
+                        Button(
+                            onClick = {
+                                sensorCleaningAutoPowerOff = false
+                                showSensorCleaningConfirmation = true
+                            },
+                            enabled = !state.previewMode &&
+                                state.status?.recording != true &&
+                                !state.bulbExposureActive &&
+                                !state.busy,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AppSurfaceHigh,
+                                contentColor = AppAccent,
+                            ),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("sensor-cleaning"),
+                        ) {
+                            Icon(
+                                painterResource(LucideR.drawable.lucide_ic_refresh_cw),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.clean_now))
+                        }
+                    }
+                }
                 if (state.supports(CameraFeature.CAMERA_SLEEP)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -1290,6 +1381,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                     !state.supports(CameraFeature.SHUTTER_HALF_PRESS) &&
                     !state.supports(CameraFeature.FOCUS_DRIVE) &&
                     !state.supports(CameraFeature.CAMERA_CLOCK_SYNC) &&
+                    !state.supports(CameraFeature.SENSOR_CLEANING) &&
                     !state.supports(CameraFeature.CAMERA_SLEEP)
                 ) {
                     Text(stringResource(R.string.no_settings), color = AppSubtleText)

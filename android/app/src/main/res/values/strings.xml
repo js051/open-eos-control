@@ -254,6 +254,12 @@
     <string name="camera_sleep_confirm_title">Put camera to sleep?</string>
     <string name="camera_sleep_confirm_message">Live View and the current camera connection will end. Wake the camera physically before reconnecting.</string>
     <string name="sleep_now">Sleep now</string>
+    <string name="sensor_cleaning">Clean camera sensor</string>
+    <string name="sensor_cleaning_hint">Runs the built-in camera sensor-cleaning cycle. Live View pauses while cleaning is in progress.</string>
+    <string name="sensor_cleaning_confirm_title">Clean the camera sensor?</string>
+    <string name="sensor_cleaning_confirm_message">The camera cannot shoot or record during the cleaning cycle.</string>
+    <string name="sensor_cleaning_power_off">Turn off camera after cleaning</string>
+    <string name="clean_now">Clean now</string>
     <string name="setting_beep">Beep</string>
     <string name="setting_display_off">Auto display off</string>
     <string name="setting_capture_target">Capture target</string>

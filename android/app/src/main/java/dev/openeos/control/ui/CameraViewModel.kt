@@ -543,11 +543,15 @@ class CameraViewModel(
     }
 
     fun restartLiveView() = runCamera(CameraOperation.LIVE_VIEW) {
+        restartLiveViewInternal()
+    }
+
+    private suspend fun restartLiveViewInternal() {
         if (
             _uiState.value.previewMode ||
             !_uiState.value.supports(CameraFeature.LIVE_VIEW) ||
             !_uiState.value.liveViewTemperatureAllowed
-        ) return@runCamera
+        ) return
         repository.restartLiveView()
         val capabilities = repository.refreshCapabilities()
         val nativeSession = repository.nativeLiveViewSession()
@@ -681,6 +685,47 @@ class CameraViewModel(
             resetFrameMetrics()
             lastPhotoShootingMode = null
             _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+        }
+    }
+
+    fun cleanSensor(autoPowerOff: Boolean) {
+        val state = _uiState.value
+        if (
+            !state.connected ||
+            state.previewMode ||
+            !state.supports(CameraFeature.SENSOR_CLEANING) ||
+            state.status?.recording == true ||
+            state.bulbExposureActive ||
+            state.busy
+        ) return
+
+        val restoreLiveView = state.supports(CameraFeature.LIVE_VIEW)
+        var restoreSessionWork = false
+        stopLiveViewLoop()
+        stopEventPollingLoop()
+        detachNativeLiveViewListener()
+        runCamera(
+            operation = CameraOperation.MAINTENANCE,
+            onError = { restoreSessionWork = true },
+            afterFinally = {
+                if (restoreSessionWork && _uiState.value.connected) {
+                    startEventPollingIfSupported()
+                    if (restoreLiveView) restartLiveView()
+                }
+            },
+        ) {
+            repository.cleanSensor(autoPowerOff)
+            if (autoPowerOff) {
+                runCatching { repository.disconnect() }
+                resetFrameMetrics()
+                lastPhotoShootingMode = null
+                _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+            } else {
+                val status = repository.refreshStatus()
+                val capabilities = repository.refreshCapabilities()
+                _uiState.update { it.copy(status = status, capabilities = capabilities) }
+                restoreSessionWork = true
+            }
         }
     }
 
@@ -1111,14 +1156,16 @@ class CameraViewModel(
     private fun runCamera(
         operation: CameraOperation,
         onError: (Exception) -> Unit = {},
+        afterFinally: () -> Unit = {},
         block: suspend () -> Unit,
     ) {
-        launchCameraOperation(operation, onError, block)
+        launchCameraOperation(operation, onError, afterFinally, block)
     }
 
     private fun launchCameraOperation(
         operation: CameraOperation,
         onError: (Exception) -> Unit = {},
+        afterFinally: () -> Unit = {},
         block: suspend () -> Unit,
     ): Job? {
         if (_uiState.value.isBusy(operation)) return null
@@ -1150,6 +1197,7 @@ class CameraViewModel(
                 _uiState.update {
                     it.copy(pendingOperations = it.pendingOperations - operation)
                 }
+                afterFinally()
             }
         }
     }

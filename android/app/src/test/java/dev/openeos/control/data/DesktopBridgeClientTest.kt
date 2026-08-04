@@ -48,6 +48,7 @@ class DesktopBridgeClientTest {
         val exposureStatus = client.setExposure(iso = "800")
         val whiteBalanceStatus = client.setWhiteBalance("Daylight")
         client.syncCameraClock()
+        client.cleanSensor(autoPowerOff = false)
         client.sleepCamera()
         client.captureStill()
         val bulbStarted = client.startBulbExposure()
@@ -98,6 +99,7 @@ class DesktopBridgeClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_THUMBNAIL))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_PREVIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.CLICK_WHITE_BALANCE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.SENSOR_CLEANING))
         assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_SLEEP))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
         assertFalse(capabilities.matrix.supports(CameraFeature.USB_DIAGNOSTICS))
@@ -117,6 +119,7 @@ class DesktopBridgeClientTest {
                     CameraFeature.EXPOSURE_CONTROL,
                     CameraFeature.WHITE_BALANCE_CONTROL,
                     CameraFeature.CAMERA_CLOCK_SYNC,
+                    CameraFeature.SENSOR_CLEANING,
                     CameraFeature.CAMERA_SLEEP,
                     CameraFeature.STILL_CAPTURE,
                     CameraFeature.BULB_EXPOSURE,
@@ -159,6 +162,11 @@ class DesktopBridgeClientTest {
         assertEquals("camera-r6m3", sessionPayload.getString("cameraId"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/settings/iso") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/clock/sync") == true })
+        val sensorCleaningRequest = requests.first {
+            it.requestUrl?.encodedPath?.endsWith("/maintenance/sensor-cleaning") == true
+        }
+        assertEquals("POST", sensorCleaningRequest.method)
+        assertEquals(false, dispatcher.sensorCleaningAutoPowerOff)
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/power/sleep") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/capture/still") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/start") == true })
@@ -365,6 +373,8 @@ class DesktopBridgeClientTest {
         private var whiteBalance = "Auto"
         private var recording = false
         private var bulbExposureActive = false
+        var sensorCleaningAutoPowerOff: Boolean? = null
+            private set
 
         override fun dispatch(request: RecordedRequest): MockResponse {
             requests += request
@@ -389,6 +399,10 @@ class DesktopBridgeClientTest {
                     json(statusJson())
                 }
                 path.endsWith("/clock/sync") -> json(statusJson())
+                path.endsWith("/maintenance/sensor-cleaning") -> {
+                    sensorCleaningAutoPowerOff = JSONObject(request.body.readUtf8()).getBoolean("autoPowerOff")
+                    MockResponse().setResponseCode(204)
+                }
                 path.endsWith("/power/sleep") -> MockResponse().setResponseCode(204)
                 path.endsWith("/capture/still") -> json(statusJson())
                 path.endsWith("/bulb/start") -> {
@@ -523,7 +537,7 @@ class DesktopBridgeClientTest {
               "profile": {"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},
               "supported": [
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
-                "CAMERA_CLOCK_SYNC", "CAMERA_SLEEP", "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
+                "CAMERA_CLOCK_SYNC", "SENSOR_CLEANING", "CAMERA_SLEEP", "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "LIVE_VIEW_MAGNIFICATION",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
                 "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"

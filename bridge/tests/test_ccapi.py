@@ -103,6 +103,7 @@ class FakeCcapiTransport:
         reject_event_stop: bool = False,
         reject_rtp_start: bool = False,
         camera_sleep_status: int = 202,
+        sensor_cleaning_status: int = 200,
         thumbnail_body: bytes = JPEG,
         thumbnail_content_type: str = "image/jpeg",
         preview_body: bytes = JPEG,
@@ -127,6 +128,7 @@ class FakeCcapiTransport:
         self.reject_event_stop = reject_event_stop
         self.reject_rtp_start = reject_rtp_start
         self.camera_sleep_status = camera_sleep_status
+        self.sensor_cleaning_status = sensor_cleaning_status
         self.thumbnail_body = thumbnail_body
         self.thumbnail_content_type = thumbnail_content_type
         self.preview_body = preview_body
@@ -193,6 +195,8 @@ class FakeCcapiTransport:
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
         self.device_functions = {"beep": "enable", "displayoff": "60", "autopoweroff": "180"}
         self.camera_sleep_count = 0
+        self.sensor_cleaning_count = 0
+        self.sensor_cleaning_auto_power_off: bool | None = None
         self.reject_live_view_size = True
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.closed = False
@@ -389,6 +393,11 @@ class FakeCcapiTransport:
             return _json_response(self.camera_clock)
         if method == "GET" and path == "/ccapi/ver100/functions/datetime":
             return _json_response(self.camera_clock)
+        if method == "POST" and path == "/ccapi/ver100/functions/sensorcleaning":
+            assert payload is not None and isinstance(payload.get("autopoweroff"), bool)
+            self.sensor_cleaning_count += 1
+            self.sensor_cleaning_auto_power_off = payload["autopoweroff"]
+            return _json_response({}, status=self.sensor_cleaning_status)
         if method == "PUT" and path.startswith("/ccapi/ver100/shooting/settings/"):
             key = path.rsplit("/", 1)[-1]
             assert payload is not None
@@ -1307,6 +1316,64 @@ def test_ccapi_camera_sleep_requires_canon_accepted_status() -> None:
         session.sleep_camera()
 
     assert CameraFeature.CAMERA_SLEEP not in session.capabilities().evidence.observed_features
+
+
+def test_ccapi_sensor_cleaning_requires_advertised_post_and_exact_boolean_payload() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/sensorcleaning", "post": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    assert CameraFeature.SENSOR_CLEANING in session.capabilities().supported
+    session.clean_sensor(auto_power_off=True)
+
+    assert transport.sensor_cleaning_count == 1
+    assert transport.sensor_cleaning_auto_power_off is True
+    assert RecordedRequest(
+        "POST",
+        "/ccapi/ver100/functions/sensorcleaning",
+        {"autopoweroff": True},
+    ) in transport.requests
+    assert CameraFeature.SENSOR_CLEANING in session.capabilities().evidence.observed_features
+
+
+def test_ccapi_sensor_cleaning_rejects_noncanonical_success_status() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/sensorcleaning", "post": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery, sensor_cleaning_status=204)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    with pytest.raises(BridgeError, match="expected HTTP 200"):
+        session.clean_sensor(auto_power_off=False)
+
+    assert CameraFeature.SENSOR_CLEANING not in session.capabilities().evidence.observed_features
+
+
+def test_ccapi_sensor_cleaning_is_planned_and_never_sent_when_unadvertised() -> None:
+    transport = FakeCcapiTransport()
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+    capabilities = session.capabilities()
+    request_count = len(transport.requests)
+
+    assert CameraFeature.SENSOR_CLEANING not in capabilities.supported
+    assert CameraFeature.SENSOR_CLEANING in capabilities.planned
+    with pytest.raises(BridgeError, match="did not advertise"):
+        session.clean_sensor(auto_power_off=False)
+    assert len(transport.requests) == request_count
 
 
 def test_ccapi_auto_power_off_requires_valid_current_and_explicit_immediate_ability() -> None:

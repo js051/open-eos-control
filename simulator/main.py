@@ -10,7 +10,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageDraw
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 TemperatureStatusValue = Literal[
     "normal",
@@ -56,6 +56,10 @@ class ZoomUpdate(BaseModel):
 
 class MovieModeUpdate(BaseModel):
     action: Literal["off", "on"]
+
+
+class SensorCleaningUpdate(BaseModel):
+    autopoweroff: StrictBool
 
 
 capabilities = {
@@ -104,6 +108,8 @@ def initial_state() -> dict[str, object]:
         "auto_power_off": "180",
         "auto_power_off_update_count": 0,
         "camera_sleep_count": 0,
+        "sensor_cleaning_count": 0,
+        "sensor_cleaning_auto_power_off": False,
         "temperature_status": "normal",
         "capture_count": 0,
         "clock_sync_count": 0,
@@ -289,6 +295,10 @@ async def get_test_state() -> dict[str, object]:
             "update_count": state["auto_power_off_update_count"],
         },
         "camera_sleep_count": state["camera_sleep_count"],
+        "sensor_cleaning": {
+            "count": state["sensor_cleaning_count"],
+            "auto_power_off": state["sensor_cleaning_auto_power_off"],
+        },
         "temperature_status": state["temperature_status"],
         "capture_count": state["capture_count"],
         "clock_sync_count": state["clock_sync_count"],
@@ -620,6 +630,17 @@ async def simulator_camera_sleep() -> Response:
         return unavailable
     state["camera_sleep_count"] += 1
     publish_event("autopoweroff")
+    return Response(status_code=204)
+
+
+@app.post("/ccapi/sensor-cleaning", status_code=204)
+async def simulator_sensor_cleaning(payload: SensorCleaningUpdate) -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    state["sensor_cleaning_count"] += 1
+    state["sensor_cleaning_auto_power_off"] = payload.autopoweroff
+    publish_event("sensorcleaning")
     return Response(status_code=204)
 
 
@@ -1003,6 +1024,7 @@ CANON_DISCOVERY = {
         {"path": "/shooting/settings/focusbracketing/exposuresmoothing", "get": True, "put": True},
         {"path": "/shooting/settings/moviequality", "get": True, "put": True},
         {"path": "/functions/datetime", "get": True, "put": True},
+        {"path": "/functions/sensorcleaning", "post": True},
         {"path": "/functions/beep", "get": True, "put": True},
         {"path": "/functions/displayoff", "get": True, "put": True},
         {"path": "/functions/autopoweroff", "get": True, "put": True},
@@ -1468,6 +1490,17 @@ async def canon_set_datetime(payload: dict[str, object]) -> dict[str, object]:
     state["clock_sync_count"] += 1
     publish_event("datetime")
     return dict(payload)
+
+
+@app.post("/ccapi/ver100/functions/sensorcleaning")
+async def canon_sensor_cleaning(payload: SensorCleaningUpdate) -> Response:
+    unavailable = device_function_unavailable()
+    if unavailable is not None:
+        return unavailable
+    state["sensor_cleaning_count"] += 1
+    state["sensor_cleaning_auto_power_off"] = payload.autopoweroff
+    publish_event("sensorcleaning")
+    return JSONResponse(status_code=200, content={})
 
 
 @app.get("/ccapi/ver100/functions/beep")

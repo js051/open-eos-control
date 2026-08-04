@@ -50,6 +50,7 @@ enum CameraOperation: Hashable {
     case refresh
     case setting
     case clock
+    case maintenance
     case power
     case capture
     case recording

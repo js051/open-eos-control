@@ -354,6 +354,7 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingLevelControl))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingControl))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusBracketingControl))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.sensorCleaning))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.cameraSleep))
         XCTAssertFalse(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 30)
@@ -530,6 +531,21 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(state.connected)
         XCTAssertTrue(state.isPreview)
         XCTAssertFalse(state.isBusy(.power))
+    }
+
+    func testOfflinePreviewCannotExecuteSensorCleaning() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        XCTAssertTrue(state.supports(.sensorCleaning))
+        await state.cleanSensor(autoPowerOff: true)
+
+        XCTAssertTrue(state.connected)
+        XCTAssertTrue(state.isPreview)
+        XCTAssertFalse(state.isBusy(.maintenance))
     }
 
     func testOfflineMediaDownloadCompletesAndClearsActiveTransferState() async throws {

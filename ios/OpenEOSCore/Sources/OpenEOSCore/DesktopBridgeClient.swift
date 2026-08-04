@@ -300,6 +300,14 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
+    public func cleanSensor(autoPowerOff: Bool) async throws {
+        try await requestOK(
+            sessionEndpoint(["maintenance", "sensor-cleaning"]),
+            method: "POST",
+            payload: ["autoPowerOff": autoPowerOff]
+        )
+    }
+
     public func sleepCamera() async throws {
         try await requestOK(sessionEndpoint(["power", "sleep"]), method: "POST")
     }
@@ -664,11 +672,15 @@ public actor DesktopBridgeClient {
     private func requestOK(
         _ url: URL,
         method: String,
+        payload: BridgeJSON? = nil,
         timeoutInterval: TimeInterval = 10
     ) async throws {
-        let response = try await transport.send(
-            makeRequest(url: url, method: method, accept: "application/json", timeoutInterval: timeoutInterval)
-        )
+        var request = makeRequest(url: url, method: method, accept: "application/json", timeoutInterval: timeoutInterval)
+        if let payload {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        }
+        let response = try await transport.send(request)
         guard (200..<300).contains(response.statusCode) else {
             throw Self.httpError(response: response, method: method, url: url)
         }

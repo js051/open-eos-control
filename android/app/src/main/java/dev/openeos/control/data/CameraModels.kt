@@ -64,6 +64,7 @@ enum class CameraFeature(
 ) {
     CAMERA_IDENTITY("Camera identity"),
     CAMERA_CLOCK_SYNC("Camera clock sync"),
+    SENSOR_CLEANING("Sensor cleaning"),
     CAMERA_SLEEP("Camera sleep"),
     BATTERY_STATUS("Battery status"),
     STORAGE_STATUS("Storage status"),
@@ -155,6 +156,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
+                CameraFeature.SENSOR_CLEANING,
                 CameraFeature.CAMERA_SLEEP,
             ) - supported,
             reasons = mapOf(
@@ -191,6 +193,8 @@ data class CapabilityMatrix(
                     "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                 CameraFeature.CAMERA_CLOCK_SYNC to
                     "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
+                CameraFeature.SENSOR_CLEANING to
+                    "The camera must advertise the Canon POST sensor-cleaning endpoint.",
                 CameraFeature.CAMERA_SLEEP to
                     "The camera must advertise matching GET and PUT Auto Power Off endpoints and include immediately in its current ability.",
             ),

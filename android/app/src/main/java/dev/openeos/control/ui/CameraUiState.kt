@@ -34,7 +34,7 @@ enum class ConnectionTarget { CCAPI, DESKTOP_BRIDGE }
 
 enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MONITOR, MORE, LANGUAGE }
 
-enum class CameraOperation { CONNECT, STATUS, SETTING, CLOCK, POWER, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
+enum class CameraOperation { CONNECT, STATUS, SETTING, CLOCK, MAINTENANCE, POWER, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
 
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,

@@ -333,6 +333,84 @@ class CcapiClientTest {
     }
 
     @Test
+    fun simulatorSensorCleaningUsesBackedEndpointAndBooleanPayload() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"iso":[],"shutter":[],"aperture":[],"white_balance":[]}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        val capabilities = client.capabilities()
+        client.cleanSensor(autoPowerOff = true)
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.SENSOR_CLEANING))
+        assertEquals("/ccapi/capabilities", server.takeRequest().path)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/ccapi/sensor-cleaning", request.path)
+        assertTrue(JSONObject(request.body.readUtf8()).getBoolean("autopoweroff"))
+        assertTrue(CameraFeature.SENSOR_CLEANING in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realSensorCleaningRequiresAdvertisedPostAndSendsCanonPayload() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/functions/sensorcleaning","post":true}]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        client.cleanSensor(autoPowerOff = false)
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.SENSOR_CLEANING))
+        assertEquals("/ccapi", server.takeRequest().path)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/ccapi/ver110/functions/sensorcleaning", request.path)
+        assertFalse(JSONObject(request.body.readUtf8()).getBoolean("autopoweroff"))
+        assertTrue(CameraFeature.SENSOR_CLEANING in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realSensorCleaningRejectsNonCanonSuccessStatus() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[{"path":"/functions/sensorcleaning","post":true}]}""",
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        val failure = runCatching { client.cleanSensor(autoPowerOff = false) }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message?.contains("expected HTTP 200") == true)
+        assertFalse(CameraFeature.SENSOR_CLEANING in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realSensorCleaningDoesNotSendUnadvertisedCommand() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver100":[{"path":"/functions/datetime","get":true}]}"""))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        val failure = runCatching { client.cleanSensor(autoPowerOff = false) }.exceptionOrNull()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.SENSOR_CLEANING))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.SENSOR_CLEANING))
+        assertTrue(failure is UnsupportedOperationException)
+        assertEquals(1, server.requestCount)
+        assertFalse(CameraFeature.SENSOR_CLEANING in client.observedFeatureSnapshot())
+    }
+
+    @Test
     fun realDeviceFunctionSettingsRequirePairsRefreshAndWriteAdvertisedValue() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(

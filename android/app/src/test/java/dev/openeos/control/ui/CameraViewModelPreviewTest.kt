@@ -81,6 +81,20 @@ class CameraViewModelPreviewTest {
     }
 
     @Test
+    fun offlinePreviewShowsButCannotExecuteSensorCleaning() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+
+        assertTrue(viewModel.uiState.value.supports(CameraFeature.SENSOR_CLEANING))
+        viewModel.cleanSensor(autoPowerOff = true)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.connected)
+        assertTrue(viewModel.uiState.value.previewMode)
+        assertFalse(CameraOperation.MAINTENANCE in viewModel.uiState.value.pendingOperations)
+    }
+
+    @Test
     fun captureModeSwitchWritesAdvertisedPreviewModeAndRestoresPreviousPhotoMode() = runTest(dispatcher) {
         val viewModel = CameraViewModel()
         viewModel.enterOfflinePreview()

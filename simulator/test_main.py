@@ -544,6 +544,38 @@ def test_auto_power_off_separates_timed_setting_from_immediate_sleep_action() ->
     assert test_state["camera_sleep_count"] == 2
 
 
+def test_sensor_cleaning_matches_canon_contract_and_recording_gate() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    canonical = client.post(
+        "/ccapi/ver100/functions/sensorcleaning",
+        json={"autopoweroff": False},
+    )
+    simulator = client.post(
+        "/ccapi/sensor-cleaning",
+        json={"autopoweroff": True},
+    )
+    invalid = client.post(
+        "/ccapi/ver100/functions/sensorcleaning",
+        json={"autopoweroff": "false"},
+    )
+    client.post("/ccapi/record/start")
+    busy = client.post(
+        "/ccapi/ver100/functions/sensorcleaning",
+        json={"autopoweroff": False},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert {"path": "/functions/sensorcleaning", "post": True} in discovery
+    assert canonical.status_code == 200
+    assert canonical.json() == {}
+    assert simulator.status_code == 204
+    assert invalid.status_code == 422
+    assert busy.status_code == 503
+    assert test_state["sensor_cleaning"] == {"count": 2, "auto_power_off": True}
+
+
 def test_sound_recording_controls_use_documented_string_abilities_and_mode_gates() -> None:
     client.post("/ccapi/test/reset")
 

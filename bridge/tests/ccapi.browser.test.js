@@ -537,6 +537,20 @@ async function run() {
       "external camera contents event to refresh the open media view",
     );
 
+    await page.click('.tab[data-view="live"]');
+    await page.waitForSelector('[data-camera-command="sensor-cleaning"]:not([disabled])');
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator('[data-camera-command="sensor-cleaning"]').first().click();
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.sensor_cleaning.count === 1 &&
+        !state.sensor_cleaning.auto_power_off &&
+        state.canonical.live_view_active &&
+        state.canonical.live_view_start_count === 2 &&
+        state.canonical.live_view_stop_count === 1,
+      "CCAPI sensor cleaning and Live View restoration",
+    );
+
     await page.click('.tab[data-view="diagnostics"]');
     await page.waitForSelector("#diagnostics-panel:not([hidden])");
     const diagnostics = await page.locator("#diagnostics-output").innerText();
@@ -554,7 +568,7 @@ async function run() {
       simulatorOrigin,
       (state) => state.camera_sleep_count === 1 &&
         !state.canonical.live_view_active &&
-        state.canonical.live_view_stop_count === 1 &&
+        state.canonical.live_view_stop_count === 2 &&
         state.canonical.event_delete_count >= 1 &&
         state.canonical.event_active_requests === 0,
       "CCAPI camera sleep to stop Live View, event polling, and disconnect",

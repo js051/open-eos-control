@@ -4,6 +4,8 @@ This package provides the PC camera backend and browser control surface for Open
 
 It can connect to Canon cameras through native HTTP CCAPI or through a system-installed `gphoto2`/libgphoto2 USB stack. Camera commands and settings are exposed only when the selected backend advertises support.
 
+Direct CCAPI sessions expose confirmation-gated sensor cleaning only when the camera advertises Canon's `POST /functions/sensorcleaning` endpoint. The Bridge requires the documented HTTP 200 response and supports an explicit clean-and-power-off choice; libgphoto2 USB sessions report this feature as unsupported until a verified public command contract exists.
+
 USB camera events are exposed only after a bounded `gphoto2 --wait-event` probe succeeds. Body-property and file events refresh PC, Android, and iOS Bridge clients. Event waits pause while the exclusive persistent USB Live View process or a Bulb exposure is active, so synchronization never interrupts capture merely to simulate notifications.
 
 Dual-card cameras expose a Photo-only recording-card selector only when gphoto2 reports at least two live writable `/store_<id>` devices and a writable `storageid` widget whose current value matches one of them. The Bridge re-runs both probes before every exact ID write; card IDs are never hardcoded, and a failed or stale refresh sends no command.

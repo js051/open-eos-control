@@ -579,6 +579,115 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
     }
 
+    func testSensorCleaningUsesAdvertisedCanonPostAndExactBooleanPayload() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver110":[{"path":"/functions/sensorcleaning","post":true}]}"#
+        )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/ver110/functions/sensorcleaning",
+            body: "{}"
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        try await client.cleanSensor(autoPowerOff: true)
+
+        XCTAssertTrue(capabilities.matrix.supports(.sensorCleaning))
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.first { $0.path.hasSuffix("/functions/sensorcleaning") })
+        let body = try XCTUnwrap(request.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["autopoweroff"] as? Bool, true)
+        let observedCapabilities = try await client.capabilities()
+        XCTAssertTrue(observedCapabilities.evidence.observedFeatures.contains(.sensorCleaning))
+    }
+
+    func testSensorCleaningRejectsNoncanonicalSuccessStatus() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/functions/sensorcleaning","post":true}]}"#
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver100/functions/sensorcleaning",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        do {
+            try await client.cleanSensor(autoPowerOff: false)
+            XCTFail("Expected Canon sensor cleaning to require HTTP 200")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("expected HTTP 200"))
+        }
+        let capabilities = try await client.capabilities()
+        XCTAssertFalse(capabilities.evidence.observedFeatures.contains(.sensorCleaning))
+    }
+
+    func testUnadvertisedSensorCleaningFailsWithoutSendingACommand() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/deviceinformation","get":true}]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        do {
+            try await client.cleanSensor(autoPowerOff: false)
+            XCTFail("Expected unsupported sensor cleaning")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.sensorCleaning))
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 1)
+        let capabilities = try await client.capabilities()
+        XCTAssertTrue(capabilities.matrix.planned.contains(.sensorCleaning))
+        XCTAssertFalse(capabilities.evidence.observedFeatures.contains(.sensorCleaning))
+    }
+
+    func testSimulatorSensorCleaningUsesBackedEndpoint() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi/capabilities", body: "{}")
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/sensor-cleaning",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        try await client.cleanSensor(autoPowerOff: false)
+
+        XCTAssertTrue(capabilities.matrix.supports(.sensorCleaning))
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.first { $0.path == "/ccapi/sensor-cleaning" })
+        let body = try XCTUnwrap(request.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["autopoweroff"] as? Bool, false)
+    }
+
     func testUnadvertisedCaptureFailsWithoutSendingACommand() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: #"{"ver100":[{"path":"/deviceinformation","get":true}]}"#)
