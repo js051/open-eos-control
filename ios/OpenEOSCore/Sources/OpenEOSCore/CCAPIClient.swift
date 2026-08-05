@@ -1588,9 +1588,10 @@ public actor CCAPIClient {
         default: nil
         }
         let ratingValue = body.string("rating")
+        let parsedRating = Int(ratingValue)
         let rating = ratingValue == "off"
             ? 0
-            : ratingValue.flatMap(Int.init).flatMap { (1...5).contains($0) ? $0 : nil }
+            : parsedRating.flatMap { (1...5).contains($0) ? $0 : nil }
         let rotation = body.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil }
         return CameraMediaItem(
             id: item.id,
