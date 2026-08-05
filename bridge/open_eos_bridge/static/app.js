@@ -39,6 +39,9 @@
     MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL",
     MEDIA_PREVIEW: "MEDIA_PREVIEW",
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
+    MEDIA_PROTECT: "MEDIA_PROTECT",
+    MEDIA_RATING: "MEDIA_RATING",
+    MEDIA_ROTATE: "MEDIA_ROTATE",
     MEDIA_DELETE: "MEDIA_DELETE",
     CAMERA_CLOCK_SYNC: "CAMERA_CLOCK_SYNC",
     SENSOR_CLEANING: "SENSOR_CLEANING",
@@ -306,6 +309,19 @@
       imageQualitySmall2: "Small 2",
       mediaCount: "{count} media item(s)",
       mediaEmpty: "No media was reported by the camera",
+      manageMedia: "Manage {name}",
+      mediaDetails: "Media details",
+      closeMediaDetails: "Close media details",
+      loadingMediaDetails: "Reading metadata from the camera",
+      protection: "Protection",
+      protect: "Protect",
+      unprotect: "Unprotect",
+      rating: "Rating",
+      ratingOff: "Off",
+      ratingValue: "{value} stars",
+      rotation: "Display rotation",
+      rotationValue: "{value} degrees",
+      mediaMetadataUpdated: "Updated {name}",
       mediaThumbnail: "Thumbnail for {name}",
       previewMedia: "Preview {name}",
       closeMediaPreview: "Close media preview",
@@ -604,6 +620,19 @@
       imageQualitySmall2: "小型 2",
       mediaCount: "共 {count} 個媒體檔案",
       mediaEmpty: "相機未回報任何媒體檔案",
+      manageMedia: "管理 {name}",
+      mediaDetails: "媒體詳細資料",
+      closeMediaDetails: "關閉媒體詳細資料",
+      loadingMediaDetails: "正在從相機讀取中繼資料",
+      protection: "檔案保護",
+      protect: "保護",
+      unprotect: "取消保護",
+      rating: "評分",
+      ratingOff: "關閉",
+      ratingValue: "{value} 星",
+      rotation: "顯示旋轉",
+      rotationValue: "{value} 度",
+      mediaMetadataUpdated: "已更新 {name}",
       mediaThumbnail: "{name} 的縮圖",
       previewMedia: "預覽 {name}",
       closeMediaPreview: "關閉媒體預覽",
@@ -883,6 +912,9 @@
     mediaPreviewUrl: null,
     mediaPreviewItem: null,
     mediaPreviewGeneration: 0,
+    mediaDetailsItem: null,
+    mediaDetailsGeneration: 0,
+    mediaDetailsBusy: false,
     mediaDownloadPreparing: false,
     mediaDownload: null,
     busy: false,
@@ -1000,6 +1032,21 @@
     mediaPreviewImage: byId("media-preview-image"),
     mediaPreviewLoading: byId("media-preview-loading"),
     mediaPreviewUnavailable: byId("media-preview-unavailable"),
+    mediaDetailsDialog: byId("media-details-dialog"),
+    mediaDetailsClose: byId("media-details-close"),
+    mediaDetailsName: byId("media-details-name"),
+    mediaDetailsKind: byId("media-details-kind"),
+    mediaDetailsSummary: byId("media-details-summary"),
+    mediaDetailsLoading: byId("media-details-loading"),
+    mediaProtectionSection: byId("media-protection-section"),
+    mediaProtectButton: byId("media-protect-button"),
+    mediaUnprotectButton: byId("media-unprotect-button"),
+    mediaRatingSection: byId("media-rating-section"),
+    mediaRatingControl: byId("media-rating-control"),
+    mediaRotationSection: byId("media-rotation-section"),
+    mediaRotationControl: byId("media-rotation-control"),
+    mediaDetailsDownload: byId("media-details-download"),
+    mediaDetailsDelete: byId("media-details-delete"),
     diagnosticsRefreshButton: byId("diagnostics-refresh-button"),
     copyDiagnosticsButton: byId("copy-diagnostics-button"),
     diagnosticsOutput: byId("diagnostics-output"),
@@ -1072,6 +1119,7 @@
     renderLocalVideoDevices();
     renderLiveState();
     renderMedia();
+    renderMediaDetails();
     renderMediaTransfer();
     renderDiagnostics();
   }
@@ -1406,6 +1454,7 @@
     clearScheduledMediaTransferRender();
     clearMediaThumbnails();
     closeMediaPreview();
+    closeMediaDetails();
     state.session = null;
     state.info = null;
     state.status = null;
@@ -3534,6 +3583,7 @@
     mediaTab.hidden = !featureSupported(FEATURES.MEDIA_BROWSER);
     ui.mediaRefreshButton.disabled = !connected || interactionBusy;
     renderMediaTransfer();
+    renderMediaDetails();
   }
 
   function setOperationState(message, error = false) {
@@ -3635,32 +3685,22 @@
       size.textContent = formatBytes(item.sizeBytes);
       const actions = document.createElement("div");
       actions.className = "media-actions";
-      if (featureSupported(FEATURES.MEDIA_DELETE)) {
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "icon-button danger";
-        remove.dataset.tooltip = t("delete");
-        remove.setAttribute("aria-label", `${t("delete")} ${item.name}`);
-        const removeIcon = document.createElement("span");
-        removeIcon.className = "icon";
-        removeIcon.dataset.icon = "trash-2";
-        remove.append(removeIcon);
-        remove.disabled = cameraInteractionBusy();
-        remove.addEventListener("click", () => deleteMedia(item, remove));
-        actions.append(remove);
+      const actionSupported = mediaMetadataSupported() || featureSupported(FEATURES.MEDIA_DOWNLOAD) ||
+        featureSupported(FEATURES.MEDIA_DELETE);
+      if (actionSupported) {
+        const manage = document.createElement("button");
+        manage.type = "button";
+        manage.className = "icon-button";
+        manage.dataset.tooltip = t("mediaDetails");
+        manage.setAttribute("aria-label", t("manageMedia", { name: item.name }));
+        const manageIcon = document.createElement("span");
+        manageIcon.className = "icon";
+        manageIcon.dataset.icon = "ellipsis-vertical";
+        manage.append(manageIcon);
+        manage.disabled = cameraInteractionBusy();
+        manage.addEventListener("click", () => openMediaDetails(item));
+        actions.append(manage);
       }
-      const download = document.createElement("button");
-      download.type = "button";
-      download.className = "icon-button";
-      download.dataset.tooltip = t("download");
-      download.setAttribute("aria-label", `${t("download")} ${item.name}`);
-      const downloadIcon = document.createElement("span");
-      downloadIcon.className = "icon";
-      downloadIcon.dataset.icon = "download";
-      download.append(downloadIcon);
-      download.disabled = !featureSupported(FEATURES.MEDIA_DOWNLOAD) || cameraInteractionBusy();
-      download.addEventListener("click", () => downloadMedia(item));
-      actions.append(download);
       row.append(thumbnail, copy, size, actions);
       ui.mediaList.append(row);
       if (featureSupported(FEATURES.MEDIA_THUMBNAIL) && !state.mediaThumbnailUrls.has(item.id)) {
@@ -3769,6 +3809,133 @@
     ui.mediaPreviewImage.hidden = true;
     ui.mediaPreviewLoading.hidden = false;
     ui.mediaPreviewUnavailable.hidden = true;
+  }
+
+  function mediaMetadataSupported() {
+    return featureSupported(FEATURES.MEDIA_PROTECT) || featureSupported(FEATURES.MEDIA_RATING) ||
+      featureSupported(FEATURES.MEDIA_ROTATE);
+  }
+
+  function replaceMediaItem(item) {
+    const index = state.media.findIndex((candidate) => candidate.id === item.id);
+    if (index >= 0) state.media[index] = { ...state.media[index], ...item };
+    if (state.mediaDetailsItem?.id === item.id) {
+      state.mediaDetailsItem = { ...state.mediaDetailsItem, ...item };
+    }
+  }
+
+  function renderMediaDetails() {
+    if (!ui.mediaDetailsDialog?.open || !state.mediaDetailsItem) return;
+    const item = state.mediaDetailsItem;
+    const disabled = state.mediaDetailsBusy || cameraInteractionBusy();
+    ui.mediaDetailsName.textContent = item.name;
+    ui.mediaDetailsKind.textContent = String(item.kind || "").toUpperCase();
+    ui.mediaDetailsSummary.textContent = [formatDate(item.captureTime), formatBytes(item.sizeBytes)]
+      .filter(Boolean).join(" · ");
+    ui.mediaDetailsLoading.hidden = !state.mediaDetailsBusy;
+
+    const protectionSupported = featureSupported(FEATURES.MEDIA_PROTECT);
+    ui.mediaProtectionSection.hidden = !protectionSupported;
+    ui.mediaProtectButton.disabled = disabled;
+    ui.mediaUnprotectButton.disabled = disabled;
+    ui.mediaProtectButton.classList.toggle("active", item.protected === true);
+    ui.mediaUnprotectButton.classList.toggle("active", item.protected === false);
+    ui.mediaProtectButton.setAttribute("aria-pressed", String(item.protected === true));
+    ui.mediaUnprotectButton.setAttribute("aria-pressed", String(item.protected === false));
+
+    const ratingSupported = featureSupported(FEATURES.MEDIA_RATING);
+    ui.mediaRatingSection.hidden = !ratingSupported;
+    ui.mediaRatingControl.querySelectorAll("[data-media-rating]").forEach((button) => {
+      const value = Number(button.dataset.mediaRating);
+      button.disabled = disabled;
+      button.classList.toggle("active", item.rating === value);
+      button.setAttribute("aria-pressed", String(item.rating === value));
+      button.setAttribute("aria-label", value === 0 ? t("ratingOff") : t("ratingValue", { value }));
+    });
+
+    const rotationSupported = featureSupported(FEATURES.MEDIA_ROTATE);
+    ui.mediaRotationSection.hidden = !rotationSupported;
+    ui.mediaRotationControl.querySelectorAll("[data-media-rotation]").forEach((button) => {
+      const value = Number(button.dataset.mediaRotation);
+      button.disabled = disabled;
+      button.classList.toggle("active", item.rotationDegrees === value);
+      button.setAttribute("aria-pressed", String(item.rotationDegrees === value));
+      button.setAttribute("aria-label", t("rotationValue", { value }));
+    });
+
+    ui.mediaDetailsDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+    ui.mediaDetailsDownload.disabled = disabled || !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+    ui.mediaDetailsDelete.hidden = !featureSupported(FEATURES.MEDIA_DELETE);
+    ui.mediaDetailsDelete.disabled = disabled || !featureSupported(FEATURES.MEDIA_DELETE);
+  }
+
+  function clearMediaDetails() {
+    state.mediaDetailsGeneration += 1;
+    state.mediaDetailsItem = null;
+    state.mediaDetailsBusy = false;
+  }
+
+  function closeMediaDetails() {
+    if (ui.mediaDetailsDialog?.open) ui.mediaDetailsDialog.close();
+    clearMediaDetails();
+  }
+
+  async function openMediaDetails(item) {
+    if (!state.session || cameraInteractionBusy()) return;
+    clearMediaDetails();
+    const generation = state.mediaDetailsGeneration;
+    state.mediaDetailsItem = item;
+    ui.mediaDetailsDialog.showModal();
+    renderMediaDetails();
+    if (!mediaMetadataSupported()) return;
+    state.mediaDetailsBusy = true;
+    renderMediaDetails();
+    try {
+      const updated = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/info`,
+      );
+      if (generation !== state.mediaDetailsGeneration || state.mediaDetailsItem?.id !== item.id) return;
+      replaceMediaItem(updated);
+      renderMedia();
+    } catch (error) {
+      if (generation === state.mediaDetailsGeneration) {
+        const normalized = captureError(error);
+        showToast(normalized.message, true);
+      }
+    } finally {
+      if (generation === state.mediaDetailsGeneration) {
+        state.mediaDetailsBusy = false;
+        renderMediaDetails();
+      }
+    }
+  }
+
+  async function updateMediaMetadata(feature, suffix, json) {
+    const item = state.mediaDetailsItem;
+    if (!state.session || !item || !featureSupported(feature) || state.mediaDetailsBusy || cameraInteractionBusy()) return;
+    const generation = state.mediaDetailsGeneration;
+    state.mediaDetailsBusy = true;
+    renderMediaDetails();
+    try {
+      const updated = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/${suffix}`,
+        { method: "PUT", json },
+      );
+      if (generation !== state.mediaDetailsGeneration || state.mediaDetailsItem?.id !== item.id) return;
+      replaceMediaItem(updated);
+      renderMedia();
+      showToast(t("mediaMetadataUpdated", { name: item.name }));
+    } catch (error) {
+      if (generation === state.mediaDetailsGeneration) {
+        const normalized = captureError(error);
+        showToast(normalized.message, true);
+      }
+    } finally {
+      if (generation === state.mediaDetailsGeneration) {
+        state.mediaDetailsBusy = false;
+        renderMediaDetails();
+      }
+    }
   }
 
   function closeMediaPreview() {
@@ -3990,6 +4157,7 @@
       state.mediaThumbnailLoads.delete(item.id);
       state.mediaThumbnailFailures.delete(item.id);
       if (state.mediaPreviewItem?.id === item.id) closeMediaPreview();
+      if (state.mediaDetailsItem?.id === item.id) closeMediaDetails();
       renderMedia();
       releaseObjectUrl(thumbnailUrl);
       showToast(t("deleted", { name: item.name }));
@@ -4362,6 +4530,31 @@
     ui.mediaPreviewDialog.addEventListener("click", (event) => {
       if (event.target === ui.mediaPreviewDialog) closeMediaPreview();
     });
+    ui.mediaDetailsClose.addEventListener("click", closeMediaDetails);
+    ui.mediaDetailsDialog.addEventListener("close", clearMediaDetails);
+    ui.mediaDetailsDialog.addEventListener("click", (event) => {
+      if (event.target === ui.mediaDetailsDialog) closeMediaDetails();
+    });
+    ui.mediaProtectButton.addEventListener("click", () => {
+      void updateMediaMetadata(FEATURES.MEDIA_PROTECT, "protection", { enabled: true });
+    });
+    ui.mediaUnprotectButton.addEventListener("click", () => {
+      void updateMediaMetadata(FEATURES.MEDIA_PROTECT, "protection", { enabled: false });
+    });
+    ui.mediaRatingControl.addEventListener("click", (event) => {
+      const button = event.target.closest?.("[data-media-rating]");
+      if (button) void updateMediaMetadata(FEATURES.MEDIA_RATING, "rating", { value: Number(button.dataset.mediaRating) });
+    });
+    ui.mediaRotationControl.addEventListener("click", (event) => {
+      const button = event.target.closest?.("[data-media-rotation]");
+      if (button) void updateMediaMetadata(FEATURES.MEDIA_ROTATE, "rotation", { degrees: Number(button.dataset.mediaRotation) });
+    });
+    ui.mediaDetailsDownload.addEventListener("click", () => {
+      if (state.mediaDetailsItem) void downloadMedia(state.mediaDetailsItem);
+    });
+    ui.mediaDetailsDelete.addEventListener("click", () => {
+      if (state.mediaDetailsItem) void deleteMedia(state.mediaDetailsItem, ui.mediaDetailsDelete);
+    });
     ui.diagnosticsRefreshButton.addEventListener("click", () => refreshSession({ quiet: true }));
     ui.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
     ui.copyPhysicalValidationButton.addEventListener("click", copyPhysicalValidation);
@@ -4378,6 +4571,7 @@
       cancelMediaDownload({ silent: true });
       clearMediaThumbnails();
       closeMediaPreview();
+      closeMediaDetails();
       stopLocalVideo({ announce: false });
       stopRtpAudio({ announce: false });
       if (!state.session) return;

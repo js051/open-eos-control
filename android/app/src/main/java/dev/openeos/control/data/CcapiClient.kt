@@ -583,6 +583,11 @@ class CcapiClient(
                 supportedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
             }
             if (supportsMediaDelete()) supportedFeatures.add(CameraFeature.MEDIA_DELETE)
+            if (supportsMediaModify()) {
+                supportedFeatures.add(CameraFeature.MEDIA_PROTECT)
+                supportedFeatures.add(CameraFeature.MEDIA_RATING)
+                supportedFeatures.add(CameraFeature.MEDIA_ROTATE)
+            }
             if (eventPollingOperations() != null) {
                 supportedFeatures.add(CameraFeature.EVENT_POLLING)
             }
@@ -1211,6 +1216,95 @@ class CcapiClient(
         )
         observedFeatures.add(CameraFeature.MEDIA_PREVIEW)
         return CameraMediaPreview(item = item, bytes = bytes, contentType = contentType)
+    }
+
+    suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem {
+        if (isRealCamera && enforceAdvertisedOperations && !supportsApi("GET", "/contents")) {
+            error("Camera did not advertise CCAPI media browsing.")
+        }
+        return parseMediaInfo(item, getJson("${mediaItemPath(item)}?kind=info"))
+    }
+
+    suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        modifyMedia(
+            item = item,
+            action = "protect",
+            value = if (enabled) "enable" else "disable",
+            feature = CameraFeature.MEDIA_PROTECT,
+            matches = { it.protected == enabled },
+        )
+
+    suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem {
+        require(rating in 0..5) { "Media rating must be from 0 through 5." }
+        return modifyMedia(
+            item = item,
+            action = "rating",
+            value = if (rating == 0) "off" else rating.toString(),
+            feature = CameraFeature.MEDIA_RATING,
+            matches = { it.rating == rating },
+        )
+    }
+
+    suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem {
+        require(degrees in MEDIA_ROTATIONS) { "Media rotation must be 0, 90, 180, or 270 degrees." }
+        return modifyMedia(
+            item = item,
+            action = "rotate",
+            value = degrees.toString(),
+            feature = CameraFeature.MEDIA_ROTATE,
+            matches = { it.rotationDegrees == degrees },
+        )
+    }
+
+    private suspend fun modifyMedia(
+        item: CameraMediaItem,
+        action: String,
+        value: String,
+        feature: CameraFeature,
+        matches: (CameraMediaItem) -> Boolean,
+    ): CameraMediaItem {
+        if (isRealCamera && enforceAdvertisedOperations && !supportsMediaModify()) {
+            error("Camera did not advertise ${feature.label.lowercase()}.")
+        }
+        val path = mediaItemPath(item)
+        putOk(path, JSONObject().put("action", action).put("value", value), expectedStatusCode = 200)
+        var latest = item
+        repeat(3) { attempt ->
+            latest = mediaInfo(item)
+            if (matches(latest)) {
+                observedFeatures.add(feature)
+                return latest
+            }
+            if (attempt < 2) delay(100)
+        }
+        error("Camera accepted media $action but did not report the requested value.")
+    }
+
+    private fun mediaItemPath(item: CameraMediaItem): String = if (isRealCamera) {
+        normalizeCameraResource(item.id).substringBefore('?')
+    } else {
+        val encodedId = URLEncoder.encode(item.id, StandardCharsets.UTF_8.name()).replace("+", "%20")
+        "/ccapi/media/$encodedId"
+    }
+
+    private fun parseMediaInfo(item: CameraMediaItem, body: JSONObject): CameraMediaItem {
+        val ratingValue = body.optString("rating").let { value ->
+            when (value) {
+                "off" -> 0
+                else -> value.toIntOrNull()?.takeIf { it in 1..5 }
+            }
+        }
+        return item.copy(
+            sizeBytes = body.optLong("filesize").takeIf { it > 0L } ?: item.sizeBytes,
+            captureTime = body.optString("lastmodifieddate").takeIf { it.isNotBlank() } ?: item.captureTime,
+            protected = when (body.optString("protect")) {
+                "enable" -> true
+                "disable" -> false
+                else -> null
+            },
+            rating = ratingValue,
+            rotationDegrees = body.optString("rotate").toIntOrNull()?.takeIf { it in MEDIA_ROTATIONS },
+        )
     }
 
     private suspend fun mediaImageRepresentation(
@@ -1936,6 +2030,11 @@ class CcapiClient(
             (operation.path.endsWith("/contents") || "/contents/" in operation.path)
     }
 
+    private fun supportsMediaModify(): Boolean = apiOperations.any { operation ->
+        operation.method == "PUT" &&
+            (operation.path.endsWith("/contents") || "/contents/" in operation.path)
+    }
+
     private suspend fun commandOk(
         pathSuffix: String,
         payload: JSONObject,
@@ -1995,6 +2094,9 @@ class CcapiClient(
                 sizeBytes = item.optLong("size_bytes").takeIf { item.has("size_bytes") },
                 captureTime = item.optString("capture_time").takeIf { it.isNotBlank() },
                 previewAvailable = item.optString("kind", "other").isCcapiPreviewKind(),
+                protected = item.opt("protect") as? Boolean,
+                rating = item.optInt("rating").takeIf { item.has("rating") && it in 0..5 },
+                rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
             )
         }
     }
@@ -2967,6 +3069,7 @@ class CcapiClient(
         const val MEDIA_TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
         const val MEDIA_SNIFF_BYTES = 64L
+        val MEDIA_ROTATIONS = setOf(0, 90, 180, 270)
     }
 }
 
@@ -3250,6 +3353,9 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.MEDIA_THUMBNAIL,
             CameraFeature.MEDIA_PREVIEW,
             CameraFeature.MEDIA_DOWNLOAD,
+            CameraFeature.MEDIA_PROTECT,
+            CameraFeature.MEDIA_RATING,
+            CameraFeature.MEDIA_ROTATE,
             CameraFeature.MEDIA_DELETE,
             CameraFeature.EVENT_POLLING,
             CameraFeature.CAMERA_CLOCK_SYNC,

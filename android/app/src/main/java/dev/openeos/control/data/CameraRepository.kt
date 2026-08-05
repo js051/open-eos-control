@@ -220,6 +220,17 @@ class CameraRepository(
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = backend.downloadMedia(item, destination, onProgress)
 
+    suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = backend.mediaInfo(item)
+
+    suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        backend.setMediaProtection(item, enabled)
+
+    suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem =
+        backend.setMediaRating(item, rating)
+
+    suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem =
+        backend.setMediaRotation(item, degrees)
+
     suspend fun deleteMedia(item: CameraMediaItem) = backend.deleteMedia(item)
 
     suspend fun restartLiveView() {

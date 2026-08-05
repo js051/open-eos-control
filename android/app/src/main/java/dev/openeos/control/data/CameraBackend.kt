@@ -107,6 +107,13 @@ interface CameraControlBackend {
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = unsupported(CameraFeature.MEDIA_DOWNLOAD)
+    suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = unsupported(CameraFeature.MEDIA_BROWSER)
+    suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        unsupported(CameraFeature.MEDIA_PROTECT)
+    suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem =
+        unsupported(CameraFeature.MEDIA_RATING)
+    suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem =
+        unsupported(CameraFeature.MEDIA_ROTATE)
     suspend fun deleteMedia(item: CameraMediaItem) = unsupported<Unit>(CameraFeature.MEDIA_DELETE)
     fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame
@@ -208,6 +215,17 @@ class CcapiCameraBackend(
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
 
+    override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = client.mediaInfo(item)
+
+    override suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        client.setMediaProtection(item, enabled)
+
+    override suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem =
+        client.setMediaRating(item, rating)
+
+    override suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem =
+        client.setMediaRotation(item, degrees)
+
     override suspend fun deleteMedia(item: CameraMediaItem) = client.deleteMedia(item)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
@@ -305,6 +323,17 @@ class DesktopBridgeCameraBackend(
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
+
+    override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = client.mediaInfo(item)
+
+    override suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        client.setMediaProtection(item, enabled)
+
+    override suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem =
+        client.setMediaRating(item, rating)
+
+    override suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem =
+        client.setMediaRotation(item, degrees)
 
     override suspend fun deleteMedia(item: CameraMediaItem) = client.deleteMedia(item)
 

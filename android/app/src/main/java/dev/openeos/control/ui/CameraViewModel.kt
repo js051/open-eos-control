@@ -971,6 +971,43 @@ class CameraViewModel(
         }
     }
 
+    fun loadMediaInfo(item: CameraMediaItem) {
+        val state = _uiState.value
+        if (state.previewMode || state.isBusy(CameraOperation.MEDIA) || !state.supports(CameraFeature.MEDIA_BROWSER)) return
+        runCamera(CameraOperation.MEDIA) {
+            val updated = repository.mediaInfo(item)
+            _uiState.update { current -> current.withUpdatedMedia(updated) }
+        }
+    }
+
+    fun setMediaProtection(item: CameraMediaItem, enabled: Boolean) = updateMediaMetadata(
+        item,
+        CameraFeature.MEDIA_PROTECT,
+    ) { repository.setMediaProtection(item, enabled) }
+
+    fun setMediaRating(item: CameraMediaItem, rating: Int) {
+        if (rating !in 0..5) return
+        updateMediaMetadata(item, CameraFeature.MEDIA_RATING) { repository.setMediaRating(item, rating) }
+    }
+
+    fun setMediaRotation(item: CameraMediaItem, degrees: Int) {
+        if (degrees !in setOf(0, 90, 180, 270)) return
+        updateMediaMetadata(item, CameraFeature.MEDIA_ROTATE) { repository.setMediaRotation(item, degrees) }
+    }
+
+    private fun updateMediaMetadata(
+        item: CameraMediaItem,
+        feature: CameraFeature,
+        update: suspend () -> CameraMediaItem,
+    ) {
+        val state = _uiState.value
+        if (state.previewMode || state.isBusy(CameraOperation.MEDIA) || !state.supports(feature)) return
+        runCamera(CameraOperation.MEDIA) {
+            val updated = update()
+            _uiState.update { current -> current.withUpdatedMedia(updated) }
+        }
+    }
+
     fun downloadMedia(context: Context, item: CameraMediaItem, destination: Uri) {
         if (
             _uiState.value.previewMode ||
@@ -1523,6 +1560,11 @@ class CameraViewModel(
             lastDeletedMediaName = item.name,
         )
     }
+
+    private fun CameraUiState.withUpdatedMedia(item: CameraMediaItem): CameraUiState = copy(
+        mediaItems = mediaItems.map { current -> if (current.id == item.id) item else current },
+        mediaPreviewItem = mediaPreviewItem?.let { current -> if (current.id == item.id) item else current },
+    )
 
     internal fun CameraUiState.withEventMediaItems(items: List<CameraMediaItem>): CameraUiState {
         val itemIds = items.mapTo(hashSetOf(), CameraMediaItem::id)

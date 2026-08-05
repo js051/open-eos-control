@@ -62,6 +62,7 @@ public actor CCAPIClient {
     private static let maximumMediaTreeDepth = 4
     private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
     private static let maximumMediaPreviewBytes = 32 * 1024 * 1024
+    private static let mediaRotations = Set([0, 90, 180, 270])
     private static let maximumCapabilityEvidenceItems = 256
     private static let maximumCapabilityEvidenceItemCharacters = 512
     private static let maximumEventBytes = 256 * 1024
@@ -557,6 +558,9 @@ public actor CCAPIClient {
             supported.formUnion([.mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload])
         }
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
+        if supportsMediaModify() {
+            supported.formUnion([.mediaProtect, .mediaRating, .mediaRotate])
+        }
         if eventPollingOperations() != nil { supported.insert(.eventPolling) }
         if cameraClockOperations() != nil { supported.insert(.cameraClockSync) }
         if operation(.post, suffix: "/functions/sensorcleaning") != nil { supported.insert(.sensorCleaning) }
@@ -571,7 +575,8 @@ public actor CCAPIClient {
             .videoRecording, .tapFocus,
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaDelete, .cameraClockSync, .zoomControl, .cardSelectionControl,
+            .mediaProtect, .mediaRating, .mediaRotate, .mediaDelete,
+            .cameraClockSync, .zoomControl, .cardSelectionControl,
             .sensorCleaning,
             .cameraSleep,
             .soundRecordingControl,
@@ -606,6 +611,9 @@ public actor CCAPIClient {
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                     .sensorCleaning: "The camera must advertise the Canon POST sensor-cleaning endpoint.",
                     .cameraSleep: "The camera must advertise matching GET and PUT Auto Power Off endpoints and include immediately in its current ability.",
+                    .mediaProtect: "The camera must advertise PUT for Canon contents before file protection can be changed.",
+                    .mediaRating: "The camera must advertise PUT for Canon contents before file ratings can be changed.",
+                    .mediaRotate: "The camera must advertise PUT for Canon contents before display rotation can be changed.",
                 ]
             ),
             liveView: LiveViewCapabilities(
@@ -1349,7 +1357,10 @@ public actor CCAPIClient {
                     kind: $0.string("kind", default: "other"),
                     sizeBytes: $0.integer64("size_bytes"),
                     captureTime: $0.string("capture_time").nilIfEmpty,
-                    previewAvailable: ["image", "raw"].contains($0.string("kind", default: "other").lowercased())
+                    previewAvailable: ["image", "raw"].contains($0.string("kind", default: "other").lowercased()),
+                    protected: $0.bool("protect"),
+                    rating: $0.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
+                    rotationDegrees: $0.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil }
                 )
             } ?? []
             observedFeatures.insert(.mediaBrowser)
@@ -1484,6 +1495,114 @@ public actor CCAPIClient {
         )
         observedFeatures.insert(.mediaPreview)
         return CameraMediaPreview(item: item, data: response.data, contentType: response.contentType)
+    }
+
+    public func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
+        try await ensureInitialized()
+        if resolvedMode != .simulator, !supports(.get, suffix: "/contents") {
+            throw CCAPIError.unsupported(.mediaBrowser)
+        }
+        let path = try mediaPath(item)
+        let body = try await requestJSON(path: "\(path)?kind=info")
+        return parseMediaInfo(item, body: body)
+    }
+
+    public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
+        try await modifyMedia(
+            item,
+            action: "protect",
+            value: enabled ? "enable" : "disable",
+            feature: .mediaProtect,
+            matches: { $0.protected == enabled }
+        )
+    }
+
+    public func setMediaRating(_ item: CameraMediaItem, rating: Int) async throws -> CameraMediaItem {
+        guard (0...5).contains(rating) else {
+            throw CCAPIError.invalidResponse("Media rating must be from 0 through 5.")
+        }
+        return try await modifyMedia(
+            item,
+            action: "rating",
+            value: rating == 0 ? "off" : String(rating),
+            feature: .mediaRating,
+            matches: { $0.rating == rating }
+        )
+    }
+
+    public func setMediaRotation(_ item: CameraMediaItem, degrees: Int) async throws -> CameraMediaItem {
+        guard Self.mediaRotations.contains(degrees) else {
+            throw CCAPIError.invalidResponse("Media rotation must be 0, 90, 180, or 270 degrees.")
+        }
+        return try await modifyMedia(
+            item,
+            action: "rotate",
+            value: String(degrees),
+            feature: .mediaRotate,
+            matches: { $0.rotationDegrees == degrees }
+        )
+    }
+
+    private func modifyMedia(
+        _ item: CameraMediaItem,
+        action: String,
+        value: String,
+        feature: CameraFeature,
+        matches: (CameraMediaItem) -> Bool
+    ) async throws -> CameraMediaItem {
+        try await ensureInitialized()
+        if resolvedMode != .simulator, !supportsMediaModify() {
+            throw CCAPIError.unsupported(feature)
+        }
+        try await requestOK(
+            path: try mediaPath(item),
+            method: .put,
+            json: ["action": action, "value": value],
+            expectedStatusCode: 200
+        )
+        var latest = item
+        for attempt in 0..<3 {
+            latest = try await mediaInfo(item)
+            if matches(latest) {
+                observedFeatures.insert(feature)
+                return latest
+            }
+            if attempt < 2 { try await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        throw CCAPIError.invalidResponse(
+            "Camera accepted media \(action) but did not report the requested value."
+        )
+    }
+
+    private func mediaPath(_ item: CameraMediaItem) throws -> String {
+        if resolvedMode == .simulator {
+            return "/ccapi/media/\(Self.encodePathComponent(item.id))"
+        }
+        return try normalizeCameraResource(item.id).components(separatedBy: "?")[0]
+    }
+
+    private func parseMediaInfo(_ item: CameraMediaItem, body: JSONDictionary) -> CameraMediaItem {
+        let protected: Bool? = switch body.string("protect") {
+        case "enable": true
+        case "disable": false
+        default: nil
+        }
+        let ratingValue = body.string("rating")
+        let rating = ratingValue == "off"
+            ? 0
+            : ratingValue.flatMap(Int.init).flatMap { (1...5).contains($0) ? $0 : nil }
+        let rotation = body.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil }
+        return CameraMediaItem(
+            id: item.id,
+            name: item.name,
+            kind: item.kind,
+            sizeBytes: body.integer64("filesize").flatMap { $0 > 0 ? $0 : nil } ?? item.sizeBytes,
+            captureTime: body.string("lastmodifieddate").nilIfEmpty ?? item.captureTime,
+            previewAvailable: item.previewAvailable,
+            protected: protected,
+            rating: rating,
+            rotationDegrees: rotation
+        )
     }
 
     private func mediaImageRepresentation(
@@ -2064,6 +2183,12 @@ public actor CCAPIClient {
     private func supportsMediaDelete() -> Bool {
         operations.contains {
             $0.method == .delete && ($0.path.hasSuffix("/contents") || $0.path.contains("/contents/"))
+        }
+    }
+
+    private func supportsMediaModify() -> Bool {
+        operations.contains {
+            $0.method == .put && ($0.path.hasSuffix("/contents") || $0.path.contains("/contents/"))
         }
     }
 
@@ -2687,7 +2812,7 @@ public actor CCAPIClient {
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
             .clickWhiteBalance, .focusDrive,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaDelete, .cameraClockSync,
+            .mediaProtect, .mediaRating, .mediaRotate, .mediaDelete, .cameraClockSync,
             .recordableStatus, .lensStatus, .temperatureStatus,
         ]
         if simulatorCameraSleepSupported { supported.insert(.cameraSleep) }

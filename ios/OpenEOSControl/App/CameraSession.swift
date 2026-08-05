@@ -207,6 +207,34 @@ enum CameraSession: Sendable {
         }
     }
 
+    func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client): return try await client.mediaInfo(item)
+        case let .desktopBridge(client): return try await client.mediaInfo(item)
+        }
+    }
+
+    func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client): return try await client.setMediaProtection(item, enabled: enabled)
+        case let .desktopBridge(client): return try await client.setMediaProtection(item, enabled: enabled)
+        }
+    }
+
+    func setMediaRating(_ item: CameraMediaItem, rating: Int) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client): return try await client.setMediaRating(item, rating: rating)
+        case let .desktopBridge(client): return try await client.setMediaRating(item, rating: rating)
+        }
+    }
+
+    func setMediaRotation(_ item: CameraMediaItem, degrees: Int) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client): return try await client.setMediaRotation(item, degrees: degrees)
+        case let .desktopBridge(client): return try await client.setMediaRotation(item, degrees: degrees)
+        }
+    }
+
     func downloadMedia(
         _ item: CameraMediaItem,
         to destination: URL,

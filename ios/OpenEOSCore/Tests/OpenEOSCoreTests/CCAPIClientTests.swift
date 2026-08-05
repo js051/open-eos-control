@@ -29,7 +29,7 @@ final class CCAPIClientTests: XCTestCase {
         {"path":"/shooting/liveview","get":true,"post":true,"delete":true},
         {"path":"/shooting/liveview/flip","get":true},
         {"path":"/shooting/liveview/flipdetail","get":true},
-        {"path":"/contents","get":true,"delete":true}
+        {"path":"/contents","get":true,"put":true,"delete":true}
       ]
     }
     """
@@ -89,6 +89,9 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDownload))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaProtect))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaRating))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaRotate))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaThumbnail))
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.mediaThumbnail))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaPreview))
@@ -2354,6 +2357,82 @@ final class CCAPIClientTests: XCTestCase {
             XCTFail("Expected unsupported media deletion")
         } catch {
             XCTAssertEqual(error as? CCAPIError, .unsupported(.mediaDelete))
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.method), ["GET"])
+    }
+
+    func testMediaMetadataUsesAdvertisedCanonPutAndVerifiesReadback() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let path = "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG"
+        let item = CameraMediaItem(id: path, name: "IMG_0001.JPG", kind: "image")
+        await transport.enqueueJSON(
+            path: "\(path)?kind=info",
+            body: #"{"filesize":1234,"protect":"disable","rating":"off","rotate":"0","lastmodifieddate":"2026-08-05T10:00:00+08:00"}"#
+        )
+        await transport.enqueueJSON(method: "PUT", path: path, body: "{}")
+        await transport.enqueueJSON(
+            path: "\(path)?kind=info",
+            body: #"{"protect":"enable","rating":"off","rotate":"0"}"#
+        )
+        await transport.enqueueJSON(method: "PUT", path: path, body: "{}")
+        await transport.enqueueJSON(
+            path: "\(path)?kind=info",
+            body: #"{"protect":"enable","rating":"5","rotate":"0"}"#
+        )
+        await transport.enqueueJSON(method: "PUT", path: path, body: "{}")
+        await transport.enqueueJSON(
+            path: "\(path)?kind=info",
+            body: #"{"protect":"enable","rating":"5","rotate":"270"}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let info = try await client.mediaInfo(item)
+        XCTAssertEqual(info.sizeBytes, 1_234)
+        XCTAssertEqual(info.protected, false)
+        XCTAssertEqual(info.rating, 0)
+        XCTAssertEqual(info.rotationDegrees, 0)
+        let protected = try await client.setMediaProtection(info, enabled: true)
+        let rated = try await client.setMediaRating(protected, rating: 5)
+        let rotated = try await client.setMediaRotation(rated, degrees: 270)
+        XCTAssertEqual(protected.protected, true)
+        XCTAssertEqual(rated.rating, 5)
+        XCTAssertEqual(rotated.rotationDegrees, 270)
+
+        let writes = await transport.requests().filter { $0.method == "PUT" && $0.path == path }
+        let payloads = try writes.map { request -> [String: String] in
+            let body = try XCTUnwrap(request.body)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        }
+        XCTAssertEqual(payloads[0], ["action": "protect", "value": "enable"])
+        XCTAssertEqual(payloads[1], ["action": "rating", "value": "5"])
+        XCTAssertEqual(payloads[2], ["action": "rotate", "value": "270"])
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
+        let capabilities = try await client.capabilities()
+        XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.mediaProtect))
+        XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.mediaRating))
+        XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.mediaRotate))
+    }
+
+    func testMediaMetadataRequiresAdvertisedContentsPut() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+        let item = CameraMediaItem(
+            id: "/ccapi/ver100/contents/card1/IMG_0001.JPG",
+            name: "IMG_0001.JPG",
+            kind: "image"
+        )
+
+        do {
+            _ = try await client.setMediaRating(item, rating: 4)
+            XCTFail("Expected unsupported media rating")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.mediaRating))
         }
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.method), ["GET"])

@@ -443,25 +443,52 @@ class DesktopBridgeClient(
     }
 
     suspend fun listMedia(): List<CameraMediaItem> {
-        val items = getJson(sessionEndpoint("media")).optJSONArray("items").objects().mapNotNull { item ->
-            val id = item.optString("id").trim()
-            val name = item.optString("name").trim()
-            if (id.isBlank() || name.isBlank()) {
-                null
-            } else {
-                CameraMediaItem(
-                    id = id,
-                    name = name,
-                    kind = item.optString("kind", "other"),
-                    sizeBytes = item.optNullableLong("sizeBytes"),
-                    captureTime = item.optNullableString("captureTime"),
-                    previewAvailable = item.optBoolean("previewAvailable", false),
-                )
-            }
-        }
+        val items = getJson(sessionEndpoint("media")).optJSONArray("items").objects().mapNotNull(::parseMediaItem)
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
         return items
     }
+
+    suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem =
+        parseMediaItem(getJson(sessionEndpoint("media", item.id, "info")))
+            ?: error("Desktop Bridge returned invalid media information for ${item.name}.")
+
+    suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        updateMediaMetadata(
+            item,
+            endpoint = "protection",
+            payload = JSONObject().put("enabled", enabled),
+            feature = CameraFeature.MEDIA_PROTECT,
+        )
+
+    suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem {
+        require(rating in 0..5) { "Media rating must be from 0 through 5." }
+        return updateMediaMetadata(
+            item,
+            endpoint = "rating",
+            payload = JSONObject().put("value", rating),
+            feature = CameraFeature.MEDIA_RATING,
+        )
+    }
+
+    suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem {
+        require(degrees in MEDIA_ROTATIONS) { "Media rotation must be 0, 90, 180, or 270 degrees." }
+        return updateMediaMetadata(
+            item,
+            endpoint = "rotation",
+            payload = JSONObject().put("degrees", degrees),
+            feature = CameraFeature.MEDIA_ROTATE,
+        )
+    }
+
+    private suspend fun updateMediaMetadata(
+        item: CameraMediaItem,
+        endpoint: String,
+        payload: JSONObject,
+        feature: CameraFeature,
+    ): CameraMediaItem = parseMediaItem(
+        putJson(sessionEndpoint("media", item.id, endpoint), payload),
+    )?.also { observedFeatures.add(feature) }
+        ?: error("Desktop Bridge returned invalid media information after updating ${item.name}.")
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
         val (bytes, contentType) = mediaImageRepresentation(
@@ -633,6 +660,23 @@ class DesktopBridgeClient(
             }
         }
 
+    private fun parseMediaItem(item: JSONObject): CameraMediaItem? {
+        val id = item.optString("id").trim()
+        val name = item.optString("name").trim()
+        if (id.isBlank() || name.isBlank()) return null
+        return CameraMediaItem(
+            id = id,
+            name = name,
+            kind = item.optString("kind", "other"),
+            sizeBytes = item.optNullableLong("sizeBytes"),
+            captureTime = item.optNullableString("captureTime"),
+            previewAvailable = item.optBoolean("previewAvailable", false),
+            protected = item.optNullableBoolean("protected"),
+            rating = item.optNullableInt("rating")?.takeIf { it in 0..5 },
+            rotationDegrees = item.optNullableInt("rotationDegrees")?.takeIf { it in MEDIA_ROTATIONS },
+        )
+    }
+
     private fun parseStatus(body: JSONObject): CameraStatus {
         val battery = body.optJSONObject("battery") ?: JSONObject()
         val media = body.optJSONObject("media") ?: JSONObject()
@@ -689,6 +733,13 @@ class DesktopBridgeClient(
             .url(url)
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build()
+    )
+
+    private suspend fun putJson(url: HttpUrl, payload: JSONObject): JSONObject = requestJson(
+        Request.Builder()
+            .url(url)
+            .put(payload.toString().toRequestBody(jsonMediaType))
+            .build(),
     )
 
     private suspend fun requestJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
@@ -788,6 +839,7 @@ class DesktopBridgeClient(
         const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024L
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
+        val MEDIA_ROTATIONS = setOf(0, 90, 180, 270)
     }
 }
 

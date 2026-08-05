@@ -167,7 +167,8 @@ class SimulatorEndToEndTest {
         compose.onNodeWithContentDescription(text(R.string.preview_media, "SIM_0003.PNG")).performClick()
         waitForContentDescription(text(R.string.media_preview_content, "SIM_0003.PNG"))
         compose.onNodeWithContentDescription(text(R.string.close_media_preview)).performClick()
-        compose.onNodeWithContentDescription(text(R.string.delete_media, "SIM_0003.PNG")).performClick()
+        compose.onNodeWithContentDescription(text(R.string.media_actions, "SIM_0003.PNG")).performClick()
+        compose.onNodeWithText(text(R.string.delete_media, "SIM_0003.PNG")).performClick()
         waitForText(text(R.string.delete_media_confirmation, "SIM_0003.PNG"))
         compose.onNodeWithText(text(R.string.delete)).performClick()
         waitForSimulatorState { state -> !state.hasMediaId("SIM_0003.PNG") }

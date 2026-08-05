@@ -881,6 +881,78 @@ final class CameraAppState: ObservableObject {
         resetMediaPreview()
     }
 
+    func loadMediaInfo(_ item: CameraMediaItem) async {
+        guard !isPreview, supports(.mediaBrowser), begin(.media) else { return }
+        defer { end(.media) }
+        guard let session else { return }
+        do {
+            applyUpdatedMedia(try await session.mediaInfo(item))
+            lastError = nil
+        } catch {
+            record(error)
+        }
+    }
+
+    func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async {
+        await updateMediaMetadata(item, feature: .mediaProtect) { session in
+            try await session.setMediaProtection(item, enabled: enabled)
+        } preview: {
+            CameraMediaItem(
+                id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
+                captureTime: item.captureTime, previewAvailable: item.previewAvailable,
+                protected: enabled, rating: item.rating, rotationDegrees: item.rotationDegrees
+            )
+        }
+    }
+
+    func setMediaRating(_ item: CameraMediaItem, rating: Int) async {
+        guard (0...5).contains(rating) else { return }
+        await updateMediaMetadata(item, feature: .mediaRating) { session in
+            try await session.setMediaRating(item, rating: rating)
+        } preview: {
+            CameraMediaItem(
+                id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
+                captureTime: item.captureTime, previewAvailable: item.previewAvailable,
+                protected: item.protected, rating: rating, rotationDegrees: item.rotationDegrees
+            )
+        }
+    }
+
+    func setMediaRotation(_ item: CameraMediaItem, degrees: Int) async {
+        guard [0, 90, 180, 270].contains(degrees) else { return }
+        await updateMediaMetadata(item, feature: .mediaRotate) { session in
+            try await session.setMediaRotation(item, degrees: degrees)
+        } preview: {
+            CameraMediaItem(
+                id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
+                captureTime: item.captureTime, previewAvailable: item.previewAvailable,
+                protected: item.protected, rating: item.rating, rotationDegrees: degrees
+            )
+        }
+    }
+
+    private func updateMediaMetadata(
+        _ item: CameraMediaItem,
+        feature: CameraFeature,
+        update: (CameraSession) async throws -> CameraMediaItem,
+        preview: () -> CameraMediaItem
+    ) async {
+        guard supports(feature), begin(.media) else { return }
+        defer { end(.media) }
+        if isPreview {
+            applyUpdatedMedia(preview())
+            lastError = nil
+            return
+        }
+        guard let session else { return }
+        do {
+            applyUpdatedMedia(try await update(session))
+            lastError = nil
+        } catch {
+            record(error)
+        }
+    }
+
     func startMediaDownload(_ item: CameraMediaItem) {
         guard supports(.mediaDownload), begin(.media) else { return }
         let token = UUID()
@@ -1379,6 +1451,11 @@ final class CameraAppState: ObservableObject {
         deletedMediaName = item.name
     }
 
+    private func applyUpdatedMedia(_ item: CameraMediaItem) {
+        mediaItems = mediaItems.map { $0.id == item.id ? item : $0 }
+        if mediaPreviewItem?.id == item.id { mediaPreviewItem = item }
+    }
+
     private func resetMediaThumbnails() {
         mediaThumbnailGeneration &+= 1
         mediaThumbnails = [:]
@@ -1441,7 +1518,7 @@ final class CameraAppState: ObservableObject {
             .soundRecordingControl, .soundRecordingLevelControl, .focusBracketingControl,
             .movieSettingsControl,
             .advancedSettings, .sensorCleaning, .cameraSleep, .mediaBrowser, .mediaDownload,
-            .mediaDelete,
+            .mediaProtect, .mediaRating, .mediaRotate, .mediaDelete,
         ]
         let capabilities = CameraCapabilities(
             settings: settings,
@@ -1481,8 +1558,8 @@ final class CameraAppState: ObservableObject {
     }
 
     static let previewMedia = [
-        CameraMediaItem(id: "preview-001", name: "R6M3_0001.CR3", kind: "raw", sizeBytes: 31_457_280, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true),
-        CameraMediaItem(id: "preview-002", name: "R6M3_0001.JPG", kind: "image", sizeBytes: 8_912_384, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true),
-        CameraMediaItem(id: "preview-003", name: "R6M3_0002.MP4", kind: "video", sizeBytes: 128_450_560, captureTime: "2026-07-21T10:10:02+08:00"),
+        CameraMediaItem(id: "preview-001", name: "R6M3_0001.CR3", kind: "raw", sizeBytes: 31_457_280, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: true, rating: 5, rotationDegrees: 0),
+        CameraMediaItem(id: "preview-002", name: "R6M3_0001.JPG", kind: "image", sizeBytes: 8_912_384, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: false, rating: 3, rotationDegrees: 90),
+        CameraMediaItem(id: "preview-003", name: "R6M3_0002.MP4", kind: "video", sizeBytes: 128_450_560, captureTime: "2026-07-21T10:10:02+08:00", protected: false, rating: 0, rotationDegrees: 0),
     ]
 }

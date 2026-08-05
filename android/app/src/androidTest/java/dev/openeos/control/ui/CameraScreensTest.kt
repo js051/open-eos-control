@@ -1762,7 +1762,9 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.delete_media, "R6M3_0001.CR3"))
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, "R6M3_0001.CR3"))
+            .performClick()
+        compose.onNodeWithText(resourceText(R.string.delete_media, "R6M3_0001.CR3"))
             .performClick()
         compose.runOnIdle { assertEquals(null, deletedName) }
         compose.onNodeWithText(
@@ -1770,6 +1772,46 @@ class CameraScreensTest {
         ).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.delete)).performClick()
         compose.runOnIdle { assertEquals("R6M3_0001.CR3", deletedName) }
+    }
+
+    @Test
+    fun mediaMetadataSheetLoadsAndDispatchesOnlyAdvertisedActions() {
+        val item = CameraMediaItem(
+            id = "ccapi:image",
+            name = "IMG_0042.JPG",
+            kind = "image",
+            protected = false,
+            rating = 2,
+            rotationDegrees = 0,
+        )
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA, mediaItems = listOf(item))
+        var loaded: CameraMediaItem? = null
+        var protection: Boolean? = null
+        var rating: Int? = null
+        var rotation: Int? = null
+        val actions = noOpActions().copy(
+            loadMediaInfo = { loaded = it },
+            setMediaProtection = { _, value -> protection = value },
+            setMediaRating = { _, value -> rating = value },
+            setMediaRotation = { _, value -> rotation = value },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, actions) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, item.name)).performClick()
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(item, loaded) }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.protect_media, item.name)).performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.set_media_rating, item.name, 4)).performClick()
+        compose.onNodeWithText(resourceText(R.string.rotation_degrees_short, 180)).performClick()
+        compose.runOnIdle {
+            assertEquals(true, protection)
+            assertEquals(4, rating)
+            assertEquals(180, rotation)
+        }
     }
 
     @Test

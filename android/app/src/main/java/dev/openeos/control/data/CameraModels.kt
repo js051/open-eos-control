@@ -99,6 +99,9 @@ enum class CameraFeature(
     MEDIA_THUMBNAIL("Media thumbnail"),
     MEDIA_PREVIEW("Media preview"),
     MEDIA_DOWNLOAD("Media download"),
+    MEDIA_PROTECT("Media protection"),
+    MEDIA_RATING("Media rating"),
+    MEDIA_ROTATE("Media rotation"),
     MEDIA_DELETE("Media deletion"),
     USB_DIAGNOSTICS("USB/PTP diagnostics"),
     DESKTOP_BRIDGE("Desktop bridge"),
@@ -156,6 +159,9 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_PROTECT,
+                CameraFeature.MEDIA_RATING,
+                CameraFeature.MEDIA_ROTATE,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
                 CameraFeature.SENSOR_CLEANING,
@@ -201,6 +207,12 @@ data class CapabilityMatrix(
                     "The camera must advertise the Canon POST sensor-cleaning endpoint.",
                 CameraFeature.CAMERA_SLEEP to
                     "The camera must advertise matching GET and PUT Auto Power Off endpoints and include immediately in its current ability.",
+                CameraFeature.MEDIA_PROTECT to
+                    "The camera must advertise PUT for Canon contents before file protection can be changed.",
+                CameraFeature.MEDIA_RATING to
+                    "The camera must advertise PUT for Canon contents before file ratings can be changed.",
+                CameraFeature.MEDIA_ROTATE to
+                    "The camera must advertise PUT for Canon contents before display rotation can be changed.",
             ),
         )
 
@@ -225,6 +237,9 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_PROTECT,
+                CameraFeature.MEDIA_RATING,
+                CameraFeature.MEDIA_ROTATE,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
             ),
@@ -264,6 +279,9 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_PROTECT,
+                CameraFeature.MEDIA_RATING,
+                CameraFeature.MEDIA_ROTATE,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
             ),
@@ -485,6 +503,9 @@ data class CameraMediaItem(
     val sizeBytes: Long? = null,
     val captureTime: String? = null,
     val previewAvailable: Boolean = false,
+    val protected: Boolean? = null,
+    val rating: Int? = null,
+    val rotationDegrees: Int? = null,
 )
 
 data class CameraMediaThumbnail(

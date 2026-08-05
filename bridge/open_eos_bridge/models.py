@@ -74,6 +74,9 @@ class CameraFeature(StrEnum):
     MEDIA_THUMBNAIL = "MEDIA_THUMBNAIL"
     MEDIA_PREVIEW = "MEDIA_PREVIEW"
     MEDIA_DOWNLOAD = "MEDIA_DOWNLOAD"
+    MEDIA_PROTECT = "MEDIA_PROTECT"
+    MEDIA_RATING = "MEDIA_RATING"
+    MEDIA_ROTATE = "MEDIA_ROTATE"
     MEDIA_DELETE = "MEDIA_DELETE"
     USB_DIAGNOSTICS = "USB_DIAGNOSTICS"
     DESKTOP_BRIDGE = "DESKTOP_BRIDGE"
@@ -322,6 +325,21 @@ class MediaItem(ApiModel):
     capture_time: str | None = None
     content_type: str = "application/octet-stream"
     preview_available: bool = False
+    protected: bool | None = None
+    rating: int | None = Field(default=None, ge=0, le=5)
+    rotation_degrees: Literal[0, 90, 180, 270] | None = None
+
+
+class MediaProtectionUpdate(ApiModel):
+    enabled: bool
+
+
+class MediaRatingUpdate(ApiModel):
+    value: int = Field(ge=0, le=5)
+
+
+class MediaRotationUpdate(ApiModel):
+    degrees: Literal[0, 90, 180, 270]
 
 
 class MediaList(ApiModel):

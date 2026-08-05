@@ -951,6 +951,14 @@ class CcapiSession:
                 )
             if self._supports_media_delete():
                 supported.add(CameraFeature.MEDIA_DELETE)
+            if self._supports_media_modify():
+                supported.update(
+                    {
+                        CameraFeature.MEDIA_PROTECT,
+                        CameraFeature.MEDIA_RATING,
+                        CameraFeature.MEDIA_ROTATE,
+                    }
+                )
             if self._event_polling_operations() is not None:
                 supported.add(CameraFeature.EVENT_POLLING)
             if self._camera_clock_operations() is not None:
@@ -980,6 +988,9 @@ class CcapiSession:
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_PROTECT,
+                CameraFeature.MEDIA_RATING,
+                CameraFeature.MEDIA_ROTATE,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
                 CameraFeature.SENSOR_CLEANING,
@@ -1021,6 +1032,15 @@ class CcapiSession:
                     ),
                     CameraFeature.EVENT_POLLING.value: (
                         "The camera must advertise both GET and DELETE for the Canon event polling endpoint."
+                    ),
+                    CameraFeature.MEDIA_PROTECT.value: (
+                        "The camera must advertise PUT for Canon contents before file protection can be changed."
+                    ),
+                    CameraFeature.MEDIA_RATING.value: (
+                        "The camera must advertise PUT for Canon contents before file ratings can be changed."
+                    ),
+                    CameraFeature.MEDIA_ROTATE.value: (
+                        "The camera must advertise PUT for Canon contents before display rotation can be changed."
                     ),
                     CameraFeature.CAMERA_CLOCK_SYNC.value: (
                         "The camera must advertise both GET and PUT for the Canon date-time endpoint "
@@ -1853,6 +1873,117 @@ class CcapiSession:
             self._media_cache = {item.id: item for item in items}
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
+
+    def media_info(self, media_id: str) -> MediaItem:
+        with self._lock:
+            self._ensure_initialized()
+            if not self._supports("GET", "/contents"):
+                raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+            return self._media_info(media_id)
+
+    def set_media_protection(self, media_id: str, enabled: bool) -> MediaItem:
+        return self._modify_media(
+            media_id,
+            action="protect",
+            value="enable" if enabled else "disable",
+            feature=CameraFeature.MEDIA_PROTECT,
+            matches=lambda item: item.protected is enabled,
+        )
+
+    def set_media_rating(self, media_id: str, value: int) -> MediaItem:
+        if value not in range(6):
+            raise BridgeError(
+                "INVALID_MEDIA_RATING",
+                "Media rating must be from 0 through 5.",
+                status_code=422,
+                feature=CameraFeature.MEDIA_RATING.value,
+                engine=self.engine_name,
+            )
+        return self._modify_media(
+            media_id,
+            action="rating",
+            value="off" if value == 0 else str(value),
+            feature=CameraFeature.MEDIA_RATING,
+            matches=lambda item: item.rating == value,
+        )
+
+    def set_media_rotation(self, media_id: str, degrees: int) -> MediaItem:
+        if degrees not in {0, 90, 180, 270}:
+            raise BridgeError(
+                "INVALID_MEDIA_ROTATION",
+                "Media rotation must be 0, 90, 180, or 270 degrees.",
+                status_code=422,
+                feature=CameraFeature.MEDIA_ROTATE.value,
+                engine=self.engine_name,
+            )
+        return self._modify_media(
+            media_id,
+            action="rotate",
+            value=str(degrees),
+            feature=CameraFeature.MEDIA_ROTATE,
+            matches=lambda item: item.rotation_degrees == degrees,
+        )
+
+    def _media_info(self, media_id: str) -> MediaItem:
+        path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+        value = self._request_json("GET", f"{path}?kind=info")
+        if not isinstance(value, dict):
+            raise BridgeError(
+                "INVALID_CCAPI_MEDIA_INFO",
+                "Camera media information was not a JSON object.",
+                status_code=502,
+                feature=CameraFeature.MEDIA_BROWSER.value,
+                engine=self.engine_name,
+            )
+        base = self._media_cache.get(media_id) or MediaItem(
+            id=media_id,
+            name=path.rsplit("/", 1)[-1],
+            kind=_media_kind(path),
+            content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+            preview_available=_media_kind(path) in {"image", "raw"},
+        )
+        item = base.model_copy(
+            update={
+                "size_bytes": _positive_int(value.get("filesize")) or base.size_bytes,
+                "capture_time": _optional_string(value.get("lastmodifieddate")) or base.capture_time,
+                "protected": _canon_protection(value.get("protect")),
+                "rating": _canon_rating(value.get("rating")),
+                "rotation_degrees": _canon_rotation(value.get("rotate")),
+            }
+        )
+        self._media_cache[media_id] = item
+        return item
+
+    def _modify_media(
+        self,
+        media_id: str,
+        *,
+        action: str,
+        value: str,
+        feature: CameraFeature,
+        matches: Callable[[MediaItem], bool],
+    ) -> MediaItem:
+        with self._lock:
+            self._ensure_initialized()
+            if not self._supports_media_modify():
+                raise unsupported(feature.value, self.engine_name)
+            path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+            self._request_ok("PUT", path, {"action": action, "value": value}, expected_status=200)
+            latest: MediaItem | None = None
+            for attempt in range(3):
+                latest = self._media_info(media_id)
+                if matches(latest):
+                    self._observed.add(feature)
+                    return latest
+                if attempt < 2:
+                    self._sleep(0.1)
+            raise BridgeError(
+                "CCAPI_MEDIA_METADATA_NOT_APPLIED",
+                f"Camera accepted media {action} but did not report the requested value.",
+                status_code=502,
+                feature=feature.value,
+                engine=self.engine_name,
+            )
 
     def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]:
         with self._lock:
@@ -2803,6 +2934,12 @@ class CcapiSession:
             for item in self._operations
         )
 
+    def _supports_media_modify(self) -> bool:
+        return any(
+            item.method == "PUT" and (item.path.endswith("/contents") or "/contents/" in item.path)
+            for item in self._operations
+        )
+
     def _api_path(self, method: str, suffix: str) -> str:
         matches = [item for item in self._operations if item.method == method and item.path.endswith(suffix)]
         preferred = next((item for item in matches if item.path.startswith(self._preferred_prefix)), None)
@@ -3139,6 +3276,41 @@ def _positive_int(value: object) -> int | None:
         match = re.search(r"\d+", str(value).replace(",", ""))
         parsed = int(match.group()) if match else 0
     return parsed if parsed > 0 else None
+
+
+def _optional_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _canon_protection(value: object) -> bool | None:
+    normalized = _optional_string(value)
+    if normalized == "enable":
+        return True
+    if normalized == "disable":
+        return False
+    return None
+
+
+def _canon_rating(value: object) -> int | None:
+    normalized = _optional_string(value)
+    if normalized == "off":
+        return 0
+    try:
+        rating = int(normalized) if normalized is not None else -1
+    except ValueError:
+        return None
+    return rating if rating in range(1, 6) else None
+
+
+def _canon_rotation(value: object) -> int | None:
+    try:
+        degrees = int(value)
+    except (TypeError, ValueError):
+        return None
+    return degrees if degrees in {0, 90, 180, 270} else None
 
 
 def _setting_value(settings: dict[str, object], key: str) -> str | None:

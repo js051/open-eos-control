@@ -2838,6 +2838,82 @@ class CcapiClientTest {
     }
 
     @Test
+    fun mediaMetadataUsesAdvertisedCanonPutAndVerifiesReadback() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true,"put":true}]}"""))
+        client.initialize()
+        server.takeRequest()
+        val path = "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG"
+        val item = CameraMediaItem(path, "IMG_0001.JPG", "image")
+        server.enqueue(
+            jsonResponse(
+                """{"filesize":1234,"protect":"disable","rating":"off","rotate":"0","lastmodifieddate":"2026-08-05T10:00:00+08:00"}""",
+            ),
+        )
+
+        val info = client.mediaInfo(item)
+
+        assertEquals(1234L, info.sizeBytes)
+        assertEquals(false, info.protected)
+        assertEquals(0, info.rating)
+        assertEquals(0, info.rotationDegrees)
+        assertEquals("$path?kind=info", server.takeRequest().path)
+
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"protect":"enable","rating":"off","rotate":"0"}"""))
+        val protected = client.setMediaProtection(info, true)
+        val protectRequest = server.takeRequest()
+        val protectBody = JSONObject(protectRequest.body.readUtf8())
+        assertEquals("PUT", protectRequest.method)
+        assertEquals(path, protectRequest.path)
+        assertEquals("protect", protectBody.getString("action"))
+        assertEquals("enable", protectBody.getString("value"))
+        assertEquals("$path?kind=info", server.takeRequest().path)
+        assertEquals(true, protected.protected)
+
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"protect":"enable","rating":"5","rotate":"0"}"""))
+        assertEquals(5, client.setMediaRating(protected, 5).rating)
+        val ratingRequest = server.takeRequest()
+        val ratingBody = JSONObject(ratingRequest.body.readUtf8())
+        assertEquals("rating", ratingBody.getString("action"))
+        assertEquals("5", ratingBody.getString("value"))
+        server.takeRequest()
+
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"protect":"enable","rating":"5","rotate":"270"}"""))
+        assertEquals(270, client.setMediaRotation(protected, 270).rotationDegrees)
+        val rotateRequest = server.takeRequest()
+        val rotateBody = JSONObject(rotateRequest.body.readUtf8())
+        assertEquals("rotate", rotateBody.getString("action"))
+        assertEquals("270", rotateBody.getString("value"))
+        server.takeRequest()
+
+        assertTrue(CameraFeature.MEDIA_PROTECT in client.observedFeatureSnapshot())
+        assertTrue(CameraFeature.MEDIA_RATING in client.observedFeatureSnapshot())
+        assertTrue(CameraFeature.MEDIA_ROTATE in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun mediaMetadataDoesNotWriteWithoutAdvertisedContentsPut() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
+        client.initialize()
+        server.takeRequest()
+        val item = CameraMediaItem(
+            "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG",
+            "IMG_0001.JPG",
+            "image",
+        )
+
+        val failure = runCatching { client.setMediaRating(item, 4) }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("did not advertise media rating"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun mediaDownloadStreamsInBoundedChunksAndReportsProgress() = runTest {
         val bytes = ByteArray(2 * 1024 * 1024 + 123) { (it % 251).toByte() }
         server.enqueue(binaryResponse(bytes, "video/mp4"))
