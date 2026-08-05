@@ -63,7 +63,7 @@ DISCOVERY = {
         {"path": "/shooting/liveview", "get": True, "post": True, "delete": True},
         {"path": "/shooting/liveview/flip", "get": True},
         {"path": "/shooting/liveview/flipdetail", "get": True},
-        {"path": "/contents", "get": True, "delete": True},
+        {"path": "/contents", "get": True, "put": True, "delete": True},
     ]
 }
 RTP_DISCOVERY = {
@@ -208,6 +208,14 @@ class FakeCcapiTransport:
         self.sensor_cleaning_auto_power_off: bool | None = None
         self.reject_live_view_size = True
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
+        self.media_metadata: dict[str, object] = {
+            "filesize": len(MEDIA),
+            "protect": "disable",
+            "archive": "disable",
+            "rotate": "0",
+            "rating": "off",
+            "lastmodifieddate": "2026-08-05T10:00:00+08:00",
+        }
         self.closed = False
 
     def request(
@@ -457,6 +465,16 @@ class FakeCcapiTransport:
             return CcapiResponse(200, {"content-type": self.thumbnail_content_type}, self.thumbnail_body)
         if method == "GET" and path.endswith("IMG_0001.JPG?kind=display"):
             return CcapiResponse(200, {"content-type": self.preview_content_type}, self.preview_body)
+        if method == "GET" and path.endswith("IMG_0001.JPG?kind=info"):
+            return _json_response(self.media_metadata)
+        if method == "PUT" and path.startswith("/ccapi/ver100/contents/"):
+            assert payload is not None
+            action = payload.get("action")
+            value = payload.get("value")
+            assert action in {"protect", "rating", "rotate"}
+            assert isinstance(value, str)
+            self.media_metadata[action] = value
+            return _json_response({})
         if method == "DELETE" and path.startswith("/ccapi/ver100/contents/"):
             return CcapiResponse(204, {}, b"")
         if (
@@ -610,6 +628,9 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.MEDIA_THUMBNAIL,
         CameraFeature.MEDIA_PREVIEW,
         CameraFeature.MEDIA_DOWNLOAD,
+        CameraFeature.MEDIA_PROTECT,
+        CameraFeature.MEDIA_RATING,
+        CameraFeature.MEDIA_ROTATE,
         CameraFeature.MEDIA_DELETE,
         CameraFeature.CAMERA_CLOCK_SYNC,
         CameraFeature.ZOOM_CONTROL,
@@ -733,6 +754,13 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     item, chunks = session.download_media(media[0].id)
     assert item.size_bytes == len(MEDIA)
     assert b"".join(chunks) == MEDIA
+    info = session.media_info(media[0].id)
+    assert info.protected is False
+    assert info.rating == 0
+    assert info.rotation_degrees == 0
+    assert session.set_media_protection(media[0].id, True).protected is True
+    assert session.set_media_rating(media[0].id, 5).rating == 5
+    assert session.set_media_rotation(media[0].id, 270).rotation_degrees == 270
     session.delete_media(media[0].id)
     session.stop_live_view()
     observed = set(session.capabilities().evidence.observed_features)
@@ -757,6 +785,9 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.MEDIA_THUMBNAIL,
         CameraFeature.MEDIA_PREVIEW,
         CameraFeature.MEDIA_DOWNLOAD,
+        CameraFeature.MEDIA_PROTECT,
+        CameraFeature.MEDIA_RATING,
+        CameraFeature.MEDIA_ROTATE,
         CameraFeature.MEDIA_DELETE,
     } <= observed
     command_paths = [request.path for request in transport.requests]
@@ -770,6 +801,30 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
             "POST",
             "/ccapi/ver100/shooting/control/drivefocus",
             {"value": "far3"},
+        )
+        in transport.requests
+    )
+    assert (
+        RecordedRequest(
+            "PUT",
+            "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
+            {"action": "protect", "value": "enable"},
+        )
+        in transport.requests
+    )
+    assert (
+        RecordedRequest(
+            "PUT",
+            "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
+            {"action": "rating", "value": "5"},
+        )
+        in transport.requests
+    )
+    assert (
+        RecordedRequest(
+            "PUT",
+            "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
+            {"action": "rotate", "value": "270"},
         )
         in transport.requests
     )
@@ -2484,6 +2539,22 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
         media_id = media.json()["items"][0]["id"]
         thumbnail = client.get(f"/v1/session/{session_id}/media/{media_id}/thumbnail", headers=headers)
         preview = client.get(f"/v1/session/{session_id}/media/{media_id}/preview", headers=headers)
+        media_info = client.get(f"/v1/session/{session_id}/media/{media_id}/info", headers=headers)
+        protected = client.put(
+            f"/v1/session/{session_id}/media/{media_id}/protection",
+            headers=headers,
+            json={"enabled": True},
+        )
+        rated = client.put(
+            f"/v1/session/{session_id}/media/{media_id}/rating",
+            headers=headers,
+            json={"value": 4},
+        )
+        rotated = client.put(
+            f"/v1/session/{session_id}/media/{media_id}/rotation",
+            headers=headers,
+            json={"degrees": 180},
+        )
         live_started = client.post(
             f"/v1/session/{session_id}/liveview/start",
             headers=headers,
@@ -2521,12 +2592,19 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert "FOCUS_DRIVE" in capabilities.json()["supported"]
     assert "MEDIA_THUMBNAIL" in capabilities.json()["supported"]
     assert "MEDIA_PREVIEW" in capabilities.json()["supported"]
+    assert "MEDIA_PROTECT" in capabilities.json()["supported"]
+    assert "MEDIA_RATING" in capabilities.json()["supported"]
+    assert "MEDIA_ROTATE" in capabilities.json()["supported"]
     assert thumbnail.content == JPEG
     assert thumbnail.headers["content-type"].startswith("image/jpeg")
     assert thumbnail.headers["cache-control"] == "private, no-store, max-age=0"
     assert preview.content == JPEG
     assert preview.headers["content-type"].startswith("image/jpeg")
     assert preview.headers["cache-control"] == "private, no-store, max-age=0"
+    assert media_info.json()["protected"] is False
+    assert protected.json()["protected"] is True
+    assert rated.json()["rating"] == 4
+    assert rotated.json()["rotationDegrees"] == 180
     assert focused.json() == {"accepted": True, "x": 0.4, "y": 0.6}
     assert white_balanced.json()["connected"] is True
     assert driven.json() == {"accepted": True, "direction": "NEAR", "step": "MEDIUM"}

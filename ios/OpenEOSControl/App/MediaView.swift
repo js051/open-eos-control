@@ -8,6 +8,7 @@ struct MediaView: View {
     @EnvironmentObject private var language: AppLanguageStore
     let controlRotation: Double
     @State private var pendingDeletion: CameraMediaItem?
+    @State private var metadataItemID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,6 +49,21 @@ struct MediaView: View {
             MediaPreviewView(controlRotation: controlRotation)
                 .environmentObject(camera)
                 .environmentObject(language)
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { metadataItemID != nil },
+                set: { if !$0 { metadataItemID = nil } }
+            )
+        ) {
+            if let metadataItemID {
+                MediaMetadataView(itemID: metadataItemID) { item in
+                    self.metadataItemID = nil
+                    pendingDeletion = item
+                }
+                .environmentObject(camera)
+                .environmentObject(language)
+            }
         }
         .alert(
             language.string("delete_media_title"),
@@ -176,11 +192,24 @@ struct MediaView: View {
 
     @ViewBuilder
     private func mediaActions(_ item: CameraMediaItem) -> some View {
+        let metadataSupported = camera.supports(.mediaProtect) ||
+            camera.supports(.mediaRating) || camera.supports(.mediaRotate)
         HStack(spacing: 2) {
             if camera.supports(.mediaDownload) {
                 downloadAction(item)
             }
-            if camera.supports(.mediaDelete) {
+            if metadataSupported {
+                Button {
+                    metadataItemID = item.id
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 48, height: 48)
+                        .accessibilityLabel(Text(language.format("media_actions", item.name)))
+                }
+                .foregroundStyle(Color.cameraText)
+                .disabled(camera.isBusy(.media))
+                .accessibilityIdentifier("media-actions-\(item.id)")
+            } else if camera.supports(.mediaDelete) {
                 Button {
                     pendingDeletion = item
                 } label: {
@@ -276,6 +305,151 @@ struct MediaView: View {
         case "raw": "camera.aperture"
         default: "photo"
         }
+    }
+}
+
+private struct MediaMetadataView: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
+    let itemID: String
+    let onDelete: (CameraMediaItem) -> Void
+
+    private var item: CameraMediaItem? {
+        camera.mediaItems.first { $0.id == itemID }
+    }
+
+    var body: some View {
+        ScrollView {
+            if let item {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(item.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if camera.isBusy(.media) {
+                        ProgressView().tint(Color.cameraAccent).frame(maxWidth: .infinity)
+                    }
+
+                    if camera.supports(.mediaProtect) {
+                        metadataHeader(
+                            language.string("media_protection"),
+                            value: protectionLabel(item.protected)
+                        )
+                        HStack(spacing: 12) {
+                            metadataIconButton(
+                                systemName: "lock",
+                                label: language.format("protect_media", item.name),
+                                selected: item.protected == true,
+                                enabled: item.protected != true
+                            ) { Task { await camera.setMediaProtection(item, enabled: true) } }
+                            metadataIconButton(
+                                systemName: "lock.open",
+                                label: language.format("unprotect_media", item.name),
+                                selected: item.protected == false,
+                                enabled: item.protected != false
+                            ) { Task { await camera.setMediaProtection(item, enabled: false) } }
+                        }
+                    }
+
+                    if camera.supports(.mediaRating) {
+                        metadataHeader(
+                            language.string("media_rating"),
+                            value: item.rating.map { language.format("media_rating_value", $0) }
+                                ?? language.string("media_metadata_unknown")
+                        )
+                        HStack(spacing: 0) {
+                            ratingButton(item, rating: 0, systemName: "star.slash")
+                            ForEach(1...5, id: \.self) { rating in
+                                ratingButton(item, rating: rating, systemName: "star.fill")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+
+                    if camera.supports(.mediaRotate) {
+                        metadataHeader(
+                            language.string("media_rotation"),
+                            value: item.rotationDegrees.map { language.format("media_rotation_value", $0) }
+                                ?? language.string("media_metadata_unknown")
+                        )
+                        Picker(
+                            language.string("media_rotation"),
+                            selection: Binding(
+                                get: { item.rotationDegrees ?? -1 },
+                                set: { value in Task { await camera.setMediaRotation(item, degrees: value) } }
+                            )
+                        ) {
+                            ForEach([0, 90, 180, 270], id: \.self) { value in
+                                Text("\(value)°").tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(camera.isBusy(.media))
+                    }
+
+                    if camera.supports(.mediaDelete) {
+                        Divider().overlay(Color.cameraBorder)
+                        Button(role: .destructive) { onDelete(item) } label: {
+                            Label(language.format("delete_media_named", item.name), systemImage: "trash")
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .disabled(camera.isBusy(.media))
+                        .accessibilityIdentifier("delete-media-\(item.id)")
+                    }
+                }
+                .padding(20)
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .background(Color.cameraBackground)
+        .task(id: itemID) {
+            guard !camera.isPreview, let item else { return }
+            await camera.loadMediaInfo(item)
+        }
+    }
+
+    private func metadataHeader(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.cameraText)
+            Spacer()
+            Text(value).font(.caption).foregroundStyle(Color.cameraSecondaryText).lineLimit(1)
+        }
+    }
+
+    private func protectionLabel(_ value: Bool?) -> String {
+        guard let value else { return language.string("media_metadata_unknown") }
+        return language.string(value ? "media_protected" : "media_unprotected")
+    }
+
+    private func metadataIconButton(
+        systemName: String,
+        label: String,
+        selected: Bool,
+        enabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .frame(width: 48, height: 48)
+                .accessibilityLabel(Text(label))
+        }
+        .buttonStyle(CameraIconButtonStyle())
+        .foregroundStyle(selected ? Color.cameraAccent : Color.cameraText)
+        .disabled(camera.isBusy(.media) || !enabled)
+    }
+
+    private func ratingButton(_ item: CameraMediaItem, rating: Int, systemName: String) -> some View {
+        Button {
+            Task { await camera.setMediaRating(item, rating: rating) }
+        } label: {
+            Image(systemName: systemName)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .accessibilityLabel(Text(language.format("set_media_rating", item.name, rating)))
+        }
+        .foregroundStyle((item.rating ?? 0) >= rating && rating > 0 ? Color.cameraWarning : Color.cameraSecondaryText)
+        .disabled(camera.isBusy(.media) || item.rating == rating)
     }
 }
 

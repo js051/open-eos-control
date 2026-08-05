@@ -1253,6 +1253,9 @@ class GPhoto2Session:
                     CameraFeature.CAMERA_CLOCK_SYNC,
                     CameraFeature.SENSOR_CLEANING,
                     CameraFeature.CAMERA_SLEEP,
+                    CameraFeature.MEDIA_PROTECT,
+                    CameraFeature.MEDIA_RATING,
+                    CameraFeature.MEDIA_ROTATE,
                 )
                 if feature not in supported
             }
@@ -1273,6 +1276,15 @@ class GPhoto2Session:
                     CameraFeature.TAP_FOCUS.value: (
                         "gphoto2 exposes autofocus and relative lens drive for this camera, but not a verified "
                         "normalized image-coordinate AF point command."
+                    ),
+                    CameraFeature.MEDIA_PROTECT.value: (
+                        "No verified libgphoto2 contract for changing Canon file protection is available."
+                    ),
+                    CameraFeature.MEDIA_RATING.value: (
+                        "No verified libgphoto2 contract for changing Canon file ratings is available."
+                    ),
+                    CameraFeature.MEDIA_ROTATE.value: (
+                        "No verified libgphoto2 contract for changing Canon display rotation is available."
                     ),
                     CameraFeature.CLICK_WHITE_BALANCE.value: (
                         "The libgphoto2 CLI engine has no verified Live View coordinate Click WB command."
@@ -1847,6 +1859,22 @@ class GPhoto2Session:
             self._run(["--folder", folder, "--delete-file", name], timeout=60.0)
             self._media_cache.pop(media_id, None)
             self._observed.add(CameraFeature.MEDIA_DELETE)
+
+    def media_info(self, media_id: str) -> MediaItem:
+        del media_id
+        raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+
+    def set_media_protection(self, media_id: str, enabled: bool) -> MediaItem:
+        del media_id, enabled
+        raise unsupported(CameraFeature.MEDIA_PROTECT.value, self.engine_name)
+
+    def set_media_rating(self, media_id: str, value: int) -> MediaItem:
+        del media_id, value
+        raise unsupported(CameraFeature.MEDIA_RATING.value, self.engine_name)
+
+    def set_media_rotation(self, media_id: str, degrees: int) -> MediaItem:
+        del media_id, degrees
+        raise unsupported(CameraFeature.MEDIA_ROTATE.value, self.engine_name)
 
     @property
     def requested_fps(self) -> int:

@@ -302,4 +302,18 @@
     <string name="sensor_cleaning_confirm_message">清潔期間無法拍照或錄影。</string>
     <string name="sensor_cleaning_power_off">清潔完成後關閉相機</string>
     <string name="clean_now">立即清潔</string>
+    <string name="media_actions">%1$s 的素材操作</string>
+    <string name="media_protection">檔案保護</string>
+    <string name="media_protected">已保護</string>
+    <string name="media_unprotected">未保護</string>
+    <string name="media_metadata_unknown">正在從相機讀取…</string>
+    <string name="protect_media">保護 %1$s</string>
+    <string name="unprotect_media">取消保護 %1$s</string>
+    <string name="media_rating">評分</string>
+    <string name="media_rating_value">5 分之 %1$d</string>
+    <string name="clear_media_rating">清除 %1$s 的評分</string>
+    <string name="set_media_rating">將 %1$s 設為 %2$d 星</string>
+    <string name="media_rotation">顯示旋轉</string>
+    <string name="media_rotation_value">%1$d 度</string>
+    <string name="rotation_degrees_short">%1$d°</string>
 </resources>

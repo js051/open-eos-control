@@ -197,6 +197,47 @@ def test_media_delete_removes_only_the_requested_item() -> None:
     assert client.delete("/ccapi/media/SIM_0002.PNG").status_code == 404
 
 
+def test_media_metadata_uses_canon_values_and_persists() -> None:
+    initial = client.get("/ccapi/media/SIM_0002.PNG?kind=info")
+    protected = client.put(
+        "/ccapi/media/SIM_0002.PNG",
+        json={"action": "protect", "value": "enable"},
+    )
+    rated = client.put(
+        "/ccapi/media/SIM_0002.PNG",
+        json={"action": "rating", "value": "5"},
+    )
+    rotated = client.put(
+        "/ccapi/media/SIM_0002.PNG",
+        json={"action": "rotate", "value": "270"},
+    )
+    updated = client.get("/ccapi/media/SIM_0002.PNG?kind=info")
+
+    assert initial.json()["protect"] == "disable"
+    assert initial.json()["rating"] == "off"
+    assert initial.json()["rotate"] == "0"
+    assert [protected.status_code, rated.status_code, rotated.status_code] == [200, 200, 200]
+    assert updated.json()["protect"] == "enable"
+    assert updated.json()["rating"] == "5"
+    assert updated.json()["rotate"] == "270"
+    assert client.get("/ccapi/test/state").json()["media_metadata_update_count"] == 3
+
+
+def test_media_metadata_rejects_invalid_action_and_value_without_mutation() -> None:
+    invalid_action = client.put(
+        "/ccapi/media/SIM_0002.PNG",
+        json={"action": "archive", "value": "enable"},
+    )
+    invalid_rating = client.put(
+        "/ccapi/media/SIM_0002.PNG",
+        json={"action": "rating", "value": "6"},
+    )
+
+    assert invalid_action.status_code == 400
+    assert invalid_rating.status_code == 400
+    assert client.get("/ccapi/test/state").json()["media_metadata_update_count"] == 0
+
+
 def test_events_return_changes_after_sequence() -> None:
     client.patch("/ccapi/exposure", json={"iso": "1600"})
     first = client.get("/ccapi/events?after=0").json()
@@ -432,15 +473,32 @@ def test_canonical_ccapi_controls_and_media_mutate_backend_state() -> None:
 
     contents = client.get("/ccapi/ver100/contents?page=1&order=desc").json()["path"]
     captured_path = next(path for path in contents if path.endswith("SIM_0003.JPG"))
+    assert client.put(
+        captured_path,
+        json={"action": "protect", "value": "enable"},
+    ).status_code == 200
+    assert client.put(
+        captured_path,
+        json={"action": "rating", "value": "4"},
+    ).status_code == 200
+    assert client.put(
+        captured_path,
+        json={"action": "rotate", "value": "90"},
+    ).status_code == 200
+    media_info = client.get(f"{captured_path}?kind=info")
     preview = client.get(f"{captured_path}?kind=display")
     deleted = client.delete(captured_path)
     test_state = client.get("/ccapi/test/state").json()
 
     assert preview.status_code == 200
+    assert media_info.json()["protect"] == "enable"
+    assert media_info.json()["rating"] == "4"
+    assert media_info.json()["rotate"] == "90"
     assert preview.headers["content-type"].startswith("image/jpeg")
     assert preview.content.startswith(b"\xff\xd8") and preview.content.endswith(b"\xff\xd9")
     assert deleted.status_code == 204
     assert test_state["capture_count"] == 1
+    assert test_state["media_metadata_update_count"] == 3
     assert test_state["canonical"]["af_start_count"] == 1
     assert test_state["canonical"]["af_stop_count"] == 1
     assert test_state["half_press_count"] == 1

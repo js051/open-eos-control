@@ -72,7 +72,7 @@ Each backend should map into this surface:
 - camera clock synchronization where advertised, with each transport preserving its own verification limit
 - timed Auto Power Off where advertised, plus immediate camera sleep only for a separately proven transport contract
 - still capture, Bulb start/stop, half-press, recording, tap focus, Click White Balance, and focus drive where available
-- media list/download/delete where available
+- media list/thumbnail/preview/download/delete where available, plus CCAPI protection/rating/display rotation only from an advertised and verified content-modification contract
 - live view source, size, and FPS request
 
 ## Implementation Order

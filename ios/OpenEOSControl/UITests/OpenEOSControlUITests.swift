@@ -82,8 +82,11 @@ final class OpenEOSControlUITests: XCTestCase {
         media.tap()
 
         let item = app.staticTexts["R6M3_0001.JPG"]
+        let actions = app.buttons["media-actions-preview-002"]
         let delete = app.buttons["delete-media-preview-002"]
         XCTAssertTrue(item.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForInteraction(actions, timeout: 5))
+        actions.tap()
         XCTAssertTrue(waitForInteraction(delete, timeout: 5))
         delete.tap()
 
@@ -282,6 +285,9 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(app.buttons["close-media-preview"].waitForExistence(timeout: 8))
         app.buttons["close-media-preview"].tap()
 
+        let mediaActions = app.buttons["media-actions-SIM_0003.PNG"]
+        XCTAssertTrue(waitForInteraction(mediaActions, timeout: 8))
+        mediaActions.tap()
         let deleteMedia = app.buttons["delete-media-SIM_0003.PNG"]
         XCTAssertTrue(waitForInteraction(deleteMedia, timeout: 8))
         deleteMedia.tap()

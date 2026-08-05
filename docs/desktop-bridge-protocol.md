@@ -182,6 +182,8 @@ The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --std
 
 `GET /v1/session/{id}/media/{itemId}/preview` is separately capability-gated and returns a private, non-cacheable display image up to 32 MiB. Every media item includes `previewAvailable`; clients must require both that field and `MEDIA_PREVIEW` before exposing an action. The direct CCAPI engine uses Canon's sample-backed structured `kind=display` query on the exact same-origin content path and accepts image/RAW media. The libgphoto2 engine uses bounded `--folder ... --get-file ... --stdout` for camera-resident JPEG/PNG and bounded local reads for host captures, then validates a complete image. RAW, HEIF and video items report `previewAvailable: false` on wired paths.
 
+`GET /v1/session/{id}/media/{itemId}/info` returns the authoritative media item including nullable `protected`, `rating`, and `rotationDegrees`. Direct CCAPI enables `MEDIA_PROTECT`, `MEDIA_RATING`, and `MEDIA_ROTATE` only when discovery advertises contents `PUT`. The corresponding Bridge routes are `PUT .../protection` with `{"enabled":true|false}`, `PUT .../rating` with `{"value":0..5}`, and `PUT .../rotation` with `{"degrees":0|90|180|270}`. The engine maps these to Canon's documented `protect=enable|disable`, `rating=off|1..5`, and `rotate=0|90|180|270` action/value bodies, then performs up to three bounded `kind=info` readbacks. A mismatch is an error and never observed evidence. libgphoto2 returns unsupported for these routes; Canon's separate archive action is intentionally not exposed.
+
 ```json
 {
   "id": "gphoto2:opaque-id",
@@ -189,7 +191,10 @@ The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --std
   "kind": "image",
   "sizeBytes": 8912384,
   "contentType": "image/jpeg",
-  "previewAvailable": true
+  "previewAvailable": true,
+  "protected": false,
+  "rating": 3,
+  "rotationDegrees": 90
 }
 ```
 

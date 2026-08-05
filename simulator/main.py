@@ -175,6 +175,7 @@ def initial_state() -> dict[str, object]:
         "canonical_event_delete_count": 0,
         "canonical_event_cancel_generation": 0,
         "canonical_event_active_requests": 0,
+        "media_metadata_update_count": 0,
         "canonical_datetime": {
             "datetime": format_datetime(datetime.now().astimezone()),
             "dst": False,
@@ -191,12 +192,18 @@ def initial_state() -> dict[str, object]:
                 "name": "SIM_0002.PNG",
                 "kind": "image",
                 "capture_time": "2026-07-21T10:00:02+08:00",
+                "protect": False,
+                "rating": 0,
+                "rotate": 0,
             },
             {
                 "id": "SIM_0001.PNG",
                 "name": "SIM_0001.PNG",
                 "kind": "image",
                 "capture_time": "2026-07-21T10:00:01+08:00",
+                "protect": True,
+                "rating": 3,
+                "rotate": 90,
             },
         ],
     }
@@ -389,6 +396,7 @@ async def get_test_state() -> dict[str, object]:
         },
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
+        "media_metadata_update_count": state["media_metadata_update_count"],
         "canonical": {
             "af_start_count": state["canonical_af_start_count"],
             "af_stop_count": state["canonical_af_stop_count"],
@@ -896,7 +904,16 @@ async def capture_still() -> dict[str, bool | int]:
     state["capture_count"] += 1
     name = f"SIM_{state['capture_count'] + 2:04d}.PNG"
     state["media"].insert(
-        0, {"id": name, "name": name, "kind": "image", "capture_time": None}
+        0,
+        {
+            "id": name,
+            "name": name,
+            "kind": "image",
+            "capture_time": None,
+            "protect": False,
+            "rating": 0,
+            "rotate": 0,
+        },
     )
     publish_event("contents")
     return {"ok": True, "capture_count": state["capture_count"]}
@@ -979,11 +996,19 @@ async def media_list() -> dict[str, list[dict[str, object]]]:
 
 @app.get("/ccapi/media/{item_id}")
 async def media_download(item_id: str, kind: str | None = None) -> Response:
-    if not any(item["id"] == item_id for item in state["media"]):
-        raise HTTPException(status_code=404, detail="Media item not found")
+    item = canonical_media_item(item_id)
+    if kind == "info":
+        return JSONResponse(content=media_info(item))
     if kind not in {None, "main", "thumbnail", "display"}:
         raise HTTPException(status_code=422, detail="Unsupported media representation")
     return Response(content=camera_frame_png(), media_type="image/png")
+
+
+@app.put("/ccapi/media/{item_id}")
+async def media_modify(item_id: str, payload: dict[str, object]) -> Response:
+    item = canonical_media_item(item_id)
+    update_media_metadata(item, payload)
+    return JSONResponse(content={})
 
 
 @app.delete("/ccapi/media/{item_id}", status_code=204)
@@ -1053,7 +1078,7 @@ CANON_DISCOVERY = {
         {"path": "/shooting/liveview/multipart", "get": True, "delete": True},
         {"path": "/shooting/liveview/afframeposition", "put": True},
         {"path": "/shooting/liveview/clickwb", "post": True},
-        {"path": "/contents", "get": True, "delete": True},
+        {"path": "/contents", "get": True, "put": True, "delete": True},
     ],
     "ver110": [
         {"path": "/event/polling", "get": True, "delete": True},
@@ -1092,6 +1117,32 @@ def canonical_media_item(item_id: str) -> dict[str, object]:
     if item is None:
         raise HTTPException(status_code=404, detail="Media item not found")
     return item
+
+
+def media_info(item: dict[str, object]) -> dict[str, object]:
+    return {
+        "filesize": len(camera_frame_jpeg()),
+        "protect": "enable" if item.get("protect") is True else "disable",
+        "archive": "disable",
+        "rotate": str(item.get("rotate", 0)),
+        "rating": "off" if item.get("rating", 0) == 0 else str(item["rating"]),
+        "lastmodifieddate": item.get("capture_time"),
+    }
+
+
+def update_media_metadata(item: dict[str, object], payload: dict[str, object]) -> None:
+    action = payload.get("action")
+    value = payload.get("value")
+    if action == "protect" and value in {"enable", "disable"}:
+        item["protect"] = value == "enable"
+    elif action == "rating" and value in {"off", "1", "2", "3", "4", "5"}:
+        item["rating"] = 0 if value == "off" else int(value)
+    elif action == "rotate" and value in {"0", "90", "180", "270"}:
+        item["rotate"] = int(value)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid media metadata parameter")
+    state["media_metadata_update_count"] += 1
+    publish_event("contents")
 
 
 @app.get("/ccapi")
@@ -1604,7 +1655,18 @@ async def canon_capture_still(payload: dict[str, object]) -> Response:
         raise HTTPException(status_code=422, detail="Unsupported shutter payload")
     state["capture_count"] += 1
     name = f"SIM_{state['capture_count'] + 2:04d}.JPG"
-    state["media"].insert(0, {"id": name, "name": name, "kind": "image", "capture_time": None})
+    state["media"].insert(
+        0,
+        {
+            "id": name,
+            "name": name,
+            "kind": "image",
+            "capture_time": None,
+            "protect": False,
+            "rating": 0,
+            "rotate": 0,
+        },
+    )
     publish_event("contents")
     return Response(status_code=204)
 
@@ -1826,10 +1888,19 @@ async def canon_contents(
 
 @app.get("/ccapi/ver100/contents/card1/100CANON/{item_id}")
 async def canon_media(item_id: str, kind: str | None = None) -> Response:
-    canonical_media_item(item_id)
+    item = canonical_media_item(item_id)
+    if kind == "info":
+        return JSONResponse(content=media_info(item))
     if kind not in {None, "main", "thumbnail", "display"}:
         raise HTTPException(status_code=422, detail="Unsupported media representation")
     return Response(content=camera_frame_jpeg(), media_type="image/jpeg")
+
+
+@app.put("/ccapi/ver100/contents/card1/100CANON/{item_id}")
+async def canon_modify_media(item_id: str, payload: dict[str, object]) -> Response:
+    item = canonical_media_item(item_id)
+    update_media_metadata(item, payload)
+    return JSONResponse(content={})
 
 
 @app.delete("/ccapi/ver100/contents/card1/100CANON/{item_id}", status_code=204)

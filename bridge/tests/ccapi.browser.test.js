@@ -533,7 +533,8 @@ async function run() {
     await page.waitForSelector("#media-preview-dialog[open] #media-preview-image:not([hidden])");
     await page.click("#media-preview-close");
     page.once("dialog", (dialog) => dialog.accept());
-    await capturedMedia.locator('button[aria-label="Delete SIM_0003.JPG"]').click();
+    await capturedMedia.locator('button[aria-label="Manage SIM_0003.JPG"]').click();
+    await page.click("#media-details-delete");
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => !state.media_ids.includes("SIM_0003.JPG"),

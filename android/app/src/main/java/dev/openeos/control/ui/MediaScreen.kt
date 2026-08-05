@@ -25,6 +25,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,6 +66,7 @@ import java.util.Locale
 fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     var pendingDownload by remember { mutableStateOf<CameraMediaItem?>(null) }
     var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
+    var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
     val createDocument = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { destination ->
@@ -101,6 +105,36 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 }
             },
         )
+    }
+
+    activeMetadataItemId?.let { itemId ->
+        val item = state.mediaItems.firstOrNull { it.id == itemId }
+        if (item != null) {
+            val metadataSupported = state.supports(CameraFeature.MEDIA_PROTECT) ||
+                state.supports(CameraFeature.MEDIA_RATING) ||
+                state.supports(CameraFeature.MEDIA_ROTATE)
+            LaunchedEffect(itemId, metadataSupported) {
+                if (metadataSupported) actions.loadMediaInfo(item)
+            }
+            MediaMetadataSheet(
+                item = item,
+                busy = state.isBusy(CameraOperation.MEDIA),
+                protectSupported = state.supports(CameraFeature.MEDIA_PROTECT),
+                ratingSupported = state.supports(CameraFeature.MEDIA_RATING),
+                rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
+                deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
+                onDismiss = { activeMetadataItemId = null },
+                onProtect = { actions.setMediaProtection(item, it) },
+                onRate = { actions.setMediaRating(item, it) },
+                onRotate = { actions.setMediaRotation(item, it) },
+                onDelete = {
+                    activeMetadataItemId = null
+                    pendingDelete = item
+                },
+            )
+        } else {
+            LaunchedEffect(itemId) { activeMetadataItemId = null }
+        }
     }
 
     Column(
@@ -206,6 +240,9 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                             item.previewAvailable &&
                             !state.isBusy(CameraOperation.MEDIA),
                         deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
+                        metadataSupported = state.supports(CameraFeature.MEDIA_PROTECT) ||
+                            state.supports(CameraFeature.MEDIA_RATING) ||
+                            state.supports(CameraFeature.MEDIA_ROTATE),
                         deleteEnabled = !state.isBusy(CameraOperation.MEDIA),
                         downloadEnabled = !state.previewMode &&
                             state.supports(CameraFeature.MEDIA_DOWNLOAD) &&
@@ -217,6 +254,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                             pendingDownload = item
                             createDocument.launch(item.name)
                         },
+                        onMetadata = { activeMetadataItemId = item.id },
                     )
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -239,12 +277,14 @@ private fun MediaRow(
     thumbnailLoading: Boolean,
     previewEnabled: Boolean,
     deleteSupported: Boolean,
+    metadataSupported: Boolean,
     deleteEnabled: Boolean,
     downloadSupported: Boolean,
     downloadEnabled: Boolean,
     onDelete: () -> Unit,
     onPreview: () -> Unit,
     onDownload: () -> Unit,
+    onMetadata: () -> Unit,
 ) {
     val previewDescription = stringResource(R.string.preview_media, item.name)
     Row(
@@ -319,13 +359,21 @@ private fun MediaRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (deleteSupported) {
+        if (deleteSupported && !metadataSupported) {
             ToolIconButton(
                 LucideR.drawable.lucide_ic_trash_2,
                 stringResource(R.string.delete_media, item.name),
                 onDelete,
                 enabled = deleteEnabled,
                 tint = AppRecord,
+            )
+        }
+        if (metadataSupported) {
+            ToolIconButton(
+                LucideR.drawable.lucide_ic_ellipsis_vertical,
+                stringResource(R.string.media_actions, item.name),
+                onMetadata,
+                enabled = deleteEnabled,
             )
         }
         if (downloadSupported) {
@@ -336,6 +384,144 @@ private fun MediaRow(
                 enabled = downloadEnabled,
             )
         }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun MediaMetadataSheet(
+    item: CameraMediaItem,
+    busy: Boolean,
+    protectSupported: Boolean,
+    ratingSupported: Boolean,
+    rotationSupported: Boolean,
+    deleteSupported: Boolean,
+    onDismiss: () -> Unit,
+    onProtect: (Boolean) -> Unit,
+    onRate: (Int) -> Unit,
+    onRotate: (Int) -> Unit,
+    onDelete: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = AppSurface,
+        contentColor = AppText,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                item.name,
+                color = AppText,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AppAccent)
+
+            if (protectSupported) {
+                MetadataSectionTitle(
+                    title = stringResource(R.string.media_protection),
+                    value = when (item.protected) {
+                        true -> stringResource(R.string.media_protected)
+                        false -> stringResource(R.string.media_unprotected)
+                        null -> stringResource(R.string.media_metadata_unknown)
+                    },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_lock,
+                        stringResource(R.string.protect_media, item.name),
+                        { onProtect(true) },
+                        enabled = !busy && item.protected != true,
+                        tint = if (item.protected == true) AppAccent else AppText,
+                    )
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_lock_open,
+                        stringResource(R.string.unprotect_media, item.name),
+                        { onProtect(false) },
+                        enabled = !busy && item.protected != false,
+                        tint = if (item.protected == false) AppAccent else AppText,
+                    )
+                }
+            }
+
+            if (ratingSupported) {
+                MetadataSectionTitle(
+                    title = stringResource(R.string.media_rating),
+                    value = item.rating?.let { stringResource(R.string.media_rating_value, it) }
+                        ?: stringResource(R.string.media_metadata_unknown),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_star_off,
+                        stringResource(R.string.clear_media_rating, item.name),
+                        { onRate(0) },
+                        enabled = !busy && item.rating != 0,
+                        tint = if (item.rating == 0) AppAccent else AppSubtleText,
+                    )
+                    (1..5).forEach { rating ->
+                        ToolIconButton(
+                            LucideR.drawable.lucide_ic_star,
+                            stringResource(R.string.set_media_rating, item.name, rating),
+                            { onRate(rating) },
+                            enabled = !busy && item.rating != rating,
+                            tint = if ((item.rating ?: 0) >= rating) AppWarning else AppSubtleText,
+                        )
+                    }
+                }
+            }
+
+            if (rotationSupported) {
+                MetadataSectionTitle(
+                    title = stringResource(R.string.media_rotation),
+                    value = item.rotationDegrees?.let { stringResource(R.string.media_rotation_value, it) }
+                        ?: stringResource(R.string.media_metadata_unknown),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(0, 90, 180, 270).forEach { degrees ->
+                        TextButton(
+                            onClick = { onRotate(degrees) },
+                            enabled = !busy && item.rotationDegrees != degrees,
+                            modifier = Modifier.weight(1f).height(48.dp),
+                        ) {
+                            Text(
+                                stringResource(R.string.rotation_degrees_short, degrees),
+                                color = if (item.rotationDegrees == degrees) AppAccent else AppText,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (deleteSupported) {
+                HorizontalDivider(color = AppSurfaceHigh)
+                TextButton(
+                    onClick = onDelete,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) {
+                    Icon(
+                        painterResource(LucideR.drawable.lucide_ic_trash_2),
+                        contentDescription = null,
+                        tint = AppRecord,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(stringResource(R.string.delete_media, item.name), color = AppRecord)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetadataSectionTitle(title: String, value: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = AppText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text(value, color = AppSubtleText, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

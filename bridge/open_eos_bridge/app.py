@@ -32,7 +32,11 @@ from .models import (
     LiveViewMagnificationResult,
     LiveViewStartRequest,
     LiveViewState,
+    MediaItem,
     MediaList,
+    MediaProtectionUpdate,
+    MediaRatingUpdate,
+    MediaRotationUpdate,
     SensorCleaningRequest,
     SessionCreated,
     SessionCreateRequest,
@@ -338,6 +342,26 @@ def create_app(
             media_type=content_type,
             headers={"Cache-Control": "private, no-store, max-age=0"},
         )
+
+    @router.get("/session/{session_id}/media/{media_id}/info", response_model=MediaItem)
+    def media_info(session_id: str, media_id: str) -> MediaItem:
+        return manager.get(session_id).media_info(media_id)
+
+    @router.put("/session/{session_id}/media/{media_id}/protection", response_model=MediaItem)
+    def set_media_protection(
+        session_id: str,
+        media_id: str,
+        update: MediaProtectionUpdate,
+    ) -> MediaItem:
+        return manager.get(session_id).set_media_protection(media_id, update.enabled)
+
+    @router.put("/session/{session_id}/media/{media_id}/rating", response_model=MediaItem)
+    def set_media_rating(session_id: str, media_id: str, update: MediaRatingUpdate) -> MediaItem:
+        return manager.get(session_id).set_media_rating(media_id, update.value)
+
+    @router.put("/session/{session_id}/media/{media_id}/rotation", response_model=MediaItem)
+    def set_media_rotation(session_id: str, media_id: str, update: MediaRotationUpdate) -> MediaItem:
+        return manager.get(session_id).set_media_rotation(media_id, update.degrees)
 
     @router.get("/session/{session_id}/media/{media_id}")
     def download_media(session_id: str, media_id: str) -> StreamingResponse:

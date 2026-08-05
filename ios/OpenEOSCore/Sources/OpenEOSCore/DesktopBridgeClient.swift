@@ -64,6 +64,7 @@ public actor DesktopBridgeClient {
     private static let maximumLiveViewFrameBytes = 12 * 1024 * 1024
     private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
     private static let maximumMediaPreviewBytes = 32 * 1024 * 1024
+    private static let mediaRotations = Set([0, 90, 180, 270])
     private static let maximumErrorBodyBytes = 2_000
     private static let maximumEvidenceItems = 256
     private static let maximumEvidenceItemCharacters = 512
@@ -432,21 +433,51 @@ public actor DesktopBridgeClient {
 
     public func listMedia() async throws -> [CameraMediaItem] {
         let body = try await getJSON(sessionEndpoint(["media"]))
-        return body.array("items").compactMap { value in
-            guard
-                let item = value as? BridgeJSON,
-                let id = item.nonEmptyString("id"),
-                let name = item.nonEmptyString("name")
-            else { return nil }
-            return CameraMediaItem(
-                id: id,
-                name: name,
-                kind: item.string("kind") ?? "other",
-                sizeBytes: item.int64("sizeBytes"),
-                captureTime: item.nonEmptyString("captureTime"),
-                previewAvailable: item.bool("previewAvailable") ?? false
+        return body.array("items").compactMap { ($0 as? BridgeJSON).flatMap(Self.parseMediaItem) }
+    }
+
+    public func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
+        let body = try await getJSON(sessionEndpoint(["media", item.id, "info"]))
+        guard let updated = Self.parseMediaItem(body) else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media information.")
+        }
+        return updated
+    }
+
+    public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
+        try await updateMediaMetadata(item, endpoint: "protection", payload: ["enabled": enabled])
+    }
+
+    public func setMediaRating(_ item: CameraMediaItem, rating: Int) async throws -> CameraMediaItem {
+        guard (0...5).contains(rating) else {
+            throw DesktopBridgeError.invalidResponse("Media rating must be from 0 through 5.")
+        }
+        return try await updateMediaMetadata(item, endpoint: "rating", payload: ["value": rating])
+    }
+
+    public func setMediaRotation(_ item: CameraMediaItem, degrees: Int) async throws -> CameraMediaItem {
+        guard Self.mediaRotations.contains(degrees) else {
+            throw DesktopBridgeError.invalidResponse("Media rotation must be 0, 90, 180, or 270 degrees.")
+        }
+        return try await updateMediaMetadata(item, endpoint: "rotation", payload: ["degrees": degrees])
+    }
+
+    private func updateMediaMetadata(
+        _ item: CameraMediaItem,
+        endpoint: String,
+        payload: BridgeJSON
+    ) async throws -> CameraMediaItem {
+        let body = try await requestJSON(
+            url: sessionEndpoint(["media", item.id, endpoint]),
+            method: "PUT",
+            payload: payload
+        )
+        guard let updated = Self.parseMediaItem(body) else {
+            throw DesktopBridgeError.invalidResponse(
+                "Desktop Bridge returned invalid media information after updating \(item.name)."
             )
         }
+        return updated
     }
 
     public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
@@ -739,6 +770,23 @@ public actor DesktopBridgeClient {
             label: body.nonEmptyString("label") ?? key,
             value: body.string("value") ?? "",
             values: values
+        )
+    }
+
+    private static func parseMediaItem(_ item: BridgeJSON) -> CameraMediaItem? {
+        guard let id = item.nonEmptyString("id"), let name = item.nonEmptyString("name") else { return nil }
+        let rating = item.int("rating").flatMap { (0...5).contains($0) ? $0 : nil }
+        let rotation = item.int("rotationDegrees").flatMap { mediaRotations.contains($0) ? $0 : nil }
+        return CameraMediaItem(
+            id: id,
+            name: name,
+            kind: item.string("kind") ?? "other",
+            sizeBytes: item.int64("sizeBytes"),
+            captureTime: item.nonEmptyString("captureTime"),
+            previewAvailable: item.optionalBool("previewAvailable") ?? false,
+            protected: item.optionalBool("protected"),
+            rating: rating,
+            rotationDegrees: rotation
         )
     }
 

@@ -552,7 +552,8 @@ async function run() {
       "media preview to request the camera JPEG",
     );
     page.once("dialog", (dialog) => dialog.accept());
-    await jpegMedia.locator('button[aria-label="Delete IMG_0001.JPG"]').click();
+    await jpegMedia.locator('button[aria-label="Manage IMG_0001.JPG"]').click();
+    await page.click("#media-details-delete");
     await page.waitForFunction(() => (
       !Array.from(document.querySelectorAll(".media-row"))
         .some((row) => row.textContent.includes("IMG_0001.JPG"))

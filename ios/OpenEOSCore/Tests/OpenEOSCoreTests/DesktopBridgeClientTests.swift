@@ -6,7 +6,7 @@ import XCTest
 final class DesktopBridgeClientTests: XCTestCase {
     private let health = #"{"ok":true,"service":"open-eos-control-bridge","version":"0.1.0","authRequired":true,"loopbackOnly":false,"engines":{}}"#
     private let status = #"{"connected":true,"battery":{"level":82,"status":"good"},"recording":false,"mode":"Manual","recordableShots":120,"remainingRecordingSeconds":3600,"media":{"available":true,"totalBytes":1000,"freeBytes":800,"freeImages":123,"devices":1},"exposure":{"iso":"400","shutter":"1/50","aperture":"2.8","whiteBalance":"Auto"},"raw":{"transport":"usb","recordable":{"recordableshots":120,"remainingtime":3600}}}"#
-    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","SENSOR_CLEANING","CAMERA_SLEEP","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso"],"observedFeatures":["BATTERY_STATUS"],"truncated":false}}"#
+    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","SENSOR_CLEANING","CAMERA_SLEEP","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_PROTECT","MEDIA_RATING","MEDIA_ROTATE","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso"],"observedFeatures":["BATTERY_STATUS"],"truncated":false}}"#
 
     func testDiscoveryValidatesServiceAndUsesBearerAuthentication() async throws {
         let transport = MockCameraHTTPTransport()
@@ -101,7 +101,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         )
         await transport.enqueueJSON(
             path: "/v1/session/session_123/media",
-            body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true}]}"#
+            body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true,"protected":null,"rating":null,"rotationDegrees":null}]}"#
         )
         let thumbnailJPEG = Data([0xFF, 0xD8, 0x04, 0x02, 0xFF, 0xD9])
         await transport.enqueue(
@@ -114,6 +114,25 @@ final class DesktopBridgeClientTests: XCTestCase {
             path: "/v1/session/session_123/media/gphoto2:YWJj/preview",
             headers: ["content-type": "image/jpeg"],
             body: previewJPEG
+        )
+        await transport.enqueueJSON(
+            path: "/v1/session/session_123/media/gphoto2:YWJj/info",
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true,"protected":false,"rating":0,"rotationDegrees":0}"#
+        )
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/v1/session/session_123/media/gphoto2:YWJj/protection",
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":0,"rotationDegrees":0}"#
+        )
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/v1/session/session_123/media/gphoto2:YWJj/rating",
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":0}"#
+        )
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/v1/session/session_123/media/gphoto2:YWJj/rotation",
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":180}"#
         )
         await transport.enqueueDownload(
             path: "/v1/session/session_123/media/gphoto2:YWJj",
@@ -153,6 +172,9 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaThumbnail))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaPreview))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaProtect))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaRating))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaRotate))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.sensorCleaning))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.cameraSleep))
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.stillCapture))
@@ -200,6 +222,16 @@ final class DesktopBridgeClientTests: XCTestCase {
         let preview = try await client.mediaPreview(item)
         XCTAssertEqual(preview.data, previewJPEG)
         XCTAssertEqual(preview.contentType, "image/jpeg")
+        let info = try await client.mediaInfo(item)
+        XCTAssertEqual(info.protected, false)
+        XCTAssertEqual(info.rating, 0)
+        XCTAssertEqual(info.rotationDegrees, 0)
+        let protected = try await client.setMediaProtection(info, enabled: true)
+        let rated = try await client.setMediaRating(protected, rating: 4)
+        let rotated = try await client.setMediaRotation(rated, degrees: 180)
+        XCTAssertEqual(protected.protected, true)
+        XCTAssertEqual(rated.rating, 4)
+        XCTAssertEqual(rotated.rotationDegrees, 180)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }

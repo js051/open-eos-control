@@ -38,6 +38,9 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case mediaThumbnail = "MEDIA_THUMBNAIL"
     case mediaPreview = "MEDIA_PREVIEW"
     case mediaDownload = "MEDIA_DOWNLOAD"
+    case mediaProtect = "MEDIA_PROTECT"
+    case mediaRating = "MEDIA_RATING"
+    case mediaRotate = "MEDIA_ROTATE"
     case mediaDelete = "MEDIA_DELETE"
     case desktopBridge = "DESKTOP_BRIDGE"
     case usbDiagnostics = "USB_DIAGNOSTICS"
@@ -471,6 +474,9 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     public let sizeBytes: Int64?
     public let captureTime: String?
     public let previewAvailable: Bool
+    public let protected: Bool?
+    public let rating: Int?
+    public let rotationDegrees: Int?
 
     public init(
         id: String,
@@ -478,7 +484,10 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         kind: String,
         sizeBytes: Int64? = nil,
         captureTime: String? = nil,
-        previewAvailable: Bool = false
+        previewAvailable: Bool = false,
+        protected: Bool? = nil,
+        rating: Int? = nil,
+        rotationDegrees: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -486,6 +495,9 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         self.sizeBytes = sizeBytes
         self.captureTime = captureTime
         self.previewAvailable = previewAvailable
+        self.protected = protected
+        self.rating = rating
+        self.rotationDegrees = rotationDegrees
     }
 }
 
