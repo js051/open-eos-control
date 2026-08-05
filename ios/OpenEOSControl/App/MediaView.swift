@@ -395,6 +395,7 @@ private struct MediaMetadataView: View {
                                 .frame(maxWidth: .infinity, minHeight: 48)
                         }
                         .disabled(camera.isBusy(.media))
+                        .accessibilityIdentifier("delete-media-\(item.id)")
                     }
                 }
                 .padding(20)
