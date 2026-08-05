@@ -418,11 +418,8 @@ private struct MediaMetadataView: View {
     }
 
     private func protectionLabel(_ value: Bool?) -> String {
-        switch value {
-        case true: language.string("media_protected")
-        case false: language.string("media_unprotected")
-        case nil: language.string("media_metadata_unknown")
-        }
+        guard let value else { return language.string("media_metadata_unknown") }
+        return language.string(value ? "media_protected" : "media_unprotected")
     }
 
     private func metadataIconButton(
