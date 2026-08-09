@@ -827,7 +827,8 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(capabilities.liveView.magnifications, [.x1, .x5, .x10])
         XCTAssertEqual(capabilities.liveView.currentMagnification, .x5)
         XCTAssertEqual(result.magnification, .x10)
-        let request = try XCTUnwrap((await transport.requests()).first {
+        let simulatorRequests = await transport.requests()
+        let request = try XCTUnwrap(simulatorRequests.first {
             $0.path == "/ccapi/liveview/magnification"
         })
         let body = try XCTUnwrap(request.body)
@@ -2137,7 +2138,8 @@ final class CCAPIClientTests: XCTestCase {
 
         let result = try await client.setLiveViewMagnification(.x10)
         XCTAssertEqual(result, LiveViewMagnificationResult(accepted: true, magnification: .x10))
-        let write = try XCTUnwrap((await transport.requests()).first {
+        let magnificationRequests = await transport.requests()
+        let write = try XCTUnwrap(magnificationRequests.first {
             $0.method == "PUT" && $0.path.hasSuffix("/shooting/settings/lvzoom")
         })
         let body = try XCTUnwrap(write.body)
@@ -2211,7 +2213,8 @@ final class CCAPIClientTests: XCTestCase {
 
         XCTAssertFalse(capabilities.matrix.supports(.liveViewMagnification))
         XCTAssertTrue(capabilities.matrix.planned.contains(.liveViewMagnification))
-        XCTAssertEqual((await transport.requests()).count, 2)
+        let requestCount = await transport.requests().count
+        XCTAssertEqual(requestCount, 2)
     }
 
     func testCanonCardSelectionRequiresMatchingGetPutAndWritesOnlyAdvertisedValue() async throws {
