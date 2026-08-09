@@ -4,6 +4,10 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-08-10
+
+- Added capability-gated Canon CCAPI media archive state and writes across Android, iOS, PC and Simulator. Clients require an advertised contents `PUT`, send Canon's exact `archive` action with `enable` or `disable`, and require a matching bounded `kind=info` readback before reporting success or observed evidence. Unknown archive state stays hidden, offline previews mutate locally, and the iOS metadata sheet now opens at a usable large detent.
+
 ## [0.1.9] - 2026-08-10
 
 - Added capability-gated wired media upload across Android, iOS and PC. Android USB uses standard PTP `SendObjectInfo`/`SendObject` only with advertised operations, a writable card and a matching object format, snapshots SAF input before the transaction, requires exact ObjectInfo readback, and drops a partial/cancelled PTP session. Desktop Bridge requires runtime libgphoto2 File Upload evidence, exact bounded raw bodies, writable storage, cancellable gPhoto2 subprocesses and fresh name/size verification; iOS and Android Bridge clients stream file-backed requests with bounded responses. Direct Canon CCAPI remains explicitly unsupported, while Simulator-only contracts preserve exact bytes and enforce matching filename/MIME categories.
@@ -88,3 +92,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.1.7]: https://github.com/js051/open-eos-control/releases/tag/v0.1.7
 [0.1.8]: https://github.com/js051/open-eos-control/releases/tag/v0.1.8
 [0.1.9]: https://github.com/js051/open-eos-control/releases/tag/v0.1.9
+[0.1.10]: https://github.com/js051/open-eos-control/releases/tag/v0.1.10
