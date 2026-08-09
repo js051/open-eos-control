@@ -830,6 +830,37 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun canonUnknownPropertyDiagnosticsExposeStructureWithoutValues() = runTest {
+        val unknownPropertyCode = 0xD2FE
+        val privateValue = 0x1234_5678
+        val privateOption = 0x5566_7788
+        val transport = CanonEosScriptedTransport(
+            scriptedEvents = listOf(
+                eosPropertyValue(unknownPropertyCode, privateValue) +
+                    eosAvailableValues(unknownPropertyCode, privateOption) +
+                    eosBlock(0, byteArrayOf()),
+            ),
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        backend.capabilities()
+
+        val diagnostics = backend.status().rawTransportJson
+
+        assertTrue(diagnostics.contains("\"unknownCanonVendorProperties\""))
+        assertTrue(diagnostics.contains("\"code\":\"0xD2FE\""))
+        assertTrue(diagnostics.contains("\"event\":\"valueChanged\""))
+        assertTrue(diagnostics.contains("\"event\":\"availableListChanged\""))
+        assertTrue(diagnostics.contains("\"declaredOptionCount\":1"))
+        assertFalse(diagnostics.contains("12345678", ignoreCase = true))
+        assertFalse(diagnostics.contains("55667788", ignoreCase = true))
+        backend.close()
+    }
+
+    @Test
     fun canonEventPollingReturnsEmptyAfterBoundedImmediatePolls() = runTest {
         val transport = CanonEosScriptedTransport()
         val backend = UsbPtpCameraBackend(

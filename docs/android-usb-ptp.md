@@ -65,7 +65,7 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 - A property is read only when DeviceInfo advertises its code and the descriptor operation. One broken descriptor does not disable the rest of the session.
 - A property control is enabled only when the camera advertises the set operation, marks that descriptor writable, and supplies a bounded enumeration or range. UI labels map back to the exact advertised raw value.
 - Standard battery, ISO/exposure index, exposure time, f-number, white balance, exposure compensation, focus mode, metering, flash, exposure program, drive mode and compression descriptors are recognized. Their actual availability remains camera-dependent.
-- Other remaining Canon vendor properties stay unavailable until their packing, state, type and value semantics are adequately proven.
+- Other remaining Canon vendor properties stay unavailable until their packing, state, type and value semantics are adequately proven. Unknown `0xC189`/`0xC18A` property events are retained only as a bounded structural diagnostic containing the property/event codes, block and payload lengths, and optional list type/count. Their raw values, bytes and text are never stored or copied.
 
 ## Evidence
 

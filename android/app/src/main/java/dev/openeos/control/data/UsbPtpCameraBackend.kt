@@ -44,6 +44,8 @@ class UsbPtpCameraBackend(
     private var canonPropertyDiscoveryAttempted = false
     private var canonTextPropertyDiscoveryAttempted = false
     private var canonPropertyError: String? = null
+    private val canonUnknownPropertyEvents = linkedMapOf<Pair<Int, Int>, CanonEosUnknownPropertyEvent>()
+    private var canonUnknownPropertyEventsTruncated = false
     private var selectedCaptureDestination: Long? = null
     private var advertisedStorageTargets: Map<String, Long> = emptyMap()
     private var bulbExposureActive = false
@@ -100,6 +102,10 @@ class UsbPtpCameraBackend(
         canonPropertyDiscoveryAttempted = false
         canonTextPropertyDiscoveryAttempted = false
         canonPropertyError = null
+        synchronized(canonUnknownPropertyEvents) {
+            canonUnknownPropertyEvents.clear()
+            canonUnknownPropertyEventsTruncated = false
+        }
         selectedCaptureDestination = null
         advertisedStorageTargets = emptyMap()
         bulbExposureActive = false
@@ -1260,6 +1266,19 @@ class UsbPtpCameraBackend(
     }
 
     private fun applyCanonPropertyUpdates(payload: ByteArray) {
+        val unknownEvidence = CanonEosPtp.unknownPropertyEvidence(payload)
+        synchronized(canonUnknownPropertyEvents) {
+            unknownEvidence.events.forEach { event ->
+                val key = event.propertyCode to event.eventCode
+                if (key in canonUnknownPropertyEvents || canonUnknownPropertyEvents.size < MAX_CANON_UNKNOWN_PROPERTIES) {
+                    canonUnknownPropertyEvents[key] = event
+                } else {
+                    canonUnknownPropertyEventsTruncated = true
+                }
+            }
+            canonUnknownPropertyEventsTruncated =
+                canonUnknownPropertyEventsTruncated || unknownEvidence.truncated
+        }
         val updates = CanonEosPtp.propertyUpdates(payload)
         if (updates.isEmpty()) return
         synchronized(canonProperties) {
@@ -1992,6 +2011,31 @@ class UsbPtpCameraBackend(
                     )
             )
         }
+        val unknownCanonVendorProperties = JSONArray()
+        val (unknownSnapshot, unknownSnapshotTruncated) = synchronized(canonUnknownPropertyEvents) {
+            canonUnknownPropertyEvents.values.sortedWith(
+                compareBy<CanonEosUnknownPropertyEvent> { it.propertyCode }.thenBy { it.eventCode }
+            ) to canonUnknownPropertyEventsTruncated
+        }
+        unknownSnapshot.forEach { event ->
+            unknownCanonVendorProperties.put(
+                JSONObject()
+                    .put("code", event.propertyCode.ptpHexCode())
+                    .put("eventCode", event.eventCode.ptpHexCode())
+                    .put(
+                        "event",
+                        when (event.eventCode) {
+                            CanonEosEventCode.PROPERTY_VALUE_CHANGED -> "valueChanged"
+                            CanonEosEventCode.AVAILABLE_LIST_CHANGED -> "availableListChanged"
+                            else -> "unknown"
+                        },
+                    )
+                    .put("blockLength", event.blockLength)
+                    .put("payloadLength", event.payloadLength)
+                    .apply { event.listType?.let { put("listType", it) } }
+                    .apply { event.declaredOptionCount?.let { put("declaredOptionCount", it) } }
+            )
+        }
         return JSONObject()
             .put("kind", "ptp-usb")
             .put("vendorExtensionId", info.vendorExtensionId.toInt().ptpHexCode(8))
@@ -2007,6 +2051,8 @@ class UsbPtpCameraBackend(
             .put("advertisedDeviceProperties", JSONArray(info.deviceProperties.sorted().map { it.ptpHexCode() }))
             .put("loadedProperties", properties)
             .put("canonVendorProperties", canonVendorProperties)
+            .put("unknownCanonVendorProperties", unknownCanonVendorProperties)
+            .put("unknownCanonVendorPropertiesTruncated", unknownSnapshotTruncated)
             .apply { canonPropertyError?.let { put("canonPropertyError", it) } }
             .toString()
     }
@@ -2332,6 +2378,7 @@ private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L
 private const val CANON_TOUCH_AF_MODE = 3L
 private const val CANON_PROPERTY_DISCOVERY_ATTEMPTS = 10
 private const val CANON_PROPERTY_DISCOVERY_RETRY_MILLIS = 50L
+private const val MAX_CANON_UNKNOWN_PROPERTIES = 64
 private const val CANON_CAPTURE_EVENT_TIMEOUT_MILLIS = 90_000L
 private const val CANON_HOST_TRANSFER_QUIET_MILLIS = 1_000L
 private const val CANON_HOST_TRANSFER_CHUNK_BYTES = 1 * 1024 * 1024
