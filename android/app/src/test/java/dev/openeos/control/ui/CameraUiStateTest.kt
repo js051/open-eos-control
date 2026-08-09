@@ -2,6 +2,7 @@ package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.CameraSettingInputKind
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.ExposureState
 import org.junit.Assert.assertEquals
@@ -89,6 +90,21 @@ class CameraUiStateTest {
         assertTrue(settingsForMode(listOf(singleChoice), CaptureMode.PHOTO).isEmpty())
         assertEquals(listOf(usable), settingsForMode(listOf(usable), CaptureMode.PHOTO))
         assertEquals(listOf(usable), settingsForMode(listOf(usable), CaptureMode.VIDEO))
+    }
+
+    @Test
+    fun advancedSettingsKeepTextControlsWithoutFakeChoiceValues() {
+        val owner = CameraSettingControl(
+            key = "ownername",
+            label = "Owner name",
+            value = "TEST OWNER",
+            values = emptyList(),
+            inputKind = CameraSettingInputKind.TEXT,
+            maxLength = 255,
+        )
+
+        assertEquals(listOf(owner), settingsForMode(listOf(owner), CaptureMode.PHOTO))
+        assertEquals(listOf(owner), settingsForMode(listOf(owner), CaptureMode.VIDEO))
     }
 
     @Test

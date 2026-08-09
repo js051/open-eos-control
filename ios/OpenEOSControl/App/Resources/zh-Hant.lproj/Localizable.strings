@@ -157,6 +157,11 @@
 "setting_continuous_af" = "連續自動對焦";
 "setting_movie_servo_af" = "短片伺服自動對焦";
 "setting_aeb" = "自動包圍曝光";
+"setting_owner_name" = "擁有者名稱";
+"setting_artist" = "藝術家";
+"setting_copyright" = "著作權";
+"setting_nickname" = "暱稱";
+"text_metadata_rule" = "可列印 ASCII，最多 255 bytes。";
 
 "camera_value_auto" = "自動";
 "camera_value_manual" = "手動";

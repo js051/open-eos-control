@@ -162,6 +162,11 @@
       fileNamingRule: "Use Canon's exact uppercase ASCII length and range.",
       apply: "Apply",
       fileNamingUpdated: "File naming updated",
+      ownername: "Owner name",
+      artist: "Artist",
+      copyright: "Copyright",
+      nickname: "Nickname",
+      textMetadataRule: "Printable ASCII, up to 255 bytes.",
       sensorCleaning: "Clean camera sensor",
       sensorCleaningHint: "Runs the camera's built-in sensor-cleaning cycle. Live View pauses while cleaning is in progress.",
       sensorCleaningNow: "Clean now",
@@ -408,6 +413,11 @@
       fileNamingRule: "請使用 Canon 規定長度與範圍的大寫 ASCII 字元。",
       apply: "套用",
       fileNamingUpdated: "已更新檔名設定",
+      ownername: "擁有者名稱",
+      artist: "藝術家",
+      copyright: "著作權",
+      nickname: "暱稱",
+      textMetadataRule: "可列印 ASCII，最多 255 bytes。",
       desktopControl: "電腦相機控制",
       language: "語言",
       auto: "自動",
@@ -875,6 +885,7 @@
     status: null,
     capabilities: null,
     fileNamingDrafts: {},
+    settingDrafts: {},
     operatorConfirmedFeatures: new Set(),
     lastClockSyncAt: null,
     lastCreatedDirectoryName: null,
@@ -1507,6 +1518,7 @@
     state.status = null;
     state.capabilities = null;
     state.fileNamingDrafts = {};
+    state.settingDrafts = {};
     state.operatorConfirmedFeatures.clear();
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
@@ -1650,6 +1662,14 @@
       messageKey = imageQualityValueKeys[rawValue];
     }
     return messageKey ? t(messageKey) : rawValue;
+  }
+
+  function textSettingValueValid(setting, value) {
+    if (setting.inputKind !== "text") return false;
+    const maximum = Number(setting.maxLength || 255);
+    return Number.isInteger(maximum) && maximum >= 1 && maximum <= 255
+      && /^[\x20-\x7E]*$/.test(value)
+      && new TextEncoder().encode(value).length <= maximum;
   }
 
   function movieQualityDisplayValue(rawValue) {
@@ -1951,6 +1971,45 @@
       return;
     }
     settings.forEach((setting) => {
+      if (setting.inputKind === "text") {
+        const row = document.createElement("div");
+        row.className = "settings-command text-setting";
+        const copy = document.createElement("span");
+        const text = document.createElement("strong");
+        text.textContent = settingLabel(setting);
+        const detail = document.createElement("small");
+        detail.textContent = t("textMetadataRule");
+        copy.append(text, detail);
+        const actions = document.createElement("div");
+        actions.className = "settings-command-actions";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "text-metadata-input";
+        input.maxLength = Number(setting.maxLength || 255);
+        input.value = state.settingDrafts[setting.key] ?? setting.value;
+        input.dataset.settingKey = setting.key;
+        input.setAttribute("aria-label", settingLabel(setting));
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "button secondary";
+        button.dataset.cameraCommand = "setting";
+        button.dataset.settingKey = setting.key;
+        button.textContent = t("apply");
+        const refresh = () => {
+          state.settingDrafts[setting.key] = input.value;
+          input.disabled = cameraInteractionBusy();
+          button.disabled = cameraInteractionBusy()
+            || !textSettingValueValid(setting, input.value)
+            || input.value === setting.value;
+        };
+        input.addEventListener("input", refresh);
+        button.addEventListener("click", () => updateSetting(setting, input.value, button));
+        refresh();
+        actions.append(input, button);
+        row.append(copy, actions);
+        ui.advancedSettings.append(row);
+        return;
+      }
       const label = document.createElement("label");
       const text = document.createElement("span");
       text.textContent = settingLabel(setting);
@@ -2342,6 +2401,7 @@
         { method: "POST", json: { value } },
       );
       setting.value = value;
+      if (setting.inputKind === "text") delete state.settingDrafts[setting.key];
       setOperationState(t("ready"));
       showToast(t("settingUpdated", { label: settingLabel(setting), value: settingValueLabel(setting, value) }));
       return true;
@@ -3843,6 +3903,16 @@
     });
     document.querySelectorAll("#advanced-settings .settings-command button").forEach((button) => {
       const command = button.dataset.cameraCommand;
+      if (command === "setting") {
+        const setting = settingByKey(button.dataset.settingKey);
+        const input = button.parentElement?.querySelector('input[type="text"]');
+        const value = input?.value ?? "";
+        if (input) input.disabled = interactionBusy || bulbActive;
+        button.disabled = interactionBusy || bulbActive || !setting
+          || !textSettingValueValid(setting, value)
+          || value === setting.value;
+        return;
+      }
       const supported = command === "sleep"
         ? featureSupported(FEATURES.CAMERA_SLEEP)
         : command === "sensor-cleaning"
@@ -4460,6 +4530,32 @@
     }
   }
 
+  function diagnosticCapabilities() {
+    const capabilities = state.capabilities;
+    if (!capabilities) return null;
+    return {
+      profile: capabilities.profile || null,
+      supported: capabilities.supported || [],
+      planned: capabilities.planned || [],
+      reasons: capabilities.reasons || {},
+      liveView: capabilities.liveView || null,
+      settings: (capabilities.settings || []).map((setting) => ({
+        key: setting.key,
+        label: setting.label,
+        inputKind: setting.inputKind || "choice",
+        maxLength: setting.maxLength ?? null,
+        choiceCount: Array.isArray(setting.values) ? setting.values.length : 0,
+      })),
+      fileNaming: capabilities.fileNaming ? {
+        available: true,
+        stillFilenameModeOptions: capabilities.fileNaming.stillFilenameModeOptions || [],
+        movieReelRange: capabilities.fileNaming.movieReelRange || null,
+        movieClipRange: capabilities.fileNaming.movieClipRange || null,
+      } : null,
+      evidence: capabilities.evidence || null,
+    };
+  }
+
   function diagnosticReport() {
     const report = {
       product: "Open EOS Control Desktop",
@@ -4470,7 +4566,7 @@
       camera: state.session?.camera || null,
       info: state.info,
       status: state.status,
-      capabilities: state.capabilities,
+      capabilities: diagnosticCapabilities(),
       validation: diagnostics.featureSummary(state.capabilities),
       cameraClock: { lastSyncAt: state.lastClockSyncAt },
       liveView: {

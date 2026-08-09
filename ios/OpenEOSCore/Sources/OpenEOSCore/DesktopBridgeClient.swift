@@ -865,16 +865,32 @@ public actor DesktopBridgeClient {
     private static func parseSetting(_ value: Any) -> CameraSetting? {
         guard
             let body = value as? BridgeJSON,
-            let key = body.nonEmptyString("key")
+            let key = body.nonEmptyString("key"),
+            let rawValue = body.string("value")
         else { return nil }
         let values = body.stringArray("values").filter { !$0.isEmpty }
-        guard !values.isEmpty else { return nil }
-        return CameraSetting(
+        let rawInputKind = body.string("inputKind") ?? CameraSettingInputKind.choice.rawValue
+        guard let inputKind = CameraSettingInputKind(rawValue: rawInputKind) else { return nil }
+        switch inputKind {
+        case .choice:
+            guard !values.isEmpty, body["maxLength"] == nil else { return nil }
+        case .text:
+            guard
+                values.isEmpty,
+                let maxLength = body.int("maxLength"),
+                (1...255).contains(maxLength)
+            else { return nil }
+        }
+        let setting = CameraSetting(
             key: key,
             label: body.nonEmptyString("label") ?? key,
-            value: body.string("value") ?? "",
-            values: values
+            value: rawValue,
+            values: values,
+            inputKind: inputKind,
+            maxLength: inputKind == .text ? body.int("maxLength") : nil
         )
+        guard inputKind == .choice || setting.accepts(rawValue) else { return nil }
+        return setting
     }
 
     private static func parseFileNaming(_ body: BridgeJSON) -> CameraFileNaming? {

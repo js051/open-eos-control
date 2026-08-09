@@ -154,6 +154,9 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
     }:
         declarations = re.findall(rf'^\s+"{re.escape(key)}":\s+"', script, flags=re.MULTILINE)
         assert len(declarations) == 2, f"{key} must have exactly one label in each supported language"
+    for key in {"ownername", "artist", "copyright", "nickname", "textMetadataRule"}:
+        declarations = re.findall(rf"^\s+{re.escape(key)}:\s+\"", script, flags=re.MULTILINE)
+        assert len(declarations) == 2, f"{key} must be declared in English and Traditional Chinese"
     for key in {
         "fileNaming",
         "fileNamingPhotoSummary",
@@ -180,6 +183,13 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
     assert 'if (key === "alomode")' in script
 
     assert "function settingValueLabel(settingOrKey, value)" in script
+    assert 'setting.inputKind === "text"' in script
+    assert "settingDrafts" in script
+    assert "textSettingValueValid" in script
+    assert 'input.className = "text-metadata-input"' in script
+    assert 'method: "POST", json: { value }' in script
+    assert "function diagnosticCapabilities()" in script
+    assert "choiceCount:" in script
     assert "option.value = value" in script
     assert "option.textContent = settingValueLabel(setting, value)" in script
     assert '"capturetarget"' in script

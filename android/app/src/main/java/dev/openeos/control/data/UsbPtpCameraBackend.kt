@@ -38,6 +38,7 @@ class UsbPtpCameraBackend(
     private var canonLiveViewGeometry: CanonEosLiveViewGeometry? = null
     private val canonProperties = mutableMapOf<Int, CanonEosPropertyState>()
     private var canonPropertyDiscoveryAttempted = false
+    private var canonTextMetadataDiscoveryAttempted = false
     private var canonPropertyError: String? = null
     private var selectedCaptureDestination: Long? = null
     private var advertisedStorageTargets: Map<String, Long> = emptyMap()
@@ -91,6 +92,7 @@ class UsbPtpCameraBackend(
         canonLiveViewGeometry = null
         synchronized(canonProperties) { canonProperties.clear() }
         canonPropertyDiscoveryAttempted = false
+        canonTextMetadataDiscoveryAttempted = false
         canonPropertyError = null
         selectedCaptureDestination = null
         advertisedStorageTargets = emptyMap()
@@ -684,6 +686,12 @@ class UsbPtpCameraBackend(
             }
             return status()
         }
+        val canonTextSpec = CanonEosPtp.textSettingSpecs.firstOrNull { it.key == key }
+        if (canonTextSpec != null) {
+            setCanonTextMetadata(info, canonTextSpec, value)
+            observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
+            return status()
+        }
         val canonSpec = CanonEosPtp.settingSpecs.firstOrNull { it.key == key }
         if (canonSpec != null && setAdvertisedCanonProperty(canonSpec.propertyCode, value)) {
             observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
@@ -986,8 +994,33 @@ class UsbPtpCameraBackend(
             } else {
                 "Canon EOS remote mode returned no supported property events."
             }
+            if (!canonTextMetadataDiscoveryAttempted && CanonEosPtp.supportsTextMetadata(info)) {
+                discoverCanonTextMetadata()
+            }
         } catch (exception: Exception) {
             canonPropertyError = exception.message ?: exception.javaClass.simpleName
+        }
+    }
+
+    private suspend fun discoverCanonTextMetadata() {
+        canonTextMetadataDiscoveryAttempted = true
+        canonEventMutex.withLock {
+            CanonEosPtp.textSettingSpecs.forEach { spec ->
+                if (canonPropertyState(spec.propertyCode).currentText != null) return@forEach
+                val requested = runCatching {
+                    requireSession().executeOperation(
+                        CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE,
+                        listOf(spec.propertyCode.toLong()),
+                    )
+                }.isSuccess
+                if (!requested) return@forEach
+                withTimeoutOrNull(CANON_TEXT_METADATA_DISCOVERY_TIMEOUT_MILLIS) {
+                    while (canonPropertyState(spec.propertyCode).currentText == null) {
+                        drainCanonEventsLocked()
+                        delay(CANON_PROPERTY_DISCOVERY_RETRY_MILLIS)
+                    }
+                }
+            }
         }
     }
 
@@ -1007,6 +1040,7 @@ class UsbPtpCameraBackend(
                 val previous = canonProperties[update.propertyCode] ?: CanonEosPropertyState()
                 canonProperties[update.propertyCode] = previous.copy(
                     currentValue = update.currentValue ?: previous.currentValue,
+                    currentText = update.currentText ?: previous.currentText,
                     availableValues = update.availableValues ?: previous.availableValues,
                 )
             }
@@ -1220,15 +1254,38 @@ class UsbPtpCameraBackend(
         }
         if (state.currentValue != target) {
             ensureCanonRemoteMode()
-            requireSession().executeDataOutOperation(
-                operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
-                payload = CanonEosPtp.uint16PropertyPayload(
-                    CanonEosPropertyCode.EVF_RECORD_STATUS,
-                    target.toInt(),
-                ),
-            )
-            synchronized(canonProperties) {
-                canonProperties[CanonEosPropertyCode.EVF_RECORD_STATUS] = state.copy(currentValue = target)
+            var lastReadback: Long? = null
+            val verified = canonEventMutex.withLock {
+                drainCanonEventsLocked()
+                requireSession().executeDataOutOperation(
+                    operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                    payload = CanonEosPtp.uint16PropertyPayload(
+                        CanonEosPropertyCode.EVF_RECORD_STATUS,
+                        target.toInt(),
+                    ),
+                )
+                withTimeoutOrNull(CANON_MOVIE_RECORD_VERIFY_TIMEOUT_MILLIS) {
+                    while (true) {
+                        val payload = drainCanonEventsLocked()
+                        CanonEosPtp.propertyUpdates(payload)
+                            .lastOrNull {
+                                it.propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && it.currentValue != null
+                            }
+                            ?.currentValue
+                            ?.let { readback ->
+                                lastReadback = readback
+                                if (readback == target) return@withTimeoutOrNull readback
+                            }
+                        delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+                    }
+                }
+            }
+            if (verified == null) {
+                throw PtpProtocolException(
+                    "Canon EOS accepted the movie-record command but did not report EVFRecordStatus=$target " +
+                        "within ${CANON_MOVIE_RECORD_VERIFY_TIMEOUT_MILLIS / 1_000} seconds " +
+                        "(last=${lastReadback ?: "none"})."
+                )
             }
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
@@ -1281,6 +1338,61 @@ class UsbPtpCameraBackend(
             )
         }
         return true
+    }
+
+    private suspend fun setCanonTextMetadata(
+        info: PtpDeviceInfo,
+        spec: CanonEosTextSettingSpec,
+        value: String,
+    ) {
+        if (!CanonEosPtp.supportsTextMetadata(info)) unsupported<Unit>(CameraFeature.ADVANCED_SETTINGS)
+        if (!CanonEosPtp.validTextMetadata(value)) {
+            throw PtpProtocolException(
+                "Canon EOS ${spec.fallbackLabel} must contain at most " +
+                    "${CanonEosPtp.MAX_TEXT_METADATA_BYTES} printable ASCII bytes."
+            )
+        }
+        val current = canonPropertyState(spec.propertyCode).currentText
+            ?: throw UnsupportedOperationException(
+                "The camera did not return the Canon EOS ${spec.fallbackLabel} property."
+            )
+        if (current == value) return
+
+        ensureCanonRemoteMode()
+        var lastReadback: String? = null
+        val verified = canonEventMutex.withLock {
+            drainCanonEventsLocked()
+            requireSession().executeDataOutOperation(
+                operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                payload = CanonEosPtp.textPropertyPayload(spec.propertyCode, value),
+            )
+            requireSession().executeOperation(
+                CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE,
+                listOf(spec.propertyCode.toLong()),
+            )
+            withTimeoutOrNull(CANON_TEXT_METADATA_VERIFY_TIMEOUT_MILLIS) {
+                while (true) {
+                    val payload = drainCanonEventsLocked()
+                    CanonEosPtp.propertyUpdates(payload)
+                        .lastOrNull {
+                            it.propertyCode == spec.propertyCode && it.currentText != null
+                        }
+                        ?.currentText
+                        ?.let { readback ->
+                            lastReadback = readback
+                            if (readback == value) return@withTimeoutOrNull readback
+                        }
+                    delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+                }
+            }
+        }
+        if (verified == null) {
+            throw PtpProtocolException(
+                "Canon EOS accepted ${spec.fallbackLabel}, but exact property readback did not match " +
+                    "within ${CANON_TEXT_METADATA_VERIFY_TIMEOUT_MILLIS / 1_000} seconds " +
+                    "(last=${lastReadback?.let { "${it.length} ASCII bytes" } ?: "none"})."
+            )
+        }
     }
 
     private suspend fun readCanonViewfinderData(): ByteArray {
@@ -1434,6 +1546,19 @@ class UsbPtpCameraBackend(
                         label = spec.fallbackLabel,
                         value = state.currentValue?.let { CanonEosPtp.propertyLabel(spec.propertyCode, it) } ?: "-",
                         values = options.map(CanonEosPropertyOption::label),
+                    )
+                }
+            }
+            if (CanonEosPtp.supportsTextMetadata(info)) {
+                CanonEosPtp.textSettingSpecs.forEach { spec ->
+                    val current = canonPropertyState(spec.propertyCode).currentText ?: return@forEach
+                    controls[spec.key] = CameraSettingControl(
+                        key = spec.key,
+                        label = spec.fallbackLabel,
+                        value = current,
+                        values = emptyList(),
+                        inputKind = CameraSettingInputKind.TEXT,
+                        maxLength = CanonEosPtp.MAX_TEXT_METADATA_BYTES,
                     )
                 }
             }
@@ -1670,6 +1795,7 @@ private fun Int.ptpHexCode(width: Int = 4): String =
 
 private data class CanonEosPropertyState(
     val currentValue: Long? = null,
+    val currentText: String? = null,
     val availableValues: List<Long> = emptyList(),
 )
 
@@ -1836,7 +1962,10 @@ private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
 private const val CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS = 3_000L
+private const val CANON_MOVIE_RECORD_VERIFY_TIMEOUT_MILLIS = 3_000L
 private const val CANON_MOVIE_MODE_VERIFY_TIMEOUT_MILLIS = 3_000L
+private const val CANON_TEXT_METADATA_VERIFY_TIMEOUT_MILLIS = 3_000L
+private const val CANON_TEXT_METADATA_DISCOVERY_TIMEOUT_MILLIS = 500L
 private const val CANON_CLOCK_SYNC_TOLERANCE_SECONDS = 10L
 private const val CANON_EVENT_LONG_POLL_ATTEMPTS = 10
 private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L

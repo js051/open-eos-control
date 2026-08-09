@@ -66,6 +66,54 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(parsed.liveView.currentMagnification, .x10)
     }
 
+    func testBridgeParsesAndAppliesTextMetadataSettings() async throws {
+        let transport = MockCameraHTTPTransport()
+        let textCapabilities = capabilities.replacingOccurrences(
+            of: #""settings":[{"#,
+            with: #""settings":[{"key":"ownername","label":"Owner Name","value":" Studio A ","values":[],"inputKind":"text","maxLength":255},{"#
+        )
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_text","engine":"libgphoto2","camera":{"id":"gphoto2:dXNi","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
+        )
+        await transport.enqueueJSON(path: "/v1/session/session_text/capabilities", body: textCapabilities)
+
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "gphoto2:dXNi",
+            transport: transport
+        )
+        try await client.initialize()
+        let parsed = try await client.capabilities()
+        let owner = try XCTUnwrap(parsed.setting("ownername"))
+        XCTAssertEqual(owner.inputKind, .text)
+        XCTAssertEqual(owner.maxLength, 255)
+        XCTAssertEqual(owner.value, " Studio A ")
+        XCTAssertTrue(owner.values.isEmpty)
+        XCTAssertTrue(owner.accepts("Studio B"))
+        XCTAssertTrue(owner.accepts(""))
+        XCTAssertFalse(owner.accepts("é"))
+        XCTAssertFalse(owner.accepts(String(repeating: "x", count: 256)))
+
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session/session_text/settings/ownername",
+            body: status
+        )
+        _ = try await client.setSetting(key: "ownername", value: "Studio B")
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.last { $0.path.hasSuffix("/settings/ownername") })
+        XCTAssertEqual(write.method, "POST")
+        let body = try XCTUnwrap(write.body)
+        XCTAssertEqual(
+            try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String]),
+            ["value": "Studio B"]
+        )
+    }
+
     func testBridgeRejectsInvalidLiveViewMagnificationAdvertisementWithoutSendingCommand() async throws {
         let transport = MockCameraHTTPTransport()
         let invalidCapabilities = capabilities.replacingOccurrences(

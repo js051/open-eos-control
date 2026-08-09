@@ -10,6 +10,7 @@ import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.CameraSettingInputKind
 import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.LiveViewSize
@@ -218,7 +219,9 @@ fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): Li
         "still", "photo", "drive", "imagequality", "colorspace", "highisonr", "aeb", "aspect", "capturetarget",
         "capturestorage", "directory",
     )
-    return settings.filter { it.values.distinct().size > 1 }.filter { setting ->
+    return settings.filter {
+        it.inputKind == CameraSettingInputKind.TEXT || it.values.distinct().size > 1
+    }.filter { setting ->
         val key = setting.key.lowercase()
         if (setting.key.isMovieModeKey()) return@filter false
         val isVideo = key in videoOnlyKeys || videoTokens.any(key::contains)

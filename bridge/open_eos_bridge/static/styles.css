@@ -1106,6 +1106,11 @@ input:disabled {
   text-transform: uppercase;
 }
 
+.settings-command-actions input.text-metadata-input {
+  width: min(260px, 100%);
+  text-transform: none;
+}
+
 .setting-row select,
 .settings-list select {
   height: 48px;

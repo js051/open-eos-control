@@ -187,6 +187,8 @@ def test_gphoto2_output_parsers_preserve_camera_advertised_values() -> None:
         "Bottom: -1\nTop: 1\nStep: 0.5\nEND\n"
         "/main/settings/datetimeutc\n"
         "Label: Camera Date and Time\nReadonly: 0\nType: DATE\nCurrent: 1768044194\nEND\n"
+        "/main/settings/ownername\n"
+        "Label: Owner Name\nReadonly: 0\nType: TEXT\nCurrent:  Studio A  \nEND\n"
     )
 
     assert cameras[0].model == "Canon EOS R6 Mark III"
@@ -207,6 +209,7 @@ def test_gphoto2_output_parsers_preserve_camera_advertised_values() -> None:
     ]
     assert configs["/main/settings/datetimeutc"].kind == "DATE"
     assert configs["/main/settings/datetimeutc"].current == "1768044194"
+    assert configs["/main/settings/ownername"].current == " Studio A  "
 
 
 def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
@@ -954,6 +957,107 @@ def test_r6_mark_iii_advanced_settings_use_advertised_safe_choices() -> None:
         setting for setting in unsafe_session.capabilities().settings if setting.key == "autopoweroff"
     )
     assert unsafe_current.value == "-"
+
+
+def test_gphoto2_text_metadata_is_advertised_with_a_bounded_text_contract() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+
+    capabilities = session.capabilities()
+    settings = {setting.key: setting for setting in capabilities.settings}
+    for key in ("ownername", "artist", "copyright", "nickname"):
+        setting = settings[key]
+        assert setting.input_kind == "text"
+        assert setting.max_length == 255
+        assert setting.values == []
+        assert f"/main/settings/{key}" in capabilities.evidence.writable_settings
+    assert "Open EOS" not in capabilities.evidence.writable_settings
+
+    session.set_setting("ownername", " Studio A ")
+    assert runner.values["/main/settings/ownername"] == " Studio A "
+    write_index = next(
+        index
+        for index, command in enumerate(runner.commands)
+        if command[-2:] == ("--set-config-value", "/main/settings/ownername= Studio A ")
+    )
+    assert any(
+        index > write_index and command[-1] == "--list-all-config"
+        for index, command in enumerate(runner.commands)
+    )
+    assert (
+        next(setting for setting in session.capabilities().settings if setting.key == "ownername").value
+        == " Studio A "
+    )
+
+    session.set_setting("nickname", "")
+    assert runner.values["/main/settings/nickname"] == ""
+
+
+@pytest.mark.parametrize("value", ["é", "line\nfeed", "x" * 256])
+def test_gphoto2_text_metadata_rejects_non_printable_or_oversized_values(value: str) -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+    session.capabilities()
+
+    with pytest.raises(BridgeError) as rejected:
+        session.set_setting("artist", value)
+
+    assert rejected.value.code == "INVALID_SETTING_VALUE"
+    assert runner.values["/main/settings/artist"] == "Jason"
+    assert not any(command[0] == "--set-config-value" for command in runner.commands)
+
+
+def test_gphoto2_text_metadata_rejects_missing_same_path_readback() -> None:
+    class MissingReadbackRunner(FakeRunner):
+        omit_owner = False
+
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            command = self._without_camera(arguments)
+            if command == ["--set-config-value", "/main/settings/ownername=Studio B"]:
+                result = super().run(arguments, timeout=timeout)
+                self.omit_owner = True
+                return result
+            return super().run(arguments, timeout=timeout)
+
+        def _config_dump(self) -> str:
+            output = super()._config_dump()
+            if self.omit_owner:
+                output = output.replace(
+                    self._text("/main/settings/ownername", "Owner Name", readonly=False),
+                    "",
+                )
+            return output
+
+    runner = MissingReadbackRunner()
+    session = GPhoto2Engine(runner).open()
+    session.capabilities()
+
+    with pytest.raises(BridgeError) as rejected:
+        session.set_setting("ownername", "Studio B")
+
+    assert rejected.value.code == "SETTING_READBACK_MISSING"
+    assert CameraFeature.ADVANCED_SETTINGS not in session.capabilities().evidence.observed_features
+
+
+def test_gphoto2_text_metadata_rejects_truncated_or_mismatched_readback() -> None:
+    class MismatchRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            command = self._without_camera(arguments)
+            if command == ["--set-config-value", "/main/settings/artist=Studio C"]:
+                result = super().run(arguments, timeout=timeout)
+                self.values["/main/settings/artist"] = "Studio"
+                return result
+            return super().run(arguments, timeout=timeout)
+
+    runner = MismatchRunner()
+    session = GPhoto2Engine(runner).open()
+    session.capabilities()
+
+    with pytest.raises(BridgeError) as rejected:
+        session.set_setting("artist", "Studio C")
+
+    assert rejected.value.code == "SETTING_READBACK_MISMATCH"
+    assert CameraFeature.ADVANCED_SETTINGS not in session.capabilities().evidence.observed_features
 
 
 def test_gphoto2_does_not_claim_unverified_immediate_camera_sleep() -> None:

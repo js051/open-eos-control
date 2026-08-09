@@ -227,6 +227,26 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(captureModeValue(for: .video, setting: movieMode, preferredPhotoValue: nil), "on")
     }
 
+    func testOfflinePreviewSupportsTextMetadataDraftValues() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        let owner = try! XCTUnwrap(state.capabilities?.setting("ownername"))
+        XCTAssertEqual(owner.inputKind, .text)
+        XCTAssertEqual(owner.maxLength, 255)
+        XCTAssertTrue(owner.accepts(" Studio A "))
+        XCTAssertTrue(owner.accepts(""))
+        XCTAssertFalse(owner.accepts("é"))
+        XCTAssertFalse(owner.accepts(String(repeating: "x", count: 256)))
+
+        await state.setSetting(key: "ownername", value: " Studio A ")
+        XCTAssertEqual(state.capabilities?.setting("ownername")?.value, " Studio A ")
+        XCTAssertNil(state.lastError)
+    }
+
     func testR6AdvancedSettingLocalizationKeepsProtocolValuesSeparate() {
         let expectedLabels = [
             "whitebalanceadjusta": "setting_white_balance_shift_a",

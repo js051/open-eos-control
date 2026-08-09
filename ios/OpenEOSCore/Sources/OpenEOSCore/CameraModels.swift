@@ -280,19 +280,49 @@ public struct CameraEvent: Equatable, Sendable {
     }
 }
 
+public enum CameraSettingInputKind: String, Equatable, Sendable {
+    case choice
+    case text
+}
+
 public struct CameraSetting: Identifiable, Equatable, Sendable {
     public let key: String
     public let label: String
     public var value: String
     public let values: [String]
+    public let inputKind: CameraSettingInputKind
+    public let maxLength: Int?
 
     public var id: String { key }
 
-    public init(key: String, label: String, value: String, values: [String]) {
+    public init(
+        key: String,
+        label: String,
+        value: String,
+        values: [String],
+        inputKind: CameraSettingInputKind = .choice,
+        maxLength: Int? = nil
+    ) {
         self.key = key
         self.label = label
         self.value = value
         self.values = values
+        self.inputKind = inputKind
+        self.maxLength = maxLength
+    }
+
+    public func accepts(_ candidate: String) -> Bool {
+        switch inputKind {
+        case .choice:
+            return values.contains(candidate)
+        case .text:
+            guard let maxLength, (1...255).contains(maxLength), candidate.utf8.count <= maxLength else {
+                return false
+            }
+            return candidate.unicodeScalars.allSatisfy { scalar in
+                scalar.value >= 0x20 && scalar.value <= 0x7E
+            }
+        }
     }
 }
 

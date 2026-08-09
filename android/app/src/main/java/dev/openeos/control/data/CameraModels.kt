@@ -494,7 +494,14 @@ data class CameraSettingControl(
     val label: String,
     val value: String,
     val values: List<String>,
+    val inputKind: CameraSettingInputKind = CameraSettingInputKind.CHOICE,
+    val maxLength: Int? = null,
 )
+
+enum class CameraSettingInputKind {
+    CHOICE,
+    TEXT,
+}
 
 enum class CameraFileNamingField(
     val wireName: String,

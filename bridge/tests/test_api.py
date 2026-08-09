@@ -138,6 +138,11 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
             headers=headers,
             json={"value": "800"},
         )
+        text_setting = client.post(
+            f"/v1/session/{session_id}/settings/ownername",
+            headers=headers,
+            json={"value": " Studio A "},
+        )
         storage_setting = client.post(
             f"/v1/session/{session_id}/settings/capturestorage",
             headers=headers,
@@ -206,9 +211,15 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert next(
         item for item in capabilities.json()["settings"] if item["key"] == "capturestorage"
     )["values"] == ["CFe", "SD"]
+    owner_setting = next(item for item in capabilities.json()["settings"] if item["key"] == "ownername")
+    assert owner_setting["inputKind"] == "text"
+    assert owner_setting["maxLength"] == 255
+    assert owner_setting["values"] == []
     assert event.json() == {"changedKeys": []}
     assert event_stopped.status_code == 204
     assert setting.json()["exposure"]["iso"] == "800"
+    assert text_setting.status_code == 200
+    assert runner.values["/main/settings/ownername"] == " Studio A "
     assert storage_setting.status_code == 200
     assert runner.values["/main/capturesettings/storageid"] == "00020001"
     assert clock_sync.status_code == 200

@@ -88,6 +88,7 @@ import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNaming
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.CameraSettingInputKind
 import dev.openeos.control.data.CameraTemperatureStatus
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
@@ -1515,7 +1516,13 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 ) {
                     Text(stringResource(R.string.no_settings), color = AppSubtleText)
                 }
-                settings.forEach { setting -> AdvancedSettingRow(setting, actions) }
+                settings.forEach { setting ->
+                    AdvancedSettingRow(
+                        setting = setting,
+                        actions = actions,
+                        enabled = !state.previewMode && !state.isBusy(CameraOperation.SETTING),
+                    )
+                }
             }
         }
     }
@@ -1809,7 +1816,15 @@ private fun FocusDriveDirectionRow(
 }
 
 @Composable
-private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraActions) {
+private fun AdvancedSettingRow(
+    setting: CameraSettingControl,
+    actions: CameraActions,
+    enabled: Boolean,
+) {
+    if (setting.inputKind == CameraSettingInputKind.TEXT) {
+        TextSettingRow(setting, actions, enabled)
+        return
+    }
     if (setting.key.lowercase() in RANGE_SETTING_KEYS) {
         RangeSettingRow(setting, actions)
         return
@@ -1846,6 +1861,60 @@ private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraAct
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextSettingRow(
+    setting: CameraSettingControl,
+    actions: CameraActions,
+    enabled: Boolean,
+) {
+    val maxLength = setting.maxLength ?: return
+    var confirmedValue by remember(setting.key) { mutableStateOf(setting.value) }
+    var draft by remember(setting.key) { mutableStateOf(setting.value) }
+    LaunchedEffect(setting.value) {
+        if (draft == confirmedValue) draft = setting.value
+        confirmedValue = setting.value
+    }
+    val valid = draft.length <= maxLength && draft.all { it.code in 0x20..0x7E }
+    Column(
+        modifier = Modifier.testTag("advanced-setting-${setting.key}"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(cameraSettingLabel(setting), color = AppText, fontWeight = FontWeight.SemiBold)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { raw ->
+                    draft = raw.filter { it.code in 0x20..0x7E }.take(maxLength)
+                },
+                enabled = enabled,
+                singleLine = true,
+                isError = !valid,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                supportingText = {
+                    Text(stringResource(R.string.setting_ascii_text_hint, maxLength))
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("advanced-setting-text-${setting.key}"),
+            )
+            Button(
+                onClick = { actions.setCameraSetting(setting.key, draft) },
+                enabled = enabled && valid && draft != setting.value,
+                colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier
+                    .height(48.dp)
+                    .testTag("advanced-setting-text-apply-${setting.key}"),
+            ) {
+                Text(stringResource(R.string.apply))
             }
         }
     }
@@ -1952,6 +2021,10 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "alomode" -> stringResource(R.string.setting_auto_lighting_optimizer)
     "aeb" -> stringResource(R.string.setting_aeb)
     "ae" -> stringResource(R.string.setting_ae_mode)
+    "ownername" -> stringResource(R.string.setting_owner_name)
+    "artist" -> stringResource(R.string.setting_artist)
+    "copyright" -> stringResource(R.string.setting_copyright)
+    "nickname" -> stringResource(R.string.setting_nickname)
     else -> setting.label
 }
 
