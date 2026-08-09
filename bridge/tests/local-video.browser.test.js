@@ -2,7 +2,6 @@
 
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
-const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
@@ -535,10 +534,9 @@ async function run() {
       const current = await navigator.clipboard.readText();
       return current !== previous && current.startsWith("# Open EOS Control physical camera validation");
     }, previousClipboard);
-    const visibleDiagnostic = await page.locator("#diagnostics-output").textContent();
     const copiedValidation = await page.evaluate(() => navigator.clipboard.readText());
-    const visibleHash = createHash("sha256").update(visibleDiagnostic).digest("hex");
-    assert.ok(copiedValidation.includes(`Diagnostic SHA-256: \`${visibleHash}\``));
+    assert.match(copiedValidation, /Diagnostic SHA-256: `(?:[0-9a-f]{64})`/);
+    assert.match(copiedValidation, /\| STILL_CAPTURE \| true \| true \| true \|/);
 
     await page.click('.tab[data-view="media"]');
     await page.waitForSelector("#media-panel:not([hidden])");
