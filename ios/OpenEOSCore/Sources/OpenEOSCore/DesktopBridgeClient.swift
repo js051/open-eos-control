@@ -86,6 +86,7 @@ public actor DesktopBridgeClient {
     private var sessionEngine: String?
     private var bridgeVersion: String?
     private var eventPollingSupported = false
+    private var liveViewMagnifications: [LiveViewMagnification] = []
 
     public init(
         baseURL: String,
@@ -147,6 +148,7 @@ public actor DesktopBridgeClient {
 
     public func initialize() async throws {
         guard sessionID == nil else { return }
+        liveViewMagnifications = []
         try await validateService()
         var payload: BridgeJSON = ["engine": cameraEngine ?? "auto"]
         if let cameraID { payload["cameraId"] = cameraID }
@@ -165,6 +167,7 @@ public actor DesktopBridgeClient {
             self.sessionID = nil
             sessionEngine = nil
             eventPollingSupported = false
+            liveViewMagnifications = []
         }
         await stopEventPolling()
         try? await requestOK(endpoint(["v1", "session", sessionID]), method: "DELETE")
@@ -229,9 +232,8 @@ public actor DesktopBridgeClient {
         let body = try await getJSON(sessionEndpoint(["capabilities"]))
         let settings = body.array("settings").compactMap(Self.parseSetting)
         let fileNaming = Self.parseFileNaming(body.dictionary("fileNaming"))
-        let supported = Set(body.stringArray("supported").compactMap(CameraFeature.init(rawValue:)))
+        var supported = Set(body.stringArray("supported").compactMap(CameraFeature.init(rawValue:)))
         eventPollingSupported = supported.contains(.eventPolling)
-        let planned = Set(body.stringArray("planned").compactMap(CameraFeature.init(rawValue:))).subtracting(supported)
         let reasons = body.dictionary("reasons").reduce(into: [CameraFeature: String]()) { result, entry in
             guard let feature = CameraFeature(rawValue: entry.key), let reason = entry.value as? String else { return }
             result[feature] = reason
@@ -242,6 +244,23 @@ public actor DesktopBridgeClient {
         let sizes = Self.unique(liveViewBody.stringArray("sizes").compactMap(Self.parseLiveViewSize))
         let minimumFPS = max(1, liveViewBody.int("minFps") ?? 1)
         let maximumFPS = max(minimumFPS, liveViewBody.int("maxFps") ?? minimumFPS)
+        let magnifications = Self.parseLiveViewMagnifications(liveViewBody)
+        let currentMagnification = liveViewBody["currentMagnification"]
+            .flatMap(Self.strictInt)
+            .flatMap(LiveViewMagnification.init(rawValue:))
+            .flatMap { magnifications.contains($0) ? $0 : nil }
+        let hasCurrentMagnification = liveViewBody["currentMagnification"] != nil
+        let validMagnificationCapability = magnifications.count >= 2
+            && (!hasCurrentMagnification || currentMagnification != nil)
+        if !validMagnificationCapability {
+            supported.remove(.liveViewMagnification)
+        }
+        liveViewMagnifications = validMagnificationCapability ? magnifications : []
+        var planned = Set(body.stringArray("planned").compactMap(CameraFeature.init(rawValue:))).subtracting(supported)
+        if !validMagnificationCapability,
+           body.stringArray("supported").contains(CameraFeature.liveViewMagnification.rawValue) {
+            planned.insert(.liveViewMagnification)
+        }
         let requestedDefaultSource = liveViewBody.string("defaultSource").flatMap(Self.parseLiveViewSource)
         let requestedDefaultSize = liveViewBody.string("defaultSize").flatMap(Self.parseLiveViewSize)
 
@@ -324,6 +343,8 @@ public actor DesktopBridgeClient {
                 defaultSize: requestedDefaultSize.flatMap { sizes.contains($0) ? $0 : nil }
                     ?? sizes.first
                     ?? .medium,
+                magnifications: liveViewMagnifications,
+                currentMagnification: currentMagnification,
                 minimumFPS: minimumFPS,
                 maximumFPS: maximumFPS
             ),
@@ -461,6 +482,11 @@ public actor DesktopBridgeClient {
     public func setLiveViewMagnification(
         _ magnification: LiveViewMagnification
     ) async throws -> LiveViewMagnificationResult {
+        guard liveViewMagnifications.contains(magnification) else {
+            throw DesktopBridgeError.invalidResponse(
+                "Desktop Bridge did not advertise Live View magnification \(magnification.rawValue)x."
+            )
+        }
         let body = try await postJSON(
             sessionEndpoint(["liveview", "magnification"]),
             payload: ["value": magnification.rawValue]
@@ -939,6 +965,17 @@ public actor DesktopBridgeClient {
 
     private static func parseLiveViewSize(_ value: String) -> LiveViewSize? {
         LiveViewSize(rawValue: value.lowercased())
+    }
+
+    private static func parseLiveViewMagnifications(_ body: BridgeJSON) -> [LiveViewMagnification] {
+        guard let raw = body["magnifications"] as? [Any] else { return [] }
+        let values = raw.compactMap { strictInt($0) }
+        guard values.count == raw.count,
+              values.count >= 2,
+              Set(values).count == values.count,
+              values.allSatisfy({ LiveViewMagnification(rawValue: $0) != nil }),
+              values.contains(1) else { return [] }
+        return values.compactMap(LiveViewMagnification.init(rawValue:))
     }
 
     private static func parseFamily(_ value: String?) -> CameraModelFamily? {

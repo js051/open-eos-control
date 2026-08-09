@@ -434,6 +434,8 @@ public struct LiveViewCapabilities: Equatable, Sendable {
     public let defaultSource: LiveViewSource
     public let sizes: [LiveViewSize]
     public let defaultSize: LiveViewSize
+    public let magnifications: [LiveViewMagnification]
+    public let currentMagnification: LiveViewMagnification?
     public let minimumFPS: Int
     public let maximumFPS: Int
 
@@ -442,6 +444,8 @@ public struct LiveViewCapabilities: Equatable, Sendable {
         defaultSource: LiveViewSource = .auto,
         sizes: [LiveViewSize] = [],
         defaultSize: LiveViewSize = .medium,
+        magnifications: [LiveViewMagnification] = [],
+        currentMagnification: LiveViewMagnification? = nil,
         minimumFPS: Int = 1,
         maximumFPS: Int = 30
     ) {
@@ -449,6 +453,8 @@ public struct LiveViewCapabilities: Equatable, Sendable {
         self.defaultSource = defaultSource
         self.sizes = sizes
         self.defaultSize = defaultSize
+        self.magnifications = magnifications
+        self.currentMagnification = currentMagnification
         self.minimumFPS = minimumFPS
         self.maximumFPS = maximumFPS
     }
@@ -589,6 +595,7 @@ public struct FocusDriveResult: Equatable, Sendable {
 public enum LiveViewMagnification: Int, CaseIterable, Codable, Sendable {
     case x1 = 1
     case x5 = 5
+    case x10 = 10
 }
 
 public struct LiveViewMagnificationResult: Equatable, Sendable {

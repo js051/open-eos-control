@@ -91,6 +91,7 @@ WB_SHIFT_SETTING_KEY = "wbshift"
 WB_SHIFT_FIELDS = ("ba", "mg")
 ZOOM_SETTING_KEY = "zoom"
 ZOOM_PATH_SUFFIX = "/shooting/control/zoom"
+LIVE_VIEW_MAGNIFICATION_PATH_SUFFIX = "/shooting/settings/lvzoom"
 MOVIE_MODE_SETTING_KEY = "moviemode"
 MOVIE_MODE_PATH_SUFFIX = "/shooting/control/moviemode"
 MOVIE_MODE_VALUES = ("off", "on")
@@ -710,6 +711,7 @@ class CcapiSession:
         self._multipart_session: CcapiMultipartSession | None = None
         self._live_view_size_control = True
         self._active_live_view_size = "MEDIUM"
+        self._live_view_magnification: tuple[int, list[int]] | None = None
         self._requested_fps = 1
         self._frame_key = 0
         self._latest_live_view_geometry: CcapiLiveViewGeometry | None = None
@@ -1000,6 +1002,7 @@ class CcapiSession:
             jpeg_live_view_supported = self._supports_jpeg_live_view()
             multipart_live_view_supported = self._supports_multipart_live_view()
             rtp_live_view_supported = self._supports_rtp_live_view()
+            live_view_magnification = self._load_live_view_magnification()
             if jpeg_live_view_supported or multipart_live_view_supported or rtp_live_view_supported:
                 supported.add(CameraFeature.LIVE_VIEW)
             if jpeg_live_view_supported:
@@ -1008,6 +1011,8 @@ class CcapiSession:
                 supported.add(CameraFeature.LIVE_VIEW_RTP)
             if multipart_live_view_supported:
                 supported.add(CameraFeature.LIVE_VIEW_MULTIPART)
+            if live_view_magnification is not None:
+                supported.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
             if self._operation("POST", "/shooting/control/recbutton") or self._operation(
                 "PUT", "/shooting/control/recbutton"
             ):
@@ -1070,6 +1075,7 @@ class CcapiSession:
                 CameraFeature.EVENT_POLLING,
                 CameraFeature.LIVE_VIEW_MULTIPART,
                 CameraFeature.LIVE_VIEW_RTP,
+                CameraFeature.LIVE_VIEW_MAGNIFICATION,
                 CameraFeature.STILL_CAPTURE,
                 CameraFeature.BULB_EXPOSURE,
                 CameraFeature.AUTOFOCUS,
@@ -1110,6 +1116,7 @@ class CcapiSession:
             if jpeg_live_view_supported:
                 live_sources.append("CCAPI_JPEG_POLLING")
             model = self.info().model
+            live_view_available = CameraFeature.LIVE_VIEW in supported or live_view_magnification is not None
             return CameraCapabilities(
                 profile=camera_profile(model),
                 supported=sorted(supported, key=str),
@@ -1163,6 +1170,10 @@ class CcapiSession:
                         "The camera must advertise matching GET and DELETE Canon multipart Live View "
                         "endpoints together with the regular Live View lifecycle in one API version."
                     ),
+                    CameraFeature.LIVE_VIEW_MAGNIFICATION.value: (
+                        "The camera must advertise matching GET and PUT Canon /shooting/settings/lvzoom "
+                        "endpoints in one API version and return a strict string value/ability payload."
+                    ),
                     CameraFeature.FOCUS_DRIVE.value: (
                         "The camera did not advertise the verified CCAPI POST drivefocus operation."
                     ),
@@ -1207,17 +1218,25 @@ class CcapiSession:
                 live_view=(
                     LiveViewCapabilities(
                         sources=live_sources,
-                        default_source=live_sources[0],
+                        default_source=live_sources[0] if live_sources else None,
                         sizes=live_sizes if jpeg_live_view_supported else [],
                         default_size=(
                             "MEDIUM" if jpeg_live_view_supported and "MEDIUM" in live_sizes else live_sizes[0]
                         )
                         if jpeg_live_view_supported
                         else None,
+                        magnifications=(
+                            [value for value in live_view_magnification[1]]
+                            if live_view_magnification is not None
+                            else []
+                        ),
+                        current_magnification=(
+                            live_view_magnification[0] if live_view_magnification is not None else None
+                        ),
                         min_fps=1,
                         max_fps=30,
                     )
-                    if CameraFeature.LIVE_VIEW in supported
+                    if live_view_available
                     else LiveViewCapabilities()
                 ),
                 settings=controls,
@@ -1657,12 +1676,52 @@ class CcapiSession:
             return FocusResult(accepted=True, direction=normalized_direction, step=normalized_step)
 
     def set_live_view_magnification(self, value: int) -> LiveViewMagnificationResult:
-        del value
-        raise unsupported(
-            CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
-            self.engine_name,
-            "Canon EOS CCAPI does not advertise a Live View focus-magnification command.",
-        )
+        with self._lock:
+            if not self._live_view_active:
+                raise BridgeError(
+                    "LIVE_VIEW_REQUIRED",
+                    "Canon Live View magnification requires an active Live View session.",
+                    status_code=409,
+                    feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+                    engine=self.engine_name,
+                )
+            settings = self._load_settings()
+            if self._recording is True or _setting_value(settings, MOVIE_MODE_SETTING_KEY) == "on":
+                raise BridgeError(
+                    "LIVE_VIEW_MAGNIFICATION_UNAVAILABLE",
+                    "Canon Live View magnification is unavailable in Movie mode or while recording.",
+                    status_code=409,
+                    feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+                    engine=self.engine_name,
+                )
+            operations = self._live_view_magnification_operations()
+            capability = self._load_live_view_magnification()
+            if operations is None or capability is None:
+                raise unsupported(CameraFeature.LIVE_VIEW_MAGNIFICATION.value, self.engine_name)
+            _, magnifications = capability
+            if value not in magnifications:
+                allowed = ", ".join(f"{item}x" for item in magnifications)
+                raise BridgeError(
+                    "INVALID_LIVE_VIEW_MAGNIFICATION",
+                    f"Canon EOS Live View magnification must be one of: {allowed}.",
+                    status_code=422,
+                    feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+                    engine=self.engine_name,
+                )
+            read, write = operations
+            self._request_ok("PUT", write.path, {"value": str(value)})
+            readback = self._parse_live_view_magnification(self._request_json("GET", read.path))
+            if readback is None or readback[0] != value:
+                raise BridgeError(
+                    "INVALID_CCAPI_RESPONSE",
+                    "Canon Live View magnification did not match the requested value after readback.",
+                    status_code=502,
+                    feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+                    engine=self.engine_name,
+                )
+            self._live_view_magnification = readback
+            self._observed.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            return LiveViewMagnificationResult(accepted=True, value=readback[0])
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
         with self._lock:
@@ -2932,6 +2991,55 @@ class CcapiSession:
             if write in self._operations:
                 return read, write
         return None
+
+    def _live_view_magnification_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith(LIVE_VIEW_MAGNIFICATION_PATH_SUFFIX)
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            write = CcapiOperation("PUT", read.path)
+            if write in self._operations:
+                return read, write
+        return None
+
+    def _load_live_view_magnification(self) -> tuple[int, list[int]] | None:
+        operations = self._live_view_magnification_operations()
+        if operations is None:
+            self._live_view_magnification = None
+            self._observed.discard(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            return None
+        read, _ = operations
+        parsed = self._parse_live_view_magnification(self._first_json([read.path]))
+        if parsed is None:
+            self._live_view_magnification = None
+            self._observed.discard(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            return None
+        self._live_view_magnification = parsed
+        return parsed
+
+    @staticmethod
+    def _parse_live_view_magnification(value: object) -> tuple[int, list[int]] | None:
+        if not isinstance(value, dict):
+            return None
+        current = value.get("value")
+        ability = value.get("ability")
+        if not isinstance(current, str) or not isinstance(ability, list):
+            return None
+        if any(not isinstance(item, str) for item in ability):
+            return None
+        if len(ability) < 2 or len(ability) > 3 or len(ability) != len(set(ability)):
+            return None
+        if any(item not in {"1", "5", "10"} for item in ability):
+            return None
+        if "1" not in ability or current not in ability:
+            return None
+        return int(current), [int(item) for item in ability]
 
     def _movie_mode_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
         reads = sorted(

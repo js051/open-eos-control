@@ -406,6 +406,7 @@ class CameraViewModel(
                 liveViewFrameRateFps = supportedFps,
                 liveViewSize = session.liveViewRequest.size,
                 liveViewSource = activeSource,
+                liveViewMagnification = session.capabilities.liveView.currentMagnification,
                 liveViewDiagnostics = session.nativeLiveViewSession?.let { native ->
                     LiveViewDiagnostics(contentType = native.contentType, sourceUrl = native.sourceUrl)
                 } ?: it.liveViewDiagnostics,
@@ -470,6 +471,8 @@ class CameraViewModel(
                 capabilities = capabilities,
                 networkDiagnostics = networkDiagnostics,
                 captureMode = captureMode ?: it.captureMode,
+                liveViewMagnification = capabilities.liveView.currentMagnification
+                    ?: it.liveViewMagnification?.takeIf { value -> value in capabilities.liveView.magnifications },
             )
         }
         refreshLiveViewFrameInternal(reportErrors = true)
@@ -887,7 +890,13 @@ class CameraViewModel(
     }
 
     fun setLiveViewMagnification(magnification: LiveViewMagnification) {
-        if (_uiState.value.previewMode) {
+        val state = _uiState.value
+        if (
+            state.captureMode != CaptureMode.PHOTO ||
+            !state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION) ||
+            magnification !in state.capabilities?.liveView?.magnifications.orEmpty()
+        ) return
+        if (state.previewMode) {
             _uiState.update { it.copy(liveViewMagnification = magnification) }
             return
         }
@@ -1486,6 +1495,10 @@ class CameraViewModel(
                                 status = status,
                                 capabilities = capabilities,
                                 captureMode = captureMode ?: current.captureMode,
+                                liveViewMagnification = capabilities.liveView.currentMagnification
+                                    ?: current.liveViewMagnification?.takeIf { value ->
+                                        value in capabilities.liveView.magnifications
+                                    },
                             )
                             if (mediaItems != null) refreshed.withEventMediaItems(mediaItems) else refreshed
                         } else {

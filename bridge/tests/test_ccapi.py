@@ -66,6 +66,12 @@ DISCOVERY = {
         {"path": "/contents", "get": True, "put": True, "delete": True},
     ]
 }
+LIVE_VIEW_MAGNIFICATION_DISCOVERY = {
+    "ver100": [
+        *DISCOVERY["ver100"],
+        {"path": "/shooting/settings/lvzoom", "get": True, "put": True},
+    ]
+}
 RTP_DISCOVERY = {
     "ver100": [
         *DISCOVERY["ver100"],
@@ -130,6 +136,7 @@ class FakeCcapiTransport:
         recordable_response: object | None = None,
         lens_response: object | None = None,
         temperature_response: object | None = None,
+        live_view_magnification_response: object | None = None,
     ) -> None:
         self.discovery = discovery or DISCOVERY
         self.developer_discovery = developer_discovery
@@ -163,6 +170,8 @@ class FakeCcapiTransport:
             lens_response if lens_response is not None else {"mount": True, "name": "RF24-105mm F4 L IS USM"}
         )
         self.temperature_response = temperature_response if temperature_response is not None else {"status": "normal"}
+        self.live_view_magnification_response = live_view_magnification_response
+        self.live_view_magnification = "1"
         self.requests: list[RecordedRequest] = []
         self.settings = {
             "iso": {"value": "800", "ability": ["100", "800", "1600"]},
@@ -277,6 +286,16 @@ class FakeCcapiTransport:
             return _json_response(self.temperature_response)
         if method == "GET" and path == "/ccapi/ver100/shooting/settings":
             return _json_response(self.settings)
+        if method == "GET" and path == "/ccapi/ver100/shooting/settings/lvzoom":
+            return _json_response(
+                self.live_view_magnification_response
+                if self.live_view_magnification_response is not None
+                else {"value": self.live_view_magnification, "ability": ["1", "5", "10"]}
+            )
+        if method == "PUT" and path == "/ccapi/ver100/shooting/settings/lvzoom":
+            assert payload == {"value": str(payload.get("value"))}
+            self.live_view_magnification = str(payload["value"])
+            return _json_response({}, status=200)
         if method == "GET" and path == "/ccapi/ver100/shooting/control/zoom":
             if self.zoom_response is not None:
                 return _json_response(self.zoom_response)
@@ -2163,6 +2182,127 @@ def test_failed_ccapi_bulb_press_still_attempts_release() -> None:
         {"af": False, "action": "release"},
     ]
     assert session.status().bulb_exposure_active is False
+
+
+def test_ccapi_live_view_magnification_uses_string_put_and_get_readback() -> None:
+    transport = FakeCcapiTransport(discovery=LIVE_VIEW_MAGNIFICATION_DISCOVERY)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    capabilities = session.capabilities()
+    assert CameraFeature.LIVE_VIEW_MAGNIFICATION in capabilities.supported
+    assert capabilities.live_view.magnifications == [1, 5, 10]
+    assert capabilities.live_view.current_magnification == 1
+
+    with pytest.raises(BridgeError) as inactive:
+        session.set_live_view_magnification(10)
+    assert inactive.value.code == "LIVE_VIEW_REQUIRED"
+
+    session.start_live_view(LiveViewStartRequest(source="CCAPI_JPEG_POLLING"))
+    result = session.set_live_view_magnification(10)
+
+    assert result.model_dump() == {"accepted": True, "value": 10}
+    assert transport.live_view_magnification == "10"
+    lvzoom_requests = [
+        request
+        for request in transport.requests
+        if request.path.endswith("/shooting/settings/lvzoom")
+    ]
+    assert [(request.method, request.body) for request in lvzoom_requests] == [
+        ("GET", None),
+        ("GET", None),
+        ("PUT", {"value": "10"}),
+        ("GET", None),
+    ]
+
+
+def test_ccapi_live_view_magnification_rejects_movie_mode_before_put() -> None:
+    discovery = {
+        "ver100": [
+            *LIVE_VIEW_MAGNIFICATION_DISCOVERY["ver100"],
+            {"path": "/shooting/control/moviemode", "get": True, "post": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery, movie_mode_response={"status": "on"})
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+    session.capabilities()
+    session.start_live_view(LiveViewStartRequest(source="CCAPI_JPEG_POLLING"))
+
+    with pytest.raises(BridgeError) as unavailable:
+        session.set_live_view_magnification(10)
+
+    assert unavailable.value.code == "LIVE_VIEW_MAGNIFICATION_UNAVAILABLE"
+    assert not any(
+        request.method == "PUT" and request.path.endswith("/shooting/settings/lvzoom")
+        for request in transport.requests
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"value": 1, "ability": ["1", "5"]},
+        {"value": "1", "ability": ["1"]},
+        {"value": "2", "ability": ["1", "2", "5"]},
+        {"value": "10", "ability": ["1", "5"]},
+        {"value": "1", "ability": ["1", "5", "5"]},
+        {"value": "1", "ability": [{"value": "1"}, "5"]},
+    ],
+)
+def test_ccapi_live_view_magnification_rejects_invalid_ability(response: object) -> None:
+    transport = FakeCcapiTransport(
+        discovery=LIVE_VIEW_MAGNIFICATION_DISCOVERY,
+        live_view_magnification_response=response,
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.LIVE_VIEW_MAGNIFICATION not in capabilities.supported
+    assert capabilities.live_view.magnifications == []
+    assert all(
+        not (request.method == "PUT" and request.path.endswith("/shooting/settings/lvzoom"))
+        for request in transport.requests
+    )
+
+
+def test_ccapi_live_view_magnification_does_not_combine_versions() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/shooting/settings/lvzoom", "get": True},
+        ],
+        "ver110": [{"path": "/shooting/settings/lvzoom", "put": True}],
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.LIVE_VIEW_MAGNIFICATION not in capabilities.supported
+    assert CameraFeature.LIVE_VIEW_MAGNIFICATION in capabilities.planned
+    assert not any(request.path.endswith("/shooting/settings/lvzoom") for request in transport.requests)
+
+
+def test_ccapi_live_view_magnification_rejects_mismatched_readback() -> None:
+    transport = FakeCcapiTransport(
+        discovery=LIVE_VIEW_MAGNIFICATION_DISCOVERY,
+        live_view_magnification_response={"value": "5", "ability": ["1", "5", "10"]},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+    session.start_live_view(LiveViewStartRequest(source="CCAPI_JPEG_POLLING"))
+
+    with pytest.raises(BridgeError, match="did not match"):
+        session.set_live_view_magnification(10)
 
 
 def test_ccapi_rtp_capability_and_exact_lifecycle_are_end_to_end() -> None:

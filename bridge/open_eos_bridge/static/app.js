@@ -1397,6 +1397,7 @@
       ]);
       state.requestedFps = clampFps(Math.min(15, state.capabilities.liveView?.maxFps || 1));
       state.captureMode = captureModeFromCamera() || (state.status.recording ? "video" : "photo");
+      syncLiveMagnificationFromCapabilities();
       state.lastError = null;
       setOperationState(t("ready"));
       if (network) {
@@ -1445,6 +1446,7 @@
       ) return false;
       [state.info, state.status, state.capabilities] = [info, status, capabilities];
       state.requestedFps = clampFps(state.requestedFps);
+      syncLiveMagnificationFromCapabilities();
       state.lastError = null;
       renderSession();
       if (!quiet) setOperationState(t("ready"));
@@ -2514,6 +2516,29 @@
     return state.capabilities?.liveView || {};
   }
 
+  function liveMagnifications() {
+    const values = Array.isArray(liveCapabilities().magnifications)
+      ? liveCapabilities().magnifications
+        .filter((value) => Number.isInteger(value) && [1, 5, 10].includes(value))
+      : [];
+    return [...new Set(values)];
+  }
+
+  function syncLiveMagnificationFromCapabilities() {
+    const capabilities = liveCapabilities();
+    const values = liveMagnifications();
+    const current = capabilities.currentMagnification;
+    if (values.includes(current)) state.liveMagnification = current;
+    else if (values.length) state.liveMagnification = values[0];
+  }
+
+  function nextLiveMagnification() {
+    const values = liveMagnifications();
+    if (!values.length) return null;
+    const index = values.indexOf(state.liveMagnification);
+    return values[(index >= 0 ? index + 1 : 0) % values.length];
+  }
+
   function localPreviewSelected() {
     return state.previewInput === "LOCAL_VIDEO";
   }
@@ -2927,7 +2952,7 @@
       state.activeLiveSource = response.source || state.liveSource;
       state.liveActive = true;
       state.livePollingSuspended = false;
-      state.liveMagnification = 1;
+      syncLiveMagnificationFromCapabilities();
       state.frameTimes = [];
       state.observedFps = 0;
       state.liveGeneration += 1;
@@ -3599,24 +3624,28 @@
     const supported = featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION);
     const cameraPreview = !localPreviewSelected();
     const bulbActive = Boolean(state.status?.bulbExposureActive);
-    const target = state.liveMagnification === 5 ? 1 : 5;
-    ui.liveMagnificationButton.hidden = !supported || !cameraPreview;
+    const values = liveMagnifications();
+    const target = nextLiveMagnification();
+    const available = values.length >= 2 && state.captureMode !== "video";
+    ui.liveMagnificationButton.hidden = !supported || !cameraPreview || !available;
     ui.liveMagnificationButton.disabled = !cameraPreview || cameraInteractionBusy() || bulbActive ||
-      !state.liveActive || !supported;
-    ui.liveMagnificationLabel.textContent = `${target}x`;
-    const description = t("liveViewMagnification", { value: target });
+      !state.liveActive || !supported || !available;
+    ui.liveMagnificationLabel.textContent = target === null ? "--" : `${target}x`;
+    const description = t("liveViewMagnification", { value: target ?? state.liveMagnification });
     ui.liveMagnificationButton.setAttribute("aria-label", description);
     ui.liveMagnificationButton.title = description;
-    replaceButtonIcon(ui.liveMagnificationButton, target === 5 ? "zoom-in" : "zoom-out");
+    replaceButtonIcon(ui.liveMagnificationButton, target > state.liveMagnification ? "zoom-in" : "zoom-out");
   }
 
   async function setLiveViewMagnification() {
     if (
       localPreviewSelected() || !state.session || cameraInteractionBusy() || !state.liveActive ||
       state.status?.bulbExposureActive ||
-      !featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)
+      state.captureMode === "video" ||
+      !featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION) || liveMagnifications().length < 2
     ) return;
-    const target = state.liveMagnification === 5 ? 1 : 5;
+    const target = nextLiveMagnification();
+    if (target === null) return;
     beginCameraInteraction();
     setOperationState(t("busy"));
     renderAvailability();
@@ -3625,7 +3654,9 @@
         `/v1/session/${encodeURIComponent(state.session.id)}/liveview/magnification`,
         { method: "POST", json: { value: target } },
       );
-      if (result.accepted) state.liveMagnification = result.value;
+      if (result.accepted && liveMagnifications().includes(Number(result.value))) {
+        state.liveMagnification = Number(result.value);
+      }
       const message = t("liveViewMagnificationChanged", { value: state.liveMagnification });
       setOperationState(message);
       showToast(message);

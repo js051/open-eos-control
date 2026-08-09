@@ -79,6 +79,7 @@ class DesktopBridgeClient(
     private var sessionId: String? = null
     private var sessionCameraModel: String? = null
     private var eventPollingSupported = false
+    private var liveViewMagnifications: List<LiveViewMagnification> = emptyList()
     private val observedFeatures = mutableSetOf(CameraFeature.DESKTOP_BRIDGE)
 
     fun observedFeatureSnapshot(): Set<CameraFeature> = observedFeatures.toSet()
@@ -93,6 +94,7 @@ class DesktopBridgeClient(
         observedFeatures.clear()
         observedFeatures.add(CameraFeature.DESKTOP_BRIDGE)
         eventPollingSupported = false
+        liveViewMagnifications = emptyList()
         sessionCameraModel = null
         validateService()
         val payload = JSONObject().put("engine", cameraEngine ?: "auto")
@@ -115,6 +117,7 @@ class DesktopBridgeClient(
             sessionId = null
             sessionCameraModel = null
             eventPollingSupported = false
+            liveViewMagnifications = emptyList()
         }
     }
 
@@ -176,9 +179,7 @@ class DesktopBridgeClient(
         }
         val settingsByKey = settings.associateBy { it.key.lowercase() }
         val coreKeys = setOf("iso", "shutter", "aperture", "whitebalance")
-        val supported = body.optJSONArray("supported").cameraFeatures()
-        eventPollingSupported = CameraFeature.EVENT_POLLING in supported
-        val planned = body.optJSONArray("planned").cameraFeatures() - supported
+        val advertisedSupported = body.optJSONArray("supported").cameraFeatures()
         val reasonsObject = body.optJSONObject("reasons") ?: JSONObject()
         val reasons = buildMap {
             reasonsObject.keys().forEach { key ->
@@ -190,6 +191,29 @@ class DesktopBridgeClient(
         val sizes = liveView.optJSONArray("sizes").enumValues<LiveViewSize>()
         val minFps = liveView.optInt("minFps", 1).coerceAtLeast(1)
         val maxFps = liveView.optInt("maxFps", minFps).coerceAtLeast(minFps)
+        val magnifications = liveView.optJSONArray("magnifications").liveViewMagnifications()
+        val currentMagnification = (liveView.opt("currentMagnification") as? Int)
+            ?.let { value -> LiveViewMagnification.entries.firstOrNull { it.value == value } }
+            ?.takeIf { it in magnifications }
+        val hasCurrentMagnification = liveView.has("currentMagnification") &&
+            !liveView.isNull("currentMagnification")
+        val validMagnificationCapability =
+            magnifications.size >= 2 &&
+                LiveViewMagnification.X1 in magnifications &&
+                (!hasCurrentMagnification || currentMagnification != null)
+        liveViewMagnifications = magnifications.takeIf { validMagnificationCapability }.orEmpty()
+        val supported = if (validMagnificationCapability) {
+            advertisedSupported
+        } else {
+            advertisedSupported - CameraFeature.LIVE_VIEW_MAGNIFICATION
+        }
+        eventPollingSupported = CameraFeature.EVENT_POLLING in supported
+        val planned = (body.optJSONArray("planned").cameraFeatures() - supported) +
+            if (CameraFeature.LIVE_VIEW_MAGNIFICATION in advertisedSupported && !validMagnificationCapability) {
+                setOf(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            } else {
+                emptySet()
+            }
         val profile = body.optJSONObject("profile") ?: JSONObject()
         val fileNaming = body.optJSONObject("fileNaming")?.toBridgeFileNamingOrNull()
         val profileModel = profile.optNullableString("modelName")
@@ -273,6 +297,8 @@ class DesktopBridgeClient(
                     ?: LiveViewSize.MEDIUM,
                 minFps = minFps,
                 maxFps = maxFps,
+                magnifications = liveViewMagnifications,
+                currentMagnification = currentMagnification,
             ),
             profile = CameraProfile(
                 modelName = profileModel,
@@ -446,6 +472,9 @@ class DesktopBridgeClient(
     suspend fun setLiveViewMagnification(
         magnification: LiveViewMagnification,
     ): LiveViewMagnificationResult {
+        require(magnification in liveViewMagnifications) {
+            "Desktop Bridge did not advertise ${magnification.value}x Live View magnification."
+        }
         val body = postJson(
             sessionEndpoint("liveview", "magnification"),
             JSONObject().put("value", magnification.value),
@@ -994,6 +1023,15 @@ private inline fun <reified T : Enum<T>> String.toEnumOrNull(): T? =
 
 private inline fun <reified T : Enum<T>> JSONArray?.enumValues(): List<T> =
     strings().mapNotNull { it.toEnumOrNull<T>() }.distinct()
+
+private fun JSONArray?.liveViewMagnifications(): List<LiveViewMagnification> {
+    if (this == null || length() !in 2..LiveViewMagnification.entries.size) return emptyList()
+    val values = (0 until length()).map { index ->
+        val raw = opt(index) as? Int ?: return emptyList()
+        LiveViewMagnification.entries.firstOrNull { it.value == raw } ?: return emptyList()
+    }
+    return values.takeIf { it.toSet().size == it.size && LiveViewMagnification.X1 in it }.orEmpty()
+}
 
 private fun ByteArray.isCompleteJpeg(): Boolean =
     size >= 4 &&

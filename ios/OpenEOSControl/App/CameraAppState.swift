@@ -39,6 +39,7 @@ final class CameraAppState: ObservableObject {
     @Published var selectedBridgeCameraID: String?
     @Published private(set) var snapshot: CameraSnapshot? {
         didSet {
+            liveViewMagnification = snapshot?.capabilities.liveView.currentMagnification
             if let setting = snapshot.flatMap({ captureModeSetting($0.capabilities.settings) }),
                let mode = appCaptureMode(for: setting) {
                 captureMode = mode
@@ -302,7 +303,6 @@ final class CameraAppState: ObservableObject {
             }
             session = newSession
             snapshot = newSnapshot
-            liveViewMagnification = nil
             isPreview = false
             screen = .control
             mediaItems = []
@@ -485,7 +485,6 @@ final class CameraAppState: ObservableObject {
         if let session { await session.stopLiveView() }
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
-        liveViewMagnification = nil
         await startLiveView()
     }
 
@@ -767,7 +766,11 @@ final class CameraAppState: ObservableObject {
     }
 
     func setLiveViewMagnification(_ magnification: LiveViewMagnification) async {
-        guard supports(.liveViewMagnification), begin(.liveView) else { return }
+        guard captureMode == .photo,
+              let liveView = capabilities?.liveView,
+              capabilities?.matrix.supports(.liveViewMagnification) == true,
+              liveView.magnifications.contains(magnification),
+              begin(.liveView) else { return }
         defer { end(.liveView) }
         if isPreview {
             liveViewMagnification = magnification
@@ -1588,6 +1591,8 @@ final class CameraAppState: ObservableObject {
                 defaultSource: .ccapiJPEGPolling,
                 sizes: LiveViewSize.allCases,
                 defaultSize: .medium,
+                magnifications: [.x1, .x5, .x10],
+                currentMagnification: .x1,
                 minimumFPS: 1,
                 maximumFPS: 30
             ),

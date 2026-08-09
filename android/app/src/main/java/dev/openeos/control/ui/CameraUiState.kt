@@ -138,6 +138,17 @@ data class FocusPoint(
     val y: Double,
 )
 
+internal fun CameraUiState.nextLiveViewMagnification(): LiveViewMagnification? {
+    val abilities = capabilities?.liveView?.magnifications.orEmpty()
+    if (abilities.size < 2 || captureMode != CaptureMode.PHOTO) return null
+    val current = liveViewMagnification
+        ?.takeIf { it in abilities }
+        ?: capabilities?.liveView?.currentMagnification
+        ?.takeIf { it in abilities }
+        ?: abilities.first()
+    return abilities[(abilities.indexOf(current) + 1) % abilities.size]
+}
+
 internal fun captureModeSwitchEnabled(state: CameraUiState): Boolean =
     state.status?.recording != true &&
         !state.bulbExposureActive &&

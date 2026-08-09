@@ -120,6 +120,11 @@ class DesktopBridgeClientTest {
             capabilities.advancedSettings.map { it.key }.toSet(),
         )
         assertEquals(5, capabilities.liveView.maxFps)
+        assertEquals(
+            listOf(LiveViewMagnification.X1, LiveViewMagnification.X5),
+            capabilities.liveView.magnifications,
+        )
+        assertEquals(LiveViewMagnification.X1, capabilities.liveView.currentMagnification)
         assertEquals("gphoto2 --abilities + --list-all-config", capabilities.evidence.source)
         assertEquals(listOf("gphoto2 2.5.33"), capabilities.evidence.protocolVersions)
         assertTrue("CAPTURE_PREVIEW" in capabilities.evidence.advertisedCommands)
@@ -610,7 +615,9 @@ class DesktopBridgeClientTest {
                 "sizes": ["MEDIUM"],
                 "defaultSize": "MEDIUM",
                 "minFps": 1,
-                "maxFps": 5
+                "maxFps": 5,
+                "magnifications": [1, 5],
+                "currentMagnification": 1
               },
               "settings": [
                 {"key":"iso","label":"ISO","value":"400","values":["Auto","100","400","800"]},

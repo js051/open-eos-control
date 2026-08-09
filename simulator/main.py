@@ -93,6 +93,7 @@ MOVIE_QUALITY_ABILITY = [
 ]
 ENABLE_DISABLE_ABILITY = ["enable", "disable"]
 MOVIE_FORMAT_ABILITY = ["raw", "mp4"]
+LIVE_VIEW_MAGNIFICATION_ABILITY = ["1", "5", "10"]
 STILL_FILENAME_MODE_ABILITY = ["preset_code", "usersetting1", "usersetting2"]
 MOVIE_REEL_ABILITY = {"min": 1, "max": 9999, "step": 1}
 MOVIE_CLIP_ABILITY = {"min": 1, "max": 999, "step": 1}
@@ -198,6 +199,8 @@ def initial_state() -> dict[str, object]:
         "canonical_multipart_frame_count": 0,
         "canonical_live_view_size_rejections": 0,
         "canonical_reject_live_view_size_once": True,
+        "canonical_live_view_magnification": "1",
+        "canonical_live_view_magnification_update_count": 0,
         "canonical_event_cursor": 0,
         "canonical_event_poll_count": 0,
         "canonical_event_delivery_count": 0,
@@ -429,6 +432,10 @@ async def get_test_state() -> dict[str, object]:
             "value": state["movie_format"],
             "update_count": state["movie_format_update_count"],
         },
+        "live_view_magnification": {
+            "value": state["canonical_live_view_magnification"],
+            "update_count": state["canonical_live_view_magnification_update_count"],
+        },
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
         "media_metadata_update_count": state["media_metadata_update_count"],
@@ -441,6 +448,8 @@ async def get_test_state() -> dict[str, object]:
             "live_view_start_count": state["canonical_live_view_start_count"],
             "live_view_stop_count": state["canonical_live_view_stop_count"],
             "live_view_size_rejections": state["canonical_live_view_size_rejections"],
+            "live_view_magnification": state["canonical_live_view_magnification"],
+            "live_view_magnification_update_count": state["canonical_live_view_magnification_update_count"],
             "event_cursor": state["canonical_event_cursor"],
             "event_poll_count": state["canonical_event_poll_count"],
             "event_delivery_count": state["canonical_event_delivery_count"],
@@ -532,6 +541,14 @@ async def get_capabilities() -> dict[str, object]:
         "highframerate": {"value": state["high_frame_rate"], "ability": ENABLE_DISABLE_ABILITY},
         "moviecropping": {"value": state["movie_cropping"], "ability": ENABLE_DISABLE_ABILITY},
         "movieformat": {"value": state["movie_format"], "ability": MOVIE_FORMAT_ABILITY},
+        "liveView": {
+            "magnifications": [int(value) for value in LIVE_VIEW_MAGNIFICATION_ABILITY],
+            "currentMagnification": int(state["canonical_live_view_magnification"]),
+        },
+        "liveviewmagnification": {
+            "value": state["canonical_live_view_magnification"],
+            "ability": LIVE_VIEW_MAGNIFICATION_ABILITY,
+        },
         "beep": {"value": state["beep"], "ability": BEEP_ABILITY},
         "displayoff": {"value": state["display_off"], "ability": DISPLAY_OFF_ABILITY},
         "autopoweroff": {"value": state["auto_power_off"], "ability": AUTO_POWER_OFF_ABILITY},
@@ -1123,6 +1140,20 @@ async def drive_focus(payload: FocusDriveRequest) -> dict[str, object]:
     }
 
 
+@app.post("/ccapi/liveview/magnification")
+async def set_simulator_live_view_magnification(payload: dict[str, object]) -> dict[str, object]:
+    if state["recording"] or state["movie_mode"] == "on":
+        raise HTTPException(status_code=409, detail="Live View magnification is unavailable in Movie mode")
+    value = payload.get("value")
+    allowed = {int(item) for item in LIVE_VIEW_MAGNIFICATION_ABILITY}
+    if isinstance(value, bool) or not isinstance(value, int) or value not in allowed:
+        raise HTTPException(status_code=422, detail="Unsupported Live View magnification")
+    state["canonical_live_view_magnification"] = str(value)
+    state["canonical_live_view_magnification_update_count"] += 1
+    publish_event("lvzoom")
+    return {"accepted": True, "value": value}
+
+
 @app.post("/ccapi/whitebalance/click")
 async def click_white_balance(payload: FocusRequest) -> dict[str, object]:
     state["click_wb_x"] = payload.x
@@ -1196,6 +1227,7 @@ CANON_DISCOVERY = {
         {"path": "/shooting/settings/av", "put": True},
         {"path": "/shooting/settings/wb", "put": True},
         {"path": "/shooting/settings/shootingmode", "put": True},
+        {"path": "/shooting/settings/lvzoom", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording/level", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording/windfilter", "get": True, "put": True},
@@ -1393,6 +1425,39 @@ async def canon_temperature() -> dict[str, str]:
 @app.get("/ccapi/ver100/shooting/settings")
 async def canon_shooting_settings() -> dict[str, dict[str, object]]:
     return canonical_settings()
+
+
+def canon_live_view_magnification_unavailable() -> JSONResponse | None:
+    if state["recording"] or state["movie_mode"] == "on":
+        return JSONResponse(status_code=503, content={"message": "During shooting or recording"})
+    return None
+
+
+@app.get("/ccapi/ver100/shooting/settings/lvzoom")
+async def canon_get_live_view_magnification() -> Response:
+    unavailable = canon_live_view_magnification_unavailable()
+    if unavailable is not None:
+        return unavailable
+    return {
+        "value": state["canonical_live_view_magnification"],
+        "ability": LIVE_VIEW_MAGNIFICATION_ABILITY,
+    }
+
+
+@app.put("/ccapi/ver100/shooting/settings/lvzoom")
+async def canon_set_live_view_magnification(payload: dict[str, object]) -> JSONResponse:
+    unavailable = canon_live_view_magnification_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if set(payload) != {"value"} or not isinstance(payload.get("value"), str):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    value = payload["value"]
+    if value not in LIVE_VIEW_MAGNIFICATION_ABILITY:
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    state["canonical_live_view_magnification"] = value
+    state["canonical_live_view_magnification_update_count"] += 1
+    publish_event("lvzoom")
+    return JSONResponse(status_code=200, content={})
 
 
 @app.put("/ccapi/ver100/shooting/settings/{key}", status_code=204)

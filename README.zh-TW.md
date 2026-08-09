@@ -45,6 +45,7 @@ open-eos-control/
 
 LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast 資料列、`DOMAIN_MIN`／`DOMAIN_MAX` 或 `LUT_3D_INPUT_RANGE`、有限數值與三線性顯示插值。混合 1D／shaper LUT 或超過 16 MiB 的檔案會回報明確錯誤；專案不重新散布 Canon 或第三方 LUT。
 - Android、iOS 與 PC 上依能力開放的 Canon CCAPI Live View，AUTO 依序嘗試 RTP H.264、持續 multipart JPEG、JPEG 輪詢，並限制 1-30 FPS 顯示／輸出幀率。Multipart 必須在同一 API 版本完整公告一般 Live View 啟停與 `GET`／`DELETE /shooting/liveview/multipart`，背景會持續排空資料但只保留最新一張有界完整 JPEG；只有 AUTO 會在啟動失敗時降級。RTP 使用可達路由的 UDP、RFC 3550／RFC 6184、手機原生顯示或 PC PyAV 解碼；各來源只會在完整能力條件成立時顯示
+- Android、iOS 與 PC 依能力提供 Photo 模式 Live View 動態放大。直接 CCAPI 必須在同一 API 版本公告 `GET`／`PUT /shooting/settings/lvzoom`，只接受 Canon 文件的字串 `1`／`5`／`10` ability，以字串寫入並在每次 PUT 後 GET 回讀確認；Android USB/PTP 與 libgphoto2 仍只保留各自已有依據的 1x／5x，不會自行宣稱 10x
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質、有界 B/A／M/G 白平衡偏移，以及相機同版本同時公告 GET／POST 時才出現的官方 0-100 變焦控制。變焦使用整數 POST；普通 EOS／鏡頭組合未提供此端點時會完全隱藏
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 雙卡選擇。Photo 與 Video 分別顯示相片／影片記錄卡；只有相機在同一 API 版本公告成對 GET／PUT，且回傳 `none`、`card1`、`card2` 的有效選項時才出現，寫入保留精確協定值，畸形或只有單一選項的回應不會形成可操作控制
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 檔名控制。只有同一 API 版本完整公告七個文件化 GET／PUT 資源，且所有目前值與 ability 都通過驗證時才出現；Photo 提供相片檔名模式與兩組自訂前綴，Video 提供索引、Reel、Clip 與自訂名稱。寫入會保留 Canon 各端點要求的字串／整數型別並完成整組回讀驗證；USB/PTP 與 libgphoto2 不會宣稱推測出的等效功能

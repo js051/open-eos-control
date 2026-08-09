@@ -351,6 +351,8 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaDelete))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.clickWhiteBalance))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.liveViewMagnification))
+        XCTAssertEqual(snapshot.capabilities.liveView.magnifications, [.x1, .x5, .x10])
+        XCTAssertEqual(snapshot.capabilities.liveView.currentMagnification, .x1)
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingLevelControl))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.soundRecordingControl))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusBracketingControl))
@@ -583,6 +585,20 @@ final class CameraAppTests: XCTestCase {
         XCTAssertNil(state.lastError)
     }
 
+    func testOfflinePreviewRejectsLiveViewMagnificationInVideoMode() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+        await state.setCaptureMode(.video)
+
+        await state.setLiveViewMagnification(.x10)
+
+        XCTAssertNotEqual(state.liveViewMagnification, .x10)
+        XCTAssertNil(state.lastError)
+    }
+
     func testOfflinePreviewLiveViewMagnificationUpdatesLocally() async {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -590,9 +606,9 @@ final class CameraAppTests: XCTestCase {
         let state = CameraAppState(defaults: defaults)
         state.openOfflinePreview()
 
-        await state.setLiveViewMagnification(.x5)
+        await state.setLiveViewMagnification(.x10)
 
-        XCTAssertEqual(state.liveViewMagnification, .x5)
+        XCTAssertEqual(state.liveViewMagnification, .x10)
         XCTAssertNil(state.lastError)
     }
 
