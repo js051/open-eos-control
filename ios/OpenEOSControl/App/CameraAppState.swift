@@ -287,6 +287,7 @@ final class CameraAppState: ObservableObject {
                         baseURL: bridgeURL,
                         token: bridgeToken,
                         cameraID: selectedBridgeCameraID,
+                        cameraEngine: camera.engine,
                         profileHint: camera.model
                     )
                 )

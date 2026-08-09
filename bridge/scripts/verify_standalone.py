@@ -118,8 +118,8 @@ def verify(executable: Path) -> None:
         health = json.loads(health_body)
         if status != 200 or health.get("version") != __version__:
             raise RuntimeError("Bundled health endpoint returned the wrong product version.")
-        if set(health.get("engines", {})) != {"libgphoto2", "ccapi"}:
-            raise RuntimeError("Bundled health endpoint did not report both camera engines.")
+        if set(health.get("engines", {})) != {"libgphoto2", "edsdk", "ccapi"}:
+            raise RuntimeError("Bundled health endpoint did not report all camera engines.")
     finally:
         stop_process_tree(process)
         require_service_stopped(f"{origin}/")

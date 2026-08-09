@@ -46,6 +46,7 @@ sealed interface CameraConnection {
         val baseUrl: String,
         val token: String = "",
         val cameraId: String? = null,
+        val cameraEngine: String? = null,
         val profileHint: String? = CameraProfile.R6_MARK_III.modelName,
         override val platform: CameraHostPlatform = CameraHostPlatform.UNKNOWN,
     ) : CameraConnection {
@@ -243,6 +244,7 @@ class DesktopBridgeCameraBackend(
         httpClient = httpTransport.client,
         token = connection.token,
         cameraId = connection.cameraId,
+        cameraEngine = connection.cameraEngine,
         profileHint = connection.profileHint,
     )
 
@@ -446,6 +448,7 @@ class CameraBackendFactory(
             httpClient = httpTransport.client,
             token = connection.token,
             cameraId = connection.cameraId,
+            cameraEngine = connection.cameraEngine,
             profileHint = connection.profileHint,
         ).discoverCameras()
     }

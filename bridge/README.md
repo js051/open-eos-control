@@ -2,7 +2,7 @@
 
 This package provides the PC camera backend and browser control surface for Open EOS Control 0.1.3.
 
-It can connect to Canon cameras through native HTTP CCAPI or through a system-installed `gphoto2`/libgphoto2 USB stack. Camera commands and settings are exposed only when the selected backend advertises support.
+It can connect to Canon cameras through native HTTP CCAPI or through a system-installed `gphoto2`/libgphoto2 USB stack. It also exposes a fail-closed provider boundary for a separately installed licensed EDSDK integration; no working EDSDK provider or Canon material is included. Camera commands and settings are exposed only when the selected backend advertises support.
 
 Direct CCAPI sessions expose confirmation-gated sensor cleaning only when the camera advertises Canon's `POST /functions/sensorcleaning` endpoint. The Bridge requires the documented HTTP 200 response and supports an explicit clean-and-power-off choice; libgphoto2 USB sessions report this feature as unsupported until a verified public command contract exists.
 
@@ -34,7 +34,7 @@ The wheel is the cross-platform installation path:
 python -m pip install open_eos_control_bridge-0.1.3-py3-none-any.whl
 ```
 
-USB control requires `gphoto2` to be available on `PATH`. CCAPI control does not require `gphoto2`.
+USB control requires `gphoto2` to be available on `PATH`. CCAPI control does not require `gphoto2`. The optional EDSDK engine remains unavailable unless a compatible local provider is installed; see [Optional Canon EDSDK Provider](../docs/edsdk-provider.md).
 
 ## Run
 

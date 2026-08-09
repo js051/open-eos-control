@@ -4,7 +4,7 @@ The desktop bridge is a local service that exposes the same camera-control conce
 
 ## Implementation Status
 
-`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and provides two open engines: `libgphoto2` for USB cameras and a native Python HTTP `ccapi` engine for direct wireless camera control. The gPhoto adapter invokes argument arrays, never a shell. Android and iOS implement the bridge protocol behind their shared camera sessions, including discovery, camera selection, memory-only Bearer auth, capability parsing, JPEG frames, bounded media thumbnails, separately advertised display previews, and streamed media. Deterministic tests cover both PC engines and the mobile contracts. Physical R6 Mark III validation is still required and must not be inferred from those tests.
+`bridge/open_eos_bridge` is the first executable implementation. It uses FastAPI and provides two executable open engines: `libgphoto2` for USB cameras and a native Python HTTP `ccapi` engine for direct wireless camera control. A third `edsdk` registration is an SDK-neutral provider boundary and reports unavailable unless a separately installed licensed provider implements it; the repository contains no working Canon binding. The gPhoto adapter invokes argument arrays, never a shell. Android and iOS implement the bridge protocol behind their shared camera sessions, including discovery, engine-preserving camera selection, memory-only Bearer auth, capability parsing, JPEG frames, bounded media thumbnails, separately advertised display previews, and streamed media. Deterministic tests cover the executable PC engines, the optional-provider boundary, and the mobile contracts. Physical R6 Mark III validation is still required and must not be inferred from those tests.
 
 The built-in PC UI also supports a browser-owned local UVC/HDMI preview. This is intentionally not a Bridge endpoint or camera capability: it replaces only the page's viewfinder while the existing Bridge session continues to provide camera controls. Device identifiers stay in page memory, diagnostics contain only a count/selection mode and allowlisted track settings, and all tracks are stopped during source, device, session, or page teardown.
 
@@ -72,6 +72,8 @@ Engines:
 - `libgphoto2`
 - `ccapi`
 - `edsdk`
+
+`GET /health` reports every registered engine. `GET /v1/cameras` aggregates only available local engines and each returned descriptor carries its engine. Clients should send that exact engine with the selected camera ID. `auto` defaults to `libgphoto2` when no selected ID resolves to another engine; an explicit `edsdk` request never falls back. See [Optional Canon EDSDK Provider](edsdk-provider.md).
 
 For direct wireless CCAPI, the session request is:
 

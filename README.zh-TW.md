@@ -155,6 +155,8 @@ GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系
 
 ## Desktop Bridge
 
+公開版 Bridge 現在會列出 fail-closed 的 `edsdk` engine，但它只有具版本的 SDK-neutral Python provider 契約。Release 不包含可運作的 provider、Canon SDK binary、header、文件、常數或 ABI 宣告，因此真正 EDSDK 控制仍屬研究；設計與授權界線見 [EDSDK provider 文件](docs/edsdk-provider.md)。
+
 Desktop Bridge 是可執行的本機服務，也是 PC 控制 App。它可以透過 `gphoto2` 控制 USB 相機，也能不依賴 `gphoto2`，直接連接相機的無線 CCAPI endpoint。API 與內建介面都會依所選 engine 與相機實際公告的能力，開放身分、狀態、設定、拍照、Bulb 計時開始／停止、AF-ON、半按快門、錄影、焦點前後移動、座標 Tap AF 或點選白平衡、JPEG 或相機公告的 RTP H.264 Live View、需身分驗證的按需媒體縮圖、串流下載、需確認後執行的刪除，以及含版本、時間與公告／實測差異且不包含帳密或相機序號的診斷。libgphoto2 設定映射包含 R6 Mark III 白平衡偏移、各卡槽影像畫質、畫面比例、電動變焦速度、自動關閉電源與拍攝儲存位置；仍須相機實際公告可寫 choices，未記載的 `0xFFFFFFFF` 電源值會被拒絕，只有單一選項的進階控制不會顯示。選擇「記憶卡」時沿用相機端拍攝；選擇「電腦（Internal RAM／SDRAM）」時，必須由相機公告 image capture，並使用 gPhoto2 的 capture-and-download 生命週期。檔案在下載並刪除相機端暫存物件前只存在同磁碟 staging，命令成功後才原子移入 Bridge 媒體庫，供縮圖、串流下載與刪除。PC RTP 會驗證 Canon SDP，以 RFC 3550／RFC 6184 接收與重組 H.264，由 PyAV／FFmpeg 解碼，再透過既有 Bridge endpoint 輸出受 FPS 上限控制的 JPEG；若 SDP 同時公告 in-band RFC 6416 `MP4A-LATM/48000`，另一個獨立接收器會輸出有界 48 kHz stereo PCM，只有使用者按下喇叭控制後才透過 WebAudio 播放，音訊失敗不會中止影像。直接 CCAPI 的 AF-ON 使用相機公告的 `POST /shooting/control/af` start/stop；libgphoto2 USB 優先使用 runtime 的 `autofocusdrive`／`autofocuscancel` action pair，缺少時才退回確實釋放的半按流程。座標 Tap AF 與點選白平衡會先用 Canon `flipdetail` 的影像幾何資訊換算，再分別送出整數 `PUT afframeposition` 或 `POST clickwb`。介面支援英文、繁體中文，以及桌面與窄版響應式配置。正式執行路徑不使用假相機 engine；可重現的 fake 只存在測試中。
 
 Windows x64 可直接從 Release 下載 `open-eos-control-bridge-windows-x64-X.Y.Z.exe` 並執行。檔案已包含 Python runtime、PyAV／FFmpeg 與瀏覽器控制介面；內嵌服務準備完成後會自動開啟 loopback 控制頁。使用期間請保留主控台視窗，關閉視窗即停止服務；加入 `--no-browser` 可停用自動開啟瀏覽器。無線 CCAPI 與本機 UVC／HDMI 監看不需另外安裝 Python；USB 相機控制仍需系統中有可用的 `gphoto2` engine。

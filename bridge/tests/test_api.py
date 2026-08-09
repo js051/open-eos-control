@@ -5,6 +5,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from open_eos_bridge.app import create_app
+from open_eos_bridge.edsdk import EdsdkEngine
+from open_eos_bridge.edsdk_loader import EdsdkProviderLoadResult
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine, SubprocessGPhotoRunner
 from open_eos_bridge.models import CameraDescriptor
@@ -309,7 +311,12 @@ def test_bridge_reports_effective_fps_when_gphoto2_movie_stream_falls_back() -> 
 
 def test_edsdk_request_is_explicitly_unavailable() -> None:
     headers = {"Authorization": "Bearer test-token"}
-    with TestClient(create_app(engine=GPhoto2Engine(FakeRunner()), token="test-token")) as client:
+    edsdk = EdsdkEngine(
+        load_result=EdsdkProviderLoadResult(provider=None, detail="No test provider is installed.")
+    )
+    with TestClient(
+        create_app(engine=GPhoto2Engine(FakeRunner()), edsdk_engine=edsdk, token="test-token")
+    ) as client:
         response = client.post("/v1/session", headers=headers, json={"engine": "edsdk"})
 
     assert response.status_code == 501

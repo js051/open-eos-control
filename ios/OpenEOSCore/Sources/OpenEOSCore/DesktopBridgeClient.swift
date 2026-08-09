@@ -78,6 +78,7 @@ public actor DesktopBridgeClient {
     private let baseURL: URL
     private let bearerToken: String
     private let cameraID: String?
+    private let cameraEngine: String?
     private let profileHint: String?
     private let transport: any CameraHTTPTransport
 
@@ -90,6 +91,7 @@ public actor DesktopBridgeClient {
         baseURL: String,
         token: String = "",
         cameraID: String? = nil,
+        cameraEngine: String? = nil,
         profileHint: String? = "Canon EOS R6 Mark III",
         transport: any CameraHTTPTransport = URLSessionCameraHTTPTransport()
     ) throws {
@@ -115,6 +117,8 @@ public actor DesktopBridgeClient {
         self.baseURL = normalizedURL
         bearerToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         self.cameraID = cameraID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let normalizedEngine = cameraEngine?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.cameraEngine = ["libgphoto2", "edsdk"].contains(normalizedEngine ?? "") ? normalizedEngine : nil
         self.profileHint = profileHint?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.transport = transport
     }
@@ -144,7 +148,7 @@ public actor DesktopBridgeClient {
     public func initialize() async throws {
         guard sessionID == nil else { return }
         try await validateService()
-        var payload: BridgeJSON = ["engine": "auto"]
+        var payload: BridgeJSON = ["engine": cameraEngine ?? "auto"]
         if let cameraID { payload["cameraId"] = cameraID }
         if let profileHint { payload["profileHint"] = profileHint }
         let body = try await postJSON(endpoint(["v1", "session"]), payload: payload)
