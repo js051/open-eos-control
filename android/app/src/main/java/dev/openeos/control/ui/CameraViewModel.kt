@@ -364,10 +364,12 @@ class CameraViewModel(
         lastPhotoShootingMode = null
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val state = _uiState.value
+        val selectedCamera = state.bridgeCameras.firstOrNull { it.id == state.selectedBridgeCameraId }
         val session = repository.connectBridge(
             baseUrl = state.bridgeBaseUrl,
             token = state.bridgeToken,
             cameraId = state.selectedBridgeCameraId,
+            cameraEngine = selectedCamera?.engine,
             request = LiveViewRequest(
                 fps = state.liveViewFrameRateFps,
                 size = state.liveViewSize,

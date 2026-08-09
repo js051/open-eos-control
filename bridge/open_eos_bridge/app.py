@@ -13,7 +13,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .ccapi import CcapiEngine
+from .edsdk import EdsdkEngine
 from .engine import CameraEngine, NetworkCameraEngine
+from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
 from .models import (
@@ -62,13 +64,19 @@ UI_HEADERS = {
 def create_app(
     *,
     engine: CameraEngine | None = None,
+    edsdk_engine: CameraEngine | None = None,
     ccapi_engine: NetworkCameraEngine | None = None,
     token: str | None = None,
 ) -> FastAPI:
     camera_engine = engine or GPhoto2Engine()
+    optional_edsdk_engine = edsdk_engine or EdsdkEngine()
+    local_engine_list = [camera_engine]
+    if optional_edsdk_engine.name != camera_engine.name:
+        local_engine_list.append(optional_edsdk_engine)
+    local_engines = LocalEngineRegistry(local_engine_list, default_engine=camera_engine.name)
     network_engine = ccapi_engine or CcapiEngine()
     configured_token = token if token is not None else os.environ.get("OPEN_EOS_BRIDGE_TOKEN")
-    manager = SessionManager(camera_engine, network_engine)
+    manager = SessionManager(local_engines, network_engine)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -147,31 +155,25 @@ def create_app(
 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        available, engine_version, detail = camera_engine.health()
         network_available, network_version, network_detail = network_engine.health()
+        engines = local_engines.health()
+        engines[network_engine.name] = EngineHealth(
+            available=network_available,
+            version=network_version,
+            detail=network_detail,
+        )
         return HealthResponse(
             version=__version__,
             auth_required=bool(configured_token),
             loopback_only=not bool(configured_token),
-            engines={
-                camera_engine.name: EngineHealth(
-                    available=available,
-                    version=engine_version,
-                    detail=detail,
-                ),
-                network_engine.name: EngineHealth(
-                    available=network_available,
-                    version=network_version,
-                    detail=network_detail,
-                ),
-            },
+            engines=engines,
         )
 
     router = APIRouter(prefix="/v1", dependencies=[Depends(authorize)])
 
     @router.get("/cameras", response_model=CameraList)
     def cameras() -> CameraList:
-        return CameraList(cameras=camera_engine.discover())
+        return CameraList(cameras=manager.discover())
 
     @router.post("/session", response_model=SessionCreated, status_code=201)
     def create_session(payload: SessionCreateRequest) -> SessionCreated:

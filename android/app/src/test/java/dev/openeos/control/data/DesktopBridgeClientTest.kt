@@ -38,6 +38,7 @@ class DesktopBridgeClientTest {
             baseUrl = server.url("/").toString(),
             token = "bridge-secret",
             cameraId = "camera-r6m3",
+            cameraEngine = "edsdk",
         )
 
         val cameras = client.discoverCameras()
@@ -160,6 +161,7 @@ class DesktopBridgeClientTest {
         val sessionRequest = requests.first { it.requestUrl?.encodedPath == "/v1/session" }
         val sessionPayload = JSONObject(sessionRequest.body.readUtf8())
         assertEquals("camera-r6m3", sessionPayload.getString("cameraId"))
+        assertEquals("edsdk", sessionPayload.getString("engine"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/settings/iso") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/clock/sync") == true })
         val sensorCleaningRequest = requests.first {
