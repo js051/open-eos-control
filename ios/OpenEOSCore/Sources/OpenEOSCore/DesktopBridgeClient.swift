@@ -342,8 +342,8 @@ public actor DesktopBridgeClient {
             )
         }
         let body = try await postJSON(sessionEndpoint(["directories"]), payload: ["name": name])
-        let created = body.string("name")
-        guard created.range(of: #"^[A-Z0-9_]{5}$"#, options: .regularExpression) != nil else {
+        guard let created = body.string("name"),
+              created.range(of: #"^[A-Z0-9_]{5}$"#, options: .regularExpression) != nil else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid created directory name.")
         }
         return created
