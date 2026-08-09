@@ -49,7 +49,8 @@ struct MediaView: View {
             allowedContentTypes: [.data],
             allowsMultipleSelection: false
         ) { result in
-            guard case let .success(url) = result,
+            guard case let .success(urls) = result,
+                  let url = urls.first,
                   url.startAccessingSecurityScopedResource()
             else { return }
             if !camera.startMediaUpload(url, securityScoped: true) {
