@@ -510,8 +510,9 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(rated.rating, 4)
         XCTAssertEqual(rotated.rotationDegrees, 180)
         XCTAssertEqual(archived.archived, true)
+        let requests = await transport.requests()
         let archiveRequest = try XCTUnwrap(
-            (await transport.requests()).last { $0.method == "PUT" && $0.path.hasSuffix("/archive") }
+            requests.last { $0.method == "PUT" && $0.path.hasSuffix("/archive") }
         )
         let archivePayload = try XCTUnwrap(archiveRequest.body)
         XCTAssertEqual(

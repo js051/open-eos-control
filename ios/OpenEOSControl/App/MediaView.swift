@@ -525,7 +525,7 @@ private struct MediaMetadataView: View {
                 .padding(20)
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .background(Color.cameraBackground)
         .task(id: itemID) {
