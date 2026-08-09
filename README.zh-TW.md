@@ -33,7 +33,7 @@ open-eos-control/
 - 顯示相機身分、transport、profile 與電池；CCAPI、USB/PTP 或桌面橋接有回報時，亦顯示記憶卡數、總容量、可用容量及剩餘可拍張數
 - Android、iOS 與 PC 依能力讀取 Canon CCAPI 可拍攝資訊。拍照模式優先顯示相機即時剩餘張數，錄影模式顯示精確剩餘錄影時間；相機未公告 `/shooting/information/recordable` 或回傳無效資料時，才退回既有儲存空間摘要
 - Android、iOS 與 PC 依能力顯示 Canon CCAPI 鏡頭與溫度狀態。拍照、開始錄影或啟動 Live View 前會重新讀取相機公告的溫度限制，並以繁中／英文警告說明原因；停止與釋放命令仍保持可用，避免相機留在作用中狀態
-- 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、協定版本、相機公告命令、可寫設定，以及本次工作階段中確實成功的操作
+- 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、根清單／developer 清單／identity 的結構化嘗試紀錄、協定版本、相機公告命令、可寫設定，以及本次工作階段中確實成功的操作；追蹤不含回應值、raw JSON、相機 origin、帳密或例外文字
 - Android、iOS 與 PC 都提供工作階段限定的真機驗證，只列出相機已公告且本次操作確實成功的功能；必須再由操作人員確認相機端結果，模擬器／離線預覽不能充當證據，複製的隱私安全 Markdown 會以平台原生 SHA-256 綁定對應診斷報告
 - Android、iOS 與 PC 都提供依能力開放的相機日期／時間同步。直接 CCAPI 必須同時公告 GET 與 PUT `/functions/datetime`，寫入 Canon 指定的 RFC 1123 時間與 DST 狀態後再回讀驗證。Android 直接 USB 會透過 `SetDevicePropValueEx` 寫入相機公告的 Canon EOS `UTCTime (0xD17C)` 或 `CameraTime (0xD113)` UINT32，並要求收到相符的屬性事件。Desktop Bridge USB 必須同時取得相機公告的可寫 libgphoto2 `syncdatetimeutc`／`syncdatetime` action 與對應 `datetimeutc`／`datetime`，執行後強制重新讀取 config，且回報時間須落在操作時間區間前後十秒內。
 - Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon `GetEvent` 機身操作與相機時鐘同步。只有手機與記憶卡兩條路徑都可執行時才顯示拍攝儲存位置選擇；選擇手機會把 Canon 主機 RAM JPEG／RAW 原子傳輸至 App 私有 Media。另包含 Canon EOS 遠端快門、半按、保證取消的原生 AF-ON、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、自動關閉電源、自動亮度優化、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View

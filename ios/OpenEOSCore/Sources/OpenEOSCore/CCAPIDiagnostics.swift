@@ -88,7 +88,8 @@ public enum CCAPIDiagnosticReport {
         let date = ISO8601DateFormatter().string(from: liveView.lastFrameAt ?? Date(timeIntervalSince1970: 0))
         let source = sanitized(liveView.sourceURL)?.absoluteString ?? "none"
         let validation = DiagnosticValidationSummary(capabilities: snapshot?.capabilities)
-        let report = [
+        let discoveryTrace = evidence?.discoveryTrace ?? []
+        let report = ([
             "Open EOS Control iOS diagnostic report",
             "reportSchema=\(diagnosticReportSchema)",
             "generatedAt=\(metadata.generatedAt)",
@@ -103,6 +104,8 @@ public enum CCAPIDiagnosticReport {
             "planned=\(planned)",
             "capabilitySource=\(evidence?.source ?? "unknown")",
             "protocolVersions=\(evidence?.protocolVersions.joined(separator: ", ") ?? "none")",
+            "discoveryAttemptCount=\(discoveryTrace.count)",
+        ] + diagnosticDiscoveryLines(discoveryTrace) + [
             "advertisedCommandCount=\(evidence?.advertisedCommands.count ?? 0)",
             "advertisedCommands=\(evidence?.advertisedCommands.joined(separator: " | ") ?? "none")",
             "writableSettings=\(evidence?.writableSettings.joined(separator: ", ") ?? "none")",
@@ -134,7 +137,7 @@ public enum CCAPIDiagnosticReport {
             "source=\(source)",
             "lastFrameAt=\(liveView.lastFrameAt == nil ? "none" : date)",
             "lastError=\(lastError ?? "none")",
-        ].joined(separator: "\n")
+        ]).joined(separator: "\n")
         return redactDiagnosticText(report, sensitiveValues: [snapshot?.info.serial])
     }
 
@@ -145,6 +148,30 @@ public enum CCAPIDiagnosticReport {
         return components.url
     }
 
+}
+
+public func cameraDiscoveryTraceText(_ attempts: [CameraDiscoveryAttempt]) -> String {
+    attempts.map(diagnosticDiscoveryAttempt).joined(separator: "\n")
+}
+
+func diagnosticDiscoveryLines(_ attempts: [CameraDiscoveryAttempt]) -> [String] {
+    attempts.enumerated().map { index, attempt in
+        "discoveryAttempt\(index + 1)=\(diagnosticDiscoveryAttempt(attempt))"
+    }
+}
+
+private func diagnosticDiscoveryAttempt(_ attempt: CameraDiscoveryAttempt) -> String {
+    let keys = attempt.responseKeys.isEmpty ? "none" : attempt.responseKeys.joined(separator: ", ")
+    let versions = attempt.protocolVersions.isEmpty ? "none" : attempt.protocolVersions.joined(separator: ", ")
+    return [
+        "endpoint=\(attempt.endpoint)",
+        "outcome=\(attempt.outcome)",
+        "httpStatus=\(attempt.httpStatus.map(String.init) ?? "none")",
+        "responseKeys=\(keys)",
+        "protocolVersions=\(versions)",
+        "advertisedOperationCount=\(attempt.advertisedOperationCount)",
+        "truncated=\(attempt.truncated)",
+    ].joined(separator: "; ")
 }
 
 func diagnosticSerial(_ value: String?) -> String {

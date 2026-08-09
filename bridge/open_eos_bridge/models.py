@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _to_camel(value: str) -> str:
@@ -251,12 +252,41 @@ class LiveViewCapabilities(ApiModel):
     max_fps: int = Field(default=5, ge=1)
 
 
+class DiscoveryAttempt(ApiModel):
+    endpoint: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^GET /ccapi(?:/[A-Za-z0-9._~-]+)*/?$",
+    )
+    outcome: str = Field(min_length=1, max_length=64, pattern=r"^[A-Z][A-Z0-9_]{0,63}$")
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    response_keys: list[str] = Field(default_factory=list, max_length=32)
+    protocol_versions: list[str] = Field(default_factory=list, max_length=32)
+    advertised_operation_count: int = Field(default=0, ge=0)
+    truncated: bool = False
+
+    @field_validator("response_keys")
+    @classmethod
+    def validate_response_keys(cls, values: list[str]) -> list[str]:
+        if any(re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", value) is None for value in values):
+            raise ValueError("Discovery response keys must be bounded structural names.")
+        return values
+
+    @field_validator("protocol_versions")
+    @classmethod
+    def validate_protocol_versions(cls, values: list[str]) -> list[str]:
+        if any(re.fullmatch(r"ver[0-9]+", value) is None for value in values):
+            raise ValueError("Discovery protocol versions must use Canon verNNN names.")
+        return values
+
+
 class CapabilityEvidence(ApiModel):
     source: str = "unknown"
     protocol_versions: list[str] = Field(default_factory=list, max_length=256)
     advertised_commands: list[str] = Field(default_factory=list, max_length=256)
     writable_settings: list[str] = Field(default_factory=list, max_length=256)
     observed_features: list[CameraFeature] = Field(default_factory=list, max_length=256)
+    discovery_trace: list[DiscoveryAttempt] = Field(default_factory=list, max_length=16)
     truncated: bool = False
 
 

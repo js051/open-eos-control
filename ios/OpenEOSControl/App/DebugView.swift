@@ -64,6 +64,12 @@ struct DebugView: View {
                             mono: true
                         )
                         value(
+                            "discovery_trace",
+                            cameraDiscoveryTraceText(camera.capabilities?.evidence.discoveryTrace ?? []).nilIfBlank
+                                ?? language.string("none"),
+                            mono: true
+                        )
+                        value(
                             "advertised_commands",
                             camera.capabilities?.evidence.advertisedCommands.joined(separator: "\n").nilIfBlank
                                 ?? language.string("none"),

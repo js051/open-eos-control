@@ -818,6 +818,7 @@ class CcapiClientTest {
         server.enqueue(jsonResponse("""{"productname":"Canon EOS R6 Mark III"}"""))
 
         client.initialize()
+        val capabilities = client.capabilities()
         val failure = runCatching { client.startLiveView() }.exceptionOrNull()
 
         assertEquals("/ccapi", server.takeRequest().path)
@@ -825,6 +826,12 @@ class CcapiClientTest {
         assertEquals("/ccapi/ver110/deviceinformation", server.takeRequest().path)
         assertTrue(failure is IllegalStateException)
         assertTrue(failure?.message.orEmpty().contains("complete Live View"))
+        assertEquals(
+            listOf("HTTP_ERROR", "HTTP_ERROR", "IDENTITY"),
+            capabilities.evidence.discoveryTrace.map(CameraDiscoveryAttempt::outcome),
+        )
+        assertEquals(200, capabilities.evidence.discoveryTrace.last().httpStatus)
+        assertTrue("productname" in capabilities.evidence.discoveryTrace.last().responseKeys)
         assertEquals(3, server.requestCount)
     }
 
@@ -855,6 +862,16 @@ class CcapiClientTest {
             "POST /ccapi/ver110/shooting/control/shutterbutton" in
                 capabilities.evidence.advertisedCommands,
         )
+        assertEquals(
+            listOf("NO_API_LIST", "OPERATIONS"),
+            capabilities.evidence.discoveryTrace.map(CameraDiscoveryAttempt::outcome),
+        )
+        assertEquals(
+            listOf("GET /ccapi", "GET /ccapi/ver100/topurlfordev"),
+            capabilities.evidence.discoveryTrace.map(CameraDiscoveryAttempt::endpoint),
+        )
+        assertTrue(capabilities.evidence.discoveryTrace.last().advertisedOperationCount > 0)
+        assertTrue(capabilities.evidence.discoveryTrace.flatMap { it.responseKeys }.none { "secret" in it.lowercase() })
     }
 
     @Test
@@ -890,6 +907,12 @@ class CcapiClientTest {
             "GET /ccapi/ver100/topurlfordev (Canon developer API fallback)",
             capabilities.evidence.source,
         )
+        assertEquals(
+            listOf("ZERO_OPERATIONS", "OPERATIONS"),
+            capabilities.evidence.discoveryTrace.map(CameraDiscoveryAttempt::outcome),
+        )
+        assertEquals(listOf("ver100"), capabilities.evidence.discoveryTrace.first().protocolVersions)
+        assertEquals(0, capabilities.evidence.discoveryTrace.first().advertisedOperationCount)
     }
 
     @Test

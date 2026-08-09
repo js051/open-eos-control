@@ -104,6 +104,7 @@
     <string name="capability_evidence">Capability evidence</string>
     <string name="capability_source">Discovery source</string>
     <string name="protocol_versions">Protocol versions</string>
+    <string name="discovery_trace">Discovery trace</string>
     <string name="advertised_commands">Advertised commands</string>
     <string name="writable_settings">Writable settings</string>
     <string name="observed_features">Observed this session</string>

@@ -2205,6 +2205,12 @@ def test_ccapi_discovery_loads_canon_developer_api_list_when_root_omits_operatio
     assert CameraFeature.MEDIA_BROWSER in capabilities.supported
     assert capabilities.evidence.source == "GET /ccapi/ver100/topurlfordev (Canon developer API fallback)"
     assert "POST /ccapi/ver100/shooting/control/shutterbutton" in capabilities.evidence.advertised_commands
+    assert [attempt.outcome for attempt in capabilities.evidence.discovery_trace] == ["NO_API_LIST", "OPERATIONS"]
+    assert [attempt.endpoint for attempt in capabilities.evidence.discovery_trace] == [
+        "GET /ccapi",
+        "GET /ccapi/ver100/topurlfordev",
+    ]
+    assert capabilities.evidence.discovery_trace[-1].advertised_operation_count > 0
     request_paths = [request.path for request in transport.requests]
     assert request_paths[:2] == [
         "/ccapi",
@@ -2227,6 +2233,12 @@ def test_ccapi_discovery_loads_developer_api_when_firmware_returns_version_witho
     assert CameraFeature.VIDEO_RECORDING in capabilities.supported
     assert capabilities.evidence.advertised_commands
     assert capabilities.evidence.source == "GET /ccapi/ver100/topurlfordev (Canon developer API fallback)"
+    assert [attempt.outcome for attempt in capabilities.evidence.discovery_trace] == [
+        "ZERO_OPERATIONS",
+        "OPERATIONS",
+    ]
+    assert capabilities.evidence.discovery_trace[0].protocol_versions == ["ver100"]
+    assert capabilities.evidence.discovery_trace[0].advertised_operation_count == 0
     request_paths = [request.path for request in transport.requests]
     assert request_paths[:2] == [
         "/ccapi",
@@ -2248,6 +2260,14 @@ def test_ccapi_discovery_rejects_empty_developer_api_list_without_inventing_capa
     assert CameraFeature.STILL_CAPTURE in capabilities.planned
     assert capabilities.evidence.advertised_commands == []
     assert capabilities.evidence.source == "GET /ccapi/ver100/deviceinformation (identity fallback)"
+    assert [attempt.outcome for attempt in capabilities.evidence.discovery_trace] == [
+        "ZERO_OPERATIONS",
+        "ZERO_OPERATIONS",
+        "HTTP_ERROR",
+        "HTTP_ERROR",
+        "IDENTITY",
+    ]
+    assert capabilities.evidence.discovery_trace[-1].response_keys == ["productname", "serialnumber", "version"]
     request_paths = [request.path for request in transport.requests]
     assert request_paths[:3] == [
         "/ccapi",
@@ -2266,6 +2286,8 @@ def test_ccapi_discovery_developer_api_failure_does_not_invent_capabilities() ->
     assert CameraFeature.STILL_CAPTURE in capabilities.planned
     assert capabilities.evidence.source == "GET /ccapi/ver100/deviceinformation (identity fallback)"
     assert "/ccapi/ver100/topurlfordev" in [request.path for request in transport.requests]
+    assert "HTTP_ERROR" in [attempt.outcome for attempt in capabilities.evidence.discovery_trace]
+    assert all("camera busy" not in str(attempt) for attempt in capabilities.evidence.discovery_trace)
 
 
 def test_ccapi_wb_shift_hides_malformed_or_unbounded_ranges() -> None:

@@ -22,6 +22,8 @@ App 內紀錄是方便檢閱的工作階段筆記，不是遠端證明。完整�
 
 使用目前版本連接實體相機，實際操作要驗證的功能，再從 Android、iOS 或 PC 控制介面的 **Debug > 複製診斷報告** 取得報告。請把原始報告保存在 repository 外，檔名可使用 `diagnostic-report-r6m3.txt` 或 `diagnostic-report-r6m3.json`；Git 已忽略這類檔名。
 
+遇到 CCAPI 韌體或探索問題時，分享私密報告前請保留 `discoveryAttemptCount` 與編號的 `discoveryAttempt` 行。它們能區分根清單、developer 清單與 identity fallback 的結果，但不含回應 body 或值。每一行只會包含固定的相對 endpoint、結果、可選 HTTP 狀態、已過濾的頂層鍵、協定版本、有效操作數與截短狀態；不會包含相機 origin、帳密、Authorization、例外訊息或 raw JSON。
+
 原始報告應維持私密，且只有符合以下條件才會被接受：
 
 - 使用 report schema 1，並包含明確的產品版本；

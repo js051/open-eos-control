@@ -280,6 +280,7 @@
 "capability_evidence" = "能力證據";
 "capability_source" = "探索來源";
 "protocol_versions" = "協定版本";
+"discovery_trace" = "探索追蹤";
 "advertised_commands" = "相機公告命令";
 "writable_settings" = "可寫設定";
 "observed_features" = "本次工作階段已成功";

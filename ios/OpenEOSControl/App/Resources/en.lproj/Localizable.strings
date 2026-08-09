@@ -280,6 +280,7 @@
 "capability_evidence" = "Capability evidence";
 "capability_source" = "Discovery source";
 "protocol_versions" = "Protocol versions";
+"discovery_trace" = "Discovery trace";
 "advertised_commands" = "Advertised commands";
 "writable_settings" = "Writable settings";
 "observed_features" = "Observed this session";

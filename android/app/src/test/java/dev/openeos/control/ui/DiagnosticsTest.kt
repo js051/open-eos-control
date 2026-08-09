@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraCapabilityEvidence
+import dev.openeos.control.data.CameraDiscoveryAttempt
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraNetworkDiagnostics
@@ -160,6 +161,22 @@ class DiagnosticsTest {
                     advertisedCommands = listOf("POST /ccapi/ver100/shooting/control/shutterbutton"),
                     writableSettings = listOf("iso", "tv"),
                     observedFeatures = setOf(CameraFeature.CAMERA_IDENTITY, CameraFeature.LIVE_VIEW),
+                    discoveryTrace = listOf(
+                        CameraDiscoveryAttempt(
+                            endpoint = "GET /ccapi",
+                            outcome = "NO_API_LIST",
+                            httpStatus = 200,
+                            responseKeys = listOf("value"),
+                        ),
+                        CameraDiscoveryAttempt(
+                            endpoint = "GET /ccapi/ver100/topurlfordev",
+                            outcome = "OPERATIONS",
+                            httpStatus = 200,
+                            responseKeys = listOf("ver100"),
+                            protocolVersions = listOf("ver100"),
+                            advertisedOperationCount = 17,
+                        ),
+                    ),
                 ),
             ),
             networkDiagnostics = CameraNetworkDiagnostics(
@@ -245,6 +262,14 @@ class DiagnosticsTest {
         assertTrue(report.contains("monitorSafeArea=true"))
         assertTrue(report.contains("monitorDesqueeze=X1_33"))
         assertTrue(report.contains("capabilitySource=GET /ccapi"))
+        assertTrue(report.contains("discoveryAttemptCount=2"))
+        assertTrue(
+            report.contains(
+                "discoveryAttempt1=endpoint=GET /ccapi; outcome=NO_API_LIST; httpStatus=200; " +
+                    "responseKeys=value; protocolVersions=none; advertisedOperationCount=0; truncated=false",
+            ),
+        )
+        assertTrue(report.contains("discoveryAttempt2=endpoint=GET /ccapi/ver100/topurlfordev; outcome=OPERATIONS"))
         assertTrue(report.contains("advertisedCommandCount=1"))
         assertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
         assertTrue(report.contains("writableSettings=iso, tv"))

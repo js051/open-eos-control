@@ -261,6 +261,38 @@ public actor DesktopBridgeClient {
         let observedFeatures = Set(
             rawObservedFeatures.prefix(Self.maximumEvidenceItems).compactMap(CameraFeature.init(rawValue:))
         )
+        let rawDiscoveryTrace = evidenceBody["discoveryTrace"] as? [Any] ?? []
+        let discoveryTrace = rawDiscoveryTrace.prefix(16).compactMap { raw -> CameraDiscoveryAttempt? in
+            guard let attempt = raw as? BridgeJSON,
+                  let endpoint = attempt.string("endpoint"),
+                  endpoint.range(
+                    of: #"^GET /ccapi(?:/[A-Za-z0-9._~-]+)*/?$"#,
+                    options: .regularExpression
+                  ) != nil,
+                  let outcome = attempt.string("outcome"),
+                  outcome.range(of: #"^[A-Z][A-Z0-9_]{0,63}$"#, options: .regularExpression) != nil
+            else { return nil }
+            let rawKeys = attempt.stringArray("responseKeys")
+            let keys = Self.unique(rawKeys.filter {
+                $0.range(of: #"^[A-Za-z][A-Za-z0-9_-]{0,63}$"#, options: .regularExpression) != nil
+            }).prefix(32)
+            let rawVersions = attempt.stringArray("protocolVersions")
+            let versions = Self.unique(rawVersions.filter {
+                $0.range(of: #"^ver\d+$"#, options: .regularExpression) != nil
+            }).prefix(32)
+            let status = attempt.int("httpStatus").flatMap { (100...599).contains($0) ? $0 : nil }
+            return CameraDiscoveryAttempt(
+                endpoint: endpoint,
+                outcome: outcome,
+                httpStatus: status,
+                responseKeys: Array(keys),
+                protocolVersions: Array(versions),
+                advertisedOperationCount: max(0, attempt.int("advertisedOperationCount") ?? 0),
+                truncated: (attempt.optionalBool("truncated") ?? false)
+                    || rawKeys.count > keys.count
+                    || rawVersions.count > versions.count
+            )
+        }
         let source = Self.cleanEvidenceItem(evidenceBody.string("source") ?? "unknown", removeQuery: false).value
         let evidence = CameraCapabilityEvidence(
             source: source.isEmpty ? "unknown" : source,
@@ -268,11 +300,14 @@ public actor DesktopBridgeClient {
             advertisedCommands: commands.values,
             writableSettings: writableSettings.values,
             observedFeatures: observedFeatures,
+            discoveryTrace: discoveryTrace,
             truncated: (evidenceBody.optionalBool("truncated") ?? false)
                 || versions.truncated
                 || commands.truncated
                 || writableSettings.truncated
                 || rawObservedFeatures.count > Self.maximumEvidenceItems
+                || rawDiscoveryTrace.count > discoveryTrace.count
+                || discoveryTrace.contains { $0.truncated }
         )
 
         return CameraCapabilities(
@@ -964,7 +999,8 @@ public enum DesktopBridgeDiagnosticReport {
         let observedText = observed.flatMap { $0.isEmpty ? nil : $0 } ?? "none"
         let date = ISO8601DateFormatter().string(from: liveView.lastFrameAt ?? Date(timeIntervalSince1970: 0))
         let validation = DiagnosticValidationSummary(capabilities: snapshot?.capabilities)
-        let report = [
+        let discoveryTrace = evidence?.discoveryTrace ?? []
+        let report = ([
             "Open EOS Control iOS diagnostic report",
             "reportSchema=\(diagnosticReportSchema)",
             "generatedAt=\(metadata.generatedAt)",
@@ -979,6 +1015,8 @@ public enum DesktopBridgeDiagnosticReport {
             "planned=\(planned)",
             "capabilitySource=\(evidence?.source ?? "unknown")",
             "protocolVersions=\(evidence?.protocolVersions.joined(separator: ", ") ?? "none")",
+            "discoveryAttemptCount=\(discoveryTrace.count)",
+        ] + diagnosticDiscoveryLines(discoveryTrace) + [
             "advertisedCommandCount=\(evidence?.advertisedCommands.count ?? 0)",
             "advertisedCommands=\(evidence?.advertisedCommands.joined(separator: " | ") ?? "none")",
             "writableSettings=\(evidence?.writableSettings.joined(separator: ", ") ?? "none")",
@@ -1009,7 +1047,7 @@ public enum DesktopBridgeDiagnosticReport {
             "source=\(sanitized(liveView.sourceURL)?.absoluteString ?? "none")",
             "lastFrameAt=\(liveView.lastFrameAt == nil ? "none" : date)",
             "lastError=\(lastError ?? "none")",
-        ].joined(separator: "\n")
+        ]).joined(separator: "\n")
         return redactDiagnosticText(report, sensitiveValues: [snapshot?.info.serial])
     }
 

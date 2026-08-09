@@ -22,6 +22,8 @@ This in-app record is a reviewable session note, not remote attestation. Keep th
 
 Use a current build, connect the physical camera, exercise the features under test, then copy the report from **Debug > Copy diagnostic report** in Android, iOS, or the PC control UI. Save the copied report outside the repository using a name such as `diagnostic-report-r6m3.txt` or `diagnostic-report-r6m3.json`; these names are ignored by Git.
 
+For CCAPI firmware/discovery problems, preserve the `discoveryAttemptCount` and numbered `discoveryAttempt` lines when sharing the private report. They distinguish root-list, developer-list and identity fallback outcomes without containing the response body or values. Each line is limited to a fixed relative endpoint, result, optional HTTP status, sanitized top-level keys, protocol versions, valid operation count and truncation state; it never includes the camera origin, credentials, Authorization, exception message or raw JSON.
+
 The source report must remain private. It is accepted only when it:
 
 - uses report schema 1 and identifies a non-unknown product version;
