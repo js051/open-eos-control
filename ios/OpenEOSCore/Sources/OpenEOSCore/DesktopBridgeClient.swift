@@ -261,7 +261,7 @@ public actor DesktopBridgeClient {
         let observedFeatures = Set(
             rawObservedFeatures.prefix(Self.maximumEvidenceItems).compactMap(CameraFeature.init(rawValue:))
         )
-        let rawDiscoveryTrace = evidenceBody.array("discoveryTrace")
+        let rawDiscoveryTrace = evidenceBody["discoveryTrace"] as? [Any] ?? []
         let discoveryTrace = rawDiscoveryTrace.prefix(16).compactMap { raw -> CameraDiscoveryAttempt? in
             guard let attempt = raw as? BridgeJSON,
                   let endpoint = attempt.string("endpoint"),
