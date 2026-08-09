@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
@@ -77,12 +78,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.CameraFileNaming
+import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraTemperatureStatus
 import dev.openeos.control.data.FocusDriveDirection
@@ -1128,6 +1132,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     var showSleepConfirmation by remember { mutableStateOf(false) }
     var showSensorCleaningConfirmation by remember { mutableStateOf(false) }
     var showDirectoryCreation by remember { mutableStateOf(false) }
+    var showFileNaming by remember { mutableStateOf(false) }
     var directoryName by remember { mutableStateOf("") }
     var sensorCleaningAutoPowerOff by remember { mutableStateOf(false) }
     if (showSensorCleaningConfirmation) {
@@ -1247,6 +1252,17 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
             titleContentColor = AppText,
             textContentColor = AppSubtleText,
         )
+    }
+    if (showFileNaming) {
+        state.capabilities?.fileNaming?.let { fileNaming ->
+            FileNamingEditorDialog(
+                value = fileNaming,
+                captureMode = state.captureMode,
+                busy = state.previewMode || state.busy,
+                onSet = actions.setFileNaming,
+                onDismiss = { showFileNaming = false },
+            )
+        }
     }
     CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
@@ -1375,6 +1391,43 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                if (
+                    state.supports(CameraFeature.FILE_NAMING_CONTROL) &&
+                    state.capabilities?.fileNaming != null
+                ) {
+                    val naming = state.capabilities.fileNaming
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.file_naming),
+                                color = AppText,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                if (state.captureMode == CaptureMode.PHOTO) {
+                                    stringResource(R.string.file_naming_photo_summary, naming.stillFilenameMode)
+                                } else {
+                                    stringResource(
+                                        R.string.file_naming_video_summary,
+                                        naming.movieIndex,
+                                        naming.movieReelNumber,
+                                        naming.movieClipNumber,
+                                    )
+                                },
+                                color = AppSubtleText,
+                            )
+                        }
+                        Button(
+                            onClick = { showFileNaming = true },
+                            enabled = !state.previewMode && !state.busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(48.dp).testTag("file-naming"),
+                        ) {
+                            Text(stringResource(R.string.edit))
+                        }
+                    }
+                }
                 if (state.supports(CameraFeature.SENSOR_CLEANING)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -1456,6 +1509,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                     !state.supports(CameraFeature.FOCUS_DRIVE) &&
                     !state.supports(CameraFeature.CAMERA_CLOCK_SYNC) &&
                     !state.supports(CameraFeature.DIRECTORY_CONTROL) &&
+                    !state.supports(CameraFeature.FILE_NAMING_CONTROL) &&
                     !state.supports(CameraFeature.SENSOR_CLEANING) &&
                     !state.supports(CameraFeature.CAMERA_SLEEP)
                 ) {
@@ -1466,6 +1520,171 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
         }
     }
 }
+
+@Composable
+private fun FileNamingEditorDialog(
+    value: CameraFileNaming,
+    captureMode: CaptureMode,
+    busy: Boolean,
+    onSet: (CameraFileNamingField, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var stillUserSetting1 by remember(value.stillUserSetting1) { mutableStateOf(value.stillUserSetting1) }
+    var stillUserSetting2 by remember(value.stillUserSetting2) { mutableStateOf(value.stillUserSetting2) }
+    var movieIndex by remember(value.movieIndex) { mutableStateOf(value.movieIndex) }
+    var movieReelNumber by remember(value.movieReelNumber) { mutableStateOf(value.movieReelNumber.toString()) }
+    var movieClipNumber by remember(value.movieClipNumber) { mutableStateOf(value.movieClipNumber.toString()) }
+    var movieUserDefined by remember(value.movieUserDefined) { mutableStateOf(value.movieUserDefined) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.file_naming)) },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    stringResource(
+                        if (captureMode == CaptureMode.PHOTO) R.string.photo else R.string.video,
+                    ),
+                    color = AppAccent,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (captureMode == CaptureMode.PHOTO) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(value.stillFilenameModeOptions) { option ->
+                            Button(
+                                onClick = { onSet(CameraFileNamingField.STILL_FILENAME_MODE, option) },
+                                enabled = !busy && option != value.stillFilenameMode,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (option == value.stillFilenameMode) AppAccent else AppSurfaceHigh,
+                                    contentColor = if (option == value.stillFilenameMode) AppBackground else AppText,
+                                ),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.height(48.dp).testTag("file-naming-mode-$option"),
+                            ) {
+                                Text(fileNamingModeLabel(option))
+                            }
+                        }
+                    }
+                    FileNamingInputRow(
+                        label = stringResource(R.string.still_user_setting_1),
+                        value = stillUserSetting1,
+                        onValueChange = { stillUserSetting1 = it.fileNamingText(4, allowUnderscore = true) },
+                        valid = value.accepts(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1),
+                        busy = busy,
+                        testTag = "still-user-setting-1",
+                        onApply = { onSet(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) },
+                    )
+                    FileNamingInputRow(
+                        label = stringResource(R.string.still_user_setting_2),
+                        value = stillUserSetting2,
+                        onValueChange = { stillUserSetting2 = it.fileNamingText(3, allowUnderscore = true) },
+                        valid = value.accepts(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2),
+                        busy = busy,
+                        testTag = "still-user-setting-2",
+                        onApply = { onSet(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) },
+                    )
+                } else {
+                    FileNamingInputRow(
+                        label = stringResource(R.string.movie_index),
+                        value = movieIndex,
+                        onValueChange = { movieIndex = it.fileNamingText(2, allowUnderscore = true) },
+                        valid = value.accepts(CameraFileNamingField.MOVIE_INDEX, movieIndex),
+                        busy = busy,
+                        testTag = "movie-index",
+                        onApply = { onSet(CameraFileNamingField.MOVIE_INDEX, movieIndex) },
+                    )
+                    FileNamingInputRow(
+                        label = stringResource(R.string.movie_reel_number),
+                        value = movieReelNumber,
+                        onValueChange = { movieReelNumber = it.filter(Char::isDigit).take(4) },
+                        valid = value.accepts(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber),
+                        busy = busy,
+                        numeric = true,
+                        testTag = "movie-reel-number",
+                        onApply = { onSet(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber) },
+                    )
+                    FileNamingInputRow(
+                        label = stringResource(R.string.movie_clip_number),
+                        value = movieClipNumber,
+                        onValueChange = { movieClipNumber = it.filter(Char::isDigit).take(3) },
+                        valid = value.accepts(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber),
+                        busy = busy,
+                        numeric = true,
+                        testTag = "movie-clip-number",
+                        onApply = { onSet(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber) },
+                    )
+                    FileNamingInputRow(
+                        label = stringResource(R.string.movie_user_defined),
+                        value = movieUserDefined,
+                        onValueChange = { movieUserDefined = it.fileNamingText(5, allowUnderscore = false) },
+                        valid = value.accepts(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined),
+                        busy = busy,
+                        testTag = "movie-user-defined",
+                        onApply = { onSet(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined) },
+                    )
+                }
+                Text(stringResource(R.string.file_naming_rule), color = AppSubtleText)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.done), color = AppAccent) }
+        },
+        containerColor = AppSurface,
+        titleContentColor = AppText,
+        textContentColor = AppSubtleText,
+    )
+}
+
+@Composable
+private fun FileNamingInputRow(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    valid: Boolean,
+    busy: Boolean,
+    testTag: String,
+    numeric: Boolean = false,
+    onApply: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text(label) },
+            isError = value.isNotEmpty() && !valid,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Ascii,
+            ),
+            modifier = Modifier.weight(1f).testTag(testTag),
+        )
+        Button(
+            onClick = onApply,
+            enabled = valid && !busy,
+            colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+            shape = RoundedCornerShape(6.dp),
+            modifier = Modifier.height(48.dp).testTag("$testTag-apply"),
+        ) {
+            Text(stringResource(R.string.apply))
+        }
+    }
+}
+
+private fun String.fileNamingText(maxLength: Int, allowUnderscore: Boolean): String =
+    uppercase().filter { it in if (allowUnderscore) "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" else "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" }
+        .take(maxLength)
+
+@Composable
+private fun fileNamingModeLabel(value: String): String = stringResource(
+    when (value) {
+        "preset_code" -> R.string.file_naming_preset_code
+        "usersetting1" -> R.string.still_user_setting_1
+        "usersetting2" -> R.string.still_user_setting_2
+        else -> R.string.unknown
+    },
+)
 
 @Composable
 private fun SettingsSheetTitle(title: String, onDismiss: () -> Unit) {

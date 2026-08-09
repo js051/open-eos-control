@@ -377,6 +377,20 @@ async function run() {
       (state) => state.movie_card_selection === "card1" && state.card_selection_update_count === 1,
       "Canon movie card selection",
     );
+    const movieIndexInput = page.locator('input[aria-label="Movie index"]');
+    await movieIndexInput.waitFor({ state: "visible" });
+    await movieIndexInput.fill("B_");
+    const movieIndexRequest = page.waitForRequest((request) =>
+      request.method() === "PUT" && request.url().includes("/file-naming/"));
+    await movieIndexInput.locator("xpath=..").getByRole("button", { name: "Apply" }).click();
+    const movieIndexWrite = await movieIndexRequest;
+    assert.match(movieIndexWrite.url(), /\/file-naming\/movie-index$/);
+    assert.deepEqual(movieIndexWrite.postDataJSON(), { value: "B_" });
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.file_naming.movieIndex === "B_" && state.file_naming_update_count === 1,
+      "Canon movie filename index",
+    );
     assert.deepEqual(
       await page.locator('#advanced-settings select[data-setting-key="beep"] option').allInnerTexts(),
       ["Enable", "Disable", "Touch sounds off"],
@@ -441,6 +455,20 @@ async function run() {
         `${key} must be hidden in Photo mode`,
       );
     }
+    const stillPrefixInput = page.locator('input[aria-label="User setting 1"]');
+    await stillPrefixInput.waitFor({ state: "visible" });
+    await stillPrefixInput.fill("R6M_");
+    const stillPrefixRequest = page.waitForRequest((request) =>
+      request.method() === "PUT" && request.url().includes("/file-naming/"));
+    await stillPrefixInput.locator("xpath=..").getByRole("button", { name: "Apply" }).click();
+    const stillPrefixWrite = await stillPrefixRequest;
+    assert.match(stillPrefixWrite.url(), /\/file-naming\/still-user-setting-1$/);
+    assert.deepEqual(stillPrefixWrite.postDataJSON(), { value: "R6M_" });
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.file_naming.stillUserSetting1 === "R6M_" && state.file_naming_update_count === 2,
+      "Canon still filename prefix",
+    );
     await page.selectOption('#advanced-settings select[data-setting-key="focusbracketing"]', "enable");
     await waitForSimulatorState(
       simulatorOrigin,

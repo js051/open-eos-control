@@ -9,6 +9,8 @@ from .models import (
     CameraEvent,
     CameraInfo,
     CameraStatus,
+    FileNamingField,
+    FileNamingState,
     FocusResult,
     LiveViewMagnificationResult,
     LiveViewStartRequest,
@@ -37,6 +39,8 @@ class CameraEngineSession(Protocol):
     def sync_camera_clock(self) -> CameraStatus: ...
 
     def create_directory(self, name: str) -> str: ...
+
+    def set_file_naming(self, field: FileNamingField, value: str) -> FileNamingState: ...
 
     def clean_sensor(self, auto_power_off: bool) -> None: ...
 

@@ -141,6 +141,8 @@ class CcapiClient(
     private val structuredSettingValuesByKey = mutableMapOf<String, Set<String>>()
     private val structuredSettingCurrentValues = mutableMapOf<String, JSONObject>()
     private var cameraSleepWritePath: String? = null
+    private var fileNamingState: CameraFileNaming? = null
+    private var fileNamingLoaded = false
     private val apiOperations = linkedSetOf<CcapiApiOperation>()
     private val observedFeatures = mutableSetOf<CameraFeature>()
     private val discoveryTrace = mutableListOf<CameraDiscoveryAttempt>()
@@ -602,6 +604,7 @@ class CcapiClient(
     suspend fun capabilities(): CameraCapabilities {
         return if (isRealCamera) {
             val settings = loadShootingSettings()
+            val fileNaming = loadFileNaming()
 
             val isoList = writableSetting(settings, listOf("iso"))
                 ?.optJSONArray("ability")?.toStringList().orEmpty()
@@ -648,6 +651,7 @@ class CcapiClient(
             ) {
                 supportedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
             }
+            if (fileNaming != null) supportedFeatures.add(CameraFeature.FILE_NAMING_CONTROL)
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
             val supportsMultipartLiveView = supportsMultipartLiveView()
@@ -733,6 +737,7 @@ class CcapiClient(
                 aperture = apertureList,
                 whiteBalance = wbList,
                 advancedSettings = advancedSettings,
+                fileNaming = fileNaming,
                 matrix = CapabilityMatrix.ccapiNetwork(supportedFeatures),
                 liveView = liveViewCapabilities,
                 evidence = capabilityEvidence(),
@@ -993,6 +998,46 @@ class CcapiClient(
         observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
         if (isRealCamera) loadShootingSettings()
         return created
+    }
+
+    suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming {
+        val current = loadFileNaming()
+            ?: error("Camera did not advertise a valid complete Canon file-naming endpoint group.")
+        require(current.accepts(field, value)) {
+            "Value '$value' is not valid for Canon file-naming field ${field.wireName}."
+        }
+        val updated = if (isRealCamera) {
+            val operations = fileNamingOperations()
+                ?: error("Camera did not advertise the complete Canon file-naming endpoint group.")
+            val operation = operations.getValue(field).second
+            val responseKey = FILE_NAMING_ENDPOINTS.getValue(field).responseKey
+            val requestValue: Any = when (field) {
+                CameraFileNamingField.MOVIE_REEL_NUMBER,
+                CameraFileNamingField.MOVIE_CLIP_NUMBER,
+                -> value.toInt()
+                else -> value
+            }
+            val response = putJson(operation.path, JSONObject().put(responseKey, requestValue))
+            check(response.opt(responseKey) == requestValue) {
+                "Canon file-naming control returned an invalid update response."
+            }
+            fileNamingLoaded = false
+            loadFileNaming(force = true)
+                ?: error("Canon file-naming control returned an invalid state after update.")
+        } else {
+            putJson(
+                "/ccapi/file-naming/${field.wireName}",
+                JSONObject().put("value", value),
+            ).toValidatedFileNaming()
+                ?: error("Simulator returned an invalid file-naming state.")
+        }
+        check(updated.value(field) == value) {
+            "Canon file-naming control did not return the requested value on refresh."
+        }
+        fileNamingState = updated
+        fileNamingLoaded = true
+        observedFeatures.add(CameraFeature.FILE_NAMING_CONTROL)
+        return updated
     }
 
     suspend fun sleepCamera() {
@@ -1776,7 +1821,8 @@ class CcapiClient(
             .toList()
         val writableSettings = (
             settingPathsByKey.keys +
-                if (cameraSleepWritePath != null) setOf(AUTO_POWER_OFF_SETTING_KEY) else emptySet()
+                (if (cameraSleepWritePath != null) setOf(AUTO_POWER_OFF_SETTING_KEY) else emptySet()) +
+                (if (fileNamingState != null) FILE_NAMING_ENDPOINTS.keys.map { it.wireName } else emptyList())
             )
             .asSequence()
             .map { it.replace("\r", "").replace("\n", "").take(MAX_CAPABILITY_EVIDENCE_ITEM_CHARS) }
@@ -1888,6 +1934,22 @@ class CcapiClient(
                 null
             }
         }
+    }
+
+    private fun fileNamingOperations(): Map<CameraFileNamingField, Pair<CcapiApiOperation, CcapiApiOperation>>? {
+        return apiVersionPrefixes
+            .sortedByDescending { it.apiVersionNumber() }
+            .firstNotNullOfOrNull { prefix ->
+                buildMap {
+                    FILE_NAMING_ENDPOINTS.forEach { (field, definition) ->
+                        val path = "$prefix${definition.pathSuffix}"
+                        val read = CcapiApiOperation("GET", path)
+                        val write = CcapiApiOperation("PUT", path)
+                        if (read !in apiOperations || write !in apiOperations) return@firstNotNullOfOrNull null
+                        put(field, read to write)
+                    }
+                }
+            }
     }
 
     private fun advertisedApiPaths(method: String, pathSuffix: String): List<String> =
@@ -2773,6 +2835,37 @@ class CcapiClient(
         return if (merged.length() > 0) merged else null
     }
 
+    private suspend fun loadFileNaming(force: Boolean = false): CameraFileNaming? {
+        if (fileNamingLoaded && !force) return fileNamingState
+        observedFeatures.remove(CameraFeature.FILE_NAMING_CONTROL)
+        val state = if (isRealCamera) {
+            val operations = fileNamingOperations()
+            if (operations == null) {
+                null
+            } else {
+                val responses = buildMap {
+                    for ((field, operation) in operations) {
+                        val response = try {
+                            getJson(operation.first.path)
+                        } catch (exception: CancellationException) {
+                            throw exception
+                        } catch (_: Exception) {
+                            return@buildMap
+                        }
+                        put(field, response)
+                    }
+                }
+                responses.toValidatedFileNaming()
+            }
+        } else {
+            getJson("/ccapi/capabilities").optJSONObject("fileNaming")?.toValidatedFileNaming()
+        }
+        fileNamingState = state
+        fileNamingLoaded = true
+        if (state != null) observedFeatures.add(CameraFeature.FILE_NAMING_CONTROL)
+        return state
+    }
+
     private suspend fun postZoomValue(value: String) {
         if (!settingsLoaded) loadShootingSettings()
         val path = settingPathsByKey[ZOOM_SETTING_KEY]
@@ -3532,6 +3625,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
                 values = setting.getJSONArray("ability").toStringList(),
             )
         }
+    val fileNaming = optJSONObject("fileNaming")?.toValidatedFileNaming()
     val zoomControl = optJSONObject(ZOOM_SETTING_KEY)
         ?.toValidatedZoomSetting()
         ?.let { setting ->
@@ -3595,6 +3689,11 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             setOf(CameraFeature.DIRECTORY_CONTROL)
         } else {
             emptySet()
+        }) +
+        (if (fileNaming != null) {
+            setOf(CameraFeature.FILE_NAMING_CONTROL)
+        } else {
+            emptySet()
         })
     return CameraCapabilities(
         iso = getJSONArray("iso").toStringList(),
@@ -3613,6 +3712,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             *focusBracketingControls.toTypedArray(),
             *movieSettingControls.toTypedArray(),
         ),
+        fileNaming = fileNaming,
         matrix = CapabilityMatrix.ccapiNetwork(supported),
         liveView = LiveViewCapabilities.simulator(),
     )
@@ -3976,6 +4076,27 @@ private data class DirectoryOperations(
     val write: CcapiApiOperation,
     val create: CcapiApiOperation,
 )
+private data class FileNamingEndpoint(
+    val pathSuffix: String,
+    val responseKey: String,
+)
+private val FILE_NAMING_ENDPOINTS = linkedMapOf(
+    CameraFileNamingField.STILL_FILENAME_MODE to
+        FileNamingEndpoint("/functions/filename/stills/filename", "value"),
+    CameraFileNamingField.STILL_USER_SETTING_1 to
+        FileNamingEndpoint("/functions/filename/stills/usersetting1", "usersetting1"),
+    CameraFileNamingField.STILL_USER_SETTING_2 to
+        FileNamingEndpoint("/functions/filename/stills/usersetting2", "usersetting2"),
+    CameraFileNamingField.MOVIE_INDEX to
+        FileNamingEndpoint("/functions/filename/movies/index", "index"),
+    CameraFileNamingField.MOVIE_REEL_NUMBER to
+        FileNamingEndpoint("/functions/filename/movies/reelnum", "value"),
+    CameraFileNamingField.MOVIE_CLIP_NUMBER to
+        FileNamingEndpoint("/functions/filename/movies/clipnum", "value"),
+    CameraFileNamingField.MOVIE_USER_DEFINED to
+        FileNamingEndpoint("/functions/filename/movies/userdefined", "userdefined"),
+)
+private val STILL_FILENAME_MODES = setOf("preset_code", "usersetting1", "usersetting2")
 
 private fun Any?.toExactJsonInt(): Int? = when (this) {
     is Byte -> toInt()
@@ -4035,6 +4156,117 @@ private fun JSONObject.toValidatedDirectorySelectionSetting(): JSONObject? {
     return JSONObject()
         .put("value", current)
         .put("ability", org.json.JSONArray(values))
+}
+
+private fun CameraFileNaming.value(field: CameraFileNamingField): String = when (field) {
+    CameraFileNamingField.STILL_FILENAME_MODE -> stillFilenameMode
+    CameraFileNamingField.STILL_USER_SETTING_1 -> stillUserSetting1
+    CameraFileNamingField.STILL_USER_SETTING_2 -> stillUserSetting2
+    CameraFileNamingField.MOVIE_INDEX -> movieIndex
+    CameraFileNamingField.MOVIE_REEL_NUMBER -> movieReelNumber.toString()
+    CameraFileNamingField.MOVIE_CLIP_NUMBER -> movieClipNumber.toString()
+    CameraFileNamingField.MOVIE_USER_DEFINED -> movieUserDefined
+}
+
+private fun JSONObject.toValidatedFileRange(maximumAllowed: Int): Pair<Int, CameraIntegerRange>? {
+    val current = opt("value").toExactJsonInt() ?: return null
+    val ability = optJSONObject("ability") ?: return null
+    val minimum = ability.opt("min").toExactJsonInt() ?: return null
+    val maximum = ability.opt("max").toExactJsonInt() ?: return null
+    val step = ability.opt("step").toExactJsonInt() ?: return null
+    val range = CameraIntegerRange(minimum, maximum, step)
+    if (
+        minimum < 1 || maximum > maximumAllowed || minimum > maximum || step <= 0 ||
+        !range.accepts(current.toString())
+    ) return null
+    return current to range
+}
+
+private fun JSONObject.toValidatedBridgeRange(maximumAllowed: Int): CameraIntegerRange? {
+    val minimum = opt("minimum").toExactJsonInt() ?: return null
+    val maximum = opt("maximum").toExactJsonInt() ?: return null
+    val step = opt("step").toExactJsonInt() ?: return null
+    if (minimum < 1 || maximum > maximumAllowed || minimum > maximum || step <= 0) return null
+    return CameraIntegerRange(minimum, maximum, step)
+}
+
+private fun JSONObject.toValidatedFileNaming(): CameraFileNaming? {
+    val mode = opt("stillFilenameMode") as? String ?: return null
+    val options = runCatching { optJSONArray("stillFilenameModeOptions")?.toStringList() }.getOrNull()
+        ?: return null
+    val stillUserSetting1 = opt("stillUserSetting1") as? String ?: return null
+    val stillUserSetting2 = opt("stillUserSetting2") as? String ?: return null
+    val movieIndex = opt("movieIndex") as? String ?: return null
+    val movieReelNumber = opt("movieReelNumber").toExactJsonInt() ?: return null
+    val movieReelRange = optJSONObject("movieReelRange")?.toValidatedBridgeRange(9999) ?: return null
+    val movieClipNumber = opt("movieClipNumber").toExactJsonInt() ?: return null
+    val movieClipRange = optJSONObject("movieClipRange")?.toValidatedBridgeRange(999) ?: return null
+    val movieUserDefined = opt("movieUserDefined") as? String ?: return null
+    if (
+        options.isEmpty() || options.size > STILL_FILENAME_MODES.size || options.toSet().size != options.size ||
+        options.any { it !in STILL_FILENAME_MODES } || mode !in options
+    ) return null
+    val result = CameraFileNaming(
+        stillFilenameMode = mode,
+        stillFilenameModeOptions = options,
+        stillUserSetting1 = stillUserSetting1,
+        stillUserSetting2 = stillUserSetting2,
+        movieIndex = movieIndex,
+        movieReelNumber = movieReelNumber,
+        movieReelRange = movieReelRange,
+        movieClipNumber = movieClipNumber,
+        movieClipRange = movieClipRange,
+        movieUserDefined = movieUserDefined,
+    )
+    return result.takeIf {
+        it.accepts(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) &&
+            it.accepts(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) &&
+            it.accepts(CameraFileNamingField.MOVIE_INDEX, movieIndex) &&
+            it.accepts(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber.toString()) &&
+            it.accepts(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber.toString()) &&
+            it.accepts(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined)
+    }
+}
+
+private fun Map<CameraFileNamingField, JSONObject>.toValidatedFileNaming(): CameraFileNaming? {
+    if (keys != FILE_NAMING_ENDPOINTS.keys) return null
+    val modeResponse = getValue(CameraFileNamingField.STILL_FILENAME_MODE)
+    val mode = modeResponse.opt("value") as? String ?: return null
+    val options = runCatching { modeResponse.optJSONArray("ability")?.toStringList() }.getOrNull()
+        ?: return null
+    if (
+        options.isEmpty() || options.size > STILL_FILENAME_MODES.size || options.toSet().size != options.size ||
+        options.any { it !in STILL_FILENAME_MODES } || mode !in options
+    ) return null
+    val stillUserSetting1 = getValue(CameraFileNamingField.STILL_USER_SETTING_1).opt("usersetting1") as? String
+        ?: return null
+    val stillUserSetting2 = getValue(CameraFileNamingField.STILL_USER_SETTING_2).opt("usersetting2") as? String
+        ?: return null
+    val movieIndex = getValue(CameraFileNamingField.MOVIE_INDEX).opt("index") as? String ?: return null
+    val reel = getValue(CameraFileNamingField.MOVIE_REEL_NUMBER).toValidatedFileRange(9999) ?: return null
+    val clip = getValue(CameraFileNamingField.MOVIE_CLIP_NUMBER).toValidatedFileRange(999) ?: return null
+    val movieUserDefined = getValue(CameraFileNamingField.MOVIE_USER_DEFINED).opt("userdefined") as? String
+        ?: return null
+    val result = CameraFileNaming(
+        stillFilenameMode = mode,
+        stillFilenameModeOptions = options,
+        stillUserSetting1 = stillUserSetting1,
+        stillUserSetting2 = stillUserSetting2,
+        movieIndex = movieIndex,
+        movieReelNumber = reel.first,
+        movieReelRange = reel.second,
+        movieClipNumber = clip.first,
+        movieClipRange = clip.second,
+        movieUserDefined = movieUserDefined,
+    )
+    return result.takeIf {
+        it.accepts(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) &&
+            it.accepts(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) &&
+            it.accepts(CameraFileNamingField.MOVIE_INDEX, movieIndex) &&
+            it.accepts(CameraFileNamingField.MOVIE_REEL_NUMBER, reel.first.toString()) &&
+            it.accepts(CameraFileNamingField.MOVIE_CLIP_NUMBER, clip.first.toString()) &&
+            it.accepts(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined)
+    }
 }
 
 private fun JSONObject.toValidatedStringAbilitySetting(allowedValues: Set<String>?): JSONObject? {

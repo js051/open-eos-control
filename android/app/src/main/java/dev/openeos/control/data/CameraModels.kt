@@ -65,6 +65,7 @@ enum class CameraFeature(
     CAMERA_IDENTITY("Camera identity"),
     CAMERA_CLOCK_SYNC("Camera clock sync"),
     DIRECTORY_CONTROL("Capture directory control"),
+    FILE_NAMING_CONTROL("File naming control"),
     SENSOR_CLEANING("Sensor cleaning"),
     CAMERA_SLEEP("Camera sleep"),
     BATTERY_STATUS("Battery status"),
@@ -166,6 +167,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
                 CameraFeature.DIRECTORY_CONTROL,
+                CameraFeature.FILE_NAMING_CONTROL,
                 CameraFeature.SENSOR_CLEANING,
                 CameraFeature.CAMERA_SLEEP,
             ) - supported,
@@ -207,6 +209,8 @@ data class CapabilityMatrix(
                     "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                 CameraFeature.DIRECTORY_CONTROL to
                     "The camera must advertise Canon directory creation and a same-version GET/PUT directory-selection pair with a valid ability list.",
+                CameraFeature.FILE_NAMING_CONTROL to
+                    "The camera must advertise the complete same-version Canon still and movie file-naming endpoint group and return valid values and ranges.",
                 CameraFeature.SENSOR_CLEANING to
                     "The camera must advertise the Canon POST sensor-cleaning endpoint.",
                 CameraFeature.CAMERA_SLEEP to
@@ -471,6 +475,7 @@ data class CameraCapabilities(
     val aperture: List<String>,
     val whiteBalance: List<String>,
     val advancedSettings: List<CameraSettingControl> = emptyList(),
+    val fileNaming: CameraFileNaming? = null,
     val matrix: CapabilityMatrix = CapabilityMatrix(),
     val liveView: LiveViewCapabilities = LiveViewCapabilities(),
     val profile: CameraProfile = CameraProfile.genericEos(),
@@ -483,6 +488,58 @@ data class CameraSettingControl(
     val value: String,
     val values: List<String>,
 )
+
+enum class CameraFileNamingField(
+    val wireName: String,
+) {
+    STILL_FILENAME_MODE("still-filename-mode"),
+    STILL_USER_SETTING_1("still-user-setting-1"),
+    STILL_USER_SETTING_2("still-user-setting-2"),
+    MOVIE_INDEX("movie-index"),
+    MOVIE_REEL_NUMBER("movie-reel-number"),
+    MOVIE_CLIP_NUMBER("movie-clip-number"),
+    MOVIE_USER_DEFINED("movie-user-defined"),
+    ;
+
+    companion object {
+        fun fromWireName(value: String): CameraFileNamingField? = entries.firstOrNull { it.wireName == value }
+    }
+}
+
+data class CameraIntegerRange(
+    val minimum: Int,
+    val maximum: Int,
+    val step: Int,
+) {
+    fun accepts(value: String): Boolean {
+        if (minimum > maximum || step <= 0) return false
+        val integer = value.toIntOrNull()?.takeIf { it.toString() == value } ?: return false
+        return integer in minimum..maximum && (integer - minimum) % step == 0
+    }
+}
+
+data class CameraFileNaming(
+    val stillFilenameMode: String,
+    val stillFilenameModeOptions: List<String>,
+    val stillUserSetting1: String,
+    val stillUserSetting2: String,
+    val movieIndex: String,
+    val movieReelNumber: Int,
+    val movieReelRange: CameraIntegerRange,
+    val movieClipNumber: Int,
+    val movieClipRange: CameraIntegerRange,
+    val movieUserDefined: String,
+) {
+    fun accepts(field: CameraFileNamingField, value: String): Boolean = when (field) {
+        CameraFileNamingField.STILL_FILENAME_MODE -> value in stillFilenameModeOptions
+        CameraFileNamingField.STILL_USER_SETTING_1 -> Regex("^[A-Z0-9][A-Z0-9_]{3}$").matches(value)
+        CameraFileNamingField.STILL_USER_SETTING_2 -> Regex("^[A-Z0-9][A-Z0-9_]{2}$").matches(value)
+        CameraFileNamingField.MOVIE_INDEX -> Regex("^[A-Z0-9][A-Z0-9_]$").matches(value)
+        CameraFileNamingField.MOVIE_REEL_NUMBER -> movieReelRange.accepts(value)
+        CameraFileNamingField.MOVIE_CLIP_NUMBER -> movieClipRange.accepts(value)
+        CameraFileNamingField.MOVIE_USER_DEFINED -> Regex("^[A-Z0-9]{5}$").matches(value)
+    }
+}
 
 data class LiveViewFrame(
     val bytes: ByteArray,

@@ -45,6 +45,7 @@
     MEDIA_DELETE: "MEDIA_DELETE",
     CAMERA_CLOCK_SYNC: "CAMERA_CLOCK_SYNC",
     DIRECTORY_CONTROL: "DIRECTORY_CONTROL",
+    FILE_NAMING_CONTROL: "FILE_NAMING_CONTROL",
     SENSOR_CLEANING: "SENSOR_CLEANING",
     CAMERA_SLEEP: "CAMERA_SLEEP",
   };
@@ -148,6 +149,19 @@
       directoryNamePlaceholder: "EOSXX or blank",
       directoryCreated: "Created {name}",
       create: "Create",
+      fileNaming: "File naming",
+      fileNamingPhotoSummary: "Still filename: {mode}",
+      fileNamingVideoSummary: "Index {index} · Reel {reel} · Clip {clip}",
+      fileNamingPresetCode: "Preset code",
+      stillUserSetting1: "User setting 1",
+      stillUserSetting2: "User setting 2",
+      movieIndex: "Movie index",
+      movieReelNumber: "Reel number",
+      movieClipNumber: "Clip number",
+      movieUserDefined: "Movie user-defined name",
+      fileNamingRule: "Use Canon's exact uppercase ASCII length and range.",
+      apply: "Apply",
+      fileNamingUpdated: "File naming updated",
       sensorCleaning: "Clean camera sensor",
       sensorCleaningHint: "Runs the camera's built-in sensor-cleaning cycle. Live View pauses while cleaning is in progress.",
       sensorCleaningNow: "Clean now",
@@ -381,6 +395,19 @@
       authRequired: "This bridge requires a Bearer token",
     },
     "zh-TW": {
+      fileNaming: "檔名設定",
+      fileNamingPhotoSummary: "相片檔名：{mode}",
+      fileNamingVideoSummary: "索引 {index} · Reel {reel} · Clip {clip}",
+      fileNamingPresetCode: "預設代碼",
+      stillUserSetting1: "自訂設定 1",
+      stillUserSetting2: "自訂設定 2",
+      movieIndex: "影片索引",
+      movieReelNumber: "Reel 編號",
+      movieClipNumber: "Clip 編號",
+      movieUserDefined: "影片自訂名稱",
+      fileNamingRule: "請使用 Canon 規定長度與範圍的大寫 ASCII 字元。",
+      apply: "套用",
+      fileNamingUpdated: "已更新檔名設定",
       desktopControl: "電腦相機控制",
       language: "語言",
       auto: "自動",
@@ -847,6 +874,7 @@
     info: null,
     status: null,
     capabilities: null,
+    fileNamingDrafts: {},
     operatorConfirmedFeatures: new Set(),
     lastClockSyncAt: null,
     lastCreatedDirectoryName: null,
@@ -1476,6 +1504,7 @@
     state.info = null;
     state.status = null;
     state.capabilities = null;
+    state.fileNamingDrafts = {};
     state.operatorConfirmedFeatures.clear();
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
@@ -1787,6 +1816,7 @@
     );
     const clockSupported = featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
     const directorySupported = featureSupported(FEATURES.DIRECTORY_CONTROL);
+    const fileNamingSupported = featureSupported(FEATURES.FILE_NAMING_CONTROL) && Boolean(state.capabilities?.fileNaming);
     const sensorCleaningSupported = featureSupported(FEATURES.SENSOR_CLEANING);
     const sleepSupported = featureSupported(FEATURES.CAMERA_SLEEP);
     if (clockSupported) {
@@ -1849,6 +1879,7 @@
       row.append(copy, actions);
       ui.advancedSettings.append(row);
     }
+    if (fileNamingSupported) renderFileNamingSettings();
     if (sensorCleaningSupported) {
       const row = document.createElement("div");
       row.className = "settings-command";
@@ -1910,7 +1941,7 @@
       ui.advancedSettings.append(row);
       window.OpenEosIcons?.render(row);
     }
-    if (!settings.length && !clockSupported && !directorySupported && !sensorCleaningSupported && !sleepSupported) {
+    if (!settings.length && !clockSupported && !directorySupported && !fileNamingSupported && !sensorCleaningSupported && !sleepSupported) {
       const empty = document.createElement("p");
       empty.className = "supporting";
       empty.textContent = t("notAvailable");
@@ -1969,6 +2000,121 @@
     });
   }
 
+  function renderFileNamingSettings() {
+    const naming = state.capabilities.fileNaming;
+    const heading = document.createElement("div");
+    heading.className = "settings-command";
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = t("fileNaming");
+    const detail = document.createElement("small");
+    detail.textContent = state.captureMode === "photo"
+      ? t("fileNamingPhotoSummary", { mode: fileNamingModeLabel(naming.stillFilenameMode) })
+      : t("fileNamingVideoSummary", {
+          index: naming.movieIndex,
+          reel: naming.movieReelNumber,
+          clip: naming.movieClipNumber,
+        });
+    copy.append(title, detail);
+    heading.append(copy);
+    ui.advancedSettings.append(heading);
+
+    if (state.captureMode === "photo") {
+      const modeRow = fileNamingRow(t("fileNaming"), t("fileNamingRule"));
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", t("fileNaming"));
+      naming.stillFilenameModeOptions.forEach((option) => {
+        const element = document.createElement("option");
+        element.value = option;
+        element.textContent = fileNamingModeLabel(option);
+        element.selected = option === naming.stillFilenameMode;
+        select.append(element);
+      });
+      select.disabled = cameraInteractionBusy();
+      select.addEventListener("change", () => updateFileNaming("still-filename-mode", select.value, select));
+      modeRow.actions.append(select);
+      ui.advancedSettings.append(modeRow.row);
+      appendFileNamingInput("still-user-setting-1", "stillUserSetting1", naming.stillUserSetting1, 4, true);
+      appendFileNamingInput("still-user-setting-2", "stillUserSetting2", naming.stillUserSetting2, 3, true);
+    } else {
+      appendFileNamingInput("movie-index", "movieIndex", naming.movieIndex, 2, true);
+      appendFileNamingInput("movie-reel-number", "movieReelNumber", String(naming.movieReelNumber), 4, false, true);
+      appendFileNamingInput("movie-clip-number", "movieClipNumber", String(naming.movieClipNumber), 3, false, true);
+      appendFileNamingInput("movie-user-defined", "movieUserDefined", naming.movieUserDefined, 5, false);
+    }
+  }
+
+  function fileNamingRow(titleText, detailText) {
+    const row = document.createElement("div");
+    row.className = "settings-command";
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = titleText;
+    const detail = document.createElement("small");
+    detail.textContent = detailText;
+    copy.append(title, detail);
+    const actions = document.createElement("div");
+    actions.className = "settings-command-actions";
+    row.append(copy, actions);
+    return { row, actions };
+  }
+
+  function appendFileNamingInput(field, labelKey, current, maximumLength, allowUnderscore, numeric = false) {
+    const control = fileNamingRow(t(labelKey), t("fileNamingRule"));
+    const input = document.createElement("input");
+    input.type = numeric ? "number" : "text";
+    input.value = state.fileNamingDrafts[field] ?? current;
+    input.maxLength = maximumLength;
+    input.setAttribute("aria-label", t(labelKey));
+    if (numeric) {
+      const range = field === "movie-reel-number"
+        ? state.capabilities.fileNaming.movieReelRange
+        : state.capabilities.fileNaming.movieClipRange;
+      input.min = String(range.minimum);
+      input.max = String(range.maximum);
+      input.step = String(range.step);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button secondary";
+    button.textContent = t("apply");
+    button.dataset.cameraCommand = "file-naming";
+    const refresh = () => {
+      if (!numeric) {
+        const allowed = allowUnderscore ? /[^A-Z0-9_]/g : /[^A-Z0-9]/g;
+        input.value = input.value.toUpperCase().replace(allowed, "").slice(0, maximumLength);
+      }
+      state.fileNamingDrafts[field] = input.value;
+      button.disabled = cameraInteractionBusy() || !fileNamingValueValid(field, input.value);
+    };
+    input.addEventListener("input", refresh);
+    button.addEventListener("click", () => updateFileNaming(field, input.value, button));
+    refresh();
+    control.actions.append(input, button);
+    ui.advancedSettings.append(control.row);
+  }
+
+  function fileNamingValueValid(field, value) {
+    const naming = state.capabilities?.fileNaming;
+    if (!naming) return false;
+    if (field === "still-filename-mode") return naming.stillFilenameModeOptions.includes(value);
+    if (field === "still-user-setting-1") return /^[A-Z0-9][A-Z0-9_]{3}$/.test(value);
+    if (field === "still-user-setting-2") return /^[A-Z0-9][A-Z0-9_]{2}$/.test(value);
+    if (field === "movie-index") return /^[A-Z0-9][A-Z0-9_]$/.test(value);
+    if (field === "movie-user-defined") return /^[A-Z0-9]{5}$/.test(value);
+    if (!/^[1-9][0-9]*$/.test(value)) return false;
+    const range = field === "movie-reel-number" ? naming.movieReelRange : naming.movieClipRange;
+    const number = Number(value);
+    return number >= range.minimum && number <= range.maximum && (number - range.minimum) % range.step === 0;
+  }
+
+  function fileNamingModeLabel(value) {
+    if (value === "preset_code") return t("fileNamingPresetCode");
+    if (value === "usersetting1") return t("stillUserSetting1");
+    if (value === "usersetting2") return t("stillUserSetting2");
+    return value;
+  }
+
   async function syncCameraClock(source) {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.CAMERA_CLOCK_SYNC)) return;
     beginCameraInteraction();
@@ -2014,6 +2160,37 @@
       await refreshCapabilityEvidence();
       setOperationState(t("ready"));
       showToast(t("directoryCreated", { name: result.name }));
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderSession();
+    }
+  }
+
+  async function updateFileNaming(field, value, source) {
+    if (
+      !state.session ||
+      cameraInteractionBusy() ||
+      !featureSupported(FEATURES.FILE_NAMING_CONTROL) ||
+      !fileNamingValueValid(field, value)
+    ) return;
+    beginCameraInteraction();
+    state.lastError = null;
+    source.disabled = true;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      state.capabilities.fileNaming = await api(
+        `/v1/session/${encodeURIComponent(state.session.id)}/file-naming/${encodeURIComponent(field)}`,
+        { method: "PUT", json: { value } },
+      );
+      delete state.fileNamingDrafts[field];
+      await refreshCapabilityEvidence();
+      setOperationState(t("ready"));
+      showToast(t("fileNamingUpdated"));
     } catch (error) {
       const normalized = captureError(error);
       setOperationState(normalized.message, true);

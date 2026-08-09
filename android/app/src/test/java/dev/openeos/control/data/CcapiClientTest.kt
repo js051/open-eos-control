@@ -173,6 +173,34 @@ class CcapiClientTest {
     }
 
     @Test
+    fun simulatorFileNamingCapabilityWritesBackedEndpoint() = runTest {
+        server.enqueue(jsonResponse(SIMULATOR_FILE_NAMING_CAPABILITIES_JSON))
+        server.enqueue(jsonResponse(SIMULATOR_FILE_NAMING_CAPABILITIES_JSON))
+        server.enqueue(
+            jsonResponse(
+                JSONObject(SIMULATOR_FILE_NAMING_CAPABILITIES_JSON)
+                    .getJSONObject("fileNaming")
+                    .put("stillUserSetting1", "EOS_")
+                    .toString(),
+            ),
+        )
+
+        val capabilities = client.capabilities()
+        assertTrue(capabilities.matrix.supports(CameraFeature.FILE_NAMING_CONTROL))
+        assertEquals("IMG_", capabilities.fileNaming?.stillUserSetting1)
+
+        val updated = client.setFileNaming(CameraFileNamingField.STILL_USER_SETTING_1, "EOS_")
+
+        assertEquals("EOS_", updated.stillUserSetting1)
+        server.takeRequest()
+        server.takeRequest()
+        val write = server.takeRequest()
+        assertEquals("PUT", write.method)
+        assertEquals("/ccapi/file-naming/still-user-setting-1", write.path)
+        assertEquals("EOS_", JSONObject(write.body.readUtf8()).getString("value"))
+    }
+
+    @Test
     fun simulatorDeviceFunctionSettingsUseBackedEndpoints() = runTest {
         server.enqueue(
             jsonResponse(
@@ -2406,6 +2434,108 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonFileNamingRequiresCompleteGroupAndVerifiesStringAndIntegerUpdates() = runTest {
+        server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON))
+        server.enqueue(jsonResponse("{}"))
+        enqueueCanonFileNaming()
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        val fileNaming = requireNotNull(capabilities.fileNaming)
+        assertTrue(capabilities.matrix.supports(CameraFeature.FILE_NAMING_CONTROL))
+        assertEquals(listOf("preset_code", "usersetting1", "usersetting2"), fileNaming.stillFilenameModeOptions)
+        assertEquals(1, fileNaming.movieReelRange.minimum)
+        assertEquals(9999, fileNaming.movieReelRange.maximum)
+        assertTrue("movie-reel-number" in capabilities.evidence.writableSettings)
+
+        val requestCount = server.requestCount
+        val invalid = runCatching {
+            client.setFileNaming(CameraFileNamingField.STILL_USER_SETTING_1, "_BAD")
+        }.exceptionOrNull()
+        assertTrue(invalid is IllegalArgumentException)
+        assertEquals(requestCount, server.requestCount)
+
+        server.enqueue(jsonResponse("""{"usersetting1":"EOS_"}"""))
+        enqueueCanonFileNaming(stillUserSetting1 = "EOS_")
+        val updatedString = client.setFileNaming(CameraFileNamingField.STILL_USER_SETTING_1, "EOS_")
+        assertEquals("EOS_", updatedString.stillUserSetting1)
+
+        repeat(9) { server.takeRequest() }
+        val stringWrite = server.takeRequest()
+        assertEquals("PUT", stringWrite.method)
+        assertEquals("/ccapi/ver100/functions/filename/stills/usersetting1", stringWrite.path)
+        assertEquals("EOS_", JSONObject(stringWrite.body.readUtf8()).getString("usersetting1"))
+
+        server.enqueue(jsonResponse("""{"value":42}"""))
+        enqueueCanonFileNaming(stillUserSetting1 = "EOS_", movieReelNumber = 42)
+        val updatedInteger = client.setFileNaming(CameraFileNamingField.MOVIE_REEL_NUMBER, "42")
+        assertEquals(42, updatedInteger.movieReelNumber)
+
+        repeat(7) { server.takeRequest() }
+        val integerWrite = server.takeRequest()
+        assertEquals("PUT", integerWrite.method)
+        assertEquals("/ccapi/ver100/functions/filename/movies/reelnum", integerWrite.path)
+        assertEquals(42, JSONObject(integerWrite.body.readUtf8()).getInt("value"))
+    }
+
+    @Test
+    fun canonFileNamingRejectsIncompleteMalformedAndCrossVersionContracts() = runTest {
+        val incompleteDiscovery = CANON_FILE_NAMING_DISCOVERY_JSON.replace(
+            "{\"path\":\"/functions/filename/movies/userdefined\",\"get\":true,\"put\":true}",
+            "{\"path\":\"/functions/filename/movies/userdefined\",\"get\":true}",
+        )
+        server.enqueue(jsonResponse(incompleteDiscovery))
+        server.enqueue(jsonResponse("{}"))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        var capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.FILE_NAMING_CONTROL))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.FILE_NAMING_CONTROL))
+        assertNull(capabilities.fileNaming)
+        assertEquals(2, server.requestCount)
+
+        server.shutdown()
+        server = MockWebServer().also { it.start() }
+        server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON))
+        server.enqueue(jsonResponse("{}"))
+        enqueueCanonFileNaming(stillUserSetting1 = "_BAD")
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.FILE_NAMING_CONTROL))
+        assertNull(capabilities.fileNaming)
+
+        server.shutdown()
+        server = MockWebServer().also { it.start() }
+        server.enqueue(
+            jsonResponse(
+                CANON_FILE_NAMING_DISCOVERY_JSON.replaceFirst(
+                    "{\"path\":\"/functions/filename/stills/filename\",\"get\":true,\"put\":true}",
+                    "{\"path\":\"/functions/filename/stills/filename\",\"get\":true}",
+                ).replace(
+                    "]}",
+                    "],\"ver110\":[{\"path\":\"/functions/filename/stills/filename\",\"put\":true}]}",
+                ),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.FILE_NAMING_CONTROL))
+        assertNull(capabilities.fileNaming)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun realStillImageQualityUsesAdvertisedObjectFieldsAndPreservesCompanionFormat() = runTest {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
@@ -3232,6 +3362,27 @@ class CcapiClientTest {
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
     }
 
+    private fun enqueueCanonFileNaming(
+        stillUserSetting1: String = "IMG_",
+        movieReelNumber: Int = 1,
+    ) {
+        server.enqueue(
+            jsonResponse(
+                """{"value":"preset_code","ability":["preset_code","usersetting1","usersetting2"]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"usersetting1":"$stillUserSetting1"}"""))
+        server.enqueue(jsonResponse("""{"usersetting2":"EOS"}"""))
+        server.enqueue(jsonResponse("""{"index":"A_"}"""))
+        server.enqueue(
+            jsonResponse(
+                """{"value":$movieReelNumber,"ability":{"min":1,"max":9999,"step":1}}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"value":1,"ability":{"min":1,"max":999,"step":1}}"""))
+        server.enqueue(jsonResponse("""{"userdefined":"EOS01"}"""))
+    }
+
     private fun CcapiClient.forceRealCamera(
         prefix: String = "/ccapi/ver100",
         prefixes: List<String> = listOf(prefix),
@@ -3338,6 +3489,40 @@ class CcapiClientTest {
               "aperture": ["2.8", "4.0"],
               "white_balance": ["auto", "daylight"]
             }
+        """
+
+        const val SIMULATOR_FILE_NAMING_CAPABILITIES_JSON = """
+            {
+              "iso": ["100"],
+              "shutter": ["1/50"],
+              "aperture": ["2.8"],
+              "white_balance": ["auto"],
+              "fileNaming": {
+                "stillFilenameMode": "preset_code",
+                "stillFilenameModeOptions": ["preset_code", "usersetting1", "usersetting2"],
+                "stillUserSetting1": "IMG_",
+                "stillUserSetting2": "EOS",
+                "movieIndex": "A_",
+                "movieReelNumber": 1,
+                "movieReelRange": {"minimum": 1, "maximum": 9999, "step": 1},
+                "movieClipNumber": 1,
+                "movieClipRange": {"minimum": 1, "maximum": 999, "step": 1},
+                "movieUserDefined": "EOS01"
+              }
+            }
+        """
+
+        const val CANON_FILE_NAMING_DISCOVERY_JSON = """
+            {"ver100":[
+              {"path":"/shooting/settings","get":true},
+              {"path":"/functions/filename/stills/filename","get":true,"put":true},
+              {"path":"/functions/filename/stills/usersetting1","get":true,"put":true},
+              {"path":"/functions/filename/stills/usersetting2","get":true,"put":true},
+              {"path":"/functions/filename/movies/index","get":true,"put":true},
+              {"path":"/functions/filename/movies/reelnum","get":true,"put":true},
+              {"path":"/functions/filename/movies/clipnum","get":true,"put":true},
+              {"path":"/functions/filename/movies/userdefined","get":true,"put":true}
+            ]}
         """
 
         const val REAL_SETTINGS_JSON = """

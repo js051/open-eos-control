@@ -2,6 +2,8 @@ package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.CameraFileNaming
+import dev.openeos.control.data.CameraIntegerRange
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraProfile
@@ -94,6 +96,18 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             ),
             CameraSettingControl("movieservoaf", "Movie Servo AF", "On", listOf("Off", "On")),
         ),
+        fileNaming = CameraFileNaming(
+            stillFilenameMode = "preset_code",
+            stillFilenameModeOptions = listOf("preset_code", "usersetting1", "usersetting2"),
+            stillUserSetting1 = "IMG_",
+            stillUserSetting2 = "IMG",
+            movieIndex = "A_",
+            movieReelNumber = 1,
+            movieReelRange = CameraIntegerRange(1, 9999, 1),
+            movieClipNumber = 1,
+            movieClipRange = CameraIntegerRange(1, 999, 1),
+            movieUserDefined = "CANON",
+        ),
         matrix = CapabilityMatrix.ccapiNetwork(
             supported = setOf(
                 CameraFeature.CAMERA_IDENTITY,
@@ -121,6 +135,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
                 CameraFeature.MOVIE_SETTINGS_CONTROL,
                 CameraFeature.CARD_SELECTION_CONTROL,
                 CameraFeature.DIRECTORY_CONTROL,
+                CameraFeature.FILE_NAMING_CONTROL,
                 CameraFeature.ADVANCED_SETTINGS,
                 CameraFeature.SENSOR_CLEANING,
                 CameraFeature.CAMERA_SLEEP,

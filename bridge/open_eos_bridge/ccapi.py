@@ -31,7 +31,10 @@ from .models import (
     CapabilityEvidence,
     DiscoveryAttempt,
     ExposureState,
+    FileNamingField,
+    FileNamingState,
     FocusResult,
+    IntegerRange,
     LensStatus,
     LiveViewCapabilities,
     LiveViewMagnificationResult,
@@ -185,6 +188,22 @@ DIRECTORY_CREATE_PATH_SUFFIX = "/functions/directory/createdirectory"
 DIRECTORY_CREATE_NAME_PATTERN = re.compile(r"^(?:[A-Z0-9_]{5})?$")
 DIRECTORY_CREATED_NAME_PATTERN = re.compile(r"^[A-Z0-9_]{5}$")
 DIRECTORY_SELECTION_PATTERN = re.compile(r"^[0-9]{3}[A-Z0-9_]{5}$")
+STILL_FILENAME_MODES = frozenset({"preset_code", "usersetting1", "usersetting2"})
+FILE_NAMING_ENDPOINTS = {
+    FileNamingField.STILL_FILENAME_MODE: ("/functions/filename/stills/filename", "value"),
+    FileNamingField.STILL_USER_SETTING_1: ("/functions/filename/stills/usersetting1", "usersetting1"),
+    FileNamingField.STILL_USER_SETTING_2: ("/functions/filename/stills/usersetting2", "usersetting2"),
+    FileNamingField.MOVIE_INDEX: ("/functions/filename/movies/index", "index"),
+    FileNamingField.MOVIE_REEL_NUMBER: ("/functions/filename/movies/reelnum", "value"),
+    FileNamingField.MOVIE_CLIP_NUMBER: ("/functions/filename/movies/clipnum", "value"),
+    FileNamingField.MOVIE_USER_DEFINED: ("/functions/filename/movies/userdefined", "userdefined"),
+}
+FILE_NAMING_TEXT_PATTERNS = {
+    FileNamingField.STILL_USER_SETTING_1: re.compile(r"^[A-Z0-9][A-Z0-9_]{3}$"),
+    FileNamingField.STILL_USER_SETTING_2: re.compile(r"^[A-Z0-9][A-Z0-9_]{2}$"),
+    FileNamingField.MOVIE_INDEX: re.compile(r"^[A-Z0-9][A-Z0-9_]$"),
+    FileNamingField.MOVIE_USER_DEFINED: re.compile(r"^[A-Z0-9]{5}$"),
+}
 CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
 SETTING_ALIASES = {
@@ -255,6 +274,11 @@ class DirectoryOperations:
     read: CcapiOperation
     write: CcapiOperation
     create: CcapiOperation
+
+
+@dataclass(frozen=True)
+class FileNamingOperations:
+    values: Mapping[FileNamingField, tuple[CcapiOperation, CcapiOperation]]
 
 
 @dataclass(frozen=True)
@@ -673,6 +697,7 @@ class CcapiSession:
         self._discovery_trace_truncated = False
         self._cached_info: CameraInfo | None = None
         self._settings_cache: dict[str, object] | None = None
+        self._file_naming_cache: FileNamingState | None = None
         self._setting_paths: dict[str, str] = {}
         self._camera_sleep_path: str | None = None
         self._discovery_source = "unknown"
@@ -843,6 +868,7 @@ class CcapiSession:
                 self._multipart_session.close()
                 self._multipart_session = None
             self._settings_cache = None
+            self._file_naming_cache = None
             self._media_cache.clear()
             self.transport.close()
             self._closed = True
@@ -943,6 +969,7 @@ class CcapiSession:
         with self._lock:
             self._ensure_initialized()
             settings = self._load_settings(force=False)
+            file_naming = self._load_file_naming(force=False)
             controls = self._camera_settings(settings)
             supported = {CameraFeature.DESKTOP_BRIDGE, CameraFeature.CAMERA_IDENTITY, *self._observed}
             control_keys = {control.key for control in controls}
@@ -966,6 +993,8 @@ class CcapiSession:
                 supported.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
             if DIRECTORY_SELECTION_SETTING_KEY in control_keys and self._directory_operations() is not None:
                 supported.add(CameraFeature.DIRECTORY_CONTROL)
+            if file_naming is not None:
+                supported.add(CameraFeature.FILE_NAMING_CONTROL)
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             jpeg_live_view_supported = self._supports_jpeg_live_view()
@@ -1068,6 +1097,7 @@ class CcapiSession:
                 CameraFeature.FOCUS_BRACKETING_CONTROL,
                 CameraFeature.MOVIE_SETTINGS_CONTROL,
                 CameraFeature.DIRECTORY_CONTROL,
+                CameraFeature.FILE_NAMING_CONTROL,
             }
             live_sizes = (
                 [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
@@ -1123,6 +1153,10 @@ class CcapiSession:
                     CameraFeature.DIRECTORY_CONTROL.value: (
                         "The camera must advertise directory creation plus matching readable and writable "
                         "directory selection in the same CCAPI version, and return a valid ability list."
+                    ),
+                    CameraFeature.FILE_NAMING_CONTROL.value: (
+                        "The camera must advertise the complete same-version Canon still and movie "
+                        "file-naming endpoint group and return valid values and ranges."
                     ),
                     CameraFeature.LIVE_VIEW_RTP.value: (self._rtp_capability_reason()),
                     CameraFeature.LIVE_VIEW_MULTIPART.value: (
@@ -1187,6 +1221,7 @@ class CcapiSession:
                     else LiveViewCapabilities()
                 ),
                 settings=controls,
+                file_naming=file_naming,
                 evidence=self._capability_evidence(),
             )
 
@@ -1380,6 +1415,53 @@ class CcapiSession:
             self._load_settings(force=True)
             self._observed.add(CameraFeature.DIRECTORY_CONTROL)
             return created
+
+    def set_file_naming(self, field: FileNamingField, value: str) -> FileNamingState:
+        with self._lock:
+            self._ensure_initialized()
+            state = self._load_file_naming(force=False)
+            operations = self._file_naming_operations()
+            if state is None or operations is None:
+                raise unsupported(
+                    CameraFeature.FILE_NAMING_CONTROL.value,
+                    self.engine_name,
+                    "The camera did not advertise a valid complete Canon file-naming endpoint group.",
+                )
+            if not _file_naming_accepts(state, field, value):
+                raise BridgeError(
+                    "INVALID_FILE_NAMING_VALUE",
+                    f"Value '{value}' is not valid for Canon file-naming field {field.value}.",
+                    status_code=422,
+                    feature=CameraFeature.FILE_NAMING_CONTROL.value,
+                    engine=self.engine_name,
+                )
+            operation = operations.values[field][1]
+            response_key = FILE_NAMING_ENDPOINTS[field][1]
+            request_value: str | int = int(value) if field in {
+                FileNamingField.MOVIE_REEL_NUMBER,
+                FileNamingField.MOVIE_CLIP_NUMBER,
+            } else value
+            response = self._request_json(operation.method, operation.path, {response_key: request_value})
+            if not isinstance(response, dict) or response.get(response_key) != request_value:
+                raise BridgeError(
+                    "INVALID_CCAPI_RESPONSE",
+                    "Canon file-naming control returned an invalid update response.",
+                    status_code=502,
+                    feature=CameraFeature.FILE_NAMING_CONTROL.value,
+                    engine=self.engine_name,
+                )
+            self._file_naming_cache = None
+            updated = self._load_file_naming(force=True)
+            if updated is None or _file_naming_value(updated, field) != value:
+                raise BridgeError(
+                    "INVALID_CCAPI_RESPONSE",
+                    "Canon file-naming control did not return the requested value on refresh.",
+                    status_code=502,
+                    feature=CameraFeature.FILE_NAMING_CONTROL.value,
+                    engine=self.engine_name,
+                )
+            self._observed.add(CameraFeature.FILE_NAMING_CONTROL)
+            return updated
 
     def sleep_camera(self) -> None:
         with self._lock:
@@ -2512,6 +2594,24 @@ class CcapiSession:
         self._setting_paths = setting_paths
         return merged
 
+    def _load_file_naming(self, force: bool = False) -> FileNamingState | None:
+        if self._file_naming_cache is not None and not force:
+            return self._file_naming_cache
+        self._observed.discard(CameraFeature.FILE_NAMING_CONTROL)
+        operations = self._file_naming_operations()
+        if operations is None:
+            self._file_naming_cache = None
+            return None
+        responses = {
+            field: self._first_json([read.path])
+            for field, (read, _) in operations.values.items()
+        }
+        state = _validated_file_naming_state(responses)
+        self._file_naming_cache = state
+        if state is not None:
+            self._observed.add(CameraFeature.FILE_NAMING_CONTROL)
+        return state
+
     def _camera_settings(self, settings: dict[str, object]) -> list[CameraSetting]:
         controls: list[CameraSetting] = []
         for key, raw in settings.items():
@@ -2670,6 +2770,11 @@ class CcapiSession:
     def _capability_evidence(self) -> CapabilityEvidence:
         protocol_versions = [prefix.rsplit("/", 1)[-1] for prefix in self._api_prefixes]
         commands = sorted({self._evidence_command(operation) for operation in self._operations})
+        filename_fields = (
+            {field.value for field in FILE_NAMING_ENDPOINTS}
+            if self._file_naming_cache is not None
+            else set()
+        )
         writable_settings = sorted(
             {
                 key.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
@@ -2678,7 +2783,7 @@ class CcapiSession:
                     if self._camera_sleep_path is not None
                     else self._setting_paths
                 )
-            }
+            } | filename_fields
         )
         return CapabilityEvidence(
             source=self._discovery_source[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS],
@@ -2924,6 +3029,21 @@ class CcapiSession:
             create = CcapiOperation("POST", f"{prefix}{DIRECTORY_CREATE_PATH_SUFFIX}")
             if write in self._operations and create in self._operations:
                 return DirectoryOperations(read=read, write=write, create=create)
+        return None
+
+    def _file_naming_operations(self) -> FileNamingOperations | None:
+        prefixes = sorted(self._api_prefixes, key=_path_version, reverse=True)
+        for prefix in prefixes:
+            values: dict[FileNamingField, tuple[CcapiOperation, CcapiOperation]] = {}
+            for field, (suffix, _) in FILE_NAMING_ENDPOINTS.items():
+                path = f"{prefix}{suffix}"
+                read = CcapiOperation("GET", path)
+                write = CcapiOperation("PUT", path)
+                if read not in self._operations or write not in self._operations:
+                    break
+                values[field] = (read, write)
+            if len(values) == len(FILE_NAMING_ENDPOINTS):
+                return FileNamingOperations(values=values)
         return None
 
     def _camera_clock_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
@@ -3641,6 +3761,107 @@ def _validated_directory_selection_setting(raw: object) -> dict[str, object] | N
     if len(set(values)) != len(values) or current not in values:
         return None
     return {"value": current, "ability": values}
+
+
+def _validated_file_number_range(raw: object, maximum_allowed: int) -> tuple[int, IntegerRange] | None:
+    if not isinstance(raw, dict):
+        return None
+    current = raw.get("value")
+    ability = raw.get("ability")
+    if isinstance(current, bool) or not isinstance(current, int) or not isinstance(ability, dict):
+        return None
+    minimum = ability.get("min")
+    maximum = ability.get("max")
+    step = ability.get("step")
+    if any(isinstance(item, bool) or not isinstance(item, int) for item in (minimum, maximum, step)):
+        return None
+    assert isinstance(minimum, int) and isinstance(maximum, int) and isinstance(step, int)
+    if minimum < 1 or maximum > maximum_allowed or minimum > maximum or step <= 0:
+        return None
+    if current < minimum or current > maximum or (current - minimum) % step != 0:
+        return None
+    return current, IntegerRange(minimum=minimum, maximum=maximum, step=step)
+
+
+def _validated_file_naming_state(
+    values: Mapping[FileNamingField, object],
+) -> FileNamingState | None:
+    if set(values) != set(FILE_NAMING_ENDPOINTS):
+        return None
+    still_mode = values[FileNamingField.STILL_FILENAME_MODE]
+    if not isinstance(still_mode, dict):
+        return None
+    current_mode = still_mode.get("value")
+    raw_options = still_mode.get("ability")
+    if not isinstance(current_mode, str) or not isinstance(raw_options, list) or not raw_options:
+        return None
+    if not all(isinstance(item, str) and item in STILL_FILENAME_MODES for item in raw_options):
+        return None
+    mode_options = list(raw_options)
+    if len(mode_options) > len(STILL_FILENAME_MODES) or len(set(mode_options)) != len(mode_options):
+        return None
+    if current_mode not in mode_options:
+        return None
+
+    text_values: dict[FileNamingField, str] = {}
+    for field, pattern in FILE_NAMING_TEXT_PATTERNS.items():
+        raw = values[field]
+        response_key = FILE_NAMING_ENDPOINTS[field][1]
+        text = raw.get(response_key) if isinstance(raw, dict) else None
+        if not isinstance(text, str) or pattern.fullmatch(text) is None:
+            return None
+        text_values[field] = text
+
+    reel = _validated_file_number_range(values[FileNamingField.MOVIE_REEL_NUMBER], 9999)
+    clip = _validated_file_number_range(values[FileNamingField.MOVIE_CLIP_NUMBER], 999)
+    if reel is None or clip is None:
+        return None
+    try:
+        return FileNamingState(
+            still_filename_mode=current_mode,
+            still_filename_mode_options=mode_options,
+            still_user_setting_1=text_values[FileNamingField.STILL_USER_SETTING_1],
+            still_user_setting_2=text_values[FileNamingField.STILL_USER_SETTING_2],
+            movie_index=text_values[FileNamingField.MOVIE_INDEX],
+            movie_reel_number=reel[0],
+            movie_reel_range=reel[1],
+            movie_clip_number=clip[0],
+            movie_clip_range=clip[1],
+            movie_user_defined=text_values[FileNamingField.MOVIE_USER_DEFINED],
+        )
+    except ValueError:
+        return None
+
+
+def _file_naming_accepts(state: FileNamingState, field: FileNamingField, value: str) -> bool:
+    if field is FileNamingField.STILL_FILENAME_MODE:
+        return value in state.still_filename_mode_options
+    if field in FILE_NAMING_TEXT_PATTERNS:
+        return FILE_NAMING_TEXT_PATTERNS[field].fullmatch(value) is not None
+    value_range = (
+        state.movie_reel_range
+        if field is FileNamingField.MOVIE_REEL_NUMBER
+        else state.movie_clip_range
+    )
+    if not value.isascii() or not value.isdigit() or (len(value) > 1 and value.startswith("0")):
+        return False
+    integer = int(value)
+    return (
+        value_range.minimum <= integer <= value_range.maximum
+        and (integer - value_range.minimum) % value_range.step == 0
+    )
+
+
+def _file_naming_value(state: FileNamingState, field: FileNamingField) -> str:
+    return {
+        FileNamingField.STILL_FILENAME_MODE: state.still_filename_mode,
+        FileNamingField.STILL_USER_SETTING_1: state.still_user_setting_1,
+        FileNamingField.STILL_USER_SETTING_2: state.still_user_setting_2,
+        FileNamingField.MOVIE_INDEX: state.movie_index,
+        FileNamingField.MOVIE_REEL_NUMBER: str(state.movie_reel_number),
+        FileNamingField.MOVIE_CLIP_NUMBER: str(state.movie_clip_number),
+        FileNamingField.MOVIE_USER_DEFINED: state.movie_user_defined,
+    }[field]
 
 
 def _validated_string_ability_setting(

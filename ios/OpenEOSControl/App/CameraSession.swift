@@ -47,6 +47,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func setFileNaming(field: CameraFileNamingField, value: String) async throws -> CameraFileNaming {
+        switch self {
+        case let .ccapi(client): return try await client.setFileNaming(field: field, value: value)
+        case let .desktopBridge(client): return try await client.setFileNaming(field: field, value: value)
+        }
+    }
+
     func syncCameraClock() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.syncCameraClock()

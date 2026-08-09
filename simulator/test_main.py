@@ -975,3 +975,62 @@ def test_directory_contract_creates_selects_and_rejects_invalid_values() -> None
     assert test_state["directory_selection"] == "102ABCDE"
     assert test_state["directory_create_count"] == 2
     assert test_state["directory_selection_update_count"] == 2
+
+
+def test_file_naming_contract_updates_all_field_shapes_and_rejects_invalid_values() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    still = client.get("/ccapi/ver100/functions/filename/stills/filename")
+    still_user = client.put(
+        "/ccapi/ver100/functions/filename/stills/usersetting1",
+        json={"usersetting1": "R6M_"},
+    )
+    movie_index = client.put(
+        "/ccapi/ver100/functions/filename/movies/index",
+        json={"index": "B_"},
+    )
+    movie_reel = client.put(
+        "/ccapi/ver100/functions/filename/movies/reelnum",
+        json={"value": 42},
+    )
+    simulator_clip = client.put(
+        "/ccapi/file-naming/movie-clip-number",
+        json={"value": "7"},
+    )
+    invalid_leading_underscore = client.put(
+        "/ccapi/ver100/functions/filename/stills/usersetting2",
+        json={"usersetting2": "_R6"},
+    )
+    invalid_movie_name = client.put(
+        "/ccapi/ver100/functions/filename/movies/userdefined",
+        json={"userdefined": "BAD__"},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    for path in (
+        "/functions/filename/stills/filename",
+        "/functions/filename/stills/usersetting1",
+        "/functions/filename/stills/usersetting2",
+        "/functions/filename/movies/index",
+        "/functions/filename/movies/reelnum",
+        "/functions/filename/movies/clipnum",
+        "/functions/filename/movies/userdefined",
+    ):
+        assert {"path": path, "get": True, "put": True} in discovery
+    assert still.json() == {
+        "value": "preset_code",
+        "ability": ["preset_code", "usersetting1", "usersetting2"],
+    }
+    assert still_user.json() == {"usersetting1": "R6M_"}
+    assert movie_index.json() == {"index": "B_"}
+    assert movie_reel.json() == {"value": 42}
+    assert simulator_clip.status_code == 200
+    assert simulator_clip.json()["movieClipNumber"] == 7
+    assert invalid_leading_underscore.status_code == 400
+    assert invalid_movie_name.status_code == 400
+    assert test_state["file_naming"]["stillUserSetting1"] == "R6M_"
+    assert test_state["file_naming"]["movieIndex"] == "B_"
+    assert test_state["file_naming"]["movieReelNumber"] == 42
+    assert test_state["file_naming"]["movieClipNumber"] == 7
+    assert test_state["file_naming_update_count"] == 4

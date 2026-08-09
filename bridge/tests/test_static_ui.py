@@ -154,6 +154,23 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
     }:
         declarations = re.findall(rf'^\s+"{re.escape(key)}":\s+"', script, flags=re.MULTILINE)
         assert len(declarations) == 2, f"{key} must have exactly one label in each supported language"
+    for key in {
+        "fileNaming",
+        "fileNamingPhotoSummary",
+        "fileNamingVideoSummary",
+        "fileNamingPresetCode",
+        "stillUserSetting1",
+        "stillUserSetting2",
+        "movieIndex",
+        "movieReelNumber",
+        "movieClipNumber",
+        "movieUserDefined",
+        "fileNamingRule",
+        "apply",
+        "fileNamingUpdated",
+    }:
+        declarations = re.findall(rf"^\s+{re.escape(key)}:\s+\"", script, flags=re.MULTILINE)
+        assert len(declarations) == 2, f"{key} must have exactly one label in each supported language"
     assert 'large_fine: "imageQualityLargeFine"' in script
     assert '"internal ram": "valueInternalRam"' in script
     assert '"memory card": "valueMemoryCard"' in script
@@ -235,6 +252,17 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'SOUND_RECORDING_CONTROL: "SOUND_RECORDING_CONTROL"' in script
     assert 'FOCUS_BRACKETING_CONTROL: "FOCUS_BRACKETING_CONTROL"' in script
     assert 'LIVE_VIEW_MAGNIFICATION: "LIVE_VIEW_MAGNIFICATION"' in script
+    assert 'FILE_NAMING_CONTROL: "FILE_NAMING_CONTROL"' in script
+    assert "featureSupported(FEATURES.FILE_NAMING_CONTROL)" in script
+    assert "function renderFileNamingSettings()" in script
+    assert "function fileNamingValueValid(field, value)" in script
+    assert "function updateFileNaming(field, value, source)" in script
+    assert "fileNamingDrafts: {}" in script
+    assert "state.fileNamingDrafts[field] ?? current" in script
+    assert "delete state.fileNamingDrafts[field]" in script
+    assert 'button.dataset.cameraCommand = "file-naming"' in script
+    assert 'file-naming/${encodeURIComponent(field)}' in script
+    assert '{ method: "PUT", json: { value } }' in script
     assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
     assert "featureSupported(FEATURES.BULB_EXPOSURE)" in script

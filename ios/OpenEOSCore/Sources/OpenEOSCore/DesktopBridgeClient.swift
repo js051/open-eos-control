@@ -228,6 +228,7 @@ public actor DesktopBridgeClient {
     public func capabilities() async throws -> CameraCapabilities {
         let body = try await getJSON(sessionEndpoint(["capabilities"]))
         let settings = body.array("settings").compactMap(Self.parseSetting)
+        let fileNaming = Self.parseFileNaming(body.dictionary("fileNaming"))
         let supported = Set(body.stringArray("supported").compactMap(CameraFeature.init(rawValue:)))
         eventPollingSupported = supported.contains(.eventPolling)
         let planned = Set(body.stringArray("planned").compactMap(CameraFeature.init(rawValue:))).subtracting(supported)
@@ -312,6 +313,7 @@ public actor DesktopBridgeClient {
 
         return CameraCapabilities(
             settings: settings,
+            fileNaming: fileNaming,
             matrix: CapabilityMatrix(supported: supported, planned: planned, reasons: reasons),
             liveView: LiveViewCapabilities(
                 sources: sources,
@@ -347,6 +349,29 @@ public actor DesktopBridgeClient {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid created directory name.")
         }
         return created
+    }
+
+    public func setFileNaming(
+        field: CameraFileNamingField,
+        value: String
+    ) async throws -> CameraFileNaming {
+        guard let current = try await capabilities().fileNaming else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge did not advertise Canon file-naming control.")
+        }
+        guard current.accepts(field, value: value) else {
+            throw DesktopBridgeError.invalidResponse(
+                "Value '\(value)' is not valid for Canon file-naming field \(field.rawValue)."
+            )
+        }
+        let body = try await requestJSON(
+            url: sessionEndpoint(["file-naming", field.rawValue]),
+            method: "PUT",
+            payload: ["value": value]
+        )
+        guard let updated = Self.parseFileNaming(body), updated.value(for: field) == value else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid file-naming state.")
+        }
+        return updated
     }
 
     public func syncCameraClock() async throws -> CameraStatus {
@@ -824,6 +849,63 @@ public actor DesktopBridgeClient {
             value: body.string("value") ?? "",
             values: values
         )
+    }
+
+    private static func parseFileNaming(_ body: BridgeJSON) -> CameraFileNaming? {
+        guard !body.isEmpty,
+              let mode = body.string("stillFilenameMode"),
+              let rawOptions = body["stillFilenameModeOptions"] as? [Any],
+              let stillUserSetting1 = body.string("stillUserSetting1"),
+              let stillUserSetting2 = body.string("stillUserSetting2"),
+              let movieIndex = body.string("movieIndex"),
+              let movieReelNumber = strictInt(body["movieReelNumber"]),
+              let movieReelRange = parseFileNamingRange(body.dictionary("movieReelRange"), maximum: 9999),
+              let movieClipNumber = strictInt(body["movieClipNumber"]),
+              let movieClipRange = parseFileNamingRange(body.dictionary("movieClipRange"), maximum: 999),
+              let movieUserDefined = body.string("movieUserDefined") else { return nil }
+        let options = rawOptions.compactMap { $0 as? String }
+        let allowedModes = Set(["preset_code", "usersetting1", "usersetting2"])
+        guard options.count == rawOptions.count,
+              !options.isEmpty,
+              options.count <= allowedModes.count,
+              Set(options).count == options.count,
+              options.allSatisfy(allowedModes.contains),
+              options.contains(mode) else { return nil }
+        let result = CameraFileNaming(
+            stillFilenameMode: mode,
+            stillFilenameModeOptions: options,
+            stillUserSetting1: stillUserSetting1,
+            stillUserSetting2: stillUserSetting2,
+            movieIndex: movieIndex,
+            movieReelNumber: movieReelNumber,
+            movieReelRange: movieReelRange,
+            movieClipNumber: movieClipNumber,
+            movieClipRange: movieClipRange,
+            movieUserDefined: movieUserDefined
+        )
+        return CameraFileNamingField.allCases.allSatisfy {
+            result.accepts($0, value: result.value(for: $0))
+        } ? result : nil
+    }
+
+    private static func parseFileNamingRange(
+        _ body: BridgeJSON,
+        maximum: Int
+    ) -> CameraIntegerRange? {
+        guard let minimum = strictInt(body["minimum"]),
+              let upper = strictInt(body["maximum"]),
+              let step = strictInt(body["step"]),
+              minimum >= 1,
+              upper <= maximum,
+              minimum <= upper,
+              step > 0 else { return nil }
+        return CameraIntegerRange(minimum: minimum, maximum: upper, step: step)
+    }
+
+    private static func strictInt(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        return Int(number.stringValue)
     }
 
     private static func parseMediaItem(_ item: BridgeJSON) -> CameraMediaItem? {

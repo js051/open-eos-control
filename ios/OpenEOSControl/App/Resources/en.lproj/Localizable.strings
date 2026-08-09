@@ -374,3 +374,17 @@
 "physical_validation_not_confirmed" = "Not yet confirmed on camera";
 "copy_physical_validation" = "Copy physical validation record";
 "physical_validation_copied" = "Physical validation record copied";
+"file_naming" = "File naming";
+"file_naming_photo_summary" = "Still filename: %@";
+"file_naming_video_summary" = "Index %@ · Reel %d · Clip %d";
+"file_naming_preset_code" = "Preset code";
+"still_filename_mode" = "Still filename mode";
+"still_user_setting_1" = "User setting 1";
+"still_user_setting_2" = "User setting 2";
+"movie_index" = "Movie index";
+"movie_reel_number" = "Reel number";
+"movie_clip_number" = "Clip number";
+"movie_user_defined" = "Movie user-defined name";
+"file_naming_rule" = "Canon requires exact uppercase ASCII lengths. An underscore cannot be the first character; the five-character movie name does not allow underscores.";
+"file_naming_unavailable" = "File naming is unavailable";
+"apply" = "Apply";

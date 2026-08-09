@@ -93,6 +93,18 @@ MOVIE_QUALITY_ABILITY = [
 ]
 ENABLE_DISABLE_ABILITY = ["enable", "disable"]
 MOVIE_FORMAT_ABILITY = ["raw", "mp4"]
+STILL_FILENAME_MODE_ABILITY = ["preset_code", "usersetting1", "usersetting2"]
+MOVIE_REEL_ABILITY = {"min": 1, "max": 9999, "step": 1}
+MOVIE_CLIP_ABILITY = {"min": 1, "max": 999, "step": 1}
+FILE_NAMING_PATHS = {
+    "stills/filename": ("still-filename-mode", "value"),
+    "stills/usersetting1": ("still-user-setting-1", "usersetting1"),
+    "stills/usersetting2": ("still-user-setting-2", "usersetting2"),
+    "movies/index": ("movie-index", "index"),
+    "movies/reelnum": ("movie-reel-number", "value"),
+    "movies/clipnum": ("movie-clip-number", "value"),
+    "movies/userdefined": ("movie-user-defined", "userdefined"),
+}
 
 def initial_state() -> dict[str, object]:
     return {
@@ -110,6 +122,14 @@ def initial_state() -> dict[str, object]:
         "directory_selection": "100EOSXX",
         "directory_create_count": 0,
         "directory_selection_update_count": 0,
+        "still_filename_mode": "preset_code",
+        "still_user_setting_1": "IMG_",
+        "still_user_setting_2": "IMG",
+        "movie_index": "A_",
+        "movie_reel_number": 1,
+        "movie_clip_number": 1,
+        "movie_user_defined": "CANON",
+        "file_naming_update_count": 0,
         "beep": "enable",
         "beep_update_count": 0,
         "display_off": "60",
@@ -306,6 +326,8 @@ async def get_test_state() -> dict[str, object]:
         "directory_selection": state["directory_selection"],
         "directory_create_count": state["directory_create_count"],
         "directory_selection_update_count": state["directory_selection_update_count"],
+        "file_naming": file_naming_state(),
+        "file_naming_update_count": state["file_naming_update_count"],
         "beep": {
             "value": state["beep"],
             "update_count": state["beep_update_count"],
@@ -489,6 +511,7 @@ async def get_capabilities() -> dict[str, object]:
             "value": state["directory_selection"],
             "ability": state["directories"],
         },
+        "fileNaming": file_naming_state(),
         "focusbracketing": {
             "value": state["focus_bracketing"],
             "ability": FOCUS_BRACKETING_ABILITY,
@@ -545,6 +568,78 @@ def update_directory_selection(payload: dict[str, object]) -> bool:
     state["directory_selection_update_count"] += 1
     publish_event("directoryselection")
     return True
+
+
+def file_naming_state() -> dict[str, object]:
+    return {
+        "stillFilenameMode": state["still_filename_mode"],
+        "stillFilenameModeOptions": STILL_FILENAME_MODE_ABILITY,
+        "stillUserSetting1": state["still_user_setting_1"],
+        "stillUserSetting2": state["still_user_setting_2"],
+        "movieIndex": state["movie_index"],
+        "movieReelNumber": state["movie_reel_number"],
+        "movieReelRange": {
+            "minimum": MOVIE_REEL_ABILITY["min"],
+            "maximum": MOVIE_REEL_ABILITY["max"],
+            "step": MOVIE_REEL_ABILITY["step"],
+        },
+        "movieClipNumber": state["movie_clip_number"],
+        "movieClipRange": {
+            "minimum": MOVIE_CLIP_ABILITY["min"],
+            "maximum": MOVIE_CLIP_ABILITY["max"],
+            "step": MOVIE_CLIP_ABILITY["step"],
+        },
+        "movieUserDefined": state["movie_user_defined"],
+    }
+
+
+def canonical_file_naming_value(field: str) -> dict[str, object]:
+    if field == "still-filename-mode":
+        return {"value": state["still_filename_mode"], "ability": STILL_FILENAME_MODE_ABILITY}
+    if field == "movie-reel-number":
+        return {"value": state["movie_reel_number"], "ability": MOVIE_REEL_ABILITY}
+    if field == "movie-clip-number":
+        return {"value": state["movie_clip_number"], "ability": MOVIE_CLIP_ABILITY}
+    state_key = field.replace("-", "_")
+    response_key = next(value[1] for value in FILE_NAMING_PATHS.values() if value[0] == field)
+    return {response_key: state[state_key]}
+
+
+def update_file_naming(field: str, value: object) -> bool:
+    valid = False
+    if field == "still-filename-mode":
+        valid = isinstance(value, str) and value in STILL_FILENAME_MODE_ABILITY
+    elif field == "still-user-setting-1":
+        valid = isinstance(value, str) and re.fullmatch(r"[A-Z0-9][A-Z0-9_]{3}", value) is not None
+    elif field == "still-user-setting-2":
+        valid = isinstance(value, str) and re.fullmatch(r"[A-Z0-9][A-Z0-9_]{2}", value) is not None
+    elif field == "movie-index":
+        valid = isinstance(value, str) and re.fullmatch(r"[A-Z0-9][A-Z0-9_]", value) is not None
+    elif field == "movie-user-defined":
+        valid = isinstance(value, str) and re.fullmatch(r"[A-Z0-9]{5}", value) is not None
+    elif field == "movie-reel-number":
+        valid = type(value) is int and MOVIE_REEL_ABILITY["min"] <= value <= MOVIE_REEL_ABILITY["max"]
+    elif field == "movie-clip-number":
+        valid = type(value) is int and MOVIE_CLIP_ABILITY["min"] <= value <= MOVIE_CLIP_ABILITY["max"]
+    if not valid:
+        return False
+    state[field.replace("-", "_")] = value
+    state["file_naming_update_count"] += 1
+    publish_event("filename")
+    return True
+
+
+@app.put("/ccapi/file-naming/{field}")
+async def simulator_set_file_naming(field: str, payload: dict[str, object]) -> Response:
+    value = payload.get("value")
+    normalized: object = value
+    if field in {"movie-reel-number", "movie-clip-number"} and isinstance(value, str) and value.isdigit():
+        normalized = int(value)
+    if set(payload) != {"value"} or field not in {item[0] for item in FILE_NAMING_PATHS.values()}:
+        return JSONResponse(status_code=422, content={"detail": "Unsupported file-naming field"})
+    if not update_file_naming(field, normalized):
+        return JSONResponse(status_code=422, content={"detail": "Invalid file-naming value"})
+    return JSONResponse(content=file_naming_state())
 
 
 @app.post("/ccapi/directory")
@@ -1119,6 +1214,13 @@ CANON_DISCOVERY = {
         {"path": "/functions/cardselection/movie", "get": True, "put": True},
         {"path": "/functions/directory/createdirectory", "post": True},
         {"path": "/functions/directory/directoryselection", "get": True, "put": True},
+        {"path": "/functions/filename/stills/filename", "get": True, "put": True},
+        {"path": "/functions/filename/stills/usersetting1", "get": True, "put": True},
+        {"path": "/functions/filename/stills/usersetting2", "get": True, "put": True},
+        {"path": "/functions/filename/movies/index", "get": True, "put": True},
+        {"path": "/functions/filename/movies/reelnum", "get": True, "put": True},
+        {"path": "/functions/filename/movies/clipnum", "get": True, "put": True},
+        {"path": "/functions/filename/movies/userdefined", "get": True, "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/af", "post": True},
@@ -1724,6 +1826,25 @@ async def canon_set_directory_selection(payload: dict[str, object]) -> Response:
     if not update_directory_selection(payload):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return JSONResponse(content={"value": state["directory_selection"]})
+
+
+@app.get("/ccapi/ver100/functions/filename/{category}/{name}")
+async def canon_get_file_naming(category: str, name: str) -> Response:
+    definition = FILE_NAMING_PATHS.get(f"{category}/{name}")
+    if definition is None:
+        return JSONResponse(status_code=404, content={"message": "Not found"})
+    return JSONResponse(content=canonical_file_naming_value(definition[0]))
+
+
+@app.put("/ccapi/ver100/functions/filename/{category}/{name}")
+async def canon_set_file_naming(category: str, name: str, payload: dict[str, object]) -> Response:
+    definition = FILE_NAMING_PATHS.get(f"{category}/{name}")
+    if definition is None:
+        return JSONResponse(status_code=404, content={"message": "Not found"})
+    field, response_key = definition
+    if set(payload) != {response_key} or not update_file_naming(field, payload.get(response_key)):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={response_key: payload[response_key]})
 
 
 @app.post("/ccapi/ver100/shooting/control/shutterbutton", status_code=204)

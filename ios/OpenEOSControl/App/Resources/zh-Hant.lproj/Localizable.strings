@@ -374,3 +374,17 @@
 "physical_validation_not_confirmed" = "尚未在相機上確認";
 "copy_physical_validation" = "複製真機驗證紀錄";
 "physical_validation_copied" = "已複製真機驗證紀錄";
+"file_naming" = "檔名設定";
+"file_naming_photo_summary" = "相片檔名：%@";
+"file_naming_video_summary" = "索引 %@ · Reel %d · Clip %d";
+"file_naming_preset_code" = "預設代碼";
+"still_filename_mode" = "相片檔名模式";
+"still_user_setting_1" = "自訂設定 1";
+"still_user_setting_2" = "自訂設定 2";
+"movie_index" = "影片索引";
+"movie_reel_number" = "Reel 編號";
+"movie_clip_number" = "Clip 編號";
+"movie_user_defined" = "影片自訂名稱";
+"file_naming_rule" = "Canon 要求固定長度的大寫 ASCII 字元。底線不可放在第一個字元；五字元影片名稱不可使用底線。";
+"file_naming_unavailable" = "檔名設定目前無法使用";
+"apply" = "套用";
