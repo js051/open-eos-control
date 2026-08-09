@@ -2054,6 +2054,14 @@ class CameraScreensTest {
                     supported = base.capabilities.matrix.supported +
                         CameraFeature.LIVE_VIEW_MAGNIFICATION,
                 ),
+                liveView = base.capabilities.liveView.copy(
+                    magnifications = listOf(
+                        LiveViewMagnification.X1,
+                        LiveViewMagnification.X5,
+                        LiveViewMagnification.X10,
+                    ),
+                    currentMagnification = LiveViewMagnification.X1,
+                ),
             ),
         )
         compose.setContent {
