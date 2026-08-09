@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="setting_owner_name">擁有者名稱</string>
+    <string name="setting_artist">作者</string>
+    <string name="setting_copyright">著作權資訊</string>
+    <string name="setting_nickname">相機暱稱</string>
+    <string name="setting_ascii_text_hint">限可列印 ASCII，最多 %1$d 個字元</string>
     <string name="recordable_shots">相機可拍張數</string>
     <string name="remaining_recording_time">剩餘錄影時間</string>
     <string name="recording_time_remaining">剩餘 %1$s</string>

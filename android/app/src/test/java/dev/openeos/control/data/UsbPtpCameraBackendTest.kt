@@ -1054,6 +1054,188 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun canonMovieRecordingDoesNotReportSuccessWithoutMatchingPropertyReadback() = runTest {
+        val transport = CanonEosScriptedTransport(movieRecordingReadback = false)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching { backend.startRecording() }.exceptionOrNull()
+
+        assertTrue(failure is PtpProtocolException)
+        assertEquals(false, backend.status().recording)
+        assertFalse(CameraFeature.VIDEO_RECORDING in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test
+    fun canonTextMetadataIsExposedOnlyAfterReadbackAndUsesExactVerifiedPayload() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseTextMetadata = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val textControls = backend.capabilities().advancedSettings.filter {
+            it.inputKind == CameraSettingInputKind.TEXT
+        }
+        assertEquals(
+            setOf("ownername", "artist", "copyright", "nickname"),
+            textControls.map { it.key }.toSet(),
+        )
+        assertTrue(textControls.all { it.values.isEmpty() && it.maxLength == 255 })
+        assertEquals("TEST OWNER", textControls.single { it.key == "ownername" }.value)
+        val diagnostics = backend.status().rawTransportJson
+        assertTrue(diagnostics.contains("\"setting\":\"ownername\""))
+        assertFalse(diagnostics.contains("TEST OWNER"))
+        assertFalse(diagnostics.contains("TEST ARTIST"))
+
+        backend.setSetting("ownername", "OPEN EOS")
+
+        assertArrayEquals(
+            CanonEosPtp.textPropertyPayload(CanonEosPropertyCode.OWNER, "OPEN EOS"),
+            transport.propertyWritePayload(CanonEosPropertyCode.OWNER),
+        )
+        assertEquals(
+            "OPEN EOS",
+            backend.capabilities().advancedSettings.single { it.key == "ownername" }.value,
+        )
+        assertTrue(CameraFeature.ADVANCED_SETTINGS in backend.observedFeatures())
+
+        backend.setSetting("copyright", "")
+        assertArrayEquals(
+            CanonEosPtp.textPropertyPayload(CanonEosPropertyCode.COPYRIGHT, ""),
+            transport.propertyWritePayload(CanonEosPropertyCode.COPYRIGHT),
+        )
+        assertEquals(
+            "",
+            backend.capabilities().advancedSettings.single { it.key == "copyright" }.value,
+        )
+        backend.close()
+    }
+
+    @Test
+    fun canonTextMetadataRejectsInvalidInputAndCameraFailuresWithoutOptimisticSuccess() = runTest {
+        val invalidTransport = CanonEosScriptedTransport(advertiseTextMetadata = true)
+        val invalidBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { invalidTransport },
+        )
+        invalidBackend.initialize()
+
+        listOf("line\nbreak", "測試", "A".repeat(256)).forEach { invalidValue ->
+            assertTrue(
+                runCatching {
+                    invalidBackend.setSetting("ownername", invalidValue)
+                }.exceptionOrNull() is PtpProtocolException,
+            )
+        }
+        assertFalse(invalidTransport.hasCanonPropertyWrite(CanonEosPropertyCode.OWNER))
+        invalidBackend.close()
+
+        val rejectedTransport = CanonEosScriptedTransport(
+            advertiseTextMetadata = true,
+            rejectPropertyCode = CanonEosPropertyCode.OWNER,
+        )
+        val rejectedBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { rejectedTransport },
+        )
+        rejectedBackend.initialize()
+        val rejected = runCatching { rejectedBackend.setSetting("ownername", "OPEN EOS") }.exceptionOrNull()
+        assertTrue(rejected is PtpResponseException)
+        assertEquals(
+            "TEST OWNER",
+            rejectedBackend.capabilities().advancedSettings.single { it.key == "ownername" }.value,
+        )
+        rejectedBackend.close()
+    }
+
+    @Test
+    fun canonTextMetadataRequiresDiscoveryAndExactPostWriteReadback() = runTest {
+        val undiscoveredBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory {
+                CanonEosScriptedTransport(advertiseTextMetadata = true, textMetadataReadback = false)
+            },
+        )
+        undiscoveredBackend.initialize()
+        assertTrue(
+            undiscoveredBackend.capabilities().advancedSettings.none {
+                it.inputKind == CameraSettingInputKind.TEXT
+            },
+        )
+        assertTrue(
+            runCatching {
+                undiscoveredBackend.setSetting("ownername", "OPEN EOS")
+            }.exceptionOrNull() is UnsupportedOperationException,
+        )
+        undiscoveredBackend.close()
+
+        val timeoutTransport = CanonEosScriptedTransport(
+            advertiseTextMetadata = true,
+            textMetadataWriteReadback = false,
+        )
+        val timeoutBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { timeoutTransport },
+        )
+        timeoutBackend.initialize()
+        val timeout = runCatching { timeoutBackend.setSetting("ownername", "OPEN EOS") }.exceptionOrNull()
+        assertTrue(timeout is PtpProtocolException)
+        assertEquals(
+            "TEST OWNER",
+            timeoutBackend.capabilities().advancedSettings.single { it.key == "ownername" }.value,
+        )
+        assertFalse(CameraFeature.ADVANCED_SETTINGS in timeoutBackend.observedFeatures())
+        timeoutBackend.close()
+
+        val mismatchTransport = CanonEosScriptedTransport(
+            advertiseTextMetadata = true,
+            textMetadataReadbackOverride = "CAMERA VALUE",
+        )
+        val mismatchBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { mismatchTransport },
+        )
+        mismatchBackend.initialize()
+        val mismatch = runCatching { mismatchBackend.setSetting("ownername", "OPEN EOS") }.exceptionOrNull()
+        assertTrue(mismatch is PtpProtocolException)
+        assertEquals(
+            "CAMERA VALUE",
+            mismatchBackend.capabilities().advancedSettings.single { it.key == "ownername" }.value,
+        )
+        assertFalse(CameraFeature.ADVANCED_SETTINGS in mismatchBackend.observedFeatures())
+        mismatchBackend.close()
+    }
+
+    @Test
+    fun canonTextMetadataExternalEventRefreshesTheCameraReportedValue() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseTextMetadata = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        transport.queueEvent(
+            eosTextPropertyValue(CanonEosPropertyCode.OWNER, "EXTERNAL OWNER") +
+                eosBlock(0, byteArrayOf()),
+        )
+
+        val event = backend.pollEvent()
+
+        assertTrue("shootingsettings" in event.changedKeys)
+        assertEquals(
+            "EXTERNAL OWNER",
+            backend.capabilities().advancedSettings.single { it.key == "ownername" }.value,
+        )
+        backend.close()
+    }
+
+    @Test
     fun canonAdvancedSettingsRequireAdvertisedValuesAndPreserveStateAfterRejectedWrite() = runTest {
         val unavailableTransport = CanonEosScriptedTransport(
             advertiseAdvancedSettings = false,
@@ -2260,9 +2442,14 @@ class UsbPtpCameraBackendTest {
         private val advertiseEventPolling: Boolean = true,
         private val advertiseMovieRecording: Boolean = true,
         private val rejectMovieRecording: Boolean = false,
+        private val movieRecordingReadback: Boolean = true,
         private val advertiseMovieModeSwitch: Boolean = true,
         private val movieModeReadback: Boolean = true,
         private val advertisePropertyWrites: Boolean = true,
+        private val advertiseTextMetadata: Boolean = false,
+        private val textMetadataReadback: Boolean = true,
+        private val textMetadataWriteReadback: Boolean = true,
+        private val textMetadataReadbackOverride: String? = null,
         private val advertiseAdvancedSettings: Boolean = true,
         private val rejectPropertyCode: Int? = null,
         private val captureDestination: Int = 2,
@@ -2298,6 +2485,16 @@ class UsbPtpCameraBackendTest {
         private var moviePropertyEventPending: Int? = null
         private var movieModeEventPending: Int? = null
         private var clockPropertyEventPending: Pair<Int, Int>? = null
+        private var textPropertyEventPending: Pair<Int, String>? = null
+        private var textPropertyWriteSeen = false
+        private val textMetadata = CanonEosPtp.textSettingSpecs.associate { spec ->
+            spec.propertyCode to when (spec.propertyCode) {
+                CanonEosPropertyCode.OWNER -> "TEST OWNER"
+                CanonEosPropertyCode.ARTIST -> "TEST ARTIST"
+                CanonEosPropertyCode.COPYRIGHT -> "TEST COPYRIGHT"
+                else -> "TEST CAMERA"
+            }
+        }.toMutableMap()
 
         override suspend fun send(container: PtpContainer) {
             sentContainers += container
@@ -2317,6 +2514,7 @@ class UsbPtpCameraBackendTest {
                             advertiseClickWhiteBalance,
                             advertiseMovieModeSwitch,
                             advertisePropertyWrites,
+                            advertiseTextMetadata,
                         ),
                     )
                     incoming += ok(transaction)
@@ -2388,6 +2586,21 @@ class UsbPtpCameraBackendTest {
                     if (fullRelease && delayAfterFullReleaseMillis > 0L) delay(delayAfterFullReleaseMillis)
                 }
 
+                CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE -> {
+                    val propertyCode = container.parameters().single().toInt()
+                    val value = textMetadata[propertyCode]
+                    val readbackEnabled = textMetadataReadback &&
+                        (!textPropertyWriteSeen || textMetadataWriteReadback)
+                    if (advertiseTextMetadata && readbackEnabled && value != null) {
+                        textPropertyEventPending = propertyCode to value
+                    }
+                    incoming += if (advertiseTextMetadata && value != null) {
+                        ok(transaction)
+                    } else {
+                        response(PtpResponseCode.GENERAL_ERROR, transaction)
+                    }
+                }
+
                 CanonEosOperationCode.GET_EVENT -> {
                     val moviePropertyValue = moviePropertyEventPending
                     val payload = when {
@@ -2412,6 +2625,12 @@ class UsbPtpCameraBackendTest {
                             (eosPropertyValue(CanonEosPropertyCode.FIXED_MOVIE, movieModeEventPending!!) +
                                 eosBlock(0, byteArrayOf())).also {
                                 movieModeEventPending = null
+                            }
+                        textPropertyEventPending != null ->
+                            textPropertyEventPending!!.let { (propertyCode, value) ->
+                                eosTextPropertyValue(propertyCode, value) + eosBlock(0, byteArrayOf())
+                            }.also {
+                                textPropertyEventPending = null
                             }
                         moviePropertyValue != null ->
                             (eosPropertyValue(CanonEosPropertyCode.EVF_RECORD_STATUS, moviePropertyValue) +
@@ -2447,20 +2666,32 @@ class UsbPtpCameraBackendTest {
                     } else {
                         check(pendingPropertyWrite) { "Canon property data arrived without a command." }
                         pendingPropertyWrite = false
-                        val fields = container.parameters()
-                        val propertyCode = fields.getOrNull(1)?.toInt()
-                        val value = fields.getOrNull(2)?.toInt()
+                        val propertyCode = container.payloadU32(4)?.toInt()
+                        val value = container.payloadU32(8)?.toInt()
                         if (
                             propertyCode == rejectPropertyCode ||
                             propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && rejectMovieRecording
                         ) {
                             incoming += response(PtpResponseCode.GENERAL_ERROR, transaction)
                         } else {
-                            if (propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && value != null) {
+                            if (
+                                propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS &&
+                                value != null &&
+                                movieRecordingReadback
+                            ) {
                                 moviePropertyEventPending = value and 0xFFFF
                             }
                             if (propertyCode != null && propertyCode == advertisedClockProperty && value != null) {
                                 clockPropertyEventPending = propertyCode to (value + clockReadbackOffsetSeconds)
+                            }
+                            if (propertyCode != null && propertyCode in textMetadata && container.payload.size >= 9) {
+                                textPropertyWriteSeen = true
+                                val bytes = container.payload
+                                    .copyOfRange(8, container.payload.size)
+                                    .takeWhile { it != 0.toByte() }
+                                    .toByteArray()
+                                textMetadata[propertyCode] = textMetadataReadbackOverride ?:
+                                    String(bytes, StandardCharsets.US_ASCII)
                             }
                             incoming += ok(transaction)
                         }
@@ -2512,11 +2743,21 @@ class UsbPtpCameraBackendTest {
         fun hasCanonPropertyWrite(propertyCode: Int): Boolean = sentContainers.any { container ->
             container.type == PtpContainerType.DATA &&
                 container.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
-                container.parameters().getOrNull(1)?.toInt() == propertyCode
+                container.payloadU32(4)?.toInt() == propertyCode
         }
 
         fun hasOperation(operationCode: Int): Boolean = sentContainers.any { container ->
             container.type == PtpContainerType.COMMAND && container.code == operationCode
+        }
+
+        fun propertyWritePayload(propertyCode: Int): ByteArray? = sentContainers.firstOrNull { container ->
+            container.type == PtpContainerType.DATA &&
+                container.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
+                container.payloadU32(4)?.toInt() == propertyCode
+        }?.payload
+
+        fun queueEvent(payload: ByteArray) {
+            pendingScriptedEvents += payload
         }
 
         fun removeStorage(storageId: Long) {
@@ -2623,6 +2864,14 @@ class UsbPtpCameraBackendTest {
             (bytes[1].toUByte().toLong() shl 8) or
             (bytes[2].toUByte().toLong() shl 16) or
             (bytes[3].toUByte().toLong() shl 24)
+    }
+
+    private fun PtpContainer.payloadU32(offset: Int): Long? {
+        if (offset < 0 || offset + 4 > payload.size) return null
+        return payload[offset].toUByte().toLong() or
+            (payload[offset + 1].toUByte().toLong() shl 8) or
+            (payload[offset + 2].toUByte().toLong() shl 16) or
+            (payload[offset + 3].toUByte().toLong() shl 24)
     }
 
     private fun eosBlock(type: Int, data: ByteArray): ByteArray = ByteArray(data.size + 8).also { block ->
@@ -2789,6 +3038,11 @@ class UsbPtpCameraBackendTest {
         }.bytes(),
     )
 
+    private fun eosTextPropertyValue(propertyCode: Int, value: String): ByteArray = eosBlock(
+        CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+        u32Fields(propertyCode) + value.toByteArray(StandardCharsets.US_ASCII) + byteArrayOf(0),
+    )
+
     private fun eosAvailableValues(propertyCode: Int, vararg values: Int): ByteArray = eosBlock(
         CanonEosEventCode.AVAILABLE_LIST_CHANGED,
         Writer().apply {
@@ -2885,6 +3139,7 @@ class UsbPtpCameraBackendTest {
             advertiseClickWhiteBalance: Boolean = false,
             advertiseMovieModeSwitch: Boolean = true,
             advertisePropertyWrites: Boolean = true,
+            advertiseTextMetadata: Boolean = false,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
@@ -2907,6 +3162,7 @@ class UsbPtpCameraBackendTest {
                         )
                     )
                     if (advertisePropertyWrites) add(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX)
+                    if (advertiseTextMetadata) add(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)
                     if (advertiseEventPolling) add(CanonEosOperationCode.GET_EVENT)
                     if (advertiseRemoteRelease) {
                         add(CanonEosOperationCode.REMOTE_RELEASE_ON)

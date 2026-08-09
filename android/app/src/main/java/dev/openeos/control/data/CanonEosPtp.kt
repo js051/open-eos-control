@@ -1,5 +1,7 @@
 package dev.openeos.control.data
 
+import java.nio.charset.StandardCharsets
+
 object CanonEosOperationCode {
     const val SET_DEVICE_PROP_VALUE_EX = 0x9110
     const val SET_REMOTE_MODE = 0x9114
@@ -7,6 +9,7 @@ object CanonEosOperationCode {
     const val GET_EVENT = 0x9116
     const val TRANSFER_COMPLETE = 0x9117
     const val PC_HDD_CAPACITY = 0x911A
+    const val REQUEST_DEVICE_PROP_VALUE = 0x9127
     const val REMOTE_RELEASE_ON = 0x9128
     const val REMOTE_RELEASE_OFF = 0x9129
     const val MOVIE_SELECT_SWITCH_ON = 0x9133
@@ -37,12 +40,14 @@ object CanonEosPropertyCode {
     const val PICTURE_STYLE = 0xD110
     const val CAMERA_TIME = 0xD113
     const val AUTO_POWER_OFF = 0xD114
+    const val OWNER = 0xD115
     const val AVAILABLE_SHOTS = 0xD11B
     const val CAPTURE_DESTINATION = 0xD11C
     const val CURRENT_STORAGE = 0xD11E
     const val IMAGE_FORMAT = 0xD120
     const val IMAGE_FORMAT_CF = 0xD121
     const val IMAGE_FORMAT_SD = 0xD122
+    const val CAMERA_NICKNAME = 0xD125
     const val POWER_ZOOM_SPEED = 0xD149
     const val HIGH_ISO_NOISE_REDUCTION = 0xD178
     const val MOVIE_SERVO_AF = 0xD179
@@ -55,6 +60,8 @@ object CanonEosPropertyCode {
     const val AUTO_LIGHTING_OPTIMIZER = 0xD1C1
     const val FIXED_MOVIE = 0xD1C2
     const val CONTINUOUS_AF_MODE = 0xD1C9
+    const val ARTIST = 0xD1D0
+    const val COPYRIGHT = 0xD1D1
     const val AEB = 0xD1D9
 }
 
@@ -72,6 +79,7 @@ object CanonEosEventCode {
 data class CanonEosPropertyUpdate(
     val propertyCode: Int,
     val currentValue: Long? = null,
+    val currentText: String? = null,
     val availableValues: List<Long>? = null,
 )
 
@@ -89,6 +97,12 @@ data class CanonEosPropertyOption(
 )
 
 data class CanonEosSettingSpec(
+    val propertyCode: Int,
+    val key: String,
+    val fallbackLabel: String,
+)
+
+data class CanonEosTextSettingSpec(
     val propertyCode: Int,
     val key: String,
     val fallbackLabel: String,
@@ -112,6 +126,7 @@ object CanonEosPtp {
     const val MOVIE_RECORD_TARGET_SDRAM = 3L
     const val MOVIE_RECORD_TARGET_CARD = 4L
     const val CAPTURE_DESTINATION_HOST = 4L
+    const val MAX_TEXT_METADATA_BYTES = 255
 
     private const val VIEWFINDER_JPEG_BLOCK = 0x01L
     private const val VIEWFINDER_JPEG_BLOCK_ALTERNATE = 0x0BL
@@ -167,11 +182,20 @@ object CanonEosPtp {
         CanonEosSettingSpec(CanonEosPropertyCode.MOVIE_SERVO_AF, "movieservoaf", "Movie Servo AF"),
     )
 
+    val textSettingSpecs = listOf(
+        CanonEosTextSettingSpec(CanonEosPropertyCode.OWNER, "ownername", "Owner name"),
+        CanonEosTextSettingSpec(CanonEosPropertyCode.ARTIST, "artist", "Artist"),
+        CanonEosTextSettingSpec(CanonEosPropertyCode.COPYRIGHT, "copyright", "Copyright"),
+        CanonEosTextSettingSpec(CanonEosPropertyCode.CAMERA_NICKNAME, "nickname", "Nickname"),
+    )
+
     private val imageFormatPropertyCodes = setOf(
         CanonEosPropertyCode.IMAGE_FORMAT,
         CanonEosPropertyCode.IMAGE_FORMAT_CF,
         CanonEosPropertyCode.IMAGE_FORMAT_SD,
     )
+
+    private val textPropertyCodes = textSettingSpecs.mapTo(hashSetOf(), CanonEosTextSettingSpec::propertyCode)
 
     private val remotePreparationOperations = setOf(
         CanonEosOperationCode.SET_REMOTE_MODE,
@@ -236,6 +260,9 @@ object CanonEosPtp {
 
     fun supportsPropertyControl(info: PtpDeviceInfo): Boolean =
         supportsRemotePreparation(info) && info.supports(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX)
+
+    fun supportsTextMetadata(info: PtpDeviceInfo): Boolean =
+        supportsPropertyControl(info) && info.supports(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)
 
     fun supportsMovieRecording(info: PtpDeviceInfo, availableValues: List<Long>): Boolean =
         supportsPropertyControl(info) &&
@@ -309,6 +336,24 @@ object CanonEosPtp {
         return propertyPayload(propertyCode, value, 4)
     }
 
+    fun textPropertyPayload(propertyCode: Int, value: String): ByteArray {
+        require(propertyCode in textPropertyCodes) {
+            "Canon EOS property 0x${propertyCode.toString(16)} is not a supported text metadata field."
+        }
+        require(validTextMetadata(value)) {
+            "Canon EOS text metadata must contain at most $MAX_TEXT_METADATA_BYTES printable ASCII bytes."
+        }
+        val encoded = value.toByteArray(StandardCharsets.US_ASCII)
+        return ByteArray(8 + encoded.size + 1).also { payload ->
+            payload.putU32Le(0, payload.size.toLong())
+            payload.putU32Le(4, propertyCode.toLong())
+            encoded.copyInto(payload, destinationOffset = 8)
+        }
+    }
+
+    fun validTextMetadata(value: String): Boolean =
+        value.length <= MAX_TEXT_METADATA_BYTES && value.all { it.code in 0x20..0x7E }
+
     fun eventCodes(payload: ByteArray): Set<Int> {
         return eventBlocks(payload).mapTo(linkedSetOf(), CanonEosEventBlock::code)
     }
@@ -357,6 +402,19 @@ object CanonEosPtp {
                 CanonEosEventCode.PROPERTY_VALUE_CHANGED -> {
                     if (block.length < 12) malformedPropertyEvent(block, "property code")
                     val propertyCode = payload.u32Le(block.offset + 8).toInt()
+                    if (propertyCode in textPropertyCodes) {
+                        add(
+                            CanonEosPropertyUpdate(
+                                propertyCode = propertyCode,
+                                currentText = payload.nullTerminatedPrintableAscii(
+                                    offset = block.offset + 12,
+                                    limit = block.offset + block.length,
+                                    maxBytes = MAX_TEXT_METADATA_BYTES,
+                                ),
+                            )
+                        )
+                        return@forEach
+                    }
                     if (propertyCode in imageFormatPropertyCodes) {
                         add(
                             CanonEosPropertyUpdate(
@@ -451,6 +509,7 @@ object CanonEosPtp {
         CanonEosPropertyCode.CAPTURE_DESTINATION -> "capturetarget"
         CanonEosPropertyCode.CURRENT_STORAGE -> "capturestorage"
         else -> settingSpecs.firstOrNull { it.propertyCode == propertyCode }?.key
+            ?: textSettingSpecs.firstOrNull { it.propertyCode == propertyCode }?.key
     }
 
     fun propertyValueBytes(propertyCode: Int): Int? = propertySpecs[propertyCode]?.valueBytes
@@ -999,6 +1058,26 @@ private fun ByteArray.nullTerminatedAscii(offset: Int, limit: Int): String {
         ?: throw PtpProtocolException("Canon EOS object-transfer filename is not null terminated.")
     return buildString(end - offset) {
         for (index in offset until end) append(this@nullTerminatedAscii[index].toInt().and(0xFF).toChar())
+    }
+}
+
+private fun ByteArray.nullTerminatedPrintableAscii(offset: Int, limit: Int, maxBytes: Int): String {
+    if (offset < 0 || limit > size || offset >= limit) {
+        throw PtpProtocolException("Canon EOS text property is missing its NUL-terminated value.")
+    }
+    val end = (offset until limit).firstOrNull { this[it] == 0.toByte() }
+        ?: throw PtpProtocolException("Canon EOS text property is not NUL terminated.")
+    if (end - offset > maxBytes) {
+        throw PtpProtocolException("Canon EOS text property exceeds $maxBytes bytes.")
+    }
+    return buildString(end - offset) {
+        for (index in offset until end) {
+            val value = this@nullTerminatedPrintableAscii[index].toUByte().toInt()
+            if (value !in 0x20..0x7E) {
+                throw PtpProtocolException("Canon EOS text property contains non-printable ASCII data.")
+            }
+            append(value.toChar())
+        }
     }
 }
 

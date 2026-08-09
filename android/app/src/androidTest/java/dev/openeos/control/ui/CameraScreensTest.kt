@@ -57,6 +57,7 @@ import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraTemperatureStatus
 import dev.openeos.control.data.CameraSettingControl
+import dev.openeos.control.data.CameraSettingInputKind
 import dev.openeos.control.data.CapabilityMatrix
 import dev.openeos.control.data.DesktopBridgeCamera
 import dev.openeos.control.data.ExposureState
@@ -1152,6 +1153,49 @@ class CameraScreensTest {
         compose.runOnIdle {
             assertEquals("capturestorage" to "SD", request)
         }
+    }
+
+    @Test
+    fun textMetadataSettingPreservesDirtyDraftAndAppliesRawAsciiValue() {
+        val base = connectedState()
+        val owner = CameraSettingControl(
+            key = "ownername",
+            label = "Owner name",
+            value = "TEST OWNER",
+            values = emptyList(),
+            inputKind = CameraSettingInputKind.TEXT,
+            maxLength = 255,
+        )
+        val screenState = mutableStateOf(
+            base.copy(
+                activeSettingPicker = SettingPicker.MORE,
+                capabilities = base.capabilities?.copy(advancedSettings = listOf(owner)),
+            ),
+        )
+        var request: Pair<String, String>? = null
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    screenState.value,
+                    noOpActions().copy(setCameraSetting = { key, value -> request = key to value }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("advanced-setting-ownername").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("advanced-setting-text-ownername").performTextReplacement("OPEN EOS")
+        compose.runOnIdle {
+            screenState.value = screenState.value.copy(
+                capabilities = screenState.value.capabilities?.copy(
+                    advancedSettings = listOf(owner.copy(value = "CAMERA REFRESH")),
+                ),
+            )
+        }
+        compose.onNodeWithTag("advanced-setting-text-apply-ownername")
+            .assertIsEnabled()
+            .performClick()
+
+        compose.runOnIdle { assertEquals("ownername" to "OPEN EOS", request) }
     }
 
     @Test

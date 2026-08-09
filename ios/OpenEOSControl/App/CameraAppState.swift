@@ -818,8 +818,9 @@ final class CameraAppState: ObservableObject {
     }
 
     func setSetting(key: String, value: String) async {
-        guard let setting = capabilities?.setting(key), setting.values.contains(value), begin(.setting) else { return }
+        guard let setting = capabilities?.setting(key), setting.accepts(value), begin(.setting) else { return }
         defer { end(.setting) }
+        lastError = nil
         if isPreview {
             guard let snapshot else { return }
             let exposure = snapshot.status.exposure.replacing(key: key, value: value)
@@ -1525,6 +1526,10 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "aperture", label: "Aperture", value: "2.8", values: ["1.8", "2.0", "2.8", "4.0", "5.6", "8.0", "11"]),
             CameraSetting(key: "whitebalance", label: "White balance", value: "auto", values: ["auto", "daylight", "shade", "cloudy", "tungsten", "fluorescent", "flash"]),
             CameraSetting(key: "moviemode", label: "Movie mode", value: "off", values: ["off", "on"]),
+            CameraSetting(key: "ownername", label: "Owner name", value: "Open EOS", values: [], inputKind: .text, maxLength: 255),
+            CameraSetting(key: "artist", label: "Artist", value: "Jason", values: [], inputKind: .text, maxLength: 255),
+            CameraSetting(key: "copyright", label: "Copyright", value: "2026 Open EOS", values: [], inputKind: .text, maxLength: 255),
+            CameraSetting(key: "nickname", label: "Nickname", value: "R6M3", values: [], inputKind: .text, maxLength: 255),
             CameraSetting(key: "shootingmode", label: "Shooting mode", value: "Manual", values: ["P", "TV", "AV", "Manual", "Bulb", "Movie", "Fv"]),
             CameraSetting(key: "afmethod", label: "AF method", value: "face+tracking", values: ["face+tracking", "1-point", "zone"]),
             CameraSetting(key: "afoperation", label: "AF operation", value: "servo", values: ["one-shot", "servo"]),

@@ -628,6 +628,7 @@ private struct MoreSettingsView: View {
     @State private var showSleepConfirmation = false
     @State private var showSensorCleaningConfirmation = false
     @State private var directoryName = ""
+    @State private var textDrafts: [String: String] = [:]
 
     var body: some View {
         NavigationStack {
@@ -914,7 +915,9 @@ private struct MoreSettingsView: View {
 
     @ViewBuilder
     private func settingRow(_ setting: CameraSetting) -> some View {
-        if [
+        if setting.inputKind == .text {
+            textSettingRow(setting)
+        } else if [
             "zoom",
             "soundrecordinglevel",
             "focusbracketingnumberofshots",
@@ -955,6 +958,53 @@ private struct MoreSettingsView: View {
             }
             .frame(minHeight: 64)
         }
+    }
+
+    private func textSettingRow(_ setting: CameraSetting) -> some View {
+        let current = currentValue(for: setting)
+        let draft = textDrafts[setting.key] ?? current
+        let binding = Binding<String>(
+            get: { textDrafts[setting.key] ?? currentValue(for: setting) },
+            set: { textDrafts[setting.key] = $0 }
+        )
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(localizedSettingLabel(setting))
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Color.cameraText)
+                Spacer()
+                Text("text_metadata_rule")
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraSecondaryText)
+            }
+            HStack(spacing: 10) {
+                TextField(localizedSettingLabel(setting), text: binding)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.asciiCapable)
+                    .autocorrectionDisabled()
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("\(setting.key)-input")
+                Button("apply") {
+                    let value = binding.wrappedValue
+                    Task {
+                        await camera.setSetting(key: setting.key, value: value)
+                        if camera.lastError == nil {
+                            textDrafts[setting.key] = nil
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(Color.cameraAccent)
+                .disabled(
+                    camera.isPreview ||
+                    camera.isBusy(.setting) ||
+                    !setting.accepts(draft) ||
+                    draft == current
+                )
+                .accessibilityIdentifier("\(setting.key)-apply")
+            }
+        }
+        .frame(minHeight: 96)
     }
 
     private func rangeSettingRow(_ setting: CameraSetting) -> some View {

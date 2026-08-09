@@ -132,6 +132,10 @@ class FakeRunner:
             "/main/settings/movierecordtarget": "SDRAM",
             "/main/settings/autopoweroff": "30",
             "/main/settings/capturetarget": "Internal RAM",
+            "/main/settings/ownername": "Open EOS",
+            "/main/settings/artist": "Jason",
+            "/main/settings/copyright": "2026 Open EOS",
+            "/main/settings/nickname": "R6M3",
         }
 
     def health(self) -> tuple[bool, str | None, str | None]:
@@ -321,6 +325,10 @@ class FakeRunner:
                     "Capture Target",
                     ["Internal RAM", "Memory card"],
                 ),
+                self._text("/main/settings/ownername", "Owner Name", readonly=False),
+                self._text("/main/settings/artist", "Artist", readonly=False),
+                self._text("/main/settings/copyright", "Copyright", readonly=False),
+                self._text("/main/settings/nickname", "Nickname", readonly=False),
             ]
         )
 

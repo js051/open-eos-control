@@ -36,8 +36,8 @@ open-eos-control/
 - 顯示有數量上限且遮蔽敏感資訊的能力證據，包括探索來源、根清單／developer 清單／identity 的結構化嘗試紀錄、協定版本、相機公告命令、可寫設定，以及本次工作階段中確實成功的操作；追蹤不含回應值、raw JSON、相機 origin、帳密或例外文字
 - Android、iOS 與 PC 都提供工作階段限定的真機驗證，只列出相機已公告且本次操作確實成功的功能；必須再由操作人員確認相機端結果，模擬器／離線預覽不能充當證據，複製的隱私安全 Markdown 會以平台原生 SHA-256 綁定對應診斷報告
 - Android、iOS 與 PC 都提供依能力開放的相機日期／時間同步。直接 CCAPI 必須同時公告 GET 與 PUT `/functions/datetime`，寫入 Canon 指定的 RFC 1123 時間與 DST 狀態後再回讀驗證。Android 直接 USB 會透過 `SetDevicePropValueEx` 寫入相機公告的 Canon EOS `UTCTime (0xD17C)` 或 `CameraTime (0xD113)` UINT32，並要求收到相符的屬性事件。Desktop Bridge USB 必須同時取得相機公告的可寫 libgphoto2 `syncdatetimeutc`／`syncdatetime` action 與對應 `datetimeutc`／`datetime`，執行後強制重新讀取 config，且回報時間須落在操作時間區間前後十秒內。
-- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon `GetEvent` 機身操作與相機時鐘同步。只有手機與記憶卡兩條路徑都可執行時才顯示拍攝儲存位置選擇；選擇手機會把 Canon 主機 RAM JPEG／RAW 原子傳輸至 App 私有 Media。另包含 Canon EOS 遠端快門、半按、保證取消的原生 AF-ON、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、自動關閉電源、自動亮度優化、高 ISO 感光度消除雜訊、AEB、錄影開始／停止、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
-- Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、AF-ON、Live View、焦點移動，以及依能力提供的媒體縮圖／傳輸／刪除。直接 CCAPI 只有在相機公告內容 `PUT` 時才提供檔案保護、0–5 評分與 0／90／180／270 度顯示旋轉，且每次寫入後都會透過 `kind=info` 回讀驗證；libgphoto2 路徑也包含經 runtime 探測的 `gphoto2 --wait-event` 機身／媒體同步、R6 Mark III 自動對焦啟動／取消 action、各卡槽影像畫質、白平衡偏移、畫面比例、電動變焦速度、安全的自動關機與自動亮度優化選項，以及可選擇寫入記憶卡或將主機 RAM 拍攝原子轉存到 Bridge 媒體庫的儲存位置
+- Android USB/PTP 權限與介面診斷、實際 PTP session、相機身分、儲存卡、媒體瀏覽／縮圖／下載／刪除、相機有公告時的標準拍照／屬性控制，以及依能力開放的 Canon `GetEvent` 機身操作與相機時鐘同步。只有手機與記憶卡兩條路徑都可執行時才顯示拍攝儲存位置選擇；選擇手機會把 Canon 主機 RAM JPEG／RAW 原子傳輸至 App 私有 Media。另包含 Canon EOS 遠端快門、半按、保證取消的原生 AF-ON、拍攝模式、ISO／Tv／Av／白平衡、曝光補償、色溫、白平衡偏移、色彩空間、畫面比例、電動變焦速度、自動關閉電源、自動亮度優化、高 ISO 感光度消除雜訊、AEB、需相符事件回讀的錄影開始／停止、具精確回讀的擁有者／作者／著作權／相機暱稱、自動對焦操作／方式、連續自動對焦、驅動、測光、相片風格、各卡槽 RAW／cRAW／JPEG 畫質、短片伺服自動對焦、焦點移動與 JPEG Live View
+- Desktop Bridge 掃描、Bearer 驗證、多相機選擇、session、動態能力／設定、拍攝、AF-ON、Live View、焦點移動，以及依能力提供的媒體縮圖／傳輸／刪除。直接 CCAPI 只有在相機公告內容 `PUT` 時才提供檔案保護、0–5 評分與 0／90／180／270 度顯示旋轉，且每次寫入後都會透過 `kind=info` 回讀驗證；libgphoto2 路徑也包含經 runtime 探測的 `gphoto2 --wait-event` 機身／媒體同步、R6 Mark III 自動對焦啟動／取消 action、各卡槽影像畫質、白平衡偏移、畫面比例、電動變焦速度、安全的自動關機與自動亮度優化選項、只在可寫 TEXT 路徑出現並強制同路徑精確回讀的擁有者／作者／著作權／暱稱，以及可選擇寫入記憶卡或將主機 RAM 拍攝原子轉存到 Bridge 媒體庫的儲存位置
 - Live view 畫面，自動/手動更新與 FPS 控制
 - Android Live View 監看輔助會對解碼後的 JPEG／USB／Bridge 影格套用匯入的 3D `.cube` LUT，並以有界 120x80 背景分析提供互斥的亮度直方圖或 64x64 亮度波形圖、可調斑馬紋、偽色、峰值對焦、16:9／2.39:1／1:1／4:3 畫幅框線、動作／標題安全區域，以及 1.33x／1.5x／1.8x／2x 變形鏡頭反擠壓。LUT 使用單一 conflated worker 處理最新影格，不會累積工作；原生 RTP 保留零拷貝表面，因此 LUT 與像素分析停用，只保留幾何型框線與反擠壓。
 - iOS Live View 監看輔助使用單一 conflated worker 搭配 Core Image `CIColorCube` 套用匯入的 3D `.cube` LUT，並沿用相同的有界 120x80 分析契約，支援解碼後 JPEG／Bridge 影格的直方圖／亮度波形圖選擇、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與反擠壓；RTP 保留原生 sample-buffer 顯示，因此只開放幾何型功能。
@@ -65,7 +65,7 @@ LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast �
 - 獨立 AF-ON：CCAPI 使用相機公告的自動對焦命令；Canon USB 優先使用 `DoAf`／`AfCancel`，沒有這組專用操作時才以確實釋放的半按流程作為後備
 - 依相機公告能力執行手動快門半按，並保證送出釋放命令
 - CCAPI、Android USB/PTP、Desktop Bridge、PC 與 iOS 共用依能力開放的 Bulb 長曝光：只有相機公告 Bulb 模式與完整按壓／釋放路徑時，中央快門才切換成可計時的開始／停止控制；曝光期間暫停主動 JPEG 輪詢，失敗可重試釋放，結束工作階段也會盡力釋放快門
-- 支援分頁與按需縮圖；相機公告時的 CCAPI 相片／RAW 全螢幕預覽；依單筆能力開放、上限 32 MiB 的 Android USB/PTP 與 Desktop Bridge JPEG／PNG 預覽；透過 Android 文件選擇器串流下載大型檔案；需確認後才執行的刪除；以及具回讀驗證的 Canon CCAPI 檔案保護、評分與顯示旋轉。有線 RAW、HEIF 與影片仍可下載，但不顯示無法執行的預覽按鈕；USB／libgphoto2 在沒有獨立可靠命令依據前不會提供假的 metadata 修改。
+- 支援分頁與按需縮圖；相機公告時的 CCAPI 相片／RAW 全螢幕預覽；依單筆能力開放、上限 32 MiB 的 Android USB/PTP 與 Desktop Bridge JPEG／PNG 預覽；透過 Android 文件選擇器串流下載大型檔案；需確認後才執行的刪除；以及具回讀驗證的 Canon CCAPI 檔案保護、評分與顯示旋轉。有線 RAW、HEIF 與影片仍可下載，但不顯示無法執行的預覽按鈕。USB／libgphoto2 仍不提供未證實的單筆媒體 metadata 編輯；已驗證協定的相機擁有者／作者／著作權／暱稱屬於機身設定，不是媒體項目修改。
 
 預設直連相機 URL：
 

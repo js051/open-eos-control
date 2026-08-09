@@ -116,9 +116,14 @@ class DesktopBridgeClientTest {
         assertFalse(capabilities.matrix.supports(CameraFeature.USB_DIAGNOSTICS))
         assertEquals(listOf("Auto", "100", "400", "800"), capabilities.iso)
         assertEquals(
-            setOf("directoryselection", "drivemode"),
+            setOf("directoryselection", "drivemode", "ownername"),
             capabilities.advancedSettings.map { it.key }.toSet(),
         )
+        val owner = capabilities.advancedSettings.single { it.key == "ownername" }
+        assertEquals(CameraSettingInputKind.TEXT, owner.inputKind)
+        assertEquals("TEST OWNER", owner.value)
+        assertEquals(emptyList<String>(), owner.values)
+        assertEquals(255, owner.maxLength)
         assertEquals(5, capabilities.liveView.maxFps)
         assertEquals(
             listOf(LiveViewMagnification.X1, LiveViewMagnification.X5),
@@ -360,6 +365,33 @@ class DesktopBridgeClientTest {
         assertEquals("libgphoto2", failure.engine)
         assertTrue(failure.message.orEmpty().contains("Camera is already open"))
         assertFalse(failure.message.orEmpty().contains("top-secret"))
+    }
+
+    @Test
+    fun bridgeCapabilitiesDiscardMalformedTextSettingContracts() = runTest {
+        val capabilitiesJson = JSONObject(CAPABILITIES_JSON)
+        capabilitiesJson.getJSONArray("settings").apply {
+            put(JSONObject().put("key", "bad-kind").put("value", "TEST").put("values", emptyList<String>())
+                .put("inputKind", "textarea").put("maxLength", 255))
+            put(JSONObject().put("key", "bad-choices").put("value", "TEST").put("values", listOf("TEST"))
+                .put("inputKind", "text").put("maxLength", 255))
+            put(JSONObject().put("key", "bad-length").put("value", "TEST").put("values", emptyList<String>())
+                .put("inputKind", "text").put("maxLength", 256))
+            put(JSONObject().put("key", "bad-ascii").put("value", "測試").put("values", emptyList<String>())
+                .put("inputKind", "text").put("maxLength", 255))
+        }
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        server.enqueue(jsonResponse(capabilitiesJson.toString()))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val client = DesktopBridgeClient(server.url("/").toString())
+
+        client.initialize()
+        val settings = client.capabilities().advancedSettings
+        client.close()
+
+        assertTrue(settings.any { it.key == "ownername" })
+        assertTrue(settings.none { it.key.startsWith("bad-") })
     }
 
     @Test
@@ -623,7 +655,8 @@ class DesktopBridgeClientTest {
                 {"key":"iso","label":"ISO","value":"400","values":["Auto","100","400","800"]},
                 {"key":"whitebalance","label":"White balance","value":"Auto","values":["Auto","Daylight"]},
                 {"key":"directoryselection","label":"Capture directory","value":"100EOSXX","values":["100EOSXX","101EOSXX"]},
-                {"key":"drivemode","label":"Drive mode","value":"Single","values":["Single","Continuous"]}
+                {"key":"drivemode","label":"Drive mode","value":"Single","values":["Single","Continuous"]},
+                {"key":"ownername","label":"Owner name","value":"TEST OWNER","values":[],"inputKind":"text","maxLength":255}
               ],
               "fileNaming": {
                 "stillFilenameMode": "preset_code",

@@ -60,6 +60,7 @@ MAX_BRIDGE_LIVE_VIEW_FPS = 30
 MAX_PREVIEW_FALLBACK_FPS = 5
 MAX_LIVE_VIEW_FRAME_BYTES = 16 * 1024 * 1024
 MAX_LIVE_VIEW_BUFFER_BYTES = MAX_LIVE_VIEW_FRAME_BYTES + 64 * 1024
+TEXT_METADATA_MAX_BYTES = 255
 LIVE_VIEW_FIRST_FRAME_TIMEOUT_SECONDS = 10.0
 LIVE_VIEW_FRAME_TIMEOUT_SECONDS = 10.0
 LIVE_VIEW_STREAM_TIMEOUT_SECONDS = 24 * 60 * 60
@@ -697,6 +698,13 @@ class ConfigSpec:
     core: bool = False
 
 
+@dataclass(frozen=True)
+class TextMetadataSpec:
+    key: str
+    label: str
+    suffix: str
+
+
 CONFIG_SPECS = (
     ConfigSpec("iso", "ISO", ("iso",), core=True),
     ConfigSpec("shutter", "Shutter speed", ("shutterspeed", "exposuretime"), core=True),
@@ -726,6 +734,13 @@ CONFIG_SPECS = (
     ConfigSpec("aeb", "Auto exposure bracketing", ("aeb",)),
     ConfigSpec("capturetarget", "Capture target", ("capturetarget",)),
     ConfigSpec("capturestorage", "Recording card", ("storageid",)),
+)
+
+TEXT_METADATA_SPECS = (
+    TextMetadataSpec("ownername", "Owner name", "ownername"),
+    TextMetadataSpec("artist", "Artist", "artist"),
+    TextMetadataSpec("copyright", "Copyright", "copyright"),
+    TextMetadataSpec("nickname", "Nickname", "nickname"),
 )
 
 
@@ -809,7 +824,9 @@ def parse_config_dump(output: str) -> dict[str, GPhotoConfig]:
             continue
         if ":" not in line:
             continue
-        key, value = (part.strip() for part in line.split(":", 1))
+        key, raw_value = line.split(":", 1)
+        key = key.strip()
+        value = raw_value.strip()
         if key == "Label":
             current.label = value
         elif key == "Readonly":
@@ -817,7 +834,7 @@ def parse_config_dump(output: str) -> dict[str, GPhotoConfig]:
         elif key == "Type":
             current.kind = value.upper()
         elif key == "Current":
-            current.current = value
+            current.current = raw_value[1:] if raw_value.startswith(" ") else raw_value
         elif key == "Bottom":
             current.bottom = _parse_float(value)
         elif key == "Top":
@@ -1223,7 +1240,9 @@ class GPhoto2Session:
                 supported.add(CameraFeature.EXPOSURE_CONTROL)
             if "whitebalance" in settings_by_key:
                 supported.add(CameraFeature.WHITE_BALANCE_CONTROL)
-            if any(not spec.core and spec.key in settings_by_key for spec in CONFIG_SPECS):
+            if any(not spec.core and spec.key in settings_by_key for spec in CONFIG_SPECS) or any(
+                setting.input_kind == "text" for setting in settings
+            ):
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             half_press_values = self._half_press_values()
             autofocus_configs = self._autofocus_configs()
@@ -1371,6 +1390,9 @@ class GPhoto2Session:
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
+            text_spec = next((candidate for candidate in TEXT_METADATA_SPECS if candidate.key == key), None)
+            if text_spec is not None:
+                return self._set_text_metadata(text_spec, value)
             spec = next((candidate for candidate in CONFIG_SPECS if candidate.key == key), None)
             if spec is None:
                 raise unsupported(
@@ -1394,6 +1416,42 @@ class GPhoto2Session:
             self._set_config_value(config, selected_value, refresh=False)
             self._observed.add(_feature_for_setting(key))
             return self.status()
+
+    def _set_text_metadata(self, spec: TextMetadataSpec, value: str) -> CameraStatus:
+        config = self._find_config((spec.suffix,), writable=True)
+        if config is None or config.kind != "TEXT" or not _is_valid_text_metadata(config.current):
+            raise unsupported(
+                CameraFeature.ADVANCED_SETTINGS.value,
+                self.engine_name,
+                f"The camera did not advertise a writable, printable ASCII {spec.key} setting.",
+            )
+        if not _is_valid_text_metadata(value):
+            raise BridgeError(
+                "INVALID_SETTING_VALUE",
+                f"{spec.key} must be printable ASCII and no longer than {TEXT_METADATA_MAX_BYTES} bytes.",
+                status_code=422,
+                engine=self.engine_name,
+            )
+        path = config.path
+        self._set_config_value(config, value, refresh=False, update_current=False)
+        self._refresh_configs(force=True, strict=True)
+        readback = self._configs.get(path)
+        if readback is None:
+            raise BridgeError(
+                "SETTING_READBACK_MISSING",
+                f"The camera removed {spec.key} after the write; no same-path readback was returned.",
+                status_code=502,
+                engine=self.engine_name,
+            )
+        if readback.kind != "TEXT" or readback.current != value:
+            raise BridgeError(
+                "SETTING_READBACK_MISMATCH",
+                f"The camera read back a different {spec.key} value after writing {path}.",
+                status_code=502,
+                engine=self.engine_name,
+            )
+        self._observed.add(CameraFeature.ADVANCED_SETTINGS)
+        return self.status()
 
     def sleep_camera(self) -> None:
         raise unsupported(
@@ -2002,6 +2060,20 @@ class GPhoto2Session:
                     values=values,
                 )
             )
+        for spec in TEXT_METADATA_SPECS:
+            config = self._find_config((spec.suffix,), writable=True)
+            if config is None or config.kind != "TEXT" or not _is_valid_text_metadata(config.current):
+                continue
+            settings.append(
+                CameraSetting(
+                    key=spec.key,
+                    label=config.label or spec.label,
+                    value=config.current,
+                    values=[],
+                    input_kind="text",
+                    max_length=TEXT_METADATA_MAX_BYTES,
+                )
+            )
         return settings
 
     def _setting_values(self, spec: ConfigSpec, config: GPhotoConfig) -> list[str]:
@@ -2122,7 +2194,14 @@ class GPhoto2Session:
         config = self._find_config(spec.suffixes)
         return config.current if config else "-"
 
-    def _set_config_value(self, config: GPhotoConfig, value: str, *, refresh: bool = False) -> None:
+    def _set_config_value(
+        self,
+        config: GPhotoConfig,
+        value: str,
+        *,
+        refresh: bool = False,
+        update_current: bool = True,
+    ) -> None:
         self._require_open()
         if config.readonly:
             raise BridgeError("READ_ONLY_SETTING", f"{config.label or config.path} is read-only.", status_code=409)
@@ -2138,7 +2217,8 @@ class GPhoto2Session:
                     engine=self.engine_name,
                 )
         self._run(["--set-config-value", f"{config.path}={selected_value}"], timeout=30.0)
-        config.current = selected_value
+        if update_current:
+            config.current = selected_value
         if refresh:
             self._refresh_configs(force=True)
 
@@ -2264,6 +2344,12 @@ class GPhoto2Session:
             for config in self._configs.values()
             if not config.readonly and config.selectable_values()
         }
+        writable_setting_paths.update(
+            config.path.replace("\r", "").replace("\n", "")[:MAX_CAPABILITY_EVIDENCE_ITEM_CHARS]
+            for spec in TEXT_METADATA_SPECS
+            for config in [self._find_config((spec.suffix,), writable=True)]
+            if config is not None and config.kind == "TEXT" and _is_valid_text_metadata(config.current)
+        )
         storage_config = self._find_config(("storageid",), writable=True)
         if self._advertised_storage_targets and storage_config is not None:
             writable_setting_paths.add(
@@ -2551,6 +2637,14 @@ def _normalize_storage_id(value: str | None) -> str | None:
 
 def _safe_storage_label(value: str) -> str:
     return re.sub(r"[\r\n\t]+", " ", value).strip()[:80]
+
+
+def _is_valid_text_metadata(value: str) -> bool:
+    try:
+        encoded = value.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return len(encoded) <= TEXT_METADATA_MAX_BYTES and all(0x20 <= byte <= 0x7E for byte in encoded)
 
 
 def _is_host_capture_target(value: str) -> bool:

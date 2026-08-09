@@ -289,6 +289,11 @@
     <string name="setting_auto_lighting_optimizer">Auto Lighting Optimizer</string>
     <string name="setting_aeb">Auto exposure bracketing (AEB)</string>
     <string name="setting_ae_mode">AE mode</string>
+    <string name="setting_owner_name">Owner name</string>
+    <string name="setting_artist">Artist</string>
+    <string name="setting_copyright">Copyright</string>
+    <string name="setting_nickname">Camera nickname</string>
+    <string name="setting_ascii_text_hint">Printable ASCII, up to %1$d characters</string>
     <string name="preview_interface">Open offline preview</string>
     <string name="offline_preview">Offline UI preview</string>
     <string name="offline_preview_hint">Explore controls without sending commands to a camera</string>

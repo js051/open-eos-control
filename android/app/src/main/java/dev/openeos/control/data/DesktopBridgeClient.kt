@@ -166,14 +166,30 @@ class DesktopBridgeClient(
         val settings = body.optJSONArray("settings").objects().mapNotNull { setting ->
             val key = setting.optString("key").trim()
             val values = setting.optJSONArray("values").strings()
-            if (key.isBlank() || values.isEmpty()) {
+            val inputKind = when (setting.optString("inputKind", "choice").lowercase()) {
+                "choice" -> CameraSettingInputKind.CHOICE
+                "text" -> CameraSettingInputKind.TEXT
+                else -> return@mapNotNull null
+            }
+            val maxLength = setting.optInt("maxLength")
+                .takeIf { setting.has("maxLength") && it in 1..CanonEosPtp.MAX_TEXT_METADATA_BYTES }
+            val current = setting.optString("value")
+            val valid = when (inputKind) {
+                CameraSettingInputKind.CHOICE -> values.isNotEmpty()
+                CameraSettingInputKind.TEXT ->
+                    values.isEmpty() && maxLength != null &&
+                        current.length <= maxLength && current.all { it.code in 0x20..0x7E }
+            }
+            if (key.isBlank() || !valid) {
                 null
             } else {
                 CameraSettingControl(
                     key = key,
                     label = setting.optString("label", key),
-                    value = setting.optString("value"),
+                    value = current,
                     values = values,
+                    inputKind = inputKind,
+                    maxLength = maxLength,
                 )
             }
         }

@@ -339,9 +339,10 @@ async function run() {
     );
     assert.ok(halfPress >= halfPressStart && halfRelease > halfPress);
 
-    await page.waitForSelector(".settings-command");
-    assert.match(await page.locator(".settings-command").innerText(), /Camera date and time/);
-    await page.click(".settings-command button");
+    const clockCommand = page.locator(".settings-command").filter({ hasText: "Camera date and time" }).first();
+    await clockCommand.waitFor();
+    assert.match(await clockCommand.innerText(), /Camera date and time/);
+    await clockCommand.locator("button").click();
     await page.waitForFunction(() => (
       document.querySelector(".settings-command small")?.textContent.includes("Verified at")
     ));
@@ -506,6 +507,10 @@ async function run() {
     assert.equal(report.liveView.monitoring.histogramVisible, false);
     assert.equal(report.liveView.monitoring.waveformVisible, true);
     assert.deepEqual(report.liveView.monitoring.lut, { loaded: true, size: 2 });
+    assert.equal(report.capabilities.settings.some((setting) => "value" in setting || "values" in setting), false);
+    assert.equal(reportText.includes("Jason"), false);
+    assert.equal(reportText.includes("2026 Open EOS"), false);
+    assert.equal(reportText.includes("R6M3"), false);
     assert.equal(reportText.includes("browser-private-name"), false);
     assert.equal(reportText.includes("Browser Invert"), false);
     assert.equal(reportText.includes("private-test-device-id"), false);
@@ -524,10 +529,12 @@ async function run() {
       /STILL_CAPTURE.*Confirmed on camera/s,
     );
     assert.equal(await page.locator("#copy-physical-validation-button").isEnabled(), true);
+    const previousClipboard = await page.evaluate(() => navigator.clipboard.readText());
     await page.click("#copy-physical-validation-button");
-    await page.waitForFunction(async () => (
-      (await navigator.clipboard.readText()).startsWith("# Open EOS Control physical camera validation")
-    ));
+    await page.waitForFunction(async (previous) => {
+      const current = await navigator.clipboard.readText();
+      return current !== previous && current.startsWith("# Open EOS Control physical camera validation");
+    }, previousClipboard);
     const visibleDiagnostic = await page.locator("#diagnostics-output").textContent();
     const copiedValidation = await page.evaluate(() => navigator.clipboard.readText());
     const visibleHash = createHash("sha256").update(visibleDiagnostic).digest("hex");

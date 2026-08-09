@@ -125,7 +125,14 @@ extension CameraCapabilities {
         CameraCapabilities(
             settings: settings.map { setting in
                 guard setting.key == key else { return setting }
-                return CameraSetting(key: setting.key, label: setting.label, value: value, values: setting.values)
+                return CameraSetting(
+                    key: setting.key,
+                    label: setting.label,
+                    value: value,
+                    values: setting.values,
+                    inputKind: setting.inputKind,
+                    maxLength: setting.maxLength
+                )
             },
             matrix: matrix,
             liveView: liveView,
@@ -152,7 +159,7 @@ func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) 
     let videoOnlyKeys = Set(["windfilter", "attenuator"])
     let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage", "directory"]
     return settings.filter { setting in
-        guard Set(setting.values).count > 1 else { return false }
+        guard setting.inputKind == .text || Set(setting.values).count > 1 else { return false }
         guard !primary.contains(setting.key) else { return false }
         guard setting.key.lowercased() != "moviemode" else { return false }
         let key = setting.key.lowercased()
@@ -264,6 +271,10 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "continuousaf": "setting_continuous_af"
     case "movieservoaf": "setting_movie_servo_af"
     case "aeb": "setting_aeb"
+    case "ownername": "setting_owner_name"
+    case "artist": "setting_artist"
+    case "copyright": "setting_copyright"
+    case "nickname": "setting_nickname"
     default: nil
     }
 }

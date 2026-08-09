@@ -39,6 +39,51 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun textMetadataPayloadMatchesLibgphoto2SetDevicePropValueExLayout() {
+        assertArrayEquals(
+            byteArrayOf(
+                0x13, 0x00, 0x00, 0x00,
+                0x15, 0xD1.toByte(), 0x00, 0x00,
+                'T'.code.toByte(), 'E'.code.toByte(), 'S'.code.toByte(), 'T'.code.toByte(),
+                ' '.code.toByte(), 'O'.code.toByte(), 'W'.code.toByte(), 'N'.code.toByte(),
+                'E'.code.toByte(), 'R'.code.toByte(), 0x00,
+            ),
+            CanonEosPtp.textPropertyPayload(CanonEosPropertyCode.OWNER, "TEST OWNER"),
+        )
+        assertArrayEquals(
+            byteArrayOf(
+                0x09, 0x00, 0x00, 0x00,
+                0xD0.toByte(), 0xD1.toByte(), 0x00, 0x00,
+                0x00,
+            ),
+            CanonEosPtp.textPropertyPayload(CanonEosPropertyCode.ARTIST, ""),
+        )
+        assertEquals(
+            listOf("ownername", "artist", "copyright", "nickname"),
+            CanonEosPtp.textSettingSpecs.map(CanonEosTextSettingSpec::key),
+        )
+    }
+
+    @Test
+    fun textMetadataRejectsUnsupportedNonPrintableNonAsciiAndOversizedValues() {
+        assertFalse(CanonEosPtp.validTextMetadata("line\nbreak"))
+        assertFalse(CanonEosPtp.validTextMetadata("測試"))
+        assertFalse(CanonEosPtp.validTextMetadata("A".repeat(256)))
+        assertTrue(CanonEosPtp.validTextMetadata(""))
+        assertTrue(CanonEosPtp.validTextMetadata("A".repeat(255)))
+        assertTrue(
+            runCatching {
+                CanonEosPtp.textPropertyPayload(CanonEosPropertyCode.ISO_SPEED, "TEST")
+            }.exceptionOrNull() is IllegalArgumentException,
+        )
+        assertTrue(
+            runCatching {
+                CanonEosPtp.textPropertyPayload(CanonEosPropertyCode.OWNER, "line\nbreak")
+            }.exceptionOrNull() is IllegalArgumentException,
+        )
+    }
+
+    @Test
     fun viewfinderParserExtractsDocumentedTypeOneAndElevenJpegBlocks() {
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2, 0xFF.toByte(), 0xD9.toByte())
         val metadata = block(type = 2, bytes = byteArrayOf(7, 8, 9))
@@ -153,6 +198,42 @@ class CanonEosPtpTest {
         assertEquals(0x58L, updates.single { it.currentValue != null }.currentValue)
         assertEquals(listOf("100", "400", "800"), options.map(CanonEosPropertyOption::label))
         assertEquals(0x60L, CanonEosPtp.propertyValue(CanonEosPropertyCode.ISO_SPEED, options.map { it.value }, "800"))
+    }
+
+    @Test
+    fun eosTextMetadataEventsExposeOnlyNulTerminatedPrintableAscii() {
+        val owner = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.OWNER) + "TEST OWNER".encodeToByteArray() + byteArrayOf(0),
+        )
+        val emptyCopyright = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.COPYRIGHT) + byteArrayOf(0),
+        )
+
+        val updates = CanonEosPtp.propertyUpdates(owner + emptyCopyright + block(0, byteArrayOf()))
+
+        assertEquals("TEST OWNER", updates.single { it.propertyCode == CanonEosPropertyCode.OWNER }.currentText)
+        assertEquals("", updates.single { it.propertyCode == CanonEosPropertyCode.COPYRIGHT }.currentText)
+        assertEquals("ownername", CanonEosPtp.settingKey(CanonEosPropertyCode.OWNER))
+        assertEquals("nickname", CanonEosPtp.settingKey(CanonEosPropertyCode.CAMERA_NICKNAME))
+    }
+
+    @Test
+    fun eosTextMetadataEventsRejectMissingNulNonPrintableAndOversizedValues() {
+        val invalidPayloads = listOf(
+            "NO NUL".encodeToByteArray(),
+            byteArrayOf('A'.code.toByte(), '\n'.code.toByte(), 0),
+            "A".repeat(256).encodeToByteArray() + byteArrayOf(0),
+        )
+
+        invalidPayloads.forEach { value ->
+            val event = block(
+                type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+                bytes = u32Fields(CanonEosPropertyCode.OWNER) + value,
+            )
+            assertTrue(runCatching { CanonEosPtp.propertyUpdates(event) }.exceptionOrNull() is PtpProtocolException)
+        }
     }
 
     @Test

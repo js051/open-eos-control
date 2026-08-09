@@ -243,6 +243,23 @@ class CameraSetting(ApiModel):
     label: str
     value: str
     values: list[str]
+    input_kind: Literal["choice", "text"] = "choice"
+    max_length: int | None = Field(default=None, gt=0, le=255)
+
+    @model_validator(mode="after")
+    def validate_input_contract(self) -> CameraSetting:
+        if self.input_kind == "text":
+            if self.values or self.max_length is None:
+                raise ValueError("Text settings must expose no choices and a bounded maximum length.")
+            try:
+                encoded = self.value.encode("ascii")
+            except UnicodeEncodeError as error:
+                raise ValueError("Text setting values must be printable ASCII.") from error
+            if len(encoded) > self.max_length or any(not 0x20 <= byte <= 0x7E for byte in encoded):
+                raise ValueError("Text setting values must be printable ASCII and fit maxLength.")
+        elif self.max_length is not None:
+            raise ValueError("Choice settings must not expose maxLength.")
+        return self
 
 
 class FileNamingField(StrEnum):
@@ -382,7 +399,7 @@ class CameraCapabilities(ApiModel):
 
 
 class SettingUpdate(ApiModel):
-    value: str = Field(min_length=1, max_length=512)
+    value: str = Field(max_length=512)
 
 
 class DirectoryCreateRequest(ApiModel):
