@@ -325,6 +325,21 @@ class DesktopBridgeClient(
         )
     ).also { observedFeatures.add(featureForSetting(key)) }
 
+    suspend fun createDirectory(name: String): String {
+        require(Regex("^(?:[A-Z0-9_]{5})?$").matches(name)) {
+            "Directory name must be empty or exactly five uppercase letters, numbers, or underscores."
+        }
+        val created = postJson(
+            sessionEndpoint("directories"),
+            JSONObject().put("name", name),
+        ).opt("name") as? String
+        require(created != null && Regex("^[A-Z0-9_]{5}$").matches(created)) {
+            "Desktop Bridge returned an invalid created directory name."
+        }
+        observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
+        return created
+    }
+
     suspend fun syncCameraClock(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("clock", "sync"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC) }
@@ -672,6 +687,7 @@ class DesktopBridgeClient(
         "cardselectionstillimage", "cardselectionmovie" -> CameraFeature.CARD_SELECTION_CONTROL
         "soundrecording", "windfilter", "attenuator" -> CameraFeature.SOUND_RECORDING_CONTROL
         "soundrecordinglevel" -> CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
+        "directoryselection" -> CameraFeature.DIRECTORY_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
     }
 

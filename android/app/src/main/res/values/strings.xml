@@ -83,6 +83,12 @@
     <string name="sync_camera_clock">Camera date and time</string>
     <string name="sync_camera_clock_hint">Set the camera clock and time zone from this device, then verify the camera readback.</string>
     <string name="camera_clock_synced_at">Verified at %1$s</string>
+    <string name="create_capture_directory">Create capture directory</string>
+    <string name="create_capture_directory_hint">Create a new directory on the camera and add it to the selectable capture directories.</string>
+    <string name="directory_name">Directory name</string>
+    <string name="directory_name_rule">Leave blank for the camera default, or enter exactly 5 uppercase letters, numbers, or underscores.</string>
+    <string name="directory_created">Created %1$s</string>
+    <string name="create">Create</string>
     <string name="sync_now">Sync now</string>
     <string name="overview">Overview</string>
     <string name="ccapi">CCAPI</string>
@@ -525,6 +531,7 @@
     <string name="setting_capture_storage">Recording card</string>
     <string name="setting_still_image_card">Still-image card</string>
     <string name="setting_movie_card">Movie card</string>
+    <string name="setting_capture_directory">Capture directory</string>
     <string name="camera_value_card_1">Card 1</string>
     <string name="camera_value_card_2">Card 2</string>
     <string name="physical_validation">Physical validation</string>

@@ -2197,6 +2197,108 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(crossVersionRequestCount, 2)
     }
 
+    func testCanonDirectoryControlRequiresCompleteGroupAndCreatesAdvertisedDirectory() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/directory/createdirectory","post":true},{"path":"/functions/directory/directoryselection","get":true,"put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/directory/directoryselection",
+            body: #"{"value":"100EOSXX","ability":["100EOSXX"]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertEqual(capabilities.setting("directoryselection")?.value, "100EOSXX")
+        XCTAssertEqual(capabilities.setting("directoryselection")?.values, ["100EOSXX"])
+        XCTAssertTrue(capabilities.matrix.supports(.directoryControl))
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("directoryselection"))
+        let requestCount = await transport.requests().count
+        do {
+            _ = try await client.createDirectory(name: "bad")
+            XCTFail("Expected a malformed directory name to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidSetting(key: "directoryname", value: "bad")
+            )
+        }
+        let requestsAfterRejection = await transport.requests()
+        XCTAssertEqual(requestsAfterRejection.count, requestCount)
+
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/ver100/functions/directory/createdirectory",
+            body: #"{"directoryname":"ABCDE"}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/directory/directoryselection",
+            body: #"{"value":"101ABCDE","ability":["100EOSXX","101ABCDE"]}"#
+        )
+
+        let created = try await client.createDirectory(name: "ABCDE")
+        XCTAssertEqual(created, "ABCDE")
+
+        let requests = await transport.requests()
+        let create = try XCTUnwrap(requests.first {
+            $0.method == "POST" && $0.path == "/ccapi/ver100/functions/directory/createdirectory"
+        })
+        let body = try XCTUnwrap(create.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(object, ["directoryname": "ABCDE"])
+    }
+
+    func testCanonDirectoryControlRejectsMalformedAndCrossVersionContracts() async throws {
+        let malformed = MockCameraHTTPTransport()
+        await malformed.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/directory/createdirectory","post":true},{"path":"/functions/directory/directoryselection","get":true,"put":true}]}"#
+        )
+        await malformed.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await malformed.enqueueJSON(
+            path: "/ccapi/ver100/functions/directory/directoryselection",
+            body: #"{"value":"100EOSXX","ability":["100EOSXX","100EOSXX"]}"#
+        )
+        let malformedClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: malformed
+        )
+
+        var capabilities = try await malformedClient.capabilities()
+
+        XCTAssertNil(capabilities.setting("directoryselection"))
+        XCTAssertFalse(capabilities.matrix.supports(.directoryControl))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.directoryControl))
+
+        let crossVersion = MockCameraHTTPTransport()
+        await crossVersion.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/directory/createdirectory","post":true},{"path":"/functions/directory/directoryselection","get":true}],"ver110":[{"path":"/functions/directory/directoryselection","put":true}]}"#
+        )
+        await crossVersion.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let crossVersionClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: crossVersion
+        )
+
+        capabilities = try await crossVersionClient.capabilities()
+
+        XCTAssertNil(capabilities.setting("directoryselection"))
+        XCTAssertFalse(capabilities.matrix.supports(.directoryControl))
+        let crossVersionRequests = await crossVersion.requests()
+        XCTAssertEqual(crossVersionRequests.count, 2)
+    }
+
     func testStillImageQualityWritesCanonObjectAndPreservesCompanionFormat() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)

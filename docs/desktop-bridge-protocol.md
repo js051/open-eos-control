@@ -34,6 +34,7 @@ POST /v1/session/{id}/liveview/stop
 GET  /v1/session/{id}/liveview/frame
 POST /v1/session/{id}/liveview/magnification
 POST /v1/session/{id}/settings/{key}
+POST /v1/session/{id}/directories
 POST /v1/session/{id}/capture/still
 POST /v1/session/{id}/bulb/start
 POST /v1/session/{id}/bulb/stop
@@ -163,6 +164,8 @@ The response includes the effective `source`, so clients can distinguish an `AUT
 `POST /liveview/magnification` accepts `{"value":1}` or `{"value":5}` and returns the accepted value. It is capability-gated and requires active Live View. The libgphoto2 engine exposes it only when a writable `eoszoom` runtime widget exists. Canon CCAPI `GET`/`POST /shooting/control/zoom` is exposed separately as the generic `zoom` camera setting and `ZOOM_CONTROL`; it never masquerades as Live View magnification.
 
 Direct CCAPI dual-card selection is exposed through generic `cardselectionstillimage` and `cardselectionmovie` settings plus `CARD_SELECTION_CONTROL`. The Bridge only creates either setting from an exact same-version Canon GET/PUT pair with a valid `none`/`card1`/`card2` ability list; the existing session setting endpoint forwards only a currently advertised value. This is distinct from libgphoto2's runtime storage-ID-backed `capturestorage` setting.
+
+Direct CCAPI capture-directory control is exposed through the generic `directoryselection` setting plus `DIRECTORY_CONTROL`. The Bridge requires one API version to advertise all of `POST /functions/directory/createdirectory` and `GET`/`PUT /functions/directory/directoryselection`, then accepts only a unique bounded ability list of one to 256 eight-character Canon directory values such as `100EOSXX`. A single-directory card still exposes creation. `POST /v1/session/{id}/directories` accepts an empty name for camera-generated `EOSXX`, or exactly five ASCII uppercase letters, digits, or underscores. It forwards Canon's `directoryname` body, validates the five-character response, refreshes the selection list, and never infers an equivalent libgphoto2 operation.
 
 Direct CCAPI sound recording level is exposed through the generic `soundrecordinglevel` setting plus `SOUND_RECORDING_LEVEL_CONTROL`. The Bridge requires an exact same-version Canon `GET`/`PUT /shooting/settings/soundrecording/level` pair and an exact bounded integer current/min/max/positive-step contract with 2-256 choices. `PUT /v1/session/{id}/setting` re-reads the Canon resource before forwarding an integer `value`; malformed, stale or unadvertised values never produce a camera write. Product UIs filter this setting into Video and render it as a discrete slider.
 

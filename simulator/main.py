@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import struct
 import zlib
 from datetime import datetime
@@ -62,6 +63,10 @@ class SensorCleaningUpdate(BaseModel):
     autopoweroff: StrictBool
 
 
+class DirectoryCreateUpdate(BaseModel):
+    directoryname: str = Field(default="", pattern=r"^(?:[A-Z0-9_]{5})?$")
+
+
 capabilities = {
     "iso": ["100", "200", "400", "800", "1600", "3200", "6400"],
     "shutter": ["1/25", "1/50", "1/60", "1/100", "1/125"],
@@ -101,6 +106,10 @@ def initial_state() -> dict[str, object]:
         "still_card_selection": "card1",
         "movie_card_selection": "card2",
         "card_selection_update_count": 0,
+        "directories": ["100EOSXX", "101EOSXX"],
+        "directory_selection": "100EOSXX",
+        "directory_create_count": 0,
+        "directory_selection_update_count": 0,
         "beep": "enable",
         "beep_update_count": 0,
         "display_off": "60",
@@ -293,6 +302,10 @@ async def get_test_state() -> dict[str, object]:
         "still_card_selection": state["still_card_selection"],
         "movie_card_selection": state["movie_card_selection"],
         "card_selection_update_count": state["card_selection_update_count"],
+        "directories": state["directories"],
+        "directory_selection": state["directory_selection"],
+        "directory_create_count": state["directory_create_count"],
+        "directory_selection_update_count": state["directory_selection_update_count"],
         "beep": {
             "value": state["beep"],
             "update_count": state["beep_update_count"],
@@ -472,6 +485,10 @@ async def get_capabilities() -> dict[str, object]:
             "value": state["movie_card_selection"],
             "ability": CARD_SELECTION_ABILITY,
         },
+        "directoryselection": {
+            "value": state["directory_selection"],
+            "ability": state["directories"],
+        },
         "focusbracketing": {
             "value": state["focus_bracketing"],
             "ability": FOCUS_BRACKETING_ABILITY,
@@ -505,6 +522,41 @@ async def get_capabilities() -> dict[str, object]:
             "ability": SOUND_RECORDING_LEVEL_ABILITY,
         }
     return result
+
+
+def create_directory(directoryname: str) -> str:
+    base_name = directoryname or "EOSXX"
+    next_number = max(int(item[:3]) for item in state["directories"]) + 1
+    if next_number > 999:
+        raise HTTPException(status_code=503, detail="No directory number is available")
+    full_name = f"{next_number:03d}{base_name}"
+    state["directories"].append(full_name)
+    state["directory_selection"] = full_name
+    state["directory_create_count"] += 1
+    publish_event("directoryselection")
+    return base_name
+
+
+def update_directory_selection(payload: dict[str, object]) -> bool:
+    value = payload.get("value")
+    if set(payload) != {"value"} or not isinstance(value, str) or value not in state["directories"]:
+        return False
+    state["directory_selection"] = value
+    state["directory_selection_update_count"] += 1
+    publish_event("directoryselection")
+    return True
+
+
+@app.post("/ccapi/directory")
+async def simulator_create_directory(payload: DirectoryCreateUpdate) -> dict[str, str]:
+    return {"directoryname": create_directory(payload.directoryname)}
+
+
+@app.put("/ccapi/directory-selection", status_code=204)
+async def simulator_select_directory(payload: dict[str, object]) -> Response:
+    if not update_directory_selection(payload):
+        raise HTTPException(status_code=422, detail="Unsupported directory selection")
+    return Response(status_code=204)
 
 
 @app.post("/ccapi/movie-mode", status_code=204)
@@ -1065,6 +1117,8 @@ CANON_DISCOVERY = {
         {"path": "/functions/autopoweroff", "get": True, "put": True},
         {"path": "/functions/cardselection/stillimage", "get": True, "put": True},
         {"path": "/functions/cardselection/movie", "get": True, "put": True},
+        {"path": "/functions/directory/createdirectory", "post": True},
+        {"path": "/functions/directory/directoryselection", "get": True, "put": True},
         {"path": "/shooting/control/shutterbutton", "post": True},
         {"path": "/shooting/control/shutterbutton/manual", "put": True},
         {"path": "/shooting/control/af", "post": True},
@@ -1646,6 +1700,30 @@ async def canon_set_movie_card_selection(payload: dict[str, object]) -> Response
     if not update_card_selection("movie", payload):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return JSONResponse(content={"value": state["movie_card_selection"]})
+
+
+@app.post("/ccapi/ver100/functions/directory/createdirectory")
+async def canon_create_directory(payload: dict[str, object]) -> Response:
+    name = payload.get("directoryname")
+    if (
+        set(payload) != {"directoryname"}
+        or not isinstance(name, str)
+        or not re.fullmatch(r"(?:[A-Z0-9_]{5})?", name)
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"directoryname": create_directory(name)})
+
+
+@app.get("/ccapi/ver100/functions/directory/directoryselection")
+async def canon_get_directory_selection() -> dict[str, object]:
+    return {"value": state["directory_selection"], "ability": state["directories"]}
+
+
+@app.put("/ccapi/ver100/functions/directory/directoryselection")
+async def canon_set_directory_selection(payload: dict[str, object]) -> Response:
+    if not update_directory_selection(payload):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["directory_selection"]})
 
 
 @app.post("/ccapi/ver100/shooting/control/shutterbutton", status_code=204)

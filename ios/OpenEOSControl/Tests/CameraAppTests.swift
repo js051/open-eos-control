@@ -548,6 +548,21 @@ final class CameraAppTests: XCTestCase {
         XCTAssertFalse(state.isBusy(.maintenance))
     }
 
+    func testOfflinePreviewShowsButCannotCreateCaptureDirectory() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        XCTAssertTrue(state.supports(.directoryControl))
+        XCTAssertEqual(state.snapshot?.capabilities.setting("directoryselection")?.value, "100EOSXX")
+        await state.createDirectory(name: "ABCDE")
+
+        XCTAssertNil(state.lastCreatedDirectoryName)
+        XCTAssertFalse(state.isBusy(.directory))
+    }
+
     func testOfflineMediaDownloadCompletesAndClearsActiveTransferState() async throws {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

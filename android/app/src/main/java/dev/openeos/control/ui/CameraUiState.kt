@@ -34,7 +34,7 @@ enum class ConnectionTarget { CCAPI, DESKTOP_BRIDGE }
 
 enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MONITOR, MORE, LANGUAGE }
 
-enum class CameraOperation { CONNECT, STATUS, SETTING, CLOCK, MAINTENANCE, POWER, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
+enum class CameraOperation { CONNECT, STATUS, SETTING, DIRECTORY, CLOCK, MAINTENANCE, POWER, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
 
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,
@@ -98,6 +98,7 @@ data class CameraUiState(
     val focusPoint: FocusPoint? = null,
     val focusFeedback: FocusFeedback? = null,
     val lastClockSyncAtMillis: Long? = null,
+    val lastCreatedDirectoryName: String? = null,
     val operatorConfirmedFeatures: Set<CameraFeature> = emptySet(),
     val error: String? = null,
     val errorOperation: CameraOperation? = null,
@@ -204,7 +205,7 @@ fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): Li
     val videoOnlyKeys = setOf("windfilter", "attenuator")
     val photoTokens = listOf(
         "still", "photo", "drive", "imagequality", "colorspace", "highisonr", "aeb", "aspect", "capturetarget",
-        "capturestorage",
+        "capturestorage", "directory",
     )
     return settings.filter { it.values.distinct().size > 1 }.filter { setting ->
         val key = setting.key.lowercase()

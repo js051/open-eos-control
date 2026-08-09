@@ -913,3 +913,65 @@ def test_card_selection_contract_mutates_canonical_and_simulator_routes() -> Non
     assert test_state["still_card_selection"] == "card2"
     assert test_state["movie_card_selection"] == "card1"
     assert test_state["card_selection_update_count"] == 2
+
+
+def test_directory_contract_creates_selects_and_rejects_invalid_values() -> None:
+    client.post("/ccapi/test/reset")
+
+    discovery = client.get("/ccapi").json()["ver100"]
+    initial = client.get("/ccapi/ver100/functions/directory/directoryselection")
+    canonical_create = client.post(
+        "/ccapi/ver100/functions/directory/createdirectory",
+        json={"directoryname": "ABCDE"},
+    )
+    automatic_create = client.post(
+        "/ccapi/directory",
+        json={"directoryname": ""},
+    )
+    canonical_select = client.put(
+        "/ccapi/ver100/functions/directory/directoryselection",
+        json={"value": "101EOSXX"},
+    )
+    simulator_select = client.put(
+        "/ccapi/directory-selection",
+        json={"value": "102ABCDE"},
+    )
+    invalid_name = client.post(
+        "/ccapi/ver100/functions/directory/createdirectory",
+        json={"directoryname": "lower"},
+    )
+    invalid_selection = client.put(
+        "/ccapi/ver100/functions/directory/directoryselection",
+        json={"value": "999MISSING"},
+    )
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert {"path": "/functions/directory/createdirectory", "post": True} in discovery
+    assert {
+        "path": "/functions/directory/directoryselection",
+        "get": True,
+        "put": True,
+    } in discovery
+    assert initial.json() == {
+        "value": "100EOSXX",
+        "ability": ["100EOSXX", "101EOSXX"],
+    }
+    assert canonical_create.status_code == 200
+    assert canonical_create.json() == {"directoryname": "ABCDE"}
+    assert automatic_create.status_code == 200
+    assert automatic_create.json() == {"directoryname": "EOSXX"}
+    assert canonical_select.json() == {"value": "101EOSXX"}
+    assert simulator_select.status_code == 204
+    assert invalid_name.status_code == 400
+    assert invalid_name.json() == {"message": "Invalid parameter"}
+    assert invalid_selection.status_code == 400
+    assert invalid_selection.json() == {"message": "Invalid parameter"}
+    assert test_state["directories"] == [
+        "100EOSXX",
+        "101EOSXX",
+        "102ABCDE",
+        "103EOSXX",
+    ]
+    assert test_state["directory_selection"] == "102ABCDE"
+    assert test_state["directory_create_count"] == 2
+    assert test_state["directory_selection_update_count"] == 2

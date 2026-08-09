@@ -79,6 +79,7 @@ interface CameraControlBackend {
     suspend fun setWhiteBalance(value: String): CameraStatus
     suspend fun setSetting(key: String, value: String): CameraStatus
     suspend fun syncCameraClock(): CameraStatus = unsupported(CameraFeature.CAMERA_CLOCK_SYNC)
+    suspend fun createDirectory(name: String): String = unsupported(CameraFeature.DIRECTORY_CONTROL)
     suspend fun cleanSensor(autoPowerOff: Boolean) = unsupported<Unit>(CameraFeature.SENSOR_CLEANING)
     suspend fun sleepCamera() = unsupported<Unit>(CameraFeature.CAMERA_SLEEP)
     suspend fun startRecording(): CameraStatus
@@ -177,6 +178,8 @@ class CcapiCameraBackend(
     override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
 
     override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
+
+    override suspend fun createDirectory(name: String): String = client.createDirectory(name)
 
     override suspend fun cleanSensor(autoPowerOff: Boolean) = client.cleanSensor(autoPowerOff)
 
@@ -283,6 +286,8 @@ class DesktopBridgeCameraBackend(
     override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
 
     override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
+
+    override suspend fun createDirectory(name: String): String = client.createDirectory(name)
 
     override suspend fun cleanSensor(autoPowerOff: Boolean) = client.cleanSensor(autoPowerOff)
 

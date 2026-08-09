@@ -86,6 +86,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaDownloadProgress: CameraMediaTransferProgress?
     @Published private(set) var deletedMediaName: String?
     @Published private(set) var lastClockSyncAt: Date?
+    @Published private(set) var lastCreatedDirectoryName: String?
     @Published private(set) var operatorConfirmedFeatures = Set<CameraFeature>()
     @Published private(set) var lastError: String?
     @Published private(set) var busyOperations = Set<CameraOperation>()
@@ -311,6 +312,7 @@ final class CameraAppState: ObservableObject {
             removeDownloadedFile()
             deletedMediaName = nil
             lastClockSyncAt = nil
+            lastCreatedDirectoryName = nil
             lastError = nil
             clampLiveViewRequest()
             beginEventLoop(session: newSession)
@@ -336,6 +338,7 @@ final class CameraAppState: ObservableObject {
         removeDownloadedFile()
         deletedMediaName = nil
         lastClockSyncAt = nil
+        lastCreatedDirectoryName = nil
         operatorConfirmedFeatures.removeAll()
         lastError = nil
         liveViewData = nil
@@ -376,6 +379,7 @@ final class CameraAppState: ObservableObject {
         focusMarker = nil
         bulbStartedAt = nil
         lastClockSyncAt = nil
+        lastCreatedDirectoryName = nil
         operatorConfirmedFeatures.removeAll()
         lastError = nil
         busyOperations.removeAll()
@@ -509,6 +513,22 @@ final class CameraAppState: ObservableObject {
         do {
             updateStatus(try await session.syncCameraClock())
             lastClockSyncAt = Date()
+            lastError = nil
+        } catch {
+            record(error)
+        }
+    }
+
+    func createDirectory(name: String) async {
+        guard !isPreview, supports(.directoryControl), begin(.directory) else { return }
+        defer { end(.directory) }
+        guard let session else { return }
+        do {
+            lastCreatedDirectoryName = try await session.createDirectory(name: name)
+            let capabilities = try await session.capabilities()
+            if let snapshot {
+                self.snapshot = CameraSnapshot(info: snapshot.info, status: snapshot.status, capabilities: capabilities)
+            }
             lastError = nil
         } catch {
             record(error)
@@ -1487,6 +1507,7 @@ final class CameraAppState: ObservableObject {
             CameraSetting(key: "capturestorage", label: "Recording card", value: "CFe", values: ["CFe", "SD"]),
             CameraSetting(key: "cardselectionstillimage", label: "Still-image card", value: "card1", values: ["none", "card1", "card2"]),
             CameraSetting(key: "cardselectionmovie", label: "Movie card", value: "card2", values: ["none", "card1", "card2"]),
+            CameraSetting(key: "directoryselection", label: "Capture directory", value: "100EOSXX", values: ["100EOSXX", "101EOSXX"]),
             CameraSetting(key: "soundrecording", label: "Sound recording", value: "manual", values: ["auto", "manual", "disable"]),
             CameraSetting(key: "soundrecordinglevel", label: "Sound recording level", value: "32", values: (0...63).map(String.init)),
             CameraSetting(key: "windfilter", label: "Wind filter", value: "auto", values: ["auto", "enable", "disable"]),
@@ -1515,7 +1536,7 @@ final class CameraAppState: ObservableObject {
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .movieModeControl, .videoRecording,
             .tapFocus, .clickWhiteBalance,
             .liveViewMagnification,
-            .exposureControl, .whiteBalanceControl, .zoomControl, .cardSelectionControl,
+            .exposureControl, .whiteBalanceControl, .zoomControl, .cardSelectionControl, .directoryControl,
             .soundRecordingControl, .soundRecordingLevelControl, .focusBracketingControl,
             .movieSettingsControl,
             .advancedSettings, .sensorCleaning, .cameraSleep, .mediaBrowser, .mediaDownload,

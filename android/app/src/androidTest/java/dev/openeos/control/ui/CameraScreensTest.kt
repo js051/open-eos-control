@@ -31,6 +31,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -1503,6 +1504,54 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithTag("sensor-cleaning")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+    }
+
+    @Test
+    fun moreSettingsCreatesAdvertisedDirectoryWithSanitizedAsciiName() {
+        var requestedName: String? = null
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities)
+        val state = base.copy(
+            activeSettingPicker = SettingPicker.MORE,
+            capabilities = capabilities.copy(
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported + CameraFeature.DIRECTORY_CONTROL,
+                ),
+            ),
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    state,
+                    noOpActions().copy(createDirectory = { requestedName = it }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("create-directory")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performClick()
+        compose.onNodeWithTag("directory-name").performTextInput("abc12")
+        compose.onNodeWithTag("create-directory-confirm").performClick()
+
+        compose.runOnIdle { assertEquals("ABC12", requestedName) }
+    }
+
+    @Test
+    fun offlinePreviewDirectoryCreationIsVisibleButDisabled() {
+        val state = CameraUiState().withOfflinePreview().copy(activeSettingPicker = SettingPicker.MORE)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state, noOpActions())
+            }
+        }
+
+        compose.onNodeWithTag("create-directory")
             .performScrollTo()
             .assertIsDisplayed()
             .assertIsNotEnabled()

@@ -627,6 +627,7 @@ private struct MoreSettingsView: View {
     @State private var pendingRangeIndices: [String: Double] = [:]
     @State private var showSleepConfirmation = false
     @State private var showSensorCleaningConfirmation = false
+    @State private var directoryName = ""
 
     var body: some View {
         NavigationStack {
@@ -640,6 +641,10 @@ private struct MoreSettingsView: View {
                         cameraClockRow
                         Divider().overlay(Color.cameraBorder)
                     }
+                    if camera.supports(.directoryControl) {
+                        directoryControlRow
+                        Divider().overlay(Color.cameraBorder)
+                    }
                     if camera.supports(.sensorCleaning) {
                         sensorCleaningRow
                         Divider().overlay(Color.cameraBorder)
@@ -651,6 +656,7 @@ private struct MoreSettingsView: View {
                     if settings.isEmpty &&
                         !camera.supports(.clickWhiteBalance) &&
                         !camera.supports(.cameraClockSync) &&
+                        !camera.supports(.directoryControl) &&
                         !camera.supports(.sensorCleaning) &&
                         !camera.supports(.cameraSleep) {
                         ContentUnavailableView("no_settings", systemImage: "slider.horizontal.3")
@@ -757,6 +763,46 @@ private struct MoreSettingsView: View {
             .accessibilityIdentifier("sync-camera-clock")
         }
         .frame(minHeight: 72)
+    }
+
+    private var directoryControlRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("create_capture_directory")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Color.cameraText)
+            Text(camera.lastCreatedDirectoryName.map { language.format("directory_created", $0) }
+                 ?? language.string("create_capture_directory_hint"))
+                .font(.caption)
+                .foregroundStyle(camera.lastCreatedDirectoryName == nil ? Color.cameraSecondaryText : Color.cameraStatus)
+            HStack(spacing: 8) {
+                TextField("directory_name_placeholder", text: $directoryName)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .onChange(of: directoryName) { _, value in
+                        directoryName = String(
+                            value.uppercased()
+                                .filter { "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_".contains($0) }
+                                .prefix(5)
+                        )
+                    }
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("directory-name")
+                Button("create") {
+                    let name = directoryName
+                    directoryName = ""
+                    Task { await camera.createDirectory(name: name) }
+                }
+                .buttonStyle(.bordered)
+                .tint(Color.cameraAccent)
+                .disabled(
+                    camera.isPreview ||
+                        (!directoryName.isEmpty && directoryName.count != 5) ||
+                        camera.isBusy(.directory)
+                )
+                .accessibilityIdentifier("create-directory")
+            }
+        }
+        .padding(.vertical, 14)
     }
 
     private func localizedClockTime(_ date: Date) -> String {

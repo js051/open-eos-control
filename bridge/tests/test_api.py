@@ -37,6 +37,8 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert "/maintenance/sensor-cleaning" in script.text
     assert "CAMERA_SLEEP" in script.text
     assert "/power/sleep" in script.text
+    assert "DIRECTORY_CONTROL" in script.text
+    assert "/directories" in script.text
     assert media_transfer.status_code == 200
     assert media_transfer.headers["content-type"].startswith(("text/javascript", "application/javascript"))
     assert "readResponse" in media_transfer.text

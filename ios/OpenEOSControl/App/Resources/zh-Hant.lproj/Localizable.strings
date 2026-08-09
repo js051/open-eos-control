@@ -85,6 +85,12 @@
 "sync_camera_clock" = "相機日期與時間";
 "sync_camera_clock_hint" = "使用此裝置的時間與時區設定相機，並回讀確認結果。";
 "camera_clock_synced_at" = "已於 %@ 驗證";
+"create_capture_directory" = "建立拍攝目錄";
+"create_capture_directory_hint" = "留空可使用相機預設名稱，或輸入剛好 5 個大寫英文字母、數字或底線。";
+"directory_name_placeholder" = "EOSXX 或留空";
+"directory_created" = "已建立 %@";
+"create" = "建立";
+"setting_capture_directory" = "拍攝目錄";
 "sync_now" = "立即同步";
 "choose_setting" = "選擇設定值";
 

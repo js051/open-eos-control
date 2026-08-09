@@ -124,6 +124,7 @@ class FakeCcapiTransport:
         movie_setting_responses: dict[str, object] | None = None,
         movie_mode_response: object | None = None,
         card_selection_responses: dict[str, object] | None = None,
+        directory_selection_response: object | None = None,
         device_function_responses: dict[str, object] | None = None,
         recordable_response: object | None = None,
         lens_response: object | None = None,
@@ -149,6 +150,7 @@ class FakeCcapiTransport:
         self.movie_setting_responses = movie_setting_responses or {}
         self.movie_mode_response = movie_mode_response
         self.card_selection_responses = card_selection_responses or {}
+        self.directory_selection_response = directory_selection_response
         self.device_function_responses = device_function_responses or {}
         self.recordable_response = (
             recordable_response
@@ -202,6 +204,8 @@ class FakeCcapiTransport:
         }
         self.movie_mode = "off"
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
+        self.directories = ["100EOSXX", "101EOSXX"]
+        self.directory_selection = "100EOSXX"
         self.device_functions = {"beep": "enable", "displayoff": "60", "autopoweroff": "180"}
         self.camera_sleep_count = 0
         self.sensor_cleaning_count = 0
@@ -382,6 +386,26 @@ class FakeCcapiTransport:
             assert payload is not None and payload.get("value") in {"none", "card1", "card2"}
             self.card_selection[kind] = str(payload["value"])
             return _json_response({"value": self.card_selection[kind]})
+        directory_selection_path = "/ccapi/ver100/functions/directory/directoryselection"
+        if method == "GET" and path == directory_selection_path:
+            response = self.directory_selection_response
+            return _json_response(
+                response
+                if response is not None
+                else {"value": self.directory_selection, "ability": self.directories}
+            )
+        if method == "PUT" and path == directory_selection_path:
+            assert payload is not None and payload.get("value") in self.directories
+            self.directory_selection = str(payload["value"])
+            return _json_response({"value": self.directory_selection})
+        if method == "POST" and path == "/ccapi/ver100/functions/directory/createdirectory":
+            assert payload is not None and set(payload) == {"directoryname"}
+            name = payload["directoryname"] or "EOSXX"
+            assert isinstance(name, str) and re.fullmatch(r"[A-Z0-9_]{5}", name)
+            full_name = f"{100 + len(self.directories):03d}{name}"
+            self.directories.append(full_name)
+            self.directory_selection = full_name
+            return _json_response({"directoryname": name})
         device_function_match = re.fullmatch(r"/ccapi/ver100/functions/(beep|displayoff|autopoweroff)", path)
         if device_function_match:
             key = device_function_match.group(1)
@@ -1796,6 +1820,73 @@ def test_ccapi_card_selection_does_not_combine_get_put_across_versions() -> None
     assert not any("cardselection" in request.path for request in transport.requests)
 
 
+def test_ccapi_directory_control_requires_complete_group_and_validates_values() -> None:
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            {"path": "/functions/directory/createdirectory", "post": True},
+            {"path": "/functions/directory/directoryselection", "get": True, "put": True},
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    transport.directories = ["100EOSXX"]
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    setting = next(item for item in capabilities.settings if item.key == "directoryselection")
+    assert setting.value == "100EOSXX"
+    assert setting.values == ["100EOSXX"]
+    assert CameraFeature.DIRECTORY_CONTROL in capabilities.supported
+    request_count = len(transport.requests)
+    with pytest.raises(BridgeError, match="exactly five"):
+        session.create_directory("bad")
+    assert len(transport.requests) == request_count
+
+    assert session.create_directory("ABCDE") == "ABCDE"
+    assert "101ABCDE" in transport.directories
+    session.set_setting("directoryselection", "101ABCDE")
+    assert transport.directory_selection == "101ABCDE"
+
+
+@pytest.mark.parametrize(
+    "discovery,response",
+    [
+        (
+            {
+                "ver100": [
+                    {"path": "/shooting/settings", "get": True},
+                    {"path": "/functions/directory/directoryselection", "get": True, "put": True},
+                ]
+            },
+            None,
+        ),
+        (
+            {
+                "ver100": [
+                    {"path": "/shooting/settings", "get": True},
+                    {"path": "/functions/directory/createdirectory", "post": True},
+                    {"path": "/functions/directory/directoryselection", "get": True, "put": True},
+                ]
+            },
+            {"value": "100EOSXX", "ability": ["100EOSXX", "100EOSXX"]},
+        ),
+    ],
+)
+def test_ccapi_directory_control_hides_incomplete_or_malformed_contract(
+    discovery: dict[str, object],
+    response: object | None,
+) -> None:
+    transport = FakeCcapiTransport(discovery=discovery, directory_selection_response=response)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert CameraFeature.DIRECTORY_CONTROL not in capabilities.supported
+    assert CameraFeature.DIRECTORY_CONTROL in capabilities.planned
+    assert not any(setting.key == "directoryselection" for setting in capabilities.settings)
+
+
 def test_ccapi_clock_sync_does_not_combine_read_and_write_across_api_versions() -> None:
     transport = FakeCcapiTransport(
         discovery={
@@ -2530,7 +2621,15 @@ def test_urllib_transport_sends_basic_auth_without_putting_it_in_the_url() -> No
 
 
 def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> None:
-    transport = FakeCcapiTransport()
+    transport = FakeCcapiTransport(
+        discovery={
+            "ver100": [
+                *DISCOVERY["ver100"],
+                {"path": "/functions/directory/createdirectory", "post": True},
+                {"path": "/functions/directory/directoryselection", "get": True, "put": True},
+            ]
+        }
+    )
     credentials: list[tuple[str, str]] = []
 
     def factory(username: str, password: str) -> FakeCcapiTransport:
@@ -2577,6 +2676,11 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
             headers=headers,
             json={"degrees": 180},
         )
+        created_directory = client.post(
+            f"/v1/session/{session_id}/directories",
+            headers=headers,
+            json={"name": "ABCDE"},
+        )
         live_started = client.post(
             f"/v1/session/{session_id}/liveview/start",
             headers=headers,
@@ -2617,6 +2721,9 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert "MEDIA_PROTECT" in capabilities.json()["supported"]
     assert "MEDIA_RATING" in capabilities.json()["supported"]
     assert "MEDIA_ROTATE" in capabilities.json()["supported"]
+    assert "DIRECTORY_CONTROL" in capabilities.json()["supported"]
+    assert created_directory.status_code == 200
+    assert created_directory.json() == {"name": "ABCDE"}
     assert thumbnail.content == JPEG
     assert thumbnail.headers["content-type"].startswith("image/jpeg")
     assert thumbnail.headers["cache-control"] == "private, no-store, max-age=0"

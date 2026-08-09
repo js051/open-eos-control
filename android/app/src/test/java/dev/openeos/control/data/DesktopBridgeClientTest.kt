@@ -51,6 +51,7 @@ class DesktopBridgeClientTest {
         client.syncCameraClock()
         client.cleanSensor(autoPowerOff = false)
         client.sleepCamera()
+        val createdDirectory = client.createDirectory("ABCDE")
         client.captureStill()
         val bulbStarted = client.startBulbExposure()
         val bulbStopped = client.stopBulbExposure()
@@ -88,6 +89,7 @@ class DesktopBridgeClientTest {
         assertEquals(3_600L, initialStatus.remainingRecordingSeconds)
         assertEquals("800", exposureStatus.exposure.iso)
         assertEquals("Daylight", whiteBalanceStatus.exposure.whiteBalance)
+        assertEquals("ABCDE", createdDirectory)
         assertTrue(bulbStarted.bulbExposureActive == true)
         assertFalse(bulbStopped.bulbExposureActive == true)
         assertTrue(recording.recording == true)
@@ -102,10 +104,14 @@ class DesktopBridgeClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.CLICK_WHITE_BALANCE))
         assertTrue(capabilities.matrix.supports(CameraFeature.SENSOR_CLEANING))
         assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_SLEEP))
+        assertTrue(capabilities.matrix.supports(CameraFeature.DIRECTORY_CONTROL))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
         assertFalse(capabilities.matrix.supports(CameraFeature.USB_DIAGNOSTICS))
         assertEquals(listOf("Auto", "100", "400", "800"), capabilities.iso)
-        assertEquals("drivemode", capabilities.advancedSettings.single().key)
+        assertEquals(
+            setOf("directoryselection", "drivemode"),
+            capabilities.advancedSettings.map { it.key }.toSet(),
+        )
         assertEquals(5, capabilities.liveView.maxFps)
         assertEquals("gphoto2 --abilities + --list-all-config", capabilities.evidence.source)
         assertEquals(listOf("gphoto2 2.5.33"), capabilities.evidence.protocolVersions)
@@ -174,6 +180,8 @@ class DesktopBridgeClientTest {
         assertEquals("POST", sensorCleaningRequest.method)
         assertEquals(false, dispatcher.sensorCleaningAutoPowerOff)
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/power/sleep") == true })
+        assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/directories") == true })
+        assertEquals("ABCDE", dispatcher.createdDirectoryName)
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/capture/still") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/start") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/stop") == true })
@@ -381,6 +389,8 @@ class DesktopBridgeClientTest {
         private var bulbExposureActive = false
         var sensorCleaningAutoPowerOff: Boolean? = null
             private set
+        var createdDirectoryName: String? = null
+            private set
 
         override fun dispatch(request: RecordedRequest): MockResponse {
             requests += request
@@ -410,6 +420,11 @@ class DesktopBridgeClientTest {
                     MockResponse().setResponseCode(204)
                 }
                 path.endsWith("/power/sleep") -> MockResponse().setResponseCode(204)
+                path.endsWith("/directories") -> {
+                    val name = JSONObject(request.body.readUtf8()).getString("name")
+                    createdDirectoryName = name
+                    json("""{"name":"$name"}""")
+                }
                 path.endsWith("/capture/still") -> json(statusJson())
                 path.endsWith("/bulb/start") -> {
                     bulbExposureActive = true
@@ -543,7 +558,7 @@ class DesktopBridgeClientTest {
               "profile": {"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},
               "supported": [
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
-                "CAMERA_CLOCK_SYNC", "SENSOR_CLEANING", "CAMERA_SLEEP", "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
+                "CAMERA_CLOCK_SYNC", "DIRECTORY_CONTROL", "SENSOR_CLEANING", "CAMERA_SLEEP", "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "LIVE_VIEW_MAGNIFICATION",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
                 "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
@@ -561,6 +576,7 @@ class DesktopBridgeClientTest {
               "settings": [
                 {"key":"iso","label":"ISO","value":"400","values":["Auto","100","400","800"]},
                 {"key":"whitebalance","label":"White balance","value":"Auto","values":["Auto","Daylight"]},
+                {"key":"directoryselection","label":"Capture directory","value":"100EOSXX","values":["100EOSXX","101EOSXX"]},
                 {"key":"drivemode","label":"Drive mode","value":"Single","values":["Single","Continuous"]}
               ],
               "evidence": {

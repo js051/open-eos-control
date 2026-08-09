@@ -64,6 +64,7 @@ enum class CameraFeature(
 ) {
     CAMERA_IDENTITY("Camera identity"),
     CAMERA_CLOCK_SYNC("Camera clock sync"),
+    DIRECTORY_CONTROL("Capture directory control"),
     SENSOR_CLEANING("Sensor cleaning"),
     CAMERA_SLEEP("Camera sleep"),
     BATTERY_STATUS("Battery status"),
@@ -164,6 +165,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_ROTATE,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
+                CameraFeature.DIRECTORY_CONTROL,
                 CameraFeature.SENSOR_CLEANING,
                 CameraFeature.CAMERA_SLEEP,
             ) - supported,
@@ -203,6 +205,8 @@ data class CapabilityMatrix(
                     "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                 CameraFeature.CAMERA_CLOCK_SYNC to
                     "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
+                CameraFeature.DIRECTORY_CONTROL to
+                    "The camera must advertise Canon directory creation and a same-version GET/PUT directory-selection pair with a valid ability list.",
                 CameraFeature.SENSOR_CLEANING to
                     "The camera must advertise the Canon POST sensor-cleaning endpoint.",
                 CameraFeature.CAMERA_SLEEP to

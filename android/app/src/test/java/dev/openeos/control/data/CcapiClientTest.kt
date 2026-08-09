@@ -2305,6 +2305,107 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonDirectoryControlRequiresCompleteGroupAndCreatesAdvertisedDirectory() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/functions/directory/createdirectory","post":true},
+                    {"path":"/functions/directory/directoryselection","get":true,"put":true}
+                ]}""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(
+            jsonResponse(
+                """{"value":"100EOSXX","ability":["100EOSXX"]}""",
+            ),
+        )
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        val selection = capabilities.advancedSettings.single { it.key == "directoryselection" }
+        assertEquals("100EOSXX", selection.value)
+        assertEquals(listOf("100EOSXX"), selection.values)
+        assertTrue(capabilities.matrix.supports(CameraFeature.DIRECTORY_CONTROL))
+        assertTrue("directoryselection" in capabilities.evidence.writableSettings)
+
+        val requestCount = server.requestCount
+        val invalid = runCatching { client.createDirectory("bad") }.exceptionOrNull()
+        assertTrue(invalid is IllegalArgumentException)
+        assertEquals(requestCount, server.requestCount)
+
+        server.enqueue(jsonResponse("""{"directoryname":"ABCDE"}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(
+            jsonResponse(
+                """{"value":"101ABCDE","ability":["100EOSXX","101ABCDE"]}""",
+            ),
+        )
+
+        assertEquals("ABCDE", client.createDirectory("ABCDE"))
+
+        repeat(3) { server.takeRequest() }
+        val create = server.takeRequest()
+        assertEquals("POST", create.method)
+        assertEquals("/ccapi/ver100/functions/directory/createdirectory", create.path)
+        assertEquals("ABCDE", JSONObject(create.body.readUtf8()).getString("directoryname"))
+    }
+
+    @Test
+    fun canonDirectoryControlRejectsMalformedAndCrossVersionContracts() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/functions/directory/createdirectory","post":true},
+                    {"path":"/functions/directory/directoryselection","get":true,"put":true}
+                ]}""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(
+            jsonResponse(
+                """{"value":"100EOSXX","ability":["100EOSXX","100EOSXX"]}""",
+            ),
+        )
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        var capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.DIRECTORY_CONTROL))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.DIRECTORY_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "directoryselection" })
+
+        server.shutdown()
+        server = MockWebServer().also { it.start() }
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver100":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/functions/directory/createdirectory","post":true},
+                        {"path":"/functions/directory/directoryselection","get":true}
+                    ],
+                    "ver110":[{"path":"/functions/directory/directoryselection","put":true}]
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.DIRECTORY_CONTROL))
+        assertTrue(capabilities.advancedSettings.none { it.key == "directoryselection" })
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun realStillImageQualityUsesAdvertisedObjectFieldsAndPreservesCompanionFormat() = runTest {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))

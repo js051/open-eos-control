@@ -1100,6 +1100,12 @@ input:disabled {
   gap: 8px;
 }
 
+.settings-command-actions input[type="text"] {
+  width: 132px;
+  min-height: 48px;
+  text-transform: uppercase;
+}
+
 .setting-row select,
 .settings-list select {
   height: 48px;
