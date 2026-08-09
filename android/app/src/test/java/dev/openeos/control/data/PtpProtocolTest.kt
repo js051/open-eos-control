@@ -274,6 +274,73 @@ class PtpProtocolTest {
     }
 
     @Test
+    fun objectPropertyReadAndWriteUseStandardMtpOperationsAndExactParameters() = runTest {
+        val descriptorPayload = DatasetWriter().apply {
+            u16(MtpObjectPropertyCode.RATING)
+            u16(PtpDataType.UINT16)
+            u8(1)
+            u16(0)
+            u32(0)
+            u8(1)
+            u16(0)
+            u16(100)
+            u16(1)
+        }.bytes()
+        val transport = FakePtpTransport(
+            data(PtpOperationCode.GET_DEVICE_INFO, 0, deviceInfoPayload()),
+            ok(0),
+            ok(0),
+            data(
+                PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED,
+                1,
+                DatasetWriter().apply {
+                    u32(1)
+                    u16(MtpObjectPropertyCode.RATING)
+                }.bytes(),
+            ),
+            ok(1),
+            data(PtpOperationCode.GET_OBJECT_PROP_DESC, 2, descriptorPayload),
+            ok(2),
+            data(PtpOperationCode.GET_OBJECT_PROP_VALUE, 3, byteArrayOf(40, 0)),
+            ok(3),
+            ok(4),
+            ok(5),
+        )
+        val session = PtpSession(transport)
+        session.initialize()
+
+        val supported = session.objectPropertiesSupported(PtpObjectFormat.EXIF_JPEG)
+        val descriptor = session.objectPropertyDescriptor(MtpObjectPropertyCode.RATING, PtpObjectFormat.EXIF_JPEG)
+        val value = session.objectPropertyValue(0x42, descriptor.code, descriptor.dataType)
+        session.setObjectPropertyValue(
+            handle = 0x42,
+            propertyCode = descriptor.code,
+            dataType = descriptor.dataType,
+            value = PtpPropertyValue.Unsigned(80UL),
+        )
+        session.shutdown()
+
+        assertEquals(setOf(MtpObjectPropertyCode.RATING), supported)
+        assertEquals(PtpPropertyValue.Unsigned(40UL), value)
+        assertArrayEquals(
+            byteArrayOf(0x01, 0x38, 0, 0),
+            transport.sent.single { it.code == PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED }.payload,
+        )
+        assertArrayEquals(
+            byteArrayOf(0x8A.toByte(), 0xDC.toByte(), 0, 0, 0x01, 0x38, 0, 0),
+            transport.sent.single { it.code == PtpOperationCode.GET_OBJECT_PROP_DESC }.payload,
+        )
+        val setContainers = transport.sent.filter { it.code == PtpOperationCode.SET_OBJECT_PROP_VALUE }
+        assertEquals(listOf(PtpContainerType.COMMAND, PtpContainerType.DATA), setContainers.map(PtpContainer::type))
+        assertArrayEquals(
+            byteArrayOf(0x42, 0, 0, 0, 0x8A.toByte(), 0xDC.toByte(), 0, 0),
+            setContainers.first().payload,
+        )
+        assertArrayEquals(byteArrayOf(80, 0), setContainers.last().payload)
+        assertEquals(setContainers.first().transactionId, setContainers.last().transactionId)
+    }
+
+    @Test
     fun vendorOperationsUseMonotonicNoDataDataInAndDataOutTransactions() = runTest {
         val eventPayload = byteArrayOf(8, 0, 0, 0, 0, 0, 0, 0)
         val propertyPayload = CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.EVF_OUTPUT_DEVICE, 2)

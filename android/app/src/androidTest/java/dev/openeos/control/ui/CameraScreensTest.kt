@@ -1995,6 +1995,29 @@ class CameraScreensTest {
     }
 
     @Test
+    fun mediaMetadataSheetHidesRatingForExplicitlyUnsupportedItem() {
+        val item = CameraMediaItem(
+            id = "usb-host:IMG_0042.JPG",
+            name = "IMG_0042.JPG",
+            kind = "image",
+            ratingWritable = false,
+        )
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA, mediaItems = listOf(item))
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, item.name)).performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription(resourceText(R.string.set_media_rating, item.name, 1))
+            .assertDoesNotExist()
+        compose.onNodeWithContentDescription(resourceText(R.string.clear_media_rating, item.name))
+            .assertDoesNotExist()
+    }
+
+    @Test
     fun mediaDownloadShowsProgressAndCancelAction() {
         val name = "R6M3_0002.MP4"
         val state = CameraUiState().withOfflinePreview().copy(

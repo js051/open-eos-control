@@ -202,6 +202,7 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
         sizeBytes = length(),
         captureTime = Instant.ofEpochMilli(lastModified()).toString(),
         previewAvailable = kind == "image" && length() in 1..MAX_HOST_PREVIEW_BYTES && hasHostPreviewExtension(name),
+        ratingWritable = false,
     )
 }
 

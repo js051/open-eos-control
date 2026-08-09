@@ -22,6 +22,10 @@ object PtpOperationCode {
     const val GET_DEVICE_PROP_VALUE = 0x1015
     const val SET_DEVICE_PROP_VALUE = 0x1016
     const val GET_PARTIAL_OBJECT = 0x101B
+    const val GET_OBJECT_PROPS_SUPPORTED = 0x9801
+    const val GET_OBJECT_PROP_DESC = 0x9802
+    const val GET_OBJECT_PROP_VALUE = 0x9803
+    const val SET_OBJECT_PROP_VALUE = 0x9804
 }
 
 object PtpResponseCode {
@@ -40,6 +44,10 @@ object PtpResponseCode {
     const val INVALID_DEVICE_PROP_VALUE = 0x201C
     const val INVALID_PARAMETER = 0x201D
     const val SESSION_ALREADY_OPEN = 0x201E
+    const val INVALID_OBJECT_PROP_CODE = 0xA801
+    const val INVALID_OBJECT_PROP_FORMAT = 0xA802
+    const val INVALID_OBJECT_PROP_VALUE = 0xA803
+    const val OBJECT_PROP_NOT_SUPPORTED = 0xA80A
 
     fun label(code: Int): String = when (code) {
         OK -> "OK"
@@ -57,6 +65,10 @@ object PtpResponseCode {
         INVALID_DEVICE_PROP_VALUE -> "InvalidDevicePropValue"
         INVALID_PARAMETER -> "InvalidParameter"
         SESSION_ALREADY_OPEN -> "SessionAlreadyOpen"
+        INVALID_OBJECT_PROP_CODE -> "InvalidObjectPropCode"
+        INVALID_OBJECT_PROP_FORMAT -> "InvalidObjectPropFormat"
+        INVALID_OBJECT_PROP_VALUE -> "InvalidObjectPropValue"
+        OBJECT_PROP_NOT_SUPPORTED -> "ObjectPropNotSupported"
         else -> "UnknownResponse"
     }
 }
@@ -391,6 +403,63 @@ class PtpSession(
             PtpDatasets.objectInfo(handle, payload)
         }
 
+    suspend fun objectPropertiesSupported(objectFormat: Int): Set<Int> {
+        requireObjectFormat(objectFormat)
+        return transaction(
+            operationCode = PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED,
+            parameters = listOf(objectFormat.toLong()),
+        ) { payload -> MtpObjectPropertyCodec.decodeSupportedProperties(payload) }
+    }
+
+    suspend fun objectPropertyDescriptor(
+        propertyCode: Int,
+        objectFormat: Int,
+    ): MtpObjectPropertyDescriptor {
+        requireObjectPropertyCode(propertyCode)
+        requireObjectFormat(objectFormat)
+        return transaction(
+            PtpOperationCode.GET_OBJECT_PROP_DESC,
+            listOf(propertyCode.toLong(), objectFormat.toLong()),
+        ) { payload ->
+            MtpObjectPropertyCodec.decodeDescriptor(payload).also { descriptor ->
+                if (descriptor.code != propertyCode) {
+                    throw PtpProtocolException(
+                        "Requested object property 0x${propertyCode.toString(16).uppercase()}, " +
+                            "received descriptor 0x${descriptor.code.toString(16).uppercase()}."
+                    )
+                }
+            }
+        }
+    }
+
+    suspend fun objectPropertyValue(
+        handle: Long,
+        propertyCode: Int,
+        dataType: PtpDataType,
+    ): PtpPropertyValue {
+        requireObjectHandle(handle, "GetObjectPropValue")
+        requireObjectPropertyCode(propertyCode)
+        return transaction(
+            PtpOperationCode.GET_OBJECT_PROP_VALUE,
+            listOf(handle, propertyCode.toLong()),
+        ) { payload -> MtpObjectPropertyCodec.decodeValue(dataType, payload) }
+    }
+
+    suspend fun setObjectPropertyValue(
+        handle: Long,
+        propertyCode: Int,
+        dataType: PtpDataType,
+        value: PtpPropertyValue,
+    ) {
+        requireObjectHandle(handle, "SetObjectPropValue")
+        requireObjectPropertyCode(propertyCode)
+        executeDataOutOperation(
+            operationCode = PtpOperationCode.SET_OBJECT_PROP_VALUE,
+            payload = MtpObjectPropertyCodec.encodeValue(dataType, value),
+            parameters = listOf(handle, propertyCode.toLong()),
+        )
+    }
+
     suspend fun objectThumbnail(handle: Long): ByteArray =
         transaction(
             operationCode = PtpOperationCode.GET_THUMB,
@@ -458,9 +527,7 @@ class PtpSession(
     }
 
     suspend fun setObjectProtection(handle: Long, protected: Boolean) {
-        if (handle <= 0L || handle >= UINT32_MAX) {
-            throw PtpProtocolException("SetObjectProtection requires a concrete PTP object handle.")
-        }
+        requireObjectHandle(handle, "SetObjectProtection")
         executeOperation(
             PtpOperationCode.SET_OBJECT_PROTECTION,
             listOf(
@@ -688,6 +755,24 @@ class PtpSession(
 
     private fun requireOpen() {
         if (!sessionOpen) throw PtpProtocolException("PTP session is not open.")
+    }
+
+    private fun requireObjectHandle(handle: Long, operation: String) {
+        if (handle <= 0L || handle >= UINT32_MAX) {
+            throw PtpProtocolException("$operation requires a concrete PTP object handle.")
+        }
+    }
+
+    private fun requireObjectPropertyCode(propertyCode: Int) {
+        if (propertyCode !in 0..0xFFFF) {
+            throw PtpProtocolException("MTP object property code $propertyCode does not fit in UINT16.")
+        }
+    }
+
+    private fun requireObjectFormat(objectFormat: Int) {
+        if (objectFormat !in 0..0xFFFF) {
+            throw PtpProtocolException("MTP object format $objectFormat does not fit in UINT16.")
+        }
     }
 
     private fun takeTransactionId(): Long {

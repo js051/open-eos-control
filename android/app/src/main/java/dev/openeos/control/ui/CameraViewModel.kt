@@ -924,9 +924,11 @@ class CameraViewModel(
         }
         runCamera(CameraOperation.MEDIA) {
             val items = repository.listMedia()
+            val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
             _uiState.update {
                 it.copy(
                     mediaItems = items,
+                    capabilities = capabilities ?: it.capabilities,
                     lastDownloadedMediaName = null,
                     lastDeletedMediaName = null,
                 )

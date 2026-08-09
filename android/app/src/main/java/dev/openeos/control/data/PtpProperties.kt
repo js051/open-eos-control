@@ -37,6 +37,10 @@ object PtpDevicePropertyCode {
     const val COPYRIGHT_INFO = 0x501F
 }
 
+object MtpObjectPropertyCode {
+    const val RATING = 0xDC8A
+}
+
 data class PtpDataType(val code: Int) {
     val isArray: Boolean
         get() = code != STRING && code and ARRAY_MASK != 0
@@ -97,6 +101,139 @@ data class PtpDevicePropertyDescriptor(
     val currentValue: PtpPropertyValue,
     val form: PtpPropertyForm,
 )
+
+data class MtpObjectPropertyDescriptor(
+    val code: Int,
+    val dataType: PtpDataType,
+    val writable: Boolean,
+    val defaultValue: PtpPropertyValue,
+    val groupCode: Long,
+    val form: PtpPropertyForm,
+)
+
+object MtpObjectPropertyCodec {
+    fun decodeSupportedProperties(bytes: ByteArray): Set<Int> {
+        val reader = PropertyReader(bytes)
+        val count = reader.u32()
+        if (count > MAX_OBJECT_PROPERTY_CODES.toULong()) {
+            throw PtpProtocolException(
+                "MTP object-property list declares $count values; limit is $MAX_OBJECT_PROPERTY_CODES."
+            )
+        }
+        return List(count.toInt()) { reader.u16() }
+            .also { reader.requireEnd("MTP object-property list") }
+            .toSet()
+    }
+
+    fun decodeDescriptor(bytes: ByteArray): MtpObjectPropertyDescriptor {
+        val reader = PropertyReader(bytes)
+        val propertyCode = reader.u16()
+        val dataType = PtpDataType(reader.u16())
+        val writable = when (val getSet = reader.u8()) {
+            0 -> false
+            1 -> true
+            else -> throw PtpProtocolException("Invalid MTP ObjectPropDesc GetSet value $getSet.")
+        }
+        val defaultValue = reader.value(dataType)
+        val groupCode = reader.u32().toLong()
+        val form = when (val formFlag = reader.u8()) {
+            FORM_NONE -> PtpPropertyForm.None
+            FORM_RANGE -> PtpPropertyForm.Range(
+                minimum = reader.value(dataType),
+                maximum = reader.value(dataType),
+                step = reader.value(dataType),
+            )
+
+            FORM_ENUMERATION -> {
+                val count = reader.u16()
+                PtpPropertyForm.Enumeration(List(count) { reader.value(dataType) })
+            }
+
+            else -> throw PtpProtocolException(
+                "Unsupported MTP ObjectPropDesc form 0x${formFlag.toString(16).uppercase()} " +
+                    "for property 0x${propertyCode.toString(16).uppercase()}."
+            )
+        }
+        reader.requireEnd("MTP ObjectPropDesc 0x${propertyCode.toString(16).uppercase()}")
+        return MtpObjectPropertyDescriptor(
+            code = propertyCode,
+            dataType = dataType,
+            writable = writable,
+            defaultValue = defaultValue,
+            groupCode = groupCode,
+            form = form,
+        )
+    }
+
+    fun decodeValue(dataType: PtpDataType, bytes: ByteArray): PtpPropertyValue {
+        val reader = PropertyReader(bytes)
+        return reader.value(dataType).also { reader.requireEnd("MTP object-property value") }
+    }
+
+    fun encodeValue(dataType: PtpDataType, value: PtpPropertyValue): ByteArray =
+        PtpPropertyCodec.encodeValue(dataType, value)
+
+    private const val FORM_NONE = 0
+    private const val FORM_RANGE = 1
+    private const val FORM_ENUMERATION = 2
+}
+
+class MtpRatingContract private constructor(
+    val dataType: PtpDataType,
+) {
+    fun wireValue(stars: Int): PtpPropertyValue.Unsigned {
+        require(stars in MIN_STARS..MAX_STARS) { "Media rating must be from 0 through 5." }
+        return PtpPropertyValue.Unsigned((stars * WIRE_POINTS_PER_STAR).toULong())
+    }
+
+    fun stars(value: PtpPropertyValue): Int? {
+        val wire = (value as? PtpPropertyValue.Unsigned)?.value ?: return null
+        if (wire > MAX_WIRE_RATING.toULong() || wire % WIRE_POINTS_PER_STAR.toULong() != 0UL) return null
+        return (wire / WIRE_POINTS_PER_STAR.toULong()).toInt()
+    }
+
+    companion object {
+        fun from(descriptor: MtpObjectPropertyDescriptor): MtpRatingContract? {
+            if (
+                descriptor.code != MtpObjectPropertyCode.RATING ||
+                descriptor.dataType.code != PtpDataType.UINT16 ||
+                !descriptor.writable
+            ) {
+                return null
+            }
+            val default = (descriptor.defaultValue as? PtpPropertyValue.Unsigned)?.value ?: return null
+            if (default > MAX_WIRE_RATING.toULong()) return null
+            val requiredValues = (MIN_STARS..MAX_STARS).map { (it * WIRE_POINTS_PER_STAR).toULong() }
+            val allowedValues: (ULong) -> Boolean = when (val form = descriptor.form) {
+                is PtpPropertyForm.Range -> {
+                    val minimum = (form.minimum as? PtpPropertyValue.Unsigned)?.value ?: return null
+                    val maximum = (form.maximum as? PtpPropertyValue.Unsigned)?.value ?: return null
+                    val step = (form.step as? PtpPropertyValue.Unsigned)?.value ?: return null
+                    if (minimum != 0UL || maximum != MAX_WIRE_RATING.toULong() || step == 0UL) return null
+                    { value -> value in minimum..maximum && (value - minimum) % step == 0UL }
+                }
+
+                is PtpPropertyForm.Enumeration -> {
+                    val values = form.values.mapNotNull { (it as? PtpPropertyValue.Unsigned)?.value }
+                    if (values.size != form.values.size || values.any { it > MAX_WIRE_RATING.toULong() }) return null
+                    values::contains
+                }
+
+                PtpPropertyForm.None -> return null
+            }
+            return if (allowedValues(default) && requiredValues.all(allowedValues)) {
+                MtpRatingContract(descriptor.dataType)
+            } else {
+                null
+            }
+        }
+
+        private const val MIN_STARS = 0
+        private const val MAX_STARS = 5
+        private const val MAX_WIRE_RATING = 100
+        private const val WIRE_POINTS_PER_STAR = 20
+    }
+}
 
 object PtpPropertyCodec {
     fun decodeDescriptor(bytes: ByteArray): PtpDevicePropertyDescriptor {
@@ -236,6 +373,14 @@ private class PropertyReader(private val bytes: ByteArray) {
 
     fun u16(): Int = readUnsigned(2).toInt()
 
+    fun u32(): ULong = readUnsigned(4)
+
+    fun requireEnd(dataset: String) {
+        if (offset != bytes.size) {
+            throw PtpProtocolException("$dataset has ${bytes.size - offset} unexpected trailing bytes.")
+        }
+    }
+
     fun value(dataType: PtpDataType): PtpPropertyValue {
         if (dataType.isArray) {
             val count = readUnsigned(4)
@@ -309,3 +454,4 @@ private class PropertyReader(private val bytes: ByteArray) {
 }
 
 private const val MAX_PROPERTY_ARRAY_VALUES = 100_000
+private const val MAX_OBJECT_PROPERTY_CODES = 65_536

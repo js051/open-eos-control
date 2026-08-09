@@ -318,6 +318,146 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun mediaRatingRequiresValidatedMtpDescriptorAndExactReadback() = runTest {
+        val transport = ScriptedTransport(
+            advertiseCapture = false,
+            advertiseRating = true,
+            initialRatingWireValue = 40,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-rating"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val beforeMedia = backend.capabilities()
+        val item = backend.listMedia().single()
+        val afterMedia = backend.capabilities()
+        val protected = backend.setMediaProtection(item, enabled = true)
+        val rated = backend.setMediaRating(protected, 5)
+
+        assertFalse(beforeMedia.matrix.supports(CameraFeature.MEDIA_RATING))
+        assertTrue(beforeMedia.matrix.isPlanned(CameraFeature.MEDIA_RATING))
+        assertEquals(2, item.rating)
+        assertEquals(true, item.ratingWritable)
+        assertTrue(afterMedia.matrix.supports(CameraFeature.MEDIA_RATING))
+        assertEquals(2, protected.rating)
+        assertEquals(true, protected.ratingWritable)
+        assertEquals(5, rated.rating)
+        assertEquals(true, rated.ratingWritable)
+        assertTrue(CameraFeature.MEDIA_RATING in backend.observedFeatures())
+        val setContainers = transport.sentContainers.filter { it.code == PtpOperationCode.SET_OBJECT_PROP_VALUE }
+        assertEquals(listOf(PtpContainerType.COMMAND, PtpContainerType.DATA), setContainers.map(PtpContainer::type))
+        assertArrayEquals(
+            byteArrayOf(0x42, 0, 0, 0, 0x8A.toByte(), 0xDC.toByte(), 0, 0),
+            setContainers.first().payload,
+        )
+        assertArrayEquals(byteArrayOf(100, 0), setContainers.last().payload)
+        assertTrue(
+            transport.sentContainers
+                .filter { it.type == PtpContainerType.COMMAND && it.code == PtpOperationCode.GET_OBJECT_PROP_VALUE }
+                .all { container -> transport.run { container.parameterU32() == OBJECT_HANDLE } },
+        )
+        backend.close()
+    }
+
+    @Test
+    fun mediaRatingRevalidatesTheFormatContractOnEveryMediaRefresh() = runTest {
+        val transport = ScriptedTransport(
+            advertiseCapture = false,
+            advertiseRating = true,
+            initialRatingWireValue = 20,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-rating-refresh"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        assertEquals(1, backend.listMedia().single().rating)
+        assertEquals(1, backend.listMedia().single().rating)
+
+        assertEquals(
+            2,
+            transport.sentOperations.count { it == PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED },
+        )
+        assertEquals(
+            2,
+            transport.sentOperations.count { it == PtpOperationCode.GET_OBJECT_PROP_DESC },
+        )
+        backend.close()
+    }
+
+    @Test
+    fun mediaRatingRejectsReadonlyAndNonstandardDescriptorsWithoutWriting() = runTest {
+        val readonlyTransport = ScriptedTransport(
+            advertiseCapture = false,
+            advertiseRating = true,
+            ratingWritable = false,
+        )
+        val readonlyBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-rating-readonly"),
+            transportFactory = PtpTransportFactory { readonlyTransport },
+        )
+        readonlyBackend.initialize()
+        val readonlyItem = readonlyBackend.listMedia().single()
+        val readonlyFailure = runCatching { readonlyBackend.setMediaRating(readonlyItem, 4) }.exceptionOrNull()
+
+        assertEquals(false, readonlyItem.ratingWritable)
+        assertFalse(readonlyBackend.capabilities().matrix.supports(CameraFeature.MEDIA_RATING))
+        assertTrue(readonlyFailure is UnsupportedOperationException)
+        assertFalse(PtpOperationCode.SET_OBJECT_PROP_VALUE in readonlyTransport.sentOperations)
+        readonlyBackend.close()
+
+        val nonstandardTransport = ScriptedTransport(
+            advertiseCapture = false,
+            advertiseRating = true,
+            ratingRangeMaximum = 5,
+        )
+        val nonstandardBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-rating-nonstandard"),
+            transportFactory = PtpTransportFactory { nonstandardTransport },
+        )
+        nonstandardBackend.initialize()
+        val nonstandardItem = nonstandardBackend.listMedia().single()
+
+        assertEquals(false, nonstandardItem.ratingWritable)
+        assertFalse(nonstandardBackend.capabilities().matrix.supports(CameraFeature.MEDIA_RATING))
+        assertFalse(PtpOperationCode.SET_OBJECT_PROP_VALUE in nonstandardTransport.sentOperations)
+        nonstandardBackend.close()
+    }
+
+    @Test
+    fun mediaRatingPreservesNonIntegralWireValueAsUnknownAndRejectsMismatchedWrite() = runTest {
+        val transport = ScriptedTransport(
+            advertiseCapture = false,
+            advertiseRating = true,
+            initialRatingWireValue = 37,
+            ratingReadbackMatches = false,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-rating-mismatch"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+        val item = backend.listMedia().single()
+
+        val failure = runCatching { backend.setMediaRating(item, 3) }.exceptionOrNull()
+
+        assertEquals(null, item.rating)
+        assertEquals(true, item.ratingWritable)
+        assertTrue(backend.capabilities().matrix.supports(CameraFeature.MEDIA_RATING))
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("exact same-handle readback"))
+        assertEquals(
+            4,
+            transport.sentOperations.count { it == PtpOperationCode.GET_OBJECT_PROP_VALUE },
+        )
+        assertFalse(CameraFeature.MEDIA_RATING in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test
     fun mediaThumbnailRemainsUnavailableWithoutAdvertisedGetThumb() = runTest {
         val transport = ScriptedTransport(advertiseCapture = false, advertiseThumbnail = false)
         val backend = UsbPtpCameraBackend(
@@ -2526,6 +2666,11 @@ class UsbPtpCameraBackendTest {
         private val advertiseProtection: Boolean = true,
         private val rejectProtection: Boolean = false,
         private val protectionReadbackMatches: Boolean = true,
+        private val advertiseRating: Boolean = false,
+        private val ratingWritable: Boolean = true,
+        private val ratingRangeMaximum: Int = 100,
+        private val ratingReadbackMatches: Boolean = true,
+        initialRatingWireValue: Int = 0,
         initialProtectionStatus: Int = PtpProtectionStatus.NONE,
         private val advertisedThumbnailSize: Long = THUMBNAIL_BYTES.size.toLong(),
         private val advertisedObjectSize: Long = OBJECT_BYTES.size.toLong(),
@@ -2536,7 +2681,9 @@ class UsbPtpCameraBackendTest {
         val sentContainers = mutableListOf<PtpContainer>()
         var closed = false
         private var pendingPropertyWrite: Int? = null
+        private var pendingObjectPropertyWrite = false
         private var protectionStatus = initialProtectionStatus
+        private var ratingWireValue = initialRatingWireValue
         private val properties = propertyFixtures().toMutableMap()
 
         override suspend fun send(container: PtpContainer) {
@@ -2555,6 +2702,7 @@ class UsbPtpCameraBackendTest {
                             advertiseObjectInfo,
                             advertiseProtection,
                             advertiseProperties = true,
+                            advertiseRating = advertiseRating,
                         ),
                     )
                     incoming += ok(transaction)
@@ -2609,6 +2757,64 @@ class UsbPtpCameraBackendTest {
                         objectInfoPayload(advertisedThumbnailSize, advertisedObjectSize, protectionStatus),
                     )
                     incoming += ok(transaction)
+                }
+
+                PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED -> {
+                    incoming += data(container.code, transaction, Writer().apply {
+                        u32(if (advertiseRating) 1 else 0)
+                        if (advertiseRating) u16(MtpObjectPropertyCode.RATING)
+                    }.bytes())
+                    incoming += ok(transaction)
+                }
+
+                PtpOperationCode.GET_OBJECT_PROP_DESC -> {
+                    incoming += data(container.code, transaction, Writer().apply {
+                        u16(MtpObjectPropertyCode.RATING)
+                        u16(PtpDataType.UINT16)
+                        u8(if (ratingWritable) 1 else 0)
+                        u16(0)
+                        u32(0)
+                        u8(1)
+                        u16(0)
+                        u16(ratingRangeMaximum)
+                        u16(1)
+                    }.bytes())
+                    incoming += ok(transaction)
+                }
+
+                PtpOperationCode.GET_OBJECT_PROP_VALUE -> {
+                    check(container.parameterU32() == OBJECT_HANDLE) { "Rating read used the wrong object handle." }
+                    check(container.parameterU32(offset = 4).toInt() == MtpObjectPropertyCode.RATING) {
+                        "Rating read used the wrong object property."
+                    }
+                    incoming += data(
+                        container.code,
+                        transaction,
+                        PtpPropertyCodec.encodeValue(
+                            PtpDataType(PtpDataType.UINT16),
+                            PtpPropertyValue.Unsigned(ratingWireValue.toULong()),
+                        ),
+                    )
+                    incoming += ok(transaction)
+                }
+
+                PtpOperationCode.SET_OBJECT_PROP_VALUE -> {
+                    if (container.type == PtpContainerType.COMMAND) {
+                        check(container.parameterU32() == OBJECT_HANDLE) { "Rating write used the wrong object handle." }
+                        check(container.parameterU32(offset = 4).toInt() == MtpObjectPropertyCode.RATING) {
+                            "Rating write used the wrong object property."
+                        }
+                        pendingObjectPropertyWrite = true
+                    } else {
+                        check(pendingObjectPropertyWrite) { "Object property data arrived without a command." }
+                        val requested = MtpObjectPropertyCodec.decodeValue(
+                            PtpDataType(PtpDataType.UINT16),
+                            container.payload,
+                        ) as PtpPropertyValue.Unsigned
+                        if (ratingReadbackMatches) ratingWireValue = requested.value.toInt()
+                        pendingObjectPropertyWrite = false
+                        incoming += ok(transaction)
+                    }
                 }
 
                 PtpOperationCode.GET_OBJECT -> {
@@ -2677,7 +2883,7 @@ class UsbPtpCameraBackendTest {
         private fun ok(transaction: Long) =
             PtpContainer(PtpContainerType.RESPONSE, PtpResponseCode.OK, transaction)
 
-        private fun PtpContainer.parameterU32(offset: Int = 0): Long =
+        fun PtpContainer.parameterU32(offset: Int = 0): Long =
             payload[offset].toUByte().toLong() or
                 (payload[offset + 1].toUByte().toLong() shl 8) or
                 (payload[offset + 2].toUByte().toLong() shl 16) or
@@ -3476,6 +3682,7 @@ class UsbPtpCameraBackendTest {
             advertiseObjectInfo: Boolean,
             advertiseProtection: Boolean,
             advertiseProperties: Boolean,
+            advertiseRating: Boolean,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(0x0000000B)
@@ -3500,6 +3707,12 @@ class UsbPtpCameraBackendTest {
                         add(PtpOperationCode.GET_DEVICE_PROP_DESC)
                         add(PtpOperationCode.GET_DEVICE_PROP_VALUE)
                         add(PtpOperationCode.SET_DEVICE_PROP_VALUE)
+                    }
+                    if (advertiseRating) {
+                        add(PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED)
+                        add(PtpOperationCode.GET_OBJECT_PROP_DESC)
+                        add(PtpOperationCode.GET_OBJECT_PROP_VALUE)
+                        add(PtpOperationCode.SET_OBJECT_PROP_VALUE)
                     }
                 }
             )

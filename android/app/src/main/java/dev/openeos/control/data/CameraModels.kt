@@ -596,6 +596,7 @@ data class CameraMediaItem(
     val protected: Boolean? = null,
     val rating: Int? = null,
     val rotationDegrees: Int? = null,
+    val ratingWritable: Boolean? = null,
 )
 
 data class CameraMediaThumbnail(
