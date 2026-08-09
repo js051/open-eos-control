@@ -36,6 +36,7 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 - Canon clock synchronization additionally requires `SetDevicePropValueEx (0x9110)` and a current-value event for `UTCTime` or `CameraTime`. UTC is preferred when both are present. The feature becomes observed only after the exact property produces a bounded matching post-write event; a rejected command, missing event, stale event or mismatched time remains an error.
 - Storage requires both `GetStorageIDs (0x1004)` and `GetStorageInfo (0x1005)`.
 - Canon EOS `AvailableShots (0xD11B)` is read-only status evidence, not a writable setting. A valid event value takes precedence because the pinned R6 Mark III snapshot reports `-1` for standard per-card image counts while exposing the camera's remaining-shot count through this property.
+- Canon EOS lens status is read from the read-only `LensName (0xD1D8)` string property. The backend requests it only after the camera advertises remote/event preparation plus `RequestDevicePropValue (0x9127)`, and exposes `LENS_STATUS` only after a bounded NUL-terminated printable-ASCII event arrives. A returned non-empty value means mounted and becomes the lens name; a returned empty value means explicitly unmounted. A missing/rejected/malformed response never becomes an inferred status.
 - Media browsing requires `GetStorageIDs`, `GetObjectHandles (0x1007)`, and `GetObjectInfo (0x1008)`.
 - Media download requires `GetObject (0x1009)`.
 - Media deletion requires `DeleteObject (0x100B)` and a user confirmation; the list changes only after the exact object handle succeeds.
@@ -76,6 +77,7 @@ The USB reader requests 16 KiB at a time and buffers bytes beyond the 12-byte PT
 - [Pinned Canon EOS event block parser](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp-pack.c)
 - [Pinned Canon EOS string-property packet writer](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp.c#L3653-L3722)
 - [Pinned R6 Mark III writable text metadata snapshot](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/cameras/canon-eos-r6-markIII.txt#L176-L198)
+- [Pinned R6 Mark III read-only Lens Name snapshot](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/cameras/canon-eos-r6-markIII.txt#L351-L355)
 - [Pinned Canon EOS capture and 1 MiB host-transfer flow](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/library.c#L4490-L4652)
 - [Pinned Canon EOS `RequestObjectTransfer` event layout](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/ptp-pack.c#L1791-L1811)
 - [Pinned libgphoto2 Canon setting tables](https://github.com/gphoto/libgphoto2/blob/ce6c5f7c7fdde404e9897f618df6168c01df70f5/camlibs/ptp2/config.c)

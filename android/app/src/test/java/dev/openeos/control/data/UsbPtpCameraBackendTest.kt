@@ -1394,6 +1394,72 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun canonLensStatusRequiresARealLensNameReadback() = runTest {
+        val lensName = "RF24-105mm F4 L IS USM"
+        val transport = CanonEosScriptedTransport(
+            advertisePropertyWrites = false,
+            advertiseLensName = true,
+            lensName = lensName,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        val status = backend.status()
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.LENS_STATUS))
+        assertEquals(LensStatus(mounted = true, name = lensName), status.lens)
+        assertTrue(CameraFeature.LENS_STATUS in backend.observedFeatures())
+        assertEquals(listOf(CanonEosPropertyCode.LENS_NAME), transport.requestedCanonProperties())
+        backend.close()
+    }
+
+    @Test
+    fun canonLensStatusTreatsAnEmptyReadbackAsNoMountedLens() = runTest {
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory {
+                CanonEosScriptedTransport(
+                    advertisePropertyWrites = false,
+                    advertiseLensName = true,
+                    lensName = "",
+                )
+            },
+        )
+        backend.initialize()
+
+        assertTrue(backend.capabilities().matrix.supports(CameraFeature.LENS_STATUS))
+        assertEquals(LensStatus(mounted = false, name = ""), backend.status().lens)
+        backend.close()
+    }
+
+    @Test
+    fun canonLensStatusStaysPlannedWithoutAPropertyReadback() = runTest {
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
+            transportFactory = PtpTransportFactory {
+                CanonEosScriptedTransport(
+                    advertisePropertyWrites = false,
+                    advertiseLensName = true,
+                    lensNameReadback = false,
+                )
+            },
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.LENS_STATUS))
+        assertTrue(CameraFeature.LENS_STATUS in capabilities.matrix.planned)
+        assertEquals(null, backend.status().lens)
+        assertFalse(CameraFeature.LENS_STATUS in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test
     fun canonAdvancedSettingsRequireAdvertisedValuesAndPreserveStateAfterRejectedWrite() = runTest {
         val unavailableTransport = CanonEosScriptedTransport(
             advertiseAdvancedSettings = false,
@@ -2628,6 +2694,9 @@ class UsbPtpCameraBackendTest {
         private val movieModeReadback: Boolean = true,
         private val advertisePropertyWrites: Boolean = true,
         private val advertiseTextMetadata: Boolean = false,
+        private val advertiseLensName: Boolean = false,
+        private val lensName: String = "RF24-105mm F4 L IS USM",
+        private val lensNameReadback: Boolean = true,
         private val textMetadataReadback: Boolean = true,
         private val textMetadataWriteReadback: Boolean = true,
         private val textMetadataReadbackOverride: String? = null,
@@ -2675,7 +2744,9 @@ class UsbPtpCameraBackendTest {
                 CanonEosPropertyCode.COPYRIGHT -> "TEST COPYRIGHT"
                 else -> "TEST CAMERA"
             }
-        }.toMutableMap()
+        }.toMutableMap().apply {
+            if (advertiseLensName) this[CanonEosPropertyCode.LENS_NAME] = lensName
+        }
 
         override suspend fun send(container: PtpContainer) {
             sentContainers += container
@@ -2695,7 +2766,7 @@ class UsbPtpCameraBackendTest {
                             advertiseClickWhiteBalance,
                             advertiseMovieModeSwitch,
                             advertisePropertyWrites,
-                            advertiseTextMetadata,
+                            advertiseTextMetadata || advertiseLensName,
                         ),
                     )
                     incoming += ok(transaction)
@@ -2770,12 +2841,20 @@ class UsbPtpCameraBackendTest {
                 CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE -> {
                     val propertyCode = container.parameters().single().toInt()
                     val value = textMetadata[propertyCode]
-                    val readbackEnabled = textMetadataReadback &&
-                        (!textPropertyWriteSeen || textMetadataWriteReadback)
-                    if (advertiseTextMetadata && readbackEnabled && value != null) {
+                    val propertyAdvertised = if (propertyCode == CanonEosPropertyCode.LENS_NAME) {
+                        advertiseLensName
+                    } else {
+                        advertiseTextMetadata
+                    }
+                    val readbackEnabled = if (propertyCode == CanonEosPropertyCode.LENS_NAME) {
+                        lensNameReadback
+                    } else {
+                        textMetadataReadback && (!textPropertyWriteSeen || textMetadataWriteReadback)
+                    }
+                    if (propertyAdvertised && readbackEnabled && value != null) {
                         textPropertyEventPending = propertyCode to value
                     }
-                    incoming += if (advertiseTextMetadata && value != null) {
+                    incoming += if (propertyAdvertised && value != null) {
                         ok(transaction)
                     } else {
                         response(PtpResponseCode.GENERAL_ERROR, transaction)
@@ -2940,6 +3019,13 @@ class UsbPtpCameraBackendTest {
         fun queueEvent(payload: ByteArray) {
             pendingScriptedEvents += payload
         }
+
+        fun requestedCanonProperties(): List<Int> = sentContainers
+            .filter {
+                it.type == PtpContainerType.COMMAND &&
+                    it.code == CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE
+            }
+            .map { it.parameters().single().toInt() }
 
         fun removeStorage(storageId: Long) {
             storageDevices.removeAll { it.id == storageId }

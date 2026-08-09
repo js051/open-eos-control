@@ -62,6 +62,7 @@ object CanonEosPropertyCode {
     const val CONTINUOUS_AF_MODE = 0xD1C9
     const val ARTIST = 0xD1D0
     const val COPYRIGHT = 0xD1D1
+    const val LENS_NAME = 0xD1D8
     const val AEB = 0xD1D9
 }
 
@@ -127,6 +128,7 @@ object CanonEosPtp {
     const val MOVIE_RECORD_TARGET_CARD = 4L
     const val CAPTURE_DESTINATION_HOST = 4L
     const val MAX_TEXT_METADATA_BYTES = 255
+    const val MAX_LENS_NAME_BYTES = 512
 
     private const val VIEWFINDER_JPEG_BLOCK = 0x01L
     private const val VIEWFINDER_JPEG_BLOCK_ALTERNATE = 0x0BL
@@ -195,7 +197,9 @@ object CanonEosPtp {
         CanonEosPropertyCode.IMAGE_FORMAT_SD,
     )
 
-    private val textPropertyCodes = textSettingSpecs.mapTo(hashSetOf(), CanonEosTextSettingSpec::propertyCode)
+    private val textPropertyCodes = textSettingSpecs
+        .mapTo(hashSetOf(), CanonEosTextSettingSpec::propertyCode)
+        .apply { add(CanonEosPropertyCode.LENS_NAME) }
 
     private val remotePreparationOperations = setOf(
         CanonEosOperationCode.SET_REMOTE_MODE,
@@ -263,6 +267,9 @@ object CanonEosPtp {
 
     fun supportsTextMetadata(info: PtpDeviceInfo): Boolean =
         supportsPropertyControl(info) && info.supports(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)
+
+    fun supportsTextPropertyRead(info: PtpDeviceInfo): Boolean =
+        supportsRemotePreparation(info) && info.supports(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)
 
     fun supportsMovieRecording(info: PtpDeviceInfo, availableValues: List<Long>): Boolean =
         supportsPropertyControl(info) &&
@@ -409,7 +416,11 @@ object CanonEosPtp {
                                 currentText = payload.nullTerminatedPrintableAscii(
                                     offset = block.offset + 12,
                                     limit = block.offset + block.length,
-                                    maxBytes = MAX_TEXT_METADATA_BYTES,
+                                    maxBytes = if (propertyCode == CanonEosPropertyCode.LENS_NAME) {
+                                        MAX_LENS_NAME_BYTES
+                                    } else {
+                                        MAX_TEXT_METADATA_BYTES
+                                    },
                                 ),
                             )
                         )
