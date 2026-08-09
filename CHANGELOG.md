@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-08-10
+
 - Added capability-gated wired media upload across Android, iOS and PC. Android USB uses standard PTP `SendObjectInfo`/`SendObject` only with advertised operations, a writable card and a matching object format, snapshots SAF input before the transaction, requires exact ObjectInfo readback, and drops a partial/cancelled PTP session. Desktop Bridge requires runtime libgphoto2 File Upload evidence, exact bounded raw bodies, writable storage, cancellable gPhoto2 subprocesses and fresh name/size verification; iOS and Android Bridge clients stream file-backed requests with bounded responses. Direct Canon CCAPI remains explicitly unsupported, while Simulator-only contracts preserve exact bytes and enforce matching filename/MIME categories.
 - Added capability-gated Canon CCAPI multipart JPEG Live View across Android, iOS, PC and Simulator. AUTO now prefers RTP, then a persistent `/shooting/liveview/multipart` stream, then bounded JPEG polling. Each client requires GET/DELETE multipart plus the regular start/stop lifecycle in one API version, continuously drains the stream while conflating old frames, validates bounded MIME headers, `Content-Length` and complete JPEG markers, records support from advertisement and observation only after a valid frame, and performs multipart DELETE before regular Live View cleanup.
 - Added capability-gated Canon CCAPI sensor cleaning across Android, iOS, PC and Simulator. The maintenance action appears only for an advertised `POST /functions/sensorcleaning`, sends Canon's strict boolean `autopoweroff` body, requires HTTP 200, pauses Live View/event polling and either restores the session or disconnects after clean-and-power-off. Recording, Bulb, preview and conflicting operations remain disabled; libgphoto2 and Android USB make no unsupported cleaning claim.
@@ -85,3 +87,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.1.6]: https://github.com/js051/open-eos-control/releases/tag/v0.1.6
 [0.1.7]: https://github.com/js051/open-eos-control/releases/tag/v0.1.7
 [0.1.8]: https://github.com/js051/open-eos-control/releases/tag/v0.1.8
+[0.1.9]: https://github.com/js051/open-eos-control/releases/tag/v0.1.9
