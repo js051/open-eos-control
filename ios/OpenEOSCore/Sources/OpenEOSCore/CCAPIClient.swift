@@ -1871,7 +1871,7 @@ public actor CCAPIClient {
             ? 0
             : parsedRating.flatMap { (1...5).contains($0) ? $0 : nil }
         let rotation = body.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil }
-        let archived = body.string("archive").flatMap(Self.parseMediaArchive)
+        let archived = Self.parseMediaArchive(body.string("archive"))
         return CameraMediaItem(
             id: item.id,
             name: item.name,
