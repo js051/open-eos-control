@@ -248,7 +248,7 @@ final class CCAPIClientTests: XCTestCase {
     func testDiscoveryTraceRetainsIdentityFallbackWithoutInventingOperations() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", status: 404, body: #"{"message":"missing"}"#)
-        await transport.enqueueJSON(path: "/ccapi/", status: 404, body: #"{"message":"missing"}"#)
+        await transport.enqueueJSON(path: "/ccapi", status: 404, body: #"{"message":"missing"}"#)
         await transport.enqueueJSON(
             path: "/ccapi/ver110/deviceinformation",
             body: #"{"productname":"Canon EOS R6 Mark III","serialnumber":"TEST-SERIAL-0001"}"#
