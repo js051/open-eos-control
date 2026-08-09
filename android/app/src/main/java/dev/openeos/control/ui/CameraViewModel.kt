@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraCapabilities
@@ -14,12 +15,14 @@ import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraSession
+import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewRequest
 import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
+import dev.openeos.control.data.MAX_PTP_OBJECT_BYTES
 import dev.openeos.control.data.NativeLiveViewEvent
 import dev.openeos.control.data.NativeLiveViewAudioStatus
 import dev.openeos.control.data.NativeLiveViewSession
@@ -30,6 +33,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,7 +41,18 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.util.UUID
+import kotlin.coroutines.coroutineContext
+
+private data class MediaUploadMetadata(
+    val name: String,
+    val sizeBytes: Long?,
+)
 
 class CameraViewModel(
     private val repository: CameraRepository = CameraRepository(),
@@ -48,6 +63,7 @@ class CameraViewModel(
     private var eventPollingJob: Job? = null
     private var eventPollingGeneration = 0L
     private var mediaDownloadJob: Job? = null
+    private var mediaUploadJob: Job? = null
     private val mediaThumbnailJobs = mutableMapOf<String, Job>()
     private val unavailableMediaThumbnailIds = mutableSetOf<String>()
     private var mediaThumbnailGeneration = 0
@@ -442,6 +458,9 @@ class CameraViewModel(
         stopEventPollingLoop()
         detachNativeLiveViewListener()
         cancelMediaDownload()
+        val uploadJob = mediaUploadJob
+        mediaUploadJob = null
+        uploadJob?.cancel()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -451,6 +470,7 @@ class CameraViewModel(
         }
         viewModelScope.launch {
             try {
+                uploadJob?.join()
                 repository.disconnect()
             } catch (e: Exception) {
                 // ignore
@@ -704,6 +724,9 @@ class CameraViewModel(
         stopEventPollingLoop()
         detachNativeLiveViewListener()
         cancelMediaDownload()
+        val uploadJob = mediaUploadJob
+        mediaUploadJob = null
+        uploadJob?.cancel()
         cancelMediaThumbnailLoads()
         runCamera(
             operation = CameraOperation.POWER,
@@ -714,6 +737,7 @@ class CameraViewModel(
                 }
             },
         ) {
+            uploadJob?.join()
             repository.sleepCamera()
             runCatching { repository.disconnect() }
             resetFrameMetrics()
@@ -930,6 +954,7 @@ class CameraViewModel(
                     mediaItems = items,
                     capabilities = capabilities ?: it.capabilities,
                     lastDownloadedMediaName = null,
+                    lastUploadedMediaName = null,
                     lastDeletedMediaName = null,
                 )
             }
@@ -1095,6 +1120,184 @@ class CameraViewModel(
 
     fun cancelMediaDownload() {
         mediaDownloadJob?.cancel()
+    }
+
+    fun uploadMedia(context: Context, sourceUri: Uri) {
+        val state = _uiState.value
+        if (
+            state.previewMode ||
+            state.isBusy(CameraOperation.MEDIA) ||
+            !state.supports(CameraFeature.MEDIA_UPLOAD) ||
+            mediaUploadJob != null ||
+            mediaDownloadJob != null
+        ) return
+        val appContext = context.applicationContext
+        val resolver = appContext.contentResolver
+        _uiState.update { it.copy(lastUploadedMediaName = null) }
+        val job = launchCameraOperation(CameraOperation.MEDIA) {
+            var temporaryFile: File? = null
+            try {
+                val metadata = withContext(Dispatchers.IO) {
+                    resolver.query(
+                        sourceUri,
+                        arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                        null,
+                        null,
+                        null,
+                    )?.use { cursor ->
+                        if (!cursor.moveToFirst()) return@use null
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        MediaUploadMetadata(
+                            name = nameIndex.takeIf { it >= 0 && !cursor.isNull(it) }
+                                ?.let(cursor::getString)
+                                .orEmpty(),
+                            sizeBytes = sizeIndex.takeIf { it >= 0 && !cursor.isNull(it) }
+                                ?.let(cursor::getLong),
+                        )
+                    }
+                } ?: MediaUploadMetadata(
+                    name = sourceUri.lastPathSegment?.substringAfterLast('/').orEmpty(),
+                    sizeBytes = null,
+                )
+                val name = metadata.name.trim()
+                check(name.isNotEmpty()) { "Android could not determine the selected media filename." }
+                _uiState.update {
+                    it.copy(
+                        activeMediaUploadName = name,
+                        mediaUploadProgress = CameraMediaTransferProgress(0L, metadata.sizeBytes),
+                        lastUploadedMediaName = null,
+                    )
+                }
+                val result = withContext(Dispatchers.IO) {
+                    val cached = File(appContext.cacheDir, "media-upload-${UUID.randomUUID()}.tmp")
+                    temporaryFile = cached
+                    val rawInput = resolver.openInputStream(sourceUri)
+                        ?: error("Android could not open the selected upload source.")
+                    val resolvedSize = BufferedInputStream(rawInput).use { input ->
+                        FileOutputStream(cached).buffered().use { output ->
+                            val buffer = ByteArray(MEDIA_UPLOAD_BUFFER_BYTES)
+                            var copied = 0L
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                if (count == 0) continue
+                                copied += count
+                                check(copied <= MAX_MEDIA_UPLOAD_BYTES) {
+                                    "Selected media exceeds the $MAX_MEDIA_UPLOAD_BYTES-byte upload limit."
+                                }
+                                output.write(buffer, 0, count)
+                                _uiState.update { current ->
+                                    current.copy(
+                                        mediaUploadProgress = CameraMediaTransferProgress(
+                                            copied,
+                                            metadata.sizeBytes?.takeIf { it > 0L },
+                                        )
+                                    )
+                                }
+                            }
+                            copied
+                        }
+                    }
+                    check(resolvedSize in 1L..MAX_MEDIA_UPLOAD_BYTES) {
+                        "Selected media size must be from 1 through $MAX_MEDIA_UPLOAD_BYTES bytes."
+                    }
+                    BufferedInputStream(FileInputStream(cached)).use { input ->
+                        repository.uploadMedia(
+                            name = name,
+                            sizeBytes = resolvedSize,
+                            contentType = resolver.getType(sourceUri),
+                            source = input,
+                        ) { progress ->
+                            _uiState.update { current -> current.copy(mediaUploadProgress = progress) }
+                        }
+                    }
+                }
+                val finishUpload: suspend () -> Unit = {
+                    val items = repository.listMedia()
+                    check(
+                        items.any {
+                            it.id == result.item.id ||
+                                (it.name == result.item.name && it.sizeBytes == result.item.sizeBytes)
+                        }
+                    ) {
+                        "The uploaded media was not present in the camera's refreshed media list."
+                    }
+                    val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
+                    cancelMediaThumbnailLoads()
+                    _uiState.update {
+                        it.copy(
+                            mediaItems = items,
+                            mediaThumbnails = emptyMap(),
+                            capabilities = capabilities ?: it.capabilities,
+                            lastUploadedMediaName = result.item.name,
+                        )
+                    }
+                }
+                if (state.transport == CameraTransport.USB_PTP) {
+                    withContext(NonCancellable) { finishUpload() }
+                } else {
+                    finishUpload()
+                }
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) { temporaryFile?.delete() }
+                _uiState.update { it.copy(activeMediaUploadName = null, mediaUploadProgress = null) }
+            }
+        }
+        mediaUploadJob = job
+        job?.invokeOnCompletion {
+            if (mediaUploadJob === job) mediaUploadJob = null
+        }
+    }
+
+    fun cancelMediaUpload() {
+        val job = mediaUploadJob ?: return
+        val state = _uiState.value
+        if (state.transport !in setOf(CameraTransport.USB_PTP, CameraTransport.DESKTOP_BRIDGE)) {
+            job.cancel()
+            return
+        }
+        val name = state.activeMediaUploadName
+        val sizeBytes = state.mediaUploadProgress?.totalBytes
+        mediaUploadJob = null
+        viewModelScope.launch {
+            job.cancelAndJoin()
+            if (_uiState.value.lastUploadedMediaName != null) return@launch
+            if (state.transport == CameraTransport.DESKTOP_BRIDGE && name != null) {
+                reconcileCancelledBridgeUpload(name, sizeBytes)
+                return@launch
+            }
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { repository.disconnect() } }
+            _uiState.update { current ->
+                if (current.transport == CameraTransport.USB_PTP) {
+                    current.withClearedSession(
+                        baseUrl = current.baseUrl,
+                        error = "USB upload was interrupted before commit confirmation. Reconnect and refresh media before retrying.",
+                    )
+                } else {
+                    current
+                }
+            }
+        }
+    }
+
+    private suspend fun reconcileCancelledBridgeUpload(name: String, sizeBytes: Long?) {
+        val items = withContext(NonCancellable + Dispatchers.IO) {
+            runCatching { repository.listMedia() }.getOrNull()
+        } ?: return
+        val uploaded = items.firstOrNull { item ->
+            item.name.equals(name, ignoreCase = true) &&
+                (sizeBytes == null || item.sizeBytes == sizeBytes)
+        }
+        cancelMediaThumbnailLoads()
+        _uiState.update { current ->
+            current.copy(
+                mediaItems = items,
+                mediaThumbnails = emptyMap(),
+                lastUploadedMediaName = uploaded?.name,
+            )
+        }
     }
 
     fun deleteMedia(item: CameraMediaItem) {
@@ -1547,8 +1750,12 @@ class CameraViewModel(
         stopEventPollingLoop()
         detachNativeLiveViewListener()
         cancelMediaDownload()
+        val uploadJob = mediaUploadJob
+        mediaUploadJob = null
+        uploadJob?.cancel()
         cancelMediaThumbnailLoads()
         viewModelScope.launch(NonCancellable + Dispatchers.IO) {
+            uploadJob?.join()
             repository.disconnect()
         }
         super.onCleared()
@@ -1573,6 +1780,9 @@ class CameraViewModel(
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
+        activeMediaUploadName = null,
+        mediaUploadProgress = null,
+        lastUploadedMediaName = null,
         lastDeletedMediaName = null,
         liveViewFrameUrl = null,
         liveViewBitmap = null,
@@ -1709,6 +1919,8 @@ class CameraViewModel(
         const val CAPTURE_FLASH_MILLIS = 120L
         const val FOCUS_FEEDBACK_MILLIS = 1_200L
         const val FPS_WINDOW_SIZE = 30
+        const val MEDIA_UPLOAD_BUFFER_BYTES = 64 * 1024
+        const val MAX_MEDIA_UPLOAD_BYTES = MAX_PTP_OBJECT_BYTES
         val EVENT_RETRY_DELAYS_MILLIS = longArrayOf(1_000L, 2_000L, 5_000L)
         val CAPABILITY_EVIDENCE_OPERATIONS = setOf(
             CameraOperation.SETTING,

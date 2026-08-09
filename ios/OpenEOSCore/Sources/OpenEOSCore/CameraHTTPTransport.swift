@@ -40,6 +40,24 @@ public struct CameraHTTPDownloadResponse: Sendable {
     }
 }
 
+public struct CameraHTTPUploadResponse: Sendable {
+    public let statusCode: Int
+    public let headers: [String: String]
+    public let body: Data
+
+    public init(statusCode: Int, headers: [String: String] = [:], body: Data = Data()) {
+        self.statusCode = statusCode
+        self.headers = headers.reduce(into: [:]) { result, entry in
+            result[entry.key.lowercased()] = entry.value
+        }
+        self.body = body
+    }
+
+    public func header(_ name: String) -> String? {
+        headers[name.lowercased()]
+    }
+}
+
 public struct CameraHTTPStreamResponse: Sendable {
     public let statusCode: Int
     public let headers: [String: String]
@@ -77,6 +95,11 @@ public protocol CameraHTTPTransport: Sendable {
         _ request: URLRequest,
         progress: @escaping CameraMediaProgressHandler
     ) async throws -> CameraHTTPDownloadResponse
+    func upload(
+        _ request: URLRequest,
+        from fileURL: URL,
+        progress: @escaping CameraMediaProgressHandler
+    ) async throws -> CameraHTTPUploadResponse
 }
 
 public extension CameraHTTPTransport {
@@ -103,6 +126,27 @@ public extension CameraHTTPTransport {
         )
         progress(CameraMediaTransferProgress(bytesTransferred: size, totalBytes: size))
         return response
+    }
+
+    func upload(
+        _ request: URLRequest,
+        from fileURL: URL,
+        progress: @escaping CameraMediaProgressHandler
+    ) async throws -> CameraHTTPUploadResponse {
+        throw CCAPIError.invalidResponse("This HTTP transport does not support file uploads.")
+    }
+}
+
+struct CameraHTTPResponseBodyAccumulator {
+    static let maximumBytes = 32 * 1024
+
+    private(set) var data = Data()
+
+    @discardableResult
+    mutating func append(_ chunk: Data) -> Bool {
+        guard chunk.count <= Self.maximumBytes - data.count else { return false }
+        data.append(chunk)
+        return true
     }
 }
 
@@ -204,6 +248,24 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
                 }
                 handle.install(task: task, observation: observation)
             }
+        } onCancel: {
+            handle.cancel()
+        }
+    }
+
+    public func upload(
+        _ request: URLRequest,
+        from fileURL: URL,
+        progress: @escaping CameraMediaProgressHandler
+    ) async throws -> CameraHTTPUploadResponse {
+        let handle = CameraHTTPUploadTaskHandle()
+        return try await withTaskCancellationHandler {
+            try await handle.start(
+                request: request,
+                fileURL: fileURL,
+                configuration: streamConfiguration,
+                progress: progress
+            )
         } onCancel: {
             handle.cancel()
         }
@@ -364,5 +426,138 @@ private final class CameraHTTPDownloadTaskHandle: @unchecked Sendable {
         lock.unlock()
         observation?.invalidate()
         return cancellationRequested
+    }
+}
+
+private final class CameraHTTPUploadTaskHandle: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var session: URLSession?
+    private var task: URLSessionUploadTask?
+    private var continuation: CheckedContinuation<CameraHTTPUploadResponse, Error>?
+    private var responseStatusCode: Int?
+    private var responseHeaders: [String: String] = [:]
+    private var responseBody = CameraHTTPResponseBodyAccumulator()
+    private var cancellationRequested = false
+    private var progress: CameraMediaProgressHandler = { _ in }
+    private var totalBytes: Int64?
+
+    func start(
+        request: URLRequest,
+        fileURL: URL,
+        configuration: URLSessionConfiguration,
+        progress: @escaping CameraMediaProgressHandler
+    ) async throws -> CameraHTTPUploadResponse {
+        let size = Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        guard size >= 0 else {
+            throw CCAPIError.invalidResponse("The upload file size is invalid.")
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            self.continuation = continuation
+            self.progress = progress
+            totalBytes = size
+            let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+            let task = session.uploadTask(with: request, fromFile: fileURL)
+            self.session = session
+            self.task = task
+            let shouldCancel = cancellationRequested
+            lock.unlock()
+            if shouldCancel { task.cancel() } else { task.resume() }
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancellationRequested = true
+        let task = task
+        lock.unlock()
+        task?.cancel()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        let total = totalBytesExpectedToSend > 0 ? totalBytesExpectedToSend : totalBytes
+        progress(CameraMediaTransferProgress(bytesTransferred: totalBytesSent, totalBytes: total))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let http = response as? HTTPURLResponse else {
+            finish(error: CCAPIError.invalidResponse("Upload response was not HTTP."))
+            completionHandler(.cancel)
+            return
+        }
+        lock.lock()
+        responseStatusCode = http.statusCode
+        responseHeaders = http.allHeaderFields.reduce(into: [:]) { result, entry in
+            result[String(describing: entry.key).lowercased()] = String(describing: entry.value)
+        }
+        lock.unlock()
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        let accepted = responseBody.append(data)
+        lock.unlock()
+        guard accepted else {
+            finish(error: CCAPIError.invalidResponse("Upload response exceeded the 32 KiB limit."))
+            return
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        guard let continuation = self.continuation else {
+            lock.unlock()
+            return
+        }
+        let cancelled = cancellationRequested || (error as? URLError)?.code == .cancelled
+        self.continuation = nil
+        let status = responseStatusCode
+        let headers = responseHeaders
+        let body = responseBody.data
+        let activeSession = self.session
+        self.session = nil
+        self.task = nil
+        lock.unlock()
+
+        activeSession?.finishTasksAndInvalidate()
+        if cancelled {
+            continuation.resume(throwing: CancellationError())
+        } else if let error {
+            continuation.resume(throwing: error)
+        } else if let status {
+            progress(CameraMediaTransferProgress(bytesTransferred: totalBytes ?? 0, totalBytes: totalBytes))
+            continuation.resume(returning: CameraHTTPUploadResponse(statusCode: status, headers: headers, body: body))
+        } else {
+            continuation.resume(throwing: CCAPIError.invalidResponse("Upload ended without an HTTP response."))
+        }
+    }
+
+    private func finish(error: Error) {
+        lock.lock()
+        guard let continuation = self.continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        let activeTask = self.task
+        let activeSession = self.session
+        self.session = nil
+        self.task = nil
+        lock.unlock()
+        activeTask?.cancel()
+        activeSession?.invalidateAndCancel()
+        continuation.resume(throwing: error)
     }
 }

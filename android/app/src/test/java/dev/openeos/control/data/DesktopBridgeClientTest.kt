@@ -13,6 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -139,6 +140,7 @@ class DesktopBridgeClientTest {
         assertEquals("GET /ccapi", capabilities.evidence.discoveryTrace.single().endpoint)
         assertEquals("NO_API_LIST", capabilities.evidence.discoveryTrace.single().outcome)
         assertEquals(listOf("value"), capabilities.evidence.discoveryTrace.single().responseKeys)
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_UPLOAD))
         assertTrue(
             observedFeatures.containsAll(
                 setOf(
@@ -219,6 +221,66 @@ class DesktopBridgeClientTest {
         assertEquals(0.6, clickWhiteBalancePayload.getDouble("y"), 0.0001)
         assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath?.contains("/media/") == true })
         assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath == "/v1/session/session-1" })
+    }
+
+    @Test
+    fun mediaUploadStreamsExactBytesAndReportsProgress() = runTest {
+        val bytes = ByteArray(192 * 1024 + 17) { (it % 251).toByte() }
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON))
+        server.enqueue(
+            jsonResponse(
+                """{"id":"gphoto2:upload","name":"PHONE 0001.JPG","kind":"image","sizeBytes":${bytes.size},"contentType":"image/jpeg"}""",
+                code = 201,
+            )
+        )
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        val progress = mutableListOf<CameraMediaTransferProgress>()
+
+        val result = client.uploadMedia(
+            name = "PHONE 0001.JPG",
+            sizeBytes = bytes.size.toLong(),
+            contentType = "image/jpeg",
+            source = ByteArrayInputStream(bytes),
+            onProgress = progress::add,
+        )
+        val request = server.takeRequest()
+        server.takeRequest()
+        val upload = server.takeRequest()
+
+        assertEquals("GET", request.method)
+        assertEquals("POST", upload.method)
+        assertEquals("/v1/session/session-1/media?filename=PHONE%200001.JPG", upload.path)
+        assertEquals("image/jpeg", upload.getHeader("content-type"))
+        assertEquals(bytes.size.toString(), upload.getHeader("content-length"))
+        assertArrayEquals(bytes, upload.body.readByteArray())
+        assertEquals(bytes.size.toLong(), result.bytesTransferred)
+        assertEquals(0L, progress.first().bytesTransferred)
+        assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
+        assertTrue(CameraFeature.MEDIA_UPLOAD in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun mediaUploadRejectsOversizedBridgeResponseBeforeJsonParsing() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON))
+        server.enqueue(MockResponse().setResponseCode(201).setBody("x".repeat(32 * 1024 + 1)))
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+
+        val failure = runCatching {
+            client.uploadMedia(
+                name = "PHONE_0002.JPG",
+                sizeBytes = 1,
+                contentType = "image/jpeg",
+                source = ByteArrayInputStream(byteArrayOf(1)),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("response exceeded 32768 bytes"))
+        assertFalse(CameraFeature.MEDIA_UPLOAD in client.observedFeatureSnapshot())
     }
 
     @Test
@@ -637,7 +699,7 @@ class DesktopBridgeClientTest {
                 "CAMERA_CLOCK_SYNC", "DIRECTORY_CONTROL", "SENSOR_CLEANING", "CAMERA_SLEEP", "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
                 "LIVE_VIEW_MAGNIFICATION", "FILE_NAMING_CONTROL",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
-                "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
+                "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_UPLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
               ],
               "planned": ["TAP_FOCUS", "LIVE_VIEW_RTP"],
               "reasons": {"LIVE_VIEW_RTP": "Persistent stream is not implemented."},

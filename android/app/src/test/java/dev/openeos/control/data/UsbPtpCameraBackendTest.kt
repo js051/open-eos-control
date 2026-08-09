@@ -10,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
@@ -174,6 +175,70 @@ class UsbPtpCameraBackendTest {
         assertTrue(failure is UnsupportedOperationException)
         assertFalse(PtpOperationCode.DELETE_OBJECT in transport.sentOperations)
         backend.close()
+    }
+
+    @Test
+    fun mediaUploadRequiresAdvertisedOperationsAndVerifiesExactObjectInfo() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false, advertiseUpload = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-upload"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        val bytes = "phone-to-camera".toByteArray()
+        val progress = mutableListOf<CameraMediaTransferProgress>()
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        val result = backend.uploadMedia(
+            name = "PHONE_0001.JPG",
+            sizeBytes = bytes.size.toLong(),
+            contentType = "image/jpeg",
+            source = ByteArrayInputStream(bytes),
+            onProgress = progress::add,
+        )
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_UPLOAD))
+        assertEquals("PHONE_0001.JPG", result.item.name)
+        assertEquals(bytes.size.toLong(), result.item.sizeBytes)
+        assertEquals(bytes.size.toLong(), result.bytesTransferred)
+        assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
+        assertTrue(CameraFeature.MEDIA_UPLOAD in backend.observedFeatures())
+        assertTrue(PtpOperationCode.SEND_OBJECT_INFO in transport.sentOperations)
+        assertTrue(PtpOperationCode.SEND_OBJECT in transport.sentOperations)
+        assertArrayEquals(
+            bytes,
+            transport.sentContainers.last {
+                it.type == PtpContainerType.DATA && it.code == PtpOperationCode.SEND_OBJECT
+            }.payload,
+        )
+        backend.close()
+    }
+
+    @Test
+    fun failedMediaUploadAbortsTransportAndRequiresReconnect() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false, advertiseUpload = true)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-short-upload"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching {
+            backend.uploadMedia(
+                name = "PHONE_0002.JPG",
+                sizeBytes = 2,
+                contentType = "image/jpeg",
+                source = ByteArrayInputStream(byteArrayOf(1)),
+                onProgress = {},
+            )
+        }.exceptionOrNull()
+        backend.close()
+
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("reconnect"))
+        assertTrue(transport.closed)
+        assertTrue(PtpOperationCode.SEND_OBJECT in transport.sentOperations)
+        assertFalse(PtpOperationCode.CLOSE_SESSION in transport.sentOperations)
     }
 
     @Test
@@ -2660,6 +2725,7 @@ class UsbPtpCameraBackendTest {
 
     private class ScriptedTransport(
         private val advertiseCapture: Boolean,
+        private val advertiseUpload: Boolean = false,
         private val advertiseDelete: Boolean = true,
         private val advertiseThumbnail: Boolean = true,
         private val advertiseObjectInfo: Boolean = true,
@@ -2684,6 +2750,8 @@ class UsbPtpCameraBackendTest {
         private var pendingObjectPropertyWrite = false
         private var protectionStatus = initialProtectionStatus
         private var ratingWireValue = initialRatingWireValue
+        private var pendingUploadInfo: PtpObjectInfo? = null
+        private var uploadedObjectInfo: PtpObjectInfo? = null
         private val properties = propertyFixtures().toMutableMap()
 
         override suspend fun send(container: PtpContainer) {
@@ -2703,6 +2771,7 @@ class UsbPtpCameraBackendTest {
                             advertiseProtection,
                             advertiseProperties = true,
                             advertiseRating = advertiseRating,
+                            advertiseUpload = advertiseUpload,
                         ),
                     )
                     incoming += ok(transaction)
@@ -2751,12 +2820,40 @@ class UsbPtpCameraBackendTest {
                 }
 
                 PtpOperationCode.GET_OBJECT_INFO -> {
+                    val requestedHandle = container.parameterU32()
+                    val payload = if (requestedHandle == UPLOADED_OBJECT_HANDLE) {
+                        PtpDatasets.encodeObjectInfo(
+                            uploadedObjectInfo ?: error("Uploaded ObjectInfo was requested before SendObject completed.")
+                        )
+                    } else {
+                        objectInfoPayload(advertisedThumbnailSize, advertisedObjectSize, protectionStatus)
+                    }
                     incoming += data(
                         container.code,
                         transaction,
-                        objectInfoPayload(advertisedThumbnailSize, advertisedObjectSize, protectionStatus),
+                        payload,
                     )
                     incoming += ok(transaction)
+                }
+
+                PtpOperationCode.SEND_OBJECT_INFO -> {
+                    if (container.type == PtpContainerType.DATA) {
+                        pendingUploadInfo = PtpDatasets.objectInfo(0, container.payload)
+                        incoming += ok(transaction, STORAGE_ID, UINT32_MAX, UPLOADED_OBJECT_HANDLE)
+                    }
+                }
+
+                PtpOperationCode.SEND_OBJECT -> {
+                    if (container.type == PtpContainerType.DATA) {
+                        val pending = pendingUploadInfo ?: error("SendObject data arrived without ObjectInfo.")
+                        check(container.payload.size.toLong() == pending.sizeBytes)
+                        uploadedObjectInfo = pending.copy(
+                            handle = UPLOADED_OBJECT_HANDLE,
+                            storageId = STORAGE_ID,
+                            parentObject = UINT32_MAX,
+                        )
+                        incoming += ok(transaction)
+                    }
                 }
 
                 PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED -> {
@@ -2880,8 +2977,13 @@ class UsbPtpCameraBackendTest {
         private fun data(operation: Int, transaction: Long, payload: ByteArray) =
             PtpContainer(PtpContainerType.DATA, operation, transaction, payload)
 
-        private fun ok(transaction: Long) =
-            PtpContainer(PtpContainerType.RESPONSE, PtpResponseCode.OK, transaction)
+        private fun ok(transaction: Long, vararg parameters: Long) =
+            PtpContainer(
+                PtpContainerType.RESPONSE,
+                PtpResponseCode.OK,
+                transaction,
+                Writer().apply { parameters.forEach(::u32) }.bytes(),
+            )
 
         fun PtpContainer.parameterU32(offset: Int = 0): Long =
             payload[offset].toUByte().toLong() or
@@ -3594,6 +3696,7 @@ class UsbPtpCameraBackendTest {
         private const val STORAGE_ID = 0x00010001L
         private const val TEST_CLOCK_EPOCH_SECONDS = 1_700_000_000L
         private const val OBJECT_HANDLE = 0x42L
+        private const val UPLOADED_OBJECT_HANDLE = 0x77L
         private val OBJECT_BYTES = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 3, 3, 7, 9, 0xFF.toByte(), 0xD9.toByte())
         private val THUMBNAIL_BYTES = byteArrayOf(
             0xFF.toByte(), 0xD8.toByte(), 4, 2, 0xFF.toByte(), 0xD9.toByte(),
@@ -3683,6 +3786,7 @@ class UsbPtpCameraBackendTest {
             advertiseProtection: Boolean,
             advertiseProperties: Boolean,
             advertiseRating: Boolean,
+            advertiseUpload: Boolean,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(0x0000000B)
@@ -3702,6 +3806,10 @@ class UsbPtpCameraBackendTest {
                     if (advertiseThumbnail) add(PtpOperationCode.GET_THUMB)
                     if (advertiseDelete) add(PtpOperationCode.DELETE_OBJECT)
                     if (advertiseProtection) add(PtpOperationCode.SET_OBJECT_PROTECTION)
+                    if (advertiseUpload) {
+                        add(PtpOperationCode.SEND_OBJECT_INFO)
+                        add(PtpOperationCode.SEND_OBJECT)
+                    }
                     if (advertiseCapture) add(PtpOperationCode.INITIATE_CAPTURE)
                     if (advertiseProperties) {
                         add(PtpOperationCode.GET_DEVICE_PROP_DESC)

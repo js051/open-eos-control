@@ -69,6 +69,10 @@
     <string name="tap_action_white_balance">點選白平衡</string>
     <string name="downloading_media">正在下載 %1$s</string>
     <string name="cancel_media_download">取消下載</string>
+    <string name="upload_media">上傳媒體到相機</string>
+    <string name="uploading_media">正在上傳 %1$s</string>
+    <string name="cancel_media_upload">取消上傳</string>
+    <string name="media_uploaded">已上傳 %1$s</string>
     <string name="camera_value_auto">自動</string>
     <string name="camera_value_manual">手動</string>
     <string name="camera_value_enable">啟用</string>

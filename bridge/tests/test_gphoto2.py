@@ -23,6 +23,7 @@ from open_eos_bridge.gphoto2 import (
     parse_storage_info,
     parse_wait_event_keys,
     resolve_gphoto_command,
+    summary_supports_file_upload,
 )
 from open_eos_bridge.local_media import default_capture_directory, preview_content_type
 from open_eos_bridge.models import (
@@ -32,7 +33,7 @@ from open_eos_bridge.models import (
     LiveViewStartRequest,
 )
 
-from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, THUMBNAIL, FakeRunner
+from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, SUMMARY, THUMBNAIL, FakeRunner
 
 
 def test_gphoto_command_resolution_prefers_native_and_supports_wsl_distribution() -> None:
@@ -71,6 +72,26 @@ def test_gphoto_command_resolution_prefers_native_and_supports_wsl_distribution(
         "Ubuntu-24.04",
     )
     assert explicit == GPhotoCommand(("D:\\Tools\\gphoto2.exe",), "native")
+
+
+def test_cancellable_runner_terminates_an_active_process() -> None:
+    runner = SubprocessGPhotoRunner(command=GPhotoCommand((sys.executable,), "native"))
+    cancelled = threading.Event()
+    timer = threading.Timer(0.1, cancelled.set)
+    started_at = time.monotonic()
+    timer.start()
+    try:
+        with pytest.raises(BridgeError) as failure:
+            runner.run_cancellable(
+                ["-c", "import time; time.sleep(30)"],
+                timeout=10.0,
+                cancelled=cancelled,
+            )
+    finally:
+        timer.cancel()
+
+    assert failure.value.code == "UPLOAD_CANCELLED"
+    assert time.monotonic() - started_at < 5.0
 
 
 def test_capture_paths_map_to_wsl_without_using_a_shell() -> None:
@@ -230,6 +251,9 @@ def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
     assert media[0].capture_time == "2026-07-21T02:13:21Z"
     assert media[0].preview_available is True
     assert media[1].preview_available is False
+    assert summary_supports_file_upload(SUMMARY) is True
+    assert summary_supports_file_upload(SUMMARY.replace("File Upload", "File Transfer")) is False
+    assert summary_supports_file_upload(SUMMARY.replace("File Upload", "No File Upload")) is False
 
 
 def test_storage_parser_keeps_libgphoto2_summary_compatibility() -> None:
@@ -405,6 +429,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert CameraFeature.FOCUS_DRIVE in capabilities.supported
     assert CameraFeature.LIVE_VIEW_MAGNIFICATION in capabilities.supported
     assert CameraFeature.MEDIA_DELETE in capabilities.supported
+    assert CameraFeature.MEDIA_UPLOAD in capabilities.supported
     assert CameraFeature.MEDIA_THUMBNAIL in capabilities.supported
     assert CameraFeature.MEDIA_PREVIEW in capabilities.supported
     assert CameraFeature.EVENT_POLLING in capabilities.supported
@@ -513,6 +538,19 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert item.name == "IMG_0001.JPG"
     assert b"".join(chunks) == MEDIA_BYTES
     session.delete_media(media[0].id)
+    upload_payload = b"uploaded-jpeg"
+    (tmp_path / "upload.jpg").write_bytes(upload_payload)
+    uploaded = session.upload_media(
+        "UPLOADED.JPG",
+        tmp_path / "upload.jpg",
+        len(upload_payload),
+        "image/jpeg",
+        threading.Event(),
+    )
+    assert uploaded.name == "UPLOADED.JPG"
+    assert uploaded.size_bytes == len(upload_payload)
+    assert runner.uploaded_files[("/store_00010001", "UPLOADED.JPG")] == upload_payload
+    assert any("--upload-file" in command for command in runner.cancellable_commands)
     observed = set(session.capabilities().evidence.observed_features)
     assert any("/main/imgsettings/iso=800" in command for command in runner.commands)
     assert any("/main/actions/eoszoom=5" in command for command in runner.commands)
@@ -538,6 +576,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
         CameraFeature.MEDIA_PREVIEW,
         CameraFeature.MEDIA_DOWNLOAD,
         CameraFeature.MEDIA_DELETE,
+        CameraFeature.MEDIA_UPLOAD,
         CameraFeature.EVENT_POLLING,
     } <= observed
 
@@ -1315,6 +1354,101 @@ def test_media_delete_requires_gphoto2_advertised_ability(tmp_path: Path) -> Non
     assert CameraFeature.MEDIA_DELETE not in session.capabilities().supported
     assert failure.value.code == "UNSUPPORTED_FEATURE"
     assert not any("--delete-file" in command for command in runner.commands)
+
+
+def test_gphoto2_media_upload_requires_summary_and_writable_storage(tmp_path: Path) -> None:
+    class NoUploadSummaryRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            if arguments[-1:] == ["--summary"]:
+                return CommandOutput(SUMMARY.replace("File Upload", "File Transfer").encode())
+            return super().run(arguments, timeout=timeout)
+
+    class ReadOnlyStorageRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            if arguments[-1:] == ["--storage-info"]:
+                return CommandOutput(STORAGE.replace("access=0 Read-Write", "access=1 Read-Only").encode())
+            return super().run(arguments, timeout=timeout)
+
+    for runner in (NoUploadSummaryRunner(), ReadOnlyStorageRunner()):
+        session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+        assert CameraFeature.MEDIA_UPLOAD not in session.capabilities().supported
+        with pytest.raises(BridgeError) as failure:
+            session.upload_media("NOPE.JPG", tmp_path / "nope.jpg", 4, "image/jpeg")
+        assert failure.value.code == "UNSUPPORTED_FEATURE"
+        assert not any("--upload-file" in command for command in runner.commands)
+
+
+def test_gphoto2_media_upload_requires_exact_post_upload_readback(tmp_path: Path) -> None:
+    class DropUploadRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0):
+            command = self._without_camera(arguments)
+            if "--upload-file" in command:
+                self.commands.append(tuple(arguments))
+                return CommandOutput(b"Uploaded file successfully.\n")
+            return super().run(arguments, timeout=timeout)
+
+    runner = DropUploadRunner()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+    source = tmp_path / "upload.jpg"
+    source.write_bytes(b"four")
+
+    with pytest.raises(BridgeError, match="did not report exactly one") as failure:
+        session.upload_media("MISSING.JPG", source, 4, "image/jpeg")
+
+    assert failure.value.code == "UPLOAD_VERIFY_FAILED"
+    upload_command = next(command for command in runner.commands if "--upload-file" in command)
+    assert list(upload_command[2:]) == [
+        "--folder",
+        "/store_00010001",
+        "--filename",
+        "MISSING.JPG",
+        "--upload-file",
+        str(source.resolve()),
+    ]
+
+
+def test_gphoto2_media_upload_rejects_casefold_filename_collision(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    runner.uploaded_files[("/store_00010001", "EXISTING.JPG")] = b"existing"
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+    source = tmp_path / "replacement.jpg"
+    source.write_bytes(b"replacement")
+
+    with pytest.raises(BridgeError) as failure:
+        session.upload_media("existing.jpg", source, len(b"replacement"), "image/jpeg")
+
+    assert failure.value.code == "MEDIA_ALREADY_EXISTS"
+    assert runner.uploaded_files[("/store_00010001", "EXISTING.JPG")] == b"existing"
+    assert not any(
+        "--upload-file" in command and "existing.jpg" in command
+        for command in runner.commands
+    )
+
+
+def test_gphoto2_media_upload_finishes_readback_after_process_commit(tmp_path: Path) -> None:
+    class LateCancellationRunner(FakeRunner):
+        def run_cancellable(self, arguments, *, timeout, cancelled):
+            output = super().run_cancellable(arguments, timeout=timeout, cancelled=cancelled)
+            cancelled.set()
+            return output
+
+    runner = LateCancellationRunner()
+    session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+    source = tmp_path / "committed.jpg"
+    source.write_bytes(b"committed")
+    cancelled = threading.Event()
+
+    uploaded = session.upload_media(
+        "COMMITTED.JPG",
+        source,
+        len(b"committed"),
+        "image/jpeg",
+        cancelled,
+    )
+
+    assert cancelled.is_set()
+    assert uploaded.name == "COMMITTED.JPG"
+    assert uploaded.size_bytes == len(b"committed")
 
 
 def test_subprocess_stream_preserves_binary_output_and_enforces_timeout() -> None:

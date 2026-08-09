@@ -280,9 +280,15 @@
       <main id="media-panel" class="content-panel view-panel" hidden>
         <div class="content-heading">
           <div><h2 data-i18n="media">Media</h2><p id="media-summary" class="supporting"></p></div>
-          <button id="media-refresh-button" class="button secondary" type="button">
-            <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span><span data-i18n="refresh">Refresh</span>
-          </button>
+          <div class="content-actions">
+            <input id="media-upload-input" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.cr2,.cr3,.dng,.mp4,.mov,.m4v,.avi" hidden>
+            <button id="media-upload-button" class="icon-button" type="button" data-i18n-aria="uploadMedia">
+              <span class="icon" data-icon="upload" aria-hidden="true"></span>
+            </button>
+            <button id="media-refresh-button" class="button secondary" type="button">
+              <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span><span data-i18n="refresh">Refresh</span>
+            </button>
+          </div>
         </div>
         <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
           <span class="media-transfer-icon icon" data-icon="download" aria-hidden="true"></span>

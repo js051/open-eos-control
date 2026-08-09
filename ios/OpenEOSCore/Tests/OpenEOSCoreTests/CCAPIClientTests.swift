@@ -4,6 +4,15 @@ import XCTest
 @testable import OpenEOSCore
 
 final class CCAPIClientTests: XCTestCase {
+    func testDirectCCAPIUploadIsExplicitlyUnsupported() async throws {
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera)
+        do {
+            _ = try await client.uploadMedia(from: URL(fileURLWithPath: "/tmp/test.jpg"))
+            XCTFail("Expected direct CCAPI upload to be unsupported")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.mediaUpload))
+        }
+    }
     private let discovery = """
     {
       "ver100": [

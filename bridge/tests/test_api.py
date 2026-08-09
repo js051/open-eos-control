@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import importlib
+import tempfile
+import threading
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
-from open_eos_bridge.app import create_app
+from open_eos_bridge.app import _run_media_upload, create_app
 from open_eos_bridge.edsdk import EdsdkEngine
 from open_eos_bridge.edsdk_loader import EdsdkProviderLoadResult
 from open_eos_bridge.errors import BridgeError
@@ -13,6 +18,34 @@ from open_eos_bridge.models import CameraDescriptor
 from open_eos_bridge.rtp import RtpAudioChunk
 
 from .fakes import JPEG, MEDIA_BYTES, THUMBNAIL, FakeRunner
+
+
+def test_media_upload_disconnect_signals_server_worker_cancellation(tmp_path: Path) -> None:
+    stopped = threading.Event()
+
+    def upload(filename, source, size_bytes, content_type, cancelled):
+        del filename, source, size_bytes, content_type
+        if not cancelled.wait(timeout=2.0):
+            raise AssertionError("Upload worker never received cancellation.")
+        stopped.set()
+        raise BridgeError("UPLOAD_CANCELLED", "Upload cancelled.", status_code=409)
+
+    async def disconnected() -> dict[str, str]:
+        return {"type": "http.disconnect"}
+
+    async def exercise() -> None:
+        request = Request({"type": "http", "method": "POST", "path": "/"}, disconnected)
+        source = tmp_path / "payload"
+        source.write_bytes(b"x")
+        try:
+            await _run_media_upload(request, upload, "PHOTO.JPG", source, 1, "image/jpeg")
+        except BridgeError as error:
+            assert error.code == "UPLOAD_CANCELLED"
+        else:
+            raise AssertionError("Disconnected upload unexpectedly succeeded.")
+
+    asyncio.run(exercise())
+    assert stopped.is_set()
 
 
 def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> None:
@@ -39,6 +72,9 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert "/power/sleep" in script.text
     assert "DIRECTORY_CONTROL" in script.text
     assert "/directories" in script.text
+    assert "MEDIA_UPLOAD" in script.text
+    assert "XMLHttpRequest" in script.text
+    assert "media?filename=" in script.text
     assert media_transfer.status_code == 200
     assert media_transfer.headers["content-type"].startswith(("text/javascript", "application/javascript"))
     assert "readResponse" in media_transfer.text
@@ -47,6 +83,60 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert icon.status_code == 200
     assert icon.headers["content-type"].startswith("image/png")
     assert protected_api.status_code == 401
+
+
+def test_media_upload_api_streams_exact_body_and_cleans_staging_file(monkeypatch) -> None:
+    bridge_app = importlib.import_module("open_eos_bridge.app")
+    runner = FakeRunner()
+    created_staging_paths: list[Path] = []
+    real_temporary_directory = tempfile.TemporaryDirectory
+
+    def tracked_temporary_directory(*args, **kwargs):
+        directory = real_temporary_directory(*args, **kwargs)
+        created_staging_paths.append(Path(directory.name))
+        return directory
+
+    monkeypatch.setattr(bridge_app.tempfile, "TemporaryDirectory", tracked_temporary_directory)
+    auth_headers = {"Authorization": "Bearer test-token"}
+    headers = {
+        **auth_headers,
+        "Content-Type": "image/jpeg",
+        "Content-Length": "12",
+    }
+    payload = b"api-upload!!"
+
+    with TestClient(create_app(engine=GPhoto2Engine(runner), token="test-token")) as client:
+        created = client.post("/v1/session", headers=auth_headers, json={"engine": "auto"})
+        session_id = created.json()["id"]
+        uploaded = client.post(
+            f"/v1/session/{session_id}/media",
+            params={"filename": "API-UPLOAD.JPG"},
+            headers=headers,
+            content=payload,
+        )
+        too_short = client.post(
+            f"/v1/session/{session_id}/media",
+            params={"filename": "SHORT.JPG"},
+            headers={**headers, "Content-Length": "13"},
+            content=payload,
+        )
+        unsafe = client.post(
+            f"/v1/session/{session_id}/media",
+            params={"filename": "../escape.JPG"},
+            headers=headers,
+            content=payload,
+        )
+
+    assert uploaded.status_code == 201
+    assert uploaded.json()["name"] == "API-UPLOAD.JPG"
+    assert uploaded.json()["sizeBytes"] == len(payload)
+    assert runner.uploaded_files[("/store_00010001", "API-UPLOAD.JPG")] == payload
+    assert too_short.status_code == 400
+    assert too_short.json()["error"]["code"] == "UPLOAD_BODY_TRUNCATED"
+    assert unsafe.status_code == 422
+    assert unsafe.json()["error"]["code"] == "INVALID_UPLOAD_FILENAME"
+    assert created_staging_paths
+    assert all(not path.exists() for path in created_staging_paths)
 
 
 def test_authenticated_rtp_audio_endpoint_returns_bounded_pcm_and_timeout() -> None:

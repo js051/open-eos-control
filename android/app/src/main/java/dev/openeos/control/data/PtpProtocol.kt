@@ -2,6 +2,8 @@ package dev.openeos.control.data
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 
@@ -16,6 +18,8 @@ object PtpOperationCode {
     const val GET_OBJECT = 0x1009
     const val GET_THUMB = 0x100A
     const val DELETE_OBJECT = 0x100B
+    const val SEND_OBJECT_INFO = 0x100C
+    const val SEND_OBJECT = 0x100D
     const val INITIATE_CAPTURE = 0x100E
     const val SET_OBJECT_PROTECTION = 0x1012
     const val GET_DEVICE_PROP_DESC = 0x1014
@@ -36,18 +40,24 @@ object PtpResponseCode {
     const val INVALID_STORAGE_ID = 0x2008
     const val INVALID_OBJECT_HANDLE = 0x2009
     const val DEVICE_PROP_NOT_SUPPORTED = 0x200A
+    const val INVALID_OBJECT_FORMAT_CODE = 0x200B
+    const val STORE_FULL = 0x200C
     const val OBJECT_WRITE_PROTECTED = 0x200D
     const val STORE_READ_ONLY = 0x200E
     const val ACCESS_DENIED = 0x200F
+    const val NO_VALID_OBJECT_INFO = 0x2015
     const val DEVICE_BUSY = 0x2019
+    const val INVALID_PARENT_OBJECT = 0x201A
     const val INVALID_DEVICE_PROP_FORMAT = 0x201B
     const val INVALID_DEVICE_PROP_VALUE = 0x201C
     const val INVALID_PARAMETER = 0x201D
     const val SESSION_ALREADY_OPEN = 0x201E
+    const val SPECIFICATION_OF_DESTINATION_UNSUPPORTED = 0x2020
     const val INVALID_OBJECT_PROP_CODE = 0xA801
     const val INVALID_OBJECT_PROP_FORMAT = 0xA802
     const val INVALID_OBJECT_PROP_VALUE = 0xA803
     const val OBJECT_PROP_NOT_SUPPORTED = 0xA80A
+    const val OBJECT_TOO_LARGE = 0xA809
 
     fun label(code: Int): String = when (code) {
         OK -> "OK"
@@ -57,23 +67,30 @@ object PtpResponseCode {
         INVALID_STORAGE_ID -> "InvalidStorageID"
         INVALID_OBJECT_HANDLE -> "InvalidObjectHandle"
         DEVICE_PROP_NOT_SUPPORTED -> "DevicePropNotSupported"
+        INVALID_OBJECT_FORMAT_CODE -> "InvalidObjectFormatCode"
+        STORE_FULL -> "StoreFull"
         OBJECT_WRITE_PROTECTED -> "ObjectWriteProtected"
         STORE_READ_ONLY -> "StoreReadOnly"
         ACCESS_DENIED -> "AccessDenied"
+        NO_VALID_OBJECT_INFO -> "NoValidObjectInfo"
         DEVICE_BUSY -> "DeviceBusy"
+        INVALID_PARENT_OBJECT -> "InvalidParentObject"
         INVALID_DEVICE_PROP_FORMAT -> "InvalidDevicePropFormat"
         INVALID_DEVICE_PROP_VALUE -> "InvalidDevicePropValue"
         INVALID_PARAMETER -> "InvalidParameter"
         SESSION_ALREADY_OPEN -> "SessionAlreadyOpen"
+        SPECIFICATION_OF_DESTINATION_UNSUPPORTED -> "SpecificationOfDestinationUnsupported"
         INVALID_OBJECT_PROP_CODE -> "InvalidObjectPropCode"
         INVALID_OBJECT_PROP_FORMAT -> "InvalidObjectPropFormat"
         INVALID_OBJECT_PROP_VALUE -> "InvalidObjectPropValue"
         OBJECT_PROP_NOT_SUPPORTED -> "ObjectPropNotSupported"
+        OBJECT_TOO_LARGE -> "ObjectTooLarge"
         else -> "UnknownResponse"
     }
 }
 
 object PtpObjectFormat {
+    const val UNDEFINED = 0x3000
     const val ASSOCIATION = 0x3001
     const val EXIF_JPEG = 0x3801
     const val TIFF_EP = 0x3802
@@ -81,6 +98,7 @@ object PtpObjectFormat {
     const val DNG = 0x3811
     const val CANON_CRW = 0xB101
     const val CANON_CRW3 = 0xB103
+    const val CANON_MOV = 0xB104
     const val CANON_CR3 = 0xB108
     const val MP4 = 0xB982
 }
@@ -158,6 +176,34 @@ object PtpCodec {
         return bytes
     }
 
+    fun encodeHeader(
+        type: PtpContainerType,
+        code: Int,
+        transactionId: Long,
+        payloadLength: Long,
+    ): ByteArray {
+        require(code in 0..0xFFFF) { "PTP code $code does not fit in UINT16." }
+        require(transactionId in 0L..UINT32_MAX) { "PTP transaction ID exceeds UINT32." }
+        val length = PTP_USB_CONTAINER_HEADER_BYTES + payloadLength
+        require(payloadLength >= 0L && length <= UINT32_MAX) {
+            "PTP container payload $payloadLength exceeds the 32-bit USB container length."
+        }
+        return ByteArray(PTP_USB_CONTAINER_HEADER_BYTES).apply {
+            putU32(0, length)
+            putU16(4, type.value)
+            putU16(6, code)
+            putU32(8, transactionId)
+        }
+    }
+
+    fun responseParameters(container: PtpContainer): List<Long> {
+        require(container.type == PtpContainerType.RESPONSE) { "PTP response parameters require a response container." }
+        if (container.payload.size % 4 != 0 || container.payload.size > 20) {
+            throw PtpProtocolException("PTP response contains an invalid ${container.payload.size}-byte parameter payload.")
+        }
+        return List(container.payload.size / 4) { index -> container.payload.u32(index * 4) }
+    }
+
     fun decode(bytes: ByteArray): PtpContainer {
         val header = decodeHeader(bytes)
         if (header.length != bytes.size.toLong()) {
@@ -212,6 +258,32 @@ interface PtpTransport {
             onProgress(container.payload.size.toLong(), container.payload.size.toLong())
         }
         return PtpContainerReceipt(container.header, container.payload)
+    }
+
+    suspend fun sendFrom(
+        source: InputStream,
+        operationCode: Int,
+        transactionId: Long,
+        payloadLength: Long,
+        onProgress: (bytesTransferred: Long, totalBytes: Long) -> Unit = { _, _ -> },
+    ) {
+        if (payloadLength !in 0L..DEFAULT_PTP_METADATA_BYTES.toLong()) {
+            throw PtpProtocolException(
+                "This PTP transport does not implement streaming data-out for $payloadLength bytes."
+            )
+        }
+        val payload = ByteArray(payloadLength.toInt())
+        var offset = 0
+        onProgress(0L, payloadLength)
+        while (offset < payload.size) {
+            val count = source.read(payload, offset, payload.size - offset)
+            if (count < 0) throw PtpProtocolException("PTP upload ended after $offset of $payloadLength bytes.")
+            if (count == 0) continue
+            offset += count
+            onProgress(offset.toLong(), payloadLength)
+        }
+        if (source.read() != -1) throw PtpProtocolException("PTP upload source exceeds its declared $payloadLength bytes.")
+        send(PtpContainer(PtpContainerType.DATA, operationCode, transactionId, payload))
     }
 
     fun close()
@@ -273,6 +345,12 @@ data class PtpObjectInfo(
     val captureDate: String,
     val modificationDate: String,
     val keywords: String,
+)
+
+data class PtpSendObjectInfoResult(
+    val storageId: Long,
+    val parentObject: Long,
+    val objectHandle: Long,
 )
 
 object PtpDatasets {
@@ -350,6 +428,28 @@ object PtpDatasets {
             keywords = reader.optionalPtpString(),
         )
     }
+
+    fun encodeObjectInfo(info: PtpObjectInfo): ByteArray = PtpDataWriter().apply {
+        u32(info.storageId)
+        u16(info.objectFormat)
+        u16(info.protectionStatus)
+        u32(info.sizeBytes)
+        u16(info.thumbnailFormat)
+        u32(info.thumbnailSizeBytes)
+        u32(info.thumbnailWidth)
+        u32(info.thumbnailHeight)
+        u32(info.imageWidth)
+        u32(info.imageHeight)
+        u32(info.imageBitDepth)
+        u32(info.parentObject)
+        u16(info.associationType)
+        u32(info.associationDescription)
+        u32(info.sequenceNumber)
+        ptpString(info.filename)
+        ptpString(info.captureDate)
+        ptpString(info.modificationDate)
+        ptpString(info.keywords)
+    }.bytes()
 }
 
 class PtpSession(
@@ -537,6 +637,63 @@ class PtpSession(
         )
     }
 
+    suspend fun uploadObject(
+        storageId: Long,
+        parentObject: Long,
+        objectInfo: PtpObjectInfo,
+        source: InputStream,
+        onProgress: (bytesTransferred: Long, totalBytes: Long) -> Unit = { _, _ -> },
+    ): PtpSendObjectInfoResult = mutex.withLock {
+        requireOpen()
+        if (storageId !in 1L until UINT32_MAX) throw PtpProtocolException("SendObjectInfo requires a storage ID.")
+        if (parentObject !in 0L..UINT32_MAX) throw PtpProtocolException("SendObjectInfo parent exceeds UINT32.")
+        if (objectInfo.sizeBytes !in 0L..MAX_PTP_OBJECT_BYTES) {
+            throw PtpProtocolException(
+                "PTP upload size ${objectInfo.sizeBytes} exceeds the ${MAX_PTP_OBJECT_BYTES}-byte object limit."
+            )
+        }
+        if (objectInfo.storageId != storageId || objectInfo.parentObject != parentObject) {
+            throw PtpProtocolException("SendObjectInfo command and dataset destinations must match.")
+        }
+
+        val infoTransactionId = takeTransactionId()
+        transport.send(
+            PtpCodec.command(
+                PtpOperationCode.SEND_OBJECT_INFO,
+                infoTransactionId,
+                listOf(storageId, parentObject),
+            )
+        )
+        transport.send(
+            PtpContainer(
+                PtpContainerType.DATA,
+                PtpOperationCode.SEND_OBJECT_INFO,
+                infoTransactionId,
+                PtpDatasets.encodeObjectInfo(objectInfo),
+            )
+        )
+        val parameters = PtpCodec.responseParameters(
+            receiveResponseLocked(PtpOperationCode.SEND_OBJECT_INFO, infoTransactionId)
+        )
+        if (parameters.size < 3) {
+            throw PtpProtocolException("SendObjectInfo response omitted storage, parent, or object handle.")
+        }
+        val result = PtpSendObjectInfoResult(parameters[0], parameters[1], parameters[2])
+        requireObjectHandle(result.objectHandle, "SendObjectInfo")
+
+        val objectTransactionId = takeTransactionId()
+        transport.send(PtpCodec.command(PtpOperationCode.SEND_OBJECT, objectTransactionId))
+        transport.sendFrom(
+            source = source,
+            operationCode = PtpOperationCode.SEND_OBJECT,
+            transactionId = objectTransactionId,
+            payloadLength = objectInfo.sizeBytes,
+            onProgress = onProgress,
+        )
+        receiveResponseLocked(PtpOperationCode.SEND_OBJECT, objectTransactionId)
+        result
+    }
+
     suspend fun executeOperation(
         operationCode: Int,
         parameters: List<Long> = emptyList(),
@@ -673,6 +830,12 @@ class PtpSession(
         }
     }
 
+    fun abort() {
+        sessionOpen = false
+        cachedDeviceInfo = null
+        transport.close()
+    }
+
     private suspend fun <T> transaction(
         operationCode: Int,
         parameters: List<Long> = emptyList(),
@@ -732,7 +895,7 @@ class PtpSession(
         }
     }
 
-    private suspend fun receiveResponseLocked(operationCode: Int, transactionId: Long) {
+    private suspend fun receiveResponseLocked(operationCode: Int, transactionId: Long): PtpContainer {
         while (true) {
             val container = transport.receive()
             if (container.type == PtpContainerType.EVENT) continue
@@ -740,7 +903,7 @@ class PtpSession(
             when (container.type) {
                 PtpContainerType.RESPONSE -> {
                     checkResponse(container.code, operationCode)
-                    return
+                    return container
                 }
 
                 PtpContainerType.DATA -> throw PtpProtocolException(
@@ -883,6 +1046,37 @@ private class PtpDataReader(private val bytes: ByteArray) {
     }
 }
 
+private class PtpDataWriter {
+    private val output = ByteArrayOutputStream()
+
+    fun u16(value: Int) {
+        if (value !in 0..0xFFFF) throw PtpProtocolException("PTP value $value does not fit in UINT16.")
+        output.write(value and 0xFF)
+        output.write((value ushr 8) and 0xFF)
+    }
+
+    fun u32(value: Long) {
+        if (value !in 0L..UINT32_MAX) throw PtpProtocolException("PTP value $value does not fit in UINT32.")
+        repeat(4) { index -> output.write((value ushr (index * 8)).toInt() and 0xFF) }
+    }
+
+    fun ptpString(value: String) {
+        val encoded = value.toByteArray(StandardCharsets.UTF_16LE)
+        val codeUnits = encoded.size / 2
+        if (codeUnits + 1 > 0xFF) throw PtpProtocolException("PTP string exceeds 254 UTF-16 code units.")
+        if (value.isEmpty()) {
+            output.write(0)
+            return
+        }
+        output.write(codeUnits + 1)
+        output.write(encoded)
+        output.write(0)
+        output.write(0)
+    }
+
+    fun bytes(): ByteArray = output.toByteArray()
+}
+
 private fun ByteArray.u16(offset: Int): Int =
     this[offset].toUByte().toInt() or (this[offset + 1].toUByte().toInt() shl 8)
 
@@ -909,3 +1103,4 @@ const val PTP_USB_CONTAINER_HEADER_BYTES = 12
 const val DEFAULT_PTP_METADATA_BYTES = 16 * 1024 * 1024
 const val MAX_PTP_THUMBNAIL_BYTES = 8 * 1024 * 1024
 const val UINT32_MAX = 0xFFFF_FFFFL
+const val MAX_PTP_OBJECT_BYTES = UINT32_MAX - PTP_USB_CONTAINER_HEADER_BYTES

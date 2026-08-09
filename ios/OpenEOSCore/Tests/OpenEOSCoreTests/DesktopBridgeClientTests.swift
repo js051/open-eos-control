@@ -8,6 +8,78 @@ final class DesktopBridgeClientTests: XCTestCase {
     private let status = #"{"connected":true,"battery":{"level":82,"status":"good"},"recording":false,"mode":"Manual","recordableShots":120,"remainingRecordingSeconds":3600,"media":{"available":true,"totalBytes":1000,"freeBytes":800,"freeImages":123,"devices":1},"exposure":{"iso":"400","shutter":"1/50","aperture":"2.8","whiteBalance":"Auto"},"raw":{"transport":"usb","recordable":{"recordableshots":120,"remainingtime":3600}}}"#
     private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","DIRECTORY_CONTROL","SENSOR_CLEANING","CAMERA_SLEEP","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_PROTECT","MEDIA_RATING","MEDIA_ROTATE","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","magnifications":[1,5],"currentMagnification":1,"minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]},{"key":"directoryselection","label":"Capture directory","value":"100EOSXX","values":["100EOSXX","101EOSXX"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso","directoryselection"],"observedFeatures":["BATTERY_STATUS"],"discoveryTrace":[{"endpoint":"GET /ccapi","outcome":"NO_API_LIST","httpStatus":200,"responseKeys":["value"],"protocolVersions":[],"advertisedOperationCount":0,"truncated":false}],"truncated":false}}"#
 
+    func testDesktopBridgeUploadsExactFileWithRequiredHeadersAndVerifiesResult() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_upload","engine":"libgphoto2","camera":{"id":"gphoto2:test","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
+        )
+        let payload = Data("camera-upload-payload\n".utf8)
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("sample file.JPG")
+        try payload.write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        await transport.enqueueUpload(
+            path: "/v1/session/session_upload/media?filename=sample%20file.JPG",
+            body: Data(#"{"id":"gphoto2:file","name":"sample file.JPG","kind":"image","sizeBytes":22,"previewAvailable":false}"#.utf8)
+        )
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "gphoto2:test",
+            transport: transport
+        )
+        try await client.initialize()
+        let progress = DownloadProgressRecorder()
+        let result = try await client.uploadMedia(from: fileURL, progress: progress.record)
+
+        XCTAssertEqual(result.name, "sample file.JPG")
+        XCTAssertEqual(result.sizeBytes, Int64(payload.count))
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.last)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/v1/session/session_upload/media?filename=sample%20file.JPG")
+        XCTAssertEqual(request.body, payload)
+        XCTAssertEqual(request.headers.first { $0.key.caseInsensitiveCompare("Content-Length") == .orderedSame }?.value, "22")
+        XCTAssertEqual(request.headers.first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value, "image/jpeg")
+        XCTAssertTrue(progress.values().contains { $0.bytesTransferred == Int64(payload.count) })
+    }
+
+    func testDesktopBridgeRejectsUploadWhenReturnedNameOrSizeDoesNotMatchLocalFile() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_upload_invalid","engine":"libgphoto2","camera":{"id":"gphoto2:test","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
+        )
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("invalid-result.JPG")
+        try Data("payload".utf8).write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        await transport.enqueueUpload(
+            path: "/v1/session/session_upload_invalid/media?filename=invalid-result.JPG",
+            body: Data(#"{"id":"gphoto2:file","name":"different.JPG","kind":"image","sizeBytes":999,"previewAvailable":false}"#.utf8)
+        )
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "gphoto2:test",
+            transport: transport
+        )
+        try await client.initialize()
+
+        do {
+            _ = try await client.uploadMedia(from: fileURL)
+            XCTFail("Expected the client to reject an unverifiable upload result")
+        } catch let error as DesktopBridgeError {
+            guard case .invalidResponse(let message) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertTrue(message.contains("upload verification failed"))
+        }
+    }
+
     func testDiscoveryValidatesServiceAndUsesBearerAuthentication() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/health", body: health)

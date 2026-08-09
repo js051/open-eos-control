@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
-from contextlib import asynccontextmanager
+import tempfile
+import threading
+from collections.abc import Callable
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from urllib.parse import quote
 
@@ -18,9 +22,11 @@ from .engine import CameraEngine, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
+from .media_upload import validate_upload_request
 from .models import (
     CameraCapabilities,
     CameraEvent,
+    CameraFeature,
     CameraInfo,
     CameraList,
     CameraStatus,
@@ -64,6 +70,33 @@ UI_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
 }
+
+
+async def _run_media_upload(
+    request: Request,
+    upload: Callable[[str, Path, int, str, threading.Event | None], MediaItem],
+    filename: str,
+    source: Path,
+    size_bytes: int,
+    content_type: str,
+) -> MediaItem:
+    cancelled = threading.Event()
+    task = asyncio.create_task(
+        asyncio.to_thread(upload, filename, source, size_bytes, content_type, cancelled)
+    )
+    try:
+        while not task.done():
+            if await request.is_disconnected():
+                cancelled.set()
+            await asyncio.wait({task}, timeout=0.05)
+        return await task
+    except asyncio.CancelledError:
+        cancelled.set()
+        with suppress(Exception, asyncio.CancelledError):
+            await asyncio.shield(task)
+        raise
+    finally:
+        cancelled.set()
 
 
 def create_app(
@@ -346,6 +379,50 @@ def create_app(
     @router.get("/session/{session_id}/media", response_model=MediaList)
     def media(session_id: str) -> MediaList:
         return MediaList(items=manager.get(session_id).list_media())
+
+    @router.post("/session/{session_id}/media", response_model=MediaItem, status_code=201)
+    async def upload_media(session_id: str, request: Request, filename: str = Query(..., min_length=1)) -> MediaItem:
+        session = manager.get(session_id)
+        capabilities = session.capabilities()
+        if CameraFeature.MEDIA_UPLOAD not in capabilities.supported:
+            raise unsupported(CameraFeature.MEDIA_UPLOAD.value, session.engine_name)
+        safe_filename, content_type, size_bytes = validate_upload_request(
+            filename,
+            request.headers.get("content-type"),
+            request.headers.get("content-length"),
+        )
+        with tempfile.TemporaryDirectory(prefix="open-eos-upload-") as temporary_directory:
+            temporary_path = Path(temporary_directory) / "payload"
+            transferred = 0
+            with temporary_path.open("wb") as destination:
+                async for chunk in request.stream():
+                    if not chunk:
+                        continue
+                    transferred += len(chunk)
+                    if transferred > size_bytes:
+                        raise BridgeError(
+                            "UPLOAD_BODY_TOO_LARGE",
+                            "Upload body is longer than Content-Length.",
+                            status_code=400,
+                        )
+                    destination.write(chunk)
+            if transferred != size_bytes:
+                raise BridgeError(
+                    "UPLOAD_BODY_TRUNCATED",
+                    "Upload body is shorter than Content-Length.",
+                    status_code=400,
+                )
+            upload = getattr(session, "upload_media", None)
+            if not callable(upload):
+                raise unsupported(CameraFeature.MEDIA_UPLOAD.value, session.engine_name)
+            return await _run_media_upload(
+                request,
+                upload,
+                safe_filename,
+                temporary_path,
+                size_bytes,
+                content_type,
+            )
 
     @router.get("/session/{session_id}/media/{media_id}/thumbnail")
     def media_thumbnail(session_id: str, media_id: str) -> Response:

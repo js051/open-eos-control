@@ -1,5 +1,6 @@
 package dev.openeos.control.data
 
+import java.io.InputStream
 import java.io.OutputStream
 
 enum class CameraTransport(
@@ -111,6 +112,13 @@ interface CameraControlBackend {
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = unsupported(CameraFeature.MEDIA_DOWNLOAD)
+    suspend fun uploadMedia(
+        name: String,
+        sizeBytes: Long,
+        contentType: String?,
+        source: InputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaUploadResult = unsupported(CameraFeature.MEDIA_UPLOAD)
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = unsupported(CameraFeature.MEDIA_BROWSER)
     suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
         unsupported(CameraFeature.MEDIA_PROTECT)
@@ -228,6 +236,14 @@ class CcapiCameraBackend(
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
 
+    override suspend fun uploadMedia(
+        name: String,
+        sizeBytes: Long,
+        contentType: String?,
+        source: InputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, onProgress)
+
     override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = client.mediaInfo(item)
 
     override suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
@@ -342,6 +358,14 @@ class DesktopBridgeCameraBackend(
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
+
+    override suspend fun uploadMedia(
+        name: String,
+        sizeBytes: Long,
+        contentType: String?,
+        source: InputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, onProgress)
 
     override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = client.mediaInfo(item)
 

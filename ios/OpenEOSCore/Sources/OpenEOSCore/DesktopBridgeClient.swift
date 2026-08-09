@@ -64,6 +64,7 @@ public actor DesktopBridgeClient {
     private static let maximumLiveViewFrameBytes = 12 * 1024 * 1024
     private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
     private static let maximumMediaPreviewBytes = 32 * 1024 * 1024
+    private static let maximumUploadBytes: Int64 = 4 * 1024 * 1024 * 1024 - 1
     private static let mediaRotations = Set([0, 90, 180, 270])
     private static let maximumErrorBodyBytes = 2_000
     private static let maximumEvidenceItems = 256
@@ -682,6 +683,61 @@ public actor DesktopBridgeClient {
         )
     }
 
+    public func uploadMedia(
+        from fileURL: URL,
+        contentType: String? = nil,
+        progress: @escaping CameraMediaProgressHandler = { _ in }
+    ) async throws -> CameraMediaItem {
+        let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true, let fileSize = values.fileSize, fileSize > 0 else {
+            throw DesktopBridgeError.invalidResponse("The selected upload is not a regular file.")
+        }
+        guard Int64(fileSize) <= Self.maximumUploadBytes else {
+            throw DesktopBridgeError.invalidResponse("The selected upload exceeds the Desktop Bridge size limit.")
+        }
+        let filename = fileURL.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !filename.isEmpty, filename != ".", !filename.contains("/") else {
+            throw DesktopBridgeError.invalidResponse("The selected upload has an invalid filename.")
+        }
+        guard let inferredContentType = Self.contentType(for: filename) else {
+            throw DesktopBridgeError.invalidResponse("The selected upload format is not supported by Desktop Bridge.")
+        }
+        let url = try sessionEndpoint(["media"], queryItems: [URLQueryItem(name: "filename", value: filename)])
+        var request = makeRequest(url: url, method: "POST", accept: "application/json", timeoutInterval: 120)
+        request.setValue(contentType ?? inferredContentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(String(fileSize), forHTTPHeaderField: "Content-Length")
+        let response = try await transport.upload(request, from: fileURL) { value in
+            progress(
+                CameraMediaTransferProgress(
+                    bytesTransferred: value.bytesTransferred,
+                    totalBytes: value.totalBytes ?? Int64(fileSize)
+                )
+            )
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw Self.httpError(
+                statusCode: response.statusCode,
+                body: Data(response.body.prefix(Self.maximumErrorBodyBytes)),
+                method: "POST",
+                url: url
+            )
+        }
+        guard response.body.count <= Self.maximumErrorBodyBytes * 16,
+              let value = try? JSONSerialization.jsonObject(with: response.body),
+              let itemBody = value as? BridgeJSON,
+              let item = Self.parseMediaItem(itemBody) else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid uploaded media information.")
+        }
+        guard item.name.caseInsensitiveCompare(filename) == .orderedSame,
+              item.sizeBytes == Int64(fileSize) else {
+            throw DesktopBridgeError.invalidResponse(
+                "Desktop Bridge upload verification failed for \(filename): returned \(item.name) with size \(item.sizeBytes.map(String.init) ?? \"unknown\")."
+            )
+        }
+        progress(CameraMediaTransferProgress(bytesTransferred: Int64(fileSize), totalBytes: Int64(fileSize)))
+        return item
+    }
+
     public func deleteMedia(_ item: CameraMediaItem) async throws {
         try await requestOK(sessionEndpoint(["media", item.id]), method: "DELETE")
     }
@@ -1084,6 +1140,24 @@ public actor DesktopBridgeClient {
     }
 
     private static let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+
+    private static func contentType(for filename: String) -> String? {
+        switch filename.split(separator: ".").last?.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "webp": return "image/webp"
+        case "gif": return "image/gif"
+        case "heic", "heif": return "image/heic"
+        case "cr2": return "image/x-canon-cr2"
+        case "cr3": return "image/x-canon-cr3"
+        case "dng": return "image/x-adobe-dng"
+        case "mp4": return "video/mp4"
+        case "mov": return "video/quicktime"
+        case "m4v": return "video/x-m4v"
+        case "avi": return "video/x-msvideo"
+        default: return nil
+        }
+    }
 
     private static func jsonString(_ value: BridgeJSON) -> String {
         guard

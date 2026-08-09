@@ -40,6 +40,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case mediaThumbnail = "MEDIA_THUMBNAIL"
     case mediaPreview = "MEDIA_PREVIEW"
     case mediaDownload = "MEDIA_DOWNLOAD"
+    case mediaUpload = "MEDIA_UPLOAD"
     case mediaProtect = "MEDIA_PROTECT"
     case mediaRating = "MEDIA_RATING"
     case mediaRotate = "MEDIA_ROTATE"
@@ -572,6 +573,27 @@ public struct CameraCapabilities: Equatable, Sendable {
 
     public func setting(_ key: String) -> CameraSetting? {
         settings.first { $0.key == key }
+    }
+
+    public func observing(_ feature: CameraFeature) -> CameraCapabilities {
+        var observed = evidence.observedFeatures
+        observed.insert(feature)
+        return CameraCapabilities(
+            settings: settings,
+            fileNaming: fileNaming,
+            matrix: matrix,
+            liveView: liveView,
+            profile: profile,
+            evidence: CameraCapabilityEvidence(
+                source: evidence.source,
+                protocolVersions: evidence.protocolVersions,
+                advertisedCommands: evidence.advertisedCommands,
+                writableSettings: evidence.writableSettings,
+                observedFeatures: observed,
+                discoveryTrace: evidence.discoveryTrace,
+                truncated: evidence.truncated
+            )
+        )
     }
 }
 

@@ -39,6 +39,7 @@
     MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL",
     MEDIA_PREVIEW: "MEDIA_PREVIEW",
     MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
+    MEDIA_UPLOAD: "MEDIA_UPLOAD",
     MEDIA_PROTECT: "MEDIA_PROTECT",
     MEDIA_RATING: "MEDIA_RATING",
     MEDIA_ROTATE: "MEDIA_ROTATE",
@@ -362,6 +363,13 @@
       cancellingDownload: "Cancelling download",
       downloadCancelled: "Download cancelled",
       downloaded: "Downloaded {name}",
+      uploadMedia: "Upload media",
+      uploading: "Uploading {name}",
+      uploadProgress: "{transferred} of {total} ({percent}%)",
+      cancelUpload: "Cancel upload",
+      cancellingUpload: "Cancelling upload",
+      uploadCancelled: "Upload cancelled",
+      uploaded: "Uploaded {name}",
       delete: "Delete",
       deleteConfirm: "Permanently delete {name} from the camera card? This cannot be undone.",
       deleted: "Deleted {name}",
@@ -697,6 +705,13 @@
       cancellingDownload: "正在取消下載",
       downloadCancelled: "已取消下載",
       downloaded: "已下載 {name}",
+      uploadMedia: "上傳媒體",
+      uploading: "正在上傳 {name}",
+      uploadProgress: "已傳輸 {transferred}／{total}（{percent}%）",
+      cancelUpload: "取消上傳",
+      cancellingUpload: "正在取消上傳",
+      uploadCancelled: "已取消上傳",
+      uploaded: "已上傳 {name}",
       delete: "刪除",
       deleteConfirm: "確定要從相機儲存卡永久刪除「{name}」嗎？此操作無法復原。",
       deleted: "已刪除 {name}",
@@ -970,6 +985,7 @@
     mediaDetailsBusy: false,
     mediaDownloadPreparing: false,
     mediaDownload: null,
+    mediaUpload: null,
     busy: false,
     refreshGeneration: 0,
     lastError: null,
@@ -1071,6 +1087,8 @@
     monitorDesqueezeSelect: byId("monitor-desqueeze-select"),
     advancedSettings: byId("advanced-settings"),
     mediaRefreshButton: byId("media-refresh-button"),
+    mediaUploadButton: byId("media-upload-button"),
+    mediaUploadInput: byId("media-upload-input"),
     mediaSummary: byId("media-summary"),
     mediaList: byId("media-list"),
     mediaTransfer: byId("media-transfer"),
@@ -1509,6 +1527,7 @@
     stopLocalVideo({ announce: false });
     cancelEventLoop();
     cancelMediaDownload({ silent: true });
+    cancelMediaUpload({ silent: true });
     clearScheduledMediaTransferRender();
     clearMediaThumbnails();
     closeMediaPreview();
@@ -1526,6 +1545,7 @@
     state.mediaLoaded = false;
     state.mediaDownloadPreparing = false;
     state.mediaDownload = null;
+    state.mediaUpload = null;
     state.captureMode = "photo";
     state.previewInput = "CAMERA";
     state.liveSource = "AUTO";
@@ -1611,7 +1631,7 @@
   }
 
   function mediaTransferActive() {
-    return state.mediaDownloadPreparing || Boolean(state.mediaDownload);
+    return state.mediaDownloadPreparing || Boolean(state.mediaDownload) || Boolean(state.mediaUpload);
   }
 
   function cameraInteractionBusy() {
@@ -3943,6 +3963,8 @@
     }
     const mediaTab = document.querySelector('.tab[data-view="media"]');
     mediaTab.hidden = !featureSupported(FEATURES.MEDIA_BROWSER);
+    ui.mediaUploadButton.hidden = !featureSupported(FEATURES.MEDIA_UPLOAD);
+    ui.mediaUploadButton.disabled = !connected || interactionBusy || !featureSupported(FEATURES.MEDIA_UPLOAD);
     ui.mediaRefreshButton.disabled = !connected || interactionBusy;
     renderMediaTransfer();
     renderMediaDetails();
@@ -4357,18 +4379,19 @@
   }
 
   function renderMediaTransfer() {
-    const transfer = state.mediaDownload;
+    const transfer = state.mediaUpload || state.mediaDownload;
+    const uploading = Boolean(state.mediaUpload);
     ui.mediaTransfer.hidden = !transfer;
     ui.mediaRefreshButton.disabled = !state.session || cameraInteractionBusy();
     if (!transfer) return;
     ui.mediaTransferName.textContent = transfer.name;
     if (transfer.cancelling) {
-      ui.mediaTransferStatus.textContent = t("cancellingDownload");
+      ui.mediaTransferStatus.textContent = t(uploading ? "cancellingUpload" : "cancellingDownload");
     } else {
       const transferred = formatBytes(transfer.bytesTransferred);
       const total = transfer.totalBytes;
       ui.mediaTransferStatus.textContent = total
-        ? t("downloadProgress", {
+        ? t(uploading ? "uploadProgress" : "downloadProgress", {
           transferred,
           total: formatBytes(total),
           percent: Math.min(100, Math.floor((transfer.bytesTransferred / total) * 100)),
@@ -4381,6 +4404,7 @@
       ui.mediaTransferProgress.removeAttribute("value");
     }
     ui.mediaTransferCancel.disabled = transfer.cancelling;
+    ui.mediaTransferCancel.setAttribute("aria-label", t(uploading ? "cancelUpload" : "cancelDownload"));
   }
 
   async function chooseMediaWritable(item) {
@@ -4504,6 +4528,105 @@
     renderMediaTransfer();
   }
 
+  function uploadMedia(file) {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_UPLOAD) || cameraInteractionBusy()) return;
+    const xhr = new XMLHttpRequest();
+    const transfer = {
+      name: file.name,
+      bytesTransferred: 0,
+      totalBytes: file.size,
+      xhr,
+      cancelling: false,
+      silent: false,
+    };
+    state.mediaUpload = transfer;
+    setOperationState(t("uploading", { name: file.name }));
+    renderMediaTransfer();
+    renderAvailability();
+    xhr.open(
+      "POST",
+      `/v1/session/${encodeURIComponent(state.session.id)}/media?filename=${encodeURIComponent(file.name)}`,
+    );
+    if (state.token) xhr.setRequestHeader("Authorization", `Bearer ${state.token}`);
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.upload.onprogress = (event) => {
+      if (state.mediaUpload !== transfer) return;
+      transfer.bytesTransferred = event.loaded;
+      transfer.totalBytes = event.lengthComputable ? event.total : file.size;
+      scheduleMediaTransferRender();
+    };
+    xhr.onload = async () => {
+      if (state.mediaUpload !== transfer) return;
+      state.mediaUpload = null;
+      clearScheduledMediaTransferRender();
+      renderMediaTransfer();
+      renderAvailability();
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          await refreshMedia();
+          showToast(t("uploaded", { name: file.name }));
+          setOperationState(t("ready"));
+        } catch (error) {
+          const normalized = captureError(error);
+          showToast(normalized.message, true);
+          setOperationState(normalized.message, true);
+        }
+      } else {
+        let message = t("operationFailed");
+        try {
+          const payload = JSON.parse(xhr.responseText || "{}");
+          message = payload.error?.message || message;
+        } catch (_) {
+          // Keep the readable fallback for non-JSON bridge errors.
+        }
+        showToast(message, true);
+        setOperationState(message, true);
+      }
+      clearScheduledMediaTransferRender();
+      renderMedia();
+      renderAvailability();
+    };
+    xhr.onerror = () => {
+      if (state.mediaUpload !== transfer) return;
+      const message = t("operationFailed");
+      showToast(message, true);
+      setOperationState(message, true);
+      state.mediaUpload = null;
+      renderMediaTransfer();
+      renderAvailability();
+    };
+    xhr.onabort = async () => {
+      if (state.mediaUpload !== transfer) return;
+      state.mediaUpload = null;
+      renderMediaTransfer();
+      renderAvailability();
+      if (!transfer.silent) {
+        const refreshed = await refreshMedia();
+        const committed = refreshed && state.media.some((item) =>
+          item.name?.localeCompare(file.name, undefined, { sensitivity: "accent" }) === 0 &&
+          Number(item.sizeBytes) === file.size
+        );
+        showToast(t(committed ? "uploaded" : "uploadCancelled", { name: file.name }));
+        setOperationState(t("ready"));
+      }
+    };
+    xhr.send(file);
+  }
+
+  function cancelMediaUpload({ silent = false } = {}) {
+    const transfer = state.mediaUpload;
+    if (!transfer || transfer.cancelling) return;
+    transfer.silent = silent;
+    transfer.cancelling = true;
+    renderMediaTransfer();
+    transfer.xhr.abort();
+  }
+
+  function cancelMediaTransfer() {
+    if (state.mediaUpload) cancelMediaUpload();
+    else cancelMediaDownload();
+  }
+
   async function deleteMedia(item, button) {
     if (!state.session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy()) return;
     if (!window.confirm(t("deleteConfirm", { name: item.name }))) return;
@@ -4620,12 +4743,13 @@
           error: state.localVideoError,
         },
       },
-      mediaTransfer: state.mediaDownload ? {
+      mediaTransfer: (state.mediaUpload || state.mediaDownload) ? {
         active: true,
-        bytesTransferred: state.mediaDownload.bytesTransferred,
-        totalBytes: state.mediaDownload.totalBytes,
-        destination: state.mediaDownload.destination,
-        cancelling: state.mediaDownload.cancelling,
+        kind: state.mediaUpload ? "upload" : "download",
+        bytesTransferred: (state.mediaUpload || state.mediaDownload).bytesTransferred,
+        totalBytes: (state.mediaUpload || state.mediaDownload).totalBytes,
+        destination: state.mediaDownload?.destination || null,
+        cancelling: (state.mediaUpload || state.mediaDownload).cancelling,
       } : { active: false },
       lastError: state.lastError,
     };
@@ -4912,7 +5036,13 @@
       });
     });
     ui.mediaRefreshButton.addEventListener("click", refreshMedia);
-    ui.mediaTransferCancel.addEventListener("click", () => cancelMediaDownload());
+    ui.mediaUploadButton.addEventListener("click", () => ui.mediaUploadInput.click());
+    ui.mediaUploadInput.addEventListener("change", () => {
+      const [file] = ui.mediaUploadInput.files || [];
+      ui.mediaUploadInput.value = "";
+      if (file) uploadMedia(file);
+    });
+    ui.mediaTransferCancel.addEventListener("click", cancelMediaTransfer);
     ui.mediaPreviewClose.addEventListener("click", closeMediaPreview);
     ui.mediaPreviewDialog.addEventListener("close", clearMediaPreview);
     ui.mediaPreviewDialog.addEventListener("click", (event) => {
@@ -4957,6 +5087,7 @@
       lutPreviewRenderer?.dispose();
       lutPreviewRenderer = null;
       cancelMediaDownload({ silent: true });
+      cancelMediaUpload({ silent: true });
       clearMediaThumbnails();
       closeMediaPreview();
       closeMediaDetails();

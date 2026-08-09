@@ -101,6 +101,7 @@ enum class CameraFeature(
     MEDIA_THUMBNAIL("Media thumbnail"),
     MEDIA_PREVIEW("Media preview"),
     MEDIA_DOWNLOAD("Media download"),
+    MEDIA_UPLOAD("Media upload"),
     MEDIA_PROTECT("Media protection"),
     MEDIA_RATING("Media rating"),
     MEDIA_ROTATE("Media rotation"),
@@ -162,6 +163,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_UPLOAD,
                 CameraFeature.MEDIA_PROTECT,
                 CameraFeature.MEDIA_RATING,
                 CameraFeature.MEDIA_ROTATE,
@@ -248,6 +250,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_UPLOAD,
                 CameraFeature.MEDIA_PROTECT,
                 CameraFeature.MEDIA_RATING,
                 CameraFeature.MEDIA_ROTATE,
@@ -290,6 +293,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_THUMBNAIL,
                 CameraFeature.MEDIA_PREVIEW,
                 CameraFeature.MEDIA_DOWNLOAD,
+                CameraFeature.MEDIA_UPLOAD,
                 CameraFeature.MEDIA_PROTECT,
                 CameraFeature.MEDIA_RATING,
                 CameraFeature.MEDIA_ROTATE,
@@ -620,6 +624,11 @@ data class CameraMediaDownloadResult(
     val item: CameraMediaItem,
     val bytesTransferred: Long,
     val contentType: String?,
+)
+
+data class CameraMediaUploadResult(
+    val item: CameraMediaItem,
+    val bytesTransferred: Long,
 )
 
 sealed interface CameraCommand {
