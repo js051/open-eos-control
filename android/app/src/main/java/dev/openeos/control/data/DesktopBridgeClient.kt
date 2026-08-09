@@ -215,6 +215,37 @@ class DesktopBridgeClient(
         )
             .take(MAX_CAPABILITY_EVIDENCE_ITEMS)
             .toSet()
+        val rawDiscoveryTrace = evidenceBody.optJSONArray("discoveryTrace")
+        val evidenceDiscoveryTrace = rawDiscoveryTrace.objects()
+            .take(MAX_DISCOVERY_TRACE_ATTEMPTS)
+            .mapNotNull { attempt ->
+                val endpoint = attempt.optString("endpoint")
+                    .takeIf { it.matches(Regex("GET /ccapi(?:/[A-Za-z0-9._~-]+)*/?")) }
+                    ?: return@mapNotNull null
+                val outcome = attempt.optString("outcome")
+                    .takeIf { it.matches(Regex("[A-Z][A-Z0-9_]{0,63}")) }
+                    ?: return@mapNotNull null
+                val keys = attempt.optJSONArray("responseKeys").strings()
+                    .filter { it.matches(Regex("[A-Za-z][A-Za-z0-9_-]{0,63}")) }
+                    .distinct()
+                    .take(MAX_DISCOVERY_TRACE_KEYS)
+                val versions = attempt.optJSONArray("protocolVersions").strings()
+                    .filter { it.matches(Regex("""ver\d+""")) }
+                    .distinct()
+                    .take(MAX_DISCOVERY_TRACE_KEYS)
+                CameraDiscoveryAttempt(
+                    endpoint = endpoint,
+                    outcome = outcome,
+                    httpStatus = attempt.optInt("httpStatus")
+                        .takeIf { attempt.has("httpStatus") && it in 100..599 },
+                    responseKeys = keys,
+                    protocolVersions = versions,
+                    advertisedOperationCount = attempt.optInt("advertisedOperationCount").coerceAtLeast(0),
+                    truncated = attempt.optBoolean("truncated") ||
+                        (attempt.optJSONArray("responseKeys")?.length() ?: 0) > keys.size ||
+                        (attempt.optJSONArray("protocolVersions")?.length() ?: 0) > versions.size,
+                )
+            }
         observedFeatures.addAll(evidenceObservedFeatures)
         return CameraCapabilities(
             iso = settingsByKey["iso"]?.values.orEmpty(),
@@ -257,11 +288,14 @@ class DesktopBridgeClient(
                 advertisedCommands = evidenceCommands,
                 writableSettings = evidenceSettings,
                 observedFeatures = evidenceObservedFeatures,
+                discoveryTrace = evidenceDiscoveryTrace,
                 truncated = evidenceBody.optBoolean("truncated") ||
                     (evidenceBody.optJSONArray("protocolVersions")?.length() ?: 0) > evidenceVersions.size ||
                     (evidenceBody.optJSONArray("advertisedCommands")?.length() ?: 0) > evidenceCommands.size ||
                     (evidenceBody.optJSONArray("writableSettings")?.length() ?: 0) > evidenceSettings.size ||
-                    (evidenceBody.optJSONArray("observedFeatures")?.length() ?: 0) > evidenceObservedFeatures.size,
+                    (evidenceBody.optJSONArray("observedFeatures")?.length() ?: 0) > evidenceObservedFeatures.size ||
+                    (rawDiscoveryTrace?.length() ?: 0) > evidenceDiscoveryTrace.size ||
+                    evidenceDiscoveryTrace.any(CameraDiscoveryAttempt::truncated),
             ),
         )
     }

@@ -570,6 +570,8 @@ async function run() {
     const diagnostics = await page.locator("#diagnostics-output").innerText();
     assert.match(diagnostics, /CCAPI_NETWORK|ccapi/i);
     assert.match(diagnostics, /EVENT_POLLING/);
+    assert.match(diagnostics, /"discoveryTrace"/);
+    assert.match(diagnostics, /"endpoint": "GET \/ccapi"/);
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
     await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-ccapi-e2e.png"), fullPage: true });
 

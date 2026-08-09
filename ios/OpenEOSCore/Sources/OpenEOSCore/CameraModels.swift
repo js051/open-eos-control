@@ -354,12 +354,41 @@ public struct LiveViewCapabilities: Equatable, Sendable {
     }
 }
 
+public struct CameraDiscoveryAttempt: Equatable, Sendable {
+    public let endpoint: String
+    public let outcome: String
+    public let httpStatus: Int?
+    public let responseKeys: [String]
+    public let protocolVersions: [String]
+    public let advertisedOperationCount: Int
+    public let truncated: Bool
+
+    public init(
+        endpoint: String,
+        outcome: String,
+        httpStatus: Int? = nil,
+        responseKeys: [String] = [],
+        protocolVersions: [String] = [],
+        advertisedOperationCount: Int = 0,
+        truncated: Bool = false
+    ) {
+        self.endpoint = endpoint
+        self.outcome = outcome
+        self.httpStatus = httpStatus
+        self.responseKeys = responseKeys
+        self.protocolVersions = protocolVersions
+        self.advertisedOperationCount = advertisedOperationCount
+        self.truncated = truncated
+    }
+}
+
 public struct CameraCapabilityEvidence: Equatable, Sendable {
     public let source: String
     public let protocolVersions: [String]
     public let advertisedCommands: [String]
     public let writableSettings: [String]
     public let observedFeatures: Set<CameraFeature>
+    public let discoveryTrace: [CameraDiscoveryAttempt]
     public let truncated: Bool
 
     public init(
@@ -368,6 +397,7 @@ public struct CameraCapabilityEvidence: Equatable, Sendable {
         advertisedCommands: [String] = [],
         writableSettings: [String] = [],
         observedFeatures: Set<CameraFeature> = [],
+        discoveryTrace: [CameraDiscoveryAttempt] = [],
         truncated: Bool = false
     ) {
         self.source = source
@@ -375,6 +405,7 @@ public struct CameraCapabilityEvidence: Equatable, Sendable {
         self.advertisedCommands = advertisedCommands
         self.writableSettings = writableSettings
         self.observedFeatures = observedFeatures
+        self.discoveryTrace = discoveryTrace
         self.truncated = truncated
     }
 }

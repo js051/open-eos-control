@@ -143,6 +143,8 @@ class CcapiClient(
     private var cameraSleepWritePath: String? = null
     private val apiOperations = linkedSetOf<CcapiApiOperation>()
     private val observedFeatures = mutableSetOf<CameraFeature>()
+    private val discoveryTrace = mutableListOf<CameraDiscoveryAttempt>()
+    private var discoveryTraceTruncated = false
     private var enforceAdvertisedOperations = false
     private var settingsLoaded = false
     private var discoverySource = "unknown"
@@ -169,6 +171,8 @@ class CcapiClient(
     }
 
     suspend fun initialize() {
+        discoveryTrace.clear()
+        discoveryTraceTruncated = false
         val isLocalOrSim = try {
             val uri = java.net.URI.create(baseUrl)
             val host = uri.host ?: ""
@@ -216,17 +220,35 @@ class CcapiClient(
                 withContext(Dispatchers.IO) {
                     httpClient.newCall(request).execute().use { response ->
                         if (response.isSuccessful) {
+                            val identity = response.body?.string()?.let { body ->
+                                runCatching { JSONObject(body) }.getOrNull()
+                            }
                             apiVersionPrefixes = listOf(prefix)
                             apiVersionPrefix = prefix
                             discoverySource = "GET $prefix/deviceinformation (identity fallback)"
+                            recordDiscoveryResponse(
+                                endpoint = "GET $prefix/deviceinformation",
+                                outcome = "IDENTITY",
+                                response = identity,
+                                httpStatus = response.code,
+                                operationCount = 0,
+                            )
                             true
                         } else {
+                            recordDiscoveryAttempt(
+                                CameraDiscoveryAttempt(
+                                    endpoint = "GET $prefix/deviceinformation",
+                                    outcome = "HTTP_ERROR",
+                                    httpStatus = response.code,
+                                ),
+                            )
                             errors.add("GET $prefix/deviceinformation: HTTP ${response.code}")
                             false
                         }
                     }
                 }
             } catch (e: Exception) {
+                recordDiscoveryFailure("GET $prefix/deviceinformation", e)
                 errors.add("GET $prefix/deviceinformation failed: ${e.message}")
                 false
             }
@@ -252,16 +274,41 @@ class CcapiClient(
 
     private suspend fun discoverApiAt(path: String, errors: MutableList<String>): Boolean {
         return try {
-            val rootDiscovery = getJson(path)
+            val rootDiscovery = try {
+                getJson(path)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                recordDiscoveryFailure("GET $path", error)
+                throw error
+            }
             if (rootDiscovery.optString("value") != CCAPI_NO_API_LIST_VALUE) {
                 parseDiscoveryResponse(rootDiscovery, "GET $path")
+                recordDiscoveryResponse(
+                    endpoint = "GET $path",
+                    outcome = if (apiOperations.isNotEmpty()) "OPERATIONS" else "ZERO_OPERATIONS",
+                    response = rootDiscovery,
+                )
                 if (apiOperations.isNotEmpty()) return true
+            } else {
+                recordDiscoveryResponse("GET $path", "NO_API_LIST", rootDiscovery)
             }
 
-            val developerDiscovery = getJson(CCAPI_DEVELOPER_API_PATH)
+            val developerEndpoint = "GET $CCAPI_DEVELOPER_API_PATH"
+            val developerDiscovery = try {
+                getJson(CCAPI_DEVELOPER_API_PATH)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                recordDiscoveryFailure(developerEndpoint, error)
+                throw error
+            }
             parseDiscoveryResponse(
                 developerDiscovery,
                 "GET $CCAPI_DEVELOPER_API_PATH (Canon developer API fallback)",
+            )
+            recordDiscoveryResponse(
+                endpoint = developerEndpoint,
+                outcome = if (apiOperations.isNotEmpty()) "OPERATIONS" else "ZERO_OPERATIONS",
+                response = developerDiscovery,
             )
             check(apiOperations.isNotEmpty()) {
                 "Camera developer API $CCAPI_DEVELOPER_API_PATH did not advertise any valid operations."
@@ -362,6 +409,69 @@ class CcapiClient(
 
     private fun extractApiVersion(path: String): String? =
         Regex("""/ccapi/(ver\d+)(/|$)""").find(path)?.groupValues?.get(1)
+
+    private fun recordDiscoveryResponse(
+        endpoint: String,
+        outcome: String,
+        response: JSONObject?,
+        httpStatus: Int? = 200,
+        operationCount: Int = apiOperations.size,
+    ) {
+        val rawKeys = mutableListOf<String>()
+        response?.keys()?.let { keys ->
+            while (keys.hasNext()) {
+                keys.next()
+                    .takeIf { it.matches(Regex("[A-Za-z][A-Za-z0-9_-]{0,63}")) }
+                    ?.let(rawKeys::add)
+            }
+        }
+        val cleanKeys = rawKeys.distinct().sorted()
+        val versions = linkedSetOf<String>()
+        response?.optJSONArray("api")?.let { array ->
+            repeat(array.length()) { index ->
+                extractApiVersion(array.optString(index))?.let(versions::add)
+            }
+        }
+        cleanKeys.filter { it.matches(Regex("""ver\d+""")) }.forEach(versions::add)
+        response?.optString("version")
+            ?.takeIf { it.matches(Regex("""ver\d+""")) }
+            ?.let(versions::add)
+        val cleanVersions = versions
+            .map { it.take(MAX_DISCOVERY_TRACE_KEY_CHARS) }
+            .distinct()
+            .sortedDescending()
+        recordDiscoveryAttempt(
+            CameraDiscoveryAttempt(
+                endpoint = endpoint.take(128),
+                outcome = outcome.take(64),
+                httpStatus = httpStatus,
+                responseKeys = cleanKeys.take(MAX_DISCOVERY_TRACE_KEYS),
+                protocolVersions = cleanVersions.take(MAX_DISCOVERY_TRACE_KEYS),
+                advertisedOperationCount = operationCount.coerceAtLeast(0),
+                truncated = cleanKeys.size > MAX_DISCOVERY_TRACE_KEYS ||
+                    cleanVersions.size > MAX_DISCOVERY_TRACE_KEYS,
+            ),
+        )
+    }
+
+    private fun recordDiscoveryFailure(endpoint: String, error: Exception) {
+        val status = (error as? CcapiHttpException)?.statusCode
+        recordDiscoveryAttempt(
+            CameraDiscoveryAttempt(
+                endpoint = endpoint.take(128),
+                outcome = if (status != null) "HTTP_ERROR" else "REQUEST_ERROR",
+                httpStatus = status,
+            ),
+        )
+    }
+
+    private fun recordDiscoveryAttempt(attempt: CameraDiscoveryAttempt) {
+        if (discoveryTrace.size < MAX_DISCOVERY_TRACE_ATTEMPTS) {
+            discoveryTrace += attempt
+        } else {
+            discoveryTraceTruncated = true
+        }
+    }
 
     private fun String.apiVersionNumber(): Int =
         substringAfterLast("ver").toIntOrNull() ?: 0
@@ -1639,9 +1749,11 @@ class CcapiClient(
             advertisedCommands = commands.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
             writableSettings = writableSettings.take(MAX_CAPABILITY_EVIDENCE_ITEMS),
             observedFeatures = observedFeatures.toSet(),
+            discoveryTrace = discoveryTrace.toList(),
             truncated = protocolVersions.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
                 commands.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
-                writableSettings.size > MAX_CAPABILITY_EVIDENCE_ITEMS,
+                writableSettings.size > MAX_CAPABILITY_EVIDENCE_ITEMS ||
+                discoveryTraceTruncated || discoveryTrace.any(CameraDiscoveryAttempt::truncated),
         )
     }
 

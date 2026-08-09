@@ -65,6 +65,9 @@ public actor CCAPIClient {
     private static let mediaRotations = Set([0, 90, 180, 270])
     private static let maximumCapabilityEvidenceItems = 256
     private static let maximumCapabilityEvidenceItemCharacters = 512
+    private static let maximumDiscoveryTraceAttempts = 16
+    private static let maximumDiscoveryTraceKeys = 32
+    private static let maximumDiscoveryTraceKeyCharacters = 64
     private static let maximumEventBytes = 256 * 1024
     private static let maximumEventKeys = 64
     private static let maximumEventKeyCharacters = 128
@@ -238,6 +241,8 @@ public actor CCAPIClient {
     private var preferredVersionPrefix = "/ccapi/ver100"
     private var operations = Set<CCAPIOperation>()
     private var observedFeatures = Set<CameraFeature>()
+    private var discoveryTrace: [CameraDiscoveryAttempt] = []
+    private var discoveryTraceTruncated = false
     private var settingPaths: [String: String] = [:]
     private var cameraSleepPath: String?
     private var cachedSettings: JSONDictionary?
@@ -306,6 +311,8 @@ public actor CCAPIClient {
 
     public func initialize() async throws {
         guard !initialized else { return }
+        discoveryTrace.removeAll()
+        discoveryTraceTruncated = false
         resolvedMode = resolveMode(requestedMode)
         if resolvedMode == .simulator {
             discoverySource = "simulator contract"
@@ -316,19 +323,50 @@ public actor CCAPIClient {
         var errors: [String] = []
         for path in ["/ccapi", "/ccapi/"] {
             do {
-                let rootDiscovery = try await requestJSON(path: path)
+                let rootDiscovery: JSONDictionary
+                do {
+                    rootDiscovery = try await requestJSON(path: path)
+                } catch {
+                    if error is CancellationError { throw error }
+                    recordDiscoveryFailure(endpoint: "GET \(path)", error: error)
+                    throw error
+                }
                 if rootDiscovery.string("value") != Self.noAPIListValue {
                     parseDiscovery(rootDiscovery, source: "GET \(path)")
+                    recordDiscoveryResponse(
+                        endpoint: "GET \(path)",
+                        outcome: operations.isEmpty ? "ZERO_OPERATIONS" : "OPERATIONS",
+                        response: rootDiscovery
+                    )
                     if !operations.isEmpty {
                         initialized = true
                         return
                     }
+                } else {
+                    recordDiscoveryResponse(
+                        endpoint: "GET \(path)",
+                        outcome: "NO_API_LIST",
+                        response: rootDiscovery
+                    )
                 }
 
-                let discovery = try await requestJSON(path: Self.developerAPIPath)
+                let developerEndpoint = "GET \(Self.developerAPIPath)"
+                let discovery: JSONDictionary
+                do {
+                    discovery = try await requestJSON(path: Self.developerAPIPath)
+                } catch {
+                    if error is CancellationError { throw error }
+                    recordDiscoveryFailure(endpoint: developerEndpoint, error: error)
+                    throw error
+                }
                 parseDiscovery(
                     discovery,
                     source: "GET \(Self.developerAPIPath) (Canon developer API fallback)"
+                )
+                recordDiscoveryResponse(
+                    endpoint: developerEndpoint,
+                    outcome: operations.isEmpty ? "ZERO_OPERATIONS" : "OPERATIONS",
+                    response: discovery
                 )
                 guard !operations.isEmpty else {
                     throw CCAPIError.invalidResponse(
@@ -349,6 +387,12 @@ public actor CCAPIClient {
                 apiVersionPrefixes = [prefix]
                 preferredVersionPrefix = prefix
                 discoverySource = "GET \(prefix)/deviceinformation (identity fallback)"
+                recordDiscoveryResponse(
+                    endpoint: "GET \(prefix)/deviceinformation",
+                    outcome: "IDENTITY",
+                    response: value,
+                    operationCount: 0
+                )
                 cachedModel = value.string("productname", default: cachedModel)
                 observedFeatures.insert(.cameraIdentity)
                 enforceAdvertisedOperations = true
@@ -356,6 +400,7 @@ public actor CCAPIClient {
                 return
             } catch {
                 if error is CancellationError { throw error }
+                recordDiscoveryFailure(endpoint: "GET \(prefix)/deviceinformation", error: error)
                 errors.append("GET \(prefix)/deviceinformation: \(error.localizedDescription)")
             }
         }
@@ -1728,6 +1773,75 @@ public actor CCAPIClient {
         preferredVersionPrefix = apiVersionPrefixes.contains("/ccapi/ver100") ? "/ccapi/ver100" : apiVersionPrefixes[0]
     }
 
+    private func recordDiscoveryResponse(
+        endpoint: String,
+        outcome: String,
+        response: JSONDictionary,
+        httpStatus: Int? = 200,
+        operationCount: Int? = nil
+    ) {
+        let keys = response.keys.compactMap(Self.safeDiscoveryKey).removingDuplicates().sorted()
+        var versions = Set<String>()
+        response.array("api")?.strings.forEach {
+            if let version = Self.extractVersion(from: $0) { versions.insert(version) }
+        }
+        keys.filter { Self.versionNumber($0) != nil }.forEach { versions.insert($0) }
+        let version = response.string("version")
+        if Self.versionNumber(version) != nil { versions.insert(version) }
+        let orderedVersions = versions.sorted {
+            (Self.versionNumber($0) ?? 0) > (Self.versionNumber($1) ?? 0)
+        }
+        recordDiscoveryAttempt(
+            CameraDiscoveryAttempt(
+                endpoint: String(endpoint.prefix(128)),
+                outcome: String(outcome.prefix(64)),
+                httpStatus: httpStatus,
+                responseKeys: Array(keys.prefix(Self.maximumDiscoveryTraceKeys)),
+                protocolVersions: Array(orderedVersions.prefix(Self.maximumDiscoveryTraceKeys)),
+                advertisedOperationCount: max(0, operationCount ?? operations.count),
+                truncated: keys.count > Self.maximumDiscoveryTraceKeys ||
+                    orderedVersions.count > Self.maximumDiscoveryTraceKeys
+            )
+        )
+    }
+
+    private func recordDiscoveryFailure(endpoint: String, error: Error) {
+        let statusCode: Int?
+        if case let CCAPIError.http(value, _, _, _) = error {
+            statusCode = value
+        } else {
+            statusCode = nil
+        }
+        recordDiscoveryAttempt(
+            CameraDiscoveryAttempt(
+                endpoint: String(endpoint.prefix(128)),
+                outcome: statusCode == nil ? "REQUEST_ERROR" : "HTTP_ERROR",
+                httpStatus: statusCode
+            )
+        )
+    }
+
+    private func recordDiscoveryAttempt(_ attempt: CameraDiscoveryAttempt) {
+        if discoveryTrace.count < Self.maximumDiscoveryTraceAttempts {
+            discoveryTrace.append(attempt)
+        } else {
+            discoveryTraceTruncated = true
+        }
+    }
+
+    private static func safeDiscoveryKey(_ value: String) -> String? {
+        let scalars = Array(value.unicodeScalars)
+        guard !scalars.isEmpty, scalars.count <= maximumDiscoveryTraceKeyCharacters else { return nil }
+        func isLetter(_ scalar: UnicodeScalar) -> Bool {
+            (65...90).contains(scalar.value) || (97...122).contains(scalar.value)
+        }
+        func isAllowed(_ scalar: UnicodeScalar) -> Bool {
+            isLetter(scalar) || (48...57).contains(scalar.value) || scalar.value == 95 || scalar.value == 45
+        }
+        guard isLetter(scalars[0]), scalars.allSatisfy(isAllowed) else { return nil }
+        return value
+    }
+
     private func recordOperations(version: String, entries: [JSONDictionary]) {
         for entry in entries {
             guard let path = advertisedOperationPath(version: version, entry: entry) else { continue }
@@ -2236,10 +2350,12 @@ public actor CCAPIClient {
             advertisedCommands: Array(commands.prefix(Self.maximumCapabilityEvidenceItems)),
             writableSettings: Array(writableSettings.prefix(Self.maximumCapabilityEvidenceItems)),
             observedFeatures: observedFeatures,
+            discoveryTrace: discoveryTrace,
             truncated: protocolVersions.count > Self.maximumCapabilityEvidenceItems ||
                 commands.count > Self.maximumCapabilityEvidenceItems ||
                 writableSettings.count > Self.maximumCapabilityEvidenceItems ||
-                observedFeatures.count > Self.maximumCapabilityEvidenceItems
+                observedFeatures.count > Self.maximumCapabilityEvidenceItems ||
+                discoveryTraceTruncated || discoveryTrace.contains { $0.truncated }
         )
     }
 

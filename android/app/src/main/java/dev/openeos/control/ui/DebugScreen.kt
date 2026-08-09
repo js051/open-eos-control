@@ -123,6 +123,13 @@ fun DebugScreen(
                     mono = true,
                 )
                 DebugValue(
+                    stringResource(R.string.discovery_trace),
+                    evidence?.discoveryTrace.orEmpty()
+                        .joinToString("\n", transform = ::diagnosticDiscoveryAttempt)
+                        .ifBlank { none },
+                    mono = true,
+                )
+                DebugValue(
                     stringResource(R.string.advertised_commands),
                     evidence?.advertisedCommands.orEmpty().joinToString("\n").ifBlank { none },
                     mono = true,

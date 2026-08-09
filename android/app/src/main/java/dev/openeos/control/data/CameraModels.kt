@@ -435,17 +435,31 @@ data class CameraEvent(
     val changedKeys: Set<String> = emptySet(),
 )
 
+data class CameraDiscoveryAttempt(
+    val endpoint: String,
+    val outcome: String,
+    val httpStatus: Int? = null,
+    val responseKeys: List<String> = emptyList(),
+    val protocolVersions: List<String> = emptyList(),
+    val advertisedOperationCount: Int = 0,
+    val truncated: Boolean = false,
+)
+
 data class CameraCapabilityEvidence(
     val source: String = "unknown",
     val protocolVersions: List<String> = emptyList(),
     val advertisedCommands: List<String> = emptyList(),
     val writableSettings: List<String> = emptyList(),
     val observedFeatures: Set<CameraFeature> = emptySet(),
+    val discoveryTrace: List<CameraDiscoveryAttempt> = emptyList(),
     val truncated: Boolean = false,
 )
 
 const val MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 const val MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
+const val MAX_DISCOVERY_TRACE_ATTEMPTS = 16
+const val MAX_DISCOVERY_TRACE_KEYS = 32
+const val MAX_DISCOVERY_TRACE_KEY_CHARS = 64
 
 data class CameraCapabilities(
     val iso: List<String>,

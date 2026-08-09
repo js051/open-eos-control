@@ -1,5 +1,6 @@
 package dev.openeos.control.ui
 
+import dev.openeos.control.data.CameraDiscoveryAttempt
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraTransport
 import java.net.URI
@@ -171,6 +172,11 @@ fun buildDiagnosticReport(
         appendLine("planned=$planned")
         appendLine("capabilitySource=${evidence?.source?.let { redactDiagnosticText(it, state) } ?: "unknown"}")
         appendLine("protocolVersions=${evidence?.protocolVersions.orEmpty().joinToString().ifBlank { "none" }}")
+        val discoveryTrace = evidence?.discoveryTrace.orEmpty()
+        appendLine("discoveryAttemptCount=${discoveryTrace.size}")
+        discoveryTrace.forEachIndexed { index, attempt ->
+            appendLine("discoveryAttempt${index + 1}=${diagnosticDiscoveryAttempt(attempt)}")
+        }
         appendLine("advertisedCommandCount=${evidence?.advertisedCommands?.size ?: 0}")
         appendLine(
             "advertisedCommands=${evidence?.advertisedCommands.orEmpty().joinToString(" | ") { redactDiagnosticText(it, state) }.ifBlank { "none" }}"
@@ -247,6 +253,16 @@ fun buildDiagnosticReport(
         append("lastError=${state.error?.let { redactDiagnosticText(it, state) } ?: "none"}")
     }
     return redactDiagnosticText(report, state)
+}
+
+fun diagnosticDiscoveryAttempt(attempt: CameraDiscoveryAttempt): String = buildString {
+    append("endpoint=${attempt.endpoint}")
+    append("; outcome=${attempt.outcome}")
+    append("; httpStatus=${attempt.httpStatus ?: "none"}")
+    append("; responseKeys=${attempt.responseKeys.joinToString().ifBlank { "none" }}")
+    append("; protocolVersions=${attempt.protocolVersions.joinToString().ifBlank { "none" }}")
+    append("; advertisedOperationCount=${attempt.advertisedOperationCount}")
+    append("; truncated=${attempt.truncated}")
 }
 
 private fun redactDiagnosticText(value: String, state: CameraUiState): String {

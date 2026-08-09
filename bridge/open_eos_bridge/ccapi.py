@@ -29,6 +29,7 @@ from .models import (
     CameraStatus,
     CameraTemperatureStatus,
     CapabilityEvidence,
+    DiscoveryAttempt,
     ExposureState,
     FocusResult,
     LensStatus,
@@ -69,6 +70,9 @@ MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
+MAX_DISCOVERY_TRACE_ATTEMPTS = 16
+MAX_DISCOVERY_TRACE_KEYS = 32
+MAX_DISCOVERY_TRACE_KEY_CHARS = 64
 MAX_DEVICE_STATUS_TEXT_CHARS = 512
 MAX_EVENT_BYTES = 256 * 1024
 MAX_EVENT_KEYS = 64
@@ -651,6 +655,8 @@ class CcapiSession:
         self._preferred_prefix = "/ccapi/ver100"
         self._operations: set[CcapiOperation] = set()
         self._observed: set[CameraFeature] = {CameraFeature.DESKTOP_BRIDGE}
+        self._discovery_trace: list[DiscoveryAttempt] = []
+        self._discovery_trace_truncated = False
         self._cached_info: CameraInfo | None = None
         self._settings_cache: dict[str, object] | None = None
         self._setting_paths: dict[str, str] = {}
@@ -676,11 +682,20 @@ class CcapiSession:
             self._require_open()
             if self._initialized:
                 return
+            self._discovery_trace.clear()
+            self._discovery_trace_truncated = False
             failures: list[str] = []
             for path in ("/ccapi", "/ccapi/"):
                 try:
-                    value = self._request_json("GET", path)
+                    try:
+                        value = self._request_json("GET", path)
+                    except BridgeError as error:
+                        self._record_discovery_failure(f"GET {path}", error)
+                        raise
                     if not isinstance(value, dict):
+                        self._record_discovery_attempt(
+                            DiscoveryAttempt(endpoint=f"GET {path}", outcome="INVALID_RESPONSE")
+                        )
                         raise BridgeError(
                             "INVALID_CCAPI_RESPONSE",
                             f"Camera discovery {path} did not return a JSON object.",
@@ -689,12 +704,29 @@ class CcapiSession:
                         )
                     if value.get("value") != CCAPI_NO_API_LIST_VALUE:
                         self._parse_discovery(value, source=f"GET {path}")
+                        self._record_discovery_response(
+                            endpoint=f"GET {path}",
+                            outcome="OPERATIONS" if self._operations else "ZERO_OPERATIONS",
+                            response=value,
+                        )
                         if self._operations:
                             self._initialized = True
                             return
+                    else:
+                        self._record_discovery_response(
+                            endpoint=f"GET {path}", outcome="NO_API_LIST", response=value
+                        )
 
-                    value = self._request_json("GET", CCAPI_DEVELOPER_API_PATH)
+                    developer_endpoint = f"GET {CCAPI_DEVELOPER_API_PATH}"
+                    try:
+                        value = self._request_json("GET", CCAPI_DEVELOPER_API_PATH)
+                    except BridgeError as error:
+                        self._record_discovery_failure(developer_endpoint, error)
+                        raise
                     if not isinstance(value, dict):
+                        self._record_discovery_attempt(
+                            DiscoveryAttempt(endpoint=developer_endpoint, outcome="INVALID_RESPONSE")
+                        )
                         raise BridgeError(
                             "INVALID_CCAPI_RESPONSE",
                             f"Camera developer API {CCAPI_DEVELOPER_API_PATH} did not return a JSON object.",
@@ -704,6 +736,11 @@ class CcapiSession:
                     self._parse_discovery(
                         value,
                         source=f"GET {CCAPI_DEVELOPER_API_PATH} (Canon developer API fallback)",
+                    )
+                    self._record_discovery_response(
+                        endpoint=developer_endpoint,
+                        outcome="OPERATIONS" if self._operations else "ZERO_OPERATIONS",
+                        response=value,
                     )
                     if not self._operations:
                         raise BridgeError(
@@ -720,8 +757,15 @@ class CcapiSession:
             for prefix in ("/ccapi/ver110", "/ccapi/ver100"):
                 path = f"{prefix}/deviceinformation"
                 try:
-                    value = self._request_json("GET", path)
+                    try:
+                        value = self._request_json("GET", path)
+                    except BridgeError as error:
+                        self._record_discovery_failure(f"GET {path}", error)
+                        raise
                     if not isinstance(value, dict):
+                        self._record_discovery_attempt(
+                            DiscoveryAttempt(endpoint=f"GET {path}", outcome="INVALID_RESPONSE")
+                        )
                         raise BridgeError(
                             "INVALID_CCAPI_RESPONSE",
                             f"Camera identity {path} did not return a JSON object.",
@@ -731,6 +775,12 @@ class CcapiSession:
                     self._api_prefixes = [prefix]
                     self._preferred_prefix = prefix
                     self._discovery_source = f"GET {path} (identity fallback)"
+                    self._record_discovery_response(
+                        endpoint=f"GET {path}",
+                        outcome="IDENTITY",
+                        response=value,
+                        operation_count=0,
+                    )
                     self._cached_info = self._camera_info(value)
                     self._observed.add(CameraFeature.CAMERA_IDENTITY)
                     self._initialized = True
@@ -2457,6 +2507,69 @@ class CcapiSession:
         self._api_prefixes = [f"/ccapi/{version}" for version in ordered]
         self._preferred_prefix = "/ccapi/ver100" if "/ccapi/ver100" in self._api_prefixes else self._api_prefixes[0]
 
+    def _record_discovery_response(
+        self,
+        *,
+        endpoint: str,
+        outcome: str,
+        response: dict[str, object],
+        http_status: int | None = 200,
+        operation_count: int | None = None,
+    ) -> None:
+        keys = sorted(
+            {
+                key
+                for key in response
+                if len(key) <= MAX_DISCOVERY_TRACE_KEY_CHARS
+                and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", key)
+            }
+        )
+        versions: set[str] = set()
+        api = response.get("api")
+        if isinstance(api, list):
+            for item in api:
+                if isinstance(item, str) and (match := re.search(r"/ccapi/(ver\d+)(?:/|$)", item)):
+                    versions.add(match.group(1))
+        versions.update(key for key in keys if re.fullmatch(r"ver\d+", key))
+        version_value = response.get("version")
+        if isinstance(version_value, str) and re.fullmatch(r"ver\d+", version_value):
+            versions.add(version_value)
+        ordered_versions = sorted(versions, key=_version_number, reverse=True)
+        self._record_discovery_attempt(
+            DiscoveryAttempt(
+                endpoint=endpoint[:128],
+                outcome=outcome[:64],
+                http_status=http_status,
+                response_keys=keys[:MAX_DISCOVERY_TRACE_KEYS],
+                protocol_versions=ordered_versions[:MAX_DISCOVERY_TRACE_KEYS],
+                advertised_operation_count=max(
+                    0,
+                    len(self._operations) if operation_count is None else operation_count,
+                ),
+                truncated=(
+                    len(keys) > MAX_DISCOVERY_TRACE_KEYS
+                    or len(ordered_versions) > MAX_DISCOVERY_TRACE_KEYS
+                ),
+            )
+        )
+
+    def _record_discovery_failure(self, endpoint: str, error: BridgeError) -> None:
+        camera_status = error.camera_status if isinstance(error, _CcapiHTTPError) else None
+        outcome = "HTTP_ERROR" if camera_status is not None else "REQUEST_ERROR"
+        self._record_discovery_attempt(
+            DiscoveryAttempt(
+                endpoint=endpoint[:128],
+                outcome=outcome,
+                http_status=camera_status,
+            )
+        )
+
+    def _record_discovery_attempt(self, attempt: DiscoveryAttempt) -> None:
+        if len(self._discovery_trace) < MAX_DISCOVERY_TRACE_ATTEMPTS:
+            self._discovery_trace.append(attempt)
+        else:
+            self._discovery_trace_truncated = True
+
     def _advertised_operation_path(
         self,
         version: str,
@@ -2505,11 +2618,14 @@ class CcapiSession:
             advertised_commands=commands[:MAX_CAPABILITY_EVIDENCE_ITEMS],
             writable_settings=writable_settings[:MAX_CAPABILITY_EVIDENCE_ITEMS],
             observed_features=sorted(self._observed, key=str)[:MAX_CAPABILITY_EVIDENCE_ITEMS],
+            discovery_trace=list(self._discovery_trace),
             truncated=(
                 len(protocol_versions) > MAX_CAPABILITY_EVIDENCE_ITEMS
                 or len(commands) > MAX_CAPABILITY_EVIDENCE_ITEMS
                 or len(writable_settings) > MAX_CAPABILITY_EVIDENCE_ITEMS
                 or len(self._observed) > MAX_CAPABILITY_EVIDENCE_ITEMS
+                or self._discovery_trace_truncated
+                or any(attempt.truncated for attempt in self._discovery_trace)
             ),
         )
 

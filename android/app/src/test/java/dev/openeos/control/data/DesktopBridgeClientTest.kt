@@ -112,6 +112,10 @@ class DesktopBridgeClientTest {
         assertTrue("CAPTURE_PREVIEW" in capabilities.evidence.advertisedCommands)
         assertTrue("/main/imgsettings/iso" in capabilities.evidence.writableSettings)
         assertTrue(CameraFeature.BATTERY_STATUS in capabilities.evidence.observedFeatures)
+        assertEquals(1, capabilities.evidence.discoveryTrace.size)
+        assertEquals("GET /ccapi", capabilities.evidence.discoveryTrace.single().endpoint)
+        assertEquals("NO_API_LIST", capabilities.evidence.discoveryTrace.single().outcome)
+        assertEquals(listOf("value"), capabilities.evidence.discoveryTrace.single().responseKeys)
         assertTrue(
             observedFeatures.containsAll(
                 setOf(
@@ -565,6 +569,17 @@ class DesktopBridgeClientTest {
                 "advertisedCommands": ["CAPTURE_IMAGE", "CAPTURE_PREVIEW"],
                 "writableSettings": ["/main/imgsettings/iso"],
                 "observedFeatures": ["BATTERY_STATUS"],
+                "discoveryTrace": [
+                  {
+                    "endpoint": "GET /ccapi",
+                    "outcome": "NO_API_LIST",
+                    "httpStatus": 200,
+                    "responseKeys": ["value"],
+                    "protocolVersions": [],
+                    "advertisedOperationCount": 0,
+                    "truncated": false
+                  }
+                ],
                 "truncated": false
               }
             }

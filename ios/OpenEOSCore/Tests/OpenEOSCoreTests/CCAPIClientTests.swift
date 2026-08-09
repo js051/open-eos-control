@@ -137,6 +137,12 @@ final class CCAPIClientTests: XCTestCase {
                 "POST /ccapi/ver100/shooting/control/shutterbutton"
             )
         )
+        XCTAssertEqual(capabilities.evidence.discoveryTrace.map(\.outcome), ["NO_API_LIST", "OPERATIONS"])
+        XCTAssertEqual(
+            capabilities.evidence.discoveryTrace.map(\.endpoint),
+            ["GET /ccapi", "GET /ccapi/ver100/topurlfordev"]
+        )
+        XCTAssertGreaterThan(capabilities.evidence.discoveryTrace.last?.advertisedOperationCount ?? 0, 0)
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.path), [
             "/ccapi",
@@ -170,6 +176,9 @@ final class CCAPIClientTests: XCTestCase {
             capabilities.evidence.source,
             "GET /ccapi/ver100/topurlfordev (Canon developer API fallback)"
         )
+        XCTAssertEqual(capabilities.evidence.discoveryTrace.map(\.outcome), ["ZERO_OPERATIONS", "OPERATIONS"])
+        XCTAssertEqual(capabilities.evidence.discoveryTrace.first?.protocolVersions, ["ver100"])
+        XCTAssertEqual(capabilities.evidence.discoveryTrace.first?.advertisedOperationCount, 0)
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.path), [
             "/ccapi",
@@ -234,6 +243,36 @@ final class CCAPIClientTests: XCTestCase {
             "/ccapi/ver110/deviceinformation",
             "/ccapi/ver100/deviceinformation",
         ])
+    }
+
+    func testDiscoveryTraceRetainsIdentityFallbackWithoutInventingOperations() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", status: 404, body: #"{"message":"missing"}"#)
+        await transport.enqueueJSON(path: "/ccapi/", status: 404, body: #"{"message":"missing"}"#)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver110/deviceinformation",
+            body: #"{"productname":"Canon EOS R6 Mark III","serialnumber":"TEST-SERIAL-0001"}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        try await client.initialize()
+        let capabilities = try await client.capabilities()
+
+        XCTAssertEqual(
+            capabilities.evidence.discoveryTrace.map(\.outcome),
+            ["HTTP_ERROR", "HTTP_ERROR", "IDENTITY"]
+        )
+        XCTAssertEqual(capabilities.evidence.discoveryTrace.last?.httpStatus, 200)
+        XCTAssertEqual(
+            capabilities.evidence.discoveryTrace.last?.responseKeys,
+            ["productname", "serialnumber"]
+        )
+        XCTAssertTrue(capabilities.evidence.advertisedCommands.isEmpty)
+        XCTAssertFalse(capabilities.matrix.supports(.stillCapture))
     }
 
     func testEventPollingRequiresAdvertisedGetDeleteLifecycle() async throws {
@@ -2613,7 +2652,23 @@ final class CCAPIClientTests: XCTestCase {
                 protocolVersions: ["ver100"],
                 advertisedCommands: ["POST /ccapi/ver100/shooting/control/shutterbutton"],
                 writableSettings: ["iso", "tv"],
-                observedFeatures: [.cameraIdentity, .liveView]
+                observedFeatures: [.cameraIdentity, .liveView],
+                discoveryTrace: [
+                    CameraDiscoveryAttempt(
+                        endpoint: "GET /ccapi",
+                        outcome: "NO_API_LIST",
+                        httpStatus: 200,
+                        responseKeys: ["value"]
+                    ),
+                    CameraDiscoveryAttempt(
+                        endpoint: "GET /ccapi/ver100/topurlfordev",
+                        outcome: "OPERATIONS",
+                        httpStatus: 200,
+                        responseKeys: ["ver100"],
+                        protocolVersions: ["ver100"],
+                        advertisedOperationCount: 17
+                    ),
+                ]
             )
         )
         let snapshot = CameraSnapshot(
@@ -2650,6 +2705,9 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertFalse(report.contains("/private/var"))
         XCTAssertTrue(report.contains("[local-path]"))
         XCTAssertTrue(report.contains("capabilitySource=GET /ccapi"))
+        XCTAssertTrue(report.contains("discoveryAttemptCount=2"))
+        XCTAssertTrue(report.contains("discoveryAttempt1=endpoint=GET /ccapi; outcome=NO_API_LIST"))
+        XCTAssertTrue(report.contains("discoveryAttempt2=endpoint=GET /ccapi/ver100/topurlfordev; outcome=OPERATIONS"))
         XCTAssertTrue(report.contains("advertisedCommandCount=1"))
         XCTAssertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
         XCTAssertTrue(report.contains("writableSettings=iso, tv"))
