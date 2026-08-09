@@ -40,6 +40,7 @@ class CameraModelPriority(StrEnum):
 class CameraFeature(StrEnum):
     CAMERA_IDENTITY = "CAMERA_IDENTITY"
     CAMERA_CLOCK_SYNC = "CAMERA_CLOCK_SYNC"
+    DIRECTORY_CONTROL = "DIRECTORY_CONTROL"
     SENSOR_CLEANING = "SENSOR_CLEANING"
     CAMERA_SLEEP = "CAMERA_SLEEP"
     BATTERY_STATUS = "BATTERY_STATUS"
@@ -302,6 +303,14 @@ class CameraCapabilities(ApiModel):
 
 class SettingUpdate(ApiModel):
     value: str = Field(min_length=1, max_length=512)
+
+
+class DirectoryCreateRequest(ApiModel):
+    name: str = Field(default="", max_length=5, pattern=r"^(?:[A-Z0-9_]{5})?$")
+
+
+class DirectoryCreateResult(ApiModel):
+    name: str = Field(min_length=5, max_length=5, pattern=r"^[A-Z0-9_]{5}$")
 
 
 class SensorCleaningRequest(ApiModel):

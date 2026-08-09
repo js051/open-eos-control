@@ -49,6 +49,7 @@ enum CameraOperation: Hashable {
     case scan
     case refresh
     case setting
+    case directory
     case clock
     case maintenance
     case power
@@ -149,7 +150,7 @@ func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) 
     let primary = Set(["iso", "shutter", "aperture", "whitebalance"])
     let videoTokens = ["movie", "video", "frame", "codec", "record", "sound"]
     let videoOnlyKeys = Set(["windfilter", "attenuator"])
-    let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage"]
+    let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage", "directory"]
     return settings.filter { setting in
         guard Set(setting.values).count > 1 else { return false }
         guard !primary.contains(setting.key) else { return false }
@@ -249,6 +250,7 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "capturestorage": "setting_capture_storage"
     case "cardselectionstillimage": "setting_still_image_card"
     case "cardselectionmovie": "setting_movie_card"
+    case "directoryselection": "setting_capture_directory"
     case "soundrecordinglevel": "setting_sound_recording_level"
     case "soundrecording": "setting_sound_recording"
     case "windfilter": "setting_wind_filter"

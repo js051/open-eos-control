@@ -44,6 +44,7 @@
     MEDIA_ROTATE: "MEDIA_ROTATE",
     MEDIA_DELETE: "MEDIA_DELETE",
     CAMERA_CLOCK_SYNC: "CAMERA_CLOCK_SYNC",
+    DIRECTORY_CONTROL: "DIRECTORY_CONTROL",
     SENSOR_CLEANING: "SENSOR_CLEANING",
     CAMERA_SLEEP: "CAMERA_SLEEP",
   };
@@ -142,6 +143,11 @@
       cameraClockSyncedAt: "Verified at {time}",
       syncNow: "Sync now",
       cameraClockSynced: "Camera date and time verified",
+      createCaptureDirectory: "Create capture directory",
+      createCaptureDirectoryHint: "Leave blank for the camera default, or enter exactly 5 uppercase letters, numbers, or underscores.",
+      directoryNamePlaceholder: "EOSXX or blank",
+      directoryCreated: "Created {name}",
+      create: "Create",
       sensorCleaning: "Clean camera sensor",
       sensorCleaningHint: "Runs the camera's built-in sensor-cleaning cycle. Live View pauses while cleaning is in progress.",
       sensorCleaningNow: "Clean now",
@@ -250,6 +256,7 @@
       capturestorage: "Recording card",
       cardselectionstillimage: "Still-image card",
       cardselectionmovie: "Movie card",
+      directoryselection: "Capture directory",
       highisonr: "High ISO noise reduction",
       alomode: "Auto Lighting Optimizer",
       continuousaf: "Continuous AF",
@@ -459,6 +466,11 @@
       cameraClockSyncedAt: "已於 {time} 驗證",
       syncNow: "立即同步",
       cameraClockSynced: "已驗證相機日期與時間",
+      createCaptureDirectory: "建立拍攝目錄",
+      createCaptureDirectoryHint: "留空可使用相機預設名稱，或輸入剛好 5 個大寫英文字母、數字或底線。",
+      directoryNamePlaceholder: "EOSXX 或留空",
+      directoryCreated: "已建立 {name}",
+      create: "建立",
       sensorCleaning: "清潔相機感光元件",
       sensorCleaningHint: "執行相機內建的感光元件清潔程序；清潔期間會暫停 Live View。",
       sensorCleaningNow: "立即清潔",
@@ -567,6 +579,7 @@
       capturestorage: "拍攝記錄卡",
       cardselectionstillimage: "相片記錄卡",
       cardselectionmovie: "影片記錄卡",
+      directoryselection: "拍攝目錄",
       highisonr: "高 ISO 降噪",
       continuousaf: "連續自動對焦",
       movieservoaf: "短片伺服自動對焦",
@@ -836,6 +849,7 @@
     capabilities: null,
     operatorConfirmedFeatures: new Set(),
     lastClockSyncAt: null,
+    lastCreatedDirectoryName: null,
     activeView: "live",
     captureMode: "photo",
     liveActive: false,
@@ -1464,6 +1478,7 @@
     state.capabilities = null;
     state.operatorConfirmedFeatures.clear();
     state.lastClockSyncAt = null;
+    state.lastCreatedDirectoryName = null;
     state.media = [];
     state.mediaLoaded = false;
     state.mediaDownloadPreparing = false;
@@ -1771,6 +1786,7 @@
       (setting) => !CORE_SETTINGS.includes(setting.key) && settingMatchesCaptureMode(setting),
     );
     const clockSupported = featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+    const directorySupported = featureSupported(FEATURES.DIRECTORY_CONTROL);
     const sensorCleaningSupported = featureSupported(FEATURES.SENSOR_CLEANING);
     const sleepSupported = featureSupported(FEATURES.CAMERA_SLEEP);
     if (clockSupported) {
@@ -1797,6 +1813,40 @@
       button.disabled = cameraInteractionBusy();
       button.addEventListener("click", () => syncCameraClock(button));
       row.append(copy, button);
+      ui.advancedSettings.append(row);
+    }
+    if (directorySupported) {
+      const row = document.createElement("div");
+      row.className = "settings-command";
+      const copy = document.createElement("span");
+      const title = document.createElement("strong");
+      title.textContent = t("createCaptureDirectory");
+      const detail = document.createElement("small");
+      detail.textContent = state.lastCreatedDirectoryName
+        ? t("directoryCreated", { name: state.lastCreatedDirectoryName })
+        : t("createCaptureDirectoryHint");
+      copy.append(title, detail);
+      const actions = document.createElement("div");
+      actions.className = "settings-command-actions";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 5;
+      input.pattern = "[A-Z0-9_]{5}";
+      input.placeholder = t("directoryNamePlaceholder");
+      input.setAttribute("aria-label", t("createCaptureDirectory"));
+      input.addEventListener("input", () => {
+        input.value = input.value.toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 5);
+        button.disabled = cameraInteractionBusy() || (input.value.length > 0 && input.value.length !== 5);
+      });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button secondary";
+      button.dataset.cameraCommand = "directory";
+      button.textContent = t("create");
+      button.disabled = cameraInteractionBusy();
+      button.addEventListener("click", () => createCaptureDirectory(button, input.value));
+      actions.append(input, button);
+      row.append(copy, actions);
       ui.advancedSettings.append(row);
     }
     if (sensorCleaningSupported) {
@@ -1860,7 +1910,7 @@
       ui.advancedSettings.append(row);
       window.OpenEosIcons?.render(row);
     }
-    if (!settings.length && !clockSupported && !sensorCleaningSupported && !sleepSupported) {
+    if (!settings.length && !clockSupported && !directorySupported && !sensorCleaningSupported && !sleepSupported) {
       const empty = document.createElement("p");
       empty.className = "supporting";
       empty.textContent = t("notAvailable");
@@ -1935,6 +1985,35 @@
       await refreshCapabilityEvidence();
       setOperationState(t("ready"));
       showToast(t("cameraClockSynced"));
+    } catch (error) {
+      const normalized = captureError(error);
+      setOperationState(normalized.message, true);
+      showToast(normalized.message, true);
+    } finally {
+      state.busy = false;
+      renderSession();
+    }
+  }
+
+  async function createCaptureDirectory(source, name) {
+    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.DIRECTORY_CONTROL)) return;
+    if (name && !/^[A-Z0-9_]{5}$/.test(name)) {
+      showToast(t("createCaptureDirectoryHint"), true);
+      return;
+    }
+    beginCameraInteraction();
+    source.disabled = true;
+    setOperationState(t("busy"));
+    renderAvailability();
+    try {
+      const result = await api(`/v1/session/${encodeURIComponent(state.session.id)}/directories`, {
+        method: "POST",
+        json: { name },
+      });
+      state.lastCreatedDirectoryName = result.name;
+      await refreshCapabilityEvidence();
+      setOperationState(t("ready"));
+      showToast(t("directoryCreated", { name: result.name }));
     } catch (error) {
       const normalized = captureError(error);
       setOperationState(normalized.message, true);
@@ -2042,7 +2121,7 @@
     if (key === "moviemode") return false;
     const videoTokens = ["movie", "video", "frame", "codec", "record", "sound"];
     const videoOnlyKeys = new Set(["windfilter", "attenuator"]);
-    const photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage"];
+    const photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage", "directory"];
     if (state.captureMode === "photo") {
       return !videoOnlyKeys.has(key) && !videoTokens.some((token) => key.includes(token));
     }
@@ -3560,7 +3639,9 @@
         ? featureSupported(FEATURES.CAMERA_SLEEP)
         : command === "sensor-cleaning"
           ? featureSupported(FEATURES.SENSOR_CLEANING)
-          : featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
+          : command === "directory"
+            ? featureSupported(FEATURES.DIRECTORY_CONTROL)
+            : featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
       button.disabled = interactionBusy || bulbActive || !supported ||
         ((command === "sleep" || command === "sensor-cleaning") && recording);
     });

@@ -642,6 +642,12 @@ class CcapiClient(
             if (advancedSettings.any { it.key in MOVIE_SETTING_KEYS }) {
                 supportedFeatures.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
             }
+            if (
+                advancedSettings.any { it.key == DIRECTORY_SELECTION_SETTING_KEY } &&
+                directoryOperations() != null
+            ) {
+                supportedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
+            }
             if (advancedSettings.isNotEmpty()) supportedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             val supportsJpegLiveView = supportsCompleteLiveView()
             val supportsMultipartLiveView = supportsMultipartLiveView()
@@ -864,6 +870,10 @@ class CcapiClient(
                     loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
+                key.equals(DIRECTORY_SELECTION_SETTING_KEY, ignoreCase = true) -> {
+                    loadShootingSettings()
+                    putSettingValue(listOf(DIRECTORY_SELECTION_SETTING_KEY), value)
+                }
                 else -> putSettingValue(listOf(key), value)
             }
             status()
@@ -944,6 +954,12 @@ class CcapiClient(
                         JSONObject().put("value", value),
                     )
                 }
+                key.equals(DIRECTORY_SELECTION_SETTING_KEY, ignoreCase = true) -> {
+                    require(DIRECTORY_SELECTION_PATTERN.matches(value)) {
+                        "Capture directory must be one of the directories advertised by the camera."
+                    }
+                    putOk("/ccapi/directory-selection", JSONObject().put("value", value))
+                }
                 else -> throw UnsupportedOperationException(
                     "${featureForSetting(key).label} is not supported by the simulator.",
                 )
@@ -952,6 +968,31 @@ class CcapiClient(
         }
         observedFeatures.add(featureForSetting(key))
         return status
+    }
+
+    suspend fun createDirectory(name: String): String {
+        require(DIRECTORY_CREATE_NAME_PATTERN.matches(name)) {
+            "Directory name must be empty or exactly five uppercase letters, numbers, or underscores."
+        }
+        val response = if (isRealCamera) {
+            val operations = directoryOperations()
+                ?: throw UnsupportedOperationException(
+                    "${CameraFeature.DIRECTORY_CONTROL.label} is not supported by this camera's advertised CCAPI ability.",
+                )
+            postJson(
+                operations.create.path,
+                JSONObject().put("directoryname", name),
+            )
+        } else {
+            postJson("/ccapi/directory", JSONObject().put("directoryname", name))
+        }
+        val created = response.opt("directoryname") as? String
+        require(created != null && DIRECTORY_CREATED_NAME_PATTERN.matches(created)) {
+            "Camera returned an invalid created directory name."
+        }
+        observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
+        if (isRealCamera) loadShootingSettings()
+        return created
     }
 
     suspend fun sleepCamera() {
@@ -1762,6 +1803,7 @@ class CcapiClient(
         "wb", "whitebalance", "white_balance" -> CameraFeature.WHITE_BALANCE_CONTROL
         MOVIE_MODE_SETTING_KEY -> CameraFeature.MOVIE_MODE_CONTROL
         ZOOM_SETTING_KEY -> CameraFeature.ZOOM_CONTROL
+        DIRECTORY_SELECTION_SETTING_KEY -> CameraFeature.DIRECTORY_CONTROL
         STILL_CARD_SELECTION_SETTING_KEY, MOVIE_CARD_SELECTION_SETTING_KEY ->
             CameraFeature.CARD_SELECTION_CONTROL
         in SOUND_RECORDING_SETTING_KEYS -> CameraFeature.SOUND_RECORDING_CONTROL
@@ -1829,6 +1871,22 @@ class CcapiClient(
             CcapiApiOperation("PUT", read.path)
                 .takeIf(apiOperations::contains)
                 ?.let { write -> read to write }
+        }
+    }
+
+    private fun directoryOperations(): DirectoryOperations? {
+        val reads = apiOperations
+            .filter { it.method == "GET" && it.path.endsWith(DIRECTORY_SELECTION_PATH_SUFFIX) }
+            .sortedByDescending { it.apiVersionNumber() }
+        return reads.firstNotNullOfOrNull { read ->
+            val prefix = read.path.removeSuffix(DIRECTORY_SELECTION_PATH_SUFFIX)
+            val write = CcapiApiOperation("PUT", read.path)
+            val create = CcapiApiOperation("POST", "$prefix$DIRECTORY_CREATE_PATH_SUFFIX")
+            if (write in apiOperations && create in apiOperations) {
+                DirectoryOperations(read, write, create)
+            } else {
+                null
+            }
         }
     }
 
@@ -2433,6 +2491,7 @@ class CcapiClient(
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
         observedFeatures.remove(CameraFeature.FOCUS_BRACKETING_CONTROL)
         observedFeatures.remove(CameraFeature.MOVIE_SETTINGS_CONTROL)
+        observedFeatures.remove(CameraFeature.DIRECTORY_CONTROL)
         settingsLoaded = false
         val merged = JSONObject()
 
@@ -2690,6 +2749,23 @@ class CcapiClient(
                     merged.put(key, setting)
                     observedFeatures.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
                 }
+            }
+        }
+
+        directoryOperations()?.let { operations ->
+            val selection = try {
+                getJson(operations.read.path).toValidatedDirectorySelectionSetting()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                null
+            }
+            if (selection != null) {
+                val values = selection.getJSONArray("ability").toStringList().toSet()
+                settingPathsByKey[DIRECTORY_SELECTION_SETTING_KEY] = operations.write.path
+                settingValuesByKey[DIRECTORY_SELECTION_SETTING_KEY] = values
+                merged.put(DIRECTORY_SELECTION_SETTING_KEY, selection)
+                observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
             }
         }
 
@@ -3446,6 +3522,16 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
                 values = setting.getJSONArray("ability").toStringList(),
             )
         }
+    val directorySelection = optJSONObject(DIRECTORY_SELECTION_SETTING_KEY)
+        ?.toValidatedDirectorySelectionSetting()
+        ?.let { setting ->
+            CameraSettingControl(
+                key = DIRECTORY_SELECTION_SETTING_KEY,
+                label = DIRECTORY_SELECTION_SETTING_KEY.toSettingLabel(),
+                value = setting.getString("value"),
+                values = setting.getJSONArray("ability").toStringList(),
+            )
+        }
     val zoomControl = optJSONObject(ZOOM_SETTING_KEY)
         ?.toValidatedZoomSetting()
         ?.let { setting ->
@@ -3504,6 +3590,11 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             setOf(CameraFeature.MOVIE_SETTINGS_CONTROL)
         } else {
             emptySet()
+        }) +
+        (if (directorySelection != null) {
+            setOf(CameraFeature.DIRECTORY_CONTROL)
+        } else {
+            emptySet()
         })
     return CameraCapabilities(
         iso = getJSONArray("iso").toStringList(),
@@ -3513,6 +3604,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
         advancedSettings = listOfNotNull(
             movieModeControl,
             zoomControl,
+            directorySelection,
             stillCardSelection,
             movieCardSelection,
             *deviceFunctionControls.toTypedArray(),
@@ -3622,7 +3714,8 @@ private fun JSONObject.toAdvancedSettingControls(writableKeys: Set<String>): Lis
             .filter { it.isNotBlank() }
             .distinct()
         val value = setting.optString("value", "")
-        if (values.size < 2 || value.isBlank()) continue
+        val minimumValues = if (key == DIRECTORY_SELECTION_SETTING_KEY) 1 else 2
+        if (values.size < minimumValues || value.isBlank()) continue
 
         controls.add(
             CameraSettingControl(
@@ -3673,6 +3766,7 @@ private fun String.toSettingLabel(): String =
         HIGH_FRAME_RATE_SETTING_KEY -> "High frame rate"
         MOVIE_CROPPING_SETTING_KEY -> "Movie cropping"
         MOVIE_FORMAT_SETTING_KEY -> "Movie recording format"
+        DIRECTORY_SELECTION_SETTING_KEY -> "Capture directory"
         "shootingmode" -> "Shooting mode"
         "stillimagequality" -> "Image quality"
         "stillimagequality.raw" -> "RAW quality"
@@ -3871,6 +3965,17 @@ private val MOVIE_SIMULATOR_VALUES = mapOf(
     MOVIE_CROPPING_SETTING_KEY to setOf("enable", "disable"),
     MOVIE_FORMAT_SETTING_KEY to setOf("raw", "mp4"),
 )
+private const val DIRECTORY_SELECTION_SETTING_KEY = "directoryselection"
+private const val DIRECTORY_SELECTION_PATH_SUFFIX = "/functions/directory/directoryselection"
+private const val DIRECTORY_CREATE_PATH_SUFFIX = "/functions/directory/createdirectory"
+private val DIRECTORY_CREATE_NAME_PATTERN = Regex("^(?:[A-Z0-9_]{5})?$")
+private val DIRECTORY_CREATED_NAME_PATTERN = Regex("^[A-Z0-9_]{5}$")
+private val DIRECTORY_SELECTION_PATTERN = Regex("^[0-9]{3}[A-Z0-9_]{5}$")
+private data class DirectoryOperations(
+    val read: CcapiApiOperation,
+    val write: CcapiApiOperation,
+    val create: CcapiApiOperation,
+)
 
 private fun Any?.toExactJsonInt(): Int? = when (this) {
     is Byte -> toInt()
@@ -3909,6 +4014,22 @@ private fun JSONObject.toValidatedCardSelectionSetting(): JSONObject? {
         values.size < 2 ||
         values.toSet().size != values.size ||
         values.any { it !in CARD_SELECTION_VALUES } ||
+        current !in values
+    ) return null
+    return JSONObject()
+        .put("value", current)
+        .put("ability", org.json.JSONArray(values))
+}
+
+private fun JSONObject.toValidatedDirectorySelectionSetting(): JSONObject? {
+    val current = opt("value") as? String ?: return null
+    val rawAbility = optJSONArray("ability") ?: return null
+    val values = runCatching { rawAbility.toStringList() }.getOrNull() ?: return null
+    if (
+        values.isEmpty() ||
+        values.size > MAX_STRING_SETTING_OPTIONS ||
+        values.toSet().size != values.size ||
+        values.any { !DIRECTORY_SELECTION_PATTERN.matches(it) } ||
         current !in values
     ) return null
     return JSONObject()

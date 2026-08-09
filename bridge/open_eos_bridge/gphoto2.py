@@ -1394,6 +1394,14 @@ class GPhoto2Session:
             "The public libgphoto2 CLI contract does not expose a verified immediate camera-sleep action.",
         )
 
+    def create_directory(self, name: str) -> str:
+        del name
+        raise unsupported(
+            CameraFeature.DIRECTORY_CONTROL.value,
+            self.engine_name,
+            "The public libgphoto2 CLI contract does not expose Canon CCAPI directory creation.",
+        )
+
     def clean_sensor(self, auto_power_off: bool) -> None:
         del auto_power_off
         raise unsupported(

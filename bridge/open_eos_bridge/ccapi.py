@@ -179,6 +179,12 @@ MOVIE_SETTING_ENDPOINTS: dict[str, tuple[str, frozenset[str] | None]] = {
     ),
 }
 MOVIE_SETTING_KEYS = MOVIE_SETTING_ENDPOINTS.keys()
+DIRECTORY_SELECTION_SETTING_KEY = "directoryselection"
+DIRECTORY_SELECTION_PATH_SUFFIX = "/functions/directory/directoryselection"
+DIRECTORY_CREATE_PATH_SUFFIX = "/functions/directory/createdirectory"
+DIRECTORY_CREATE_NAME_PATTERN = re.compile(r"^(?:[A-Z0-9_]{5})?$")
+DIRECTORY_CREATED_NAME_PATTERN = re.compile(r"^[A-Z0-9_]{5}$")
+DIRECTORY_SELECTION_PATTERN = re.compile(r"^[0-9]{3}[A-Z0-9_]{5}$")
 CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
 SETTING_ALIASES = {
@@ -211,6 +217,7 @@ SETTING_LABELS = {
     HIGH_FRAME_RATE_SETTING_KEY: "High frame rate",
     MOVIE_CROPPING_SETTING_KEY: "Movie cropping",
     MOVIE_FORMAT_SETTING_KEY: "Movie recording format",
+    DIRECTORY_SELECTION_SETTING_KEY: "Capture directory",
     "shutter": "Tv",
     "aperture": "Av",
     "whitebalance": "WB",
@@ -241,6 +248,13 @@ _DEFAULT_RTP_FACTORY = object()
 class CcapiOperation:
     method: str
     path: str
+
+
+@dataclass(frozen=True)
+class DirectoryOperations:
+    read: CcapiOperation
+    write: CcapiOperation
+    create: CcapiOperation
 
 
 @dataclass(frozen=True)
@@ -950,6 +964,8 @@ class CcapiSession:
                 supported.add(CameraFeature.FOCUS_BRACKETING_CONTROL)
             if control_keys & MOVIE_SETTING_KEYS:
                 supported.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
+            if DIRECTORY_SELECTION_SETTING_KEY in control_keys and self._directory_operations() is not None:
+                supported.add(CameraFeature.DIRECTORY_CONTROL)
             if control_keys - PRIMARY_SETTING_KEYS:
                 supported.add(CameraFeature.ADVANCED_SETTINGS)
             jpeg_live_view_supported = self._supports_jpeg_live_view()
@@ -1051,6 +1067,7 @@ class CcapiSession:
                 CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
                 CameraFeature.FOCUS_BRACKETING_CONTROL,
                 CameraFeature.MOVIE_SETTINGS_CONTROL,
+                CameraFeature.DIRECTORY_CONTROL,
             }
             live_sizes = (
                 [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
@@ -1102,6 +1119,10 @@ class CcapiSession:
                     CameraFeature.CAMERA_SLEEP.value: (
                         "The camera must advertise matching GET and PUT Auto Power Off endpoints and "
                         "include immediately in its current ability."
+                    ),
+                    CameraFeature.DIRECTORY_CONTROL.value: (
+                        "The camera must advertise directory creation plus matching readable and writable "
+                        "directory selection in the same CCAPI version, and return a valid ability list."
                     ),
                     CameraFeature.LIVE_VIEW_RTP.value: (self._rtp_capability_reason()),
                     CameraFeature.LIVE_VIEW_MULTIPART.value: (
@@ -1213,7 +1234,7 @@ class CcapiSession:
                 canonical in CARD_SELECTION_ENDPOINTS
                 or canonical in DEVICE_FUNCTION_SETTING_ENDPOINTS
                 or canonical in SOUND_RECORDING_ENDPOINTS
-                or canonical == SOUND_RECORDING_LEVEL_SETTING_KEY
+                or canonical in (SOUND_RECORDING_LEVEL_SETTING_KEY, DIRECTORY_SELECTION_SETTING_KEY)
                 or canonical in FOCUS_BRACKETING_SETTING_KEYS
                 or canonical in MOVIE_SETTING_KEYS
             )
@@ -1322,6 +1343,43 @@ class CcapiSession:
             self._settings_cache = None
             self._observed.add(_feature_for_setting(canonical))
             return self.status()
+
+    def create_directory(self, name: str) -> str:
+        with self._lock:
+            self._ensure_initialized()
+            if not DIRECTORY_CREATE_NAME_PATTERN.fullmatch(name):
+                raise BridgeError(
+                    "INVALID_DIRECTORY_NAME",
+                    "Directory name must be empty or exactly five uppercase letters, numbers, or underscores.",
+                    status_code=422,
+                    feature=CameraFeature.DIRECTORY_CONTROL.value,
+                    engine=self.engine_name,
+                )
+            operations = self._directory_operations()
+            if operations is None:
+                raise unsupported(
+                    CameraFeature.DIRECTORY_CONTROL.value,
+                    self.engine_name,
+                    "The camera did not advertise the complete Canon directory-control endpoint group.",
+                )
+            response = self._request_json(
+                operations.create.method,
+                operations.create.path,
+                {"directoryname": name},
+            )
+            created = response.get("directoryname") if isinstance(response, dict) else None
+            if not isinstance(created, str) or not DIRECTORY_CREATED_NAME_PATTERN.fullmatch(created):
+                raise BridgeError(
+                    "INVALID_CCAPI_RESPONSE",
+                    "Canon directory creation returned an invalid directory name.",
+                    status_code=502,
+                    feature=CameraFeature.DIRECTORY_CONTROL.value,
+                    engine=self.engine_name,
+                )
+            self._settings_cache = None
+            self._load_settings(force=True)
+            self._observed.add(CameraFeature.DIRECTORY_CONTROL)
+            return created
 
     def sleep_camera(self) -> None:
         with self._lock:
@@ -2319,6 +2377,7 @@ class CcapiSession:
         self._observed.discard(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
         self._observed.discard(CameraFeature.FOCUS_BRACKETING_CONTROL)
         self._observed.discard(CameraFeature.MOVIE_SETTINGS_CONTROL)
+        self._observed.discard(CameraFeature.DIRECTORY_CONTROL)
         for path in self._versioned_paths("/shooting/settings"):
             value = self._first_json([path])
             if not isinstance(value, dict):
@@ -2440,6 +2499,15 @@ class CcapiSession:
                 merged[key] = setting
                 setting_paths[key] = write.path
                 self._observed.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
+        directory_operations = self._directory_operations()
+        if directory_operations is not None:
+            directory_selection = _validated_directory_selection_setting(
+                self._first_json([directory_operations.read.path])
+            )
+            if directory_selection is not None:
+                merged[DIRECTORY_SELECTION_SETTING_KEY] = directory_selection
+                setting_paths[DIRECTORY_SELECTION_SETTING_KEY] = directory_operations.write.path
+                self._observed.add(CameraFeature.DIRECTORY_CONTROL)
         self._settings_cache = merged
         self._setting_paths = setting_paths
         return merged
@@ -2838,6 +2906,24 @@ class CcapiSession:
             write = CcapiOperation("PUT", read.path)
             if write in self._operations:
                 return read, write
+        return None
+
+    def _directory_operations(self) -> DirectoryOperations | None:
+        reads = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "GET" and operation.path.endswith(DIRECTORY_SELECTION_PATH_SUFFIX)
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        for read in reads:
+            prefix = read.path.removesuffix(DIRECTORY_SELECTION_PATH_SUFFIX)
+            write = CcapiOperation("PUT", read.path)
+            create = CcapiOperation("POST", f"{prefix}{DIRECTORY_CREATE_PATH_SUFFIX}")
+            if write in self._operations and create in self._operations:
+                return DirectoryOperations(read=read, write=write, create=create)
         return None
 
     def _camera_clock_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
@@ -3540,6 +3626,23 @@ def _validated_card_selection_setting(raw: object) -> dict[str, object] | None:
     return {"value": current, "ability": values}
 
 
+def _validated_directory_selection_setting(raw: object) -> dict[str, object] | None:
+    if not isinstance(raw, dict):
+        return None
+    current = raw.get("value")
+    ability = raw.get("ability")
+    if not isinstance(current, str) or not isinstance(ability, list):
+        return None
+    if not ability or len(ability) > MAX_STRING_SETTING_OPTIONS:
+        return None
+    if not all(isinstance(item, str) and DIRECTORY_SELECTION_PATTERN.fullmatch(item) for item in ability):
+        return None
+    values = list(ability)
+    if len(set(values)) != len(values) or current not in values:
+        return None
+    return {"value": current, "ability": values}
+
+
 def _validated_string_ability_setting(
     raw: object,
     allowed_values: frozenset[str] | None,
@@ -3623,6 +3726,8 @@ def _feature_for_setting(key: str) -> CameraFeature:
         return CameraFeature.MOVIE_SETTINGS_CONTROL
     if key in CARD_SELECTION_ENDPOINTS:
         return CameraFeature.CARD_SELECTION_CONTROL
+    if key == DIRECTORY_SELECTION_SETTING_KEY:
+        return CameraFeature.DIRECTORY_CONTROL
     return CameraFeature.ADVANCED_SETTINGS
 
 

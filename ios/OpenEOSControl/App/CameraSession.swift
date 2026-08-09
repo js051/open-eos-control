@@ -40,6 +40,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func createDirectory(name: String) async throws -> String {
+        switch self {
+        case let .ccapi(client): return try await client.createDirectory(name: name)
+        case let .desktopBridge(client): return try await client.createDirectory(name: name)
+        }
+    }
+
     func syncCameraClock() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.syncCameraClock()

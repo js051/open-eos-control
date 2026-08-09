@@ -657,6 +657,19 @@ class CameraViewModel(
         }
     }
 
+    fun createDirectory(name: String) = runCamera(CameraOperation.DIRECTORY) {
+        val state = _uiState.value
+        if (state.previewMode || !state.supports(CameraFeature.DIRECTORY_CONTROL)) return@runCamera
+        val created = repository.createDirectory(name)
+        val capabilities = repository.refreshCapabilities()
+        _uiState.update {
+            it.copy(
+                capabilities = capabilities,
+                lastCreatedDirectoryName = created,
+            )
+        }
+    }
+
     fun sleepCamera() {
         val state = _uiState.value
         if (
@@ -1541,6 +1554,7 @@ class CameraViewModel(
         focusPoint = null,
         focusFeedback = null,
         lastClockSyncAtMillis = null,
+        lastCreatedDirectoryName = null,
         operatorConfirmedFeatures = emptySet(),
         error = error,
         errorOperation = null,

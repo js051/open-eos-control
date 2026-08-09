@@ -335,6 +335,20 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
+    public func createDirectory(name: String) async throws -> String {
+        guard name.range(of: #"^(?:[A-Z0-9_]{5})?$"#, options: .regularExpression) != nil else {
+            throw DesktopBridgeError.invalidResponse(
+                "Directory name must be empty or exactly five uppercase letters, numbers, or underscores."
+            )
+        }
+        let body = try await postJSON(sessionEndpoint(["directories"]), payload: ["name": name])
+        let created = body.string("name")
+        guard created.range(of: #"^[A-Z0-9_]{5}$"#, options: .regularExpression) != nil else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid created directory name.")
+        }
+        return created
+    }
+
     public func syncCameraClock() async throws -> CameraStatus {
         let body = try await postJSON(sessionEndpoint(["clock", "sync"]), payload: [:])
         return parseStatus(body)

@@ -137,6 +137,7 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
         "capturestorage",
         "cardselectionstillimage",
         "cardselectionmovie",
+        "directoryselection",
         "stillimagequalitysd",
         "stillimagequalitycf",
     }

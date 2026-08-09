@@ -85,6 +85,12 @@
 "sync_camera_clock" = "Camera date and time";
 "sync_camera_clock_hint" = "Set the camera clock and time zone from this device, then verify the camera readback.";
 "camera_clock_synced_at" = "Verified at %@";
+"create_capture_directory" = "Create capture directory";
+"create_capture_directory_hint" = "Leave blank for the camera default, or enter exactly 5 uppercase letters, numbers, or underscores.";
+"directory_name_placeholder" = "EOSXX or blank";
+"directory_created" = "Created %@";
+"create" = "Create";
+"setting_capture_directory" = "Capture directory";
 "sync_now" = "Sync now";
 "choose_setting" = "Choose setting value";
 

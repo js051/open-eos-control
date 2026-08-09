@@ -24,6 +24,8 @@ from .models import (
     CameraInfo,
     CameraList,
     CameraStatus,
+    DirectoryCreateRequest,
+    DirectoryCreateResult,
     EngineHealth,
     ErrorDetail,
     ErrorResponse,
@@ -203,6 +205,10 @@ def create_app(
     @router.post("/session/{session_id}/settings/{key}", response_model=CameraStatus)
     def set_camera_setting(session_id: str, key: str, payload: SettingUpdate) -> CameraStatus:
         return manager.get(session_id).set_setting(key, payload.value)
+
+    @router.post("/session/{session_id}/directories", response_model=DirectoryCreateResult)
+    def create_camera_directory(session_id: str, payload: DirectoryCreateRequest) -> DirectoryCreateResult:
+        return DirectoryCreateResult(name=manager.get(session_id).create_directory(payload.name))
 
     @router.post("/session/{session_id}/clock/sync", response_model=CameraStatus)
     def sync_camera_clock(session_id: str) -> CameraStatus:

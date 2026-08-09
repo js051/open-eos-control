@@ -44,6 +44,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
@@ -1126,6 +1127,8 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
     var showSleepConfirmation by remember { mutableStateOf(false) }
     var showSensorCleaningConfirmation by remember { mutableStateOf(false) }
+    var showDirectoryCreation by remember { mutableStateOf(false) }
+    var directoryName by remember { mutableStateOf("") }
     var sensorCleaningAutoPowerOff by remember { mutableStateOf(false) }
     if (showSensorCleaningConfirmation) {
         AlertDialog(
@@ -1198,6 +1201,47 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 TextButton(onClick = { showSleepConfirmation = false }) {
                     Text(stringResource(R.string.cancel))
                 }
+            },
+            containerColor = AppSurface,
+            titleContentColor = AppText,
+            textContentColor = AppSubtleText,
+        )
+    }
+    if (showDirectoryCreation) {
+        val validName = directoryName.isEmpty() || Regex("^[A-Z0-9_]{5}$").matches(directoryName)
+        AlertDialog(
+            onDismissRequest = { showDirectoryCreation = false },
+            title = { Text(stringResource(R.string.create_capture_directory)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.create_capture_directory_hint))
+                    OutlinedTextField(
+                        value = directoryName,
+                        onValueChange = { raw ->
+                            directoryName = raw.uppercase()
+                                .filter { it in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" }
+                                .take(5)
+                        },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.directory_name)) },
+                        supportingText = { Text(stringResource(R.string.directory_name_rule)) },
+                        isError = !validName,
+                        modifier = Modifier.fillMaxWidth().testTag("directory-name"),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDirectoryCreation = false
+                        actions.createDirectory(directoryName)
+                    },
+                    enabled = validName && !state.isBusy(CameraOperation.DIRECTORY),
+                    modifier = Modifier.testTag("create-directory-confirm"),
+                ) { Text(stringResource(R.string.create), color = AppAccent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDirectoryCreation = false }) { Text(stringResource(R.string.cancel)) }
             },
             containerColor = AppSurface,
             titleContentColor = AppText,
@@ -1302,6 +1346,35 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                if (state.supports(CameraFeature.DIRECTORY_CONTROL)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.create_capture_directory),
+                                color = AppText,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                state.lastCreatedDirectoryName?.let {
+                                    stringResource(R.string.directory_created, it)
+                                } ?: stringResource(R.string.create_capture_directory_hint),
+                                color = if (state.lastCreatedDirectoryName == null) AppSubtleText else AppSuccess,
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                directoryName = ""
+                                showDirectoryCreation = true
+                            },
+                            enabled = !state.previewMode && !state.busy,
+                            colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(48.dp).testTag("create-directory"),
+                        ) {
+                            Text(stringResource(R.string.create))
+                        }
+                    }
+                }
                 if (state.supports(CameraFeature.SENSOR_CLEANING)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -1382,6 +1455,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                     !state.supports(CameraFeature.SHUTTER_HALF_PRESS) &&
                     !state.supports(CameraFeature.FOCUS_DRIVE) &&
                     !state.supports(CameraFeature.CAMERA_CLOCK_SYNC) &&
+                    !state.supports(CameraFeature.DIRECTORY_CONTROL) &&
                     !state.supports(CameraFeature.SENSOR_CLEANING) &&
                     !state.supports(CameraFeature.CAMERA_SLEEP)
                 ) {
@@ -1654,6 +1728,7 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "capturestorage" -> stringResource(R.string.setting_capture_storage)
     "cardselectionstillimage" -> stringResource(R.string.setting_still_image_card)
     "cardselectionmovie" -> stringResource(R.string.setting_movie_card)
+    "directoryselection" -> stringResource(R.string.setting_capture_directory)
     "highisonr" -> stringResource(R.string.setting_high_iso_noise_reduction)
     "alomode" -> stringResource(R.string.setting_auto_lighting_optimizer)
     "aeb" -> stringResource(R.string.setting_aeb)

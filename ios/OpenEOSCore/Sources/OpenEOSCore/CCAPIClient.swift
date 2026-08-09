@@ -227,6 +227,9 @@ public actor CCAPIClient {
         movieCroppingSettingKey: Set(["enable", "disable"]),
         movieFormatSettingKey: Set(["raw", "mp4"]),
     ]
+    private static let directorySelectionSettingKey = "directoryselection"
+    private static let directorySelectionPathSuffix = "/functions/directory/directoryselection"
+    private static let directoryCreatePathSuffix = "/functions/directory/createdirectory"
 
     private let baseURL: URL
     private let baseURLString: String
@@ -573,6 +576,9 @@ public actor CCAPIClient {
         if controls.contains(where: { Self.movieSettingKeys.contains($0.key) }) {
             supported.insert(.movieSettingsControl)
         }
+        if controls.contains(where: { $0.key == Self.directorySelectionSettingKey }), directoryOperations() != nil {
+            supported.insert(.directoryControl)
+        }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
@@ -628,6 +634,7 @@ public actor CCAPIClient {
             .soundRecordingLevelControl,
             .focusBracketingControl,
             .movieSettingsControl,
+            .directoryControl,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
         return CameraCapabilities(
@@ -656,6 +663,7 @@ public actor CCAPIClient {
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                     .sensorCleaning: "The camera must advertise the Canon POST sensor-cleaning endpoint.",
                     .cameraSleep: "The camera must advertise matching GET and PUT Auto Power Off endpoints and include immediately in its current ability.",
+                    .directoryControl: "The camera must advertise directory creation plus matching readable and writable directory selection in the same CCAPI version, and return a valid ability list.",
                     .mediaProtect: "The camera must advertise PUT for Canon contents before file protection can be changed.",
                     .mediaRating: "The camera must advertise PUT for Canon contents before file ratings can be changed.",
                     .mediaRotate: "The camera must advertise PUT for Canon contents before display rotation can be changed.",
@@ -789,6 +797,11 @@ public actor CCAPIClient {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
                 try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
+            case Self.directorySelectionSettingKey:
+                guard Self.isValidDirectorySelection(value) else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+                try await requestOK(path: "/ccapi/directory-selection", method: .put, json: ["value": value])
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
@@ -802,7 +815,8 @@ public actor CCAPIClient {
             Self.soundRecordingSettingKeys.contains(key.lowercased()) ||
             key.lowercased() == Self.soundRecordingLevelSettingKey ||
             Self.focusBracketingSettingKeys.contains(key.lowercased()) ||
-            Self.movieSettingKeys.contains(key.lowercased()) {
+            Self.movieSettingKeys.contains(key.lowercased()) ||
+            key.lowercased() == Self.directorySelectionSettingKey {
             settings = try await loadShootingSettings()
         } else {
             settings = try await cachedOrLoadShootingSettings()
@@ -850,6 +864,38 @@ public actor CCAPIClient {
         }
         observedFeatures.insert(featureForSetting(key))
         return try await status()
+    }
+
+    public func createDirectory(name: String) async throws -> String {
+        try await ensureInitialized()
+        guard Self.isValidDirectoryCreateName(name) else {
+            throw CCAPIError.invalidSetting(key: "directoryname", value: name)
+        }
+        let response: JSONDictionary
+        if resolvedMode == .simulator {
+            response = try await requestJSON(
+                path: "/ccapi/directory",
+                method: .post,
+                json: ["directoryname": name]
+            )
+        } else {
+            guard let operations = directoryOperations() else {
+                throw CCAPIError.unsupported(.directoryControl)
+            }
+            response = try await requestJSON(
+                path: operations.create.path,
+                method: operations.create.method,
+                json: ["directoryname": name]
+            )
+        }
+        let created = response.string("directoryname")
+        guard Self.isValidCreatedDirectoryName(created) else {
+            throw CCAPIError.invalidResponse("Canon directory creation returned an invalid directory name.")
+        }
+        observedFeatures.insert(.directoryControl)
+        cachedSettings = nil
+        if resolvedMode != .simulator { _ = try await loadShootingSettings() }
+        return created
     }
 
     public func sleepCamera() async throws {
@@ -1978,6 +2024,21 @@ public actor CCAPIClient {
         return nil
     }
 
+    private func directoryOperations() -> (read: CCAPIOperation, write: CCAPIOperation, create: CCAPIOperation)? {
+        let reads = operations
+            .filter { $0.method == .get && $0.path.hasSuffix(Self.directorySelectionPathSuffix) }
+            .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
+        for read in reads {
+            let prefix = String(read.path.dropLast(Self.directorySelectionPathSuffix.count))
+            let write = CCAPIOperation(method: .put, path: read.path)
+            let create = CCAPIOperation(method: .post, path: "\(prefix)\(Self.directoryCreatePathSuffix)")
+            if operations.contains(write), operations.contains(create) {
+                return (read, write, create)
+            }
+        }
+        return nil
+    }
+
     private func directShutterOperation() -> CCAPIOperation? {
         operation(.post, suffix: "/shooting/control/shutterbutton")
     }
@@ -2374,6 +2435,7 @@ public actor CCAPIClient {
         observedFeatures.remove(.soundRecordingLevelControl)
         observedFeatures.remove(.focusBracketingControl)
         observedFeatures.remove(.movieSettingsControl)
+        observedFeatures.remove(.directoryControl)
         settingsLoaded = false
         var merged: JSONDictionary = [:]
         let paths = enforceAdvertisedOperations
@@ -2488,6 +2550,13 @@ public actor CCAPIClient {
             settingPaths[endpoint.key] = operations.write.path
             merged[endpoint.key] = setting
             observedFeatures.insert(.movieSettingsControl)
+        }
+        if let operations = directoryOperations(),
+           let raw = try await firstJSON(paths: [operations.read.path], required: false),
+           let selection = Self.validatedDirectorySelectionSetting(raw) {
+            settingPaths[Self.directorySelectionSettingKey] = operations.write.path
+            merged[Self.directorySelectionSettingKey] = selection
+            observedFeatures.insert(.directoryControl)
         }
         settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
@@ -2608,6 +2677,31 @@ public actor CCAPIClient {
               cardSelectionValues.contains(current),
               values.contains(current) else { return nil }
         return ["value": current, "ability": values]
+    }
+
+    private static func validatedDirectorySelectionSetting(_ value: JSONDictionary) -> JSONDictionary? {
+        guard let current = value["value"] as? String,
+              let rawAbility = value["ability"] as? [Any] else { return nil }
+        let values = rawAbility.compactMap { $0 as? String }
+        guard values.count == rawAbility.count,
+              !values.isEmpty,
+              values.count <= maximumStringSettingOptions,
+              Set(values).count == values.count,
+              values.allSatisfy(isValidDirectorySelection),
+              values.contains(current) else { return nil }
+        return ["value": current, "ability": values]
+    }
+
+    private static func isValidDirectoryCreateName(_ value: String) -> Bool {
+        value.range(of: #"^(?:[A-Z0-9_]{5})?$"#, options: .regularExpression) != nil
+    }
+
+    private static func isValidCreatedDirectoryName(_ value: String) -> Bool {
+        value.range(of: #"^[A-Z0-9_]{5}$"#, options: .regularExpression) != nil
+    }
+
+    private static func isValidDirectorySelection(_ value: String) -> Bool {
+        value.range(of: #"^[0-9]{3}[A-Z0-9_]{5}$"#, options: .regularExpression) != nil
     }
 
     private static func validatedStringAbilitySetting(
@@ -2745,6 +2839,7 @@ public actor CCAPIClient {
         case Self.soundRecordingLevelSettingKey: .soundRecordingLevelControl
         case let focusKey where Self.focusBracketingSettingKeys.contains(focusKey): .focusBracketingControl
         case let movieKey where Self.movieSettingKeys.contains(movieKey): .movieSettingsControl
+        case Self.directorySelectionSettingKey: .directoryControl
         default: .advancedSettings
         }
     }
@@ -2924,6 +3019,15 @@ public actor CCAPIClient {
                   let control = control(endpoint.key, Self.settingLabel(endpoint.key), normalized) else { continue }
             controls.append(control)
         }
+        if let raw = value.object(Self.directorySelectionSettingKey),
+           let normalized = Self.validatedDirectorySelectionSetting(raw),
+           let control = control(
+               Self.directorySelectionSettingKey,
+               Self.settingLabel(Self.directorySelectionSettingKey),
+               normalized
+           ) {
+            controls.append(control)
+        }
         var supported: Set<CameraFeature> = [
             .cameraIdentity, .batteryStatus, .storageStatus, .eventPolling, .liveView, .liveViewJPEGPolling,
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
@@ -2954,6 +3058,9 @@ public actor CCAPIClient {
         }
         if controls.contains(where: { Self.movieSettingKeys.contains($0.key) }) {
             supported.insert(.movieSettingsControl)
+        }
+        if controls.contains(where: { $0.key == Self.directorySelectionSettingKey }) {
+            supported.insert(.directoryControl)
         }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
@@ -3400,6 +3507,7 @@ public actor CCAPIClient {
             Self.highFrameRateSettingKey: "High frame rate",
             Self.movieCroppingSettingKey: "Movie cropping",
             Self.movieFormatSettingKey: "Movie recording format",
+            Self.directorySelectionSettingKey: "Capture directory",
         ]
         if let label = known[key] { return label }
         return key.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").capitalized
