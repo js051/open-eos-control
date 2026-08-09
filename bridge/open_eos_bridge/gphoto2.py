@@ -1315,6 +1315,12 @@ class GPhoto2Session:
                         default_source="DESKTOP_BRIDGE_STREAM",
                         sizes=["MEDIUM"],
                         default_size="MEDIUM",
+                        magnifications=[1, 5] if self._live_view_magnification_config() is not None else [],
+                        current_magnification=(
+                            self._live_view_magnification
+                            if self._live_view_magnification in {1, 5}
+                            else None
+                        ),
                         max_fps=MAX_BRIDGE_LIVE_VIEW_FPS,
                     )
                     if CameraFeature.LIVE_VIEW in supported

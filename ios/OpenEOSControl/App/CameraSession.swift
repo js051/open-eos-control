@@ -151,8 +151,8 @@ enum CameraSession: Sendable {
         _ magnification: LiveViewMagnification
     ) async throws -> LiveViewMagnificationResult {
         switch self {
-        case .ccapi:
-            throw CCAPIError.unsupported(.liveViewMagnification)
+        case let .ccapi(client):
+            return try await client.setLiveViewMagnification(magnification)
         case let .desktopBridge(client):
             return try await client.setLiveViewMagnification(magnification)
         }

@@ -156,13 +156,20 @@ struct LiveViewSurface: View {
                     Color.white.ignoresSafeArea()
                 }
 
-                if camera.supports(.liveViewMagnification) {
-                    let target: LiveViewMagnification = camera.liveViewMagnification == .x5 ? .x1 : .x5
+                if camera.captureMode == .photo,
+                   camera.supports(.liveViewMagnification),
+                   let magnifications = camera.capabilities?.liveView.magnifications,
+                   magnifications.count >= 2,
+                   let current = camera.liveViewMagnification
+                    ?? camera.capabilities?.liveView.currentMagnification
+                    ?? magnifications.first,
+                   let currentIndex = magnifications.firstIndex(of: current) {
+                    let target = magnifications[(currentIndex + 1) % magnifications.count]
                     Button {
                         Task { await camera.setLiveViewMagnification(target) }
                     } label: {
                         ZStack(alignment: .bottomTrailing) {
-                            Image(systemName: target == .x5 ? "plus.magnifyingglass" : "minus.magnifyingglass")
+                            Image(systemName: target.rawValue > current.rawValue ? "plus.magnifyingglass" : "minus.magnifyingglass")
                                 .font(.system(size: 20, weight: .semibold))
                             Text("\(target.rawValue)\u{00D7}")
                                 .font(.system(size: 10, weight: .bold, design: .rounded))

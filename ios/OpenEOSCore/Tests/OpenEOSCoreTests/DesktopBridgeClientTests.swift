@@ -6,7 +6,7 @@ import XCTest
 final class DesktopBridgeClientTests: XCTestCase {
     private let health = #"{"ok":true,"service":"open-eos-control-bridge","version":"0.1.0","authRequired":true,"loopbackOnly":false,"engines":{}}"#
     private let status = #"{"connected":true,"battery":{"level":82,"status":"good"},"recording":false,"mode":"Manual","recordableShots":120,"remainingRecordingSeconds":3600,"media":{"available":true,"totalBytes":1000,"freeBytes":800,"freeImages":123,"devices":1},"exposure":{"iso":"400","shutter":"1/50","aperture":"2.8","whiteBalance":"Auto"},"raw":{"transport":"usb","recordable":{"recordableshots":120,"remainingtime":3600}}}"#
-    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","DIRECTORY_CONTROL","SENSOR_CLEANING","CAMERA_SLEEP","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_PROTECT","MEDIA_RATING","MEDIA_ROTATE","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]},{"key":"directoryselection","label":"Capture directory","value":"100EOSXX","values":["100EOSXX","101EOSXX"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso","directoryselection"],"observedFeatures":["BATTERY_STATUS"],"discoveryTrace":[{"endpoint":"GET /ccapi","outcome":"NO_API_LIST","httpStatus":200,"responseKeys":["value"],"protocolVersions":[],"advertisedOperationCount":0,"truncated":false}],"truncated":false}}"#
+    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","DIRECTORY_CONTROL","SENSOR_CLEANING","CAMERA_SLEEP","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_PROTECT","MEDIA_RATING","MEDIA_ROTATE","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","magnifications":[1,5],"currentMagnification":1,"minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]},{"key":"directoryselection","label":"Capture directory","value":"100EOSXX","values":["100EOSXX","101EOSXX"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso","directoryselection"],"observedFeatures":["BATTERY_STATUS"],"discoveryTrace":[{"endpoint":"GET /ccapi","outcome":"NO_API_LIST","httpStatus":200,"responseKeys":["value"],"protocolVersions":[],"advertisedOperationCount":0,"truncated":false}],"truncated":false}}"#
 
     func testDiscoveryValidatesServiceAndUsesBearerAuthentication() async throws {
         let transport = MockCameraHTTPTransport()
@@ -33,6 +33,77 @@ final class DesktopBridgeClientTests: XCTestCase {
             request.headers.first { $0.key.caseInsensitiveCompare("Authorization") == .orderedSame }?.value
                 == "Bearer bridge-secret"
         })
+    }
+
+    func testBridgeCapabilitiesParseDynamicLiveViewMagnifications() async throws {
+        let transport = MockCameraHTTPTransport()
+        let dynamicCapabilities = capabilities
+            .replacingOccurrences(
+                of: #""magnifications":[1,5],"currentMagnification":1"#,
+                with: #""magnifications":[1,5,10],"currentMagnification":10"#
+            )
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_dynamic","engine":"libgphoto2","camera":{"id":"gphoto2:dXNi","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
+        )
+        await transport.enqueueJSON(
+            path: "/v1/session/session_dynamic/capabilities",
+            body: dynamicCapabilities
+        )
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "gphoto2:dXNi",
+            transport: transport
+        )
+
+        try await client.initialize()
+        let parsed = try await client.capabilities()
+
+        XCTAssertEqual(parsed.liveView.magnifications, [.x1, .x5, .x10])
+        XCTAssertEqual(parsed.liveView.currentMagnification, .x10)
+    }
+
+    func testBridgeRejectsInvalidLiveViewMagnificationAdvertisementWithoutSendingCommand() async throws {
+        let transport = MockCameraHTTPTransport()
+        let invalidCapabilities = capabilities.replacingOccurrences(
+            of: #""magnifications":[1,5],"currentMagnification":1"#,
+            with: #""magnifications":[1,5],"currentMagnification":"1""#
+        )
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_invalid","engine":"libgphoto2","camera":{"id":"gphoto2:dXNi","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
+        )
+        await transport.enqueueJSON(
+            path: "/v1/session/session_invalid/capabilities",
+            body: invalidCapabilities
+        )
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "gphoto2:dXNi",
+            transport: transport
+        )
+
+        try await client.initialize()
+        let parsed = try await client.capabilities()
+
+        XCTAssertFalse(parsed.matrix.supports(.liveViewMagnification))
+        XCTAssertTrue(parsed.matrix.planned.contains(.liveViewMagnification))
+        XCTAssertTrue(parsed.liveView.magnifications.isEmpty)
+        do {
+            _ = try await client.setLiveViewMagnification(.x5)
+            XCTFail("Expected invalid Bridge magnification metadata to block the command")
+        } catch {
+            let sentMagnificationCommand = await transport.requests().contains {
+                $0.path.hasSuffix("/liveview/magnification")
+            }
+            XCTAssertFalse(sentMagnificationCommand)
+        }
     }
 
     func testFileNamingCapabilityAndUpdateUseBridgeContract() async throws {
@@ -250,6 +321,8 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.directoryControl))
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.stillCapture))
         XCTAssertEqual(snapshot.capabilities.liveView.sources, [.desktopBridgeStream])
+        XCTAssertEqual(snapshot.capabilities.liveView.magnifications, [.x1, .x5])
+        XCTAssertEqual(snapshot.capabilities.liveView.currentMagnification, .x1)
         XCTAssertEqual(snapshot.capabilities.liveView.maximumFPS, 12)
         XCTAssertEqual(snapshot.capabilities.evidence.advertisedCommands, ["POST /capture"])
         XCTAssertTrue(snapshot.capabilities.evidence.observedFeatures.contains(.batteryStatus))

@@ -309,8 +309,27 @@ class LiveViewCapabilities(ApiModel):
     default_source: str | None = None
     sizes: list[str] = Field(default_factory=list)
     default_size: str | None = None
+    magnifications: list[Literal[1, 5, 10]] = Field(default_factory=list)
+    current_magnification: Literal[1, 5, 10] | None = None
     min_fps: int = Field(default=1, ge=1)
     max_fps: int = Field(default=5, ge=1)
+
+    @field_validator("magnifications")
+    @classmethod
+    def validate_magnifications(cls, values: list[Literal[1, 5, 10]]) -> list[Literal[1, 5, 10]]:
+        if len(values) != len(set(values)):
+            raise ValueError("Live View magnifications must be unique.")
+        if values and (len(values) < 2 or 1 not in values):
+            raise ValueError("Live View magnifications must include 1x and at least one additional value.")
+        return values
+
+    @model_validator(mode="after")
+    def validate_current_magnification(self) -> LiveViewCapabilities:
+        if self.current_magnification is not None and self.current_magnification not in self.magnifications:
+            raise ValueError("Current Live View magnification must be advertised.")
+        if not self.magnifications and self.current_magnification is not None:
+            raise ValueError("Current Live View magnification requires an advertised ability list.")
+        return self
 
 
 class DiscoveryAttempt(ApiModel):
@@ -395,12 +414,12 @@ class LiveViewState(ApiModel):
 
 
 class LiveViewMagnificationRequest(ApiModel):
-    value: Literal[1, 5]
+    value: Literal[1, 5, 10]
 
 
 class LiveViewMagnificationResult(ApiModel):
     accepted: bool
-    value: Literal[1, 5]
+    value: Literal[1, 5, 10]
 
 
 class FocusDriveRequest(ApiModel):

@@ -2583,7 +2583,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun liveViewMagnificationControlAppearsOnlyWhenAdvertisedAndSendsFiveTimes() {
+    fun liveViewMagnificationControlCyclesOnlyAdvertisedValuesIncludingTenTimes() {
         var selected: LiveViewMagnification? = null
         val base = connectedState()
         compose.setContent {
@@ -2595,8 +2595,16 @@ class CameraScreensTest {
                                 supported = base.capabilities.matrix.supported +
                                     CameraFeature.LIVE_VIEW_MAGNIFICATION,
                             ),
+                            liveView = base.capabilities.liveView.copy(
+                                magnifications = listOf(
+                                    LiveViewMagnification.X1,
+                                    LiveViewMagnification.X5,
+                                    LiveViewMagnification.X10,
+                                ),
+                                currentMagnification = LiveViewMagnification.X5,
+                            ),
                         ),
-                        liveViewMagnification = LiveViewMagnification.X1,
+                        liveViewMagnification = LiveViewMagnification.X5,
                     ),
                     noOpActions().copy(setLiveViewMagnification = { selected = it }),
                 )
@@ -2604,7 +2612,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithTag("live-view-magnification").assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals(LiveViewMagnification.X5, selected) }
+        compose.runOnIdle { assertEquals(LiveViewMagnification.X10, selected) }
     }
 
     @Test
@@ -2613,6 +2621,36 @@ class CameraScreensTest {
         compose.setContent {
             MaterialTheme { CameraControlScreen(base, noOpActions()) }
         }
+        compose.onAllNodesWithTag("live-view-magnification").assertCountEquals(0)
+    }
+
+    @Test
+    fun liveViewMagnificationControlIsHiddenInVideoMode() {
+        val base = connectedState()
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    base.copy(
+                        captureMode = CaptureMode.VIDEO,
+                        capabilities = base.capabilities?.copy(
+                            matrix = CapabilityMatrix(
+                                supported = base.capabilities.matrix.supported +
+                                    CameraFeature.LIVE_VIEW_MAGNIFICATION,
+                            ),
+                            liveView = base.capabilities.liveView.copy(
+                                magnifications = listOf(
+                                    LiveViewMagnification.X1,
+                                    LiveViewMagnification.X5,
+                                ),
+                                currentMagnification = LiveViewMagnification.X1,
+                            ),
+                        ),
+                    ),
+                    noOpActions(),
+                )
+            }
+        }
+
         compose.onAllNodesWithTag("live-view-magnification").assertCountEquals(0)
     }
 

@@ -137,6 +137,25 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.RECORDABLE_STATUS))
         assertEquals(listOf(LiveViewSource.SIMULATOR_FRAME), capabilities.liveView.sources)
         assertEquals(2, capabilities.liveView.maxFps)
+        assertEquals(LiveViewMagnification.entries, capabilities.liveView.magnifications)
+        assertEquals(LiveViewMagnification.X1, capabilities.liveView.currentMagnification)
+    }
+
+    @Test
+    fun simulatorLiveViewMagnificationUsesBackedIntegerEndpoint() = runTest {
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        server.enqueue(jsonResponse("""{"accepted":true,"value":10}"""))
+
+        val capabilities = client.capabilities()
+        val result = client.setLiveViewMagnification(LiveViewMagnification.X10)
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION))
+        assertEquals(LiveViewMagnification.X10, result.magnification)
+        assertEquals("/ccapi/capabilities", server.takeRequest().path)
+        val write = server.takeRequest()
+        assertEquals("POST", write.method)
+        assertEquals("/ccapi/liveview/magnification", write.path)
+        assertEquals(10, JSONObject(write.body.readUtf8()).getInt("value"))
     }
 
     @Test
@@ -2922,6 +2941,96 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realLiveViewMagnificationUsesAdvertisedStringValueAndReadback() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver140":[
+                    {"path":"/shooting/liveview","post":true,"delete":true},
+                    {"path":"/shooting/liveview/flip","get":true},
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/settings/lvzoom","get":true,"put":true}
+                ]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":"5","ability":["1","5","10"]}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        server.enqueue(jsonResponse("""{"value":"10","ability":["1","5","10"]}"""))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        client.startLiveView()
+        val result = client.setLiveViewMagnification(LiveViewMagnification.X10)
+
+        assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION))
+        assertEquals(
+            listOf(LiveViewMagnification.X1, LiveViewMagnification.X5, LiveViewMagnification.X10),
+            capabilities.liveView.magnifications,
+        )
+        assertEquals(LiveViewMagnification.X5, capabilities.liveView.currentMagnification)
+        assertEquals(LiveViewMagnification.X10, result.magnification)
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/shooting/settings", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/shooting/settings/lvzoom", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/shooting/liveview", server.takeRequest().path)
+        val write = server.takeRequest()
+        assertEquals("PUT", write.method)
+        assertEquals("/ccapi/ver140/shooting/settings/lvzoom", write.path)
+        val requestedValue = JSONObject(write.body.readUtf8()).get("value")
+        assertTrue(requestedValue is String)
+        assertEquals("10", requestedValue)
+        assertEquals("/ccapi/ver140/shooting/settings/lvzoom", server.takeRequest().path)
+    }
+
+    @Test
+    fun realLiveViewMagnificationRejectsInvalidNumericAbilityPayload() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{"ver140":[
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/settings/lvzoom","get":true,"put":true}
+                ]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":1,"ability":[1,5,10]}"""))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_MAGNIFICATION))
+        assertTrue(capabilities.liveView.magnifications.isEmpty())
+        assertNull(capabilities.liveView.currentMagnification)
+    }
+
+    @Test
+    fun realLiveViewMagnificationRequiresSameVersionGetAndPut() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "ver140":[
+                        {"path":"/shooting/settings","get":true},
+                        {"path":"/shooting/settings/lvzoom","get":true}
+                    ],
+                    "ver130":[{"path":"/shooting/settings/lvzoom","put":true}]
+                }""",
+            ),
+        )
+        server.enqueue(jsonResponse("{}"))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun simulatorMediaCanBeListedAndDownloaded() = runTest {
         server.enqueue(
             jsonResponse(
@@ -3487,7 +3596,11 @@ class CcapiClientTest {
               "iso": ["100", "800", "1600"],
               "shutter": ["1/50", "1/100"],
               "aperture": ["2.8", "4.0"],
-              "white_balance": ["auto", "daylight"]
+              "white_balance": ["auto", "daylight"],
+              "liveView": {
+                "magnifications": [1, 5, 10],
+                "currentMagnification": 1
+              }
             }
         """
 

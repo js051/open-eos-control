@@ -79,6 +79,9 @@ public actor CCAPIClient {
     private static let wbShiftFields = ["ba", "mg"]
     private static let zoomSettingKey = "zoom"
     private static let zoomPathSuffix = "/shooting/control/zoom"
+    private static let liveViewMagnificationPathSuffix = "/shooting/settings/lvzoom"
+    private static let liveViewMagnificationSettingKey = "lvzoom"
+    private static let liveViewMagnificationValues = Set(["1", "5", "10"])
     private static let movieModeSettingKey = "moviemode"
     private static let movieModePathSuffix = "/shooting/control/moviemode"
     private static let movieModeValues = ["off", "on"]
@@ -281,6 +284,8 @@ public actor CCAPIClient {
     private var nativeGeometryCacheKey: Int64 = 0
     private var latestLiveViewGeometry: CCAPILiveViewGeometry?
     private var simulatorEventSequence: Int64 = 0
+    private var liveViewMagnifications: [LiveViewMagnification] = []
+    private var currentLiveViewMagnification: LiveViewMagnification?
 
     public init(
         baseURL value: String,
@@ -609,6 +614,7 @@ public actor CCAPIClient {
         if supportsJPEGLiveView { supported.insert(.liveViewJPEGPolling) }
         if supportsMultipartLiveView { supported.insert(.liveViewMultipart) }
         if supportsRTPLiveView { supported.insert(.liveViewRTP) }
+        if liveViewMagnifications.count >= 2 { supported.insert(.liveViewMagnification) }
         if recordingOperation() != nil { supported.insert(.videoRecording) }
         if directShutterOperation() != nil || manualShutterOperation() != nil {
             supported.insert(.stillCapture)
@@ -652,6 +658,7 @@ public actor CCAPIClient {
             .soundRecordingLevelControl,
             .focusBracketingControl,
             .movieSettingsControl,
+            .liveViewMagnification,
             .directoryControl,
             .fileNamingControl,
         ]
@@ -679,6 +686,7 @@ public actor CCAPIClient {
                     .soundRecordingLevelControl: "The camera must advertise matching GET and PUT Canon sound-recording-level endpoints and a valid integer range.",
                     .focusBracketingControl: "The camera must advertise matching GET and PUT Canon focus-bracketing endpoints and valid documented abilities.",
                     .movieSettingsControl: "The camera must advertise matching GET and PUT Canon movie-setting endpoints and valid documented abilities.",
+                    .liveViewMagnification: "The camera must advertise matching GET and PUT Canon lvzoom endpoints in one CCAPI version and return a strict string ability containing 1 and at least one additional documented magnification.",
                     .movieModeControl: "The camera must advertise readable and writable Canon movie mode control in the same API version.",
                     .cameraClockSync: "The camera must advertise both GET and PUT for the Canon date-time endpoint in the same API version.",
                     .sensorCleaning: "The camera must advertise the Canon POST sensor-cleaning endpoint.",
@@ -695,6 +703,8 @@ public actor CCAPIClient {
                 defaultSource: ccapiLiveViewSources().first ?? .auto,
                 sizes: liveSizes,
                 defaultSize: liveSizes.contains(.medium) ? .medium : activeLiveViewSize,
+                magnifications: liveViewMagnifications,
+                currentMagnification: currentLiveViewMagnification,
                 maximumFPS: 30
             ),
             profile: CameraProfile.from(modelName: cachedModel),
@@ -1450,6 +1460,65 @@ public actor CCAPIClient {
         await rtpSession?.setTargetFPS(min(max(fps, 1), 30))
     }
 
+    public func setLiveViewMagnification(
+        _ magnification: LiveViewMagnification
+    ) async throws -> LiveViewMagnificationResult {
+        try await ensureInitialized()
+        if resolvedMode == .simulator {
+            guard activeLiveViewSource != nil,
+                  liveViewMagnifications.contains(magnification) else {
+                throw CCAPIError.unsupported(.liveViewMagnification)
+            }
+            let response = try await requestJSON(
+                path: "/ccapi/liveview/magnification",
+                method: .post,
+                json: ["value": magnification.rawValue]
+            )
+            guard response["accepted"] as? Bool == true,
+                  let returnedValue = Self.strictInteger(response["value"]),
+                  let returned = LiveViewMagnification(rawValue: returnedValue),
+                  returned == magnification,
+                  liveViewMagnifications.contains(returned) else {
+                throw CCAPIError.invalidResponse(
+                    "Simulator did not confirm the requested Live View magnification."
+                )
+            }
+            currentLiveViewMagnification = returned
+            observedFeatures.insert(.liveViewMagnification)
+            return LiveViewMagnificationResult(accepted: true, magnification: returned)
+        }
+        if liveViewMagnifications.isEmpty {
+            _ = try await loadShootingSettings()
+        }
+        guard let operations = liveViewMagnificationOperations(),
+              liveViewMagnifications.contains(magnification) else {
+            throw CCAPIError.unsupported(.liveViewMagnification)
+        }
+        guard activeLiveViewSource != nil else {
+            throw CCAPIError.invalidResponse("Canon Live View must be active before changing magnification.")
+        }
+        guard recording != true,
+              cachedSettings?.object(Self.movieModeSettingKey)?.string("value") != "on" else {
+            throw CCAPIError.invalidResponse("Canon Live View magnification is unavailable in Movie mode or while recording.")
+        }
+        try await requestOK(
+            path: operations.write.path,
+            method: .put,
+            json: ["value": String(magnification.rawValue)]
+        )
+        guard let readback = try await firstJSON(paths: [operations.read.path], required: true),
+              let setting = Self.validatedLiveViewMagnificationSetting(readback),
+              setting.current == magnification else {
+            throw CCAPIError.invalidResponse(
+                "Canon Live View magnification PUT succeeded but GET readback did not confirm the requested value."
+            )
+        }
+        liveViewMagnifications = setting.magnifications
+        currentLiveViewMagnification = setting.current
+        observedFeatures.insert(.liveViewMagnification)
+        return LiveViewMagnificationResult(accepted: true, magnification: setting.current)
+    }
+
     public func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
         try await ensureInitialized()
         if activeLiveViewSource == .ccapiMultipart {
@@ -2056,6 +2125,10 @@ public actor CCAPIClient {
         return nil
     }
 
+    private func liveViewMagnificationOperations() -> (read: CCAPIOperation, write: CCAPIOperation)? {
+        readWriteSettingOperations(suffix: Self.liveViewMagnificationPathSuffix)
+    }
+
     private func movieModeOperations() -> (read: CCAPIOperation, write: CCAPIOperation)? {
         let reads = operations
             .filter { $0.method == .get && $0.path.hasSuffix(Self.movieModePathSuffix) }
@@ -2553,6 +2626,9 @@ public actor CCAPIClient {
 
     private func loadShootingSettings() async throws -> JSONDictionary? {
         settingPaths.removeAll()
+        liveViewMagnifications.removeAll()
+        currentLiveViewMagnification = nil
+        observedFeatures.remove(.liveViewMagnification)
         cameraSleepPath = nil
         observedFeatures.remove(.cardSelectionControl)
         observedFeatures.remove(.soundRecordingControl)
@@ -2572,6 +2648,7 @@ public actor CCAPIClient {
                 let settingPath = "\(prefix)/shooting/settings/\(key)"
                 if !Self.soundRecordingSettingKeys.contains(key),
                    key != Self.soundRecordingLevelSettingKey,
+                   key != Self.liveViewMagnificationSettingKey,
                    !Self.deviceFunctionSettingKeys.contains(key),
                    !Self.focusBracketingSettingKeys.contains(key),
                    !Self.movieSettingKeys.contains(key),
@@ -2580,6 +2657,14 @@ public actor CCAPIClient {
                 }
                 if merged[key] == nil { merged[key] = setting }
             }
+        }
+        if let operations = liveViewMagnificationOperations(),
+           let raw = try await firstJSON(paths: [operations.read.path], required: false),
+           let setting = Self.validatedLiveViewMagnificationSetting(raw) {
+            settingPaths[Self.liveViewMagnificationSettingKey] = operations.write.path
+            liveViewMagnifications = setting.magnifications
+            currentLiveViewMagnification = setting.current
+            observedFeatures.insert(.liveViewMagnification)
         }
         if let operations = zoomOperations(),
            let raw = try await firstJSON(paths: [operations.read.path], required: false),
@@ -2795,6 +2880,26 @@ public actor CCAPIClient {
 
     private static func validatedZoomSetting(_ value: JSONDictionary) -> JSONDictionary? {
         validatedIntegerRangeSetting(value)
+    }
+
+    private static func validatedLiveViewMagnificationSetting(
+        _ value: JSONDictionary
+    ) -> (magnifications: [LiveViewMagnification], current: LiveViewMagnification)? {
+        guard let currentValue = value["value"] as? String,
+              let rawAbility = value["ability"] as? [Any] else { return nil }
+        let ability = rawAbility.compactMap { $0 as? String }
+        guard ability.count == rawAbility.count,
+              ability.count >= 2,
+              Set(ability).count == ability.count,
+              ability.allSatisfy(liveViewMagnificationValues.contains),
+              ability.contains("1"),
+              ability.contains(currentValue),
+              let current = LiveViewMagnification(rawValue: Int(currentValue) ?? 0) else {
+            return nil
+        }
+        let magnifications = ability.compactMap { LiveViewMagnification(rawValue: Int($0) ?? 0) }
+        guard magnifications.count == ability.count else { return nil }
+        return (magnifications, current)
     }
 
     private static func validatedIntegerRangeSetting(
@@ -3185,6 +3290,23 @@ public actor CCAPIClient {
     private func simulatorCapabilities() async throws -> CameraCapabilities {
         let value = try await requestJSON(path: "/ccapi/capabilities")
         let fileNaming = value.object("fileNaming").flatMap(Self.validatedBridgeFileNaming)
+        let simulatorMagnifications: [LiveViewMagnification] = {
+            guard let liveView = value.object("liveView"),
+                  let rawValues = liveView.array("magnifications") else { return [] }
+            let values = rawValues.compactMap(Self.strictInteger)
+            guard values.count == rawValues.count,
+                  values.count >= 2,
+                  Set(values).count == values.count,
+                  values.contains(1),
+                  values.allSatisfy({ LiveViewMagnification(rawValue: $0) != nil }) else { return [] }
+            return values.compactMap(LiveViewMagnification.init(rawValue:))
+        }()
+        let simulatorCurrentMagnification = value.object("liveView")
+            .flatMap { Self.strictInteger($0["currentMagnification"]) }
+            .flatMap(LiveViewMagnification.init(rawValue:))
+            .flatMap { simulatorMagnifications.contains($0) ? $0 : nil }
+        liveViewMagnifications = simulatorMagnifications
+        currentLiveViewMagnification = simulatorCurrentMagnification
         var controls = [
             CameraSetting(key: "iso", label: "ISO", value: "-", values: value.array("iso")?.strings ?? []),
             CameraSetting(key: "shutter", label: "Shutter speed", value: "-", values: value.array("shutter")?.strings ?? []),
@@ -3324,6 +3446,9 @@ public actor CCAPIClient {
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
+        if simulatorMagnifications.count >= 2, simulatorCurrentMagnification != nil {
+            supported.insert(.liveViewMagnification)
+        }
         return CameraCapabilities(
             settings: controls,
             fileNaming: fileNaming,
@@ -3333,6 +3458,8 @@ public actor CCAPIClient {
                 defaultSource: .simulatorFrame,
                 sizes: [.medium],
                 defaultSize: .medium,
+                magnifications: simulatorMagnifications,
+                currentMagnification: simulatorCurrentMagnification,
                 maximumFPS: 2
             ),
             profile: CameraProfile.from(modelName: cachedModel),

@@ -151,6 +151,7 @@ data class CapabilityMatrix(
                 CameraFeature.TAP_FOCUS,
                 CameraFeature.CLICK_WHITE_BALANCE,
                 CameraFeature.FOCUS_DRIVE,
+                CameraFeature.LIVE_VIEW_MAGNIFICATION,
                 CameraFeature.ZOOM_CONTROL,
                 CameraFeature.CARD_SELECTION_CONTROL,
                 CameraFeature.SOUND_RECORDING_CONTROL,
@@ -191,6 +192,8 @@ data class CapabilityMatrix(
                 CameraFeature.AUTOFOCUS to
                     "The camera must advertise CCAPI POST autofocus or a verified manual half-press operation.",
                 CameraFeature.FOCUS_DRIVE to "The camera must advertise the verified CCAPI POST drivefocus operation.",
+                CameraFeature.LIVE_VIEW_MAGNIFICATION to
+                    "The camera must advertise same-version GET and PUT Canon lvzoom endpoints and return a valid 1x/5x/10x string ability list.",
                 CameraFeature.ZOOM_CONTROL to
                     "The camera must advertise readable and writable Canon zoom control in the same API version.",
                 CameraFeature.CARD_SELECTION_CONTROL to
@@ -341,6 +344,8 @@ data class LiveViewCapabilities(
     val defaultSize: LiveViewSize = sizes.firstOrNull() ?: LiveViewSize.MEDIUM,
     val minFps: Int = 1,
     val maxFps: Int = 30,
+    val magnifications: List<LiveViewMagnification> = emptyList(),
+    val currentMagnification: LiveViewMagnification? = null,
 ) {
     companion object {
         fun ccapiNetwork(): LiveViewCapabilities = LiveViewCapabilities(
@@ -356,6 +361,8 @@ data class LiveViewCapabilities(
             sizes = listOf(LiveViewSize.MEDIUM),
             defaultSize = LiveViewSize.MEDIUM,
             maxFps = 2,
+            magnifications = LiveViewMagnification.entries,
+            currentMagnification = LiveViewMagnification.X1,
         )
     }
 }
@@ -564,6 +571,7 @@ enum class LiveViewMagnification(
 ) {
     X1(1),
     X5(5),
+    X10(10),
 }
 
 data class LiveViewMagnificationResult(

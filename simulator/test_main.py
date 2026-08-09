@@ -303,12 +303,80 @@ def test_canonical_ccapi_discovery_settings_and_live_view_contract() -> None:
         "live_view_start_count": 1,
         "live_view_stop_count": 1,
         "live_view_size_rejections": 1,
+        "live_view_magnification": "1",
+        "live_view_magnification_update_count": 0,
         "event_cursor": 0,
         "event_poll_count": 0,
         "event_delivery_count": 0,
         "event_delete_count": 0,
         "event_active_requests": 0,
     }
+
+
+def test_canonical_ccapi_live_view_magnification_uses_string_values_and_empty_put_body() -> None:
+    initial = client.get("/ccapi/ver100/shooting/settings/lvzoom")
+    changed = client.put(
+        "/ccapi/ver100/shooting/settings/lvzoom",
+        json={"value": "10"},
+    )
+    readback = client.get("/ccapi/ver100/shooting/settings/lvzoom")
+    capabilities = client.get("/ccapi/capabilities")
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert initial.json() == {"value": "1", "ability": ["1", "5", "10"]}
+    assert changed.status_code == 200
+    assert changed.json() == {}
+    assert readback.json() == {"value": "10", "ability": ["1", "5", "10"]}
+    assert capabilities.json()["liveView"] == {
+        "magnifications": [1, 5, 10],
+        "currentMagnification": 10,
+    }
+    assert test_state["live_view_magnification"] == {
+        "value": "10",
+        "update_count": 1,
+    }
+    assert test_state["canonical"]["live_view_magnification"] == "10"
+    assert test_state["canonical"]["live_view_magnification_update_count"] == 1
+
+
+def test_simulator_app_live_view_magnification_uses_integer_contract() -> None:
+    changed = client.post("/ccapi/liveview/magnification", json={"value": 10})
+    invalid_string = client.post("/ccapi/liveview/magnification", json={"value": "5"})
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert changed.status_code == 200
+    assert changed.json() == {"accepted": True, "value": 10}
+    assert invalid_string.status_code == 422
+    assert test_state["live_view_magnification"] == {"value": "10", "update_count": 1}
+
+
+def test_canonical_ccapi_live_view_magnification_rejects_invalid_values_and_busy_modes() -> None:
+    invalid_type = client.put(
+        "/ccapi/ver100/shooting/settings/lvzoom",
+        json={"value": 10},
+    )
+    invalid_value = client.put(
+        "/ccapi/ver100/shooting/settings/lvzoom",
+        json={"value": "2"},
+    )
+    extra_key = client.put(
+        "/ccapi/ver100/shooting/settings/lvzoom",
+        json={"value": "5", "extra": True},
+    )
+    client.post("/ccapi/movie-mode", json={"action": "on"})
+    movie_mode = client.get("/ccapi/ver100/shooting/settings/lvzoom")
+    client.post("/ccapi/movie-mode", json={"action": "off"})
+    client.post("/ccapi/record/start", json={})
+    recording = client.put(
+        "/ccapi/ver100/shooting/settings/lvzoom",
+        json={"value": "5"},
+    )
+
+    assert invalid_type.status_code == 400
+    assert invalid_value.status_code == 400
+    assert extra_key.status_code == 400
+    assert movie_mode.status_code == 503
+    assert recording.status_code == 503
 
 
 def test_canonical_multipart_live_view_streams_exact_jpeg_parts_and_stops() -> None:

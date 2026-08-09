@@ -212,6 +212,10 @@ class CcapiCameraBackend(
     override suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusDriveResult =
         client.driveFocus(direction, step)
 
+    override suspend fun setLiveViewMagnification(
+        magnification: LiveViewMagnification,
+    ): LiveViewMagnificationResult = client.setLiveViewMagnification(magnification)
+
     override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)

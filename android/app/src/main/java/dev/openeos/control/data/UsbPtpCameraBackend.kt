@@ -349,6 +349,16 @@ class UsbPtpCameraBackend(
                     defaultSize = LiveViewSize.MEDIUM,
                     minFps = 1,
                     maxFps = 30,
+                    magnifications = if (supportsCanonLiveViewMagnification) {
+                        listOf(LiveViewMagnification.X1, LiveViewMagnification.X5)
+                    } else {
+                        emptyList()
+                    },
+                    currentMagnification = if (supportsCanonLiveViewMagnification) {
+                        LiveViewMagnification.X1
+                    } else {
+                        null
+                    },
                 )
             } else {
                 LiveViewCapabilities()

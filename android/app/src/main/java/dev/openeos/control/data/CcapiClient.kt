@@ -84,6 +84,11 @@ private data class CcapiRecordableStatus(
     val remainingSeconds: Long?,
 )
 
+private data class CcapiLiveViewMagnificationSetting(
+    val current: LiveViewMagnification,
+    val abilities: List<LiveViewMagnification>,
+)
+
 private data class StrictNullableLong(
     val value: Long?,
 )
@@ -143,6 +148,7 @@ class CcapiClient(
     private var cameraSleepWritePath: String? = null
     private var fileNamingState: CameraFileNaming? = null
     private var fileNamingLoaded = false
+    private var liveViewMagnificationSetting: CcapiLiveViewMagnificationSetting? = null
     private val apiOperations = linkedSetOf<CcapiApiOperation>()
     private val observedFeatures = mutableSetOf<CameraFeature>()
     private val discoveryTrace = mutableListOf<CameraDiscoveryAttempt>()
@@ -695,6 +701,9 @@ class CcapiClient(
             }
             if (focusDriveOperation() != null) {
                 supportedFeatures.add(CameraFeature.FOCUS_DRIVE)
+            }
+            if (liveViewMagnificationSetting != null) {
+                supportedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
             }
             if (supportsApi("GET", "/contents")) {
                 supportedFeatures.add(CameraFeature.MEDIA_BROWSER)
@@ -1383,6 +1392,53 @@ class CcapiClient(
         return FocusDriveResult(ok = true, direction = direction, step = step)
     }
 
+    suspend fun setLiveViewMagnification(
+        magnification: LiveViewMagnification,
+    ): LiveViewMagnificationResult {
+        if (!isRealCamera) {
+            val response = postJson(
+                "/ccapi/liveview/magnification",
+                JSONObject().put("value", magnification.value),
+            )
+            val accepted = response.opt("accepted") as? Boolean
+                ?: response.opt("ok") as? Boolean
+                ?: false
+            val returnedValue = response.opt("value") as? Int
+            val returned = LiveViewMagnification.entries.firstOrNull { it.value == returnedValue }
+                ?: error("Simulator returned an invalid Live View magnification value.")
+            check(accepted && returned == magnification) {
+                "Simulator did not confirm the requested Live View magnification."
+            }
+            observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            return LiveViewMagnificationResult(ok = true, magnification = returned)
+        }
+
+        check(activeLiveViewSource != null) {
+            "Canon Live View magnification requires an active Live View session."
+        }
+        if (!settingsLoaded) loadShootingSettings()
+        val operations = liveViewMagnificationOperations()
+            ?: error("Camera did not advertise same-version GET and PUT Canon Live View magnification control.")
+        val setting = liveViewMagnificationSetting
+            ?: error("Camera did not return a valid Canon Live View magnification ability list.")
+        require(magnification in setting.abilities) {
+            "${magnification.value}x Live View magnification is not advertised by this camera."
+        }
+
+        putOk(
+            operations.second.path,
+            JSONObject().put("value", magnification.value.toString()),
+        )
+        val readback = getJson(operations.first.path).toValidatedLiveViewMagnificationSetting()
+            ?: error("Camera returned an invalid Live View magnification readback.")
+        check(readback.current == magnification) {
+            "Camera accepted Live View magnification but reported ${readback.current.value}x instead of ${magnification.value}x."
+        }
+        liveViewMagnificationSetting = readback
+        observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+        return LiveViewMagnificationResult(ok = true, magnification = readback.current)
+    }
+
     suspend fun listMedia(): List<CameraMediaItem> {
         val items = if (isRealCamera) listRealMedia() else listSimulatorMedia()
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
@@ -1821,6 +1877,7 @@ class CcapiClient(
             .toList()
         val writableSettings = (
             settingPathsByKey.keys +
+                (if (liveViewMagnificationSetting != null) setOf(LIVE_VIEW_MAGNIFICATION_SETTING_KEY) else emptySet()) +
                 (if (cameraSleepWritePath != null) setOf(AUTO_POWER_OFF_SETTING_KEY) else emptySet()) +
                 (if (fileNamingState != null) FILE_NAMING_ENDPOINTS.keys.map { it.wireName } else emptyList())
             )
@@ -1878,6 +1935,9 @@ class CcapiClient(
                 ?.let { write -> read to write }
         }
     }
+
+    private fun liveViewMagnificationOperations(): Pair<CcapiApiOperation, CcapiApiOperation>? =
+        readWriteSettingOperations(LIVE_VIEW_MAGNIFICATION_PATH_SUFFIX)
 
     private fun cardSelectionOperations(pathSuffix: String): Pair<CcapiApiOperation, CcapiApiOperation>? {
         val reads = apiOperations
@@ -2109,6 +2169,8 @@ class CcapiClient(
         return LiveViewCapabilities.ccapiNetwork().copy(
             sources = sources,
             defaultSource = sources.firstOrNull() ?: LiveViewSource.AUTO,
+            magnifications = liveViewMagnificationSetting?.abilities.orEmpty(),
+            currentMagnification = liveViewMagnificationSetting?.current,
         )
     }
 
@@ -2548,6 +2610,8 @@ class CcapiClient(
         structuredSettingValuesByKey.clear()
         structuredSettingCurrentValues.clear()
         cameraSleepWritePath = null
+        liveViewMagnificationSetting = null
+        observedFeatures.remove(CameraFeature.LIVE_VIEW_MAGNIFICATION)
         observedFeatures.remove(CameraFeature.CARD_SELECTION_CONTROL)
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_CONTROL)
         observedFeatures.remove(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
@@ -2579,6 +2643,7 @@ class CcapiClient(
                 if (
                     key !in SOUND_RECORDING_SETTING_KEYS &&
                     key != SOUND_RECORDING_LEVEL_SETTING_KEY &&
+                    key != LIVE_VIEW_MAGNIFICATION_SETTING_KEY &&
                     key !in DEVICE_FUNCTION_SETTING_KEYS &&
                     key !in FOCUS_BRACKETING_SETTING_KEYS &&
                     key !in MOVIE_SETTING_KEYS &&
@@ -2637,6 +2702,20 @@ class CcapiClient(
                 if (!merged.has(key)) {
                     merged.put(key, settings.get(key))
                 }
+            }
+        }
+
+        liveViewMagnificationOperations()?.let { (read, _) ->
+            val setting = try {
+                getJson(read.path).toValidatedLiveViewMagnificationSetting()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                null
+            }
+            if (setting != null) {
+                liveViewMagnificationSetting = setting
+                observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
             }
         }
 
@@ -3490,6 +3569,8 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
 }
 
 private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
+    val simulatorLiveViewMagnification = optJSONObject("liveView")
+        ?.toValidatedSimulatorLiveViewMagnificationSetting()
     fun simulatorCardSelection(key: String): CameraSettingControl? = optJSONObject(key)
         ?.toValidatedCardSelectionSetting()
         ?.let { setting ->
@@ -3657,6 +3738,11 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.LENS_STATUS,
             CameraFeature.TEMPERATURE_STATUS,
         ) +
+        (if (simulatorLiveViewMagnification != null) {
+            setOf(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+        } else {
+            emptySet()
+        }) +
         (if (simulatorCameraSleepSupported) setOf(CameraFeature.CAMERA_SLEEP) else emptySet()) +
         (if (zoomControl != null) setOf(CameraFeature.ZOOM_CONTROL) else emptySet()) +
         (if (movieModeControl != null) setOf(CameraFeature.MOVIE_MODE_CONTROL) else emptySet()) +
@@ -3714,8 +3800,30 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
         ),
         fileNaming = fileNaming,
         matrix = CapabilityMatrix.ccapiNetwork(supported),
-        liveView = LiveViewCapabilities.simulator(),
+        liveView = LiveViewCapabilities.simulator().copy(
+            magnifications = simulatorLiveViewMagnification?.abilities.orEmpty(),
+            currentMagnification = simulatorLiveViewMagnification?.current,
+        ),
     )
+}
+
+private fun JSONObject.toValidatedSimulatorLiveViewMagnificationSetting(): CcapiLiveViewMagnificationSetting? {
+    val currentValue = opt("currentMagnification") as? Int ?: return null
+    val rawAbility = optJSONArray("magnifications") ?: return null
+    val values = (0 until rawAbility.length()).map { index ->
+        rawAbility.opt(index) as? Int ?: return null
+    }
+    if (
+        values.size !in 2..LiveViewMagnification.entries.size ||
+        values.toSet().size != values.size ||
+        1 !in values ||
+        currentValue !in values
+    ) return null
+    val abilities = values.map { value ->
+        LiveViewMagnification.entries.firstOrNull { it.value == value } ?: return null
+    }
+    val current = abilities.firstOrNull { it.value == currentValue } ?: return null
+    return CcapiLiveViewMagnificationSetting(current = current, abilities = abilities)
 }
 
 private fun JSONObject.safeTopLevelKeys(): Set<String> {
@@ -3903,6 +4011,9 @@ private const val WB_SHIFT_SETTING_KEY = "wbshift"
 private val WB_SHIFT_FIELDS = listOf("ba", "mg")
 private const val ZOOM_SETTING_KEY = "zoom"
 private const val ZOOM_PATH_SUFFIX = "/shooting/control/zoom"
+private const val LIVE_VIEW_MAGNIFICATION_SETTING_KEY = "lvzoom"
+private const val LIVE_VIEW_MAGNIFICATION_PATH_SUFFIX = "/shooting/settings/lvzoom"
+private val LIVE_VIEW_MAGNIFICATION_VALUES = setOf("1", "5", "10")
 private const val MOVIE_MODE_SETTING_KEY = "moviemode"
 private const val MOVIE_MODE_PATH_SUFFIX = "/shooting/control/moviemode"
 private val MOVIE_MODE_VALUES = linkedSetOf("off", "on")
@@ -4287,6 +4398,26 @@ private fun JSONObject.toValidatedStringAbilitySetting(allowedValues: Set<String
     return JSONObject()
         .put("value", current)
         .put("ability", org.json.JSONArray(values))
+}
+
+private fun JSONObject.toValidatedLiveViewMagnificationSetting(): CcapiLiveViewMagnificationSetting? {
+    val currentValue = opt("value") as? String ?: return null
+    val rawAbility = optJSONArray("ability") ?: return null
+    val values = (0 until rawAbility.length()).map { index ->
+        rawAbility.opt(index) as? String ?: return null
+    }
+    if (
+        values.size !in 2..LIVE_VIEW_MAGNIFICATION_VALUES.size ||
+        values.toSet().size != values.size ||
+        "1" !in values ||
+        currentValue !in values ||
+        values.any { it !in LIVE_VIEW_MAGNIFICATION_VALUES }
+    ) return null
+    val abilities = values.map { value ->
+        LiveViewMagnification.entries.firstOrNull { it.value.toString() == value } ?: return null
+    }
+    val current = abilities.firstOrNull { it.value.toString() == currentValue } ?: return null
+    return CcapiLiveViewMagnificationSetting(current = current, abilities = abilities)
 }
 
 private fun JSONObject.toValidatedZoomSetting(): JSONObject? {

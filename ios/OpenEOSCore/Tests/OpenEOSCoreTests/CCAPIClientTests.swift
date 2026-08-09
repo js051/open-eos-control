@@ -802,6 +802,39 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(json, ["direction": "near", "step": "large"])
     }
 
+    func testSimulatorLiveViewMagnificationUsesDynamicContract() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/capabilities",
+            body: #"{"iso":["800"],"shutter":["1/50"],"aperture":["2.8"],"white_balance":["auto"],"liveView":{"magnifications":[1,5,10],"currentMagnification":5}}"#
+        )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/liveview/magnification",
+            body: #"{"accepted":true,"value":10}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        try await client.startLiveView()
+        let result = try await client.setLiveViewMagnification(.x10)
+
+        XCTAssertTrue(capabilities.matrix.supports(.liveViewMagnification))
+        XCTAssertEqual(capabilities.liveView.magnifications, [.x1, .x5, .x10])
+        XCTAssertEqual(capabilities.liveView.currentMagnification, .x5)
+        XCTAssertEqual(result.magnification, .x10)
+        let request = try XCTUnwrap((await transport.requests()).first {
+            $0.path == "/ccapi/liveview/magnification"
+        })
+        let body = try XCTUnwrap(request.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Int])
+        XCTAssertEqual(json, ["value": 10])
+    }
+
     func testUnadvertisedFocusDriveFailsWithoutSendingACommand() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
@@ -2065,6 +2098,120 @@ final class CCAPIClientTests: XCTestCase {
         capabilities = try await invalidStatusClient.capabilities()
         XCTAssertNil(capabilities.setting("moviemode"))
         XCTAssertFalse(capabilities.matrix.supports(.movieModeControl))
+    }
+
+    func testCanonLiveViewMagnificationUsesStrictSameVersionContractAndReadback() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/lvzoom","get":true,"put":true},{"path":"/shooting/liveview","get":true,"post":true,"delete":true},{"path":"/shooting/liveview/flip","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings/lvzoom",
+            body: #"{"value":"5","ability":["1","5","10"]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        XCTAssertTrue(capabilities.matrix.supports(.liveViewMagnification))
+        XCTAssertEqual(capabilities.liveView.magnifications, [.x1, .x5, .x10])
+        XCTAssertEqual(capabilities.liveView.currentMagnification, .x5)
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("lvzoom"))
+
+        await transport.enqueue(method: "POST", path: "/ccapi/ver100/shooting/liveview", status: 204)
+        try await client.startLiveView(LiveViewRequest(source: .ccapiJPEGPolling))
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/settings/lvzoom",
+            body: "{}"
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings/lvzoom",
+            body: #"{"value":"10","ability":["1","5","10"]}"#
+        )
+
+        let result = try await client.setLiveViewMagnification(.x10)
+        XCTAssertEqual(result, LiveViewMagnificationResult(accepted: true, magnification: .x10))
+        let write = try XCTUnwrap((await transport.requests()).first {
+            $0.method == "PUT" && $0.path.hasSuffix("/shooting/settings/lvzoom")
+        })
+        let body = try XCTUnwrap(write.body)
+        XCTAssertEqual(
+            try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String]),
+            ["value": "10"]
+        )
+
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/ccapi/ver100/shooting/settings/lvzoom",
+            body: "{}"
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/settings/lvzoom",
+            body: #"{"value":"5","ability":["1","5","10"]}"#
+        )
+        do {
+            _ = try await client.setLiveViewMagnification(.x10)
+            XCTFail("Expected a mismatched Live View magnification readback to fail")
+        } catch let error as CCAPIError {
+            guard case .invalidResponse = error else {
+                XCTFail("Unexpected error: \(error)")
+                return
+            }
+        }
+    }
+
+    func testCanonLiveViewMagnificationRejectsInvalidPayloads() async throws {
+        let invalidPayloads = [
+            #"{"value":5,"ability":["1","5"]}"#,
+            #"{"value":"1","ability":["1","1"]}"#,
+            #"{"value":"5","ability":["5","10"]}"#,
+            #"{"value":"10","ability":["1","5"]}"#,
+        ]
+        for payload in invalidPayloads {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(
+                path: "/ccapi",
+                body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/lvzoom","get":true,"put":true}]}"#
+            )
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings/lvzoom", body: payload)
+            let client = try CCAPIClient(
+                baseURL: "http://192.168.1.2:8080",
+                mode: .camera,
+                transport: transport
+            )
+
+            let capabilities = try await client.capabilities()
+            XCTAssertFalse(capabilities.matrix.supports(.liveViewMagnification), payload)
+            XCTAssertTrue(capabilities.liveView.magnifications.isEmpty, payload)
+            XCTAssertNil(capabilities.liveView.currentMagnification, payload)
+        }
+    }
+
+    func testCanonLiveViewMagnificationDoesNotPairDifferentVersions() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/lvzoom","get":true}],"ver110":[{"path":"/shooting/settings/lvzoom","put":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertFalse(capabilities.matrix.supports(.liveViewMagnification))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.liveViewMagnification))
+        XCTAssertEqual((await transport.requests()).count, 2)
     }
 
     func testCanonCardSelectionRequiresMatchingGetPutAndWritesOnlyAdvertisedValue() async throws {

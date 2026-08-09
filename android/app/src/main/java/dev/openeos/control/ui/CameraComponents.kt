@@ -1156,13 +1156,10 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp)),
             )
         }
-        if (state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION)) {
+        val targetMagnification = state.nextLiveViewMagnification()
+        if (state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION) && targetMagnification != null) {
             val bottomPadding = liveViewOverlayBottomPadding(state)
-            val target = if (state.liveViewMagnification == LiveViewMagnification.X5) {
-                LiveViewMagnification.X1
-            } else {
-                LiveViewMagnification.X5
-            }
+            val target = targetMagnification
             val description = stringResource(R.string.live_view_magnify_to, target.value)
             val enabled = !state.isBusy(CameraOperation.LIVE_VIEW)
             Box(
@@ -1189,7 +1186,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     ) {
                         Icon(
                             painterResource(
-                                if (target == LiveViewMagnification.X5) {
+                                if (target != LiveViewMagnification.X1) {
                                     LucideR.drawable.lucide_ic_zoom_in
                                 } else {
                                     LucideR.drawable.lucide_ic_zoom_out

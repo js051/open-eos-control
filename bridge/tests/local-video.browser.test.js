@@ -708,7 +708,18 @@ async function run() {
       const capabilities = await response.json();
       capabilities.liveView.sources = ["CCAPI_RTP", "DESKTOP_BRIDGE_STREAM"];
       capabilities.liveView.defaultSource = "CCAPI_RTP";
+      capabilities.liveView.magnifications = [1, 5, 10];
+      capabilities.liveView.currentMagnification = 5;
       await route.fulfill({ response, json: capabilities });
+    });
+    const magnificationRequests = [];
+    await page.route("**/v1/session/*/liveview/magnification", async (route) => {
+      const payload = route.request().postDataJSON();
+      magnificationRequests.push(payload);
+      await route.fulfill({ status: 200, contentType: "application/json", json: {
+        accepted: true,
+        value: payload.value,
+      } });
     });
     await page.route("**/v1/session/*/liveview/start", async (route) => {
       const request = route.request();
@@ -750,6 +761,8 @@ async function run() {
     await page.selectOption("#live-source-select", "CCAPI_RTP");
     await page.click("#rail-live-button");
     await page.waitForSelector("#rtp-audio-button:not([hidden]):not([disabled])");
+    await page.click("#live-magnification-button");
+    assert.deepEqual(magnificationRequests, [{ value: 10 }]);
     assert.equal(await page.locator("#rtp-audio-button").getAttribute("aria-pressed"), "false");
     assert.equal(audioRequests, 0);
     await page.click("#rtp-audio-button");

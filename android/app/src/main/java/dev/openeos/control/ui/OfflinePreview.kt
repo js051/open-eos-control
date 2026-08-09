@@ -12,6 +12,7 @@ import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CapabilityMatrix
 import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.LiveViewCapabilities
+import dev.openeos.control.data.LiveViewMagnification
 
 internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
     previewMode = true,
@@ -147,7 +148,10 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
                 CameraFeature.MEDIA_ROTATE,
             ),
         ),
-        liveView = LiveViewCapabilities.ccapiNetwork(),
+        liveView = LiveViewCapabilities.ccapiNetwork().copy(
+            magnifications = LiveViewMagnification.entries,
+            currentMagnification = LiveViewMagnification.X1,
+        ),
         profile = CameraProfile.R6_MARK_III,
     ),
     mediaItems = listOf(
