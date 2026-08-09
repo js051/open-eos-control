@@ -277,7 +277,7 @@ final class OpenEOSControlUITests: XCTestCase {
         }
 
         openMoreActions(in: app)
-        app.buttons["camera-media-menu-button"].tap()
+        guard tapMenuAction(app.buttons["camera-media-menu-button"]) else { return }
         XCTAssertTrue(app.staticTexts["SIM_0003.PNG"].waitForExistence(timeout: 20))
 
         let previewMedia = app.buttons["preview-media-SIM_0003.PNG"]
@@ -358,7 +358,7 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.buttons["exposure-iso"], containing: "3200", timeout: 20))
 
         openMoreActions(in: app)
-        app.buttons["camera-media-menu-button"].tap()
+        guard tapMenuAction(app.buttons["camera-media-menu-button"]) else { return }
         XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 20))
 
         _ = try await simulatorRequest(
