@@ -74,6 +74,9 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         pendingDownload = null
         if (destination != null && item != null) actions.downloadMedia(item, destination)
     }
+    val openUploadDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { source ->
+        if (source != null) actions.uploadMedia(source)
+    }
 
     state.mediaPreviewItem?.let { item ->
         MediaPreviewDialog(
@@ -160,6 +163,14 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                     maxLines = 1,
                 )
             }
+            if (state.supports(CameraFeature.MEDIA_UPLOAD)) {
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_upload,
+                    stringResource(R.string.upload_media),
+                    { openUploadDocument.launch(arrayOf("image/*", "video/*", "application/octet-stream")) },
+                    enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
+                )
+            }
             ToolIconButton(
                 LucideR.drawable.lucide_ic_refresh_cw,
                 stringResource(R.string.refresh_media),
@@ -169,7 +180,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         }
 
         if (state.isBusy(CameraOperation.MEDIA)) {
-            val progress = state.mediaDownloadProgress
+            val progress = state.mediaUploadProgress ?: state.mediaDownloadProgress
             val totalBytes = progress?.totalBytes
             if (progress != null && totalBytes != null && totalBytes > 0L) {
                 LinearProgressIndicator(
@@ -206,9 +217,41 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             }
         }
 
+        state.activeMediaUploadName?.let { name ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.uploading_media, name),
+                        color = AppText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    state.mediaUploadProgress?.let { progress ->
+                        Text(formatMediaProgress(progress), color = AppSubtleText, maxLines = 1)
+                    }
+                }
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_x,
+                    stringResource(R.string.cancel_media_upload),
+                    actions.cancelMediaUpload,
+                )
+            }
+        }
+
         state.lastDownloadedMediaName?.let { name ->
             Text(
                 stringResource(R.string.media_downloaded, name),
+                color = AppSuccess,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
+        state.lastUploadedMediaName?.let { name ->
+            Text(
+                stringResource(R.string.media_uploaded, name),
                 color = AppSuccess,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )

@@ -1,5 +1,6 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -8,6 +9,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.InputStream
 import java.io.OutputStream
 import java.time.Instant
 import java.util.Locale
@@ -229,6 +231,7 @@ class UsbPtpCameraBackend(
         val supportsMtpMediaRating = supportsMediaBrowser(info) &&
             supportsMtpObjectProperties(info) &&
             validatedMediaRatingFormats.isNotEmpty()
+        val supportsMediaUpload = supportsMediaUpload(info, storageSnapshot)
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
             add(CameraFeature.CAMERA_IDENTITY)
@@ -242,6 +245,7 @@ class UsbPtpCameraBackend(
             }
             if (info.supports(PtpOperationCode.GET_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_PREVIEW)
             if (info.supports(PtpOperationCode.GET_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_DOWNLOAD)
+            if (supportsMediaUpload) add(CameraFeature.MEDIA_UPLOAD)
             if (info.supports(PtpOperationCode.DELETE_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_DELETE)
             if (supportsMediaBrowser(info) && info.supports(PtpOperationCode.SET_OBJECT_PROTECTION)) {
                 add(CameraFeature.MEDIA_PROTECT)
@@ -294,6 +298,7 @@ class UsbPtpCameraBackend(
             CameraFeature.MEDIA_THUMBNAIL,
             CameraFeature.MEDIA_PREVIEW,
             CameraFeature.MEDIA_DOWNLOAD,
+            CameraFeature.MEDIA_UPLOAD,
             CameraFeature.MEDIA_DELETE,
             CameraFeature.MEDIA_PROTECT,
             CameraFeature.MEDIA_RATING,
@@ -356,6 +361,8 @@ class UsbPtpCameraBackend(
                         "success requires a matching post-write event readback.",
                     CameraFeature.MEDIA_DOWNLOAD to
                         "Uses standard GetObject with bounded USB reads or streams a completed app-private host capture.",
+                    CameraFeature.MEDIA_UPLOAD to
+                        "Uses advertised standard SendObjectInfo and SendObject only with a writable card, an advertised object format, exact byte counts, and ObjectInfo readback.",
                     CameraFeature.MEDIA_DELETE to
                         "Uses standard DeleteObject for card media and local deletion for app-private host captures.",
                     CameraFeature.MEDIA_PROTECT to
@@ -848,6 +855,103 @@ class UsbPtpCameraBackend(
             bytesTransferred = bytesTransferred,
             contentType = contentTypeFor(item.name, item.kind),
         ).also { observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD) }
+    }
+
+    override suspend fun uploadMedia(
+        name: String,
+        sizeBytes: Long,
+        contentType: String?,
+        source: InputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): CameraMediaUploadResult {
+        val info = requireDeviceInfo()
+        val storages = refreshStorageSnapshot(info)?.getOrThrow().orEmpty()
+        if (!supportsMediaUpload(info, storages)) unsupported<Unit>(CameraFeature.MEDIA_UPLOAD)
+        val safeName = validatePtpUploadName(name)
+        if (sizeBytes !in 1L..MAX_PTP_OBJECT_BYTES) {
+            throw PtpProtocolException("USB PTP upload size must be from 1 through $MAX_PTP_OBJECT_BYTES bytes.")
+        }
+        val objectFormat = ptpUploadFormat(safeName, contentType, info.imageFormats)
+        val writable = storages.filter { storage ->
+            storage.accessCapability == PTP_STORAGE_READ_WRITE &&
+                (storage.freeSpaceBytes == ULong.MAX_VALUE || storage.freeSpaceBytes >= sizeBytes.toULong())
+        }
+        val currentStorage = canonPropertyState(CanonEosPropertyCode.CURRENT_STORAGE).currentValue
+        val target = writable.firstOrNull { it.storageId == currentStorage } ?: writable.firstOrNull()
+            ?: throw PtpProtocolException("No writable camera storage has enough free space for $safeName.")
+        val ptp = requireSession()
+        val existingRootItems = ptp.objectHandles(
+            storageId = target.storageId,
+            associationHandle = PTP_ROOT_OBJECT_HANDLE,
+        ).mapNotNull { handle -> runCatching { ptp.objectInfo(handle) }.getOrNull() }
+        if (existingRootItems.any { it.filename.equals(safeName, ignoreCase = true) }) {
+            throw PtpProtocolException("A camera-root object named $safeName already exists.")
+        }
+
+        val outgoing = PtpObjectInfo(
+            handle = 0L,
+            storageId = target.storageId,
+            objectFormat = objectFormat,
+            protectionStatus = PtpProtectionStatus.NONE,
+            sizeBytes = sizeBytes,
+            thumbnailFormat = 0,
+            thumbnailSizeBytes = 0,
+            thumbnailWidth = 0,
+            thumbnailHeight = 0,
+            imageWidth = 0,
+            imageHeight = 0,
+            imageBitDepth = 0,
+            parentObject = PTP_ROOT_OBJECT_HANDLE,
+            associationType = 0,
+            associationDescription = 0,
+            sequenceNumber = 0,
+            filename = safeName,
+            captureDate = "",
+            modificationDate = "",
+            keywords = "",
+        )
+        val sent = try {
+            ptp.uploadObject(
+                storageId = target.storageId,
+                parentObject = PTP_ROOT_OBJECT_HANDLE,
+                objectInfo = outgoing,
+                source = source,
+            ) { transferred, total ->
+                onProgress(CameraMediaTransferProgress(transferred, total))
+            }
+        } catch (exception: CancellationException) {
+            abortUploadSession(ptp)
+            throw exception
+        } catch (exception: Exception) {
+            abortUploadSession(ptp)
+            throw PtpProtocolException(
+                "USB PTP upload failed after SendObjectInfo; reconnect the camera before another command.",
+                exception,
+            )
+        }
+        val readback = withContext(NonCancellable) { ptp.objectInfo(sent.objectHandle) }
+        if (
+            readback.storageId != sent.storageId ||
+            readback.parentObject != sent.parentObject ||
+            readback.objectFormat != objectFormat ||
+            readback.sizeBytes != sizeBytes ||
+            !readback.filename.equals(safeName, ignoreCase = false)
+        ) {
+            throw PtpProtocolException(
+                "Camera accepted $safeName but ObjectInfo readback did not match the uploaded object."
+            )
+        }
+        mediaInfo[readback.handle] = readback
+        refreshStorageSnapshot(info)
+        val item = readback.toMediaItem()
+        observedFeatures.addAll(setOf(CameraFeature.MEDIA_UPLOAD, CameraFeature.MEDIA_BROWSER))
+        return CameraMediaUploadResult(item = item, bytesTransferred = sizeBytes)
+    }
+
+    private suspend fun abortUploadSession(ptp: PtpSession) {
+        ptp.abort()
+        if (session === ptp) session = null
+        close()
     }
 
     override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem {
@@ -1929,6 +2033,13 @@ class UsbPtpCameraBackend(
             info.supports(PtpOperationCode.GET_OBJECT_HANDLES) &&
             info.supports(PtpOperationCode.GET_OBJECT_INFO)
 
+    private fun supportsMediaUpload(info: PtpDeviceInfo, storages: List<PtpStorageInfo>): Boolean =
+        supportsMediaBrowser(info) &&
+            info.supports(PtpOperationCode.SEND_OBJECT_INFO) &&
+            info.supports(PtpOperationCode.SEND_OBJECT) &&
+            storages.any { it.accessCapability == PTP_STORAGE_READ_WRITE } &&
+            info.imageFormats.any(::isSupportedPtpUploadFormat)
+
     private fun supportsMtpObjectProperties(info: PtpDeviceInfo): Boolean =
         info.supports(PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED) &&
             info.supports(PtpOperationCode.GET_OBJECT_PROP_DESC) &&
@@ -2141,6 +2252,56 @@ private fun contentTypeFor(filename: String, kind: String): String =
         else -> if (kind == "video") "video/*" else "application/octet-stream"
     }
 
+private fun validatePtpUploadName(name: String): String {
+    val trimmed = name.trim()
+    if (
+        trimmed.isEmpty() || trimmed.length > 120 || trimmed != name ||
+        trimmed == "." || trimmed == ".." || trimmed.endsWith('.') ||
+        trimmed.endsWith(' ') || trimmed.any { it == '/' || it == '\\' || it == ':' || it.isISOControl() }
+    ) {
+        throw PtpProtocolException("Camera upload filename is invalid.")
+    }
+    return trimmed
+}
+
+private fun ptpUploadFormat(name: String, contentType: String?, advertisedFormats: Set<Int>): Int {
+    val candidates = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
+        "jpg", "jpeg" -> listOf(PtpObjectFormat.EXIF_JPEG)
+        "png" -> listOf(PtpObjectFormat.PNG)
+        "tif", "tiff" -> listOf(PtpObjectFormat.TIFF_EP)
+        "dng" -> listOf(PtpObjectFormat.DNG)
+        "cr2" -> listOf(PtpObjectFormat.CANON_CRW3, PtpObjectFormat.CANON_CRW)
+        "cr3" -> listOf(PtpObjectFormat.CANON_CR3)
+        "mov" -> listOf(PtpObjectFormat.CANON_MOV)
+        "mp4" -> listOf(PtpObjectFormat.MP4)
+        else -> emptyList()
+    }
+    if (candidates.isEmpty()) {
+        throw PtpProtocolException("Camera upload supports only advertised JPEG, PNG, TIFF, DNG, CR2, CR3, MOV, or MP4 formats.")
+    }
+    val expectedKind = contentType?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
+    if (
+        expectedKind != null && expectedKind != "application/octet-stream" &&
+        ((name.substringAfterLast('.', "").lowercase(Locale.ROOT) in setOf("mov", "mp4")) != expectedKind.startsWith("video/"))
+    ) {
+        throw PtpProtocolException("Upload content type $contentType does not match $name.")
+    }
+    return candidates.firstOrNull(advertisedFormats::contains)
+        ?: throw PtpProtocolException("The camera does not advertise the object format required by $name.")
+}
+
+private fun isSupportedPtpUploadFormat(format: Int): Boolean = format in setOf(
+    PtpObjectFormat.EXIF_JPEG,
+    PtpObjectFormat.PNG,
+    PtpObjectFormat.TIFF_EP,
+    PtpObjectFormat.DNG,
+    PtpObjectFormat.CANON_CRW,
+    PtpObjectFormat.CANON_CRW3,
+    PtpObjectFormat.CANON_CR3,
+    PtpObjectFormat.CANON_MOV,
+    PtpObjectFormat.MP4,
+)
+
 private fun String.toDisplayPtpDate(): String? {
     if (length < 15 || getOrNull(8) != 'T') return takeIf { it.isNotBlank() }
     return "${substring(0, 4)}-${substring(4, 6)}-${substring(6, 8)} " +
@@ -2151,6 +2312,8 @@ private fun formatPtpVersion(value: Int): String =
     "${value / 100}.${(value % 100).toString().padStart(2, '0')}"
 
 private const val MAX_USB_MEDIA_ITEMS = 500
+private const val PTP_STORAGE_READ_WRITE = 0
+private const val PTP_ROOT_OBJECT_HANDLE = UINT32_MAX
 private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 private const val PTP_OBJECT_PROTECTION_READBACK_ATTEMPTS = 3
 private const val PTP_OBJECT_PROTECTION_READBACK_DELAY_MILLIS = 100L

@@ -34,8 +34,17 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
         let body: Data
     }
 
+    struct UploadStub: Sendable {
+        let method: String
+        let path: String
+        let statusCode: Int
+        let headers: [String: String]
+        let body: Data
+    }
+
     private var stubs: [Stub] = []
     private var downloadStubs: [DownloadStub] = []
+    private var uploadStubs: [UploadStub] = []
     private var recorded: [RecordedRequest] = []
 
     func enqueue(
@@ -60,6 +69,16 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
         body: Data
     ) {
         downloadStubs.append(DownloadStub(method: method, path: path, statusCode: status, headers: headers, body: body))
+    }
+
+    func enqueueUpload(
+        method: String = "POST",
+        path: String,
+        status: Int = 201,
+        headers: [String: String] = ["content-type": "application/json"],
+        body: Data
+    ) {
+        uploadStubs.append(UploadStub(method: method, path: path, statusCode: status, headers: headers, body: body))
     }
 
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
@@ -94,6 +113,32 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
             headers: stub.headers,
             temporaryFileURL: temporaryURL
         )
+    }
+
+    func upload(
+        _ request: URLRequest,
+        from fileURL: URL,
+        progress: @escaping CameraMediaProgressHandler
+    ) async throws -> CameraHTTPUploadResponse {
+        let actual = RecordedRequest(
+            method: request.httpMethod ?? "GET",
+            path: (request.url?.path ?? "") + (request.url?.query.map { "?\($0)" } ?? ""),
+            headers: request.allHTTPHeaderFields ?? [:],
+            body: try Data(contentsOf: fileURL),
+            timeoutInterval: request.timeoutInterval
+        )
+        recorded.append(actual)
+        guard !uploadStubs.isEmpty else { throw MockTransportError.missingResponse("upload \(actual.path)") }
+        let stub = uploadStubs.removeFirst()
+        guard stub.method == actual.method, stub.path == actual.path else {
+            throw MockTransportError.unexpectedRequest(
+                expected: "\(stub.method) \(stub.path)",
+                actual: "\(actual.method) \(actual.path)"
+            )
+        }
+        let size = Int64(actual.body?.count ?? 0)
+        progress(CameraMediaTransferProgress(bytesTransferred: size, totalBytes: size))
+        return CameraHTTPUploadResponse(statusCode: stub.statusCode, headers: stub.headers, body: stub.body)
     }
 
     func requests() -> [RecordedRequest] {

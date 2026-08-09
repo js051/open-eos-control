@@ -2041,6 +2041,50 @@ class CameraScreensTest {
     }
 
     @Test
+    fun mediaUploadActionIsHiddenWithoutAdvertisedCapability() {
+        val state = CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state, noOpActions())
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.upload_media)).assertDoesNotExist()
+    }
+
+    @Test
+    fun mediaUploadShowsProgressAndCancelActionWhenAdvertised() {
+        val name = "EDITED_0001.JPG"
+        val preview = CameraUiState().withOfflinePreview()
+        val capabilities = requireNotNull(preview.capabilities)
+        val state = preview.copy(
+            previewMode = false,
+            uiMode = UiMode.MEDIA,
+            activeMediaUploadName = name,
+            mediaUploadProgress = CameraMediaTransferProgress(
+                bytesTransferred = 8L * 1024L * 1024L,
+                totalBytes = 32L * 1024L * 1024L,
+            ),
+            pendingOperations = setOf(CameraOperation.MEDIA),
+            capabilities = capabilities.copy(
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported + CameraFeature.MEDIA_UPLOAD,
+                ),
+            ),
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state, noOpActions())
+            }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.upload_media)).assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.uploading_media, name)).assertIsDisplayed()
+        compose.onNodeWithText("8.0 MB / 32.0 MB (25%)").assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.cancel_media_upload)).assertIsDisplayed()
+    }
+
+    @Test
     fun photoStateShowsModeSelectorAndExplainsMissingStillCaptureCapability() {
         var selectedMode: CaptureMode? = null
         compose.setContent {

@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 
@@ -127,6 +128,43 @@ class PtpProtocolTest {
     }
 
     @Test
+    fun abortClosesTransportWithoutSendingCloseSession() = runTest {
+        val transport = FakePtpTransport(
+            data(PtpOperationCode.GET_DEVICE_INFO, 0, deviceInfoPayload()),
+            ok(0),
+            ok(0),
+        )
+        val session = PtpSession(transport)
+        session.initialize()
+
+        session.abort()
+
+        assertTrue(transport.closed)
+        assertFalse(transport.sent.any { it.code == PtpOperationCode.CLOSE_SESSION })
+    }
+
+    @Test
+    fun maximumObjectPayloadLeavesRoomForUsbContainerHeader() {
+        val header = PtpCodec.encodeHeader(
+            type = PtpContainerType.DATA,
+            code = PtpOperationCode.SEND_OBJECT,
+            transactionId = 1,
+            payloadLength = MAX_PTP_OBJECT_BYTES,
+        )
+        val tooLarge = runCatching {
+            PtpCodec.encodeHeader(
+                type = PtpContainerType.DATA,
+                code = PtpOperationCode.SEND_OBJECT,
+                transactionId = 2,
+                payloadLength = MAX_PTP_OBJECT_BYTES + 1,
+            )
+        }.exceptionOrNull()
+
+        assertEquals(UINT32_MAX, PtpCodec.decodeHeader(header).length)
+        assertTrue(tooLarge is IllegalArgumentException)
+    }
+
+    @Test
     fun sessionSurfacesPtpResponseCodeAndOperation() = runTest {
         val transport = FakePtpTransport(
             data(PtpOperationCode.GET_DEVICE_INFO, 0, deviceInfoPayload()),
@@ -226,6 +264,75 @@ class PtpProtocolTest {
         assertEquals(objectBytes.size.toLong() to objectBytes.size.toLong(), progress.last())
         assertEquals(PtpOperationCode.GET_OBJECT, transport.sent[2].code)
         assertArrayEquals(byteArrayOf(0x42, 0, 0, 0), transport.sent[2].payload)
+    }
+
+    @Test
+    fun sendObjectInfoThenStreamsObjectAndReturnsResponderHandle() = runTest {
+        val objectBytes = "open-eos-upload".toByteArray()
+        val transport = FakePtpTransport(
+            data(PtpOperationCode.GET_DEVICE_INFO, 0, deviceInfoPayload()),
+            ok(0),
+            ok(0),
+            ok(1, 0x00010001, UINT32_MAX, 0x77),
+            ok(2),
+            ok(3),
+        )
+        val session = PtpSession(transport)
+        session.initialize()
+        val progress = mutableListOf<Pair<Long, Long>>()
+        val objectInfo = PtpObjectInfo(
+            handle = 0,
+            storageId = 0x00010001,
+            objectFormat = PtpObjectFormat.EXIF_JPEG,
+            protectionStatus = PtpProtectionStatus.NONE,
+            sizeBytes = objectBytes.size.toLong(),
+            thumbnailFormat = 0,
+            thumbnailSizeBytes = 0,
+            thumbnailWidth = 0,
+            thumbnailHeight = 0,
+            imageWidth = 0,
+            imageHeight = 0,
+            imageBitDepth = 0,
+            parentObject = UINT32_MAX,
+            associationType = 0,
+            associationDescription = 0,
+            sequenceNumber = 0,
+            filename = "PHONE_0001.JPG",
+            captureDate = "",
+            modificationDate = "",
+            keywords = "",
+        )
+
+        val result = session.uploadObject(
+            storageId = 0x00010001,
+            parentObject = UINT32_MAX,
+            objectInfo = objectInfo,
+            source = ByteArrayInputStream(objectBytes),
+        ) { transferred, total -> progress += transferred to total }
+        session.shutdown()
+
+        assertEquals(PtpSendObjectInfoResult(0x00010001, UINT32_MAX, 0x77), result)
+        val uploadContainers = transport.sent.filter {
+            it.code == PtpOperationCode.SEND_OBJECT_INFO || it.code == PtpOperationCode.SEND_OBJECT
+        }
+        assertEquals(
+            listOf(
+                PtpContainerType.COMMAND,
+                PtpContainerType.DATA,
+                PtpContainerType.COMMAND,
+                PtpContainerType.DATA,
+            ),
+            uploadContainers.map(PtpContainer::type),
+        )
+        assertArrayEquals(
+            byteArrayOf(1, 0, 1, 0, -1, -1, -1, -1),
+            uploadContainers[0].payload,
+        )
+        val encodedInfo = PtpDatasets.objectInfo(0, uploadContainers[1].payload)
+        assertEquals("PHONE_0001.JPG", encodedInfo.filename)
+        assertEquals(objectBytes.size.toLong(), encodedInfo.sizeBytes)
+        assertArrayEquals(objectBytes, uploadContainers[3].payload)
+        assertEquals(objectBytes.size.toLong() to objectBytes.size.toLong(), progress.last())
     }
 
     @Test
@@ -487,8 +594,13 @@ class PtpProtocolTest {
     private fun data(operation: Int, transaction: Long, payload: ByteArray): PtpContainer =
         PtpContainer(PtpContainerType.DATA, operation, transaction, payload)
 
-    private fun ok(transaction: Long): PtpContainer =
-        PtpContainer(PtpContainerType.RESPONSE, PtpResponseCode.OK, transaction)
+    private fun ok(transaction: Long, vararg parameters: Long): PtpContainer =
+        PtpContainer(
+            PtpContainerType.RESPONSE,
+            PtpResponseCode.OK,
+            transaction,
+            DatasetWriter().apply { parameters.forEach(::u32) }.bytes(),
+        )
 
     private class DatasetWriter {
         private val output = ByteArrayOutputStream()

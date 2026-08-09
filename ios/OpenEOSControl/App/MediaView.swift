@@ -2,6 +2,7 @@ import Foundation
 import OpenEOSCore
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct MediaView: View {
     @EnvironmentObject private var camera: CameraAppState
@@ -9,11 +10,15 @@ struct MediaView: View {
     let controlRotation: Double
     @State private var pendingDeletion: CameraMediaItem?
     @State private var metadataItemID: String?
+    @State private var isFileImporterPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Color.cameraBorder)
+            if camera.activeMediaUploadName != nil || camera.mediaUploadError != nil || camera.uploadedMediaName != nil {
+                uploadStatus
+            }
             if camera.isBusy(.media), camera.mediaItems.isEmpty {
                 Spacer()
                 ProgressView().tint(Color.cameraAccent)
@@ -38,6 +43,19 @@ struct MediaView: View {
         .background(Color.cameraBackground)
         .task {
             if camera.mediaItems.isEmpty { await camera.loadMedia() }
+        }
+        .fileImporter(
+            isPresented: $isFileImporterPresented,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case let .success(urls) = result,
+                  let url = urls.first,
+                  url.startAccessingSecurityScopedResource()
+            else { return }
+            if !camera.startMediaUpload(url, securityScoped: true) {
+                url.stopAccessingSecurityScopedResource()
+            }
         }
         .onDisappear { camera.closeMediaPreview() }
         .fullScreenCover(
@@ -111,6 +129,9 @@ struct MediaView: View {
                 }
             }
             Spacer()
+            if camera.supports(.mediaUpload) {
+                uploadControl
+            }
             Button {
                 Task { await camera.loadMedia() }
             } label: {
@@ -124,6 +145,88 @@ struct MediaView: View {
         .foregroundStyle(Color.cameraText)
         .padding(.horizontal, 10)
         .frame(minHeight: 56)
+    }
+
+    @ViewBuilder
+    private var uploadControl: some View {
+        if camera.activeMediaUploadName != nil {
+            Button { camera.cancelMediaUpload() } label: {
+                RotatingControl(degrees: controlRotation) {
+                    Image(systemName: "xmark.circle.fill")
+                        .accessibilityLabel(Text("cancel_media_upload"))
+                }
+            }
+            .buttonStyle(CameraIconButtonStyle())
+            .foregroundStyle(Color.cameraRecording)
+            .accessibilityIdentifier("cancel-media-upload")
+        } else {
+            Button { isFileImporterPresented = true } label: {
+                RotatingControl(degrees: controlRotation) {
+                    Image(systemName: "arrow.up.circle")
+                        .accessibilityLabel(Text("upload_media"))
+                }
+            }
+            .buttonStyle(CameraIconButtonStyle())
+            .foregroundStyle(Color.cameraAccent)
+            .accessibilityIdentifier("upload-media-button")
+        }
+    }
+
+    @ViewBuilder
+    private var uploadStatus: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let name = camera.activeMediaUploadName, let progress = camera.mediaUploadProgress {
+                HStack(spacing: 8) {
+                    Text(language.format("uploading_media", name))
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer()
+                    Button { camera.cancelMediaUpload() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .accessibilityLabel(Text("cancel_media_upload"))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.cameraRecording)
+                    .accessibilityIdentifier("cancel-media-upload-status")
+                }
+                if let fraction = progress.fractionCompleted {
+                    ProgressView(value: fraction).tint(Color.cameraAccent)
+                } else {
+                    ProgressView().tint(Color.cameraAccent)
+                }
+                Text(mediaUploadProgressLabel(progress))
+                    .font(.caption2)
+                    .foregroundStyle(Color.cameraSecondaryText)
+            } else if let error = camera.mediaUploadError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraWarning)
+                    .lineLimit(3)
+                    .accessibilityIdentifier("media-upload-error")
+            } else if let name = camera.uploadedMediaName {
+                Label(language.format("upload_complete", name), systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraStatus)
+                    .accessibilityIdentifier("media-upload-complete")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.cameraSurface)
+    }
+
+    private func mediaUploadProgressLabel(_ progress: CameraMediaTransferProgress) -> String {
+        let transferred = ByteCountFormatter.string(fromByteCount: progress.bytesTransferred, countStyle: .file)
+        guard let total = progress.totalBytes, let fraction = progress.fractionCompleted else {
+            return language.format("media_upload_progress_unknown", transferred)
+        }
+        let totalText = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+        return language.format(
+            "media_upload_progress_known",
+            transferred,
+            totalText,
+            Int((fraction * 100).rounded())
+        )
     }
 
     private func mediaRow(_ item: CameraMediaItem) -> some View {

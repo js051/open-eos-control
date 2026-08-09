@@ -49,12 +49,15 @@ POST /v1/session/{id}/focus/drive
 POST /v1/session/{id}/maintenance/sensor-cleaning
 POST /v1/session/{id}/power/sleep
 GET  /v1/session/{id}/media
+POST /v1/session/{id}/media?filename={safeBasename}
 GET  /v1/session/{id}/media/{itemId}/thumbnail
 GET  /v1/session/{id}/media/{itemId}/preview
 GET  /v1/session/{id}/media/{itemId}
 DELETE /v1/session/{id}/media/{itemId}
 DELETE /v1/session/{id}
 ```
+
+Media upload is a raw, authenticated request body with an exact required `Content-Length`, a safe basename query parameter, and a 4 GiB-minus-one upper bound. The endpoint exists only for `MEDIA_UPLOAD`. The libgphoto2 engine requires runtime File Upload evidence and writable storage, stages the request in a private temporary directory, rejects case-insensitive card-name collisions, invokes `gphoto2 --folder ... --filename ... --upload-file ...` as an argument array, then refreshes the camera listing and requires exactly one case-insensitive name and exact-size match before success. The endpoint watches for client disconnect after staging; cancellation sets a server-side event and terminates or kills an active gPhoto2 subprocess before commit. Once the process exits successfully, bounded readback always finishes so clients can reconcile an ambiguous late abort through a fresh list. Missing, short, long, cancelled, duplicate, rejected or unverifiable transfers remain errors. A generic picker MIME is inferred only after the filename extension passes the fixed image/video allowlist. Direct CCAPI returns unsupported because no verified Canon CCAPI upload resource is claimed.
 
 `/health` and the browser UI assets are public. All `/v1` routes require either a loopback client or `Authorization: Bearer <OPEN_EOS_BRIDGE_TOKEN>`. The executable refuses a non-loopback bind when no token is configured.
 

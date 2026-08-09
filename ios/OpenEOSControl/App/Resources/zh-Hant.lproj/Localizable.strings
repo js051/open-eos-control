@@ -226,6 +226,12 @@
 "media_download_progress_known" = "%@ / %@（%d%%）";
 "media_download_progress_unknown" = "已下載 %@";
 "download_complete" = "下載完成";
+"upload_media" = "上傳媒體到相機";
+"cancel_media_upload" = "取消媒體上傳";
+"uploading_media" = "正在上傳 %@";
+"media_upload_progress_known" = "%@ / %@（%d%%）";
+"media_upload_progress_unknown" = "已上傳 %@";
+"upload_complete" = "已上傳 %@";
 "save_media" = "儲存或分享媒體";
 "delete_media" = "刪除媒體";
 "delete_media_title" = "要從相機刪除嗎？";

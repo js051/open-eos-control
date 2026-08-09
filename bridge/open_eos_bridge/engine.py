@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
+from threading import Event
 from typing import Protocol
 
 from .models import (
@@ -81,6 +83,15 @@ class CameraEngineSession(Protocol):
     def media_preview(self, media_id: str) -> tuple[bytes, str]: ...
 
     def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]: ...
+
+    def upload_media(
+        self,
+        filename: str,
+        source: Path,
+        size_bytes: int,
+        content_type: str,
+        cancelled: Event | None = None,
+    ) -> MediaItem: ...
 
     def media_info(self, media_id: str) -> MediaItem: ...
 

@@ -16,7 +16,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -1626,6 +1628,85 @@ class CcapiClient(
         return result
     }
 
+    suspend fun uploadMedia(
+        name: String,
+        sizeBytes: Long,
+        contentType: String?,
+        source: InputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaUploadResult = withContext(Dispatchers.IO) {
+        if (isRealCamera) {
+            throw UnsupportedOperationException("Canon CCAPI did not advertise a verified media upload endpoint.")
+        }
+        require(sizeBytes in 1L..MAX_MEDIA_UPLOAD_BYTES) {
+            "Simulator upload size must be from 1 through $MAX_MEDIA_UPLOAD_BYTES bytes."
+        }
+        val uploadUrl = "$baseUrl/ccapi/media".toHttpUrl().newBuilder()
+            .addQueryParameter("filename", name)
+            .build()
+        val mediaType = (contentType ?: "application/octet-stream").substringBefore(';').trim().toMediaType()
+        var bytesTransferred = 0L
+        val body = object : RequestBody() {
+            override fun contentType() = mediaType
+            override fun contentLength(): Long = sizeBytes
+
+            override fun writeTo(sink: BufferedSink) {
+                val buffer = ByteArray(MEDIA_TRANSFER_BUFFER_BYTES)
+                onProgress(CameraMediaTransferProgress(0L, sizeBytes))
+                while (bytesTransferred < sizeBytes) {
+                    val requested = minOf(buffer.size.toLong(), sizeBytes - bytesTransferred).toInt()
+                    val count = source.read(buffer, 0, requested)
+                    check(count >= 0) { "Upload source ended after $bytesTransferred of $sizeBytes bytes." }
+                    if (count == 0) continue
+                    sink.write(buffer, 0, count)
+                    bytesTransferred += count
+                    onProgress(CameraMediaTransferProgress(bytesTransferred, sizeBytes))
+                }
+                check(source.read() == -1) { "Upload source exceeds its declared $sizeBytes bytes." }
+            }
+        }
+        val call = httpClient.newCall(Request.Builder().url(uploadUrl).post(body).build())
+        val cancelCall = AtomicBoolean(true)
+        val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                if (cancelCall.get()) call.cancel()
+            }
+        }
+        try {
+            val response = try {
+                call.execute()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                currentCoroutineContext().ensureActive()
+                throw exception
+            }
+            response.use {
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    throw CcapiHttpException(
+                        response.code,
+                        "Simulator media upload returned HTTP ${response.code}: ${responseBody.take(MAX_ERROR_BODY_CHARS)}",
+                    )
+                }
+                check(bytesTransferred == sizeBytes) { "Simulator upload byte count did not match the source." }
+                val item = parseSimulatorMediaItem(JSONObject(responseBody))
+                    ?: error("Simulator returned invalid uploaded media information.")
+                check(item.name == name && item.sizeBytes == sizeBytes) {
+                    "Simulator did not verify the uploaded filename and size."
+                }
+                CameraMediaUploadResult(item, bytesTransferred).also {
+                    observedFeatures.add(CameraFeature.MEDIA_UPLOAD)
+                }
+            }
+        } finally {
+            cancelCall.set(false)
+            cancellationWatcher.cancel()
+        }
+    }
+
     suspend fun deleteMedia(item: CameraMediaItem) {
         val path = if (isRealCamera) {
             if (enforceAdvertisedOperations && !supportsMediaDelete()) {
@@ -2379,20 +2460,26 @@ class CcapiClient(
 
     private suspend fun listSimulatorMedia(): List<CameraMediaItem> {
         val items = getJson("/ccapi/media").optJSONArray("items") ?: return emptyList()
-        return List(items.length()) { index ->
-            val item = items.getJSONObject(index)
-            CameraMediaItem(
-                id = item.getString("id"),
-                name = item.getString("name"),
-                kind = item.optString("kind", "other"),
-                sizeBytes = item.optLong("size_bytes").takeIf { item.has("size_bytes") },
-                captureTime = item.optString("capture_time").takeIf { it.isNotBlank() },
-                previewAvailable = item.optString("kind", "other").isCcapiPreviewKind(),
-                protected = item.opt("protect") as? Boolean,
-                rating = item.optInt("rating").takeIf { item.has("rating") && it in 0..5 },
-                rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
-            )
-        }
+        return List(items.length()) { index -> parseSimulatorMediaItem(items.getJSONObject(index)) }.filterNotNull()
+    }
+
+    private fun parseSimulatorMediaItem(item: JSONObject): CameraMediaItem? {
+        val id = item.optString("id").trim()
+        val name = item.optString("name").trim()
+        if (id.isBlank() || name.isBlank()) return null
+        val kind = item.optString("kind", "other")
+        return CameraMediaItem(
+            id = id,
+            name = name,
+            kind = kind,
+            sizeBytes = item.optLong("size_bytes").takeIf { item.has("size_bytes") },
+            captureTime = item.optString("capture_time").takeIf { it.isNotBlank() },
+            previewAvailable = kind.isCcapiPreviewKind(),
+            protected = item.opt("protect") as? Boolean,
+            rating = item.optInt("rating").takeIf { item.has("rating") && it in 0..5 },
+            rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
+            ratingWritable = true,
+        )
     }
 
     private suspend fun listRealMedia(): List<CameraMediaItem> {
@@ -3428,6 +3515,7 @@ class CcapiClient(
         const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
         const val MEDIA_TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
+        const val MAX_MEDIA_UPLOAD_BYTES = UINT32_MAX
         const val MEDIA_SNIFF_BYTES = 64L
         val MEDIA_ROTATIONS = setOf(0, 90, 180, 270)
     }
@@ -3726,6 +3814,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.MEDIA_THUMBNAIL,
             CameraFeature.MEDIA_PREVIEW,
             CameraFeature.MEDIA_DOWNLOAD,
+            CameraFeature.MEDIA_UPLOAD,
             CameraFeature.MEDIA_PROTECT,
             CameraFeature.MEDIA_RATING,
             CameraFeature.MEDIA_ROTATE,

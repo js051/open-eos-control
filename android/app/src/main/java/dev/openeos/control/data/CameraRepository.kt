@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.OutputStream
+import java.io.InputStream
 
 class CameraRepository(
     backendFactory: CameraBackendFactory = CameraBackendFactory(),
@@ -226,6 +227,14 @@ class CameraRepository(
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = backend.downloadMedia(item, destination, onProgress)
+
+    suspend fun uploadMedia(
+        name: String,
+        sizeBytes: Long,
+        contentType: String?,
+        source: InputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaUploadResult = backend.uploadMedia(name, sizeBytes, contentType, source, onProgress)
 
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = backend.mediaInfo(item)
 

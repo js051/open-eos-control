@@ -12,6 +12,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
+from pathlib import Path
 from typing import BinaryIO, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
@@ -2389,6 +2390,17 @@ class CcapiSession:
             self._request_ok("DELETE", path)
             self._media_cache.pop(media_id, None)
             self._observed.add(CameraFeature.MEDIA_DELETE)
+
+    def upload_media(
+        self,
+        filename: str,
+        source: Path,
+        size_bytes: int,
+        content_type: str,
+        cancelled: threading.Event | None = None,
+    ) -> MediaItem:
+        del filename, source, size_bytes, content_type, cancelled
+        raise unsupported(CameraFeature.MEDIA_UPLOAD.value, self.engine_name)
 
     @property
     def requested_fps(self) -> int:

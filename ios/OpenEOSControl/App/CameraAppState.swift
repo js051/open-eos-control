@@ -85,6 +85,10 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var downloadedFileName: String?
     @Published private(set) var activeMediaDownloadID: String?
     @Published private(set) var mediaDownloadProgress: CameraMediaTransferProgress?
+    @Published private(set) var activeMediaUploadName: String?
+    @Published private(set) var mediaUploadProgress: CameraMediaTransferProgress?
+    @Published private(set) var uploadedMediaName: String?
+    @Published private(set) var mediaUploadError: String?
     @Published private(set) var deletedMediaName: String?
     @Published private(set) var lastClockSyncAt: Date?
     @Published private(set) var lastCreatedDirectoryName: String?
@@ -100,6 +104,8 @@ final class CameraAppState: ObservableObject {
     private var operationRevision: UInt64 = 0
     private var mediaDownloadTask: Task<Void, Never>?
     private var mediaDownloadToken: UUID?
+    private var mediaUploadTask: Task<Void, Never>?
+    private var mediaUploadToken: UUID?
     private var rateTracker = LiveViewRateTracker()
     private var downloadedMediaID: String?
     private var unavailableMediaThumbnailIDs = Set<String>()
@@ -309,6 +315,7 @@ final class CameraAppState: ObservableObject {
             resetMediaThumbnails()
             resetMediaPreview()
             resetMediaDownloadState()
+            resetMediaUploadState()
             removeDownloadedFile()
             deletedMediaName = nil
             lastClockSyncAt = nil
@@ -328,6 +335,7 @@ final class CameraAppState: ObservableObject {
         stopLiveViewLoop()
         stopEventLoop()
         resetMediaDownloadState()
+        resetMediaUploadState()
         session = nil
         snapshot = Self.makeOfflinePreviewSnapshot()
         isPreview = true
@@ -356,6 +364,7 @@ final class CameraAppState: ObservableObject {
         stopLiveViewLoop()
         stopEventLoop()
         resetMediaDownloadState()
+        resetMediaUploadState()
         if let session { await session.close() }
         session = nil
         snapshot = nil
@@ -575,6 +584,7 @@ final class CameraAppState: ObservableObject {
         stopLiveViewLoop()
         stopEventLoop()
         resetMediaDownloadState()
+        resetMediaUploadState()
         do {
             try await session.sleepCamera()
             await disconnect()
@@ -1020,6 +1030,124 @@ final class CameraAppState: ObservableObject {
 
     func cancelMediaDownload() {
         mediaDownloadTask?.cancel()
+    }
+
+    @discardableResult
+    func startMediaUpload(_ fileURL: URL, securityScoped: Bool = false) -> Bool {
+        guard !isPreview, supports(.mediaUpload), begin(.media) else { return false }
+        let filename = fileURL.lastPathComponent
+        let token = UUID()
+        mediaUploadToken = token
+        activeMediaUploadName = filename
+        mediaUploadProgress = CameraMediaTransferProgress(
+            bytesTransferred: 0,
+            totalBytes: Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        )
+        mediaUploadError = nil
+        uploadedMediaName = nil
+        mediaUploadTask = Task { [weak self] in
+            await self?.performMediaUpload(fileURL, token: token, securityScoped: securityScoped)
+        }
+        return true
+    }
+
+    func cancelMediaUpload() {
+        mediaUploadTask?.cancel()
+    }
+
+    private func performMediaUpload(_ fileURL: URL, token: UUID, securityScoped: Bool) async {
+        defer {
+            if securityScoped { fileURL.stopAccessingSecurityScopedResource() }
+            if mediaUploadToken == token {
+                mediaUploadTask = nil
+                mediaUploadToken = nil
+                activeMediaUploadName = nil
+                mediaUploadProgress = nil
+                end(.media)
+            }
+        }
+        guard !isPreview, let session else { return }
+        do {
+            let result = try await session.uploadMedia(
+                from: fileURL,
+                progress: { [weak self] progress in
+                    Task { @MainActor in
+                        guard self?.mediaUploadToken == token else { return }
+                        self?.mediaUploadProgress = progress
+                    }
+                }
+            )
+            if Task.isCancelled {
+                await reconcileCancelledMediaUpload(
+                    session: session,
+                    name: result.name,
+                    sizeBytes: result.sizeBytes
+                )
+                return
+            }
+            guard mediaUploadToken == token else { throw CancellationError() }
+            mediaItems = try await session.listMedia()
+            resetMediaThumbnails()
+            resetMediaPreview()
+            uploadedMediaName = result.name
+            mediaUploadError = nil
+            lastError = nil
+            if let snapshot {
+                self.snapshot = CameraSnapshot(
+                    info: snapshot.info,
+                    status: snapshot.status,
+                    capabilities: snapshot.capabilities.observing(.mediaUpload)
+                )
+            }
+        } catch is CancellationError {
+            await reconcileCancelledMediaUpload(session: session, fileURL: fileURL)
+        } catch let error as URLError where error.code == .cancelled {
+            await reconcileCancelledMediaUpload(session: session, fileURL: fileURL)
+        } catch {
+            if !Task.isCancelled {
+                mediaUploadError = error.localizedDescription
+                record(error)
+            }
+        }
+    }
+
+    private func reconcileCancelledMediaUpload(
+        session: CameraSession,
+        fileURL: URL
+    ) async {
+        let size = Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        await reconcileCancelledMediaUpload(
+            session: session,
+            name: fileURL.lastPathComponent,
+            sizeBytes: size > 0 ? size : nil
+        )
+    }
+
+    private func reconcileCancelledMediaUpload(
+        session: CameraSession,
+        name: String,
+        sizeBytes: Int64?
+    ) async {
+        guard case .desktopBridge = session else { return }
+        let items = await Task.detached { try? await session.listMedia() }.value
+        guard let items else { return }
+        mediaItems = items
+        resetMediaThumbnails()
+        resetMediaPreview()
+        guard let uploaded = items.first(where: { item in
+            item.name.caseInsensitiveCompare(name) == .orderedSame &&
+                (sizeBytes == nil || item.sizeBytes == sizeBytes)
+        }) else { return }
+        uploadedMediaName = uploaded.name
+        mediaUploadError = nil
+        lastError = nil
+        if let snapshot {
+            self.snapshot = CameraSnapshot(
+                info: snapshot.info,
+                status: snapshot.status,
+                capabilities: snapshot.capabilities.observing(.mediaUpload)
+            )
+        }
     }
 
     private func performMediaDownload(_ item: CameraMediaItem, token: UUID) async {
@@ -1486,6 +1614,17 @@ final class CameraAppState: ObservableObject {
         mediaDownloadToken = nil
         activeMediaDownloadID = nil
         mediaDownloadProgress = nil
+        busyOperations.remove(.media)
+    }
+
+    private func resetMediaUploadState() {
+        mediaUploadTask?.cancel()
+        mediaUploadTask = nil
+        mediaUploadToken = nil
+        activeMediaUploadName = nil
+        mediaUploadProgress = nil
+        mediaUploadError = nil
+        uploadedMediaName = nil
         busyOperations.remove(.media)
     }
 

@@ -14,10 +14,14 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
+import okio.BufferedSink
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -736,6 +740,79 @@ class DesktopBridgeClient(
         }
     }
 
+    suspend fun uploadMedia(
+        name: String,
+        sizeBytes: Long,
+        contentType: String?,
+        source: InputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaUploadResult = withContext(Dispatchers.IO) {
+        require(sizeBytes in 1L..MAX_MEDIA_UPLOAD_BYTES) {
+            "Desktop Bridge upload size must be from 1 through $MAX_MEDIA_UPLOAD_BYTES bytes."
+        }
+        val mediaType = (contentType ?: "application/octet-stream").substringBefore(';').trim().toMediaType()
+        val uploadUrl = sessionEndpoint("media").newBuilder().addQueryParameter("filename", name).build()
+        var bytesTransferred = 0L
+        val body = object : RequestBody() {
+            override fun contentType() = mediaType
+            override fun contentLength(): Long = sizeBytes
+
+            override fun writeTo(sink: BufferedSink) {
+                val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
+                onProgress(CameraMediaTransferProgress(0L, sizeBytes))
+                while (bytesTransferred < sizeBytes) {
+                    val requested = minOf(buffer.size.toLong(), sizeBytes - bytesTransferred).toInt()
+                    val count = source.read(buffer, 0, requested)
+                    check(count >= 0) {
+                        "Upload source ended after $bytesTransferred of $sizeBytes bytes."
+                    }
+                    if (count == 0) continue
+                    sink.write(buffer, 0, count)
+                    bytesTransferred += count
+                    onProgress(CameraMediaTransferProgress(bytesTransferred, sizeBytes))
+                }
+                check(source.read() == -1) { "Upload source exceeds its declared $sizeBytes bytes." }
+            }
+        }
+        val call = httpClient.newCall(Request.Builder().url(uploadUrl).post(body).build())
+        val cancelCall = AtomicBoolean(true)
+        val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                if (cancelCall.get()) call.cancel()
+            }
+        }
+        try {
+            val response = try {
+                call.execute()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                currentCoroutineContext().ensureActive()
+                throw exception
+            }
+            response.use {
+                val responseBody = response.body?.readBoundedUtf8(MAX_UPLOAD_RESPONSE_BYTES).orEmpty()
+                if (!response.isSuccessful) throw bridgeError(response.code, responseBody, "Media upload")
+                check(bytesTransferred == sizeBytes) {
+                    "Desktop Bridge upload completed after $bytesTransferred of $sizeBytes bytes."
+                }
+                val item = parseMediaItem(JSONObject(responseBody))
+                    ?: error("Desktop Bridge returned invalid uploaded media information.")
+                check(item.name.equals(name, ignoreCase = true) && item.sizeBytes == sizeBytes) {
+                    "Desktop Bridge did not verify the uploaded filename and size."
+                }
+                CameraMediaUploadResult(item, bytesTransferred).also {
+                    observedFeatures.add(CameraFeature.MEDIA_UPLOAD)
+                }
+            }
+        } finally {
+            cancelCall.set(false)
+            cancellationWatcher.cancel()
+        }
+    }
+
     suspend fun deleteMedia(item: CameraMediaItem) {
         requestOk(
             Request.Builder()
@@ -951,6 +1028,7 @@ class DesktopBridgeClient(
         const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024L
         const val MAX_ERROR_BODY_CHARS = 2_000
         const val MAX_EVENT_BODY_BYTES = 256 * 1024
+        const val MAX_UPLOAD_RESPONSE_BYTES = 32 * 1024
         const val MAX_EVENT_KEYS = 64
         const val MAX_EVENT_KEY_CHARS = 128
         const val EVENT_READ_TIMEOUT_SECONDS = 40L
@@ -959,8 +1037,30 @@ class DesktopBridgeClient(
         const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024L
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
+        const val MAX_MEDIA_UPLOAD_BYTES = UINT32_MAX
         val MEDIA_ROTATIONS = setOf(0, 90, 180, 270)
     }
+}
+
+private fun ResponseBody.readBoundedUtf8(maxBytes: Int): String {
+    val declaredBytes = contentLength()
+    check(declaredBytes < 0L || declaredBytes <= maxBytes.toLong()) {
+        "Desktop Bridge upload response exceeded $maxBytes bytes."
+    }
+    val output = ByteArrayOutputStream(minOf(maxBytes, declaredBytes.coerceAtLeast(0L).toInt()))
+    byteStream().use { input ->
+        val buffer = ByteArray(8 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            if (count == 0) continue
+            check(output.size() <= maxBytes - count) {
+                "Desktop Bridge upload response exceeded $maxBytes bytes."
+            }
+            output.write(buffer, 0, count)
+        }
+    }
+    return output.toString(Charsets.UTF_8.name())
 }
 
 private fun JSONObject.requireString(key: String, message: String): String =

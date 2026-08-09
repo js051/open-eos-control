@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import CommandOutput
 
 AUTO_DETECT = """Model                          Port
@@ -98,7 +99,9 @@ class FakeMovieStream:
 class FakeRunner:
     def __init__(self) -> None:
         self.commands: list[tuple[str, ...]] = []
+        self.cancellable_commands: list[tuple[str, ...]] = []
         self.movie_streams: list[FakeMovieStream] = []
+        self.uploaded_files: dict[tuple[str, str], bytes] = {}
         self.values = {
             "/main/status/eosserialnumber": "TEST-SERIAL-0001",
             "/main/status/cameramodel": "Canon EOS R6 Mark III",
@@ -164,7 +167,12 @@ class FakeRunner:
         if command in (["--wait-event", "1ms"], ["--wait-event", "250ms"]):
             return CommandOutput(b"")
         if command == ["--recurse", "--list-files"]:
-            return CommandOutput(MEDIA.encode())
+            extra = "".join(
+                f"There is 1 file in folder '{folder}'.\n"
+                f"#99 {name} rd {len(payload)} B {self._content_type(name)} 1784600002\n"
+                for (folder, name), payload in self.uploaded_files.items()
+            )
+            return CommandOutput((MEDIA + extra).encode())
         if command == ["--capture-preview", "--stdout"]:
             return CommandOutput(JPEG)
         if (
@@ -207,6 +215,17 @@ class FakeRunner:
             "IMG_0001.JPG",
         ]:
             return CommandOutput(b"")
+        if (
+            len(command) == 6
+            and command[0] == "--folder"
+            and command[2] == "--filename"
+            and command[4] == "--upload-file"
+        ):
+            folder = command[1]
+            name = command[3]
+            payload = Path(command[5]).read_bytes()
+            self.uploaded_files[(folder, name)] = payload
+            return CommandOutput(b"Uploaded file successfully.\n")
         if command and command[0] == "--set-config-value":
             path, value = command[1].split("=", 1)
             if path not in self.values:
@@ -220,6 +239,22 @@ class FakeRunner:
                 self.values[clock_readback] = str(int(time.time()))
             return CommandOutput(b"")
         raise AssertionError(f"Unexpected gphoto2 command: {command}")
+
+    def run_cancellable(
+        self,
+        arguments: list[str],
+        *,
+        timeout: float,
+        cancelled: threading.Event,
+    ) -> CommandOutput:
+        if cancelled.is_set():
+            raise BridgeError("UPLOAD_CANCELLED", "Upload cancelled.", status_code=409)
+        self.cancellable_commands.append(tuple(arguments))
+        return self.run(arguments, timeout=timeout)
+
+    @staticmethod
+    def _content_type(name: str) -> str:
+        return "video/mp4" if name.casefold().endswith((".mp4", ".mov")) else "image/jpeg"
 
     def stream(self, arguments: list[str], *, timeout: float = 300.0) -> Iterator[bytes]:
         del timeout

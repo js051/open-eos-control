@@ -262,6 +262,19 @@ enum CameraSession: Sendable {
         }
     }
 
+    func uploadMedia(
+        from fileURL: URL,
+        contentType: String? = nil,
+        progress: @escaping CameraMediaProgressHandler = { _ in }
+    ) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client):
+            return try await client.uploadMedia(from: fileURL, contentType: contentType, progress: progress)
+        case let .desktopBridge(client):
+            return try await client.uploadMedia(from: fileURL, contentType: contentType, progress: progress)
+        }
+    }
+
     func deleteMedia(_ item: CameraMediaItem) async throws {
         switch self {
         case let .ccapi(client): try await client.deleteMedia(item)

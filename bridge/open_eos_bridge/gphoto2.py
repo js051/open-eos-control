@@ -8,6 +8,7 @@ import queue
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -25,6 +26,7 @@ from .local_media import (
     is_previewable_media,
     preview_content_type,
 )
+from .media_upload import validate_upload_request
 from .models import (
     BatteryStatus,
     CameraCapabilities,
@@ -49,6 +51,7 @@ from .models import (
 
 ENGINE_NAME = "libgphoto2"
 MAX_COMMAND_OUTPUT_BYTES = 32 * 1024 * 1024
+MAX_COMMAND_STDERR_BYTES = 256 * 1024
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 MAX_MEDIA_ITEMS = 500
@@ -149,6 +152,14 @@ class GPhotoRunner(Protocol):
     def health(self) -> tuple[bool, str | None, str | None]: ...
 
     def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput: ...
+
+    def run_cancellable(
+        self,
+        arguments: list[str],
+        *,
+        timeout: float,
+        cancelled: threading.Event,
+    ) -> CommandOutput: ...
 
     def host_path(self, path: Path) -> str: ...
 
@@ -361,6 +372,65 @@ class SubprocessGPhotoRunner:
             raise _command_error(arguments, completed.returncode, stderr)
         return CommandOutput(stdout=completed.stdout, stderr=stderr)
 
+    def run_cancellable(
+        self,
+        arguments: list[str],
+        *,
+        timeout: float,
+        cancelled: threading.Event,
+    ) -> CommandOutput:
+        if cancelled.is_set():
+            raise _upload_cancelled()
+        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+            try:
+                process = subprocess.Popen(
+                    [*self.command.prefix, *arguments],
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    env=_command_environment(),
+                )
+            except FileNotFoundError as error:
+                raise _engine_unavailable(self.command.display) from error
+
+            started_at = time.monotonic()
+            while True:
+                if cancelled.is_set():
+                    _terminate_process(process)
+                    raise _upload_cancelled()
+                remaining = timeout - (time.monotonic() - started_at)
+                if remaining <= 0:
+                    _terminate_process(process)
+                    raise BridgeError(
+                        "ENGINE_TIMEOUT",
+                        f"gphoto2 did not finish within {timeout:g} seconds.",
+                        status_code=504,
+                        engine=ENGINE_NAME,
+                    )
+                try:
+                    process.wait(timeout=min(remaining, 0.1))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+
+            stdout_file.seek(0, os.SEEK_END)
+            stdout_size = stdout_file.tell()
+            if stdout_size > MAX_COMMAND_OUTPUT_BYTES:
+                raise BridgeError(
+                    "ENGINE_OUTPUT_LIMIT",
+                    f"gphoto2 returned more than {MAX_COMMAND_OUTPUT_BYTES} bytes of command output.",
+                    status_code=502,
+                    engine=ENGINE_NAME,
+                )
+            stdout_file.seek(0)
+            stdout = stdout_file.read()
+            stderr_file.seek(0, os.SEEK_END)
+            stderr_size = stderr_file.tell()
+            stderr_file.seek(max(0, stderr_size - MAX_COMMAND_STDERR_BYTES))
+            stderr = _decode_process_text(stderr_file.read())
+            if process.returncode != 0:
+                raise _command_error(arguments, process.returncode, stderr)
+            return CommandOutput(stdout=stdout, stderr=stderr)
+
     def host_path(self, path: Path) -> str:
         resolved = path.resolve(strict=False)
         if self.command.host_mode != "wsl":
@@ -387,6 +457,26 @@ def _command_environment() -> dict[str, str]:
     environment["LC_ALL"] = "C"
     environment["LANG"] = "C"
     return environment
+
+
+def _terminate_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is None:
+        process.terminate()
+    try:
+        process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5.0)
+
+
+def _upload_cancelled() -> BridgeError:
+    return BridgeError(
+        "UPLOAD_CANCELLED",
+        "The media upload was cancelled and the gphoto2 process was stopped.",
+        status_code=409,
+        feature=CameraFeature.MEDIA_UPLOAD.value,
+        engine=ENGINE_NAME,
+    )
 
 
 def _windows_path_to_wsl(value: str) -> str:
@@ -777,6 +867,14 @@ def parse_summary(output: str) -> dict[str, str]:
     return result
 
 
+def summary_supports_file_upload(output: str) -> bool:
+    return any(
+        re.search(r"\bFile\s+Upload\b", line, re.I)
+        and re.search(r"\bNo\s+File\s+Upload\b", line, re.I) is None
+        for line in output.splitlines()
+    )
+
+
 def parse_abilities(output: str) -> GPhotoAbilities:
     model_match = re.search(r"^Abilities for camera\s*:\s*(.+)$", output, re.M | re.I)
     capture_lines = {
@@ -1079,6 +1177,7 @@ class GPhoto2Session:
         self._requested_fps = 1
         self._last_error: str | None = None
         self._summary_text = ""
+        self._summary_supports_file_upload = False
         self._configs: dict[str, GPhotoConfig] = {}
         self._last_config_refresh = 0.0
         self._storage = StorageSnapshot(None, None, None, None, 0)
@@ -1094,6 +1193,7 @@ class GPhoto2Session:
 
         with self._lock:
             self._summary_text = self._optional_text(["--summary"], timeout=20.0)
+            self._summary_supports_file_upload = summary_supports_file_upload(self._summary_text)
             abilities_output = self._run(["--abilities"], timeout=20.0).text
             self._abilities = parse_abilities(abilities_output)
             self._refresh_configs(force=True)
@@ -1236,6 +1336,8 @@ class GPhoto2Session:
                     supported.add(CameraFeature.MEDIA_THUMBNAIL)
                 if self._abilities.delete_files or host_media_supported:
                     supported.add(CameraFeature.MEDIA_DELETE)
+            if self._media_upload_supported():
+                supported.add(CameraFeature.MEDIA_UPLOAD)
             if any(key in settings_by_key for key in ("iso", "shutter", "aperture")):
                 supported.add(CameraFeature.EXPOSURE_CONTROL)
             if "whitebalance" in settings_by_key:
@@ -1277,6 +1379,7 @@ class GPhoto2Session:
                     CameraFeature.MEDIA_PROTECT,
                     CameraFeature.MEDIA_RATING,
                     CameraFeature.MEDIA_ROTATE,
+                    CameraFeature.MEDIA_UPLOAD,
                 )
                 if feature not in supported
             }
@@ -1306,6 +1409,10 @@ class GPhoto2Session:
                     ),
                     CameraFeature.MEDIA_ROTATE.value: (
                         "No verified libgphoto2 contract for changing Canon display rotation is available."
+                    ),
+                    CameraFeature.MEDIA_UPLOAD.value: (
+                        "Requires the camera summary to advertise File Upload and a writable storage "
+                        "with a base directory."
                     ),
                     CameraFeature.CLICK_WHITE_BALANCE.value: (
                         "The libgphoto2 CLI engine has no verified Live View coordinate Click WB command."
@@ -1874,6 +1981,113 @@ class GPhoto2Session:
 
         return item, stream()
 
+    def upload_media(
+        self,
+        filename: str,
+        source: Path,
+        size_bytes: int,
+        content_type: str,
+        cancelled: threading.Event | None = None,
+    ) -> MediaItem:
+        with self._lock:
+            self._require_open()
+            if not self._media_upload_supported():
+                raise unsupported(CameraFeature.MEDIA_UPLOAD.value, self.engine_name)
+            safe_filename, _, validated_size = validate_upload_request(
+                filename,
+                content_type,
+                str(size_bytes),
+            )
+            if validated_size != size_bytes:
+                raise BridgeError(
+                    "INVALID_UPLOAD_SIZE",
+                    "The upload size does not match the staged file size.",
+                    status_code=400,
+                    feature=CameraFeature.MEDIA_UPLOAD.value,
+                    engine=self.engine_name,
+                )
+            try:
+                actual_size = source.stat().st_size
+            except OSError as error:
+                raise BridgeError(
+                    "UPLOAD_SOURCE_UNAVAILABLE",
+                    "The staged upload file is unavailable.",
+                    status_code=500,
+                    feature=CameraFeature.MEDIA_UPLOAD.value,
+                    engine=self.engine_name,
+                ) from error
+            if actual_size != size_bytes or not source.is_file():
+                raise BridgeError(
+                    "INVALID_UPLOAD_SIZE",
+                    "The staged upload file size does not match Content-Length.",
+                    status_code=400,
+                    feature=CameraFeature.MEDIA_UPLOAD.value,
+                    engine=self.engine_name,
+                )
+            if cancelled is not None and cancelled.is_set():
+                raise _upload_cancelled()
+
+            self._refresh_storage(force=True, strict=True)
+            storage = self._upload_storage()
+            if storage is None:
+                raise unsupported(CameraFeature.MEDIA_UPLOAD.value, self.engine_name)
+            before = self.list_media()
+            if any(
+                item.name.casefold() == safe_filename.casefold()
+                and _decode_media_id(item.id)[0] == storage.base_dir
+                for item in before
+                if item.id.startswith("gphoto2:")
+            ):
+                raise BridgeError(
+                    "MEDIA_ALREADY_EXISTS",
+                    f"Media '{safe_filename}' already exists in the selected camera storage.",
+                    status_code=409,
+                    feature=CameraFeature.MEDIA_UPLOAD.value,
+                    engine=self.engine_name,
+                )
+
+            if cancelled is not None and cancelled.is_set():
+                raise _upload_cancelled()
+            self._run_cancellable(
+                [
+                    "--folder",
+                    storage.base_dir,
+                    "--filename",
+                    safe_filename,
+                    "--upload-file",
+                    self.runner.host_path(source),
+                ],
+                timeout=600.0,
+                cancelled=cancelled,
+            )
+            after = self.list_media()
+            matches = [
+                item
+                for item in after
+                if item.name.casefold() == safe_filename.casefold()
+                and item.id.startswith("gphoto2:")
+                and _decode_media_id(item.id)[0] == storage.base_dir
+            ]
+            if len(matches) != 1:
+                raise BridgeError(
+                    "UPLOAD_VERIFY_FAILED",
+                    "gphoto2 accepted the upload, but the camera did not report exactly one matching media item.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_UPLOAD.value,
+                    engine=self.engine_name,
+                )
+            uploaded = matches[0]
+            if uploaded.size_bytes != size_bytes:
+                raise BridgeError(
+                    "UPLOAD_VERIFY_SIZE_MISMATCH",
+                    f"The camera reported {uploaded.size_bytes} bytes for an upload of {size_bytes} bytes.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_UPLOAD.value,
+                    engine=self.engine_name,
+                )
+            self._observed.add(CameraFeature.MEDIA_UPLOAD)
+            return uploaded
+
     def media_thumbnail(self, media_id: str) -> tuple[bytes, str]:
         if is_host_media_id(media_id):
             with self._lock:
@@ -2075,6 +2289,24 @@ class GPhoto2Session:
                 )
             )
         return settings
+
+    def _media_upload_supported(self) -> bool:
+        return self._summary_supports_file_upload and self._upload_storage() is not None
+
+    def _upload_storage(self) -> StorageDevice | None:
+        writable = [
+            entry
+            for entry in self._storage.entries
+            if entry.writable is True
+            and bool(entry.base_dir)
+            and entry.base_dir.startswith("/")
+            and "\x00" not in entry.base_dir
+            and ".." not in entry.base_dir.split("/")
+        ]
+        if not writable:
+            return None
+        current_id = _normalize_storage_id(self._config_value("storageid"))
+        return next((entry for entry in writable if entry.storage_id == current_id), writable[0])
 
     def _setting_values(self, spec: ConfigSpec, config: GPhotoConfig) -> list[str]:
         values = config.selectable_values()
@@ -2462,6 +2694,31 @@ class GPhoto2Session:
         self._require_open()
         self._stop_movie_stream()
         return self.runner.run(self._camera_arguments(arguments), timeout=timeout)
+
+    def _run_cancellable(
+        self,
+        arguments: list[str],
+        *,
+        timeout: float,
+        cancelled: threading.Event | None,
+    ) -> CommandOutput:
+        if cancelled is None:
+            return self._run(arguments, timeout=timeout)
+        self._require_open()
+        self._stop_movie_stream()
+        run_cancellable = getattr(self.runner, "run_cancellable", None)
+        if callable(run_cancellable):
+            return run_cancellable(
+                self._camera_arguments(arguments),
+                timeout=timeout,
+                cancelled=cancelled,
+            )
+        if cancelled.is_set():
+            raise _upload_cancelled()
+        output = self.runner.run(self._camera_arguments(arguments), timeout=timeout)
+        if cancelled.is_set():
+            raise _upload_cancelled()
+        return output
 
     def _camera_arguments(self, arguments: list[str]) -> list[str]:
         return ["--port", self.camera.port, *arguments]

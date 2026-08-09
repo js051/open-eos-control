@@ -22,6 +22,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.OutputStream
@@ -3054,6 +3055,46 @@ class CcapiClientTest {
         assertEquals(0L, progress.first().bytesTransferred)
         assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
         assertEquals(bytes.size.toLong(), progress.last().totalBytes)
+    }
+
+    @Test
+    fun simulatorMediaUploadStreamsExactBytesAndRealCcapiRefusesUnverifiedUpload() = runTest {
+        val bytes = ByteArray(96 * 1024 + 7) { (it % 239).toByte() }
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(201)
+                .setHeader("content-type", "application/json")
+                .setBody(
+                    """{"id":"PHONE 0001.JPG","name":"PHONE 0001.JPG","kind":"image","size_bytes":${bytes.size}}"""
+                )
+        )
+        val progress = mutableListOf<CameraMediaTransferProgress>()
+
+        val result = client.uploadMedia(
+            name = "PHONE 0001.JPG",
+            sizeBytes = bytes.size.toLong(),
+            contentType = "image/jpeg",
+            source = ByteArrayInputStream(bytes),
+            onProgress = progress::add,
+        )
+        val upload = server.takeRequest()
+        client.forceRealCamera(prefix = "/ccapi/ver110")
+        val realFailure = runCatching {
+            client.uploadMedia(
+                name = "PHONE_0002.JPG",
+                sizeBytes = bytes.size.toLong(),
+                contentType = "image/jpeg",
+                source = ByteArrayInputStream(bytes),
+            )
+        }.exceptionOrNull()
+
+        assertEquals("POST", upload.method)
+        assertEquals("/ccapi/media?filename=PHONE%200001.JPG", upload.path)
+        assertArrayEquals(bytes, upload.body.readByteArray())
+        assertEquals(bytes.size.toLong(), result.bytesTransferred)
+        assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
+        assertTrue(realFailure is UnsupportedOperationException)
+        assertEquals(1, server.requestCount)
     }
 
     @Test

@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import java.io.InputStream
 import java.io.OutputStream
 
 class AndroidUsbPtpTransportFactory(context: Context) : PtpTransportFactory {
@@ -107,6 +108,30 @@ class AndroidUsbPtpTransport private constructor(
         PtpContainerReceipt(header)
     }
 
+    override suspend fun sendFrom(
+        source: InputStream,
+        operationCode: Int,
+        transactionId: Long,
+        payloadLength: Long,
+        onProgress: (bytesTransferred: Long, totalBytes: Long) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        checkOpen()
+        writeAll(
+            PtpCodec.encodeHeader(
+                type = PtpContainerType.DATA,
+                code = operationCode,
+                transactionId = transactionId,
+                payloadLength = payloadLength,
+            )
+        )
+        streamExactPtpPayload(
+            source = source,
+            payloadLength = payloadLength,
+            onChunk = ::writeAll,
+            onProgress = onProgress,
+        )
+    }
+
     override fun close() {
         if (closed) return
         closed = true
@@ -120,10 +145,15 @@ class AndroidUsbPtpTransport private constructor(
     private suspend fun readExact(byteCount: Int): ByteArray = bufferedInput.readExact(byteCount)
 
     private suspend fun writeAll(bytes: ByteArray) {
+        writeAll(bytes, bytes.size)
+    }
+
+    private suspend fun writeAll(bytes: ByteArray, byteCount: Int) {
+        require(byteCount in 0..bytes.size) { "Invalid USB write length $byteCount for ${bytes.size}-byte buffer." }
         var offset = 0
-        while (offset < bytes.size) {
+        while (offset < byteCount) {
             currentCoroutineContext().ensureActive()
-            val requested = minOf(USB_TRANSFER_CHUNK_BYTES, bytes.size - offset)
+            val requested = minOf(USB_TRANSFER_CHUNK_BYTES, byteCount - offset)
             val count = deviceConnection.bulkTransfer(
                 bulkOut,
                 bytes,
@@ -208,6 +238,36 @@ class AndroidUsbPtpTransport private constructor(
                 .firstOrNull { endpoint ->
                     endpoint.type == UsbConstants.USB_ENDPOINT_XFER_BULK && endpoint.direction == direction
                 }
+    }
+}
+
+internal suspend fun streamExactPtpPayload(
+    source: InputStream,
+    payloadLength: Long,
+    bufferBytes: Int = USB_TRANSFER_CHUNK_BYTES,
+    onChunk: suspend (bytes: ByteArray, byteCount: Int) -> Unit,
+    onProgress: (bytesTransferred: Long, totalBytes: Long) -> Unit,
+) {
+    require(payloadLength >= 0L) { "PTP payload length cannot be negative." }
+    require(bufferBytes > 0) { "PTP upload buffer must be positive." }
+    val buffer = ByteArray(bufferBytes)
+    var transferred = 0L
+    onProgress(0L, payloadLength)
+    while (transferred < payloadLength) {
+        currentCoroutineContext().ensureActive()
+        val requested = minOf(buffer.size.toLong(), payloadLength - transferred).toInt()
+        val count = source.read(buffer, 0, requested)
+        if (count < 0) {
+            throw PtpProtocolException("PTP upload ended after $transferred of $payloadLength bytes.")
+        }
+        if (count == 0) continue
+        onChunk(buffer, count)
+        transferred += count
+        onProgress(transferred, payloadLength)
+    }
+    currentCoroutineContext().ensureActive()
+    if (source.read() != -1) {
+        throw PtpProtocolException("PTP upload source exceeds its declared $payloadLength bytes.")
     }
 }
 

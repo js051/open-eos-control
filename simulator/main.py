@@ -8,7 +8,7 @@ from email.utils import format_datetime
 from io import BytesIO
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field, StrictBool, StrictInt
@@ -28,6 +28,24 @@ TemperatureStatusValue = Literal[
     "stillqualitywarning_and_restrictionmovierecording",
 ]
 
+MAX_SIMULATOR_UPLOAD_BYTES = 64 * 1024 * 1024
+SIMULATOR_UPLOAD_CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".cr2": "image/x-canon-cr2",
+    ".cr3": "image/x-canon-cr3",
+    ".dng": "image/x-adobe-dng",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".m4v": "video/x-m4v",
+    ".avi": "video/x-msvideo",
+}
+SIMULATOR_UPLOAD_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".m4v", ".avi"})
 app = FastAPI(title="Open EOS Control Fake Camera")
 
 
@@ -242,6 +260,8 @@ def initial_state() -> dict[str, object]:
 
 
 state = initial_state()
+uploaded_media_payloads: dict[str, tuple[bytes, str]] = {}
+media_upload_lock = asyncio.Lock()
 
 
 def publish_event(*keys: str) -> None:
@@ -311,6 +331,7 @@ async def health() -> dict[str, bool | str]:
 async def reset_test_state() -> dict[str, bool]:
     state.clear()
     state.update(initial_state())
+    uploaded_media_payloads.clear()
     return {"ok": True}
 
 
@@ -1168,8 +1189,69 @@ async def click_white_balance(payload: FocusRequest) -> dict[str, object]:
 async def media_list() -> dict[str, list[dict[str, object]]]:
     frame_size = len(camera_frame_png())
     return {
-        "items": [dict(item, size_bytes=frame_size) for item in state["media"]],
+        "items": [
+            dict(
+                item,
+                size_bytes=item.get(
+                    "size_bytes",
+                    len(uploaded_media_payloads.get(str(item["id"]), (b"", ""))[0]) or frame_size,
+                ),
+            )
+            for item in state["media"]
+        ],
     }
+
+
+@app.post("/ccapi/media", status_code=201)
+async def media_upload(request: Request, filename: str = Query(..., min_length=1)) -> JSONResponse:
+    safe_name = validate_upload_filename(filename)
+    if any(str(item["id"]).casefold() == safe_name.casefold() for item in state["media"]):
+        raise HTTPException(status_code=409, detail="Media filename already exists")
+    content_length = request.headers.get("content-length")
+    if content_length is None or not content_length.isdigit():
+        raise HTTPException(status_code=411, detail="Content-Length is required")
+    expected_size = int(content_length)
+    if expected_size < 1 or expected_size > MAX_SIMULATOR_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Media upload size is unsupported")
+    payload = bytearray()
+    async for chunk in request.stream():
+        if len(payload) + len(chunk) > expected_size:
+            raise HTTPException(status_code=400, detail="Upload exceeds Content-Length")
+        payload.extend(chunk)
+    if len(payload) != expected_size:
+        raise HTTPException(status_code=400, detail="Upload is shorter than Content-Length")
+    extension = safe_name[safe_name.rfind(".") :].casefold()
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
+    if not content_type or content_type == "application/octet-stream":
+        content_type = SIMULATOR_UPLOAD_CONTENT_TYPES[extension]
+    elif extension in SIMULATOR_UPLOAD_VIDEO_EXTENSIONS and not content_type.startswith("video/"):
+        raise HTTPException(status_code=415, detail="Video uploads require a video Content-Type")
+    elif extension not in SIMULATOR_UPLOAD_VIDEO_EXTENSIONS and not content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="Photo uploads require an image Content-Type")
+    kind = (
+        "video"
+        if extension in SIMULATOR_UPLOAD_VIDEO_EXTENSIONS
+        else "raw"
+        if extension in {".cr2", ".cr3", ".dng"}
+        else "image"
+    )
+    item = {
+        "id": safe_name,
+        "name": safe_name,
+        "kind": kind,
+        "size_bytes": expected_size,
+        "capture_time": datetime.now().astimezone().isoformat(),
+        "protect": False,
+        "rating": 0,
+        "rotate": 0,
+    }
+    async with media_upload_lock:
+        if any(str(existing["id"]).casefold() == safe_name.casefold() for existing in state["media"]):
+            raise HTTPException(status_code=409, detail="Media filename already exists")
+        uploaded_media_payloads[safe_name] = (bytes(payload), content_type)
+        state["media"].insert(0, item)
+    publish_event("contents")
+    return JSONResponse(content=item, status_code=201)
 
 
 @app.get("/ccapi/media/{item_id}")
@@ -1179,6 +1261,9 @@ async def media_download(item_id: str, kind: str | None = None) -> Response:
         return JSONResponse(content=media_info(item))
     if kind not in {None, "main", "thumbnail", "display"}:
         raise HTTPException(status_code=422, detail="Unsupported media representation")
+    uploaded = uploaded_media_payloads.get(item_id)
+    if uploaded is not None:
+        return Response(content=uploaded[0], media_type=uploaded[1])
     return Response(content=camera_frame_png(), media_type="image/png")
 
 
@@ -1197,6 +1282,7 @@ async def media_delete(item_id: str) -> Response:
     if item is None:
         raise HTTPException(status_code=404, detail="Media item not found")
     state["media"].remove(item)
+    uploaded_media_payloads.pop(item_id, None)
     publish_event("contents")
     return Response(status_code=204)
 
@@ -1300,6 +1386,21 @@ def canonical_media_path(item_id: str) -> str:
     return f"/ccapi/ver100/contents/card1/100CANON/{item_id}"
 
 
+def validate_upload_filename(filename: str) -> str:
+    extension = filename[filename.rfind(".") :].casefold() if "." in filename else ""
+    if (
+        filename != filename.strip()
+        or len(filename) > 120
+        or filename in {"", ".", ".."}
+        or filename.endswith((".", " "))
+        or any(character in filename for character in "/\\:")
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in filename)
+        or extension not in SIMULATOR_UPLOAD_CONTENT_TYPES
+    ):
+        raise HTTPException(status_code=422, detail="Invalid media upload filename")
+    return filename
+
+
 def canonical_media_item(item_id: str) -> dict[str, object]:
     item = next((candidate for candidate in state["media"] if candidate["id"] == item_id), None)
     if item is None:
@@ -1309,7 +1410,10 @@ def canonical_media_item(item_id: str) -> dict[str, object]:
 
 def media_info(item: dict[str, object]) -> dict[str, object]:
     return {
-        "filesize": len(camera_frame_jpeg()),
+        "filesize": item.get(
+            "size_bytes",
+            len(uploaded_media_payloads.get(str(item["id"]), (camera_frame_jpeg(), ""))[0]),
+        ),
         "protect": "enable" if item.get("protect") is True else "disable",
         "archive": "disable",
         "rotate": str(item.get("rotate", 0)),
@@ -2157,6 +2261,9 @@ async def canon_media(item_id: str, kind: str | None = None) -> Response:
         return JSONResponse(content=media_info(item))
     if kind not in {None, "main", "thumbnail", "display"}:
         raise HTTPException(status_code=422, detail="Unsupported media representation")
+    uploaded = uploaded_media_payloads.get(item_id)
+    if uploaded is not None:
+        return Response(content=uploaded[0], media_type=uploaded[1])
     return Response(content=camera_frame_jpeg(), media_type="image/jpeg")
 
 
@@ -2171,6 +2278,7 @@ async def canon_modify_media(item_id: str, payload: dict[str, object]) -> Respon
 async def canon_delete_media(item_id: str) -> Response:
     item = canonical_media_item(item_id)
     state["media"].remove(item)
+    uploaded_media_payloads.pop(item_id, None)
     publish_event("contents")
     return Response(status_code=204)
 

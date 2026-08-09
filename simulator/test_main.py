@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,7 @@ from main import (
     canon_stop_live_view_multipart,
     initial_state,
     state,
+    uploaded_media_payloads,
 )
 
 client = TestClient(app)
@@ -19,6 +21,7 @@ client = TestClient(app)
 def setup_function() -> None:
     state.clear()
     state.update(initial_state())
+    uploaded_media_payloads.clear()
 
 
 def test_state_endpoint_is_sanitized_and_resettable() -> None:
@@ -170,6 +173,85 @@ def test_unknown_media_returns_not_found() -> None:
     response = client.get("/ccapi/media/DOES_NOT_EXIST.PNG")
 
     assert response.status_code == 404
+
+
+def test_media_upload_persists_exact_bytes_and_rejects_duplicates() -> None:
+    payload = b"\x89PNG\r\n\x1a\nopen-eos-upload"
+
+    uploaded = client.post(
+        "/ccapi/media?filename=PHONE_0001.PNG",
+        content=payload,
+        headers={"content-type": "image/png"},
+    )
+    media = client.get("/ccapi/media")
+    downloaded = client.get("/ccapi/media/PHONE_0001.PNG")
+    duplicate = client.post(
+        "/ccapi/media?filename=PHONE_0001.PNG",
+        content=payload,
+        headers={"content-type": "image/png"},
+    )
+
+    assert uploaded.status_code == 201
+    assert uploaded.json()["size_bytes"] == len(payload)
+    assert media.json()["items"][0]["name"] == "PHONE_0001.PNG"
+    assert downloaded.content == payload
+    assert downloaded.headers["content-type"] == "image/png"
+    assert duplicate.status_code == 409
+
+
+def test_media_upload_rejects_unsafe_or_unsupported_names() -> None:
+    traversal = client.post("/ccapi/media?filename=../secret.jpg", content=b"x")
+    executable = client.post("/ccapi/media?filename=payload.exe", content=b"x")
+
+    assert traversal.status_code == 422
+    assert executable.status_code == 422
+
+
+def test_media_upload_validates_and_infers_content_type() -> None:
+    inferred = client.post(
+        "/ccapi/media?filename=PHONE_0002.CR3",
+        content=b"raw-camera-data",
+        headers={"content-type": "application/octet-stream"},
+    )
+    mismatch = client.post(
+        "/ccapi/media?filename=PHONE_0003.MP4",
+        content=b"video-camera-data",
+        headers={"content-type": "image/jpeg"},
+    )
+
+    downloaded = client.get("/ccapi/media/PHONE_0002.CR3")
+    assert inferred.status_code == 201
+    assert downloaded.headers["content-type"] == "image/x-canon-cr3"
+    assert mismatch.status_code == 415
+
+
+def test_concurrent_same_name_upload_keeps_exactly_one_item() -> None:
+    def upload(payload: bytes):
+        return client.post(
+            "/ccapi/media?filename=PHONE_RACE.JPG",
+            content=payload,
+            headers={"content-type": "image/jpeg"},
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(upload, (b"first", b"second")))
+
+    assert sorted(response.status_code for response in responses) == [201, 409]
+    assert sum(item["name"] == "PHONE_RACE.JPG" for item in client.get("/ccapi/media").json()["items"]) == 1
+    assert client.get("/ccapi/media/PHONE_RACE.JPG").content in {b"first", b"second"}
+
+
+def test_canonical_delete_releases_uploaded_payload() -> None:
+    uploaded = client.post(
+        "/ccapi/media?filename=PHONE_DELETE.JPG",
+        content=b"delete-me",
+        headers={"content-type": "image/jpeg"},
+    )
+    deleted = client.delete("/ccapi/ver100/contents/card1/100CANON/PHONE_DELETE.JPG")
+
+    assert uploaded.status_code == 201
+    assert deleted.status_code == 204
+    assert "PHONE_DELETE.JPG" not in uploaded_media_payloads
 
 
 def test_media_thumbnail_uses_canon_kind_query() -> None:

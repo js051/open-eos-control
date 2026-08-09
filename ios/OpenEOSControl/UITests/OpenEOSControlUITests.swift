@@ -107,6 +107,7 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Camera media"].waitForExistence(timeout: 3))
         app.buttons["Camera media"].tap()
 
+        XCTAssertFalse(app.buttons["upload-media-button"].waitForExistence(timeout: 2))
         let download = app.buttons["download-media-preview-001"]
         XCTAssertTrue(download.waitForExistence(timeout: 5))
         download.tap()
