@@ -42,8 +42,12 @@ class DesktopBridgeClient(
     httpClient: OkHttpClient? = null,
     token: String = "",
     private val cameraId: String? = null,
+    cameraEngine: String? = null,
     private val profileHint: String? = CameraProfile.R6_MARK_III.modelName,
 ) {
+    private val cameraEngine = cameraEngine
+        ?.trim()
+        ?.takeIf { it in SUPPORTED_LOCAL_ENGINES }
     private val rootUrl = runCatching { baseUrl.trimEnd('/').toHttpUrl() }
         .getOrElse { throw IllegalArgumentException("Invalid desktop bridge URL: $baseUrl", it) }
         .also { url ->
@@ -91,7 +95,7 @@ class DesktopBridgeClient(
         eventPollingSupported = false
         sessionCameraModel = null
         validateService()
-        val payload = JSONObject().put("engine", "auto")
+        val payload = JSONObject().put("engine", cameraEngine ?: "auto")
         cameraId?.takeIf(String::isNotBlank)?.let { payload.put("cameraId", it) }
         profileHint?.takeIf(String::isNotBlank)?.let { payload.put("profileHint", it) }
         val created = postJson(endpoint("v1", "session"), payload)
@@ -827,6 +831,7 @@ class DesktopBridgeClient(
         .build()
 
     private companion object {
+        val SUPPORTED_LOCAL_ENGINES = setOf("libgphoto2", "edsdk")
         const val BRIDGE_SERVICE_NAME = "open-eos-control-bridge"
         const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024L
         const val MAX_ERROR_BODY_CHARS = 2_000

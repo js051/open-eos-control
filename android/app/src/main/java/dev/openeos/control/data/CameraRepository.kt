@@ -72,12 +72,14 @@ class CameraRepository(
         baseUrl: String,
         token: String = "",
         cameraId: String? = null,
+        cameraEngine: String? = null,
         request: LiveViewRequest = liveViewRequest,
     ): CameraSession = connect(
         connection = CameraConnection.DesktopBridge(
             baseUrl = baseUrl,
             token = token,
             cameraId = cameraId,
+            cameraEngine = cameraEngine,
         ),
         request = request,
     )

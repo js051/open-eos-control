@@ -3,32 +3,32 @@ from __future__ import annotations
 import secrets
 import threading
 
-from .engine import CameraEngine, CameraEngineSession, NetworkCameraEngine
+from .engine import CameraEngineSession, NetworkCameraEngine
+from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError
-from .models import EngineName, SessionCreated, SessionCreateRequest
+from .models import CameraDescriptor, EngineName, SessionCreated, SessionCreateRequest
 
 
 class SessionManager:
-    def __init__(self, engine: CameraEngine, network_engine: NetworkCameraEngine | None = None) -> None:
-        self.engine = engine
+    def __init__(
+        self,
+        local_engines: LocalEngineRegistry,
+        network_engine: NetworkCameraEngine | None = None,
+    ) -> None:
+        self.local_engines = local_engines
         self.network_engine = network_engine
         self._sessions: dict[str, CameraEngineSession] = {}
         self._camera_sessions: dict[str, str] = {}
         self._lock = threading.RLock()
+        self._open_lock = threading.Lock()
+
+    def discover(self) -> list[CameraDescriptor]:
+        return self.local_engines.discover()
 
     def create(self, request: SessionCreateRequest) -> SessionCreated:
-        if request.engine == EngineName.EDSDK:
-            raise BridgeError(
-                "ENGINE_UNAVAILABLE",
-                "The optional Canon EDSDK adapter is not installed in this open-source build.",
-                status_code=501,
-                engine=EngineName.EDSDK.value,
-            )
         use_ccapi = request.engine == EngineName.CCAPI or (
             request.engine == EngineName.AUTO and bool(request.ccapi_url)
         )
-        if request.engine not in {EngineName.AUTO, EngineName.LIBGPHOTO2, EngineName.CCAPI}:
-            raise BridgeError("UNKNOWN_ENGINE", f"Unknown engine '{request.engine}'.", status_code=422)
 
         if use_ccapi:
             if self.network_engine is None:
@@ -51,13 +51,28 @@ class SessionManager:
                 request.ccapi_password or "",
             )
         else:
-            session = self.engine.open(request.camera_id, request.profile_hint)
+            with self._open_lock:
+                engine_name = self.local_engines.resolve_name(request.engine, request.camera_id)
+                self._require_compatible_local_engine(engine_name)
+                session = self.local_engines.open(engine_name, request.camera_id, request.profile_hint)
+                try:
+                    return self._register(session)
+                except Exception:
+                    session.close()
+                    raise
 
+        try:
+            return self._register(session)
+        except Exception:
+            session.close()
+            raise
+
+    def _register(self, session: CameraEngineSession) -> SessionCreated:
         camera_key = f"{session.engine_name}:{session.camera.id}"
         with self._lock:
+            self._require_compatible_local_engine(session.engine_name)
             existing = self._camera_sessions.get(camera_key)
             if existing is not None:
-                session.close()
                 raise BridgeError(
                     "CAMERA_BUSY",
                     f"Camera already belongs to bridge session {existing}.",
@@ -68,6 +83,23 @@ class SessionManager:
             self._sessions[session_id] = session
             self._camera_sessions[camera_key] = session_id
         return SessionCreated(id=session_id, engine=session.engine_name, camera=session.camera)
+
+    def _require_compatible_local_engine(self, engine_name: str) -> None:
+        if engine_name == EngineName.CCAPI.value:
+            return
+        with self._lock:
+            active_local_engines = {
+                session.engine_name
+                for session in self._sessions.values()
+                if session.engine_name != EngineName.CCAPI.value
+            }
+            if active_local_engines and engine_name not in active_local_engines:
+                raise BridgeError(
+                    "CAMERA_BUSY",
+                    "Another local USB engine already owns a camera session.",
+                    status_code=409,
+                    engine=engine_name,
+                )
 
     def get(self, session_id: str) -> CameraEngineSession:
         with self._lock:

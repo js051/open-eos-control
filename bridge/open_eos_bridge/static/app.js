@@ -1339,7 +1339,10 @@
             ccapiUsername: ui.ccapiUsernameInput.value.trim(),
             ccapiPassword: ui.ccapiPasswordInput.value,
           }
-        : { engine: "auto", cameraId };
+        : {
+            engine: state.cameras.find((camera) => camera.id === cameraId)?.engine || "auto",
+            cameraId,
+          };
       state.session = await api("/v1/session", {
         method: "POST",
         json: sessionPayload,

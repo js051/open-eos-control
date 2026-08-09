@@ -152,6 +152,7 @@ final class DesktopBridgeClientTests: XCTestCase {
             baseURL: "http://192.168.1.10:18181",
             token: "bridge-secret",
             cameraID: "gphoto2:dXNi",
+            cameraEngine: "edsdk",
             transport: transport
         )
         let snapshot = try await client.connectSnapshot()
@@ -257,6 +258,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         let sessionBody = try XCTUnwrap(requests.first { $0.path == "/v1/session" }?.body)
         let sessionJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: sessionBody) as? [String: Any])
         XCTAssertEqual(sessionJSON["cameraId"] as? String, "gphoto2:dXNi")
+        XCTAssertEqual(sessionJSON["engine"] as? String, "edsdk")
         XCTAssertEqual(sessionJSON["profileHint"] as? String, "Canon EOS R6 Mark III")
         XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/start") })
         XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/stop") })
