@@ -47,6 +47,7 @@ LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast �
 - Android、iOS 與 PC 上依能力開放的 Canon CCAPI Live View，AUTO 依序嘗試 RTP H.264、持續 multipart JPEG、JPEG 輪詢，並限制 1-30 FPS 顯示／輸出幀率。Multipart 必須在同一 API 版本完整公告一般 Live View 啟停與 `GET`／`DELETE /shooting/liveview/multipart`，背景會持續排空資料但只保留最新一張有界完整 JPEG；只有 AUTO 會在啟動失敗時降級。RTP 使用可達路由的 UDP、RFC 3550／RFC 6184、手機原生顯示或 PC PyAV 解碼；各來源只會在完整能力條件成立時顯示
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質、有界 B/A／M/G 白平衡偏移，以及相機同版本同時公告 GET／POST 時才出現的官方 0-100 變焦控制。變焦使用整數 POST；普通 EOS／鏡頭組合未提供此端點時會完全隱藏
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 雙卡選擇。Photo 與 Video 分別顯示相片／影片記錄卡；只有相機在同一 API 版本公告成對 GET／PUT，且回傳 `none`、`card1`、`card2` 的有效選項時才出現，寫入保留精確協定值，畸形或只有單一選項的回應不會形成可操作控制
+- Android、iOS 與 PC 依能力提供 Canon CCAPI 檔名控制。只有同一 API 版本完整公告七個文件化 GET／PUT 資源，且所有目前值與 ability 都通過驗證時才出現；Photo 提供相片檔名模式與兩組自訂前綴，Video 提供索引、Reel、Clip 與自訂名稱。寫入會保留 Canon 各端點要求的字串／整數型別並完成整組回讀驗證；USB/PTP 與 libgphoto2 不會宣稱推測出的等效功能
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 錄音音量控制。Video 設定只有在相機於同一 API 版本公告成對 GET／PUT，並回傳有效的有界整數範圍後，才顯示類似 0–63 的離散滑桿；每次寫入前會重新讀取範圍並送出 Canon 要求的整數 `value`。Still 模式、錄音設定不是手動、錄影進行中、畸形或過期能力都會維持真實的不可用／錯誤狀態
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 錄音模式、風聲抑制與衰減器。Video 設定只顯示同一 API 版本成對 GET／PUT 所回傳且符合 Canon 文件的字串選項；寫入前會重新讀取 ability，忙碌、錄影中、Still 模式或錄音停用等相機錯誤不會被偽裝成成功
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 機身提示音與螢幕自動關閉時間。More Settings 只顯示同一 API 版本成對 GET／PUT 回傳的 Canon 文件值；每次寫入前會重新讀取兩個資源並保留精確字串，畸形、過期、單一選項、跨版本、忙碌或錄影中狀態不會被偽裝成成功

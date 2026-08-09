@@ -535,6 +535,31 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    func setFileNaming(field: CameraFileNamingField, value: String) async {
+        guard
+            !isPreview,
+            supports(.fileNamingControl),
+            snapshot?.capabilities.fileNaming?.accepts(field, value: value) == true,
+            begin(.setting)
+        else { return }
+        defer { end(.setting) }
+        guard let session else { return }
+        do {
+            _ = try await session.setFileNaming(field: field, value: value)
+            let capabilities = try await session.capabilities()
+            if let snapshot {
+                self.snapshot = CameraSnapshot(
+                    info: snapshot.info,
+                    status: snapshot.status,
+                    capabilities: capabilities
+                )
+            }
+            lastError = nil
+        } catch {
+            record(error)
+        }
+    }
+
     func sleepCamera() async {
         guard
             !isPreview,
@@ -1537,6 +1562,7 @@ final class CameraAppState: ObservableObject {
             .tapFocus, .clickWhiteBalance,
             .liveViewMagnification,
             .exposureControl, .whiteBalanceControl, .zoomControl, .cardSelectionControl, .directoryControl,
+            .fileNamingControl,
             .soundRecordingControl, .soundRecordingLevelControl, .focusBracketingControl,
             .movieSettingsControl,
             .advancedSettings, .sensorCleaning, .cameraSleep, .mediaBrowser, .mediaDownload,
@@ -1544,6 +1570,18 @@ final class CameraAppState: ObservableObject {
         ]
         let capabilities = CameraCapabilities(
             settings: settings,
+            fileNaming: CameraFileNaming(
+                stillFilenameMode: "preset_code",
+                stillFilenameModeOptions: ["preset_code", "usersetting1", "usersetting2"],
+                stillUserSetting1: "IMG_",
+                stillUserSetting2: "IMG",
+                movieIndex: "A_",
+                movieReelNumber: 1,
+                movieReelRange: CameraIntegerRange(minimum: 1, maximum: 9999, step: 1),
+                movieClipNumber: 1,
+                movieClipRange: CameraIntegerRange(minimum: 1, maximum: 999, step: 1),
+                movieUserDefined: "CANON"
+            ),
             matrix: CapabilityMatrix(supported: supported, planned: [.liveViewRTP, .focusDrive]),
             liveView: LiveViewCapabilities(
                 sources: [.ccapiJPEGPolling],

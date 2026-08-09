@@ -55,6 +55,8 @@ final class CCAPIClientTests: XCTestCase {
 
     private let deviceStatusDiscovery = #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/information/recordable","get":true},{"path":"/devicestatus/lens","get":true},{"path":"/devicestatus/temperature","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/shutterbutton","post":true},{"path":"/shooting/control/recbutton","post":true}]}"#
 
+    private let fileNamingDiscovery = #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/functions/filename/stills/filename","get":true,"put":true},{"path":"/functions/filename/stills/usersetting1","get":true,"put":true},{"path":"/functions/filename/stills/usersetting2","get":true,"put":true},{"path":"/functions/filename/movies/index","get":true,"put":true},{"path":"/functions/filename/movies/reelnum","get":true,"put":true},{"path":"/functions/filename/movies/clipnum","get":true,"put":true},{"path":"/functions/filename/movies/userdefined","get":true,"put":true}]}"#
+
     func testDiscoverySnapshotBuildsCapabilitiesFromAdvertisedOperations() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
@@ -2299,6 +2301,140 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(crossVersionRequests.count, 2)
     }
 
+    func testCanonFileNamingRequiresCompleteGroupAndVerifiesUpdates() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: fileNamingDiscovery)
+        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await enqueueFileNaming(on: transport)
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        let fileNaming = try XCTUnwrap(capabilities.fileNaming)
+        XCTAssertTrue(capabilities.matrix.supports(.fileNamingControl))
+        XCTAssertEqual(fileNaming.stillFilenameModeOptions, ["preset_code", "usersetting1", "usersetting2"])
+        XCTAssertEqual(fileNaming.movieReelRange, CameraIntegerRange(minimum: 1, maximum: 9_999, step: 1))
+        XCTAssertTrue(capabilities.evidence.writableSettings.contains("movie-reel-number"))
+
+        let requestCount = await transport.requests().count
+        do {
+            _ = try await client.setFileNaming(field: .stillUserSetting1, value: "_BAD")
+            XCTFail("Expected an invalid Canon file prefix to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidSetting(key: CameraFileNamingField.stillUserSetting1.rawValue, value: "_BAD")
+            )
+        }
+        let requestsAfterRejection = await transport.requests()
+        XCTAssertEqual(requestsAfterRejection.count, requestCount)
+
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/ccapi/ver100/functions/filename/stills/usersetting1",
+            body: #"{"usersetting1":"EOS_"}"#
+        )
+        await enqueueFileNaming(on: transport, stillUserSetting1: "EOS_")
+        let updatedString = try await client.setFileNaming(field: .stillUserSetting1, value: "EOS_")
+        XCTAssertEqual(updatedString.stillUserSetting1, "EOS_")
+
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/ccapi/ver100/functions/filename/movies/reelnum",
+            body: #"{"value":42}"#
+        )
+        await enqueueFileNaming(on: transport, stillUserSetting1: "EOS_", movieReelNumber: 42)
+        let updatedInteger = try await client.setFileNaming(field: .movieReelNumber, value: "42")
+        XCTAssertEqual(updatedInteger.movieReelNumber, 42)
+
+        let requests = await transport.requests()
+        let stringWrite = try XCTUnwrap(requests.first {
+            $0.method == "PUT" && $0.path.hasSuffix("/filename/stills/usersetting1")
+        })
+        let stringBody = try XCTUnwrap(stringWrite.body)
+        XCTAssertEqual(
+            try XCTUnwrap(JSONSerialization.jsonObject(with: stringBody) as? [String: String]),
+            ["usersetting1": "EOS_"]
+        )
+        let integerWrite = try XCTUnwrap(requests.first {
+            $0.method == "PUT" && $0.path.hasSuffix("/filename/movies/reelnum")
+        })
+        let integerBody = try XCTUnwrap(integerWrite.body)
+        XCTAssertEqual(
+            (try XCTUnwrap(JSONSerialization.jsonObject(with: integerBody) as? [String: Any]))["value"] as? Int,
+            42
+        )
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
+    func testCanonFileNamingRejectsIncompleteMalformedAndCrossVersionContracts() async throws {
+        let incomplete = MockCameraHTTPTransport()
+        let incompleteDiscovery = fileNamingDiscovery.replacingOccurrences(
+            of: #"{"path":"/functions/filename/movies/userdefined","get":true,"put":true}"#,
+            with: #"{"path":"/functions/filename/movies/userdefined","get":true}"#
+        )
+        await incomplete.enqueueJSON(path: "/ccapi", body: incompleteDiscovery)
+        await incomplete.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let incompleteClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: incomplete
+        )
+
+        var capabilities = try await incompleteClient.capabilities()
+
+        XCTAssertNil(capabilities.fileNaming)
+        XCTAssertFalse(capabilities.matrix.supports(.fileNamingControl))
+        XCTAssertTrue(capabilities.matrix.planned.contains(.fileNamingControl))
+        let incompleteRequests = await incomplete.requests()
+        XCTAssertEqual(incompleteRequests.count, 2)
+
+        let malformed = MockCameraHTTPTransport()
+        await malformed.enqueueJSON(path: "/ccapi", body: fileNamingDiscovery)
+        await malformed.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        await enqueueFileNaming(on: malformed, stillUserSetting1: "_BAD")
+        let malformedClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: malformed
+        )
+
+        capabilities = try await malformedClient.capabilities()
+
+        XCTAssertNil(capabilities.fileNaming)
+        XCTAssertFalse(capabilities.matrix.supports(.fileNamingControl))
+
+        let crossVersion = MockCameraHTTPTransport()
+        let crossVersionDiscovery = fileNamingDiscovery
+            .replacingOccurrences(
+                of: #"{"path":"/functions/filename/stills/filename","get":true,"put":true}"#,
+                with: #"{"path":"/functions/filename/stills/filename","get":true}"#
+            )
+            .replacingOccurrences(
+                of: "]}",
+                with: #"],"ver110":[{"path":"/functions/filename/stills/filename","put":true}]}"#
+            )
+        await crossVersion.enqueueJSON(path: "/ccapi", body: crossVersionDiscovery)
+        await crossVersion.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+        let crossVersionClient = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: crossVersion
+        )
+
+        capabilities = try await crossVersionClient.capabilities()
+
+        XCTAssertNil(capabilities.fileNaming)
+        XCTAssertFalse(capabilities.matrix.supports(.fileNamingControl))
+        let crossVersionRequests = await crossVersion.requests()
+        XCTAssertEqual(crossVersionRequests.count, 2)
+    }
+
     func testStillImageQualityWritesCanonObjectAndPreservesCompanionFormat() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
@@ -2832,6 +2968,41 @@ final class CCAPIClientTests: XCTestCase {
             body: #"{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000,"freeimages":-1},{"name":"card2","capacity":128000000000,"freebytes":64000000000,"remainingimages":2400}]}"#
         )
         await transport.enqueueJSON(path: "\(prefix)/shooting/settings", body: settings)
+    }
+
+    private func enqueueFileNaming(
+        on transport: MockCameraHTTPTransport,
+        stillUserSetting1: String = "IMG_",
+        movieReelNumber: Int = 1
+    ) async {
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/filename/stills/filename",
+            body: #"{"value":"preset_code","ability":["preset_code","usersetting1","usersetting2"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/filename/stills/usersetting1",
+            body: "{\"usersetting1\":\"\(stillUserSetting1)\"}"
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/filename/stills/usersetting2",
+            body: #"{"usersetting2":"EOS"}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/filename/movies/index",
+            body: #"{"index":"A_"}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/filename/movies/reelnum",
+            body: "{\"value\":\(movieReelNumber),\"ability\":{\"min\":1,\"max\":9999,\"step\":1}}"
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/filename/movies/clipnum",
+            body: #"{"value":1,"ability":{"min":1,"max":999,"step":1}}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/functions/filename/movies/userdefined",
+            body: #"{"userdefined":"EOS01"}"#
+        )
     }
 
     private func enqueueDeviceStatus(

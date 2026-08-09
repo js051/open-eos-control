@@ -109,6 +109,14 @@ class SimulatorEndToEndTest {
             state.getString("movie_mode") == "on" && state.getInt("movie_mode_update_count") == 1
         }
         compose.onNodeWithContentDescription(text(R.string.more_settings)).performClick()
+        compose.onNodeWithTag("file-naming").performScrollTo().performClick()
+        compose.onNodeWithTag("movie-index").performTextReplacement("B_")
+        compose.onNodeWithTag("movie-index-apply").performClick()
+        waitForSimulatorState { state ->
+            state.getJSONObject("file_naming").getString("movieIndex") == "B_" &&
+                state.getInt("file_naming_update_count") == 1
+        }
+        compose.onNodeWithText(text(R.string.done)).performClick()
         setAdvancedSetting(key = "beep", value = "disabletouch", stateKey = "beep")
         setAdvancedSetting(key = "displayoff", value = "120", stateKey = "display_off")
         setAdvancedSetting(

@@ -645,6 +645,10 @@ private struct MoreSettingsView: View {
                         directoryControlRow
                         Divider().overlay(Color.cameraBorder)
                     }
+                    if camera.supports(.fileNamingControl), camera.capabilities?.fileNaming != nil {
+                        fileNamingRow
+                        Divider().overlay(Color.cameraBorder)
+                    }
                     if camera.supports(.sensorCleaning) {
                         sensorCleaningRow
                         Divider().overlay(Color.cameraBorder)
@@ -657,6 +661,7 @@ private struct MoreSettingsView: View {
                         !camera.supports(.clickWhiteBalance) &&
                         !camera.supports(.cameraClockSync) &&
                         !camera.supports(.directoryControl) &&
+                        !camera.supports(.fileNamingControl) &&
                         !camera.supports(.sensorCleaning) &&
                         !camera.supports(.cameraSleep) {
                         ContentUnavailableView("no_settings", systemImage: "slider.horizontal.3")
@@ -803,6 +808,41 @@ private struct MoreSettingsView: View {
             }
         }
         .padding(.vertical, 14)
+    }
+
+    private var fileNamingRow: some View {
+        NavigationLink {
+            FileNamingEditorView()
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("file_naming")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Color.cameraText)
+                    if let naming = camera.capabilities?.fileNaming {
+                        Text(
+                            camera.captureMode == .photo
+                                ? language.format("file_naming_photo_summary", naming.stillFilenameMode)
+                                : language.format(
+                                    "file_naming_video_summary",
+                                    naming.movieIndex,
+                                    naming.movieReelNumber,
+                                    naming.movieClipNumber
+                                )
+                        )
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraSecondaryText)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(Color.cameraSecondaryText)
+            }
+            .frame(minHeight: 72)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("file-naming")
     }
 
     private func localizedClockTime(_ date: Date) -> String {
@@ -978,5 +1018,154 @@ private struct MoreSettingsView: View {
             return LocalizedStringKey(display)
         }
         return LocalizedStringKey(settingValueLocalizationKey(key: setting.key, value: value) ?? value)
+    }
+}
+
+private struct FileNamingEditorView: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @State private var stillUserSetting1 = ""
+    @State private var stillUserSetting2 = ""
+    @State private var movieIndex = ""
+    @State private var movieReelNumber = ""
+    @State private var movieClipNumber = ""
+    @State private var movieUserDefined = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let naming = camera.capabilities?.fileNaming {
+                    if camera.captureMode == .photo {
+                        Picker("still_filename_mode", selection: stillModeBinding(naming)) {
+                            ForEach(naming.stillFilenameModeOptions, id: \.self) { option in
+                                Text(modeLabel(option)).tag(option)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(camera.isBusy(.setting) || camera.isPreview)
+                        fileNamingField(
+                            "still_user_setting_1",
+                            value: $stillUserSetting1,
+                            field: .stillUserSetting1,
+                            maximumLength: 4,
+                            allowUnderscore: true,
+                            naming: naming
+                        )
+                        fileNamingField(
+                            "still_user_setting_2",
+                            value: $stillUserSetting2,
+                            field: .stillUserSetting2,
+                            maximumLength: 3,
+                            allowUnderscore: true,
+                            naming: naming
+                        )
+                    } else {
+                        fileNamingField(
+                            "movie_index",
+                            value: $movieIndex,
+                            field: .movieIndex,
+                            maximumLength: 2,
+                            allowUnderscore: true,
+                            naming: naming
+                        )
+                        fileNamingField(
+                            "movie_reel_number",
+                            value: $movieReelNumber,
+                            field: .movieReelNumber,
+                            maximumLength: 4,
+                            numeric: true,
+                            naming: naming
+                        )
+                        fileNamingField(
+                            "movie_clip_number",
+                            value: $movieClipNumber,
+                            field: .movieClipNumber,
+                            maximumLength: 3,
+                            numeric: true,
+                            naming: naming
+                        )
+                        fileNamingField(
+                            "movie_user_defined",
+                            value: $movieUserDefined,
+                            field: .movieUserDefined,
+                            maximumLength: 5,
+                            allowUnderscore: false,
+                            naming: naming
+                        )
+                    }
+                    Text("file_naming_rule")
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraSecondaryText)
+                } else {
+                    ContentUnavailableView("file_naming_unavailable", systemImage: "textformat")
+                }
+            }
+            .padding(18)
+        }
+        .background(Color.cameraSurface)
+        .navigationTitle(Text("file_naming"))
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear(perform: loadCurrentValues)
+        .onChange(of: camera.capabilities?.fileNaming) { _, _ in loadCurrentValues() }
+    }
+
+    private func stillModeBinding(_ naming: CameraFileNaming) -> Binding<String> {
+        Binding(
+            get: { naming.stillFilenameMode },
+            set: { value in Task { await camera.setFileNaming(field: .stillFilenameMode, value: value) } }
+        )
+    }
+
+    @ViewBuilder
+    private func fileNamingField(
+        _ label: LocalizedStringKey,
+        value: Binding<String>,
+        field: CameraFileNamingField,
+        maximumLength: Int,
+        allowUnderscore: Bool = false,
+        numeric: Bool = false,
+        naming: CameraFileNaming
+    ) -> some View {
+        HStack(spacing: 10) {
+            TextField(label, text: value)
+                .textInputAutocapitalization(numeric ? .never : .characters)
+                .keyboardType(numeric ? .numberPad : .asciiCapable)
+                .autocorrectionDisabled()
+                .onChange(of: value.wrappedValue) { _, raw in
+                    let filtered = numeric
+                        ? raw.filter(\.isNumber)
+                        : raw.uppercased().filter {
+                            $0.isASCII && ($0.isLetter || $0.isNumber || (allowUnderscore && $0 == "_"))
+                        }
+                    value.wrappedValue = String(filtered.prefix(maximumLength))
+                }
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier(field.rawValue)
+            Button("apply") {
+                Task { await camera.setFileNaming(field: field, value: value.wrappedValue) }
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.cameraAccent)
+            .disabled(camera.isPreview || camera.isBusy(.setting) || !naming.accepts(field, value: value.wrappedValue))
+            .accessibilityIdentifier("\(field.rawValue)-apply")
+        }
+    }
+
+    private func loadCurrentValues() {
+        guard let naming = camera.capabilities?.fileNaming else { return }
+        stillUserSetting1 = naming.stillUserSetting1
+        stillUserSetting2 = naming.stillUserSetting2
+        movieIndex = naming.movieIndex
+        movieReelNumber = String(naming.movieReelNumber)
+        movieClipNumber = String(naming.movieClipNumber)
+        movieUserDefined = naming.movieUserDefined
+    }
+
+    private func modeLabel(_ value: String) -> LocalizedStringKey {
+        switch value {
+        case "preset_code": "file_naming_preset_code"
+        case "usersetting1": "still_user_setting_1"
+        case "usersetting2": "still_user_setting_2"
+        default: "unknown"
+        }
     }
 }

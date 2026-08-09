@@ -168,6 +168,9 @@ class CameraRepository(
 
     suspend fun createDirectory(name: String): String = backend.createDirectory(name)
 
+    suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
+        backend.setFileNaming(field, value)
+
     suspend fun syncCameraClock(): CameraStatus = backend.syncCameraClock()
 
     suspend fun cleanSensor(autoPowerOff: Boolean) = backend.cleanSensor(autoPowerOff)

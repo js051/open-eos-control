@@ -4,7 +4,7 @@ import re
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _to_camel(value: str) -> str:
@@ -41,6 +41,7 @@ class CameraFeature(StrEnum):
     CAMERA_IDENTITY = "CAMERA_IDENTITY"
     CAMERA_CLOCK_SYNC = "CAMERA_CLOCK_SYNC"
     DIRECTORY_CONTROL = "DIRECTORY_CONTROL"
+    FILE_NAMING_CONTROL = "FILE_NAMING_CONTROL"
     SENSOR_CLEANING = "SENSOR_CLEANING"
     CAMERA_SLEEP = "CAMERA_SLEEP"
     BATTERY_STATUS = "BATTERY_STATUS"
@@ -244,6 +245,65 @@ class CameraSetting(ApiModel):
     values: list[str]
 
 
+class FileNamingField(StrEnum):
+    STILL_FILENAME_MODE = "still-filename-mode"
+    STILL_USER_SETTING_1 = "still-user-setting-1"
+    STILL_USER_SETTING_2 = "still-user-setting-2"
+    MOVIE_INDEX = "movie-index"
+    MOVIE_REEL_NUMBER = "movie-reel-number"
+    MOVIE_CLIP_NUMBER = "movie-clip-number"
+    MOVIE_USER_DEFINED = "movie-user-defined"
+
+
+class IntegerRange(ApiModel):
+    minimum: int
+    maximum: int
+    step: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> IntegerRange:
+        if self.minimum > self.maximum:
+            raise ValueError("Integer range minimum must not exceed maximum.")
+        return self
+
+
+class FileNamingState(ApiModel):
+    still_filename_mode: str = Field(min_length=1, max_length=64)
+    still_filename_mode_options: list[str] = Field(min_length=1, max_length=16)
+    still_user_setting_1: str = Field(pattern=r"^[A-Z0-9][A-Z0-9_]{3}$")
+    still_user_setting_2: str = Field(pattern=r"^[A-Z0-9][A-Z0-9_]{2}$")
+    movie_index: str = Field(pattern=r"^[A-Z0-9][A-Z0-9_]$")
+    movie_reel_number: int
+    movie_reel_range: IntegerRange
+    movie_clip_number: int
+    movie_clip_range: IntegerRange
+    movie_user_defined: str = Field(pattern=r"^[A-Z0-9]{5}$")
+
+    @model_validator(mode="after")
+    def validate_current_values(self) -> FileNamingState:
+        allowed_modes = {"preset_code", "usersetting1", "usersetting2"}
+        if (
+            len(set(self.still_filename_mode_options)) != len(self.still_filename_mode_options)
+            or any(value not in allowed_modes for value in self.still_filename_mode_options)
+        ):
+            raise ValueError("Still filename modes must use unique documented Canon values.")
+        if self.still_filename_mode not in self.still_filename_mode_options:
+            raise ValueError("Current still filename mode must be advertised.")
+        if self.movie_reel_range.minimum < 1 or self.movie_reel_range.maximum > 9999:
+            raise ValueError("Movie reel range is outside Canon's documented bounds.")
+        if self.movie_clip_range.minimum < 1 or self.movie_clip_range.maximum > 999:
+            raise ValueError("Movie clip range is outside Canon's documented bounds.")
+        for value, value_range in (
+            (self.movie_reel_number, self.movie_reel_range),
+            (self.movie_clip_number, self.movie_clip_range),
+        ):
+            if not value_range.minimum <= value <= value_range.maximum:
+                raise ValueError("Current filename number must be inside its range.")
+            if (value - value_range.minimum) % value_range.step != 0:
+                raise ValueError("Current filename number must conform to its range step.")
+        return self
+
+
 class LiveViewCapabilities(ApiModel):
     sources: list[str] = Field(default_factory=list)
     default_source: str | None = None
@@ -298,6 +358,7 @@ class CameraCapabilities(ApiModel):
     reasons: dict[str, str] = Field(default_factory=dict)
     live_view: LiveViewCapabilities = Field(default_factory=LiveViewCapabilities)
     settings: list[CameraSetting] = Field(default_factory=list)
+    file_naming: FileNamingState | None = None
     evidence: CapabilityEvidence = Field(default_factory=CapabilityEvidence)
 
 
@@ -311,6 +372,10 @@ class DirectoryCreateRequest(ApiModel):
 
 class DirectoryCreateResult(ApiModel):
     name: str = Field(min_length=5, max_length=5, pattern=r"^[A-Z0-9_]{5}$")
+
+
+class FileNamingUpdate(ApiModel):
+    value: str = Field(min_length=1, max_length=16)
 
 
 class SensorCleaningRequest(ApiModel):

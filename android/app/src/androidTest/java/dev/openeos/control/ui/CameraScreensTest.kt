@@ -32,6 +32,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -47,7 +48,10 @@ import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilityEvidence
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.CameraFileNaming
+import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.CameraIntegerRange
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraStatus
@@ -1558,6 +1562,65 @@ class CameraScreensTest {
     }
 
     @Test
+    fun photoFileNamingEditorNormalizesAndDispatchesAdvertisedPrefix() {
+        var requested: Pair<CameraFileNamingField, String>? = null
+        val state = connectedStateWithFileNaming().copy(activeSettingPicker = SettingPicker.MORE)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    state,
+                    noOpActions().copy(setFileNaming = { field, value -> requested = field to value }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("file-naming")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performClick()
+        compose.onNodeWithTag("still-user-setting-1")
+            .assertIsDisplayed()
+            .performTextReplacement("r6m_")
+        compose.onNodeWithTag("still-user-setting-1-apply")
+            .assertIsEnabled()
+            .performClick()
+
+        compose.runOnIdle {
+            assertEquals(CameraFileNamingField.STILL_USER_SETTING_1 to "R6M_", requested)
+        }
+    }
+
+    @Test
+    fun videoFileNamingEditorFiltersFieldsAndRejectsOutOfRangeReel() {
+        var requested: Pair<CameraFileNamingField, String>? = null
+        val state = connectedStateWithFileNaming().copy(
+            activeSettingPicker = SettingPicker.MORE,
+            captureMode = CaptureMode.VIDEO,
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    state,
+                    noOpActions().copy(setFileNaming = { field, value -> requested = field to value }),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("file-naming").performScrollTo().performClick()
+        compose.onNodeWithTag("movie-index").assertIsDisplayed()
+        compose.onNodeWithTag("still-user-setting-1").assertDoesNotExist()
+        compose.onNodeWithTag("movie-reel-number").performTextReplacement("0")
+        compose.onNodeWithTag("movie-reel-number-apply").assertIsNotEnabled()
+        compose.onNodeWithTag("movie-reel-number").performTextReplacement("42")
+        compose.onNodeWithTag("movie-reel-number-apply").assertIsEnabled().performClick()
+
+        compose.runOnIdle {
+            assertEquals(CameraFileNamingField.MOVIE_REEL_NUMBER to "42", requested)
+        }
+    }
+
+    @Test
     fun moreSettingsHidesShutterHalfPressWhenTheCameraDoesNotAdvertiseIt() {
         val picker = mutableStateOf<SettingPicker?>(null)
         val preview = CameraUiState().withOfflinePreview()
@@ -2595,6 +2658,30 @@ class CameraScreensTest {
             ),
         ),
     )
+
+    private fun connectedStateWithFileNaming(): CameraUiState {
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities)
+        return base.copy(
+            capabilities = capabilities.copy(
+                fileNaming = CameraFileNaming(
+                    stillFilenameMode = "preset_code",
+                    stillFilenameModeOptions = listOf("preset_code", "usersetting1", "usersetting2"),
+                    stillUserSetting1 = "IMG_",
+                    stillUserSetting2 = "EOS",
+                    movieIndex = "A_",
+                    movieReelNumber = 1,
+                    movieReelRange = CameraIntegerRange(1, 9999, 1),
+                    movieClipNumber = 1,
+                    movieClipRange = CameraIntegerRange(1, 999, 1),
+                    movieUserDefined = "EOS01",
+                ),
+                matrix = capabilities.matrix.copy(
+                    supported = capabilities.matrix.supported + CameraFeature.FILE_NAMING_CONTROL,
+                ),
+            ),
+        )
+    }
 
     private fun assertPrimaryCameraControlsVisible() {
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()

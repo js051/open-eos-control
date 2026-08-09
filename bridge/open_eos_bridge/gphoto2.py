@@ -36,6 +36,8 @@ from .models import (
     CameraStatus,
     CapabilityEvidence,
     ExposureState,
+    FileNamingField,
+    FileNamingState,
     FocusResult,
     LiveViewCapabilities,
     LiveViewMagnificationResult,
@@ -1400,6 +1402,14 @@ class GPhoto2Session:
             CameraFeature.DIRECTORY_CONTROL.value,
             self.engine_name,
             "The public libgphoto2 CLI contract does not expose Canon CCAPI directory creation.",
+        )
+
+    def set_file_naming(self, field: FileNamingField, value: str) -> FileNamingState:
+        del field, value
+        raise unsupported(
+            CameraFeature.FILE_NAMING_CONTROL.value,
+            self.engine_name,
+            "The public libgphoto2 CLI contract does not expose Canon CCAPI file-naming controls.",
         )
 
     def clean_sensor(self, auto_power_off: bool) -> None:

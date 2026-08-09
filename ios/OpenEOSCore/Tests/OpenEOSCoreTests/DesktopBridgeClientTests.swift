@@ -35,6 +35,70 @@ final class DesktopBridgeClientTests: XCTestCase {
         })
     }
 
+    func testFileNamingCapabilityAndUpdateUseBridgeContract() async throws {
+        let transport = MockCameraHTTPTransport()
+        let fileNaming = #"{"stillFilenameMode":"preset_code","stillFilenameModeOptions":["preset_code","usersetting1","usersetting2"],"stillUserSetting1":"IMG_","stillUserSetting2":"EOS","movieIndex":"A_","movieReelNumber":1,"movieReelRange":{"minimum":1,"maximum":9999,"step":1},"movieClipNumber":1,"movieClipRange":{"minimum":1,"maximum":999,"step":1},"movieUserDefined":"EOS01"}"#
+        let updatedFileNaming = fileNaming.replacingOccurrences(
+            of: #""stillUserSetting1":"IMG_""#,
+            with: #""stillUserSetting1":"EOS_""#
+        )
+        let fileNamingCapabilities = """
+        {
+          "profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},
+          "supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","FILE_NAMING_CONTROL"],
+          "planned":[],
+          "liveView":{"sources":[],"sizes":[],"minFps":1,"maxFps":1},
+          "settings":[],
+          "fileNaming":\(fileNaming),
+          "evidence":{"source":"GET /ccapi","writableSettings":["still-user-setting-1"]}
+        }
+        """
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_filename","engine":"ccapi","camera":{"id":"ccapi:test","model":"Canon EOS R6 Mark III","port":"network","engine":"ccapi"}}"#
+        )
+        await transport.enqueueJSON(
+            path: "/v1/session/session_filename/capabilities",
+            body: fileNamingCapabilities
+        )
+        await transport.enqueueJSON(
+            path: "/v1/session/session_filename/capabilities",
+            body: fileNamingCapabilities
+        )
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/v1/session/session_filename/file-naming/still-user-setting-1",
+            body: updatedFileNaming
+        )
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "ccapi:test",
+            transport: transport
+        )
+
+        try await client.initialize()
+        let capabilities = try await client.capabilities()
+        let updated = try await client.setFileNaming(field: .stillUserSetting1, value: "EOS_")
+
+        XCTAssertTrue(capabilities.matrix.supports(.fileNamingControl))
+        XCTAssertEqual(capabilities.fileNaming?.stillUserSetting1, "IMG_")
+        XCTAssertEqual(updated.stillUserSetting1, "EOS_")
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first {
+            $0.method == "PUT" && $0.path.hasSuffix("/file-naming/still-user-setting-1")
+        })
+        let body = try XCTUnwrap(write.body)
+        XCTAssertEqual(
+            try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String]),
+            ["value": "EOS_"]
+        )
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
     func testSessionCoversControlLiveViewMediaAndCloseContract() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/health", body: health)

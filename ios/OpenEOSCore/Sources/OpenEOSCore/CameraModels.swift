@@ -4,6 +4,7 @@ public enum CameraFeature: String, CaseIterable, Codable, Hashable, Sendable {
     case cameraIdentity = "CAMERA_IDENTITY"
     case cameraClockSync = "CAMERA_CLOCK_SYNC"
     case directoryControl = "DIRECTORY_CONTROL"
+    case fileNamingControl = "FILE_NAMING_CONTROL"
     case sensorCleaning = "SENSOR_CLEANING"
     case cameraSleep = "CAMERA_SLEEP"
     case batteryStatus = "BATTERY_STATUS"
@@ -295,6 +296,104 @@ public struct CameraSetting: Identifiable, Equatable, Sendable {
     }
 }
 
+public enum CameraFileNamingField: String, CaseIterable, Codable, Sendable {
+    case stillFilenameMode = "still-filename-mode"
+    case stillUserSetting1 = "still-user-setting-1"
+    case stillUserSetting2 = "still-user-setting-2"
+    case movieIndex = "movie-index"
+    case movieReelNumber = "movie-reel-number"
+    case movieClipNumber = "movie-clip-number"
+    case movieUserDefined = "movie-user-defined"
+}
+
+public struct CameraIntegerRange: Equatable, Sendable {
+    public let minimum: Int
+    public let maximum: Int
+    public let step: Int
+
+    public init(minimum: Int, maximum: Int, step: Int) {
+        self.minimum = minimum
+        self.maximum = maximum
+        self.step = step
+    }
+
+    public func accepts(_ value: String) -> Bool {
+        guard minimum <= maximum,
+              let integer = Int(value),
+              String(integer) == value,
+              step > 0 else { return false }
+        return (minimum...maximum).contains(integer) && (integer - minimum).isMultiple(of: step)
+    }
+}
+
+public struct CameraFileNaming: Equatable, Sendable {
+    public let stillFilenameMode: String
+    public let stillFilenameModeOptions: [String]
+    public let stillUserSetting1: String
+    public let stillUserSetting2: String
+    public let movieIndex: String
+    public let movieReelNumber: Int
+    public let movieReelRange: CameraIntegerRange
+    public let movieClipNumber: Int
+    public let movieClipRange: CameraIntegerRange
+    public let movieUserDefined: String
+
+    public init(
+        stillFilenameMode: String,
+        stillFilenameModeOptions: [String],
+        stillUserSetting1: String,
+        stillUserSetting2: String,
+        movieIndex: String,
+        movieReelNumber: Int,
+        movieReelRange: CameraIntegerRange,
+        movieClipNumber: Int,
+        movieClipRange: CameraIntegerRange,
+        movieUserDefined: String
+    ) {
+        self.stillFilenameMode = stillFilenameMode
+        self.stillFilenameModeOptions = stillFilenameModeOptions
+        self.stillUserSetting1 = stillUserSetting1
+        self.stillUserSetting2 = stillUserSetting2
+        self.movieIndex = movieIndex
+        self.movieReelNumber = movieReelNumber
+        self.movieReelRange = movieReelRange
+        self.movieClipNumber = movieClipNumber
+        self.movieClipRange = movieClipRange
+        self.movieUserDefined = movieUserDefined
+    }
+
+    public func value(for field: CameraFileNamingField) -> String {
+        switch field {
+        case .stillFilenameMode: stillFilenameMode
+        case .stillUserSetting1: stillUserSetting1
+        case .stillUserSetting2: stillUserSetting2
+        case .movieIndex: movieIndex
+        case .movieReelNumber: String(movieReelNumber)
+        case .movieClipNumber: String(movieClipNumber)
+        case .movieUserDefined: movieUserDefined
+        }
+    }
+
+    public func accepts(_ field: CameraFileNamingField, value: String) -> Bool {
+        switch field {
+        case .stillFilenameMode:
+            stillFilenameModeOptions.contains(value)
+        case .stillUserSetting1:
+            value.range(of: #"^[A-Z0-9][A-Z0-9_]{3}$"#, options: .regularExpression) != nil
+        case .stillUserSetting2:
+            value.range(of: #"^[A-Z0-9][A-Z0-9_]{2}$"#, options: .regularExpression) != nil
+        case .movieIndex:
+            value.range(of: #"^[A-Z0-9][A-Z0-9_]$"#, options: .regularExpression) != nil
+        case .movieReelNumber:
+            movieReelRange.accepts(value)
+        case .movieClipNumber:
+            movieClipRange.accepts(value)
+        case .movieUserDefined:
+            value.range(of: #"^[A-Z0-9]{5}$"#, options: .regularExpression) != nil
+        }
+    }
+}
+
 public enum LiveViewSource: String, Codable, Sendable {
     case auto
     case ccapiJPEGPolling
@@ -413,6 +512,7 @@ public struct CameraCapabilityEvidence: Equatable, Sendable {
 
 public struct CameraCapabilities: Equatable, Sendable {
     public let settings: [CameraSetting]
+    public let fileNaming: CameraFileNaming?
     public let matrix: CapabilityMatrix
     public let liveView: LiveViewCapabilities
     public let profile: CameraProfile
@@ -420,12 +520,14 @@ public struct CameraCapabilities: Equatable, Sendable {
 
     public init(
         settings: [CameraSetting],
+        fileNaming: CameraFileNaming? = nil,
         matrix: CapabilityMatrix,
         liveView: LiveViewCapabilities,
         profile: CameraProfile,
         evidence: CameraCapabilityEvidence = CameraCapabilityEvidence()
     ) {
         self.settings = settings
+        self.fileNaming = fileNaming
         self.matrix = matrix
         self.liveView = liveView
         self.profile = profile

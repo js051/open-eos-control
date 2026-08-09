@@ -25,7 +25,7 @@ from open_eos_bridge.ccapi import (
 )
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine
-from open_eos_bridge.models import CameraFeature, CameraTemperatureStatus, LiveViewStartRequest
+from open_eos_bridge.models import CameraFeature, CameraTemperatureStatus, FileNamingField, LiveViewStartRequest
 from open_eos_bridge.rtp import RtpAudioChunk, RtpError, RtpSessionDescription
 
 from .fakes import FakeRunner
@@ -125,6 +125,7 @@ class FakeCcapiTransport:
         movie_mode_response: object | None = None,
         card_selection_responses: dict[str, object] | None = None,
         directory_selection_response: object | None = None,
+        file_naming_responses: dict[str, object] | None = None,
         device_function_responses: dict[str, object] | None = None,
         recordable_response: object | None = None,
         lens_response: object | None = None,
@@ -151,6 +152,7 @@ class FakeCcapiTransport:
         self.movie_mode_response = movie_mode_response
         self.card_selection_responses = card_selection_responses or {}
         self.directory_selection_response = directory_selection_response
+        self.file_naming_responses = file_naming_responses or {}
         self.device_function_responses = device_function_responses or {}
         self.recordable_response = (
             recordable_response
@@ -206,6 +208,15 @@ class FakeCcapiTransport:
         self.card_selection = {"stillimage": "card1", "movie": "card2"}
         self.directories = ["100EOSXX", "101EOSXX"]
         self.directory_selection = "100EOSXX"
+        self.file_naming: dict[str, str | int] = {
+            "still-filename-mode": "preset_code",
+            "still-user-setting-1": "IMG_",
+            "still-user-setting-2": "IMG",
+            "movie-index": "A_",
+            "movie-reel-number": 1,
+            "movie-clip-number": 1,
+            "movie-user-defined": "CANON",
+        }
         self.device_functions = {"beep": "enable", "displayoff": "60", "autopoweroff": "180"}
         self.camera_sleep_count = 0
         self.sensor_cleaning_count = 0
@@ -406,6 +417,42 @@ class FakeCcapiTransport:
             self.directories.append(full_name)
             self.directory_selection = full_name
             return _json_response({"directoryname": name})
+        file_naming_paths = {
+            "stills/filename": ("still-filename-mode", "value"),
+            "stills/usersetting1": ("still-user-setting-1", "usersetting1"),
+            "stills/usersetting2": ("still-user-setting-2", "usersetting2"),
+            "movies/index": ("movie-index", "index"),
+            "movies/reelnum": ("movie-reel-number", "value"),
+            "movies/clipnum": ("movie-clip-number", "value"),
+            "movies/userdefined": ("movie-user-defined", "userdefined"),
+        }
+        file_naming_match = re.fullmatch(r"/ccapi/ver100/functions/filename/(stills|movies)/([^/]+)", path)
+        if file_naming_match:
+            suffix = f"{file_naming_match.group(1)}/{file_naming_match.group(2)}"
+            field, response_key = file_naming_paths[suffix]
+            if method == "GET":
+                if field in self.file_naming_responses:
+                    return _json_response(self.file_naming_responses[field])
+                if field == "still-filename-mode":
+                    return _json_response(
+                        {
+                            "value": self.file_naming[field],
+                            "ability": ["preset_code", "usersetting1", "usersetting2"],
+                        }
+                    )
+                if field == "movie-reel-number":
+                    return _json_response(
+                        {"value": self.file_naming[field], "ability": {"min": 1, "max": 9999, "step": 1}}
+                    )
+                if field == "movie-clip-number":
+                    return _json_response(
+                        {"value": self.file_naming[field], "ability": {"min": 1, "max": 999, "step": 1}}
+                    )
+                return _json_response({response_key: self.file_naming[field]})
+            if method == "PUT":
+                assert payload is not None and set(payload) == {response_key}
+                self.file_naming[field] = payload[response_key]  # type: ignore[assignment]
+                return _json_response({response_key: payload[response_key]})
         device_function_match = re.fullmatch(r"/ccapi/ver100/functions/(beep|displayoff|autopoweroff)", path)
         if device_function_match:
             key = device_function_match.group(1)
@@ -1887,6 +1934,109 @@ def test_ccapi_directory_control_hides_incomplete_or_malformed_contract(
     assert not any(setting.key == "directoryselection" for setting in capabilities.settings)
 
 
+def test_ccapi_file_naming_requires_complete_group_and_verifies_updates() -> None:
+    endpoint_paths = [
+        "/functions/filename/stills/filename",
+        "/functions/filename/stills/usersetting1",
+        "/functions/filename/stills/usersetting2",
+        "/functions/filename/movies/index",
+        "/functions/filename/movies/reelnum",
+        "/functions/filename/movies/clipnum",
+        "/functions/filename/movies/userdefined",
+    ]
+    discovery = {
+        "ver100": [
+            *DISCOVERY["ver100"],
+            *({"path": path, "get": True, "put": True} for path in endpoint_paths),
+        ]
+    }
+    transport = FakeCcapiTransport(discovery=discovery)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    naming = capabilities.file_naming
+    assert naming is not None
+    assert naming.still_filename_mode == "preset_code"
+    assert naming.still_user_setting_1 == "IMG_"
+    assert naming.movie_reel_range.maximum == 9999
+    assert naming.movie_clip_range.maximum == 999
+    assert CameraFeature.FILE_NAMING_CONTROL in capabilities.supported
+    assert {field.value for field in FileNamingField} <= set(capabilities.evidence.writable_settings)
+
+    put_count = sum(request.method == "PUT" for request in transport.requests)
+    with pytest.raises(BridgeError, match="not valid"):
+        session.set_file_naming(FileNamingField.STILL_USER_SETTING_1, "_BAD")
+    assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+    updated = session.set_file_naming(FileNamingField.STILL_USER_SETTING_1, "R6M_")
+    assert updated.still_user_setting_1 == "R6M_"
+    assert RecordedRequest(
+        "PUT",
+        "/ccapi/ver100/functions/filename/stills/usersetting1",
+        {"usersetting1": "R6M_"},
+    ) in transport.requests
+
+    updated = session.set_file_naming(FileNamingField.MOVIE_REEL_NUMBER, "42")
+    assert updated.movie_reel_number == 42
+    assert RecordedRequest(
+        "PUT",
+        "/ccapi/ver100/functions/filename/movies/reelnum",
+        {"value": 42},
+    ) in transport.requests
+
+
+@pytest.mark.parametrize(
+    "discovery,file_naming_responses",
+    [
+        (
+            {
+                "ver100": [
+                    *DISCOVERY["ver100"],
+                    {"path": "/functions/filename/stills/filename", "get": True, "put": True},
+                ]
+            },
+            {},
+        ),
+        (
+            {
+                "ver100": [
+                    *DISCOVERY["ver100"],
+                    *(
+                        {"path": path, "get": True, "put": True}
+                        for path in [
+                            "/functions/filename/stills/filename",
+                            "/functions/filename/stills/usersetting1",
+                            "/functions/filename/stills/usersetting2",
+                            "/functions/filename/movies/index",
+                            "/functions/filename/movies/reelnum",
+                            "/functions/filename/movies/clipnum",
+                            "/functions/filename/movies/userdefined",
+                        ]
+                    ),
+                ]
+            },
+            {"movie-reel-number": {"value": 0, "ability": {"min": 1, "max": 9999, "step": 1}}},
+        ),
+    ],
+)
+def test_ccapi_file_naming_hides_incomplete_or_malformed_contract(
+    discovery: dict[str, object],
+    file_naming_responses: dict[str, object],
+) -> None:
+    transport = FakeCcapiTransport(
+        discovery=discovery,
+        file_naming_responses=file_naming_responses,
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    capabilities = session.capabilities()
+
+    assert capabilities.file_naming is None
+    assert CameraFeature.FILE_NAMING_CONTROL not in capabilities.supported
+    assert CameraFeature.FILE_NAMING_CONTROL in capabilities.planned
+
+
 def test_ccapi_clock_sync_does_not_combine_read_and_write_across_api_versions() -> None:
     transport = FakeCcapiTransport(
         discovery={
@@ -2627,6 +2777,13 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
                 *DISCOVERY["ver100"],
                 {"path": "/functions/directory/createdirectory", "post": True},
                 {"path": "/functions/directory/directoryselection", "get": True, "put": True},
+                {"path": "/functions/filename/stills/filename", "get": True, "put": True},
+                {"path": "/functions/filename/stills/usersetting1", "get": True, "put": True},
+                {"path": "/functions/filename/stills/usersetting2", "get": True, "put": True},
+                {"path": "/functions/filename/movies/index", "get": True, "put": True},
+                {"path": "/functions/filename/movies/reelnum", "get": True, "put": True},
+                {"path": "/functions/filename/movies/clipnum", "get": True, "put": True},
+                {"path": "/functions/filename/movies/userdefined", "get": True, "put": True},
             ]
         }
     )
@@ -2681,6 +2838,11 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
             headers=headers,
             json={"name": "ABCDE"},
         )
+        updated_file_naming = client.put(
+            f"/v1/session/{session_id}/file-naming/movie-index",
+            headers=headers,
+            json={"value": "B_"},
+        )
         live_started = client.post(
             f"/v1/session/{session_id}/liveview/start",
             headers=headers,
@@ -2722,8 +2884,12 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert "MEDIA_RATING" in capabilities.json()["supported"]
     assert "MEDIA_ROTATE" in capabilities.json()["supported"]
     assert "DIRECTORY_CONTROL" in capabilities.json()["supported"]
+    assert "FILE_NAMING_CONTROL" in capabilities.json()["supported"]
+    assert capabilities.json()["fileNaming"]["movieIndex"] == "A_"
     assert created_directory.status_code == 200
     assert created_directory.json() == {"name": "ABCDE"}
+    assert updated_file_naming.status_code == 200
+    assert updated_file_naming.json()["movieIndex"] == "B_"
     assert thumbnail.content == JPEG
     assert thumbnail.headers["content-type"].startswith("image/jpeg")
     assert thumbnail.headers["cache-control"] == "private, no-store, max-age=0"

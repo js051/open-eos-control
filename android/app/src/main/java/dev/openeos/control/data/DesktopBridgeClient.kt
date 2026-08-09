@@ -191,6 +191,7 @@ class DesktopBridgeClient(
         val minFps = liveView.optInt("minFps", 1).coerceAtLeast(1)
         val maxFps = liveView.optInt("maxFps", minFps).coerceAtLeast(minFps)
         val profile = body.optJSONObject("profile") ?: JSONObject()
+        val fileNaming = body.optJSONObject("fileNaming")?.toBridgeFileNamingOrNull()
         val profileModel = profile.optNullableString("modelName")
             ?.trim()
             ?.takeIf(String::isNotEmpty)
@@ -253,6 +254,7 @@ class DesktopBridgeClient(
             aperture = settingsByKey["aperture"]?.values.orEmpty(),
             whiteBalance = settingsByKey["whitebalance"]?.values.orEmpty(),
             advancedSettings = settings.filterNot { it.key.lowercase() in coreKeys },
+            fileNaming = fileNaming,
             matrix = CapabilityMatrix(
                 supported = supported,
                 planned = planned,
@@ -338,6 +340,24 @@ class DesktopBridgeClient(
         }
         observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
         return created
+    }
+
+    suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming {
+        val current = capabilities().fileNaming
+            ?: error("Desktop Bridge did not advertise Canon file-naming control.")
+        require(current.accepts(field, value)) {
+            "Value '$value' is not valid for Canon file-naming field ${field.wireName}."
+        }
+        val updated = putJson(
+            sessionEndpoint("file-naming", field.wireName),
+            JSONObject().put("value", value),
+        ).toBridgeFileNamingOrNull()
+            ?: error("Desktop Bridge returned an invalid file-naming state.")
+        check(updated.accepts(field, value) && updated.fileNamingValue(field) == value) {
+            "Desktop Bridge did not return the requested file-naming value."
+        }
+        observedFeatures.add(CameraFeature.FILE_NAMING_CONTROL)
+        return updated
     }
 
     suspend fun syncCameraClock(): CameraStatus = parseStatus(
@@ -912,6 +932,52 @@ private fun JSONObject.optNullableInt(key: String): Int? =
 
 private fun JSONObject.optNullableLong(key: String): Long? =
     takeIf { has(key) && !isNull(key) }?.optLong(key)
+
+private fun JSONObject.toBridgeIntegerRangeOrNull(maximumAllowed: Int): CameraIntegerRange? {
+    val minimum = opt("minimum") as? Int ?: return null
+    val maximum = opt("maximum") as? Int ?: return null
+    val step = opt("step") as? Int ?: return null
+    if (minimum < 1 || maximum > maximumAllowed || minimum > maximum || step <= 0) return null
+    return CameraIntegerRange(minimum, maximum, step)
+}
+
+private fun JSONObject.toBridgeFileNamingOrNull(): CameraFileNaming? {
+    val mode = opt("stillFilenameMode") as? String ?: return null
+    val rawOptions = optJSONArray("stillFilenameModeOptions") ?: return null
+    val options = (0 until rawOptions.length()).map { rawOptions.opt(it) }
+    if (options.any { it !is String }) return null
+    val modeOptions = options.filterIsInstance<String>()
+    val allowedModes = setOf("preset_code", "usersetting1", "usersetting2")
+    if (
+        modeOptions.isEmpty() || modeOptions.size > allowedModes.size || modeOptions.toSet().size != modeOptions.size ||
+        modeOptions.any { it !in allowedModes } || mode !in modeOptions
+    ) return null
+    val result = CameraFileNaming(
+        stillFilenameMode = mode,
+        stillFilenameModeOptions = modeOptions,
+        stillUserSetting1 = opt("stillUserSetting1") as? String ?: return null,
+        stillUserSetting2 = opt("stillUserSetting2") as? String ?: return null,
+        movieIndex = opt("movieIndex") as? String ?: return null,
+        movieReelNumber = opt("movieReelNumber") as? Int ?: return null,
+        movieReelRange = optJSONObject("movieReelRange")?.toBridgeIntegerRangeOrNull(9999) ?: return null,
+        movieClipNumber = opt("movieClipNumber") as? Int ?: return null,
+        movieClipRange = optJSONObject("movieClipRange")?.toBridgeIntegerRangeOrNull(999) ?: return null,
+        movieUserDefined = opt("movieUserDefined") as? String ?: return null,
+    )
+    return result.takeIf { state ->
+        CameraFileNamingField.entries.all { field -> state.accepts(field, state.fileNamingValue(field)) }
+    }
+}
+
+private fun CameraFileNaming.fileNamingValue(field: CameraFileNamingField): String = when (field) {
+    CameraFileNamingField.STILL_FILENAME_MODE -> stillFilenameMode
+    CameraFileNamingField.STILL_USER_SETTING_1 -> stillUserSetting1
+    CameraFileNamingField.STILL_USER_SETTING_2 -> stillUserSetting2
+    CameraFileNamingField.MOVIE_INDEX -> movieIndex
+    CameraFileNamingField.MOVIE_REEL_NUMBER -> movieReelNumber.toString()
+    CameraFileNamingField.MOVIE_CLIP_NUMBER -> movieClipNumber.toString()
+    CameraFileNamingField.MOVIE_USER_DEFINED -> movieUserDefined
+}
 
 private fun JSONArray?.strings(): List<String> =
     if (this == null) emptyList() else (0 until length()).mapNotNull { index -> optString(index).takeIf(String::isNotBlank) }

@@ -230,6 +230,20 @@ public actor CCAPIClient {
     private static let directorySelectionSettingKey = "directoryselection"
     private static let directorySelectionPathSuffix = "/functions/directory/directoryselection"
     private static let directoryCreatePathSuffix = "/functions/directory/createdirectory"
+    private static let stillFilenameModes = Set(["preset_code", "usersetting1", "usersetting2"])
+    private static let fileNamingEndpoints: [(
+        field: CameraFileNamingField,
+        suffix: String,
+        responseKey: String
+    )] = [
+        (.stillFilenameMode, "/functions/filename/stills/filename", "value"),
+        (.stillUserSetting1, "/functions/filename/stills/usersetting1", "usersetting1"),
+        (.stillUserSetting2, "/functions/filename/stills/usersetting2", "usersetting2"),
+        (.movieIndex, "/functions/filename/movies/index", "index"),
+        (.movieReelNumber, "/functions/filename/movies/reelnum", "value"),
+        (.movieClipNumber, "/functions/filename/movies/clipnum", "value"),
+        (.movieUserDefined, "/functions/filename/movies/userdefined", "userdefined"),
+    ]
 
     private let baseURL: URL
     private let baseURLString: String
@@ -249,6 +263,8 @@ public actor CCAPIClient {
     private var settingPaths: [String: String] = [:]
     private var cameraSleepPath: String?
     private var cachedSettings: JSONDictionary?
+    private var cachedFileNaming: CameraFileNaming?
+    private var fileNamingLoaded = false
     private var enforceAdvertisedOperations = false
     private var settingsLoaded = false
     private var discoverySource = "unknown"
@@ -547,6 +563,7 @@ public actor CCAPIClient {
             return try await simulatorCapabilities()
         }
         let settings = try await cachedOrLoadShootingSettings()
+        let fileNaming = try await loadFileNaming()
         let controls = cameraSettings(settings)
         var supported = observedFeatures
         if controls.contains(where: { ["iso", "shutter", "aperture"].contains($0.key) }) {
@@ -579,6 +596,7 @@ public actor CCAPIClient {
         if controls.contains(where: { $0.key == Self.directorySelectionSettingKey }), directoryOperations() != nil {
             supported.insert(.directoryControl)
         }
+        if fileNaming != nil { supported.insert(.fileNamingControl) }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
@@ -635,10 +653,12 @@ public actor CCAPIClient {
             .focusBracketingControl,
             .movieSettingsControl,
             .directoryControl,
+            .fileNamingControl,
         ]
         let liveSizes = liveViewSizeControlSupported ? LiveViewSize.allCases : [activeLiveViewSize]
         return CameraCapabilities(
             settings: controls,
+            fileNaming: fileNaming,
             matrix: CapabilityMatrix(
                 supported: supported,
                 planned: allPlanned.subtracting(supported),
@@ -664,6 +684,7 @@ public actor CCAPIClient {
                     .sensorCleaning: "The camera must advertise the Canon POST sensor-cleaning endpoint.",
                     .cameraSleep: "The camera must advertise matching GET and PUT Auto Power Off endpoints and include immediately in its current ability.",
                     .directoryControl: "The camera must advertise directory creation plus matching readable and writable directory selection in the same CCAPI version, and return a valid ability list.",
+                    .fileNamingControl: "The camera must advertise the complete same-version Canon still and movie file-naming endpoint group and return valid values and ranges.",
                     .mediaProtect: "The camera must advertise PUT for Canon contents before file protection can be changed.",
                     .mediaRating: "The camera must advertise PUT for Canon contents before file ratings can be changed.",
                     .mediaRotate: "The camera must advertise PUT for Canon contents before display rotation can be changed.",
@@ -896,6 +917,83 @@ public actor CCAPIClient {
         cachedSettings = nil
         if resolvedMode != .simulator { _ = try await loadShootingSettings() }
         return created
+    }
+
+    public func setFileNaming(
+        field: CameraFileNamingField,
+        value: String
+    ) async throws -> CameraFileNaming {
+        try await ensureInitialized()
+        let current: CameraFileNaming
+        if resolvedMode == .simulator {
+            guard let naming = try await simulatorCapabilities().fileNaming else {
+                throw CCAPIError.unsupported(.fileNamingControl)
+            }
+            current = naming
+        } else {
+            guard let naming = try await loadFileNaming() else {
+                throw CCAPIError.unsupported(.fileNamingControl)
+            }
+            current = naming
+        }
+        guard current.accepts(field, value: value) else {
+            throw CCAPIError.invalidSetting(key: field.rawValue, value: value)
+        }
+
+        let updated: CameraFileNaming
+        if resolvedMode == .simulator {
+            let response = try await requestJSON(
+                path: "/ccapi/file-naming/\(field.rawValue)",
+                method: .put,
+                json: ["value": value]
+            )
+            guard let naming = Self.validatedBridgeFileNaming(response) else {
+                throw CCAPIError.invalidResponse("Simulator returned an invalid file-naming state.")
+            }
+            updated = naming
+        } else {
+            guard let operations = fileNamingOperations(),
+                  let operation = operations[field],
+                  let endpoint = Self.fileNamingEndpoints.first(where: { $0.field == field }) else {
+                throw CCAPIError.unsupported(.fileNamingControl)
+            }
+            let requestValue: Any
+            switch field {
+            case .movieReelNumber, .movieClipNumber:
+                guard let integer = Int(value) else {
+                    throw CCAPIError.invalidSetting(key: field.rawValue, value: value)
+                }
+                requestValue = integer
+            default:
+                requestValue = value
+            }
+            let response = try await requestJSON(
+                path: operation.write.path,
+                method: operation.write.method,
+                json: [endpoint.responseKey: requestValue]
+            )
+            let responseMatches: Bool
+            if let integer = requestValue as? Int {
+                responseMatches = Self.strictInteger(response[endpoint.responseKey]) == integer
+            } else {
+                responseMatches = response[endpoint.responseKey] as? String == value
+            }
+            guard responseMatches else {
+                throw CCAPIError.invalidResponse("Canon file-naming control returned an invalid update response.")
+            }
+            fileNamingLoaded = false
+            guard let naming = try await loadFileNaming(force: true) else {
+                throw CCAPIError.invalidResponse("Canon file-naming control returned an invalid state after update.")
+            }
+            updated = naming
+        }
+        guard updated.value(for: field) == value else {
+            throw CCAPIError.invalidResponse("Canon file-naming control did not return the requested value on refresh.")
+        }
+        cachedFileNaming = updated
+        fileNamingLoaded = true
+        observedFeatures.insert(.fileNamingControl)
+        return updated
     }
 
     public func sleepCamera() async throws {
@@ -2039,6 +2137,27 @@ public actor CCAPIClient {
         return nil
     }
 
+    private func fileNamingOperations() -> [
+        CameraFileNamingField: (read: CCAPIOperation, write: CCAPIOperation)
+    ]? {
+        let prefixes = apiVersionPrefixes.sorted { Self.pathVersion($0) > Self.pathVersion($1) }
+        for prefix in prefixes {
+            var result: [CameraFileNamingField: (read: CCAPIOperation, write: CCAPIOperation)] = [:]
+            for endpoint in Self.fileNamingEndpoints {
+                let path = "\(prefix)\(endpoint.suffix)"
+                let read = CCAPIOperation(method: .get, path: path)
+                let write = CCAPIOperation(method: .put, path: path)
+                guard operations.contains(read), operations.contains(write) else {
+                    result.removeAll()
+                    break
+                }
+                result[endpoint.field] = (read, write)
+            }
+            if result.count == Self.fileNamingEndpoints.count { return result }
+        }
+        return nil
+    }
+
     private func directShutterOperation() -> CCAPIOperation? {
         operation(.post, suffix: "/shooting/control/shutterbutton")
     }
@@ -2393,6 +2512,11 @@ public actor CCAPIClient {
         }.removingDuplicates().sorted()
         let writableSettings = Set(settingPaths.keys)
             .union(cameraSleepPath == nil ? Set<String>() : Set([Self.autoPowerOffSettingKey]))
+            .union(
+                cachedFileNaming == nil
+                    ? Set<String>()
+                    : Set(Self.fileNamingEndpoints.map { $0.field.rawValue })
+            )
             .map {
             String(
                 $0.replacingOccurrences(of: "\r", with: "")
@@ -2563,6 +2687,31 @@ public actor CCAPIClient {
         return cachedSettings
     }
 
+    private func loadFileNaming(force: Bool = false) async throws -> CameraFileNaming? {
+        if fileNamingLoaded, !force { return cachedFileNaming }
+        observedFeatures.remove(.fileNamingControl)
+        guard let operations = fileNamingOperations() else {
+            cachedFileNaming = nil
+            fileNamingLoaded = true
+            return nil
+        }
+        var responses: [CameraFileNamingField: JSONDictionary] = [:]
+        for endpoint in Self.fileNamingEndpoints {
+            guard let operation = operations[endpoint.field],
+                  let response = try await firstJSON(paths: [operation.read.path], required: false) else {
+                cachedFileNaming = nil
+                fileNamingLoaded = true
+                return nil
+            }
+            responses[endpoint.field] = response
+        }
+        let state = Self.validatedCanonicalFileNaming(responses)
+        cachedFileNaming = state
+        fileNamingLoaded = true
+        if state != nil { observedFeatures.insert(.fileNamingControl) }
+        return state
+    }
+
     private func cachedOrLoadShootingSettings() async throws -> JSONDictionary? {
         if let cachedSettings { return cachedSettings }
         return try await loadShootingSettings()
@@ -2690,6 +2839,114 @@ public actor CCAPIClient {
               values.allSatisfy(isValidDirectorySelection),
               values.contains(current) else { return nil }
         return ["value": current, "ability": values]
+    }
+
+    private static func validatedFileRange(
+        _ value: JSONDictionary,
+        maximumAllowed: Int
+    ) -> (value: Int, range: CameraIntegerRange)? {
+        guard let current = strictInteger(value["value"]),
+              let ability = value.object("ability"),
+              let minimum = strictInteger(ability["min"]),
+              let maximum = strictInteger(ability["max"]),
+              let step = strictInteger(ability["step"]),
+              minimum >= 1,
+              maximum <= maximumAllowed,
+              minimum <= maximum,
+              step > 0 else { return nil }
+        let range = CameraIntegerRange(minimum: minimum, maximum: maximum, step: step)
+        guard range.accepts(String(current)) else { return nil }
+        return (current, range)
+    }
+
+    private static func validatedBridgeRange(
+        _ value: JSONDictionary,
+        maximumAllowed: Int
+    ) -> CameraIntegerRange? {
+        guard let minimum = strictInteger(value["minimum"]),
+              let maximum = strictInteger(value["maximum"]),
+              let step = strictInteger(value["step"]),
+              minimum >= 1,
+              maximum <= maximumAllowed,
+              minimum <= maximum,
+              step > 0 else { return nil }
+        return CameraIntegerRange(minimum: minimum, maximum: maximum, step: step)
+    }
+
+    private static func validatedBridgeFileNaming(_ value: JSONDictionary) -> CameraFileNaming? {
+        guard let mode = value["stillFilenameMode"] as? String,
+              let rawOptions = value["stillFilenameModeOptions"] as? [Any],
+              let stillUserSetting1 = value["stillUserSetting1"] as? String,
+              let stillUserSetting2 = value["stillUserSetting2"] as? String,
+              let movieIndex = value["movieIndex"] as? String,
+              let movieReelNumber = strictInteger(value["movieReelNumber"]),
+              let movieReelRangeValue = value.object("movieReelRange"),
+              let movieReelRange = validatedBridgeRange(movieReelRangeValue, maximumAllowed: 9999),
+              let movieClipNumber = strictInteger(value["movieClipNumber"]),
+              let movieClipRangeValue = value.object("movieClipRange"),
+              let movieClipRange = validatedBridgeRange(movieClipRangeValue, maximumAllowed: 999),
+              let movieUserDefined = value["movieUserDefined"] as? String else { return nil }
+        let options = rawOptions.compactMap { $0 as? String }
+        guard options.count == rawOptions.count,
+              !options.isEmpty,
+              options.count <= stillFilenameModes.count,
+              Set(options).count == options.count,
+              options.allSatisfy(stillFilenameModes.contains),
+              options.contains(mode) else { return nil }
+        let result = CameraFileNaming(
+            stillFilenameMode: mode,
+            stillFilenameModeOptions: options,
+            stillUserSetting1: stillUserSetting1,
+            stillUserSetting2: stillUserSetting2,
+            movieIndex: movieIndex,
+            movieReelNumber: movieReelNumber,
+            movieReelRange: movieReelRange,
+            movieClipNumber: movieClipNumber,
+            movieClipRange: movieClipRange,
+            movieUserDefined: movieUserDefined
+        )
+        return CameraFileNamingField.allCases.allSatisfy {
+            result.accepts($0, value: result.value(for: $0))
+        } ? result : nil
+    }
+
+    private static func validatedCanonicalFileNaming(
+        _ values: [CameraFileNamingField: JSONDictionary]
+    ) -> CameraFileNaming? {
+        guard values.count == fileNamingEndpoints.count,
+              let modeValue = values[.stillFilenameMode],
+              let mode = modeValue["value"] as? String,
+              let rawOptions = modeValue["ability"] as? [Any],
+              let stillUserSetting1 = values[.stillUserSetting1]?["usersetting1"] as? String,
+              let stillUserSetting2 = values[.stillUserSetting2]?["usersetting2"] as? String,
+              let movieIndex = values[.movieIndex]?["index"] as? String,
+              let reelValue = values[.movieReelNumber],
+              let reel = validatedFileRange(reelValue, maximumAllowed: 9999),
+              let clipValue = values[.movieClipNumber],
+              let clip = validatedFileRange(clipValue, maximumAllowed: 999),
+              let movieUserDefined = values[.movieUserDefined]?["userdefined"] as? String else { return nil }
+        let options = rawOptions.compactMap { $0 as? String }
+        guard options.count == rawOptions.count,
+              !options.isEmpty,
+              options.count <= stillFilenameModes.count,
+              Set(options).count == options.count,
+              options.allSatisfy(stillFilenameModes.contains),
+              options.contains(mode) else { return nil }
+        let result = CameraFileNaming(
+            stillFilenameMode: mode,
+            stillFilenameModeOptions: options,
+            stillUserSetting1: stillUserSetting1,
+            stillUserSetting2: stillUserSetting2,
+            movieIndex: movieIndex,
+            movieReelNumber: reel.value,
+            movieReelRange: reel.range,
+            movieClipNumber: clip.value,
+            movieClipRange: clip.range,
+            movieUserDefined: movieUserDefined
+        )
+        return CameraFileNamingField.allCases.allSatisfy {
+            result.accepts($0, value: result.value(for: $0))
+        } ? result : nil
     }
 
     private static func isValidDirectoryCreateName(_ value: String) -> Bool {
@@ -2927,6 +3184,7 @@ public actor CCAPIClient {
 
     private func simulatorCapabilities() async throws -> CameraCapabilities {
         let value = try await requestJSON(path: "/ccapi/capabilities")
+        let fileNaming = value.object("fileNaming").flatMap(Self.validatedBridgeFileNaming)
         var controls = [
             CameraSetting(key: "iso", label: "ISO", value: "-", values: value.array("iso")?.strings ?? []),
             CameraSetting(key: "shutter", label: "Shutter speed", value: "-", values: value.array("shutter")?.strings ?? []),
@@ -3062,11 +3320,13 @@ public actor CCAPIClient {
         if controls.contains(where: { $0.key == Self.directorySelectionSettingKey }) {
             supported.insert(.directoryControl)
         }
+        if fileNaming != nil { supported.insert(.fileNamingControl) }
         if controls.contains(where: { !Self.primarySettingKeys.contains($0.key) }) {
             supported.insert(.advancedSettings)
         }
         return CameraCapabilities(
             settings: controls,
+            fileNaming: fileNaming,
             matrix: CapabilityMatrix(supported: supported, planned: [.liveViewRTP]),
             liveView: LiveViewCapabilities(
                 sources: [.simulatorFrame],

@@ -35,6 +35,7 @@ GET  /v1/session/{id}/liveview/frame
 POST /v1/session/{id}/liveview/magnification
 POST /v1/session/{id}/settings/{key}
 POST /v1/session/{id}/directories
+PUT  /v1/session/{id}/file-naming/{field}
 POST /v1/session/{id}/capture/still
 POST /v1/session/{id}/bulb/start
 POST /v1/session/{id}/bulb/stop
@@ -123,6 +124,18 @@ The bridge should mirror the app-side capability model:
       "values": ["100", "200", "400", "800", "1600"]
     }
   ],
+  "fileNaming": {
+    "stillFilenameMode": "preset_code",
+    "stillFilenameModeOptions": ["preset_code", "usersetting1", "usersetting2"],
+    "stillUserSetting1": "IMG_",
+    "stillUserSetting2": "EOS",
+    "movieIndex": "A_",
+    "movieReelNumber": 1,
+    "movieReelRange": {"minimum": 1, "maximum": 9999, "step": 1},
+    "movieClipNumber": 1,
+    "movieClipRange": {"minimum": 1, "maximum": 999, "step": 1},
+    "movieUserDefined": "EOS01"
+  },
   "evidence": {
     "source": "GET /ccapi",
     "protocolVersions": ["ver100"],
@@ -166,6 +179,8 @@ The response includes the effective `source`, so clients can distinguish an `AUT
 Direct CCAPI dual-card selection is exposed through generic `cardselectionstillimage` and `cardselectionmovie` settings plus `CARD_SELECTION_CONTROL`. The Bridge only creates either setting from an exact same-version Canon GET/PUT pair with a valid `none`/`card1`/`card2` ability list; the existing session setting endpoint forwards only a currently advertised value. This is distinct from libgphoto2's runtime storage-ID-backed `capturestorage` setting.
 
 Direct CCAPI capture-directory control is exposed through the generic `directoryselection` setting plus `DIRECTORY_CONTROL`. The Bridge requires one API version to advertise all of `POST /functions/directory/createdirectory` and `GET`/`PUT /functions/directory/directoryselection`, then accepts only a unique bounded ability list of one to 256 eight-character Canon directory values such as `100EOSXX`. A single-directory card still exposes creation. `POST /v1/session/{id}/directories` accepts an empty name for camera-generated `EOSXX`, or exactly five ASCII uppercase letters, digits, or underscores. It forwards Canon's `directoryname` body, validates the five-character response, refreshes the selection list, and never infers an equivalent libgphoto2 operation.
+
+Direct CCAPI file naming is exposed as `FILE_NAMING_CONTROL` plus the structured `fileNaming` capability object. One API version must advertise GET and PUT for all seven Canon resources: `stills/filename`, `stills/usersetting1`, `stills/usersetting2`, `movies/index`, `movies/reelnum`, `movies/clipnum`, and `movies/userdefined`. Every response must validate before the capability appears. `PUT /v1/session/{id}/file-naming/{field}` accepts `{"value":"..."}` at the Bridge boundary, where `field` is one of `still-filename-mode`, `still-user-setting-1`, `still-user-setting-2`, `movie-index`, `movie-reel-number`, `movie-clip-number`, or `movie-user-defined`. The CCAPI engine maps that value to Canon's endpoint-specific field, preserves integer types for reel and clip, verifies the immediate response, re-reads the complete group, and returns the updated `FileNamingState`. Incomplete, malformed, stale, or cross-version contracts never produce a write. The libgphoto2 engine returns `UNSUPPORTED_FEATURE`; no similarly named USB setting is inferred.
 
 Direct CCAPI sound recording level is exposed through the generic `soundrecordinglevel` setting plus `SOUND_RECORDING_LEVEL_CONTROL`. The Bridge requires an exact same-version Canon `GET`/`PUT /shooting/settings/soundrecording/level` pair and an exact bounded integer current/min/max/positive-step contract with 2-256 choices. `PUT /v1/session/{id}/setting` re-reads the Canon resource before forwarding an integer `value`; malformed, stale or unadvertised values never produce a camera write. Product UIs filter this setting into Video and render it as a discrete slider.
 

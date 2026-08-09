@@ -52,6 +52,10 @@ class DesktopBridgeClientTest {
         client.cleanSensor(autoPowerOff = false)
         client.sleepCamera()
         val createdDirectory = client.createDirectory("ABCDE")
+        val updatedFileNaming = client.setFileNaming(
+            CameraFileNamingField.STILL_USER_SETTING_1,
+            "EOS_",
+        )
         client.captureStill()
         val bulbStarted = client.startBulbExposure()
         val bulbStopped = client.stopBulbExposure()
@@ -105,6 +109,9 @@ class DesktopBridgeClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.SENSOR_CLEANING))
         assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_SLEEP))
         assertTrue(capabilities.matrix.supports(CameraFeature.DIRECTORY_CONTROL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.FILE_NAMING_CONTROL))
+        assertEquals("IMG_", capabilities.fileNaming?.stillUserSetting1)
+        assertEquals("EOS_", updatedFileNaming.stillUserSetting1)
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
         assertFalse(capabilities.matrix.supports(CameraFeature.USB_DIAGNOSTICS))
         assertEquals(listOf("Auto", "100", "400", "800"), capabilities.iso)
@@ -132,6 +139,7 @@ class DesktopBridgeClientTest {
                     CameraFeature.CAMERA_CLOCK_SYNC,
                     CameraFeature.SENSOR_CLEANING,
                     CameraFeature.CAMERA_SLEEP,
+                    CameraFeature.FILE_NAMING_CONTROL,
                     CameraFeature.STILL_CAPTURE,
                     CameraFeature.BULB_EXPOSURE,
                     CameraFeature.AUTOFOCUS,
@@ -182,6 +190,11 @@ class DesktopBridgeClientTest {
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/power/sleep") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/directories") == true })
         assertEquals("ABCDE", dispatcher.createdDirectoryName)
+        val fileNamingRequest = requests.single {
+            it.requestUrl?.encodedPath?.endsWith("/file-naming/still-user-setting-1") == true
+        }
+        assertEquals("PUT", fileNamingRequest.method)
+        assertEquals("EOS_", JSONObject(fileNamingRequest.body.readUtf8()).getString("value"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/capture/still") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/start") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/stop") == true })
@@ -387,6 +400,7 @@ class DesktopBridgeClientTest {
         private var whiteBalance = "Auto"
         private var recording = false
         private var bulbExposureActive = false
+        private var stillUserSetting1 = "IMG_"
         var sensorCleaningAutoPowerOff: Boolean? = null
             private set
         var createdDirectoryName: String? = null
@@ -424,6 +438,15 @@ class DesktopBridgeClientTest {
                     val name = JSONObject(request.body.readUtf8()).getString("name")
                     createdDirectoryName = name
                     json("""{"name":"$name"}""")
+                }
+                path.contains("/file-naming/") && request.method == "PUT" -> {
+                    val field = path.substringAfterLast('/')
+                    val value = JSONObject(request.body.clone().readUtf8()).getString("value")
+                    if (field != CameraFileNamingField.STILL_USER_SETTING_1.wireName) {
+                        return json("""{"detail":"Unexpected file-naming field"}""", 400)
+                    }
+                    stillUserSetting1 = value
+                    json(fileNamingJson())
                 }
                 path.endsWith("/capture/still") -> json(statusJson())
                 path.endsWith("/bulb/start") -> {
@@ -489,6 +512,22 @@ class DesktopBridgeClientTest {
                 "whiteBalance": "$whiteBalance"
               },
               "raw": {"engine": "libgphoto2", "port": "usb:001,007", "recordable": {"recordableshots": 120, "remainingtime": 3600}}
+            }
+            """.trimIndent()
+
+        private fun fileNamingJson(): String =
+            """
+            {
+              "stillFilenameMode": "preset_code",
+              "stillFilenameModeOptions": ["preset_code", "usersetting1", "usersetting2"],
+              "stillUserSetting1": "$stillUserSetting1",
+              "stillUserSetting2": "EOS",
+              "movieIndex": "A_",
+              "movieReelNumber": 1,
+              "movieReelRange": {"minimum": 1, "maximum": 9999, "step": 1},
+              "movieClipNumber": 1,
+              "movieClipRange": {"minimum": 1, "maximum": 999, "step": 1},
+              "movieUserDefined": "EOS01"
             }
             """.trimIndent()
 
@@ -559,7 +598,7 @@ class DesktopBridgeClientTest {
               "supported": [
                 "CAMERA_IDENTITY", "DESKTOP_BRIDGE", "LIVE_VIEW", "LIVE_VIEW_JPEG_POLLING",
                 "CAMERA_CLOCK_SYNC", "DIRECTORY_CONTROL", "SENSOR_CLEANING", "CAMERA_SLEEP", "STILL_CAPTURE", "BULB_EXPOSURE", "AUTOFOCUS", "SHUTTER_HALF_PRESS", "VIDEO_RECORDING", "FOCUS_DRIVE",
-                "LIVE_VIEW_MAGNIFICATION",
+                "LIVE_VIEW_MAGNIFICATION", "FILE_NAMING_CONTROL",
                 "EXPOSURE_CONTROL", "WHITE_BALANCE_CONTROL", "CLICK_WHITE_BALANCE", "ADVANCED_SETTINGS",
                 "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE", "A_FUTURE_FEATURE"
               ],
@@ -579,6 +618,18 @@ class DesktopBridgeClientTest {
                 {"key":"directoryselection","label":"Capture directory","value":"100EOSXX","values":["100EOSXX","101EOSXX"]},
                 {"key":"drivemode","label":"Drive mode","value":"Single","values":["Single","Continuous"]}
               ],
+              "fileNaming": {
+                "stillFilenameMode": "preset_code",
+                "stillFilenameModeOptions": ["preset_code", "usersetting1", "usersetting2"],
+                "stillUserSetting1": "IMG_",
+                "stillUserSetting2": "EOS",
+                "movieIndex": "A_",
+                "movieReelNumber": 1,
+                "movieReelRange": {"minimum": 1, "maximum": 9999, "step": 1},
+                "movieClipNumber": 1,
+                "movieClipRange": {"minimum": 1, "maximum": 999, "step": 1},
+                "movieUserDefined": "EOS01"
+              },
               "evidence": {
                 "source": "gphoto2 --abilities + --list-all-config",
                 "protocolVersions": ["gphoto2 2.5.33"],

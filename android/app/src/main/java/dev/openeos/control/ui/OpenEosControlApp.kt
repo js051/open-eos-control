@@ -29,6 +29,7 @@ import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.LiveViewMagnification
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 
@@ -101,6 +102,7 @@ fun OpenEosControlApp(
         setWhiteBalance = viewModel::setWhiteBalance,
         setCameraSetting = viewModel::setCameraSetting,
         createDirectory = viewModel::createDirectory,
+        setFileNaming = viewModel::setFileNaming,
         syncCameraClock = viewModel::syncCameraClock,
         cleanSensor = viewModel::cleanSensor,
         sleepCamera = viewModel::sleepCamera,
@@ -246,6 +248,7 @@ data class CameraActions(
     val setWhiteBalance: (String) -> Unit,
     val setCameraSetting: (String, String) -> Unit,
     val createDirectory: (String) -> Unit = {},
+    val setFileNaming: (CameraFileNamingField, String) -> Unit = { _, _ -> },
     val syncCameraClock: () -> Unit = {},
     val cleanSensor: (Boolean) -> Unit = {},
     val sleepCamera: () -> Unit = {},

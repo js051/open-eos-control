@@ -29,6 +29,9 @@ from .models import (
     EngineHealth,
     ErrorDetail,
     ErrorResponse,
+    FileNamingField,
+    FileNamingState,
+    FileNamingUpdate,
     FocusDriveRequest,
     FocusResult,
     HealthResponse,
@@ -209,6 +212,17 @@ def create_app(
     @router.post("/session/{session_id}/directories", response_model=DirectoryCreateResult)
     def create_camera_directory(session_id: str, payload: DirectoryCreateRequest) -> DirectoryCreateResult:
         return DirectoryCreateResult(name=manager.get(session_id).create_directory(payload.name))
+
+    @router.put(
+        "/session/{session_id}/file-naming/{field}",
+        response_model=FileNamingState,
+    )
+    def set_camera_file_naming(
+        session_id: str,
+        field: FileNamingField,
+        payload: FileNamingUpdate,
+    ) -> FileNamingState:
+        return manager.get(session_id).set_file_naming(field, payload.value)
 
     @router.post("/session/{session_id}/clock/sync", response_model=CameraStatus)
     def sync_camera_clock(session_id: str) -> CameraStatus:

@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
@@ -666,6 +667,21 @@ class CameraViewModel(
             it.copy(
                 capabilities = capabilities,
                 lastCreatedDirectoryName = created,
+            )
+        }
+    }
+
+    fun setFileNaming(field: CameraFileNamingField, value: String) = runCamera(CameraOperation.SETTING) {
+        val state = _uiState.value
+        if (
+            state.previewMode ||
+            !state.supports(CameraFeature.FILE_NAMING_CONTROL) ||
+            state.capabilities?.fileNaming?.accepts(field, value) != true
+        ) return@runCamera
+        val updated = repository.setFileNaming(field, value)
+        _uiState.update { current ->
+            current.copy(
+                capabilities = current.capabilities?.copy(fileNaming = updated),
             )
         }
     }
