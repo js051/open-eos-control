@@ -1971,6 +1971,30 @@ class CameraScreensTest {
     }
 
     @Test
+    fun mediaMetadataSheetHidesProtectionActionsWhenItemStatusIsUnknown() {
+        val item = CameraMediaItem(
+            id = "usb-host:IMG_0042.JPG",
+            name = "IMG_0042.JPG",
+            kind = "image",
+            protected = null,
+        )
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA, mediaItems = listOf(item))
+        var loaded: CameraMediaItem? = null
+        val actions = noOpActions().copy(loadMediaInfo = { loaded = it })
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, actions) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, item.name)).performClick()
+        compose.waitForIdle()
+
+        compose.runOnIdle { assertEquals(item, loaded) }
+        compose.onNodeWithContentDescription(resourceText(R.string.protect_media, item.name)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(resourceText(R.string.unprotect_media, item.name)).assertDoesNotExist()
+    }
+
+    @Test
     fun mediaDownloadShowsProgressAndCancelAction() {
         val name = "R6M3_0002.MP4"
         val state = CameraUiState().withOfflinePreview().copy(

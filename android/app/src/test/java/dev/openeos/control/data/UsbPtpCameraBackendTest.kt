@@ -30,11 +30,14 @@ class UsbPtpCameraBackendTest {
         val exposureStatus = backend.setExposure(iso = "800", shutter = "1/50", aperture = "2.8")
         val whiteBalanceStatus = backend.setWhiteBalance("daylight")
         val media = backend.listMedia()
+        val mediaInfo = backend.mediaInfo(media.single())
         val thumbnail = backend.mediaThumbnail(media.single())
         val preview = backend.mediaPreview(media.single())
         val output = ByteArrayOutputStream()
         val progress = mutableListOf<CameraMediaTransferProgress>()
         val download = backend.downloadMedia(media.single(), output, progress::add)
+        val protectedMedia = backend.setMediaProtection(mediaInfo, enabled = true)
+        val unprotectedMedia = backend.setMediaProtection(protectedMedia, enabled = false)
         backend.deleteMedia(media.single())
         backend.captureStill()
         val observedFeatures = backend.observedFeatures()
@@ -60,6 +63,7 @@ class UsbPtpCameraBackendTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_PREVIEW))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DOWNLOAD))
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_DELETE))
+        assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_PROTECT))
         assertTrue(capabilities.matrix.supports(CameraFeature.STILL_CAPTURE))
         assertTrue(capabilities.matrix.supports(CameraFeature.BATTERY_STATUS))
         assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
@@ -87,12 +91,16 @@ class UsbPtpCameraBackendTest {
                     CameraFeature.MEDIA_PREVIEW,
                     CameraFeature.MEDIA_DOWNLOAD,
                     CameraFeature.MEDIA_DELETE,
+                    CameraFeature.MEDIA_PROTECT,
                     CameraFeature.STILL_CAPTURE,
                 ),
             ),
         )
         assertEquals("IMG_0042.JPG", media.single().name)
         assertEquals("2026-07-21 14:30:25", media.single().captureTime)
+        assertEquals(false, mediaInfo.protected)
+        assertEquals(true, protectedMedia.protected)
+        assertEquals(false, unprotectedMedia.protected)
         assertArrayEquals(THUMBNAIL_BYTES, thumbnail.bytes)
         assertEquals("image/jpeg", thumbnail.contentType)
         assertTrue(media.single().previewAvailable)
@@ -106,6 +114,15 @@ class UsbPtpCameraBackendTest {
             transport.sentContainers.single {
                 it.type == PtpContainerType.COMMAND && it.code == PtpOperationCode.DELETE_OBJECT
             }.payload,
+        )
+        assertEquals(
+            listOf(
+                byteArrayOf(0x42, 0, 0, 0, 1, 0, 0, 0).toList(),
+                byteArrayOf(0x42, 0, 0, 0, 0, 0, 0, 0).toList(),
+            ),
+            transport.sentContainers.filter {
+                it.type == PtpContainerType.COMMAND && it.code == PtpOperationCode.SET_OBJECT_PROTECTION
+            }.map { it.payload.toList() },
         )
         assertTrue(PtpOperationCode.INITIATE_CAPTURE in transport.sentOperations)
         assertArrayEquals(
@@ -157,6 +174,147 @@ class UsbPtpCameraBackendTest {
         assertTrue(failure is UnsupportedOperationException)
         assertFalse(PtpOperationCode.DELETE_OBJECT in transport.sentOperations)
         backend.close()
+    }
+
+    @Test
+    fun mediaProtectionRemainsUnavailableWithoutAdvertisedSetObjectProtection() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false, advertiseProtection = false)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-no-protection"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        val failure = runCatching {
+            backend.setMediaProtection(
+                CameraMediaItem("ptp:00000042", "IMG_0042.JPG", "image", protected = false),
+                enabled = true,
+            )
+        }.exceptionOrNull()
+
+        assertFalse(capabilities.matrix.supports(CameraFeature.MEDIA_PROTECT))
+        assertTrue(capabilities.matrix.isPlanned(CameraFeature.MEDIA_PROTECT))
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(PtpOperationCode.SET_OBJECT_PROTECTION in transport.sentOperations)
+        backend.close()
+    }
+
+    @Test
+    fun mediaProtectionRequiresCompleteAdvertisedMediaBrowser() = runTest {
+        val transport = ScriptedTransport(
+            advertiseCapture = false,
+            advertiseObjectInfo = false,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-incomplete-media-browser"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val failure = runCatching {
+            backend.setMediaProtection(
+                CameraMediaItem("ptp:00000042", "IMG_0042.JPG", "image", protected = false),
+                enabled = true,
+            )
+        }.exceptionOrNull()
+
+        assertFalse(backend.capabilities().matrix.supports(CameraFeature.MEDIA_PROTECT))
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(PtpOperationCode.SET_OBJECT_PROTECTION in transport.sentOperations)
+        backend.close()
+    }
+
+    @Test
+    fun mediaProtectionNeverSendsPtpForHostCapturedMedia() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-host-protection"),
+            transportFactory = PtpTransportFactory { transport },
+            hostCaptureStore = MemoryHostCaptureStore(),
+        )
+        backend.initialize()
+
+        val failure = runCatching {
+            backend.setMediaProtection(
+                CameraMediaItem("memory-host:IMG_0042.JPG", "IMG_0042.JPG", "image"),
+                enabled = true,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(backend.capabilities().matrix.supports(CameraFeature.MEDIA_PROTECT))
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(PtpOperationCode.SET_OBJECT_PROTECTION in transport.sentOperations)
+        assertFalse(CameraFeature.MEDIA_PROTECT in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test
+    fun mediaInfoKeepsReservedProtectionStatusUnknown() = runTest {
+        val transport = ScriptedTransport(
+            advertiseCapture = false,
+            initialProtectionStatus = 0xFFFF,
+        )
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-unknown-protection"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val item = backend.listMedia().single()
+        val refreshed = backend.mediaInfo(item)
+
+        assertEquals(null, item.protected)
+        assertEquals(null, refreshed.protected)
+        assertFalse(CameraFeature.MEDIA_PROTECT in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test
+    fun mediaProtectionRejectsCommandFailureAndMismatchedReadback() = runTest {
+        val rejectedTransport = ScriptedTransport(advertiseCapture = false, rejectProtection = true)
+        val rejectedBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-protection-rejected"),
+            transportFactory = PtpTransportFactory { rejectedTransport },
+        )
+        rejectedBackend.initialize()
+
+        val rejected = runCatching {
+            rejectedBackend.setMediaProtection(
+                CameraMediaItem("ptp:00000042", "IMG_0042.JPG", "image", protected = false),
+                enabled = true,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(rejected is PtpResponseException)
+        assertFalse(CameraFeature.MEDIA_PROTECT in rejectedBackend.observedFeatures())
+        rejectedBackend.close()
+
+        val mismatchTransport = ScriptedTransport(
+            advertiseCapture = false,
+            protectionReadbackMatches = false,
+        )
+        val mismatchBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-protection-mismatch"),
+            transportFactory = PtpTransportFactory { mismatchTransport },
+        )
+        mismatchBackend.initialize()
+
+        val mismatch = runCatching {
+            mismatchBackend.setMediaProtection(
+                CameraMediaItem("ptp:00000042", "IMG_0042.JPG", "image", protected = false),
+                enabled = true,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(mismatch is PtpProtocolException)
+        assertTrue(mismatch?.message.orEmpty().contains("ProtectionStatus=1"))
+        assertEquals(
+            3,
+            mismatchTransport.sentOperations.count { it == PtpOperationCode.GET_OBJECT_INFO },
+        )
+        assertFalse(CameraFeature.MEDIA_PROTECT in mismatchBackend.observedFeatures())
+        mismatchBackend.close()
     }
 
     @Test
@@ -2298,6 +2456,11 @@ class UsbPtpCameraBackendTest {
         private val advertiseCapture: Boolean,
         private val advertiseDelete: Boolean = true,
         private val advertiseThumbnail: Boolean = true,
+        private val advertiseObjectInfo: Boolean = true,
+        private val advertiseProtection: Boolean = true,
+        private val rejectProtection: Boolean = false,
+        private val protectionReadbackMatches: Boolean = true,
+        initialProtectionStatus: Int = PtpProtectionStatus.NONE,
         private val advertisedThumbnailSize: Long = THUMBNAIL_BYTES.size.toLong(),
         private val advertisedObjectSize: Long = OBJECT_BYTES.size.toLong(),
         private val descriptorFailureCode: Int? = null,
@@ -2307,6 +2470,7 @@ class UsbPtpCameraBackendTest {
         val sentContainers = mutableListOf<PtpContainer>()
         var closed = false
         private var pendingPropertyWrite: Int? = null
+        private var protectionStatus = initialProtectionStatus
         private val properties = propertyFixtures().toMutableMap()
 
         override suspend fun send(container: PtpContainer) {
@@ -2322,6 +2486,8 @@ class UsbPtpCameraBackendTest {
                             advertiseCapture,
                             advertiseDelete,
                             advertiseThumbnail,
+                            advertiseObjectInfo,
+                            advertiseProtection,
                             advertiseProperties = true,
                         ),
                     )
@@ -2333,6 +2499,21 @@ class UsbPtpCameraBackendTest {
                 PtpOperationCode.INITIATE_CAPTURE,
                 PtpOperationCode.DELETE_OBJECT,
                 -> incoming += ok(transaction)
+
+                PtpOperationCode.SET_OBJECT_PROTECTION -> {
+                    if (rejectProtection) {
+                        incoming += PtpContainer(
+                            PtpContainerType.RESPONSE,
+                            PtpResponseCode.GENERAL_ERROR,
+                            transaction,
+                        )
+                    } else {
+                        if (protectionReadbackMatches) {
+                            protectionStatus = container.parameterU32(offset = 4).toInt()
+                        }
+                        incoming += ok(transaction)
+                    }
+                }
 
                 PtpOperationCode.GET_STORAGE_IDS -> {
                     incoming += data(container.code, transaction, Writer().apply {
@@ -2359,7 +2540,7 @@ class UsbPtpCameraBackendTest {
                     incoming += data(
                         container.code,
                         transaction,
-                        objectInfoPayload(advertisedThumbnailSize, advertisedObjectSize),
+                        objectInfoPayload(advertisedThumbnailSize, advertisedObjectSize, protectionStatus),
                     )
                     incoming += ok(transaction)
                 }
@@ -2430,11 +2611,11 @@ class UsbPtpCameraBackendTest {
         private fun ok(transaction: Long) =
             PtpContainer(PtpContainerType.RESPONSE, PtpResponseCode.OK, transaction)
 
-        private fun PtpContainer.parameterU32(): Long =
-            payload[0].toUByte().toLong() or
-                (payload[1].toUByte().toLong() shl 8) or
-                (payload[2].toUByte().toLong() shl 16) or
-                (payload[3].toUByte().toLong() shl 24)
+        private fun PtpContainer.parameterU32(offset: Int = 0): Long =
+            payload[offset].toUByte().toLong() or
+                (payload[offset + 1].toUByte().toLong() shl 8) or
+                (payload[offset + 2].toUByte().toLong() shl 16) or
+                (payload[offset + 3].toUByte().toLong() shl 24)
     }
 
     private inner class CanonEosScriptedTransport(
@@ -3206,6 +3387,8 @@ class UsbPtpCameraBackendTest {
             advertiseCapture: Boolean,
             advertiseDelete: Boolean,
             advertiseThumbnail: Boolean,
+            advertiseObjectInfo: Boolean,
+            advertiseProtection: Boolean,
             advertiseProperties: Boolean,
         ): ByteArray = Writer().apply {
             u16(100)
@@ -3221,10 +3404,11 @@ class UsbPtpCameraBackendTest {
                     add(PtpOperationCode.GET_STORAGE_IDS)
                     add(PtpOperationCode.GET_STORAGE_INFO)
                     add(PtpOperationCode.GET_OBJECT_HANDLES)
-                    add(PtpOperationCode.GET_OBJECT_INFO)
+                    if (advertiseObjectInfo) add(PtpOperationCode.GET_OBJECT_INFO)
                     add(PtpOperationCode.GET_OBJECT)
                     if (advertiseThumbnail) add(PtpOperationCode.GET_THUMB)
                     if (advertiseDelete) add(PtpOperationCode.DELETE_OBJECT)
+                    if (advertiseProtection) add(PtpOperationCode.SET_OBJECT_PROTECTION)
                     if (advertiseCapture) add(PtpOperationCode.INITIATE_CAPTURE)
                     if (advertiseProperties) {
                         add(PtpOperationCode.GET_DEVICE_PROP_DESC)
@@ -3291,10 +3475,14 @@ class UsbPtpCameraBackendTest {
             string(storage.volumeLabel)
         }.bytes()
 
-        private fun objectInfoPayload(thumbnailSize: Long, objectSize: Long = OBJECT_BYTES.size.toLong()): ByteArray = Writer().apply {
+        private fun objectInfoPayload(
+            thumbnailSize: Long,
+            objectSize: Long = OBJECT_BYTES.size.toLong(),
+            protectionStatus: Int = PtpProtectionStatus.NONE,
+        ): ByteArray = Writer().apply {
             u32(STORAGE_ID)
             u16(PtpObjectFormat.EXIF_JPEG)
-            u16(0)
+            u16(protectionStatus)
             u32(objectSize)
             u16(PtpObjectFormat.EXIF_JPEG)
             u32(thumbnailSize)

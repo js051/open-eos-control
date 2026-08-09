@@ -150,6 +150,57 @@ class PtpProtocolTest {
     }
 
     @Test
+    fun setObjectProtectionUsesTwoCommandParametersWithoutADataPhase() = runTest {
+        val transport = FakePtpTransport(
+            data(PtpOperationCode.GET_DEVICE_INFO, 0, deviceInfoPayload()),
+            ok(0),
+            ok(0),
+            ok(1),
+            ok(2),
+        )
+        val session = PtpSession(transport)
+        session.initialize()
+
+        session.setObjectProtection(handle = 0x42, protected = true)
+        val invalid = runCatching {
+            session.setObjectProtection(handle = 0, protected = false)
+        }.exceptionOrNull()
+        session.shutdown()
+
+        val command = transport.sent.single { it.code == PtpOperationCode.SET_OBJECT_PROTECTION }
+        assertEquals(PtpContainerType.COMMAND, command.type)
+        assertEquals(1L, command.transactionId)
+        assertArrayEquals(byteArrayOf(0x42, 0, 0, 0, 1, 0, 0, 0), command.payload)
+        assertTrue(invalid is PtpProtocolException)
+        assertTrue(transport.sent.none {
+            it.type == PtpContainerType.DATA && it.code == PtpOperationCode.SET_OBJECT_PROTECTION
+        })
+    }
+
+    @Test
+    fun setObjectProtectionPreservesRejectedOperationAndResponseCode() = runTest {
+        val transport = FakePtpTransport(
+            data(PtpOperationCode.GET_DEVICE_INFO, 0, deviceInfoPayload()),
+            ok(0),
+            ok(0),
+            PtpContainer(PtpContainerType.RESPONSE, PtpResponseCode.ACCESS_DENIED, 1),
+        )
+        val session = PtpSession(transport)
+        session.initialize()
+
+        val failure = runCatching {
+            session.setObjectProtection(handle = 0x42, protected = true)
+        }.exceptionOrNull()
+
+        assertTrue(failure is PtpResponseException)
+        assertEquals(PtpOperationCode.SET_OBJECT_PROTECTION, (failure as PtpResponseException).operationCode)
+        assertEquals(PtpResponseCode.ACCESS_DENIED, failure.responseCode)
+        assertTrue(failure.message.orEmpty().contains("AccessDenied"))
+        assertEquals("ObjectWriteProtected", PtpResponseCode.label(PtpResponseCode.OBJECT_WRITE_PROTECTED))
+        assertEquals("StoreReadOnly", PtpResponseCode.label(PtpResponseCode.STORE_READ_ONLY))
+    }
+
+    @Test
     fun getObjectStreamsDataAndReportsProgress() = runTest {
         val objectBytes = ByteArray(128 * 1024) { index -> (index and 0xFF).toByte() }
         val transport = FakePtpTransport(

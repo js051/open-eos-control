@@ -65,7 +65,7 @@ LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast �
 - 獨立 AF-ON：CCAPI 使用相機公告的自動對焦命令；Canon USB 優先使用 `DoAf`／`AfCancel`，沒有這組專用操作時才以確實釋放的半按流程作為後備
 - 依相機公告能力執行手動快門半按，並保證送出釋放命令
 - CCAPI、Android USB/PTP、Desktop Bridge、PC 與 iOS 共用依能力開放的 Bulb 長曝光：只有相機公告 Bulb 模式與完整按壓／釋放路徑時，中央快門才切換成可計時的開始／停止控制；曝光期間暫停主動 JPEG 輪詢，失敗可重試釋放，結束工作階段也會盡力釋放快門
-- 支援分頁與按需縮圖；相機公告時的 CCAPI 相片／RAW 全螢幕預覽；依單筆能力開放、上限 32 MiB 的 Android USB/PTP 與 Desktop Bridge JPEG／PNG 預覽；透過 Android 文件選擇器串流下載大型檔案；需確認後才執行的刪除；以及具回讀驗證的 Canon CCAPI 檔案保護、評分與顯示旋轉。有線 RAW、HEIF 與影片仍可下載，但不顯示無法執行的預覽按鈕。USB／libgphoto2 仍不提供未證實的單筆媒體 metadata 編輯；已驗證協定的相機擁有者／作者／著作權／暱稱屬於機身設定，不是媒體項目修改。
+- 支援分頁與按需縮圖；相機公告時的 CCAPI 相片／RAW 全螢幕預覽；依單筆能力開放、上限 32 MiB 的 Android USB/PTP 與 Desktop Bridge JPEG／PNG 預覽；透過 Android 文件選擇器串流下載大型檔案；需確認後才執行的刪除；以及具回讀驗證的 Canon CCAPI 檔案保護、評分與顯示旋轉。Android 直接 USB 另在相機公告 `SetObjectProtection` 時支援標準 PTP 記憶卡檔案保護，且必須精確回讀 ObjectInfo；未知狀態與 App 私有的手機端拍攝檔案不顯示保護操作。有線 RAW、HEIF 與影片仍可下載，但不顯示無法執行的預覽按鈕。USB 評分／旋轉與 libgphoto2 單筆媒體 metadata 寫入仍不提供；已驗證協定的相機擁有者／作者／著作權／暱稱屬於機身設定，不是媒體項目修改。
 
 預設直連相機 URL：
 

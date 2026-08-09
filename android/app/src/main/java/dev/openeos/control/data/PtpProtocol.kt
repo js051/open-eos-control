@@ -17,6 +17,7 @@ object PtpOperationCode {
     const val GET_THUMB = 0x100A
     const val DELETE_OBJECT = 0x100B
     const val INITIATE_CAPTURE = 0x100E
+    const val SET_OBJECT_PROTECTION = 0x1012
     const val GET_DEVICE_PROP_DESC = 0x1014
     const val GET_DEVICE_PROP_VALUE = 0x1015
     const val SET_DEVICE_PROP_VALUE = 0x1016
@@ -31,6 +32,9 @@ object PtpResponseCode {
     const val INVALID_STORAGE_ID = 0x2008
     const val INVALID_OBJECT_HANDLE = 0x2009
     const val DEVICE_PROP_NOT_SUPPORTED = 0x200A
+    const val OBJECT_WRITE_PROTECTED = 0x200D
+    const val STORE_READ_ONLY = 0x200E
+    const val ACCESS_DENIED = 0x200F
     const val DEVICE_BUSY = 0x2019
     const val INVALID_DEVICE_PROP_FORMAT = 0x201B
     const val INVALID_DEVICE_PROP_VALUE = 0x201C
@@ -45,6 +49,9 @@ object PtpResponseCode {
         INVALID_STORAGE_ID -> "InvalidStorageID"
         INVALID_OBJECT_HANDLE -> "InvalidObjectHandle"
         DEVICE_PROP_NOT_SUPPORTED -> "DevicePropNotSupported"
+        OBJECT_WRITE_PROTECTED -> "ObjectWriteProtected"
+        STORE_READ_ONLY -> "StoreReadOnly"
+        ACCESS_DENIED -> "AccessDenied"
         DEVICE_BUSY -> "DeviceBusy"
         INVALID_DEVICE_PROP_FORMAT -> "InvalidDevicePropFormat"
         INVALID_DEVICE_PROP_VALUE -> "InvalidDevicePropValue"
@@ -64,6 +71,11 @@ object PtpObjectFormat {
     const val CANON_CRW3 = 0xB103
     const val CANON_CR3 = 0xB108
     const val MP4 = 0xB982
+}
+
+object PtpProtectionStatus {
+    const val NONE = 0x0000
+    const val READ_ONLY = 0x0001
 }
 
 enum class PtpContainerType(val value: Int) {
@@ -443,6 +455,19 @@ class PtpSession(
 
     suspend fun deleteObject(handle: Long, objectFormat: Long = 0L) {
         executeOperation(PtpOperationCode.DELETE_OBJECT, listOf(handle, objectFormat))
+    }
+
+    suspend fun setObjectProtection(handle: Long, protected: Boolean) {
+        if (handle <= 0L || handle >= UINT32_MAX) {
+            throw PtpProtocolException("SetObjectProtection requires a concrete PTP object handle.")
+        }
+        executeOperation(
+            PtpOperationCode.SET_OBJECT_PROTECTION,
+            listOf(
+                handle,
+                if (protected) PtpProtectionStatus.READ_ONLY.toLong() else PtpProtectionStatus.NONE.toLong(),
+            ),
+        )
     }
 
     suspend fun executeOperation(
