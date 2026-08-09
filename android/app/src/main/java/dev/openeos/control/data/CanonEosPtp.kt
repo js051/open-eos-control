@@ -84,6 +84,20 @@ data class CanonEosPropertyUpdate(
     val availableValues: List<Long>? = null,
 )
 
+data class CanonEosUnknownPropertyEvent(
+    val propertyCode: Int,
+    val eventCode: Int,
+    val blockLength: Int,
+    val payloadLength: Int,
+    val listType: Long? = null,
+    val declaredOptionCount: Long? = null,
+)
+
+data class CanonEosUnknownPropertyEvidence(
+    val events: List<CanonEosUnknownPropertyEvent>,
+    val truncated: Boolean,
+)
+
 data class CanonEosObjectTransferRequest(
     val eventCode: Int,
     val handle: Long,
@@ -495,6 +509,42 @@ object CanonEosPtp {
         }
     }
 
+    fun unknownPropertyEvidence(payload: ByteArray): CanonEosUnknownPropertyEvidence {
+        val events = mutableListOf<CanonEosUnknownPropertyEvent>()
+        var truncated = false
+        eventBlocks(payload).forEach { block ->
+            val minimumLength = when (block.code) {
+                CanonEosEventCode.PROPERTY_VALUE_CHANGED -> 12
+                CanonEosEventCode.AVAILABLE_LIST_CHANGED -> 20
+                else -> return@forEach
+            }
+            if (block.length < minimumLength) malformedPropertyEvent(block, "property structure")
+            val propertyCode = payload.u32Le(block.offset + 8).toInt()
+            if (isKnownPropertyCode(propertyCode)) return@forEach
+            if (events.size >= MAX_UNKNOWN_PROPERTY_EVENTS_PER_PAYLOAD) {
+                truncated = true
+                return@forEach
+            }
+            events += CanonEosUnknownPropertyEvent(
+                propertyCode = propertyCode,
+                eventCode = block.code,
+                blockLength = block.length,
+                payloadLength = block.length - minimumLength,
+                listType = if (block.code == CanonEosEventCode.AVAILABLE_LIST_CHANGED) {
+                    payload.u32Le(block.offset + 12)
+                } else {
+                    null
+                },
+                declaredOptionCount = if (block.code == CanonEosEventCode.AVAILABLE_LIST_CHANGED) {
+                    payload.u32Le(block.offset + 16)
+                } else {
+                    null
+                },
+            )
+        }
+        return CanonEosUnknownPropertyEvidence(events = events, truncated = truncated)
+    }
+
     fun propertyOptions(propertyCode: Int, values: List<Long>): List<CanonEosPropertyOption> {
         val selectableValues = propertySpecs[propertyCode]?.selectableValues
         return values.distinct().filter { value ->
@@ -686,6 +736,11 @@ object CanonEosPtp {
             "Canon EOS object-transfer event 0x${block.code.toString(16)} at byte ${block.offset} " +
                 "has invalid $field (${block.length} bytes)."
         )
+
+    private fun isKnownPropertyCode(propertyCode: Int): Boolean =
+        propertyCode in propertySpecs ||
+            propertyCode in textPropertyCodes ||
+            propertyCode in imageFormatPropertyCodes
 
     private data class CanonEosEventBlock(
         val code: Int,
@@ -1049,6 +1104,7 @@ object CanonEosPtp {
     )
 
     private const val MAX_PROPERTY_OPTIONS = 4_096L
+    private const val MAX_UNKNOWN_PROPERTY_EVENTS_PER_PAYLOAD = 256
     private const val PTP_STORAGE_READ_WRITE = 0
     private const val IMAGE_FORMAT_ENTRY_BYTES = 0x10
     private const val IMAGE_FORMAT_TYPE_JPEG = 1L

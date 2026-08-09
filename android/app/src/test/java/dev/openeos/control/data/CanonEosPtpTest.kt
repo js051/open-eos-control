@@ -235,6 +235,65 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun unknownCanonPropertyEvidenceKeepsOnlyBoundedEventStructure() {
+        val unknownPropertyCode = 0xD2FE
+        val privateValue = 0x1234_5678
+        val privateOptions = intArrayOf(0x1122_3344, 0x5566_7788)
+        val payload = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(unknownPropertyCode, privateValue),
+        ) + block(
+            type = CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+            bytes = u32Fields(unknownPropertyCode, 3, privateOptions.size, *privateOptions),
+        ) + block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.ISO_SPEED, 0x60),
+        ) + block(type = 0, bytes = byteArrayOf())
+
+        val evidence = CanonEosPtp.unknownPropertyEvidence(payload)
+
+        assertFalse(evidence.truncated)
+        assertEquals(2, evidence.events.size)
+        assertEquals(
+            CanonEosUnknownPropertyEvent(
+                propertyCode = unknownPropertyCode,
+                eventCode = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+                blockLength = 16,
+                payloadLength = 4,
+            ),
+            evidence.events[0],
+        )
+        assertEquals(
+            CanonEosUnknownPropertyEvent(
+                propertyCode = unknownPropertyCode,
+                eventCode = CanonEosEventCode.AVAILABLE_LIST_CHANGED,
+                blockLength = 28,
+                payloadLength = 8,
+                listType = 3,
+                declaredOptionCount = 2,
+            ),
+            evidence.events[1],
+        )
+        assertFalse(evidence.toString().contains(privateValue.toString()))
+        privateOptions.forEach { assertFalse(evidence.toString().contains(it.toString())) }
+    }
+
+    @Test
+    fun unknownCanonPropertyEvidenceIsBoundedPerPayload() {
+        val payload = (0 until 257).fold(byteArrayOf()) { events, index ->
+            events + block(
+                type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+                bytes = u32Fields(0xE000 + index, index),
+            )
+        } + block(type = 0, bytes = byteArrayOf())
+
+        val evidence = CanonEosPtp.unknownPropertyEvidence(payload)
+
+        assertEquals(256, evidence.events.size)
+        assertTrue(evidence.truncated)
+    }
+
+    @Test
     fun eosLensNameEventRejectsAnOversizedCameraValue() {
         val event = block(
             type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
