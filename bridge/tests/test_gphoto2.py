@@ -436,6 +436,9 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert CameraFeature.CAMERA_CLOCK_SYNC in capabilities.supported
     assert CameraFeature.TAP_FOCUS in capabilities.planned
     assert CameraFeature.CLICK_WHITE_BALANCE in capabilities.planned
+    assert CameraFeature.MEDIA_ARCHIVE in capabilities.planned
+    assert CameraFeature.MEDIA_ARCHIVE not in capabilities.supported
+    assert "No verified libgphoto2 contract" in capabilities.reasons[CameraFeature.MEDIA_ARCHIVE.value]
     assert next(setting for setting in capabilities.settings if setting.key == "iso").values == [
         "Auto",
         "100",

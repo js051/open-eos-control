@@ -45,6 +45,7 @@ from .models import (
     LiveViewMagnificationResult,
     LiveViewStartRequest,
     LiveViewState,
+    MediaArchiveUpdate,
     MediaItem,
     MediaList,
     MediaProtectionUpdate,
@@ -461,6 +462,10 @@ def create_app(
     @router.put("/session/{session_id}/media/{media_id}/rotation", response_model=MediaItem)
     def set_media_rotation(session_id: str, media_id: str, update: MediaRotationUpdate) -> MediaItem:
         return manager.get(session_id).set_media_rotation(media_id, update.degrees)
+
+    @router.put("/session/{session_id}/media/{media_id}/archive", response_model=MediaItem)
+    def set_media_archive(session_id: str, media_id: str, update: MediaArchiveUpdate) -> MediaItem:
+        return manager.get(session_id).set_media_archive(media_id, update.enabled)
 
     @router.get("/session/{session_id}/media/{media_id}")
     def download_media(session_id: str, media_id: str) -> StreamingResponse:

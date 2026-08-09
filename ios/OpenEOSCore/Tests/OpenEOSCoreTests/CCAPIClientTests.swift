@@ -103,6 +103,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaProtect))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaRating))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaRotate))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaArchive))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaThumbnail))
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.mediaThumbnail))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaPreview))
@@ -2822,6 +2823,16 @@ final class CCAPIClientTests: XCTestCase {
             path: "\(path)?kind=info",
             body: #"{"protect":"enable","rating":"5","rotate":"270"}"#
         )
+        await transport.enqueueJSON(method: "PUT", path: path, body: "{}")
+        await transport.enqueueJSON(
+            path: "\(path)?kind=info",
+            body: #"{"protect":"enable","rating":"5","rotate":"270","archive":"enable"}"#
+        )
+        await transport.enqueueJSON(method: "PUT", path: path, body: "{}")
+        await transport.enqueueJSON(
+            path: "\(path)?kind=info",
+            body: #"{"protect":"enable","rating":"5","rotate":"270","archive":"disable"}"#
+        )
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
         let info = try await client.mediaInfo(item)
@@ -2832,9 +2843,13 @@ final class CCAPIClientTests: XCTestCase {
         let protected = try await client.setMediaProtection(info, enabled: true)
         let rated = try await client.setMediaRating(protected, rating: 5)
         let rotated = try await client.setMediaRotation(rated, degrees: 270)
+        let archived = try await client.setMediaArchive(rotated, enabled: true)
+        let unarchived = try await client.setMediaArchive(archived, enabled: false)
         XCTAssertEqual(protected.protected, true)
         XCTAssertEqual(rated.rating, 5)
         XCTAssertEqual(rotated.rotationDegrees, 270)
+        XCTAssertEqual(archived.archived, true)
+        XCTAssertEqual(unarchived.archived, false)
 
         let writes = await transport.requests().filter { $0.method == "PUT" && $0.path == path }
         let payloads = try writes.map { request -> [String: String] in
@@ -2844,11 +2859,31 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(payloads[0], ["action": "protect", "value": "enable"])
         XCTAssertEqual(payloads[1], ["action": "rating", "value": "5"])
         XCTAssertEqual(payloads[2], ["action": "rotate", "value": "270"])
+        XCTAssertEqual(payloads[3], ["action": "archive", "value": "enable"])
+        XCTAssertEqual(payloads[4], ["action": "archive", "value": "disable"])
         await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
         let capabilities = try await client.capabilities()
         XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.mediaProtect))
         XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.mediaRating))
         XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.mediaRotate))
+        XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.mediaArchive))
+    }
+
+    func testSimulatorMediaArchiveParsesBooleanState() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/media",
+            body: #"{"items":[{"id":"SIM_0001.PNG","name":"SIM_0001.PNG","kind":"image","archive":true}]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let items = try await client.listMedia()
+
+        XCTAssertEqual(items.first?.archived, true)
     }
 
     func testMediaMetadataRequiresAdvertisedContentsPut() async throws {
@@ -2869,6 +2904,12 @@ final class CCAPIClientTests: XCTestCase {
             XCTFail("Expected unsupported media rating")
         } catch {
             XCTAssertEqual(error as? CCAPIError, .unsupported(.mediaRating))
+        }
+        do {
+            _ = try await client.setMediaArchive(item, enabled: true)
+            XCTFail("Expected unsupported media archive")
+        } catch {
+            XCTAssertEqual(error as? CCAPIError, .unsupported(.mediaArchive))
         }
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.method), ["GET"])

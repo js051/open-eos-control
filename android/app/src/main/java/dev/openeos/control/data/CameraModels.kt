@@ -103,6 +103,7 @@ enum class CameraFeature(
     MEDIA_DOWNLOAD("Media download"),
     MEDIA_UPLOAD("Media upload"),
     MEDIA_PROTECT("Media protection"),
+    MEDIA_ARCHIVE("Media archive"),
     MEDIA_RATING("Media rating"),
     MEDIA_ROTATE("Media rotation"),
     MEDIA_DELETE("Media deletion"),
@@ -165,6 +166,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_UPLOAD,
                 CameraFeature.MEDIA_PROTECT,
+                CameraFeature.MEDIA_ARCHIVE,
                 CameraFeature.MEDIA_RATING,
                 CameraFeature.MEDIA_ROTATE,
                 CameraFeature.MEDIA_DELETE,
@@ -222,6 +224,8 @@ data class CapabilityMatrix(
                     "The camera must advertise matching GET and PUT Auto Power Off endpoints and include immediately in its current ability.",
                 CameraFeature.MEDIA_PROTECT to
                     "The camera must advertise PUT for Canon contents before file protection can be changed.",
+                CameraFeature.MEDIA_ARCHIVE to
+                    "The camera must advertise PUT for Canon contents before file archive state can be changed.",
                 CameraFeature.MEDIA_RATING to
                     "The camera must advertise PUT for Canon contents before file ratings can be changed.",
                 CameraFeature.MEDIA_ROTATE to
@@ -252,6 +256,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_UPLOAD,
                 CameraFeature.MEDIA_PROTECT,
+                CameraFeature.MEDIA_ARCHIVE,
                 CameraFeature.MEDIA_RATING,
                 CameraFeature.MEDIA_ROTATE,
                 CameraFeature.MEDIA_DELETE,
@@ -295,6 +300,7 @@ data class CapabilityMatrix(
                 CameraFeature.MEDIA_DOWNLOAD,
                 CameraFeature.MEDIA_UPLOAD,
                 CameraFeature.MEDIA_PROTECT,
+                CameraFeature.MEDIA_ARCHIVE,
                 CameraFeature.MEDIA_RATING,
                 CameraFeature.MEDIA_ROTATE,
                 CameraFeature.MEDIA_DELETE,
@@ -601,6 +607,7 @@ data class CameraMediaItem(
     val rating: Int? = null,
     val rotationDegrees: Int? = null,
     val ratingWritable: Boolean? = null,
+    val archived: Boolean? = null,
 )
 
 data class CameraMediaThumbnail(

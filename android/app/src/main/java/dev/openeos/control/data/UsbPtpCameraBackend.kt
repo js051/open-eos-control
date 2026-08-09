@@ -307,7 +307,9 @@ class UsbPtpCameraBackend(
             CameraFeature.MEDIA_UPLOAD,
             CameraFeature.MEDIA_DELETE,
             CameraFeature.MEDIA_PROTECT,
+            CameraFeature.MEDIA_ARCHIVE,
             CameraFeature.MEDIA_RATING,
+            CameraFeature.MEDIA_ROTATE,
             CameraFeature.CAMERA_CLOCK_SYNC,
         )
         val writableSettings = buildList {
@@ -373,8 +375,12 @@ class UsbPtpCameraBackend(
                         "Uses standard DeleteObject for card media and local deletion for app-private host captures.",
                     CameraFeature.MEDIA_PROTECT to
                         "Uses advertised standard PTP SetObjectProtection for card media and requires exact ObjectInfo readback.",
+                    CameraFeature.MEDIA_ARCHIVE to
+                        "No standard PTP or validated Canon EOS USB command maps to the CCAPI archive attribute.",
                     CameraFeature.MEDIA_RATING to
                         "Uses standard MTP Rating only after a card-media format advertises writable UINT16 0-100 values and an object value is read successfully; writes require exact same-handle readback.",
+                    CameraFeature.MEDIA_ROTATE to
+                        "No standard PTP or validated Canon EOS USB command maps to the CCAPI display-rotation attribute.",
                     CameraFeature.EXPOSURE_CONTROL to
                         "Uses writable standard PTP descriptors or Canon EOS PropValueChanged/AvailListChanged events with SetDevicePropValueEx.",
                     CameraFeature.LIVE_VIEW to

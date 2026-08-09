@@ -334,6 +334,11 @@
     <string name="media_metadata_unknown">正在從相機讀取…</string>
     <string name="protect_media">保護 %1$s</string>
     <string name="unprotect_media">取消保護 %1$s</string>
+    <string name="media_archive">封存</string>
+    <string name="media_archived">已封存</string>
+    <string name="media_not_archived">未封存</string>
+    <string name="archive_media">封存 %1$s</string>
+    <string name="unarchive_media">取消封存 %1$s</string>
     <string name="media_rating">評分</string>
     <string name="media_rating_value">5 分之 %1$d</string>
     <string name="clear_media_rating">清除 %1$s 的評分</string>

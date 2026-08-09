@@ -43,6 +43,7 @@
     MEDIA_PROTECT: "MEDIA_PROTECT",
     MEDIA_RATING: "MEDIA_RATING",
     MEDIA_ROTATE: "MEDIA_ROTATE",
+    MEDIA_ARCHIVE: "MEDIA_ARCHIVE",
     MEDIA_DELETE: "MEDIA_DELETE",
     CAMERA_CLOCK_SYNC: "CAMERA_CLOCK_SYNC",
     DIRECTORY_CONTROL: "DIRECTORY_CONTROL",
@@ -348,6 +349,8 @@
       ratingValue: "{value} stars",
       rotation: "Display rotation",
       rotationValue: "{value} degrees",
+      archive: "Archive",
+      unarchive: "Unarchive",
       mediaMetadataUpdated: "Updated {name}",
       mediaThumbnail: "Thumbnail for {name}",
       previewMedia: "Preview {name}",
@@ -690,6 +693,8 @@
       ratingValue: "{value} 星",
       rotation: "顯示旋轉",
       rotationValue: "{value} 度",
+      archive: "封存",
+      unarchive: "取消封存",
       mediaMetadataUpdated: "已更新 {name}",
       mediaThumbnail: "{name} 的縮圖",
       previewMedia: "預覽 {name}",
@@ -1116,6 +1121,9 @@
     mediaRatingControl: byId("media-rating-control"),
     mediaRotationSection: byId("media-rotation-section"),
     mediaRotationControl: byId("media-rotation-control"),
+    mediaArchiveSection: byId("media-archive-section"),
+    mediaArchiveButton: byId("media-archive-button"),
+    mediaUnarchiveButton: byId("media-unarchive-button"),
     mediaDetailsDownload: byId("media-details-download"),
     mediaDetailsDelete: byId("media-details-delete"),
     diagnosticsRefreshButton: byId("diagnostics-refresh-button"),
@@ -4197,7 +4205,7 @@
 
   function mediaMetadataSupported() {
     return featureSupported(FEATURES.MEDIA_PROTECT) || featureSupported(FEATURES.MEDIA_RATING) ||
-      featureSupported(FEATURES.MEDIA_ROTATE);
+      featureSupported(FEATURES.MEDIA_ROTATE) || featureSupported(FEATURES.MEDIA_ARCHIVE);
   }
 
   function replaceMediaItem(item) {
@@ -4246,6 +4254,15 @@
       button.setAttribute("aria-pressed", String(item.rotationDegrees === value));
       button.setAttribute("aria-label", t("rotationValue", { value }));
     });
+
+    const archiveSupported = featureSupported(FEATURES.MEDIA_ARCHIVE) && typeof item.archived === "boolean";
+    ui.mediaArchiveSection.hidden = !archiveSupported;
+    ui.mediaArchiveButton.disabled = disabled;
+    ui.mediaUnarchiveButton.disabled = disabled;
+    ui.mediaArchiveButton.classList.toggle("active", item.archived === true);
+    ui.mediaUnarchiveButton.classList.toggle("active", item.archived === false);
+    ui.mediaArchiveButton.setAttribute("aria-pressed", String(item.archived === true));
+    ui.mediaUnarchiveButton.setAttribute("aria-pressed", String(item.archived === false));
 
     ui.mediaDetailsDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
     ui.mediaDetailsDownload.disabled = disabled || !featureSupported(FEATURES.MEDIA_DOWNLOAD);
@@ -5066,6 +5083,12 @@
     ui.mediaRotationControl.addEventListener("click", (event) => {
       const button = event.target.closest?.("[data-media-rotation]");
       if (button) void updateMediaMetadata(FEATURES.MEDIA_ROTATE, "rotation", { degrees: Number(button.dataset.mediaRotation) });
+    });
+    ui.mediaArchiveButton.addEventListener("click", () => {
+      void updateMediaMetadata(FEATURES.MEDIA_ARCHIVE, "archive", { enabled: true });
+    });
+    ui.mediaUnarchiveButton.addEventListener("click", () => {
+      void updateMediaMetadata(FEATURES.MEDIA_ARCHIVE, "archive", { enabled: false });
     });
     ui.mediaDetailsDownload.addEventListener("click", () => {
       if (state.mediaDetailsItem) void downloadMedia(state.mediaDetailsItem);

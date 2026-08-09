@@ -81,6 +81,7 @@ class CameraFeature(StrEnum):
     MEDIA_PROTECT = "MEDIA_PROTECT"
     MEDIA_RATING = "MEDIA_RATING"
     MEDIA_ROTATE = "MEDIA_ROTATE"
+    MEDIA_ARCHIVE = "MEDIA_ARCHIVE"
     MEDIA_DELETE = "MEDIA_DELETE"
     USB_DIAGNOSTICS = "USB_DIAGNOSTICS"
     DESKTOP_BRIDGE = "DESKTOP_BRIDGE"
@@ -469,6 +470,7 @@ class MediaItem(ApiModel):
     protected: bool | None = None
     rating: int | None = Field(default=None, ge=0, le=5)
     rotation_degrees: Literal[0, 90, 180, 270] | None = None
+    archived: bool | None = None
 
 
 class MediaProtectionUpdate(ApiModel):
@@ -481,6 +483,10 @@ class MediaRatingUpdate(ApiModel):
 
 class MediaRotationUpdate(ApiModel):
     degrees: Literal[0, 90, 180, 270]
+
+
+class MediaArchiveUpdate(ApiModel):
+    enabled: bool
 
 
 class MediaList(ApiModel):

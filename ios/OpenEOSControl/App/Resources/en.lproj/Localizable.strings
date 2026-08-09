@@ -246,6 +246,11 @@
 "media_metadata_unknown" = "Reading from camera…";
 "protect_media" = "Protect %@";
 "unprotect_media" = "Remove protection from %@";
+"media_archive" = "Archive";
+"media_archived" = "Archived";
+"media_unarchived" = "Not archived";
+"archive_media" = "Archive %@";
+"unarchive_media" = "Remove %@ from archive";
 "media_rating" = "Rating";
 "media_rating_value" = "%ld of 5";
 "set_media_rating" = "Rate %@ %ld stars";

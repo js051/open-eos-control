@@ -6,6 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -114,6 +116,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         val item = state.mediaItems.firstOrNull { it.id == itemId }
         if (item != null) {
             val metadataSupported = state.supports(CameraFeature.MEDIA_PROTECT) ||
+                state.supports(CameraFeature.MEDIA_ARCHIVE) ||
                 (state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false) ||
                 state.supports(CameraFeature.MEDIA_ROTATE)
             LaunchedEffect(itemId, metadataSupported) {
@@ -123,11 +126,13 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 item = item,
                 busy = state.isBusy(CameraOperation.MEDIA),
                 protectSupported = state.supports(CameraFeature.MEDIA_PROTECT) && item.protected != null,
+                archiveSupported = state.supports(CameraFeature.MEDIA_ARCHIVE) && item.archived != null,
                 ratingSupported = state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false,
                 rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
                 deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
                 onDismiss = { activeMetadataItemId = null },
                 onProtect = { actions.setMediaProtection(item, it) },
+                onArchive = { actions.setMediaArchived(item, it) },
                 onRate = { actions.setMediaRating(item, it) },
                 onRotate = { actions.setMediaRotation(item, it) },
                 onDelete = {
@@ -284,6 +289,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                             !state.isBusy(CameraOperation.MEDIA),
                         deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
                         metadataSupported = state.supports(CameraFeature.MEDIA_PROTECT) ||
+                            state.supports(CameraFeature.MEDIA_ARCHIVE) ||
                             (state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false) ||
                             state.supports(CameraFeature.MEDIA_ROTATE),
                         deleteEnabled = !state.isBusy(CameraOperation.MEDIA),
@@ -436,11 +442,13 @@ private fun MediaMetadataSheet(
     item: CameraMediaItem,
     busy: Boolean,
     protectSupported: Boolean,
+    archiveSupported: Boolean,
     ratingSupported: Boolean,
     rotationSupported: Boolean,
     deleteSupported: Boolean,
     onDismiss: () -> Unit,
     onProtect: (Boolean) -> Unit,
+    onArchive: (Boolean) -> Unit,
     onRate: (Int) -> Unit,
     onRotate: (Int) -> Unit,
     onDelete: () -> Unit,
@@ -451,7 +459,10 @@ private fun MediaMetadataSheet(
         contentColor = AppText,
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -486,6 +497,33 @@ private fun MediaMetadataSheet(
                         { onProtect(false) },
                         enabled = !busy && item.protected != false,
                         tint = if (item.protected == false) AppAccent else AppText,
+                    )
+                }
+            }
+
+            if (archiveSupported) {
+                MetadataSectionTitle(
+                    title = stringResource(R.string.media_archive),
+                    value = when (item.archived) {
+                        true -> stringResource(R.string.media_archived)
+                        false -> stringResource(R.string.media_not_archived)
+                        null -> stringResource(R.string.media_metadata_unknown)
+                    },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_archive,
+                        stringResource(R.string.archive_media, item.name),
+                        { onArchive(true) },
+                        enabled = !busy && item.archived != true,
+                        tint = if (item.archived == true) AppAccent else AppText,
+                    )
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_archive_restore,
+                        stringResource(R.string.unarchive_media, item.name),
+                        { onArchive(false) },
+                        enabled = !busy && item.archived != false,
+                        tint = if (item.archived == false) AppAccent else AppText,
                     )
                 }
             }

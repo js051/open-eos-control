@@ -293,22 +293,28 @@ def test_media_metadata_uses_canon_values_and_persists() -> None:
         "/ccapi/media/SIM_0002.PNG",
         json={"action": "rotate", "value": "270"},
     )
+    archived = client.put(
+        "/ccapi/media/SIM_0002.PNG",
+        json={"action": "archive", "value": "enable"},
+    )
     updated = client.get("/ccapi/media/SIM_0002.PNG?kind=info")
 
     assert initial.json()["protect"] == "disable"
     assert initial.json()["rating"] == "off"
     assert initial.json()["rotate"] == "0"
-    assert [protected.status_code, rated.status_code, rotated.status_code] == [200, 200, 200]
+    assert initial.json()["archive"] == "disable"
+    assert [protected.status_code, rated.status_code, rotated.status_code, archived.status_code] == [200, 200, 200, 200]
     assert updated.json()["protect"] == "enable"
     assert updated.json()["rating"] == "5"
     assert updated.json()["rotate"] == "270"
-    assert client.get("/ccapi/test/state").json()["media_metadata_update_count"] == 3
+    assert updated.json()["archive"] == "enable"
+    assert client.get("/ccapi/test/state").json()["media_metadata_update_count"] == 4
 
 
 def test_media_metadata_rejects_invalid_action_and_value_without_mutation() -> None:
     invalid_action = client.put(
         "/ccapi/media/SIM_0002.PNG",
-        json={"action": "archive", "value": "enable"},
+        json={"action": "archive", "value": "invalid"},
     )
     invalid_rating = client.put(
         "/ccapi/media/SIM_0002.PNG",
@@ -317,6 +323,7 @@ def test_media_metadata_rejects_invalid_action_and_value_without_mutation() -> N
 
     assert invalid_action.status_code == 400
     assert invalid_rating.status_code == 400
+    assert client.get("/ccapi/media/SIM_0002.PNG?kind=info").json()["archive"] == "disable"
     assert client.get("/ccapi/test/state").json()["media_metadata_update_count"] == 0
 
 
@@ -635,6 +642,10 @@ def test_canonical_ccapi_controls_and_media_mutate_backend_state() -> None:
         captured_path,
         json={"action": "rotate", "value": "90"},
     ).status_code == 200
+    assert client.put(
+        captured_path,
+        json={"action": "archive", "value": "enable"},
+    ).status_code == 200
     media_info = client.get(f"{captured_path}?kind=info")
     preview = client.get(f"{captured_path}?kind=display")
     deleted = client.delete(captured_path)
@@ -644,11 +655,12 @@ def test_canonical_ccapi_controls_and_media_mutate_backend_state() -> None:
     assert media_info.json()["protect"] == "enable"
     assert media_info.json()["rating"] == "4"
     assert media_info.json()["rotate"] == "90"
+    assert media_info.json()["archive"] == "enable"
     assert preview.headers["content-type"].startswith("image/jpeg")
     assert preview.content.startswith(b"\xff\xd8") and preview.content.endswith(b"\xff\xd9")
     assert deleted.status_code == 204
     assert test_state["capture_count"] == 1
-    assert test_state["media_metadata_update_count"] == 3
+    assert test_state["media_metadata_update_count"] == 4
     assert test_state["canonical"]["af_start_count"] == 1
     assert test_state["canonical"]["af_stop_count"] == 1
     assert test_state["half_press_count"] == 1
