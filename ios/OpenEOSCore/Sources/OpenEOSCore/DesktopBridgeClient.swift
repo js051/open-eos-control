@@ -968,8 +968,7 @@ public actor DesktopBridgeClient {
     }
 
     private static func parseLiveViewMagnifications(_ body: BridgeJSON) -> [LiveViewMagnification] {
-        guard body["magnifications"] != nil else { return [] }
-        let raw = body.array("magnifications")
+        guard let raw = body["magnifications"] as? [Any] else { return [] }
         let values = raw.compactMap { strictInt($0) }
         guard values.count == raw.count,
               values.count >= 2,
