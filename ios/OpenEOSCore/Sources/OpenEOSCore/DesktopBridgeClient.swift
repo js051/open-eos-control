@@ -730,8 +730,9 @@ public actor DesktopBridgeClient {
         }
         guard item.name.caseInsensitiveCompare(filename) == .orderedSame,
               item.sizeBytes == Int64(fileSize) else {
+            let returnedSize = item.sizeBytes.map(String.init) ?? "unknown"
             throw DesktopBridgeError.invalidResponse(
-                "Desktop Bridge upload verification failed for \(filename): returned \(item.name) with size \(item.sizeBytes.map(String.init) ?? \"unknown\")."
+                "Desktop Bridge upload verification failed for \(filename): returned \(item.name) with size \(returnedSize)."
             )
         }
         progress(CameraMediaTransferProgress(bytesTransferred: Int64(fileSize), totalBytes: Int64(fileSize)))
