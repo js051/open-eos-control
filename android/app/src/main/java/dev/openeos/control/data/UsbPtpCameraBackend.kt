@@ -231,6 +231,9 @@ class UsbPtpCameraBackend(
             if (info.supports(PtpOperationCode.GET_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_PREVIEW)
             if (info.supports(PtpOperationCode.GET_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_DOWNLOAD)
             if (info.supports(PtpOperationCode.DELETE_OBJECT) || supportsHostMedia) add(CameraFeature.MEDIA_DELETE)
+            if (supportsMediaBrowser(info) && info.supports(PtpOperationCode.SET_OBJECT_PROTECTION)) {
+                add(CameraFeature.MEDIA_PROTECT)
+            }
             if (info.supports(PtpOperationCode.INITIATE_CAPTURE) || supportsCanonRelease) {
                 add(CameraFeature.STILL_CAPTURE)
             }
@@ -278,6 +281,7 @@ class UsbPtpCameraBackend(
             CameraFeature.MEDIA_PREVIEW,
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
+            CameraFeature.MEDIA_PROTECT,
             CameraFeature.CAMERA_CLOCK_SYNC,
         )
         val writableSettings = buildList {
@@ -337,6 +341,8 @@ class UsbPtpCameraBackend(
                         "Uses standard GetObject with bounded USB reads or streams a completed app-private host capture.",
                     CameraFeature.MEDIA_DELETE to
                         "Uses standard DeleteObject for card media and local deletion for app-private host captures.",
+                    CameraFeature.MEDIA_PROTECT to
+                        "Uses advertised standard PTP SetObjectProtection for card media and requires exact ObjectInfo readback.",
                     CameraFeature.EXPOSURE_CONTROL to
                         "Uses writable standard PTP descriptors or Canon EOS PropValueChanged/AvailListChanged events with SetDevicePropValueEx.",
                     CameraFeature.LIVE_VIEW to
@@ -807,6 +813,42 @@ class UsbPtpCameraBackend(
             bytesTransferred = bytesTransferred,
             contentType = contentTypeFor(item.name, item.kind),
         ).also { observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD) }
+    }
+
+    override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem {
+        hostCaptureStore?.takeIf { it.owns(item) }?.let { return item }
+        requireMediaBrowser()
+        val handle = item.ptpHandle()
+        return requireSession().objectInfo(handle)
+            .also { mediaInfo[handle] = it }
+            .toMediaItem()
+    }
+
+    override suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem {
+        if (hostCaptureStore?.owns(item) == true) unsupported<Unit>(CameraFeature.MEDIA_PROTECT)
+        requireMediaBrowser()
+        requireOperation(PtpOperationCode.SET_OBJECT_PROTECTION, CameraFeature.MEDIA_PROTECT)
+        val handle = item.ptpHandle()
+        val ptp = requireSession()
+        ptp.setObjectProtection(handle, enabled)
+
+        var latest = item
+        repeat(PTP_OBJECT_PROTECTION_READBACK_ATTEMPTS) { attempt ->
+            latest = ptp.objectInfo(handle)
+                .also { mediaInfo[handle] = it }
+                .toMediaItem()
+            if (latest.protected == enabled) {
+                observedFeatures.add(CameraFeature.MEDIA_PROTECT)
+                return latest
+            }
+            if (attempt < PTP_OBJECT_PROTECTION_READBACK_ATTEMPTS - 1) {
+                delay(PTP_OBJECT_PROTECTION_READBACK_DELAY_MILLIS)
+            }
+        }
+        throw PtpProtocolException(
+            "Camera accepted SetObjectProtection for ${item.name} but did not report " +
+                "ProtectionStatus=${if (enabled) PtpProtectionStatus.READ_ONLY else PtpProtectionStatus.NONE}.",
+        )
     }
 
     override suspend fun deleteMedia(item: CameraMediaItem) {
@@ -1807,6 +1849,11 @@ private fun PtpObjectInfo.toMediaItem(): CameraMediaItem = CameraMediaItem(
     captureTime = captureDate.toDisplayPtpDate(),
     previewAvailable = sizeBytes in 1..MAX_PTP_MEDIA_PREVIEW_BYTES.toLong() &&
         (objectFormat == PtpObjectFormat.EXIF_JPEG || objectFormat == PtpObjectFormat.PNG),
+    protected = when (protectionStatus) {
+        PtpProtectionStatus.NONE -> false
+        PtpProtectionStatus.READ_ONLY -> true
+        else -> null
+    },
 )
 
 private fun CameraMediaItem.ptpHandle(): Long {
@@ -1959,6 +2006,8 @@ private fun formatPtpVersion(value: Int): String =
 
 private const val MAX_USB_MEDIA_ITEMS = 500
 private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
+private const val PTP_OBJECT_PROTECTION_READBACK_ATTEMPTS = 3
+private const val PTP_OBJECT_PROTECTION_READBACK_DELAY_MILLIS = 100L
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
 private const val CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS = 3_000L

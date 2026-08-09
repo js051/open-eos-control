@@ -119,7 +119,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             MediaMetadataSheet(
                 item = item,
                 busy = state.isBusy(CameraOperation.MEDIA),
-                protectSupported = state.supports(CameraFeature.MEDIA_PROTECT),
+                protectSupported = state.supports(CameraFeature.MEDIA_PROTECT) && item.protected != null,
                 ratingSupported = state.supports(CameraFeature.MEDIA_RATING),
                 rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
                 deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
