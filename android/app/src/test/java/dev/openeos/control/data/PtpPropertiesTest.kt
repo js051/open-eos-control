@@ -109,6 +109,136 @@ class PtpPropertiesTest {
         )
     }
 
+    @Test
+    fun objectPropertyCodecReadsSupportedCodesAndWritableRatingRange() {
+        val supported = PropertyWriter().apply {
+            u32(2)
+            u16(MtpObjectPropertyCode.RATING)
+            u16(0xDC03)
+        }.bytes()
+        val descriptorBytes = PropertyWriter().apply {
+            u16(MtpObjectPropertyCode.RATING)
+            u16(PtpDataType.UINT16)
+            u8(1)
+            u16(0)
+            u32(0)
+            u8(1)
+            u16(0)
+            u16(100)
+            u16(1)
+        }.bytes()
+
+        val descriptor = MtpObjectPropertyCodec.decodeDescriptor(descriptorBytes)
+
+        assertEquals(setOf(MtpObjectPropertyCode.RATING, 0xDC03), MtpObjectPropertyCodec.decodeSupportedProperties(supported))
+        assertEquals(MtpObjectPropertyCode.RATING, descriptor.code)
+        assertEquals(PtpDataType(PtpDataType.UINT16), descriptor.dataType)
+        assertTrue(descriptor.writable)
+        assertEquals(PtpPropertyValue.Unsigned(0UL), descriptor.defaultValue)
+        assertEquals(0L, descriptor.groupCode)
+        assertEquals(
+            PtpPropertyForm.Range(
+                minimum = PtpPropertyValue.Unsigned(0UL),
+                maximum = PtpPropertyValue.Unsigned(100UL),
+                step = PtpPropertyValue.Unsigned(1UL),
+            ),
+            descriptor.form,
+        )
+    }
+
+    @Test
+    fun objectPropertyCodecRejectsTrailingOrUnsupportedDescriptorData() {
+        val descriptorWithTrailingByte = PropertyWriter().apply {
+            u16(MtpObjectPropertyCode.RATING)
+            u16(PtpDataType.UINT16)
+            u8(1)
+            u16(0)
+            u32(0)
+            u8(0)
+            u8(0x7F)
+        }.bytes()
+        val unsupportedForm = PropertyWriter().apply {
+            u16(MtpObjectPropertyCode.RATING)
+            u16(PtpDataType.UINT16)
+            u8(1)
+            u16(0)
+            u32(0)
+            u8(3)
+        }.bytes()
+
+        val trailingFailure = runCatching {
+            MtpObjectPropertyCodec.decodeDescriptor(descriptorWithTrailingByte)
+        }.exceptionOrNull()
+        val formFailure = runCatching {
+            MtpObjectPropertyCodec.decodeDescriptor(unsupportedForm)
+        }.exceptionOrNull()
+        val valueFailure = runCatching {
+            MtpObjectPropertyCodec.decodeValue(
+                PtpDataType(PtpDataType.UINT16),
+                byteArrayOf(40, 0, 1),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(trailingFailure is PtpProtocolException)
+        assertTrue(formFailure is PtpProtocolException)
+        assertTrue(valueFailure is PtpProtocolException)
+    }
+
+    @Test
+    fun ratingContractMapsFiveStarsToExplicitMtpPercentValues() {
+        val contract = MtpRatingContract.from(
+            MtpObjectPropertyDescriptor(
+                code = MtpObjectPropertyCode.RATING,
+                dataType = PtpDataType(PtpDataType.UINT16),
+                writable = true,
+                defaultValue = PtpPropertyValue.Unsigned(0UL),
+                groupCode = 0,
+                form = PtpPropertyForm.Range(
+                    minimum = PtpPropertyValue.Unsigned(0UL),
+                    maximum = PtpPropertyValue.Unsigned(100UL),
+                    step = PtpPropertyValue.Unsigned(1UL),
+                ),
+            ),
+        ) ?: error("Expected a rating contract.")
+
+        assertEquals(
+            listOf(0UL, 20UL, 40UL, 60UL, 80UL, 100UL).map(PtpPropertyValue::Unsigned),
+            (0..5).map(contract::wireValue),
+        )
+        assertEquals(4, contract.stars(PtpPropertyValue.Unsigned(80UL)))
+        assertEquals(null, contract.stars(PtpPropertyValue.Unsigned(37UL)))
+    }
+
+    @Test
+    fun ratingContractRejectsReadonlyWrongTypeAndUnprovenValues() {
+        fun descriptor(
+            dataType: Int = PtpDataType.UINT16,
+            writable: Boolean = true,
+            form: PtpPropertyForm,
+        ) = MtpObjectPropertyDescriptor(
+            code = MtpObjectPropertyCode.RATING,
+            dataType = PtpDataType(dataType),
+            writable = writable,
+            defaultValue = PtpPropertyValue.Unsigned(0UL),
+            groupCode = 0,
+            form = form,
+        )
+
+        val standardRange = PtpPropertyForm.Range(
+            minimum = PtpPropertyValue.Unsigned(0UL),
+            maximum = PtpPropertyValue.Unsigned(100UL),
+            step = PtpPropertyValue.Unsigned(1UL),
+        )
+        val starsOnly = PtpPropertyForm.Enumeration(
+            (0UL..5UL).map(PtpPropertyValue::Unsigned),
+        )
+
+        assertEquals(null, MtpRatingContract.from(descriptor(writable = false, form = standardRange)))
+        assertEquals(null, MtpRatingContract.from(descriptor(dataType = PtpDataType.UINT32, form = standardRange)))
+        assertEquals(null, MtpRatingContract.from(descriptor(form = PtpPropertyForm.None)))
+        assertEquals(null, MtpRatingContract.from(descriptor(form = starsOnly)))
+    }
+
     private class PropertyWriter {
         private val output = ByteArrayOutputStream()
 
@@ -119,6 +249,10 @@ class PtpPropertiesTest {
         fun u16(value: Int) {
             output.write(value and 0xFF)
             output.write((value ushr 8) and 0xFF)
+        }
+
+        fun u32(value: Long) {
+            repeat(4) { index -> output.write(((value ushr (index * 8)) and 0xFF).toInt()) }
         }
 
         fun i16(value: Int) = u16(value and 0xFFFF)

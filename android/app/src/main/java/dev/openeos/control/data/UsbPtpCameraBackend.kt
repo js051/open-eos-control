@@ -29,6 +29,8 @@ class UsbPtpCameraBackend(
     private var storageSnapshot: List<PtpStorageInfo> = emptyList()
     private var storageError: String? = null
     private val mediaInfo = mutableMapOf<Long, PtpObjectInfo>()
+    private val mediaRatingContracts = mutableMapOf<Int, MtpRatingContract?>()
+    private val validatedMediaRatingFormats = mutableSetOf<Int>()
     private var propertyDescriptors: Map<Int, PtpDevicePropertyDescriptor> = emptyMap()
     private val propertyValues = mutableMapOf<Int, PtpPropertyValue>()
     private val propertyErrors = mutableMapOf<Int, String>()
@@ -83,6 +85,8 @@ class UsbPtpCameraBackend(
         storageSnapshot = emptyList()
         storageError = null
         mediaInfo.clear()
+        mediaRatingContracts.clear()
+        validatedMediaRatingFormats.clear()
         propertyDescriptors = emptyMap()
         propertyValues.clear()
         propertyErrors.clear()
@@ -222,6 +226,9 @@ class UsbPtpCameraBackend(
         val supportsCanonClockSync = canonClockPropertyCode(info) != null
         val supportsCanonLensStatus = canonPropertyState(CanonEosPropertyCode.LENS_NAME).currentText != null
         val supportsHostMedia = hostCaptureStore != null
+        val supportsMtpMediaRating = supportsMediaBrowser(info) &&
+            supportsMtpObjectProperties(info) &&
+            validatedMediaRatingFormats.isNotEmpty()
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
             add(CameraFeature.CAMERA_IDENTITY)
@@ -239,6 +246,7 @@ class UsbPtpCameraBackend(
             if (supportsMediaBrowser(info) && info.supports(PtpOperationCode.SET_OBJECT_PROTECTION)) {
                 add(CameraFeature.MEDIA_PROTECT)
             }
+            if (supportsMtpMediaRating) add(CameraFeature.MEDIA_RATING)
             if (info.supports(PtpOperationCode.INITIATE_CAPTURE) || supportsCanonRelease) {
                 add(CameraFeature.STILL_CAPTURE)
             }
@@ -288,6 +296,7 @@ class UsbPtpCameraBackend(
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_DELETE,
             CameraFeature.MEDIA_PROTECT,
+            CameraFeature.MEDIA_RATING,
             CameraFeature.CAMERA_CLOCK_SYNC,
         )
         val writableSettings = buildList {
@@ -351,6 +360,8 @@ class UsbPtpCameraBackend(
                         "Uses standard DeleteObject for card media and local deletion for app-private host captures.",
                     CameraFeature.MEDIA_PROTECT to
                         "Uses advertised standard PTP SetObjectProtection for card media and requires exact ObjectInfo readback.",
+                    CameraFeature.MEDIA_RATING to
+                        "Uses standard MTP Rating only after a card-media format advertises writable UINT16 0-100 values and an object value is read successfully; writes require exact same-handle readback.",
                     CameraFeature.EXPOSURE_CONTROL to
                         "Uses writable standard PTP descriptors or Canon EOS PropValueChanged/AvailListChanged events with SetDevicePropValueEx.",
                     CameraFeature.LIVE_VIEW to
@@ -734,16 +745,32 @@ class UsbPtpCameraBackend(
 
         var firstFailure: Exception? = null
         mediaInfo.clear()
-        val items = handles.mapNotNull { handle ->
+        mediaRatingContracts.clear()
+        validatedMediaRatingFormats.clear()
+        val objectInfos = handles.mapNotNull { handle ->
             try {
                 ptp.objectInfo(handle)
                     .takeUnless { it.objectFormat == PtpObjectFormat.ASSOCIATION || it.filename.isBlank() }
                     ?.also { mediaInfo[handle] = it }
-                    ?.toMediaItem()
             } catch (exception: Exception) {
                 if (firstFailure == null) firstFailure = exception
                 null
             }
+        }
+        val ratingSamples = mutableMapOf<Long, MtpMediaRatingRead>()
+        if (supportsMtpObjectProperties(requireDeviceInfo())) {
+            objectInfos.groupBy(PtpObjectInfo::objectFormat).values.forEach { sameFormat ->
+                val sample = sameFormat.first()
+                runCatching { readMtpMediaRating(sample) }
+                    .getOrNull()
+                    ?.let { ratingSamples[sample.handle] = it }
+            }
+        }
+        val items = objectInfos.map { objectInfo ->
+            objectInfo.toMediaItem(
+                rating = ratingSamples[objectInfo.handle]?.stars,
+                ratingWritable = objectInfo.objectFormat in validatedMediaRatingFormats,
+            )
         }
         if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null && hostItems.isEmpty()) throw firstFailure!!
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
@@ -827,9 +854,12 @@ class UsbPtpCameraBackend(
         hostCaptureStore?.takeIf { it.owns(item) }?.let { return item }
         requireMediaBrowser()
         val handle = item.ptpHandle()
-        return requireSession().objectInfo(handle)
-            .also { mediaInfo[handle] = it }
-            .toMediaItem()
+        val objectInfo = requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
+        val rating = if (supportsMtpObjectProperties(requireDeviceInfo())) readMtpMediaRating(objectInfo) else null
+        return objectInfo.toMediaItem(
+            rating = rating?.stars,
+            ratingWritable = rating != null,
+        )
     }
 
     override suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem {
@@ -842,9 +872,11 @@ class UsbPtpCameraBackend(
 
         var latest = item
         repeat(PTP_OBJECT_PROTECTION_READBACK_ATTEMPTS) { attempt ->
-            latest = ptp.objectInfo(handle)
-                .also { mediaInfo[handle] = it }
-                .toMediaItem()
+            val refreshed = ptp.objectInfo(handle).also { mediaInfo[handle] = it }
+            latest = refreshed.toMediaItem(
+                rating = item.rating,
+                ratingWritable = refreshed.objectFormat in validatedMediaRatingFormats,
+            )
             if (latest.protected == enabled) {
                 observedFeatures.add(CameraFeature.MEDIA_PROTECT)
                 return latest
@@ -856,6 +888,49 @@ class UsbPtpCameraBackend(
         throw PtpProtocolException(
             "Camera accepted SetObjectProtection for ${item.name} but did not report " +
                 "ProtectionStatus=${if (enabled) PtpProtectionStatus.READ_ONLY else PtpProtectionStatus.NONE}.",
+        )
+    }
+
+    override suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem {
+        require(rating in 0..5) { "Media rating must be from 0 through 5." }
+        if (hostCaptureStore?.owns(item) == true) unsupported<Unit>(CameraFeature.MEDIA_RATING)
+        requireMediaBrowser()
+        val info = requireDeviceInfo()
+        if (!supportsMtpObjectProperties(info)) unsupported<Unit>(CameraFeature.MEDIA_RATING)
+
+        val handle = item.ptpHandle()
+        val ptp = requireSession()
+        val objectInfo = ptp.objectInfo(handle).also { mediaInfo[handle] = it }
+        val contract = resolveMtpRatingContract(objectInfo.objectFormat)
+            ?: throw UnsupportedOperationException(
+                "${item.name} does not advertise a writable standard MTP Rating property for " +
+                    "format ${objectInfo.objectFormat.ptpHexCode()}."
+            )
+        val requested = contract.wireValue(rating)
+        ptp.setObjectPropertyValue(
+            handle = handle,
+            propertyCode = MtpObjectPropertyCode.RATING,
+            dataType = contract.dataType,
+            value = requested,
+        )
+
+        var lastReadback: PtpPropertyValue? = null
+        repeat(MTP_RATING_READBACK_ATTEMPTS) { attempt ->
+            lastReadback = ptp.objectPropertyValue(
+                handle = handle,
+                propertyCode = MtpObjectPropertyCode.RATING,
+                dataType = contract.dataType,
+            )
+            if (lastReadback == requested) {
+                validatedMediaRatingFormats += objectInfo.objectFormat
+                observedFeatures.add(CameraFeature.MEDIA_RATING)
+                return objectInfo.toMediaItem(rating = rating, ratingWritable = true)
+            }
+            if (attempt < MTP_RATING_READBACK_ATTEMPTS - 1) delay(MTP_RATING_READBACK_DELAY_MILLIS)
+        }
+        throw PtpProtocolException(
+            "Camera accepted MTP Rating=${requested.value} for ${item.name} but exact same-handle readback " +
+                "was ${lastReadback ?: "missing"}."
         )
     }
 
@@ -1478,7 +1553,16 @@ class UsbPtpCameraBackend(
     private suspend fun refreshStorageSnapshot(info: PtpDeviceInfo): Result<List<PtpStorageInfo>>? {
         if (!supportsStorage(info)) return null
         return runCatching { readStorageSnapshot() }.also { result ->
-            storageSnapshot = result.getOrDefault(emptyList())
+            val refreshed = result.getOrDefault(emptyList())
+            if (
+                storageSnapshot.isNotEmpty() &&
+                storageSnapshot.map(PtpStorageInfo::storageId) != refreshed.map(PtpStorageInfo::storageId)
+            ) {
+                mediaInfo.clear()
+                mediaRatingContracts.clear()
+                validatedMediaRatingFormats.clear()
+            }
+            storageSnapshot = refreshed
             storageError = result.exceptionOrNull()?.message
         }
     }
@@ -1844,6 +1928,45 @@ class UsbPtpCameraBackend(
         info.supports(PtpOperationCode.GET_STORAGE_IDS) &&
             info.supports(PtpOperationCode.GET_OBJECT_HANDLES) &&
             info.supports(PtpOperationCode.GET_OBJECT_INFO)
+
+    private fun supportsMtpObjectProperties(info: PtpDeviceInfo): Boolean =
+        info.supports(PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED) &&
+            info.supports(PtpOperationCode.GET_OBJECT_PROP_DESC) &&
+            info.supports(PtpOperationCode.GET_OBJECT_PROP_VALUE) &&
+            info.supports(PtpOperationCode.SET_OBJECT_PROP_VALUE)
+
+    private suspend fun resolveMtpRatingContract(objectFormat: Int): MtpRatingContract? {
+        if (objectFormat == PtpObjectFormat.ASSOCIATION) return null
+        if (mediaRatingContracts.containsKey(objectFormat)) return mediaRatingContracts[objectFormat]
+        val ptp = requireSession()
+        val contract = if (MtpObjectPropertyCode.RATING in ptp.objectPropertiesSupported(objectFormat)) {
+            MtpRatingContract.from(
+                ptp.objectPropertyDescriptor(MtpObjectPropertyCode.RATING, objectFormat),
+            )
+        } else {
+            null
+        }
+        mediaRatingContracts[objectFormat] = contract
+        return contract
+    }
+
+    private suspend fun readMtpMediaRating(objectInfo: PtpObjectInfo): MtpMediaRatingRead? {
+        val contract = resolveMtpRatingContract(objectInfo.objectFormat) ?: return null
+        val value = requireSession().objectPropertyValue(
+            handle = objectInfo.handle,
+            propertyCode = MtpObjectPropertyCode.RATING,
+            dataType = contract.dataType,
+        )
+        val wireValue = (value as? PtpPropertyValue.Unsigned)?.value
+            ?: throw PtpProtocolException("MTP Rating readback was not an unsigned value.")
+        if (wireValue > 100UL) {
+            throw PtpProtocolException("MTP Rating readback $wireValue is outside the standard 0-100 range.")
+        }
+        validatedMediaRatingFormats += objectInfo.objectFormat
+        return MtpMediaRatingRead(
+            stars = contract.stars(value),
+        )
+    }
 }
 
 private fun Int.ptpHexCode(width: Int = 4): String =
@@ -1855,7 +1978,14 @@ private data class CanonEosPropertyState(
     val availableValues: List<Long> = emptyList(),
 )
 
-private fun PtpObjectInfo.toMediaItem(): CameraMediaItem = CameraMediaItem(
+private data class MtpMediaRatingRead(
+    val stars: Int?,
+)
+
+private fun PtpObjectInfo.toMediaItem(
+    rating: Int? = null,
+    ratingWritable: Boolean? = null,
+): CameraMediaItem = CameraMediaItem(
     id = "ptp:${handle.toString(16).uppercase(Locale.ROOT).padStart(8, '0')}",
     name = filename,
     kind = mediaKind(filename, objectFormat),
@@ -1868,6 +1998,8 @@ private fun PtpObjectInfo.toMediaItem(): CameraMediaItem = CameraMediaItem(
         PtpProtectionStatus.READ_ONLY -> true
         else -> null
     },
+    rating = rating,
+    ratingWritable = ratingWritable,
 )
 
 private fun CameraMediaItem.ptpHandle(): Long {
@@ -2022,6 +2154,8 @@ private const val MAX_USB_MEDIA_ITEMS = 500
 private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 private const val PTP_OBJECT_PROTECTION_READBACK_ATTEMPTS = 3
 private const val PTP_OBJECT_PROTECTION_READBACK_DELAY_MILLIS = 100L
+private const val MTP_RATING_READBACK_ATTEMPTS = 3
+private const val MTP_RATING_READBACK_DELAY_MILLIS = 100L
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
 private const val CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS = 3_000L

@@ -111,7 +111,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         val item = state.mediaItems.firstOrNull { it.id == itemId }
         if (item != null) {
             val metadataSupported = state.supports(CameraFeature.MEDIA_PROTECT) ||
-                state.supports(CameraFeature.MEDIA_RATING) ||
+                (state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false) ||
                 state.supports(CameraFeature.MEDIA_ROTATE)
             LaunchedEffect(itemId, metadataSupported) {
                 if (metadataSupported) actions.loadMediaInfo(item)
@@ -120,7 +120,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 item = item,
                 busy = state.isBusy(CameraOperation.MEDIA),
                 protectSupported = state.supports(CameraFeature.MEDIA_PROTECT) && item.protected != null,
-                ratingSupported = state.supports(CameraFeature.MEDIA_RATING),
+                ratingSupported = state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false,
                 rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
                 deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
                 onDismiss = { activeMetadataItemId = null },
@@ -241,7 +241,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                             !state.isBusy(CameraOperation.MEDIA),
                         deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
                         metadataSupported = state.supports(CameraFeature.MEDIA_PROTECT) ||
-                            state.supports(CameraFeature.MEDIA_RATING) ||
+                            (state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false) ||
                             state.supports(CameraFeature.MEDIA_ROTATE),
                         deleteEnabled = !state.isBusy(CameraOperation.MEDIA),
                         downloadEnabled = !state.previewMode &&
