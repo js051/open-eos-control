@@ -87,6 +87,9 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "media-unprotect-button",
         "media-rating-control",
         "media-rotation-control",
+        "media-archive-section",
+        "media-archive-button",
+        "media-unarchive-button",
         "media-details-download",
         "media-details-delete",
         "media-transfer",
@@ -227,11 +230,14 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "FEATURES.MEDIA_PROTECT" in script
     assert "FEATURES.MEDIA_RATING" in script
     assert "FEATURES.MEDIA_ROTATE" in script
+    assert "FEATURES.MEDIA_ARCHIVE" in script
     assert '{ method: "PUT", json }' in script
     assert 'FEATURES.MEDIA_PROTECT, "protection", { enabled: true }' in script
     assert 'FEATURES.MEDIA_PROTECT, "protection", { enabled: false }' in script
     assert 'FEATURES.MEDIA_RATING, "rating", { value:' in script
     assert 'FEATURES.MEDIA_ROTATE, "rotation", { degrees:' in script
+    assert 'FEATURES.MEDIA_ARCHIVE, "archive", { enabled: true }' in script
+    assert 'FEATURES.MEDIA_ARCHIVE, "archive", { enabled: false }' in script
     assert 'MEDIA_DELETE: "MEDIA_DELETE"' in script
     assert 'EVENT_POLLING: "EVENT_POLLING"' in script
     assert "function startEventLoop()" in script

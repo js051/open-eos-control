@@ -716,6 +716,7 @@ class CcapiClient(
             if (supportsMediaDelete()) supportedFeatures.add(CameraFeature.MEDIA_DELETE)
             if (supportsMediaModify()) {
                 supportedFeatures.add(CameraFeature.MEDIA_PROTECT)
+                supportedFeatures.add(CameraFeature.MEDIA_ARCHIVE)
                 supportedFeatures.add(CameraFeature.MEDIA_RATING)
                 supportedFeatures.add(CameraFeature.MEDIA_ROTATE)
             }
@@ -1488,6 +1489,15 @@ class CcapiClient(
             matches = { it.protected == enabled },
         )
 
+    suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        modifyMedia(
+            item = item,
+            action = "archive",
+            value = if (enabled) "enable" else "disable",
+            feature = CameraFeature.MEDIA_ARCHIVE,
+            matches = { it.archived == enabled },
+        )
+
     suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem {
         require(rating in 0..5) { "Media rating must be from 0 through 5." }
         return modifyMedia(
@@ -1552,6 +1562,11 @@ class CcapiClient(
             sizeBytes = body.optLong("filesize").takeIf { it > 0L } ?: item.sizeBytes,
             captureTime = body.optString("lastmodifieddate").takeIf { it.isNotBlank() } ?: item.captureTime,
             protected = when (body.optString("protect")) {
+                "enable" -> true
+                "disable" -> false
+                else -> null
+            },
+            archived = when (body.optString("archive")) {
                 "enable" -> true
                 "disable" -> false
                 else -> null
@@ -2476,6 +2491,7 @@ class CcapiClient(
             captureTime = item.optString("capture_time").takeIf { it.isNotBlank() },
             previewAvailable = kind.isCcapiPreviewKind(),
             protected = item.opt("protect") as? Boolean,
+            archived = item.opt("archive") as? Boolean,
             rating = item.optInt("rating").takeIf { item.has("rating") && it in 0..5 },
             rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
             ratingWritable = true,
@@ -3816,6 +3832,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             CameraFeature.MEDIA_DOWNLOAD,
             CameraFeature.MEDIA_UPLOAD,
             CameraFeature.MEDIA_PROTECT,
+            CameraFeature.MEDIA_ARCHIVE,
             CameraFeature.MEDIA_RATING,
             CameraFeature.MEDIA_ROTATE,
             CameraFeature.MEDIA_DELETE,

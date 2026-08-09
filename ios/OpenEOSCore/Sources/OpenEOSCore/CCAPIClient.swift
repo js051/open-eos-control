@@ -634,7 +634,7 @@ public actor CCAPIClient {
         }
         if supportsMediaDelete() { supported.insert(.mediaDelete) }
         if supportsMediaModify() {
-            supported.formUnion([.mediaProtect, .mediaRating, .mediaRotate])
+            supported.formUnion([.mediaProtect, .mediaRating, .mediaRotate, .mediaArchive])
         }
         if eventPollingOperations() != nil { supported.insert(.eventPolling) }
         if cameraClockOperations() != nil { supported.insert(.cameraClockSync) }
@@ -650,7 +650,7 @@ public actor CCAPIClient {
             .videoRecording, .tapFocus,
             .clickWhiteBalance,
             .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaProtect, .mediaRating, .mediaRotate, .mediaDelete,
+            .mediaProtect, .mediaRating, .mediaRotate, .mediaArchive, .mediaDelete,
             .cameraClockSync, .zoomControl, .cardSelectionControl,
             .sensorCleaning,
             .cameraSleep,
@@ -696,6 +696,7 @@ public actor CCAPIClient {
                     .mediaProtect: "The camera must advertise PUT for Canon contents before file protection can be changed.",
                     .mediaRating: "The camera must advertise PUT for Canon contents before file ratings can be changed.",
                     .mediaRotate: "The camera must advertise PUT for Canon contents before display rotation can be changed.",
+                    .mediaArchive: "The camera must advertise PUT for Canon contents before media archiving can be changed.",
                 ]
             ),
             liveView: LiveViewCapabilities(
@@ -1618,7 +1619,8 @@ public actor CCAPIClient {
                     previewAvailable: ["image", "raw"].contains($0.string("kind", default: "other").lowercased()),
                     protected: $0.bool("protect"),
                     rating: $0.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
-                    rotationDegrees: $0.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil }
+                    rotationDegrees: $0.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil },
+                    archived: $0.bool("archive")
                 )
             } ?? []
             observedFeatures.insert(.mediaBrowser)
@@ -1809,6 +1811,16 @@ public actor CCAPIClient {
         )
     }
 
+    public func setMediaArchive(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
+        try await modifyMedia(
+            item,
+            action: "archive",
+            value: enabled ? "enable" : "disable",
+            feature: .mediaArchive,
+            matches: { $0.archived == enabled }
+        )
+    }
+
     private func modifyMedia(
         _ item: CameraMediaItem,
         action: String,
@@ -1859,6 +1871,7 @@ public actor CCAPIClient {
             ? 0
             : parsedRating.flatMap { (1...5).contains($0) ? $0 : nil }
         let rotation = body.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil }
+        let archived = Self.parseMediaArchive(body.string("archive"))
         return CameraMediaItem(
             id: item.id,
             name: item.name,
@@ -1868,8 +1881,17 @@ public actor CCAPIClient {
             previewAvailable: item.previewAvailable,
             protected: protected,
             rating: rating,
-            rotationDegrees: rotation
+            rotationDegrees: rotation,
+            archived: archived
         )
+    }
+
+    private static func parseMediaArchive(_ value: String) -> Bool? {
+        switch value {
+        case "enable": true
+        case "disable": false
+        default: nil
+        }
     }
 
     private func mediaImageRepresentation(
@@ -3421,7 +3443,7 @@ public actor CCAPIClient {
             .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress, .videoRecording, .tapFocus,
             .clickWhiteBalance, .focusDrive,
             .exposureControl, .whiteBalanceControl, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaProtect, .mediaRating, .mediaRotate, .mediaDelete, .cameraClockSync,
+            .mediaProtect, .mediaRating, .mediaRotate, .mediaArchive, .mediaDelete, .cameraClockSync,
             .recordableStatus, .lensStatus, .temperatureStatus,
         ]
         if simulatorCameraSleepSupported { supported.insert(.cameraSleep) }

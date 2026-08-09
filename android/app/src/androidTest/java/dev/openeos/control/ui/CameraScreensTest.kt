@@ -1937,6 +1937,7 @@ class CameraScreensTest {
             name = "IMG_0042.JPG",
             kind = "image",
             protected = false,
+            archived = false,
             rating = 2,
             rotationDegrees = 0,
         )
@@ -1944,11 +1945,13 @@ class CameraScreensTest {
         val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA, mediaItems = listOf(item))
         var loaded: CameraMediaItem? = null
         var protection: Boolean? = null
+        var archived: Boolean? = null
         var rating: Int? = null
         var rotation: Int? = null
         val actions = noOpActions().copy(
             loadMediaInfo = { loaded = it },
             setMediaProtection = { _, value -> protection = value },
+            setMediaArchived = { _, value -> archived = value },
             setMediaRating = { _, value -> rating = value },
             setMediaRotation = { _, value -> rotation = value },
         )
@@ -1961,10 +1964,12 @@ class CameraScreensTest {
         compose.runOnIdle { assertEquals(item, loaded) }
 
         compose.onNodeWithContentDescription(resourceText(R.string.protect_media, item.name)).performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.archive_media, item.name)).performClick()
         compose.onNodeWithContentDescription(resourceText(R.string.set_media_rating, item.name, 4)).performClick()
         compose.onNodeWithText(resourceText(R.string.rotation_degrees_short, 180)).performClick()
         compose.runOnIdle {
             assertEquals(true, protection)
+            assertEquals(true, archived)
             assertEquals(4, rating)
             assertEquals(180, rotation)
         }
@@ -2038,6 +2043,27 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.downloading_media, name)).assertIsDisplayed()
         compose.onNodeWithText("32.0 MB / 128.0 MB (25%)").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.cancel_media_download)).assertIsDisplayed()
+    }
+
+    @Test
+    fun mediaMetadataSheetHidesArchiveActionsWhenItemStatusIsUnknown() {
+        val item = CameraMediaItem(
+            id = "ccapi:IMG_0042.JPG",
+            name = "IMG_0042.JPG",
+            kind = "image",
+            archived = null,
+        )
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA, mediaItems = listOf(item))
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, item.name)).performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription(resourceText(R.string.archive_media, item.name)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(resourceText(R.string.unarchive_media, item.name)).assertDoesNotExist()
     }
 
     @Test

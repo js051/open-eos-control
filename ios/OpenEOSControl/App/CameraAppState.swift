@@ -960,7 +960,8 @@ final class CameraAppState: ObservableObject {
             CameraMediaItem(
                 id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
-                protected: enabled, rating: item.rating, rotationDegrees: item.rotationDegrees
+                protected: enabled, rating: item.rating, rotationDegrees: item.rotationDegrees,
+                archived: item.archived
             )
         }
     }
@@ -973,7 +974,8 @@ final class CameraAppState: ObservableObject {
             CameraMediaItem(
                 id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
-                protected: item.protected, rating: rating, rotationDegrees: item.rotationDegrees
+                protected: item.protected, rating: rating, rotationDegrees: item.rotationDegrees,
+                archived: item.archived
             )
         }
     }
@@ -986,7 +988,8 @@ final class CameraAppState: ObservableObject {
             CameraMediaItem(
                 id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
-                protected: item.protected, rating: item.rating, rotationDegrees: degrees
+                protected: item.protected, rating: item.rating, rotationDegrees: degrees,
+                archived: item.archived
             )
         }
     }
@@ -1108,6 +1111,19 @@ final class CameraAppState: ObservableObject {
                 mediaUploadError = error.localizedDescription
                 record(error)
             }
+        }
+    }
+
+    func setMediaArchive(_ item: CameraMediaItem, enabled: Bool) async {
+        await updateMediaMetadata(item, feature: .mediaArchive) { session in
+            try await session.setMediaArchive(item, enabled: enabled)
+        } preview: {
+            CameraMediaItem(
+                id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
+                captureTime: item.captureTime, previewAvailable: item.previewAvailable,
+                protected: item.protected, rating: item.rating, rotationDegrees: item.rotationDegrees,
+                archived: enabled
+            )
         }
     }
 
@@ -1713,7 +1729,7 @@ final class CameraAppState: ObservableObject {
             .soundRecordingControl, .soundRecordingLevelControl, .focusBracketingControl,
             .movieSettingsControl,
             .advancedSettings, .sensorCleaning, .cameraSleep, .mediaBrowser, .mediaDownload,
-            .mediaProtect, .mediaRating, .mediaRotate, .mediaDelete,
+            .mediaProtect, .mediaRating, .mediaRotate, .mediaArchive, .mediaDelete,
         ]
         let capabilities = CameraCapabilities(
             settings: settings,
@@ -1767,8 +1783,8 @@ final class CameraAppState: ObservableObject {
     }
 
     static let previewMedia = [
-        CameraMediaItem(id: "preview-001", name: "R6M3_0001.CR3", kind: "raw", sizeBytes: 31_457_280, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: true, rating: 5, rotationDegrees: 0),
-        CameraMediaItem(id: "preview-002", name: "R6M3_0001.JPG", kind: "image", sizeBytes: 8_912_384, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: false, rating: 3, rotationDegrees: 90),
-        CameraMediaItem(id: "preview-003", name: "R6M3_0002.MP4", kind: "video", sizeBytes: 128_450_560, captureTime: "2026-07-21T10:10:02+08:00", protected: false, rating: 0, rotationDegrees: 0),
+        CameraMediaItem(id: "preview-001", name: "R6M3_0001.CR3", kind: "raw", sizeBytes: 31_457_280, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: true, rating: 5, rotationDegrees: 0, archived: false),
+        CameraMediaItem(id: "preview-002", name: "R6M3_0001.JPG", kind: "image", sizeBytes: 8_912_384, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: false, rating: 3, rotationDegrees: 90, archived: true),
+        CameraMediaItem(id: "preview-003", name: "R6M3_0002.MP4", kind: "video", sizeBytes: 128_450_560, captureTime: "2026-07-21T10:10:02+08:00", protected: false, rating: 0, rotationDegrees: 0, archived: false),
     ]
 }

@@ -122,6 +122,8 @@ interface CameraControlBackend {
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = unsupported(CameraFeature.MEDIA_BROWSER)
     suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
         unsupported(CameraFeature.MEDIA_PROTECT)
+    suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        unsupported(CameraFeature.MEDIA_ARCHIVE)
     suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem =
         unsupported(CameraFeature.MEDIA_RATING)
     suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem =
@@ -249,6 +251,9 @@ class CcapiCameraBackend(
     override suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
         client.setMediaProtection(item, enabled)
 
+    override suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        client.setMediaArchived(item, enabled)
+
     override suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem =
         client.setMediaRating(item, rating)
 
@@ -371,6 +376,9 @@ class DesktopBridgeCameraBackend(
 
     override suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
         client.setMediaProtection(item, enabled)
+
+    override suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        client.setMediaArchived(item, enabled)
 
     override suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem =
         client.setMediaRating(item, rating)

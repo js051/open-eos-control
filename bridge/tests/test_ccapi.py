@@ -561,7 +561,7 @@ class FakeCcapiTransport:
             assert payload is not None
             action = payload.get("action")
             value = payload.get("value")
-            assert action in {"protect", "rating", "rotate"}
+            assert action in {"protect", "rating", "rotate", "archive"}
             assert isinstance(value, str)
             self.media_metadata[action] = value
             return _json_response({})
@@ -721,6 +721,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.MEDIA_PROTECT,
         CameraFeature.MEDIA_RATING,
         CameraFeature.MEDIA_ROTATE,
+        CameraFeature.MEDIA_ARCHIVE,
         CameraFeature.MEDIA_DELETE,
         CameraFeature.CAMERA_CLOCK_SYNC,
         CameraFeature.ZOOM_CONTROL,
@@ -848,9 +849,12 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert info.protected is False
     assert info.rating == 0
     assert info.rotation_degrees == 0
+    assert info.archived is False
     assert session.set_media_protection(media[0].id, True).protected is True
     assert session.set_media_rating(media[0].id, 5).rating == 5
     assert session.set_media_rotation(media[0].id, 270).rotation_degrees == 270
+    assert session.set_media_archive(media[0].id, True).archived is True
+    assert session.set_media_archive(media[0].id, False).archived is False
     session.delete_media(media[0].id)
     session.stop_live_view()
     observed = set(session.capabilities().evidence.observed_features)
@@ -878,6 +882,7 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
         CameraFeature.MEDIA_PROTECT,
         CameraFeature.MEDIA_RATING,
         CameraFeature.MEDIA_ROTATE,
+        CameraFeature.MEDIA_ARCHIVE,
         CameraFeature.MEDIA_DELETE,
     } <= observed
     command_paths = [request.path for request in transport.requests]
@@ -915,6 +920,22 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
             "PUT",
             "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
             {"action": "rotate", "value": "270"},
+        )
+        in transport.requests
+    )
+    assert (
+        RecordedRequest(
+            "PUT",
+            "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
+            {"action": "archive", "value": "enable"},
+        )
+        in transport.requests
+    )
+    assert (
+        RecordedRequest(
+            "PUT",
+            "/ccapi/ver100/contents/card1/100CANON/IMG_0001.JPG",
+            {"action": "archive", "value": "disable"},
         )
         in transport.requests
     )
@@ -2717,6 +2738,8 @@ def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
         session.delete_media("ccapi:invalid")
     with pytest.raises(BridgeError) as thumbnail_failure:
         session.media_thumbnail("ccapi:invalid")
+    with pytest.raises(BridgeError) as archive_failure:
+        session.set_media_archive("ccapi:invalid", True)
     with pytest.raises(BridgeError) as focus_failure:
         session.drive_focus("near", "small")
 
@@ -2726,10 +2749,12 @@ def test_ccapi_capabilities_do_not_enable_unadvertised_commands() -> None:
     assert failure.value.code == "UNSUPPORTED_FEATURE"
     assert delete_failure.value.code == "UNSUPPORTED_FEATURE"
     assert thumbnail_failure.value.code == "UNSUPPORTED_FEATURE"
+    assert archive_failure.value.code == "UNSUPPORTED_FEATURE"
     assert focus_failure.value.code == "UNSUPPORTED_FEATURE"
     observed = set(session.capabilities().evidence.observed_features)
     assert CameraFeature.STILL_CAPTURE not in observed
     assert CameraFeature.MEDIA_DELETE not in observed
+    assert CameraFeature.MEDIA_ARCHIVE not in observed
     assert CameraFeature.FOCUS_DRIVE not in observed
     assert len(transport.requests) == before
 
@@ -2973,6 +2998,11 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
             headers=headers,
             json={"degrees": 180},
         )
+        archived = client.put(
+            f"/v1/session/{session_id}/media/{media_id}/archive",
+            headers=headers,
+            json={"enabled": True},
+        )
         created_directory = client.post(
             f"/v1/session/{session_id}/directories",
             headers=headers,
@@ -3023,6 +3053,7 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert "MEDIA_PROTECT" in capabilities.json()["supported"]
     assert "MEDIA_RATING" in capabilities.json()["supported"]
     assert "MEDIA_ROTATE" in capabilities.json()["supported"]
+    assert "MEDIA_ARCHIVE" in capabilities.json()["supported"]
     assert "DIRECTORY_CONTROL" in capabilities.json()["supported"]
     assert "FILE_NAMING_CONTROL" in capabilities.json()["supported"]
     assert capabilities.json()["fileNaming"]["movieIndex"] == "A_"
@@ -3040,6 +3071,7 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert protected.json()["protected"] is True
     assert rated.json()["rating"] == 4
     assert rotated.json()["rotationDegrees"] == 180
+    assert archived.json()["archived"] is True
     assert focused.json() == {"accepted": True, "x": 0.4, "y": 0.6}
     assert white_balanced.json()["connected"] is True
     assert driven.json() == {"accepted": True, "direction": "NEAR", "step": "MEDIUM"}

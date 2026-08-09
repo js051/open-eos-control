@@ -155,4 +155,24 @@ class CameraViewModelPreviewTest {
         assertEquals(item.name, viewModel.uiState.value.lastDeletedMediaName)
         assertEquals(2, viewModel.uiState.value.mediaItems.size)
     }
+
+    @Test
+    fun previewMediaMetadataActionsUpdateOnlyTheLocalItem() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+        val item = viewModel.uiState.value.mediaItems.first()
+
+        viewModel.setMediaProtection(item, false)
+        viewModel.setMediaArchived(item, true)
+        viewModel.setMediaRating(item, 2)
+        viewModel.setMediaRotation(item, 180)
+
+        val updated = viewModel.uiState.value.mediaItems.first { it.id == item.id }
+        assertEquals(false, updated.protected)
+        assertEquals(true, updated.archived)
+        assertEquals(2, updated.rating)
+        assertEquals(180, updated.rotationDegrees)
+        assertTrue(viewModel.uiState.value.previewMode)
+        assertFalse(CameraOperation.MEDIA in viewModel.uiState.value.pendingOperations)
+    }
 }

@@ -1050,25 +1050,48 @@ class CameraViewModel(
     fun setMediaProtection(item: CameraMediaItem, enabled: Boolean) = updateMediaMetadata(
         item,
         CameraFeature.MEDIA_PROTECT,
+        previewUpdate = { it.copy(protected = enabled) },
     ) { repository.setMediaProtection(item, enabled) }
+
+    fun setMediaArchived(item: CameraMediaItem, enabled: Boolean) = updateMediaMetadata(
+        item,
+        CameraFeature.MEDIA_ARCHIVE,
+        previewUpdate = { it.copy(archived = enabled) },
+    ) { repository.setMediaArchived(item, enabled) }
 
     fun setMediaRating(item: CameraMediaItem, rating: Int) {
         if (rating !in 0..5) return
-        updateMediaMetadata(item, CameraFeature.MEDIA_RATING) { repository.setMediaRating(item, rating) }
+        updateMediaMetadata(
+            item,
+            CameraFeature.MEDIA_RATING,
+            previewUpdate = { it.copy(rating = rating) },
+        ) { repository.setMediaRating(item, rating) }
     }
 
     fun setMediaRotation(item: CameraMediaItem, degrees: Int) {
         if (degrees !in setOf(0, 90, 180, 270)) return
-        updateMediaMetadata(item, CameraFeature.MEDIA_ROTATE) { repository.setMediaRotation(item, degrees) }
+        updateMediaMetadata(
+            item,
+            CameraFeature.MEDIA_ROTATE,
+            previewUpdate = { it.copy(rotationDegrees = degrees) },
+        ) { repository.setMediaRotation(item, degrees) }
     }
 
     private fun updateMediaMetadata(
         item: CameraMediaItem,
         feature: CameraFeature,
+        previewUpdate: (CameraMediaItem) -> CameraMediaItem,
         update: suspend () -> CameraMediaItem,
     ) {
         val state = _uiState.value
-        if (state.previewMode || state.isBusy(CameraOperation.MEDIA) || !state.supports(feature)) return
+        if (state.isBusy(CameraOperation.MEDIA) || !state.supports(feature)) return
+        if (state.previewMode) {
+            _uiState.update { current ->
+                val currentItem = current.mediaItems.firstOrNull { it.id == item.id } ?: item
+                current.withUpdatedMedia(previewUpdate(currentItem))
+            }
+            return
+        }
         runCamera(CameraOperation.MEDIA) {
             val updated = update()
             _uiState.update { current -> current.withUpdatedMedia(updated) }

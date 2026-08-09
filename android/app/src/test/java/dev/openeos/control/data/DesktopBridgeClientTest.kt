@@ -262,6 +262,31 @@ class DesktopBridgeClientTest {
     }
 
     @Test
+    fun mediaArchiveUsesBooleanBridgeRouteAndParsesAuthoritativeResponse() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON))
+        server.enqueue(
+            jsonResponse(
+                """{"id":"ccapi:item","name":"IMG_0001.JPG","kind":"image","archived":true}""",
+            ),
+        )
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        server.takeRequest()
+        server.takeRequest()
+        val item = CameraMediaItem("ccapi:item", "IMG_0001.JPG", "image", archived = false)
+
+        val updated = client.setMediaArchived(item, enabled = true)
+        val request = server.takeRequest()
+
+        assertEquals("PUT", request.method)
+        assertEquals("/v1/session/session-1/media/ccapi:item/archive", request.path)
+        assertTrue(JSONObject(request.body.readUtf8()).getBoolean("enabled"))
+        assertEquals(true, updated.archived)
+        assertTrue(CameraFeature.MEDIA_ARCHIVE in client.observedFeatureSnapshot())
+    }
+
+    @Test
     fun mediaUploadRejectsOversizedBridgeResponseBeforeJsonParsing() = runTest {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON))

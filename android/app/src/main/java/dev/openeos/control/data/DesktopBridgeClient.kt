@@ -582,6 +582,14 @@ class DesktopBridgeClient(
             feature = CameraFeature.MEDIA_PROTECT,
         )
 
+    suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        updateMediaMetadata(
+            item,
+            endpoint = "archive",
+            payload = JSONObject().put("enabled", enabled),
+            feature = CameraFeature.MEDIA_ARCHIVE,
+        )
+
     suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem {
         require(rating in 0..5) { "Media rating must be from 0 through 5." }
         return updateMediaMetadata(
@@ -868,6 +876,7 @@ class DesktopBridgeClient(
             captureTime = item.optNullableString("captureTime"),
             previewAvailable = item.optBoolean("previewAvailable", false),
             protected = item.optNullableBoolean("protected"),
+            archived = item.optNullableBoolean("archived"),
             rating = item.optNullableInt("rating")?.takeIf { it in 0..5 },
             rotationDegrees = item.optNullableInt("rotationDegrees")?.takeIf { it in MEDIA_ROTATIONS },
         )

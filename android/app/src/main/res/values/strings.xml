@@ -329,6 +329,11 @@
     <string name="media_metadata_unknown">Reading from camera…</string>
     <string name="protect_media">Protect %1$s</string>
     <string name="unprotect_media">Remove protection from %1$s</string>
+    <string name="media_archive">Archive</string>
+    <string name="media_archived">Archived</string>
+    <string name="media_not_archived">Not archived</string>
+    <string name="archive_media">Archive %1$s</string>
+    <string name="unarchive_media">Remove %1$s from archive</string>
     <string name="media_rating">Rating</string>
     <string name="media_rating_value">%1$d of 5</string>
     <string name="clear_media_rating">Clear rating for %1$s</string>

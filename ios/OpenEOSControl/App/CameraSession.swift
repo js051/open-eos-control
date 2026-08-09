@@ -262,6 +262,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func setMediaArchive(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client): return try await client.setMediaArchive(item, enabled: enabled)
+        case let .desktopBridge(client): return try await client.setMediaArchive(item, enabled: enabled)
+        }
+    }
+
     func uploadMedia(
         from fileURL: URL,
         contentType: String? = nil,

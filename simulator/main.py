@@ -245,6 +245,7 @@ def initial_state() -> dict[str, object]:
                 "protect": False,
                 "rating": 0,
                 "rotate": 0,
+                "archive": False,
             },
             {
                 "id": "SIM_0001.PNG",
@@ -254,6 +255,7 @@ def initial_state() -> dict[str, object]:
                 "protect": True,
                 "rating": 3,
                 "rotate": 90,
+                "archive": False,
             },
         ],
     }
@@ -1415,7 +1417,7 @@ def media_info(item: dict[str, object]) -> dict[str, object]:
             len(uploaded_media_payloads.get(str(item["id"]), (camera_frame_jpeg(), ""))[0]),
         ),
         "protect": "enable" if item.get("protect") is True else "disable",
-        "archive": "disable",
+        "archive": "enable" if item.get("archive") is True else "disable",
         "rotate": str(item.get("rotate", 0)),
         "rating": "off" if item.get("rating", 0) == 0 else str(item["rating"]),
         "lastmodifieddate": item.get("capture_time"),
@@ -1431,6 +1433,8 @@ def update_media_metadata(item: dict[str, object], payload: dict[str, object]) -
         item["rating"] = 0 if value == "off" else int(value)
     elif action == "rotate" and value in {"0", "90", "180", "270"}:
         item["rotate"] = int(value)
+    elif action == "archive" and value in {"enable", "disable"}:
+        item["archive"] = value == "enable"
     else:
         raise HTTPException(status_code=400, detail="Invalid media metadata parameter")
     state["media_metadata_update_count"] += 1
@@ -2033,6 +2037,7 @@ async def canon_capture_still(payload: dict[str, object]) -> Response:
             "protect": False,
             "rating": 0,
             "rotate": 0,
+            "archive": False,
         },
     )
     publish_event("contents")

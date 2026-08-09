@@ -296,7 +296,7 @@ struct MediaView: View {
     @ViewBuilder
     private func mediaActions(_ item: CameraMediaItem) -> some View {
         let metadataSupported = camera.supports(.mediaProtect) ||
-            camera.supports(.mediaRating) || camera.supports(.mediaRotate)
+            camera.supports(.mediaRating) || camera.supports(.mediaRotate) || camera.supports(.mediaArchive)
         HStack(spacing: 2) {
             if camera.supports(.mediaDownload) {
                 downloadAction(item)
@@ -491,6 +491,27 @@ private struct MediaMetadataView: View {
                         .disabled(camera.isBusy(.media))
                     }
 
+                    if camera.supports(.mediaArchive), item.archived != nil {
+                        metadataHeader(
+                            language.string("media_archive"),
+                            value: archiveLabel(item.archived)
+                        )
+                        HStack(spacing: 12) {
+                            metadataIconButton(
+                                systemName: "archivebox",
+                                label: language.format("archive_media", item.name),
+                                selected: item.archived == true,
+                                enabled: item.archived != true
+                            ) { Task { await camera.setMediaArchive(item, enabled: true) } }
+                            metadataIconButton(
+                                systemName: "arrow.up.bin",
+                                label: language.format("unarchive_media", item.name),
+                                selected: item.archived == false,
+                                enabled: item.archived != false
+                            ) { Task { await camera.setMediaArchive(item, enabled: false) } }
+                        }
+                    }
+
                     if camera.supports(.mediaDelete) {
                         Divider().overlay(Color.cameraBorder)
                         Button(role: .destructive) { onDelete(item) } label: {
@@ -504,7 +525,7 @@ private struct MediaMetadataView: View {
                 .padding(20)
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .background(Color.cameraBackground)
         .task(id: itemID) {
@@ -524,6 +545,11 @@ private struct MediaMetadataView: View {
     private func protectionLabel(_ value: Bool?) -> String {
         guard let value else { return language.string("media_metadata_unknown") }
         return language.string(value ? "media_protected" : "media_unprotected")
+    }
+
+    private func archiveLabel(_ value: Bool?) -> String {
+        guard let value else { return language.string("media_metadata_unknown") }
+        return language.string(value ? "media_archived" : "media_unarchived")
     }
 
     private func metadataIconButton(

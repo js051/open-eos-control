@@ -246,6 +246,11 @@
 "media_metadata_unknown" = "正在從相機讀取…";
 "protect_media" = "保護 %@";
 "unprotect_media" = "取消保護 %@";
+"media_archive" = "封存";
+"media_archived" = "已封存";
+"media_unarchived" = "未封存";
+"archive_media" = "封存 %@";
+"unarchive_media" = "從封存移除 %@";
 "media_rating" = "評分";
 "media_rating_value" = "5 分之 %ld";
 "set_media_rating" = "將 %@ 設為 %ld 星";

@@ -1379,6 +1379,7 @@ class GPhoto2Session:
                     CameraFeature.MEDIA_PROTECT,
                     CameraFeature.MEDIA_RATING,
                     CameraFeature.MEDIA_ROTATE,
+                    CameraFeature.MEDIA_ARCHIVE,
                     CameraFeature.MEDIA_UPLOAD,
                 )
                 if feature not in supported
@@ -1409,6 +1410,9 @@ class GPhoto2Session:
                     ),
                     CameraFeature.MEDIA_ROTATE.value: (
                         "No verified libgphoto2 contract for changing Canon display rotation is available."
+                    ),
+                    CameraFeature.MEDIA_ARCHIVE.value: (
+                        "No verified libgphoto2 contract for changing Canon archive state is available."
                     ),
                     CameraFeature.MEDIA_UPLOAD.value: (
                         "Requires the camera summary to advertise File Upload and a writable storage "
@@ -2171,6 +2175,10 @@ class GPhoto2Session:
     def set_media_rotation(self, media_id: str, degrees: int) -> MediaItem:
         del media_id, degrees
         raise unsupported(CameraFeature.MEDIA_ROTATE.value, self.engine_name)
+
+    def set_media_archive(self, media_id: str, enabled: bool) -> MediaItem:
+        del media_id, enabled
+        raise unsupported(CameraFeature.MEDIA_ARCHIVE.value, self.engine_name)
 
     @property
     def requested_fps(self) -> int:

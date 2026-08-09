@@ -3035,7 +3035,7 @@ class CcapiClientTest {
     fun simulatorMediaCanBeListedAndDownloaded() = runTest {
         server.enqueue(
             jsonResponse(
-                """{"items":[{"id":"SIM_0001.PNG","name":"SIM_0001.PNG","kind":"image","size_bytes":6}]}""",
+                """{"items":[{"id":"SIM_0001.PNG","name":"SIM_0001.PNG","kind":"image","size_bytes":6,"archive":true}]}""",
             ),
         )
         val bytes = byteArrayOf(1, 2, 3, 4, 5, 6)
@@ -3045,6 +3045,7 @@ class CcapiClientTest {
 
         val item = client.listMedia().single()
         assertTrue(item.previewAvailable)
+        assertEquals(true, item.archived)
         val result = client.downloadMedia(item, output, progress::add)
 
         assertEquals("/ccapi/media", server.takeRequest().path)
@@ -3251,7 +3252,7 @@ class CcapiClientTest {
         val item = CameraMediaItem(path, "IMG_0001.JPG", "image")
         server.enqueue(
             jsonResponse(
-                """{"filesize":1234,"protect":"disable","rating":"off","rotate":"0","lastmodifieddate":"2026-08-05T10:00:00+08:00"}""",
+                """{"filesize":1234,"protect":"disable","archive":"disable","rating":"off","rotate":"0","lastmodifieddate":"2026-08-05T10:00:00+08:00"}""",
             ),
         )
 
@@ -3259,12 +3260,13 @@ class CcapiClientTest {
 
         assertEquals(1234L, info.sizeBytes)
         assertEquals(false, info.protected)
+        assertEquals(false, info.archived)
         assertEquals(0, info.rating)
         assertEquals(0, info.rotationDegrees)
         assertEquals("$path?kind=info", server.takeRequest().path)
 
         server.enqueue(jsonResponse("{}"))
-        server.enqueue(jsonResponse("""{"protect":"enable","rating":"off","rotate":"0"}"""))
+        server.enqueue(jsonResponse("""{"protect":"enable","archive":"disable","rating":"off","rotate":"0"}"""))
         val protected = client.setMediaProtection(info, true)
         val protectRequest = server.takeRequest()
         val protectBody = JSONObject(protectRequest.body.readUtf8())
@@ -3276,8 +3278,28 @@ class CcapiClientTest {
         assertEquals(true, protected.protected)
 
         server.enqueue(jsonResponse("{}"))
-        server.enqueue(jsonResponse("""{"protect":"enable","rating":"5","rotate":"0"}"""))
-        assertEquals(5, client.setMediaRating(protected, 5).rating)
+        server.enqueue(jsonResponse("""{"protect":"enable","archive":"enable","rating":"off","rotate":"0"}"""))
+        val archived = client.setMediaArchived(protected, true)
+        val archiveRequest = server.takeRequest()
+        val archiveBody = JSONObject(archiveRequest.body.readUtf8())
+        assertEquals("archive", archiveBody.getString("action"))
+        assertEquals("enable", archiveBody.getString("value"))
+        server.takeRequest()
+        assertEquals(true, archived.archived)
+
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"protect":"enable","archive":"disable","rating":"off","rotate":"0"}"""))
+        val unarchived = client.setMediaArchived(archived, false)
+        val unarchiveRequest = server.takeRequest()
+        val unarchiveBody = JSONObject(unarchiveRequest.body.readUtf8())
+        assertEquals("archive", unarchiveBody.getString("action"))
+        assertEquals("disable", unarchiveBody.getString("value"))
+        server.takeRequest()
+        assertEquals(false, unarchived.archived)
+
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"protect":"enable","archive":"disable","rating":"5","rotate":"0"}"""))
+        assertEquals(5, client.setMediaRating(unarchived, 5).rating)
         val ratingRequest = server.takeRequest()
         val ratingBody = JSONObject(ratingRequest.body.readUtf8())
         assertEquals("rating", ratingBody.getString("action"))
@@ -3285,8 +3307,8 @@ class CcapiClientTest {
         server.takeRequest()
 
         server.enqueue(jsonResponse("{}"))
-        server.enqueue(jsonResponse("""{"protect":"enable","rating":"5","rotate":"270"}"""))
-        assertEquals(270, client.setMediaRotation(protected, 270).rotationDegrees)
+        server.enqueue(jsonResponse("""{"protect":"enable","archive":"disable","rating":"5","rotate":"270"}"""))
+        assertEquals(270, client.setMediaRotation(unarchived, 270).rotationDegrees)
         val rotateRequest = server.takeRequest()
         val rotateBody = JSONObject(rotateRequest.body.readUtf8())
         assertEquals("rotate", rotateBody.getString("action"))
@@ -3294,6 +3316,7 @@ class CcapiClientTest {
         server.takeRequest()
 
         assertTrue(CameraFeature.MEDIA_PROTECT in client.observedFeatureSnapshot())
+        assertTrue(CameraFeature.MEDIA_ARCHIVE in client.observedFeatureSnapshot())
         assertTrue(CameraFeature.MEDIA_RATING in client.observedFeatureSnapshot())
         assertTrue(CameraFeature.MEDIA_ROTATE in client.observedFeatureSnapshot())
     }
@@ -3310,10 +3333,10 @@ class CcapiClientTest {
             "image",
         )
 
-        val failure = runCatching { client.setMediaRating(item, 4) }.exceptionOrNull()
+        val failure = runCatching { client.setMediaArchived(item, true) }.exceptionOrNull()
 
         assertTrue(failure is IllegalStateException)
-        assertTrue(failure?.message.orEmpty().contains("did not advertise media rating"))
+        assertTrue(failure?.message.orEmpty().contains("did not advertise media archive"))
         assertEquals(1, server.requestCount)
     }
 

@@ -241,6 +241,9 @@ class CameraRepository(
     suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
         backend.setMediaProtection(item, enabled)
 
+    suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
+        backend.setMediaArchived(item, enabled)
+
     suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem =
         backend.setMediaRating(item, rating)
 

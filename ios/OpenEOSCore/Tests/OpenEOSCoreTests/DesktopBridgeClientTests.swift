@@ -6,7 +6,7 @@ import XCTest
 final class DesktopBridgeClientTests: XCTestCase {
     private let health = #"{"ok":true,"service":"open-eos-control-bridge","version":"0.1.0","authRequired":true,"loopbackOnly":false,"engines":{}}"#
     private let status = #"{"connected":true,"battery":{"level":82,"status":"good"},"recording":false,"mode":"Manual","recordableShots":120,"remainingRecordingSeconds":3600,"media":{"available":true,"totalBytes":1000,"freeBytes":800,"freeImages":123,"devices":1},"exposure":{"iso":"400","shutter":"1/50","aperture":"2.8","whiteBalance":"Auto"},"raw":{"transport":"usb","recordable":{"recordableshots":120,"remainingtime":3600}}}"#
-    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","DIRECTORY_CONTROL","SENSOR_CLEANING","CAMERA_SLEEP","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_PROTECT","MEDIA_RATING","MEDIA_ROTATE","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","magnifications":[1,5],"currentMagnification":1,"minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]},{"key":"directoryselection","label":"Capture directory","value":"100EOSXX","values":["100EOSXX","101EOSXX"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso","directoryselection"],"observedFeatures":["BATTERY_STATUS"],"discoveryTrace":[{"endpoint":"GET /ccapi","outcome":"NO_API_LIST","httpStatus":200,"responseKeys":["value"],"protocolVersions":[],"advertisedOperationCount":0,"truncated":false}],"truncated":false}}"#
+    private let capabilities = #"{"profile":{"modelName":"Canon EOS R6 Mark III","family":"EOS_R","priority":"PRIMARY"},"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","USB_DIAGNOSTICS","LIVE_VIEW","LIVE_VIEW_MAGNIFICATION","STILL_CAPTURE","BULB_EXPOSURE","AUTOFOCUS","SHUTTER_HALF_PRESS","VIDEO_RECORDING","TAP_FOCUS","CLICK_WHITE_BALANCE","FOCUS_DRIVE","EXPOSURE_CONTROL","DIRECTORY_CONTROL","SENSOR_CLEANING","CAMERA_SLEEP","MEDIA_BROWSER","MEDIA_THUMBNAIL","MEDIA_PREVIEW","MEDIA_DOWNLOAD","MEDIA_PROTECT","MEDIA_RATING","MEDIA_ROTATE","MEDIA_ARCHIVE","MEDIA_DELETE"],"planned":["LIVE_VIEW_RTP","STILL_CAPTURE"],"reasons":{"LIVE_VIEW_RTP":"No verified decoder."},"liveView":{"sources":["DESKTOP_BRIDGE_STREAM"],"defaultSource":"DESKTOP_BRIDGE_STREAM","sizes":["MEDIUM","LARGE"],"defaultSize":"MEDIUM","magnifications":[1,5],"currentMagnification":1,"minFps":1,"maxFps":12},"settings":[{"key":"iso","label":"ISO Speed","value":"400","values":["100","400","800"]},{"key":"directoryselection","label":"Capture directory","value":"100EOSXX","values":["100EOSXX","101EOSXX"]}],"evidence":{"source":"libgphoto2","protocolVersions":["gphoto2 2.5.33"],"advertisedCommands":["POST /capture?token=secret"],"writableSettings":["iso","directoryselection"],"observedFeatures":["BATTERY_STATUS"],"discoveryTrace":[{"endpoint":"GET /ccapi","outcome":"NO_API_LIST","httpStatus":200,"responseKeys":["value"],"protocolVersions":[],"advertisedOperationCount":0,"truncated":false}],"truncated":false}}"#
 
     func testDesktopBridgeUploadsExactFileWithRequiredHeadersAndVerifiesResult() async throws {
         let transport = MockCameraHTTPTransport()
@@ -361,7 +361,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         )
         await transport.enqueueJSON(
             path: "/v1/session/session_123/media",
-            body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true,"protected":null,"rating":null,"rotationDegrees":null}]}"#
+            body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true,"protected":null,"rating":null,"rotationDegrees":null,"archived":false}]}"#
         )
         let thumbnailJPEG = Data([0xFF, 0xD8, 0x04, 0x02, 0xFF, 0xD9])
         await transport.enqueue(
@@ -377,22 +377,27 @@ final class DesktopBridgeClientTests: XCTestCase {
         )
         await transport.enqueueJSON(
             path: "/v1/session/session_123/media/gphoto2:YWJj/info",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true,"protected":false,"rating":0,"rotationDegrees":0}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true,"protected":false,"rating":0,"rotationDegrees":0,"archived":false}"#
         )
         await transport.enqueueJSON(
             method: "PUT",
             path: "/v1/session/session_123/media/gphoto2:YWJj/protection",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":0,"rotationDegrees":0}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":0,"rotationDegrees":0,"archived":false}"#
         )
         await transport.enqueueJSON(
             method: "PUT",
             path: "/v1/session/session_123/media/gphoto2:YWJj/rating",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":0}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":0,"archived":false}"#
         )
         await transport.enqueueJSON(
             method: "PUT",
             path: "/v1/session/session_123/media/gphoto2:YWJj/rotation",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":180}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":180,"archived":false}"#
+        )
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: "/v1/session/session_123/media/gphoto2:YWJj/archive",
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":180,"archived":true}"#
         )
         await transport.enqueueDownload(
             path: "/v1/session/session_123/media/gphoto2:YWJj",
@@ -436,6 +441,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaProtect))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaRating))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaRotate))
+        XCTAssertTrue(snapshot.capabilities.matrix.supports(.mediaArchive))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.sensorCleaning))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.cameraSleep))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.directoryControl))
@@ -499,9 +505,20 @@ final class DesktopBridgeClientTests: XCTestCase {
         let protected = try await client.setMediaProtection(info, enabled: true)
         let rated = try await client.setMediaRating(protected, rating: 4)
         let rotated = try await client.setMediaRotation(rated, degrees: 180)
+        let archived = try await client.setMediaArchive(rotated, enabled: true)
         XCTAssertEqual(protected.protected, true)
         XCTAssertEqual(rated.rating, 4)
         XCTAssertEqual(rotated.rotationDegrees, 180)
+        XCTAssertEqual(archived.archived, true)
+        let archiveRequests = await transport.requests()
+        let archiveRequest = try XCTUnwrap(
+            archiveRequests.last { $0.method == "PUT" && $0.path.hasSuffix("/archive") }
+        )
+        let archivePayload = try XCTUnwrap(archiveRequest.body)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: archivePayload) as? [String: Bool],
+            ["enabled": true]
+        )
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }

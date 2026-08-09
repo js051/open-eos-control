@@ -87,7 +87,7 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 5))
         XCTAssertTrue(waitForInteraction(actions, timeout: 5))
         actions.tap()
-        XCTAssertTrue(waitForInteraction(delete, timeout: 5))
+        XCTAssertTrue(scrollToInteraction(delete, in: app, timeout: 8))
         delete.tap()
 
         let alert = app.alerts["Delete from camera?"]
@@ -290,7 +290,7 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForInteraction(mediaActions, timeout: 8))
         mediaActions.tap()
         let deleteMedia = app.buttons["delete-media-SIM_0003.PNG"]
-        XCTAssertTrue(waitForInteraction(deleteMedia, timeout: 8))
+        XCTAssertTrue(scrollToInteraction(deleteMedia, in: app, timeout: 8))
         deleteMedia.tap()
         let deleteAlert = app.alerts["Delete from camera?"]
         XCTAssertTrue(deleteAlert.waitForExistence(timeout: 5))
@@ -410,6 +410,27 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func scrollToInteraction(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        guard element.waitForExistence(timeout: min(timeout, 2)) else { return false }
+        while Date() < deadline {
+            if element.isEnabled, element.isHittable { return true }
+            let scrollSurface = app.scrollViews.allElementsBoundByIndex.last {
+                $0.exists && $0.isHittable
+            }
+            if let scrollSurface {
+                scrollSurface.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+        }
+        return element.isEnabled && element.isHittable
     }
 
     private func openMoreActions(in app: XCUIApplication) {

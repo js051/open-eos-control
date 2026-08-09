@@ -567,6 +567,10 @@ public actor DesktopBridgeClient {
         return try await updateMediaMetadata(item, endpoint: "rotation", payload: ["degrees": degrees])
     }
 
+    public func setMediaArchive(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
+        try await updateMediaMetadata(item, endpoint: "archive", payload: ["enabled": enabled])
+    }
+
     private func updateMediaMetadata(
         _ item: CameraMediaItem,
         endpoint: String,
@@ -1011,6 +1015,7 @@ public actor DesktopBridgeClient {
         guard let id = item.nonEmptyString("id"), let name = item.nonEmptyString("name") else { return nil }
         let rating = item.int("rating").flatMap { (0...5).contains($0) ? $0 : nil }
         let rotation = item.int("rotationDegrees").flatMap { mediaRotations.contains($0) ? $0 : nil }
+        let archived = item.optionalBool("archived")
         return CameraMediaItem(
             id: id,
             name: name,
@@ -1020,7 +1025,8 @@ public actor DesktopBridgeClient {
             previewAvailable: item.optionalBool("previewAvailable") ?? false,
             protected: item.optionalBool("protected"),
             rating: rating,
-            rotationDegrees: rotation
+            rotationDegrees: rotation,
+            archived: archived
         )
     }
 

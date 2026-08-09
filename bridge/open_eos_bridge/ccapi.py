@@ -1058,6 +1058,7 @@ class CcapiSession:
                         CameraFeature.MEDIA_PROTECT,
                         CameraFeature.MEDIA_RATING,
                         CameraFeature.MEDIA_ROTATE,
+                        CameraFeature.MEDIA_ARCHIVE,
                     }
                 )
             if self._event_polling_operations() is not None:
@@ -1093,6 +1094,7 @@ class CcapiSession:
                 CameraFeature.MEDIA_PROTECT,
                 CameraFeature.MEDIA_RATING,
                 CameraFeature.MEDIA_ROTATE,
+                CameraFeature.MEDIA_ARCHIVE,
                 CameraFeature.MEDIA_DELETE,
                 CameraFeature.CAMERA_CLOCK_SYNC,
                 CameraFeature.SENSOR_CLEANING,
@@ -1146,6 +1148,9 @@ class CcapiSession:
                     ),
                     CameraFeature.MEDIA_ROTATE.value: (
                         "The camera must advertise PUT for Canon contents before display rotation can be changed."
+                    ),
+                    CameraFeature.MEDIA_ARCHIVE.value: (
+                        "The camera must advertise PUT for Canon contents before media archive state can be changed."
                     ),
                     CameraFeature.CAMERA_CLOCK_SYNC.value: (
                         "The camera must advertise both GET and PUT for the Canon date-time endpoint "
@@ -2174,6 +2179,15 @@ class CcapiSession:
             matches=lambda item: item.rotation_degrees == degrees,
         )
 
+    def set_media_archive(self, media_id: str, enabled: bool) -> MediaItem:
+        return self._modify_media(
+            media_id,
+            action="archive",
+            value="enable" if enabled else "disable",
+            feature=CameraFeature.MEDIA_ARCHIVE,
+            matches=lambda item: item.archived is enabled,
+        )
+
     def _media_info(self, media_id: str) -> MediaItem:
         path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
         value = self._request_json("GET", f"{path}?kind=info")
@@ -2199,6 +2213,7 @@ class CcapiSession:
                 "protected": _canon_protection(value.get("protect")),
                 "rating": _canon_rating(value.get("rating")),
                 "rotation_degrees": _canon_rotation(value.get("rotate")),
+                "archived": _canon_archive(value.get("archive")),
             }
         )
         self._media_cache[media_id] = item
@@ -3728,6 +3743,15 @@ def _optional_string(value: object) -> str | None:
 
 
 def _canon_protection(value: object) -> bool | None:
+    normalized = _optional_string(value)
+    if normalized == "enable":
+        return True
+    if normalized == "disable":
+        return False
+    return None
+
+
+def _canon_archive(value: object) -> bool | None:
     normalized = _optional_string(value)
     if normalized == "enable":
         return True
