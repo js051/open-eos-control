@@ -347,10 +347,97 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun canonMovieModeSwitchUsesAdvertisedOperationsAndMatchingFixedMovieReadback() = runTest {
+        val transport = CanonEosScriptedTransport(advertisePropertyWrites = false)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-movie-mode"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val initial = backend.capabilities().advancedSettings.single { it.key == "moviemode" }
+        assertEquals("off", initial.value)
+        assertEquals(listOf("off", "on"), initial.values)
+
+        backend.setSetting("moviemode", "on")
+        val movie = backend.capabilities().advancedSettings.single { it.key == "moviemode" }
+        backend.setSetting("moviemode", "off")
+        val photo = backend.capabilities().advancedSettings.single { it.key == "moviemode" }
+
+        assertTrue(transport.hasOperation(CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON))
+        assertTrue(transport.hasOperation(CanonEosOperationCode.MOVIE_SELECT_SWITCH_OFF))
+        assertEquals("on", movie.value)
+        assertEquals("off", photo.value)
+        assertTrue(CameraFeature.ADVANCED_SETTINGS in backend.observedFeatures())
+        backend.close()
+    }
+
+    @Test
+    fun canonMovieModeSwitchStaysHiddenWithoutTheCompleteAdvertisedPair() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseMovieModeSwitch = false)
+        val backend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-no-movie-mode"),
+            transportFactory = PtpTransportFactory { transport },
+        )
+        backend.initialize()
+
+        val capabilities = backend.capabilities()
+        val failure = runCatching { backend.setSetting("moviemode", "on") }.exceptionOrNull()
+
+        assertTrue(capabilities.advancedSettings.none { it.key == "moviemode" })
+        assertTrue(failure is UnsupportedOperationException)
+        assertFalse(transport.hasOperation(CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON))
+        backend.close()
+    }
+
+    @Test
+    fun canonMovieModeSwitchRejectsCommandFailureAndMissingReadbackWithoutChangingState() = runTest {
+        val rejectedTransport = CanonEosScriptedTransport(
+            rejectOperationCode = CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON,
+        )
+        val rejectedBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-movie-mode-rejected"),
+            transportFactory = PtpTransportFactory { rejectedTransport },
+        )
+        rejectedBackend.initialize()
+        rejectedBackend.capabilities()
+
+        val rejected = runCatching { rejectedBackend.setSetting("moviemode", "on") }.exceptionOrNull()
+
+        assertTrue(rejected is PtpResponseException)
+        assertEquals(
+            "off",
+            rejectedBackend.capabilities().advancedSettings.single { it.key == "moviemode" }.value,
+        )
+        assertFalse(CameraFeature.ADVANCED_SETTINGS in rejectedBackend.observedFeatures())
+        rejectedBackend.close()
+
+        val timeoutTransport = CanonEosScriptedTransport(movieModeReadback = false)
+        val timeoutBackend = UsbPtpCameraBackend(
+            connection = CameraConnection.AndroidUsbPtp("usb-r6m3-movie-mode-timeout"),
+            transportFactory = PtpTransportFactory { timeoutTransport },
+        )
+        timeoutBackend.initialize()
+        timeoutBackend.capabilities()
+
+        val timeout = runCatching { timeoutBackend.setSetting("moviemode", "on") }.exceptionOrNull()
+
+        assertTrue(timeout is PtpProtocolException)
+        assertTrue(timeout?.message.orEmpty().contains("FixedMovie=1"))
+        assertEquals(
+            "off",
+            timeoutBackend.capabilities().advancedSettings.single { it.key == "moviemode" }.value,
+        )
+        assertFalse(CameraFeature.ADVANCED_SETTINGS in timeoutBackend.observedFeatures())
+        timeoutBackend.close()
+    }
+
+    @Test
     fun canonEventPollingAppliesPropertyUpdatesAndReturnsRefreshHints() = runTest {
         val transport = CanonEosScriptedTransport(
             scriptedEvents = listOf(
                 eosPropertyValue(CanonEosPropertyCode.ISO_SPEED, 0x60) +
+                    eosPropertyValue(CanonEosPropertyCode.FIXED_MOVIE, 1) +
                     eosPropertyValue(
                         CanonEosPropertyCode.EVF_RECORD_STATUS,
                         CanonEosPtp.MOVIE_RECORD_TARGET_CARD.toInt(),
@@ -368,9 +455,11 @@ class UsbPtpCameraBackendTest {
 
         val event = backend.pollEvent()
         val status = backend.status()
+        val movieMode = backend.capabilities().advancedSettings.single { it.key == "moviemode" }
 
         assertEquals(setOf("shootingsettings", "recording", "storage"), event.changedKeys)
         assertEquals("800", status.exposure.iso)
+        assertEquals("on", movieMode.value)
         assertTrue(status.recording == true)
         assertEquals(321L, status.storageFreeImages)
         assertTrue(CameraFeature.EVENT_POLLING in backend.observedFeatures())
@@ -539,6 +628,8 @@ class UsbPtpCameraBackendTest {
         backend.setSetting("highisonr", "High")
         backend.setSetting("alomode", "High")
         backend.setSetting("aeb", "+/- 2")
+        backend.setSetting("moviemode", "on")
+        backend.setSetting("moviemode", "off")
         val recordingStatus = backend.startRecording()
         val stoppedRecordingStatus = backend.stopRecording()
         val exposureStatus = backend.setExposure(iso = "800", shutter = "1/50", aperture = "4")
@@ -568,6 +659,7 @@ class UsbPtpCameraBackendTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.VIDEO_RECORDING))
         assertTrue(capabilities.matrix.supports(CameraFeature.ADVANCED_SETTINGS))
         assertTrue("movierecordtarget" in capabilities.evidence.writableSettings)
+        assertTrue("moviemode" in capabilities.evidence.writableSettings)
         assertTrue(CanonEosPtp.settingSpecs.all { it.key in capabilities.evidence.writableSettings })
         assertEquals("Manual", initialStatus.mode)
         assertEquals(46_822L, initialStatus.storageFreeImages)
@@ -577,6 +669,8 @@ class UsbPtpCameraBackendTest {
         assertEquals(listOf("2.8", "4"), capabilities.aperture)
         assertEquals(listOf("Auto", "Daylight", "Shadow"), capabilities.whiteBalance)
         val settings = capabilities.advancedSettings.associateBy(CameraSettingControl::key)
+        assertEquals("off", settings.getValue("moviemode").value)
+        assertEquals(listOf("off", "on"), settings.getValue("moviemode").values)
         assertEquals("Manual", settings.getValue("shootingmode").value)
         assertTrue("Movie" in settings.getValue("shootingmode").values)
         assertEquals("AI Servo", settings.getValue("afoperation").value)
@@ -961,7 +1055,10 @@ class UsbPtpCameraBackendTest {
 
     @Test
     fun canonAdvancedSettingsRequireAdvertisedValuesAndPreserveStateAfterRejectedWrite() = runTest {
-        val unavailableTransport = CanonEosScriptedTransport(advertiseAdvancedSettings = false)
+        val unavailableTransport = CanonEosScriptedTransport(
+            advertiseAdvancedSettings = false,
+            advertiseMovieModeSwitch = false,
+        )
         val unavailableBackend = UsbPtpCameraBackend(
             connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
             transportFactory = PtpTransportFactory { unavailableTransport },
@@ -2163,6 +2260,9 @@ class UsbPtpCameraBackendTest {
         private val advertiseEventPolling: Boolean = true,
         private val advertiseMovieRecording: Boolean = true,
         private val rejectMovieRecording: Boolean = false,
+        private val advertiseMovieModeSwitch: Boolean = true,
+        private val movieModeReadback: Boolean = true,
+        private val advertisePropertyWrites: Boolean = true,
         private val advertiseAdvancedSettings: Boolean = true,
         private val rejectPropertyCode: Int? = null,
         private val captureDestination: Int = 2,
@@ -2196,6 +2296,7 @@ class UsbPtpCameraBackendTest {
         private var fullPressActive = false
         private var initialPropertyEventsPending = true
         private var moviePropertyEventPending: Int? = null
+        private var movieModeEventPending: Int? = null
         private var clockPropertyEventPending: Pair<Int, Int>? = null
 
         override suspend fun send(container: PtpContainer) {
@@ -2214,6 +2315,8 @@ class UsbPtpCameraBackendTest {
                             advertiseEventPolling,
                             advertiseTouchAutofocus,
                             advertiseClickWhiteBalance,
+                            advertiseMovieModeSwitch,
+                            advertisePropertyWrites,
                         ),
                     )
                     incoming += ok(transaction)
@@ -2235,6 +2338,26 @@ class UsbPtpCameraBackendTest {
                     response(PtpResponseCode.GENERAL_ERROR, transaction)
                 } else {
                     ok(transaction)
+                }
+
+                CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON,
+                CanonEosOperationCode.MOVIE_SELECT_SWITCH_OFF,
+                -> {
+                    val rejected = container.code == rejectOperationCode
+                    if (!rejected && movieModeReadback) {
+                        movieModeEventPending = if (
+                            container.code == CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON
+                        ) {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    incoming += if (rejected) {
+                        response(PtpResponseCode.GENERAL_ERROR, transaction)
+                    } else {
+                        ok(transaction)
+                    }
                 }
 
                 CanonEosOperationCode.REMOTE_RELEASE_ON -> {
@@ -2276,6 +2399,7 @@ class UsbPtpCameraBackendTest {
                             availableShots,
                             currentStorageId,
                             advertisedClockProperty,
+                            advertiseMovieModeSwitch,
                         ).also {
                             initialPropertyEventsPending = false
                         }
@@ -2284,6 +2408,11 @@ class UsbPtpCameraBackendTest {
                             clockPropertyEventPending = null
                             eosPropertyValue(propertyCode, value) + eosBlock(0, byteArrayOf())
                         }
+                        movieModeEventPending != null ->
+                            (eosPropertyValue(CanonEosPropertyCode.FIXED_MOVIE, movieModeEventPending!!) +
+                                eosBlock(0, byteArrayOf())).also {
+                                movieModeEventPending = null
+                            }
                         moviePropertyValue != null ->
                             (eosPropertyValue(CanonEosPropertyCode.EVF_RECORD_STATUS, moviePropertyValue) +
                                 eosBlock(0, byteArrayOf())).also {
@@ -2529,6 +2658,7 @@ class UsbPtpCameraBackendTest {
         availableShots: Int,
         currentStorageId: Long?,
         advertisedClockProperty: Int?,
+        advertiseMovieModeSwitch: Boolean,
     ): ByteArray {
         var payload = eosPropertyValue(CanonEosPropertyCode.ISO_SPEED, 0x58) +
             eosAvailableValues(CanonEosPropertyCode.ISO_SPEED, 0x48, 0x58, 0x60) +
@@ -2549,6 +2679,9 @@ class UsbPtpCameraBackendTest {
         }
         advertisedClockProperty?.let { propertyCode ->
             payload += eosPropertyValue(propertyCode, TEST_CLOCK_EPOCH_SECONDS.toInt())
+        }
+        if (advertiseMovieModeSwitch) {
+            payload += eosPropertyValue(CanonEosPropertyCode.FIXED_MOVIE, 0)
         }
         if (advertiseAdvancedSettings) {
             payload += eosPropertyValue(CanonEosPropertyCode.EXPOSURE_COMPENSATION, 0)
@@ -2750,6 +2883,8 @@ class UsbPtpCameraBackendTest {
             advertiseEventPolling: Boolean = true,
             advertiseTouchAutofocus: Boolean = false,
             advertiseClickWhiteBalance: Boolean = false,
+            advertiseMovieModeSwitch: Boolean = true,
+            advertisePropertyWrites: Boolean = true,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
@@ -2765,13 +2900,13 @@ class UsbPtpCameraBackendTest {
                             PtpOperationCode.CLOSE_SESSION,
                             PtpOperationCode.GET_STORAGE_IDS,
                             PtpOperationCode.GET_STORAGE_INFO,
-                            CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
                             CanonEosOperationCode.SET_REMOTE_MODE,
                             CanonEosOperationCode.SET_EVENT_MODE,
                             CanonEosOperationCode.GET_VIEWFINDER_DATA,
                             CanonEosOperationCode.DRIVE_LENS,
                         )
                     )
+                    if (advertisePropertyWrites) add(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX)
                     if (advertiseEventPolling) add(CanonEosOperationCode.GET_EVENT)
                     if (advertiseRemoteRelease) {
                         add(CanonEosOperationCode.REMOTE_RELEASE_ON)
@@ -2789,6 +2924,10 @@ class UsbPtpCameraBackendTest {
                     }
                     if (advertiseClickWhiteBalance) {
                         add(CanonEosOperationCode.CLICK_WHITE_BALANCE)
+                    }
+                    if (advertiseMovieModeSwitch) {
+                        add(CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON)
+                        add(CanonEosOperationCode.MOVIE_SELECT_SWITCH_OFF)
                     }
                     if (advertiseHostTransferOperations) {
                         add(PtpOperationCode.GET_PARTIAL_OBJECT)

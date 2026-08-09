@@ -678,6 +678,12 @@ class UsbPtpCameraBackend(
             observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
             return status()
         }
+        if (key == USB_MOVIE_MODE_KEY) {
+            if (setCanonMovieMode(info, value)) {
+                observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
+            }
+            return status()
+        }
         val canonSpec = CanonEosPtp.settingSpecs.firstOrNull { it.key == key }
         if (canonSpec != null && setAdvertisedCanonProperty(canonSpec.propertyCode, value)) {
             observedFeatures.add(CameraFeature.ADVANCED_SETTINGS)
@@ -954,7 +960,7 @@ class UsbPtpCameraBackend(
         requireSession().executeDataInOperation(CanonEosOperationCode.GET_EVENT).also(::applyCanonPropertyUpdates)
 
     private suspend fun refreshCanonPropertyState(info: PtpDeviceInfo) {
-        if (!CanonEosPtp.supportsPropertyControl(info)) return
+        if (!CanonEosPtp.supportsRemotePreparation(info)) return
         if (!canonRemotePrepared) {
             try {
                 ensureCanonRemoteMode()
@@ -968,17 +974,17 @@ class UsbPtpCameraBackend(
             if (!canonPropertyDiscoveryAttempted) {
                 canonPropertyDiscoveryAttempted = true
                 for (attempt in 1 until CANON_PROPERTY_DISCOVERY_ATTEMPTS) {
-                    if (hasCanonCorePropertyOptions()) break
+                    if (hasCanonPropertyDiscoveryEvidence()) break
                     delay(CANON_PROPERTY_DISCOVERY_RETRY_MILLIS)
                     drainCanonEvents()
                 }
             } else {
                 drainCanonEvents()
             }
-            canonPropertyError = if (hasCanonCorePropertyOptions()) {
+            canonPropertyError = if (hasCanonPropertyDiscoveryEvidence()) {
                 null
             } else {
-                "Canon EOS remote mode returned no supported writable property events."
+                "Canon EOS remote mode returned no supported property events."
             }
         } catch (exception: Exception) {
             canonPropertyError = exception.message ?: exception.javaClass.simpleName
@@ -1010,6 +1016,10 @@ class UsbPtpCameraBackend(
     private fun hasCanonCorePropertyOptions(): Boolean = synchronized(canonProperties) {
         canonProperties.values.any { it.availableValues.isNotEmpty() }
     }
+
+    private fun hasCanonPropertyDiscoveryEvidence(): Boolean =
+        hasCanonCorePropertyOptions() ||
+            canonPropertyState(CanonEosPropertyCode.FIXED_MOVIE).currentValue in 0L..1L
 
     private suspend fun awaitCanonCapturedObjectLocked(hostTransferPrepared: Boolean) {
         var deadline = System.currentTimeMillis() + CANON_CAPTURE_EVENT_TIMEOUT_MILLIS
@@ -1225,6 +1235,54 @@ class UsbPtpCameraBackend(
         return status()
     }
 
+    private suspend fun setCanonMovieMode(info: PtpDeviceInfo, label: String): Boolean {
+        val control = movieModeControl(info)
+            ?: unsupported<CameraSettingControl>(CameraFeature.ADVANCED_SETTINGS)
+        if (label !in control.values) {
+            throw PtpProtocolException("Value '$label' is not an available Canon EOS movie mode.")
+        }
+        val target = if (label == USB_MOVIE_MODE_ON) 1L else 0L
+        val state = canonPropertyState(CanonEosPropertyCode.FIXED_MOVIE)
+        if (state.currentValue == target) return false
+
+        ensureCanonRemoteMode()
+        var lastReadback: Long? = null
+        val verified = canonEventMutex.withLock {
+            drainCanonEventsLocked()
+            requireSession().executeOperation(
+                operationCode = if (target == 1L) {
+                    CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON
+                } else {
+                    CanonEosOperationCode.MOVIE_SELECT_SWITCH_OFF
+                },
+                parameters = emptyList(),
+            )
+            withTimeoutOrNull(CANON_MOVIE_MODE_VERIFY_TIMEOUT_MILLIS) {
+                while (true) {
+                    val payload = drainCanonEventsLocked()
+                    CanonEosPtp.propertyUpdates(payload)
+                        .lastOrNull {
+                            it.propertyCode == CanonEosPropertyCode.FIXED_MOVIE && it.currentValue != null
+                        }
+                        ?.currentValue
+                        ?.let { readback ->
+                            lastReadback = readback
+                            if (readback == target) return@withTimeoutOrNull readback
+                        }
+                    delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+                }
+            }
+        }
+        if (verified == null) {
+            throw PtpProtocolException(
+                "Canon EOS accepted the movie-mode command but did not report FixedMovie=${target} " +
+                    "within ${CANON_MOVIE_MODE_VERIFY_TIMEOUT_MILLIS / 1_000} seconds " +
+                    "(last=${lastReadback ?: "none"})."
+            )
+        }
+        return true
+    }
+
     private suspend fun readCanonViewfinderData(): ByteArray {
         val deadline = System.currentTimeMillis() + CANON_LIVE_VIEW_READY_TIMEOUT_MILLIS
         var retryDelay = 5L
@@ -1365,6 +1423,7 @@ class UsbPtpCameraBackend(
         canSetCanonProperties: Boolean,
     ): List<CameraSettingControl> {
         val controls = linkedMapOf<String, CameraSettingControl>()
+        movieModeControl(info)?.let { controls[it.key] = it }
         if (canSetCanonProperties) {
             CanonEosPtp.settingSpecs.forEach { spec ->
                 val state = canonPropertyState(spec.propertyCode)
@@ -1395,6 +1454,17 @@ class UsbPtpCameraBackend(
             }
         }
         return controls.values.toList()
+    }
+
+    private fun movieModeControl(info: PtpDeviceInfo): CameraSettingControl? {
+        val current = canonPropertyState(CanonEosPropertyCode.FIXED_MOVIE).currentValue
+        if (!CanonEosPtp.supportsMovieModeSwitch(info, current)) return null
+        return CameraSettingControl(
+            key = USB_MOVIE_MODE_KEY,
+            label = "Movie mode",
+            value = if (current == 1L) USB_MOVIE_MODE_ON else USB_MOVIE_MODE_OFF,
+            values = listOf(USB_MOVIE_MODE_OFF, USB_MOVIE_MODE_ON),
+        )
     }
 
     private fun captureTargetControl(info: PtpDeviceInfo): CameraSettingControl? {
@@ -1766,6 +1836,7 @@ private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 private const val PROPERTY_REFRESH_INTERVAL_MILLIS = 500L
 private const val CANON_EVENT_POLL_INTERVAL_MILLIS = 100L
 private const val CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS = 3_000L
+private const val CANON_MOVIE_MODE_VERIFY_TIMEOUT_MILLIS = 3_000L
 private const val CANON_CLOCK_SYNC_TOLERANCE_SECONDS = 10L
 private const val CANON_EVENT_LONG_POLL_ATTEMPTS = 10
 private const val CANON_AUTOFOCUS_HOLD_MILLIS = 350L
@@ -1778,6 +1849,9 @@ private const val CANON_HOST_TRANSFER_CHUNK_BYTES = 1 * 1024 * 1024
 private const val CANON_HOST_MIN_AVAILABLE_SHOTS = 100L
 private const val USB_CAPTURE_TARGET_KEY = "capturetarget"
 private const val USB_CAPTURE_STORAGE_KEY = "capturestorage"
+private const val USB_MOVIE_MODE_KEY = "moviemode"
+private const val USB_MOVIE_MODE_OFF = "off"
+private const val USB_MOVIE_MODE_ON = "on"
 private const val USB_CAPTURE_TARGET_PHONE = "Phone"
 private const val USB_CAPTURE_TARGET_CARD = "Memory card"
 private const val CANON_HOST_CAPACITY_CLUSTERS = 0x0FFF_FFFFL
