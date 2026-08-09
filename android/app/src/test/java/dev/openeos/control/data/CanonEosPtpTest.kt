@@ -624,6 +624,28 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun movieModeSwitchRequiresBothOperationsAndAReadableBinaryState() {
+        val operations = setOf(
+            CanonEosOperationCode.SET_REMOTE_MODE,
+            CanonEosOperationCode.SET_EVENT_MODE,
+            CanonEosOperationCode.GET_EVENT,
+            CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON,
+            CanonEosOperationCode.MOVIE_SELECT_SWITCH_OFF,
+        )
+        val complete = deviceInfo(operations)
+
+        assertTrue(CanonEosPtp.supportsMovieModeSwitch(complete, 0L))
+        assertTrue(CanonEosPtp.supportsMovieModeSwitch(complete, 1L))
+        assertFalse(CanonEosPtp.supportsMovieModeSwitch(complete, 2L))
+        assertFalse(
+            CanonEosPtp.supportsMovieModeSwitch(
+                deviceInfo(operations - CanonEosOperationCode.MOVIE_SELECT_SWITCH_OFF),
+                0L,
+            )
+        )
+    }
+
+    @Test
     fun capabilitiesRequireCanonVendorAndCompleteAdvertisedSequences() {
         val operations = setOf(
             CanonEosOperationCode.SET_REMOTE_MODE,

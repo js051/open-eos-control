@@ -9,6 +9,8 @@ object CanonEosOperationCode {
     const val PC_HDD_CAPACITY = 0x911A
     const val REMOTE_RELEASE_ON = 0x9128
     const val REMOTE_RELEASE_OFF = 0x9129
+    const val MOVIE_SELECT_SWITCH_ON = 0x9133
+    const val MOVIE_SELECT_SWITCH_OFF = 0x9134
     const val GET_VIEWFINDER_DATA = 0x9153
     const val DO_AF = 0x9154
     const val DRIVE_LENS = 0x9155
@@ -51,6 +53,7 @@ object CanonEosPropertyCode {
     const val EVF_RECORD_STATUS = 0xD1B8
     const val LIVE_VIEW_AF_SYSTEM = 0xD1BA
     const val AUTO_LIGHTING_OPTIMIZER = 0xD1C1
+    const val FIXED_MOVIE = 0xD1C2
     const val CONTINUOUS_AF_MODE = 0xD1C9
     const val AEB = 0xD1D9
 }
@@ -238,6 +241,12 @@ object CanonEosPtp {
         supportsPropertyControl(info) &&
             MOVIE_RECORD_TARGET_NONE in availableValues &&
             MOVIE_RECORD_TARGET_CARD in availableValues
+
+    fun supportsMovieModeSwitch(info: PtpDeviceInfo, currentValue: Long?): Boolean =
+        supportsRemotePreparation(info) &&
+            info.supports(CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON) &&
+            info.supports(CanonEosOperationCode.MOVIE_SELECT_SWITCH_OFF) &&
+            currentValue in 0L..1L
 
     fun movieRecording(value: Long?): Boolean? = when (value) {
         MOVIE_RECORD_TARGET_CARD -> true
@@ -964,6 +973,7 @@ object CanonEosPtp {
             labels = autoLightingOptimizerLabels,
             selectableValues = autoLightingOptimizerLabels.keys,
         ),
+        CanonEosPropertyCode.FIXED_MOVIE to CanonEosPropertySpec(4, offOnLabels),
         CanonEosPropertyCode.CONTINUOUS_AF_MODE to CanonEosPropertySpec(4, offOnLabels),
         CanonEosPropertyCode.AEB to CanonEosPropertySpec(2, aebLabels),
     )
