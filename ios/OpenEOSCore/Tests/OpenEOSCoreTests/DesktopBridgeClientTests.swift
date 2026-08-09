@@ -98,10 +98,15 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertFalse(owner.accepts("é"))
         XCTAssertFalse(owner.accepts(String(repeating: "x", count: 256)))
 
-        await transport.enqueueJSON(path: "/v1/session/session_text/settings/ownername", body: status)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session/session_text/settings/ownername",
+            body: status
+        )
         _ = try await client.setSetting(key: "ownername", value: "Studio B")
         let requests = await transport.requests()
         let write = try XCTUnwrap(requests.last { $0.path.hasSuffix("/settings/ownername") })
+        XCTAssertEqual(write.method, "POST")
         let body = try XCTUnwrap(write.body)
         XCTAssertEqual(
             try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String]),
