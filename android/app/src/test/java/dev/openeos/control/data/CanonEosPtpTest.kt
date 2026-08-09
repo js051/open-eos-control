@@ -220,6 +220,33 @@ class CanonEosPtpTest {
     }
 
     @Test
+    fun eosLensNameEventUsesTheReadOnlyCanonStringProperty() {
+        val lensName = "RF24-105mm F4 L IS USM"
+        val event = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.LENS_NAME) + lensName.encodeToByteArray() + byteArrayOf(0),
+        )
+
+        val update = CanonEosPtp.propertyUpdates(event + block(0, byteArrayOf())).single()
+
+        assertEquals(CanonEosPropertyCode.LENS_NAME, update.propertyCode)
+        assertEquals(lensName, update.currentText)
+        assertEquals(null, CanonEosPtp.settingKey(CanonEosPropertyCode.LENS_NAME))
+    }
+
+    @Test
+    fun eosLensNameEventRejectsAnOversizedCameraValue() {
+        val event = block(
+            type = CanonEosEventCode.PROPERTY_VALUE_CHANGED,
+            bytes = u32Fields(CanonEosPropertyCode.LENS_NAME) +
+                "L".repeat(CanonEosPtp.MAX_LENS_NAME_BYTES + 1).encodeToByteArray() +
+                byteArrayOf(0),
+        )
+
+        assertTrue(runCatching { CanonEosPtp.propertyUpdates(event) }.exceptionOrNull() is PtpProtocolException)
+    }
+
+    @Test
     fun eosTextMetadataEventsRejectMissingNulNonPrintableAndOversizedValues() {
         val invalidPayloads = listOf(
             "NO NUL".encodeToByteArray(),

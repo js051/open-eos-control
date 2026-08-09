@@ -38,7 +38,7 @@ class UsbPtpCameraBackend(
     private var canonLiveViewGeometry: CanonEosLiveViewGeometry? = null
     private val canonProperties = mutableMapOf<Int, CanonEosPropertyState>()
     private var canonPropertyDiscoveryAttempted = false
-    private var canonTextMetadataDiscoveryAttempted = false
+    private var canonTextPropertyDiscoveryAttempted = false
     private var canonPropertyError: String? = null
     private var selectedCaptureDestination: Long? = null
     private var advertisedStorageTargets: Map<String, Long> = emptyMap()
@@ -92,7 +92,7 @@ class UsbPtpCameraBackend(
         canonLiveViewGeometry = null
         synchronized(canonProperties) { canonProperties.clear() }
         canonPropertyDiscoveryAttempted = false
-        canonTextMetadataDiscoveryAttempted = false
+        canonTextPropertyDiscoveryAttempted = false
         canonPropertyError = null
         selectedCaptureDestination = null
         advertisedStorageTargets = emptyMap()
@@ -138,6 +138,8 @@ class UsbPtpCameraBackend(
         val freeImages = CanonEosPtp.availableShots(
             canonPropertyState(CanonEosPropertyCode.AVAILABLE_SHOTS).currentValue,
         ) ?: standardFreeImages
+        val lensName = canonPropertyState(CanonEosPropertyCode.LENS_NAME).currentText
+        if (lensName != null) observedFeatures.add(CameraFeature.LENS_STATUS)
         return CameraStatus(
             connected = true,
             batteryLevel = batteryLevel,
@@ -171,6 +173,7 @@ class UsbPtpCameraBackend(
             rawStorageJson = storageError?.let(::storageErrorJson) ?: storageSnapshot.toStorageJson(),
             rawTransportJson = ptpTransportJson(info),
             bulbExposureActive = bulbExposureActive,
+            lens = lensName?.let { LensStatus(mounted = it.isNotBlank(), name = it) },
         )
     }
 
@@ -217,6 +220,7 @@ class UsbPtpCameraBackend(
             canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).availableValues,
         )
         val supportsCanonClockSync = canonClockPropertyCode(info) != null
+        val supportsCanonLensStatus = canonPropertyState(CanonEosPropertyCode.LENS_NAME).currentText != null
         val supportsHostMedia = hostCaptureStore != null
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
@@ -224,6 +228,7 @@ class UsbPtpCameraBackend(
             if (supportsCanonEvents) add(CameraFeature.EVENT_POLLING)
             if (PtpDevicePropertyCode.BATTERY_LEVEL in propertyDescriptors) add(CameraFeature.BATTERY_STATUS)
             if (supportsStorage(info)) add(CameraFeature.STORAGE_STATUS)
+            if (supportsCanonLensStatus) add(CameraFeature.LENS_STATUS)
             if (supportsMediaBrowser(info) || supportsHostMedia) add(CameraFeature.MEDIA_BROWSER)
             if ((supportsMediaBrowser(info) && info.supports(PtpOperationCode.GET_THUMB)) || supportsHostMedia) {
                 add(CameraFeature.MEDIA_THUMBNAIL)
@@ -261,6 +266,7 @@ class UsbPtpCameraBackend(
         val candidates = setOf(
             CameraFeature.BATTERY_STATUS,
             CameraFeature.STORAGE_STATUS,
+            CameraFeature.LENS_STATUS,
             CameraFeature.EVENT_POLLING,
             CameraFeature.STILL_CAPTURE,
             CameraFeature.BULB_EXPOSURE,
@@ -310,6 +316,8 @@ class UsbPtpCameraBackend(
                 reasons = mapOf(
                     CameraFeature.EVENT_POLLING to
                         "Uses Canon EOS GetEvent only when SetRemoteMode, SetEventMode, and GetEvent are all advertised.",
+                    CameraFeature.LENS_STATUS to
+                        "Requires a successful Canon EOS LensName event read through RequestDevicePropValue.",
                     CameraFeature.STILL_CAPTURE to
                         "Uses standard InitiateCapture or Canon EOS RemoteReleaseOn/Off; advertised host-RAM transfers are downloaded in 1 MiB partial-object chunks before TransferComplete.",
                     CameraFeature.SHUTTER_HALF_PRESS to
@@ -1036,28 +1044,34 @@ class UsbPtpCameraBackend(
             } else {
                 "Canon EOS remote mode returned no supported property events."
             }
-            if (!canonTextMetadataDiscoveryAttempted && CanonEosPtp.supportsTextMetadata(info)) {
-                discoverCanonTextMetadata()
+            if (!canonTextPropertyDiscoveryAttempted && CanonEosPtp.supportsTextPropertyRead(info)) {
+                discoverCanonTextProperties(info)
             }
         } catch (exception: Exception) {
             canonPropertyError = exception.message ?: exception.javaClass.simpleName
         }
     }
 
-    private suspend fun discoverCanonTextMetadata() {
-        canonTextMetadataDiscoveryAttempted = true
+    private suspend fun discoverCanonTextProperties(info: PtpDeviceInfo) {
+        canonTextPropertyDiscoveryAttempted = true
         canonEventMutex.withLock {
-            CanonEosPtp.textSettingSpecs.forEach { spec ->
-                if (canonPropertyState(spec.propertyCode).currentText != null) return@forEach
+            val propertyCodes = buildList {
+                add(CanonEosPropertyCode.LENS_NAME)
+                if (CanonEosPtp.supportsTextMetadata(info)) {
+                    addAll(CanonEosPtp.textSettingSpecs.map(CanonEosTextSettingSpec::propertyCode))
+                }
+            }
+            propertyCodes.forEach { propertyCode ->
+                if (canonPropertyState(propertyCode).currentText != null) return@forEach
                 val requested = runCatching {
                     requireSession().executeOperation(
                         CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE,
-                        listOf(spec.propertyCode.toLong()),
+                        listOf(propertyCode.toLong()),
                     )
                 }.isSuccess
                 if (!requested) return@forEach
                 withTimeoutOrNull(CANON_TEXT_METADATA_DISCOVERY_TIMEOUT_MILLIS) {
-                    while (canonPropertyState(spec.propertyCode).currentText == null) {
+                    while (canonPropertyState(propertyCode).currentText == null) {
                         drainCanonEventsLocked()
                         delay(CANON_PROPERTY_DISCOVERY_RETRY_MILLIS)
                     }
