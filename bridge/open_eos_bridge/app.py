@@ -312,13 +312,18 @@ def create_app(
     def drive_focus(session_id: str, payload: FocusDriveRequest) -> FocusResult:
         return manager.get(session_id).drive_focus(payload.direction, payload.step)
 
-    @router.post("/session/{session_id}/liveview/start", response_model=LiveViewState)
+    @router.post(
+        "/session/{session_id}/liveview/start",
+        response_model=LiveViewState,
+        response_model_exclude_none=True,
+    )
     def start_live_view(session_id: str, payload: LiveViewStartRequest) -> LiveViewState:
         session = manager.get(session_id)
         session.start_live_view(payload)
         requested_fps = getattr(session, "requested_fps", min(payload.fps, 5))
         source = getattr(session, "live_view_source", payload.source)
-        return LiveViewState(active=True, requested_fps=requested_fps, source=source)
+        size = getattr(session, "live_view_size", None)
+        return LiveViewState(active=True, requested_fps=requested_fps, source=source, size=size)
 
     @router.post("/session/{session_id}/liveview/stop", response_model=LiveViewState)
     def stop_live_view(session_id: str) -> LiveViewState:
