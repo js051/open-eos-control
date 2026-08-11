@@ -1189,7 +1189,7 @@ class CcapiClientTest {
 
         assertFalse(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_MULTIPART))
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_MULTIPART))
-        assertTrue(failure?.message.orEmpty().contains("matching Canon multipart"))
+        assertTrue(failure?.message.orEmpty().contains("complete Canon multipart"))
         assertEquals(1, server.requestCount)
     }
 
@@ -1328,21 +1328,163 @@ class CcapiClientTest {
         server.enqueue(jsonResponse("{}"))
         server.enqueue(jsonResponse("{}"))
         server.enqueue(MockResponse().setResponseCode(204))
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x31, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(binaryResponse(jpeg, "image/jpeg"))
 
         client.initialize()
         client.startLiveView(LiveViewRequest(source = LiveViewSource.AUTO))
+        val frame = client.liveViewFrame(cacheKey = 1, request = LiveViewRequest(source = LiveViewSource.AUTO))
 
         assertEquals("/ccapi", server.takeRequest().path)
         assertEquals("/ccapi/ver110/shooting/liveview/rtpsessiondesc", server.takeRequest().path)
         assertEquals("start", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
         assertEquals("stop", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
         assertEquals("/ccapi/ver110/shooting/liveview", server.takeRequest().path)
+        assertTrue(server.takeRequest().path.orEmpty().startsWith("/ccapi/ver110/shooting/liveview/flip?"))
         assertTrue(nativeSession.readyAwaited)
         assertTrue(nativeSession.closed)
         assertNull(client.nativeLiveViewSession)
+        assertArrayEquals(jpeg, frame.bytes)
         assertEquals(LiveViewSource.CCAPI_JPEG_POLLING, client.currentLiveViewSource())
         assertFalse(CameraFeature.LIVE_VIEW_RTP in client.observedFeatureSnapshot())
         assertTrue(CameraFeature.LIVE_VIEW_JPEG_POLLING in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun latestFirmwareAutoFallsBackToPostOnlySmallJpegAndStopsWithPostOff() = runTest {
+        lateinit var nativeSession: FakeNativeLiveViewSession
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+            rtpDestinationAddress = "192.168.11.5",
+            rtpSessionFactory = CcapiRtpSessionFactory { description, destinationAddress ->
+                FakeNativeLiveViewSession(description, destinationAddress).also { nativeSession = it }
+            },
+        )
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x41, 0x42, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(jsonResponse(DISCOVERY_POST_ONLY_RTP_AND_JPEG_JSON))
+        server.enqueue(MockResponse().setHeader("content-type", "text/plain").setBody(CANON_RTP_SDP))
+        server.enqueue(MockResponse().setResponseCode(503).setBody("""{"message":"Mode not supported"}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(MockResponse().setResponseCode(503).setBody("""{"message":"Mode not supported"}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(binaryResponse(jpeg, "image/jpeg"))
+        server.enqueue(jsonResponse("{}"))
+
+        client.initialize()
+        val initialCapabilities = client.capabilities()
+        client.startLiveView(
+            LiveViewRequest(
+                fps = 15,
+                size = LiveViewSize.MEDIUM,
+                source = LiveViewSource.AUTO,
+            )
+        )
+        val activeCapabilities = client.capabilities()
+
+        assertEquals(
+            listOf(LiveViewSource.CCAPI_RTP, LiveViewSource.CCAPI_JPEG_POLLING),
+            initialCapabilities.liveView.sources,
+        )
+        assertEquals(LiveViewSource.CCAPI_JPEG_POLLING, client.currentLiveViewSource())
+        assertEquals(listOf(LiveViewSize.SMALL), activeCapabilities.liveView.sizes)
+        assertEquals(LiveViewSize.SMALL, activeCapabilities.liveView.defaultSize)
+        assertFalse(CameraFeature.LIVE_VIEW_RTP in client.observedFeatureSnapshot())
+        assertTrue(CameraFeature.LIVE_VIEW_JPEG_POLLING in client.observedFeatureSnapshot())
+        assertTrue(nativeSession.closed)
+
+        client.stopLiveView()
+
+        val requests = List(10) { server.takeRequest() }
+        assertEquals("/ccapi", requests[0].path)
+        assertEquals("/ccapi/ver100/shooting/liveview/rtpsessiondesc", requests[1].path)
+        assertEquals("start", JSONObject(requests[2].body.readUtf8()).getString("action"))
+        assertEquals("stop", JSONObject(requests[3].body.readUtf8()).getString("action"))
+        assertEquals("medium", JSONObject(requests[4].body.readUtf8()).getString("liveviewsize"))
+        assertTrue(requests[5].path.orEmpty().startsWith("/ccapi/ver100/shooting/liveview/flip?"))
+        assertEquals("off", JSONObject(requests[6].body.readUtf8()).getString("liveviewsize"))
+        assertEquals("small", JSONObject(requests[7].body.readUtf8()).getString("liveviewsize"))
+        assertTrue(requests[8].path.orEmpty().startsWith("/ccapi/ver100/shooting/liveview/flip?"))
+        assertEquals("off", JSONObject(requests[9].body.readUtf8()).getString("liveviewsize"))
+        assertEquals(List(6) { "POST" }, listOf(
+            requests[2].method,
+            requests[3].method,
+            requests[4].method,
+            requests[6].method,
+            requests[7].method,
+            requests[9].method,
+        ))
+    }
+
+    @Test
+    fun latestFirmwareAutoFallsBackFromRejectedRtpToPostOnlyMultipart() = runTest {
+        lateinit var nativeSession: FakeNativeLiveViewSession
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+            rtpDestinationAddress = "192.168.11.5",
+            rtpSessionFactory = CcapiRtpSessionFactory { description, destinationAddress ->
+                FakeNativeLiveViewSession(description, destinationAddress).also { nativeSession = it }
+            },
+        )
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x51, 0x52, 0xFF.toByte(), 0xD9.toByte())
+        val multipart = Buffer()
+            .writeUtf8("--boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.size}\r\n\r\n")
+            .write(jpeg)
+            .writeUtf8("\r\n--boundary--\r\n")
+        server.enqueue(jsonResponse(DISCOVERY_LATEST_FIRMWARE_LIVE_VIEW_JSON))
+        server.enqueue(MockResponse().setHeader("content-type", "text/plain").setBody(CANON_RTP_SDP))
+        server.enqueue(MockResponse().setResponseCode(503).setBody("""{"message":"Mode not supported"}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("content-type", "multipart/x-mixed-replace;boundary=boundary")
+                .setChunkedBody(multipart, 3),
+        )
+        server.enqueue(MockResponse().setResponseCode(503).setBody("""{"message":"Mode not supported"}"""))
+        server.enqueue(jsonResponse("{}"))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+        client.startLiveView(
+            LiveViewRequest(
+                fps = 15,
+                size = LiveViewSize.MEDIUM,
+                source = LiveViewSource.AUTO,
+            )
+        )
+        val frame = client.liveViewFrame(cacheKey = 1)
+
+        assertEquals(
+            listOf(
+                LiveViewSource.CCAPI_RTP,
+                LiveViewSource.CCAPI_MULTIPART,
+                LiveViewSource.CCAPI_JPEG_POLLING,
+            ),
+            capabilities.liveView.sources,
+        )
+        assertEquals(LiveViewSource.CCAPI_MULTIPART, client.currentLiveViewSource())
+        assertArrayEquals(jpeg, frame.bytes)
+        assertFalse(CameraFeature.LIVE_VIEW_RTP in client.observedFeatureSnapshot())
+        assertTrue(CameraFeature.LIVE_VIEW_MULTIPART in client.observedFeatureSnapshot())
+        assertTrue(nativeSession.closed)
+
+        client.stopLiveView()
+
+        val requests = List(8) { server.takeRequest() }
+        assertEquals("/ccapi", requests[0].path)
+        assertEquals("/ccapi/ver100/shooting/liveview/rtpsessiondesc", requests[1].path)
+        assertEquals("start", JSONObject(requests[2].body.readUtf8()).getString("action"))
+        assertEquals("stop", JSONObject(requests[3].body.readUtf8()).getString("action"))
+        assertEquals("medium", JSONObject(requests[4].body.readUtf8()).getString("liveviewsize"))
+        assertEquals("GET", requests[5].method)
+        assertEquals("/ccapi/ver100/shooting/liveview/multipart", requests[5].path)
+        assertEquals("DELETE", requests[6].method)
+        assertEquals("off", JSONObject(requests[7].body.readUtf8()).getString("liveviewsize"))
     }
 
     @Test
@@ -1503,7 +1645,7 @@ class CcapiClientTest {
                   "ver100": [
                     {"path":"/shooting/settings","get":true},
                     {"path":"/shooting/control/shutterbutton","put":true},
-                    {"path":"/shooting/liveview","post":true},
+                    {"path":"/shooting/liveview","delete":true},
                     {"path":"/shooting/liveview/flip","get":true}
                   ]
                 }
@@ -3862,6 +4004,29 @@ class CcapiClientTest {
                 {"path":"/shooting/liveview/flip","get":true},
                 {"path":"/shooting/liveview/rtpsessiondesc","get":true},
                 {"path":"/shooting/liveview/rtp","post":true}
+              ]
+            }
+        """
+
+        const val DISCOVERY_POST_ONLY_RTP_AND_JPEG_JSON = """
+            {
+              "ver100": [
+                {"path":"/shooting/liveview","post":true},
+                {"path":"/shooting/liveview/flip","get":true},
+                {"path":"/shooting/liveview/rtpsessiondesc","get":true},
+                {"path":"/shooting/liveview/rtp","get":true,"post":true}
+              ]
+            }
+        """
+
+        const val DISCOVERY_LATEST_FIRMWARE_LIVE_VIEW_JSON = """
+            {
+              "ver100": [
+                {"path":"/shooting/liveview","post":true},
+                {"path":"/shooting/liveview/flip","get":true},
+                {"path":"/shooting/liveview/multipart","get":true,"delete":true},
+                {"path":"/shooting/liveview/rtpsessiondesc","get":true},
+                {"path":"/shooting/liveview/rtp","get":true,"post":true}
               ]
             }
         """

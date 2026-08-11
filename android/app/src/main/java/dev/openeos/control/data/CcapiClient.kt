@@ -55,9 +55,22 @@ private data class CcapiApiOperation(
     val path: String,
 )
 
+private enum class CcapiLiveViewStopMethod {
+    DELETE,
+    POST_OFF,
+}
+
+private data class CcapiJpegLiveViewOperations(
+    val startLiveView: CcapiApiOperation,
+    val stopLiveView: CcapiApiOperation,
+    val stopMethod: CcapiLiveViewStopMethod,
+    val framePaths: List<String>,
+)
+
 private data class CcapiMultipartOperations(
     val startLiveView: CcapiApiOperation,
     val stopLiveView: CcapiApiOperation,
+    val stopMethod: CcapiLiveViewStopMethod,
     val openStream: CcapiApiOperation,
     val closeStream: CcapiApiOperation,
 )
@@ -162,6 +175,8 @@ class CcapiClient(
     private var activeLiveViewSize = LiveViewSize.MEDIUM
     private var latestLiveViewGeometry: CcapiLiveViewGeometry? = null
     private var activeLiveViewSource: LiveViewSource? = null
+    private var activeJpegLiveViewOperations: CcapiJpegLiveViewOperations? = null
+    private var activeMultipartLiveViewOperations: CcapiMultipartOperations? = null
     private var multipartLiveViewSession: CcapiMultipartLiveViewSession? = null
     private var simulatorEventSequence = 0L
 
@@ -1785,14 +1800,16 @@ class CcapiClient(
                 LiveViewSource.CCAPI_RTP -> stopRtpLiveView()
                 LiveViewSource.CCAPI_MULTIPART -> stopMultipartLiveView()
                 LiveViewSource.CCAPI_JPEG_POLLING -> {
-                    if (!enforceAdvertisedOperations || supportsApi("DELETE", "/shooting/liveview")) {
-                        runCatching { deleteOk(apiPath("DELETE", "/shooting/liveview")) }
+                    activeJpegLiveViewOperations?.let { operations ->
+                        runCatching { stopCcapiLiveView(operations.stopLiveView, operations.stopMethod) }
                     }
                 }
 
                 else -> Unit
             }
             activeLiveViewSource = null
+            activeJpegLiveViewOperations = null
+            activeMultipartLiveViewOperations = null
         }
     }
 
@@ -2186,14 +2203,12 @@ class CcapiClient(
     private fun supportsCoordinateTapFocus(): Boolean =
         tapFocusOperation() != null &&
             detailedLiveViewOperation() != null &&
-            supportsApi("POST", "/shooting/liveview") &&
-            supportsApi("DELETE", "/shooting/liveview")
+            (supportsCompleteLiveView() || supportsMultipartLiveView())
 
     private fun supportsCoordinateClickWhiteBalance(): Boolean =
         clickWhiteBalanceOperation() != null &&
             detailedLiveViewOperation() != null &&
-            supportsApi("POST", "/shooting/liveview") &&
-            supportsApi("DELETE", "/shooting/liveview")
+            (supportsCompleteLiveView() || supportsMultipartLiveView())
 
     private fun needsLiveViewGeometry(): Boolean =
         supportsCoordinateTapFocus() || supportsCoordinateClickWhiteBalance()
@@ -2204,28 +2219,64 @@ class CcapiClient(
     private fun focusDriveOperation(): CcapiApiOperation? =
         apiOperation("POST", "/shooting/control/drivefocus")
 
-    private fun liveViewFramePaths(): List<String> {
+    private fun liveViewFramePaths(): List<String> =
+        activeJpegLiveViewOperations?.framePaths
+            ?: jpegLiveViewOperations()?.framePaths
+            ?: emptyList()
+
+    private fun jpegLiveViewOperations(): CcapiJpegLiveViewOperations? {
         if (!enforceAdvertisedOperations) {
-            return listOf(
-                apiPath("GET", "/shooting/liveview/flip"),
-                "${apiPath("GET", "/shooting/liveview/flipdetail")}?kind=image",
-                apiPath("GET", "/shooting/liveview"),
+            return CcapiJpegLiveViewOperations(
+                startLiveView = CcapiApiOperation("POST", apiPath("POST", "/shooting/liveview")),
+                stopLiveView = CcapiApiOperation("DELETE", apiPath("DELETE", "/shooting/liveview")),
+                stopMethod = CcapiLiveViewStopMethod.DELETE,
+                framePaths = listOf(
+                    apiPath("GET", "/shooting/liveview/flip"),
+                    "${apiPath("GET", "/shooting/liveview/flipdetail")}?kind=image",
+                    apiPath("GET", "/shooting/liveview"),
+                ),
             )
         }
-        return buildList {
-            if (needsLiveViewGeometry()) {
-                detailedLiveViewOperation()?.let { add("${it.path}?kind=both") }
+        val starts = apiOperations
+            .filter { it.method == "POST" && it.path.endsWith("/shooting/liveview") }
+            .sortedByDescending { it.path.apiVersionNumber() }
+        return starts.firstNotNullOfOrNull { start ->
+            val prefix = start.path.removeSuffix("/shooting/liveview")
+            val detailed = apiOperations.firstOrNull {
+                it.method == "GET" && it.path == "$prefix/shooting/liveview/flipdetail"
             }
-            apiOperation("GET", "/shooting/liveview/flip")?.let { add(it.path) }
-            apiOperation("GET", "/shooting/liveview/flipdetail")?.let { add("${it.path}?kind=image") }
-            apiOperation("GET", "/shooting/liveview")?.let { add(it.path) }
+            val coordinateMetadataNeeded = detailed != null && apiOperations.any { operation ->
+                (operation.method == "PUT" && operation.path == "$prefix/shooting/liveview/afframeposition") ||
+                    (operation.method == "POST" && operation.path == "$prefix/shooting/liveview/clickwb")
+            }
+            val framePaths = buildList {
+                if (coordinateMetadataNeeded) add("${detailed?.path}?kind=both")
+                apiOperations.firstOrNull {
+                    it.method == "GET" && it.path == "$prefix/shooting/liveview/flip"
+                }?.let { add(it.path) }
+                detailed?.let { add("${it.path}?kind=image") }
+                apiOperations.firstOrNull {
+                    it.method == "GET" && it.path == "$prefix/shooting/liveview"
+                }?.let { add(it.path) }
+            }
+            if (framePaths.isEmpty()) return@firstNotNullOfOrNull null
+            val delete = apiOperations.firstOrNull {
+                it.method == "DELETE" && it.path == start.path
+            }
+            CcapiJpegLiveViewOperations(
+                startLiveView = start,
+                stopLiveView = delete ?: start,
+                stopMethod = if (delete != null) {
+                    CcapiLiveViewStopMethod.DELETE
+                } else {
+                    CcapiLiveViewStopMethod.POST_OFF
+                },
+                framePaths = framePaths,
+            )
         }
     }
 
-    private fun supportsCompleteLiveView(): Boolean =
-        supportsApi("POST", "/shooting/liveview") &&
-            supportsApi("DELETE", "/shooting/liveview") &&
-            liveViewFramePaths().isNotEmpty()
+    private fun supportsCompleteLiveView(): Boolean = jpegLiveViewOperations() != null
 
     private fun supportsRtpLiveView(): Boolean =
         supportsApi("GET", "/shooting/liveview/rtpsessiondesc") &&
@@ -2239,15 +2290,22 @@ class CcapiClient(
             .sortedByDescending { it.apiVersionNumber() }
         reads.forEach { read ->
             val prefix = read.path.removeSuffix("/shooting/liveview/multipart")
+            val start = CcapiApiOperation("POST", "$prefix/shooting/liveview")
+            val deleteStop = CcapiApiOperation("DELETE", "$prefix/shooting/liveview")
+                .takeIf { it in apiOperations }
             val operations = CcapiMultipartOperations(
-                startLiveView = CcapiApiOperation("POST", "$prefix/shooting/liveview"),
-                stopLiveView = CcapiApiOperation("DELETE", "$prefix/shooting/liveview"),
+                startLiveView = start,
+                stopLiveView = deleteStop ?: start,
+                stopMethod = if (deleteStop != null) {
+                    CcapiLiveViewStopMethod.DELETE
+                } else {
+                    CcapiLiveViewStopMethod.POST_OFF
+                },
                 openStream = read,
                 closeStream = CcapiApiOperation("DELETE", read.path),
             )
             if (
                 operations.startLiveView in apiOperations &&
-                operations.stopLiveView in apiOperations &&
                 operations.closeStream in apiOperations
             ) return operations
         }
@@ -2271,13 +2329,60 @@ class CcapiClient(
     }
 
     private suspend fun startJpegLiveView(request: LiveViewRequest) {
-        if (enforceAdvertisedOperations && !supportsCompleteLiveView()) {
-            error("Camera did not advertise a complete Live View JPEG start, frame, and stop lifecycle.")
+        val operations = jpegLiveViewOperations()
+            ?: error("Camera did not advertise a complete Live View JPEG lifecycle.")
+        var started = false
+        try {
+            startCcapiLiveView(request, operations.startLiveView.path)
+            started = true
+            activeJpegLiveViewOperations = operations
+            if (operations.stopMethod == CcapiLiveViewStopMethod.POST_OFF) {
+                try {
+                    validateJpegLiveViewFrame(request)
+                } catch (exception: Exception) {
+                    if (request.size == LiveViewSize.SMALL || !exception.isRejectedLiveViewSize()) {
+                        throw exception
+                    }
+                    withContext(NonCancellable) {
+                        stopCcapiLiveView(operations.stopLiveView, operations.stopMethod)
+                    }
+                    started = false
+                    val fallback = request.copy(
+                        size = LiveViewSize.SMALL,
+                        source = LiveViewSource.CCAPI_JPEG_POLLING,
+                    )
+                    startCcapiLiveView(fallback, operations.startLiveView.path)
+                    started = true
+                    validateJpegLiveViewFrame(fallback)
+                    liveViewSizeControlSupported = false
+                    activeLiveViewSize = LiveViewSize.SMALL
+                }
+            }
+            activeLiveViewSource = LiveViewSource.CCAPI_JPEG_POLLING
+        } catch (exception: Exception) {
+            if (started) {
+                withContext(NonCancellable) {
+                    runCatching { stopCcapiLiveView(operations.stopLiveView, operations.stopMethod) }
+                }
+            }
+            activeJpegLiveViewOperations = null
+            activeLiveViewSource = null
+            throw exception
         }
-        startCcapiLiveView(request)
-        activeLiveViewSource = LiveViewSource.CCAPI_JPEG_POLLING
-        observedFeatures.add(CameraFeature.LIVE_VIEW)
-        observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+    }
+
+    private suspend fun validateJpegLiveViewFrame(request: LiveViewRequest) {
+        liveViewFrame(
+            cacheKey = System.nanoTime(),
+            request = request.copy(source = LiveViewSource.CCAPI_JPEG_POLLING),
+        )
+    }
+
+    private fun Throwable.isRejectedLiveViewSize(): Boolean {
+        val details = generateSequence(this) { it.cause }
+            .joinToString("\n") { it.message.orEmpty() }
+            .lowercase(Locale.US)
+        return "http 503" in details && "mode not supported" in details
     }
 
     private suspend fun startCcapiLiveView(
@@ -2300,8 +2405,9 @@ class CcapiClient(
 
     private suspend fun startMultipartLiveView(request: LiveViewRequest) {
         val operation = multipartLiveViewOperations()
-            ?: error("Camera did not advertise matching Canon multipart Live View GET and DELETE endpoints.")
+            ?: error("Camera did not advertise a complete Canon multipart Live View lifecycle.")
         startCcapiLiveView(request, operation.startLiveView.path)
+        activeMultipartLiveViewOperations = operation
         val sourceUrl = "$baseUrl${operation.openStream.path}"
         val streamRequest = Request.Builder()
             .url(sourceUrl)
@@ -2341,8 +2447,9 @@ class CcapiClient(
         } catch (exception: Exception) {
             withContext(NonCancellable) {
                 runCatching { deleteOk(operation.closeStream.path) }
-                runCatching { deleteOk(operation.stopLiveView.path) }
+                runCatching { stopCcapiLiveView(operation.stopLiveView, operation.stopMethod) }
             }
+            activeMultipartLiveViewOperations = null
             throw exception
         }
     }
@@ -2350,18 +2457,26 @@ class CcapiClient(
     private suspend fun stopMultipartLiveView() {
         multipartLiveViewSession?.close()
         multipartLiveViewSession = null
-        val operations = multipartLiveViewOperations()
-        try {
-            if (operations != null) {
-                requestOk(
-                    Request.Builder().url("$baseUrl${operations.closeStream.path}").delete().build(),
-                    expectedStatusCode = 200,
-                )
-            }
-        } finally {
-            if (!enforceAdvertisedOperations || supportsApi("DELETE", "/shooting/liveview")) {
-                runCatching { deleteOk(operations?.stopLiveView?.path ?: apiPath("DELETE", "/shooting/liveview")) }
-            }
+        val operations = activeMultipartLiveViewOperations ?: multipartLiveViewOperations()
+        if (operations != null) {
+            runCatching { deleteOk(operations.closeStream.path) }
+            stopCcapiLiveView(operations.stopLiveView, operations.stopMethod)
+        }
+        activeMultipartLiveViewOperations = null
+    }
+
+    private suspend fun stopCcapiLiveView(
+        operation: CcapiApiOperation,
+        stopMethod: CcapiLiveViewStopMethod,
+    ) {
+        when (stopMethod) {
+            CcapiLiveViewStopMethod.DELETE -> deleteOk(operation.path)
+            CcapiLiveViewStopMethod.POST_OFF -> postOk(
+                operation.path,
+                JSONObject()
+                    .put("liveviewsize", "off")
+                    .put("cameradisplay", "on"),
+            )
         }
     }
 
