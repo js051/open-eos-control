@@ -880,6 +880,7 @@ final class CCAPIClientTests: XCTestCase {
             body: #"{"ver100":[{"path":"/shooting/settings","get":true},{"path":"/shooting/control/shutterbutton","put":true},{"path":"/shooting/liveview","post":true},{"path":"/shooting/liveview/flip","get":true}]}"#
         )
         await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
+        await transport.enqueue(method: "POST", path: "/ccapi/ver100/shooting/liveview", status: 204, body: Data())
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
         let capabilities = try await client.capabilities()
