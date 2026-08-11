@@ -768,6 +768,7 @@ class CcapiSession:
         self._frame_key = 0
         self._latest_live_view_geometry: CcapiLiveViewGeometry | None = None
         self._media_cache: dict[str, MediaItem] = {}
+        self._media_descending_order_supported: bool | None = None
         self._last_error: str | None = None
 
     def initialize(self) -> None:
@@ -2250,20 +2251,24 @@ class CcapiSession:
                 raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
             pending: deque[tuple[str, int]] = deque([(self._api_path("GET", "/contents"), 0)])
             visited: set[str] = set()
-            media_paths: list[str] = []
-            while pending and len(media_paths) < MAX_MEDIA_ITEMS:
+            media_path_groups: list[list[str]] = []
+            while pending:
                 raw_container, depth = pending.popleft()
                 container = self._normalize_resource(raw_container).split("?", 1)[0]
                 if depth > MAX_MEDIA_TREE_DEPTH or container in visited:
                     continue
                 visited.add(container)
-                for raw_path in self._content_paths(container):
+                media_paths: list[str] = []
+                for raw_path in self._content_paths(container, max_paths=MAX_MEDIA_ITEMS):
                     path = self._normalize_resource(raw_path).split("?", 1)[0]
                     if _is_media_path(path):
                         if path not in media_paths:
                             media_paths.append(path)
                     elif path not in visited:
                         pending.append((path, depth + 1))
+                if media_paths:
+                    media_path_groups.append(media_paths)
+            media_paths = _merge_media_path_groups(media_path_groups, MAX_MEDIA_ITEMS)
             items = [
                 MediaItem(
                     id=_media_id(path),
@@ -2670,22 +2675,72 @@ class CcapiSession:
             )
         self._request_ok(operation.method, operation.path, payload)
 
-    def _content_paths(self, container: str) -> list[str]:
+    def _content_paths(self, container: str, *, max_paths: int = MAX_MEDIA_ITEMS) -> list[str]:
+        if max_paths <= 0:
+            return []
         page_info = self._first_json([f"{container}?kind=number", f"{container}?type=all,kind=number"])
         page_count = min(MAX_MEDIA_PAGES, _integer_value(page_info, "pagenumber") or 0)
-        pages = range(1, page_count + 1) if page_count > 0 else (0,)
-        paths: list[str] = []
-        for page in pages:
-            candidates = (
-                [container] if page == 0 else [f"{container}?page={page}&order=desc", f"{container}?page={page}"]
-            )
-            value = self._first_json(candidates, required=True)
-            if not isinstance(value, dict):
-                continue
-            raw_paths = value.get("path")
-            if isinstance(raw_paths, list):
-                paths.extend(item for item in raw_paths if isinstance(item, str) and item)
-        return list(dict.fromkeys(paths))
+        paths: dict[str, None] = {}
+        if page_count <= 0:
+            value = self._first_json([container], required=True)
+            if isinstance(value, dict):
+                self._add_content_paths(paths, value, reverse=False, max_paths=max_paths)
+            return list(paths)
+
+        first_value = self._content_page(container, 1)
+        if self._media_descending_order_supported is False:
+            pages = range(page_count, 0, -1)
+            for page in pages:
+                value = first_value if page == 1 else self._content_page(container, page)
+                self._add_content_paths(paths, value, reverse=True, max_paths=max_paths)
+                if len(paths) >= max_paths:
+                    break
+        else:
+            self._add_content_paths(paths, first_value, reverse=False, max_paths=max_paths)
+            for page in range(2, page_count + 1):
+                if len(paths) >= max_paths:
+                    break
+                self._add_content_paths(
+                    paths,
+                    self._content_page(container, page),
+                    reverse=False,
+                    max_paths=max_paths,
+                )
+        return list(paths)[:max_paths]
+
+    def _content_page(self, container: str, page: int) -> object:
+        plain_path = f"{container}?page={page}"
+        if self._media_descending_order_supported is False:
+            return self._request_json("GET", plain_path)
+        try:
+            value = self._request_json("GET", f"{plain_path}&order=desc")
+        except _CcapiHTTPError as error:
+            if error.camera_status != 400:
+                raise
+            self._media_descending_order_supported = False
+            return self._request_json("GET", plain_path)
+        self._media_descending_order_supported = True
+        return value
+
+    @staticmethod
+    def _add_content_paths(
+        paths: dict[str, None],
+        value: object,
+        *,
+        reverse: bool,
+        max_paths: int,
+    ) -> None:
+        if not isinstance(value, dict):
+            return
+        raw_paths = value.get("path")
+        if not isinstance(raw_paths, list):
+            return
+        values = reversed(raw_paths) if reverse else raw_paths
+        for item in values:
+            if isinstance(item, str) and item:
+                paths.setdefault(item, None)
+                if len(paths) >= max_paths:
+                    break
 
     def _load_settings(self, force: bool = False) -> dict[str, object]:
         if self._settings_cache is not None and not force:
@@ -4342,6 +4397,22 @@ def _effective_port(value: SplitResult) -> int:
 def _is_media_path(path: str) -> bool:
     name = path.rsplit("/", 1)[-1]
     return "." in name and not name.endswith(".")
+
+
+def _merge_media_path_groups(groups: list[list[str]], max_items: int) -> list[str]:
+    positions = [0] * len(groups)
+    merged: dict[str, None] = {}
+    while len(merged) < max_items:
+        advanced = False
+        for index, group in enumerate(groups):
+            if len(merged) >= max_items or positions[index] >= len(group):
+                continue
+            merged.setdefault(group[positions[index]], None)
+            positions[index] += 1
+            advanced = True
+        if not advanced:
+            break
+    return list(merged)
 
 
 def _media_kind(path: str) -> str:

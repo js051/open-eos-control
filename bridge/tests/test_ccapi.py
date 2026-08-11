@@ -138,6 +138,7 @@ class FakeCcapiTransport:
         discovery: dict[str, object] | None = None,
         developer_discovery: dict[str, object] | None = None,
         external_media: bool = False,
+        media_routes: dict[str, CcapiResponse] | None = None,
         reject_autofocus_start: bool = False,
         reject_bulb_press: bool = False,
         reject_event_stop: bool = False,
@@ -173,6 +174,7 @@ class FakeCcapiTransport:
         self.discovery = discovery or DISCOVERY
         self.developer_discovery = developer_discovery
         self.external_media = external_media
+        self.media_routes = media_routes or {}
         self.reject_autofocus_start = reject_autofocus_start
         self.reject_bulb_press = reject_bulb_press
         self.reject_event_stop = reject_event_stop
@@ -295,6 +297,9 @@ class FakeCcapiTransport:
         path = _request_path(url)
         payload = json.loads(body) if body else None
         self.requests.append(RecordedRequest(method, path, payload))
+        if method == "GET" and path in self.media_routes:
+            response = self.media_routes[path]
+            return CcapiResponse(response.status, dict(response.headers), response.body)
         if method == "GET" and path == "/ccapi":
             return _json_response(self.discovery)
         if method == "GET" and path == "/ccapi/ver100/topurlfordev" and self.developer_discovery is not None:
@@ -3142,6 +3147,116 @@ def test_ccapi_media_rejects_cross_origin_camera_paths() -> None:
         session.list_media()
 
     assert failure.value.code == "INVALID_CAMERA_RESOURCE"
+
+
+def test_ccapi_media_descending_order_fallback_is_remembered_across_containers() -> None:
+    root = "/ccapi/ver100/contents"
+    photo_container = f"{root}/card1/100CANON"
+    video_container = f"{root}/card1/VIDEO"
+    routes = {
+        f"{root}?kind=number": _json_response({"pagenumber": 0}),
+        root: _json_response({"path": [photo_container, video_container]}),
+        f"{photo_container}?kind=number": _json_response({"pagenumber": 1}),
+        f"{photo_container}?page=1&order=desc": _json_response(
+            {"message": "Illegal query parameter"}, status=400
+        ),
+        f"{photo_container}?page=1": _json_response(
+            {"path": [f"{photo_container}/IMG_0001.JPG", f"{photo_container}/IMG_0002.JPG"]}
+        ),
+        f"{video_container}?kind=number": _json_response({"pagenumber": 1}),
+        f"{video_container}?page=1": _json_response(
+            {"path": [f"{video_container}/VIDEO_0001.MP4", f"{video_container}/VIDEO_0002.MP4"]}
+        ),
+    }
+    transport = FakeCcapiTransport(media_routes=routes)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    items = session.list_media()
+
+    assert [item.name for item in items] == [
+        "IMG_0002.JPG",
+        "VIDEO_0002.MP4",
+        "IMG_0001.JPG",
+        "VIDEO_0001.MP4",
+    ]
+    media_requests = [request.path for request in transport.requests if request.path.startswith(root)]
+    assert media_requests.count(f"{photo_container}?page=1&order=desc") == 1
+    assert f"{video_container}?page=1&order=desc" not in media_requests
+    assert media_requests.count(f"{photo_container}?page=1") == 1
+    assert media_requests.count(f"{video_container}?page=1") == 1
+
+
+def test_ccapi_media_stops_paging_after_500_items_per_container() -> None:
+    root = "/ccapi/ver100/contents"
+    container = f"{root}/card1/100CANON"
+    routes = {
+        f"{root}?kind=number": _json_response({"pagenumber": 0}),
+        root: _json_response({"path": [container]}),
+        f"{container}?kind=number": _json_response({"pagenumber": 47}),
+    }
+    for page in range(1, 6):
+        routes[f"{container}?page={page}&order=desc"] = _json_response(
+            {
+                "path": [
+                    f"{container}/IMG_{number:04d}.JPG"
+                    for number in range((page - 1) * 100 + 1, page * 100 + 1)
+                ]
+            }
+        )
+    transport = FakeCcapiTransport(media_routes=routes)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    items = session.list_media()
+
+    assert len(items) == 500
+    assert items[0].name == "IMG_0001.JPG"
+    assert items[-1].name == "IMG_0500.JPG"
+    media_requests = [request.path for request in transport.requests if request.path.startswith(container)]
+    assert f"{container}?page=5&order=desc" in media_requests
+    assert f"{container}?page=6&order=desc" not in media_requests
+
+
+def test_ccapi_media_fairly_merges_sibling_containers_round_robin() -> None:
+    root = "/ccapi/ver100/contents"
+    photo_container = f"{root}/card1/100CANON"
+    video_container = f"{root}/card1/VIDEO"
+    routes = {
+        f"{root}?kind=number": _json_response({"pagenumber": 0}),
+        root: _json_response({"path": [photo_container, video_container]}),
+        f"{photo_container}?kind=number": _json_response({"pagenumber": 1}),
+        f"{photo_container}?page=1&order=desc": _json_response(
+            {
+                "path": [
+                    f"{photo_container}/IMG_0001.JPG",
+                    f"{photo_container}/IMG_0002.JPG",
+                    f"{photo_container}/IMG_0003.JPG",
+                ]
+            }
+        ),
+        f"{video_container}?kind=number": _json_response({"pagenumber": 1}),
+        f"{video_container}?page=1&order=desc": _json_response(
+            {
+                "path": [
+                    f"{video_container}/VIDEO_0001.MP4",
+                    f"{video_container}/VIDEO_0002.MP4",
+                    f"{video_container}/VIDEO_0003.MP4",
+                ]
+            }
+        ),
+    }
+    transport = FakeCcapiTransport(media_routes=routes)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    items = session.list_media()
+
+    assert [item.name for item in items] == [
+        "IMG_0001.JPG",
+        "VIDEO_0001.MP4",
+        "IMG_0002.JPG",
+        "VIDEO_0002.MP4",
+        "IMG_0003.JPG",
+        "VIDEO_0003.MP4",
+    ]
 
 
 @pytest.mark.parametrize(
