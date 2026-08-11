@@ -3131,8 +3131,9 @@ final class CCAPIClientTests: XCTestCase {
         let items = try await client.listMedia()
 
         XCTAssertEqual(items.map(\.name), ["C2.JPG", "C1.JPG", "B2.JPG", "B1.JPG", "A2.JPG", "A1.JPG"])
+        let requests = await transport.requests()
         XCTAssertEqual(
-            (await transport.requests()).map(\.path),
+            requests.map(\.path),
             [
                 "/ccapi",
                 "/ccapi/ver100/contents?kind=number",
@@ -3165,8 +3166,9 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(items.count, 500)
         XCTAssertEqual(items.first?.name, "IMG_0001.JPG")
         XCTAssertEqual(items.last?.name, "IMG_0500.JPG")
+        let requests = await transport.requests()
         XCTAssertEqual(
-            (await transport.requests()).map(\.path),
+            requests.map(\.path),
             [
                 "/ccapi",
                 "/ccapi/ver100/contents?kind=number",
@@ -3212,7 +3214,8 @@ final class CCAPIClientTests: XCTestCase {
 
         XCTAssertEqual(items.map(\.name), ["P2.JPG", "V2.MP4", "P1.JPG", "V1.MP4", "P0.JPG"])
         XCTAssertEqual(items.map(\.kind), ["image", "video", "image", "video", "image"])
-        XCTAssertEqual(await transport.remainingResponses(), 0)
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
     }
 
     func testMediaMetadataRequiresAdvertisedContentsPut() async throws {
