@@ -62,12 +62,14 @@ final class CCAPIClientTests: XCTestCase {
     }
     """
 
-    private let postOnlyLiveViewDiscovery = #"{
+    private let postOnlyLiveViewDiscovery = """
+    {
       "ver130":[
         {"path":"/shooting/liveview","post":true},
         {"path":"/shooting/liveview/flip","get":true}
       ]
-    }"#
+    }
+    """
 
     private let deviceStatusDiscovery = #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/information/recordable","get":true},{"path":"/devicestatus/lens","get":true},{"path":"/devicestatus/temperature","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/shutterbutton","post":true},{"path":"/shooting/control/recbutton","post":true}]}"#
 
