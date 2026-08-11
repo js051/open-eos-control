@@ -284,7 +284,7 @@ public actor CCAPIClient {
     private var liveViewSizeControlSupported = true
     private var activeLiveViewSize = LiveViewSize.medium
     private var activeLiveViewSource: LiveViewSource?
-    private var requestedLiveViewSource: LiveViewSource?
+    private var requestedLiveViewRequest: LiveViewRequest?
     private var liveViewSizeFallbackAttempted = false
     private var rtpSession: (any CCAPIRTPSession)?
     private var multipartSession: CCAPIMultipartLiveViewSession?
@@ -1320,7 +1320,7 @@ public actor CCAPIClient {
         try await refreshTemperatureStatusForRestrictedCommand()
         try requireTemperatureAllowsLiveView()
         latestLiveViewGeometry = nil
-        requestedLiveViewSource = request.source
+        requestedLiveViewRequest = request
         liveViewSizeFallbackAttempted = false
         if resolvedMode == .simulator {
             activeLiveViewSource = .simulatorFrame
@@ -1370,7 +1370,6 @@ public actor CCAPIClient {
         try await startCCAPILiveView(request, path: operations.start.path)
         pendingMultipartFrame = nil
         activeLiveViewSource = .ccapiJPEGPolling
-        observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
     }
 
     private func startCCAPILiveView(_ request: LiveViewRequest, path: String) async throws {
@@ -1572,6 +1571,7 @@ public actor CCAPIClient {
         }
 
         var failures: [String] = []
+        var liveViewSizeRejected = false
         for path in paths {
             try Task.checkCancellation()
             let sourceURL = try URLForPath(path, cacheKey: cacheKey)
@@ -1610,11 +1610,12 @@ public actor CCAPIClient {
                 return LiveViewFrame(data: frame, contentType: contentType, sourceURL: sourceURL)
             } catch {
                 if error is CancellationError { throw error }
-                if shouldDowngradeLiveViewSize(for: error) {
-                    return try await retryJPEGLiveViewAtSmallSize(cacheKey: cacheKey)
-                }
+                liveViewSizeRejected = liveViewSizeRejected || shouldDowngradeLiveViewSize(for: error)
                 failures.append("\(sourceURL.absoluteString): \(error.localizedDescription)")
             }
+        }
+        if liveViewSizeRejected {
+            return try await retryJPEGLiveViewAtSmallSize(cacheKey: cacheKey)
         }
         throw CCAPIError.invalidResponse(
             "Live View failed on every advertised JPEG endpoint.\n" + failures.map { "- \($0)" }.joined(separator: "\n")
@@ -2634,7 +2635,7 @@ public actor CCAPIClient {
         guard activeLiveViewSource == .ccapiJPEGPolling,
               !liveViewSizeFallbackAttempted,
               activeLiveViewSize != .small,
-              requestedLiveViewSource == .auto || requestedLiveViewSource == .ccapiJPEGPolling,
+              requestedLiveViewRequest?.source == .auto || requestedLiveViewRequest?.source == .ccapiJPEGPolling,
               case let CCAPIError.http(statusCode, _, _, body) = error,
               statusCode == 503 else { return false }
         return body.range(of: "mode not supported", options: .caseInsensitive) != nil
@@ -2642,9 +2643,10 @@ public actor CCAPIClient {
 
     private func retryJPEGLiveViewAtSmallSize(cacheKey: Int64) async throws -> LiveViewFrame {
         liveViewSizeFallbackAttempted = true
+        let requestedFPS = requestedLiveViewRequest?.fps ?? 1
         await stopLiveView()
         try await startJPEGLiveView(
-            LiveViewRequest(fps: 1, size: .small, source: .ccapiJPEGPolling)
+            LiveViewRequest(fps: requestedFPS, size: .small, source: .ccapiJPEGPolling)
         )
         return try await liveViewFrame(cacheKey: cacheKey)
     }

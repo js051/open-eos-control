@@ -1428,6 +1428,10 @@ final class CameraAppState: ObservableObject {
                     frameBytes = frame.data.count
                     frameContentType = frame.contentType
                     frameSourceURL = frame.sourceURL
+                    if let activeSize = await session.currentLiveViewSize(), activeSize != liveViewSize {
+                        liveViewSize = activeSize
+                        defaults.set(activeSize.rawValue, forKey: DefaultsKey.liveViewSize)
+                    }
                     let now = Date()
                     lastFrameAt = now
                     observedFPS = rateTracker.record(now.timeIntervalSinceReferenceDate)
