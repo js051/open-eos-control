@@ -98,6 +98,21 @@ class CameraRepositoryTest {
     }
 
     @Test
+    fun restartLiveViewReturnsRequestClampedToRefreshedCapabilities() = runTest {
+        server.enqueue(jsonResponse(INFO_JSON))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        repository.connect(server.url("/").toString())
+        repository.updateLiveViewRequest(fps = 30, size = LiveViewSize.LARGE)
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+
+        val effectiveRequest = repository.restartLiveView()
+
+        assertEquals(2, effectiveRequest.fps)
+        assertEquals(LiveViewSize.MEDIUM, effectiveRequest.size)
+    }
+
+    @Test
     fun captureStillRunsThroughRepositoryBackendBoundary() = runTest {
         server.enqueue(jsonResponse(INFO_JSON))
         server.enqueue(jsonResponse(STATUS_JSON))

@@ -1,7 +1,9 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,6 +12,16 @@ import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 
 class CcapiMultipartLiveViewTest {
+    @Test
+    fun closesMultipartResponseAwayFromTheCallerThread() = runBlocking {
+        val callerThread = Thread.currentThread()
+        var closeThread: Thread? = null
+
+        closeCcapiMultipartSession(AutoCloseable { closeThread = Thread.currentThread() })
+
+        assertNotEquals(callerThread, closeThread)
+    }
+
     @Test
     fun parsesQuotedBoundaryAndConsecutiveJpegParts() {
         val first = jpeg(1)

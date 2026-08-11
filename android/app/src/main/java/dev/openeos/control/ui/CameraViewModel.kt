@@ -578,7 +578,8 @@ class CameraViewModel(
             !_uiState.value.supports(CameraFeature.LIVE_VIEW) ||
             !_uiState.value.liveViewTemperatureAllowed
         ) return
-        repository.restartLiveView()
+        stopLiveViewLoop()
+        val effectiveRequest = repository.restartLiveView()
         val capabilities = repository.refreshCapabilities()
         val nativeSession = repository.nativeLiveViewSession()
         configureNativeLiveViewSession(nativeSession, _uiState.value.liveViewFrameRateFps)
@@ -587,6 +588,7 @@ class CameraViewModel(
                 capabilities = capabilities,
                 nativeLiveViewSession = nativeSession,
                 liveViewSource = nativeSession?.source ?: it.liveViewSource,
+                liveViewSize = effectiveRequest.size,
                 liveViewBitmap = null,
                 liveViewFrameUrl = null,
                 liveViewMagnification = null,
