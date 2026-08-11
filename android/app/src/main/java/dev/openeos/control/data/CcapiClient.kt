@@ -2492,7 +2492,7 @@ class CcapiClient(
                 }
                 throw checkNotNull(lastFailure)
             }
-            multipartLiveViewSession?.close()
+            closeCcapiMultipartSession(multipartLiveViewSession)
             multipartLiveViewSession = session
             activeLiveViewSource = LiveViewSource.CCAPI_MULTIPART
         } catch (exception: Exception) {
@@ -2506,7 +2506,7 @@ class CcapiClient(
     }
 
     private suspend fun stopMultipartLiveView() {
-        multipartLiveViewSession?.close()
+        closeCcapiMultipartSession(multipartLiveViewSession)
         multipartLiveViewSession = null
         val operations = activeMultipartLiveViewOperations ?: multipartLiveViewOperations()
         if (operations != null) {

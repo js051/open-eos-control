@@ -9,7 +9,7 @@ This record captures physical-camera evidence reported from the Android app. Ide
 
 - Camera: Canon EOS R6 Mark III
 - Firmware: `1.1.0`, read directly from the camera on 2026-08-12
-- Client: physical Android phone
+- Clients: physical Android phone for the original diagnostics; production Android APK on a Pixel 6 Pro API 34 AVD routed through the host for the 2026-08-12 installed-App pass
 - Transport: direct camera Wi-Fi and CCAPI HTTP
 - Camera origin: `http://192.168.1.2:8080`
 - API discovery: `/ccapi`, with `ver100` selected by the client
@@ -22,13 +22,13 @@ This record captures physical-camera evidence reported from the Android app. Ide
 | Battery | Passed | Camera returned LP-E6P, `quality=good`, `level=full` |
 | Exposure and writable settings | Passed through the integrated PC engine; installed Android recheck pending | 28 advertised choice settings were changed to an adjacent advertised value, read back, restored, and read back again; all 28 passed and all 28 original values were restored |
 | JPEG Live View | Passed | Requested 15 FPS, rolling observed 15.1 FPS, JPEG content type, 66,086-byte recorded frame |
-| Multipart JPEG Live View | Camera protocol and integrated PC engine passed; Android device pass pending | The latest developer list advertises a same-version general POST plus multipart GET/DELETE without general DELETE. The camera returned a complete bounded multipart JPEG, and the integrated PC engine completed AUTO fallback and POST-off cleanup. Android uses the same tested lifecycle but still needs an installed-build pass. |
+| Multipart JPEG Live View | Passed in the installed Android App through AVD-to-camera routing; physical-phone repeat pending | The latest developer list advertises a same-version general POST plus multipart GET/DELETE without general DELETE. The installed App selected multipart, returned current JPEG frames, reported 6.0 observed FPS, restarted cleanly, and completed disconnect cleanup. |
 | RTP H.264 Live View | Advertised; camera rejected start in the 2026-08-11 recheck | Direct `POST rtp` returned HTTP 503 `Mode not supported` in both tested movie-mode states. AUTO then reached multipart. This does not prove RTP is universally unavailable; Android still reports bounded UDP/access-unit/keyframe evidence when camera start succeeds. |
-| Live View size compatibility fallback | Passed through the integrated PC engine; installed mobile recheck pending | `SMALL` and `MEDIUM` produced complete JPEGs through multipart and polling. Firmware 1.1.0 advertised `LARGE` but rejected its start payload with HTTP 400; all three clients now try the no-size compatibility form, then downgrade `LARGE` to `MEDIUM`/`SMALL`, report the effective size, and remove the rejected size for that session. |
+| Live View size compatibility fallback | Passed through the integrated PC engine and installed Android App | `SMALL` and `MEDIUM` produced complete JPEGs through multipart and polling. Firmware 1.1.0 advertised `LARGE` but rejected its start payload with HTTP 400. The installed App downgraded without surfacing an error, removed `LARGE` for that session, then switched between `SMALL` and `MEDIUM` while maintaining 6.0 observed FPS. |
 | CCAPI event polling and body-dial synchronization | Protocol lifecycle passed through the integrated PC engine; client refresh UI recheck pending | The first long poll returned bounded change keys. A subsequent long poll remained pending, advertised DELETE stopped it successfully, and the request completed with an empty event. A reversible beep change was restored exactly. |
 | Still capture and half-press | Still capture intentionally not tested; half-press reached the camera but did not complete AF | No file-producing command was sent. Timed half-press returned Canon `AF NG` for the current scene and still executed the guaranteed release, so this is not recorded as a successful half-press result. |
 | Movie start/stop, Tap AF, and Click White Balance | Tap AF passed through the integrated PC engine; other writes intentionally not tested | Center Tap AF succeeded after reading geometry from the exact Canon `flipdetail?kind=both` query. Firmware 1.1.0 rejects an additional `&t=` query item. Recording and Click WB were skipped because they create media or alter calibration state. |
-| Storage, media browser and download | Passed through the integrated PC engine; installed mobile recheck pending | Storage, 500 bounded media entries, one item's metadata, JPEG thumbnail and display preview, and a 9,313,518-byte in-memory download all succeeded. The received download length exactly matched metadata; no file, filename, timestamp, image or hash was retained. |
+| Storage, media browser and download | Browser, thumbnail, display preview and metadata passed in the installed Android App; full download passed through the integrated PC engine | The App loaded the bounded 500-item list, displayed thumbnails, opened the first item's display preview, and read protection/archive/rating/rotation metadata without invoking a write. The engine's 9,313,518-byte in-memory download exactly matched metadata; no file, image or hash was retained. |
 | Camera Wi-Fi plus cellular internet | Passed by routing diagnostics; public-app confirmation pending | The 2026-08-03 report shows camera HTTP bound to `wlan0` while validated cellular remained the validated system default and `wifiCellularCoexistence=true` |
 | Android USB/PTP | Pending | No USB validation is represented by this CCAPI record |
 
@@ -140,12 +140,25 @@ The same camera remained connected only by Wi-Fi. This pass exercised read-only 
 - Event long-poll start/stop, storage/media traversal, metadata, thumbnail, display preview, and bounded full-file streaming passed. The thumbnail contained a decodable 160x120 JPEG followed by camera-supplied trailing bytes; strict Pillow verification and decode passed, so the response was treated as valid rather than requiring EOI at the final response byte.
 - Camera RTP state and general Live View were confirmed stopped at cleanup. RTP start remains advertised but rejected with HTTP 503 `Mode not supported` on this body/firmware state.
 
-The Android and iOS implementations now carry deterministic tests for the exact `flipdetail` query, advertised-size pruning, start-payload downgrade, and bounded multipart-not-ready retry. They still require installed-device passes before their rows can be marked physically passed.
+The Android and iOS implementations now carry deterministic tests for the exact `flipdetail` query, advertised-size pruning, start-payload downgrade, and bounded multipart-not-ready retry. Android now also has the installed AVD-to-camera evidence below; a physical-phone repeat and an installed iOS pass remain pending.
+
+## 2026-08-12 Installed Android App Pass
+
+A production-path debug APK was installed on a Pixel 6 Pro API 34 AVD. The emulator reached the physical R6 Mark III through the Windows host's active camera Wi-Fi route. This validates the Android App, repository, CCAPI backend, decoding and Compose state path against a real camera; it does not replace a physical-phone validation of Android Wi-Fi/cellular binding or USB host behavior.
+
+- Connection returned the physical camera identity, 92% battery, 9,999 recordable shots, RF lens/status data, exposure values, four protocol versions and 246 validated advertised operations.
+- AUTO selected Canon multipart JPEG. Debug reported `image/jpeg`, current frame timestamps, nonzero frame bytes, and 5.5-6.0 observed FPS for a 6 FPS request.
+- The App's FPS control produced 14.9 observed FPS for a 15 FPS request. A 30 FPS request remained distinct from throughput and settled between roughly 14.7 and 20.0 FPS during this AVD route; no 400/503 was returned.
+- Selecting the firmware-advertised `LARGE` size exposed a real Android defect: closing OkHttp's streaming response on the main thread raised `NetworkOnMainThreadException`, aborted restart, and caused repeated reads from a closed multipart session. The corrected build closes the response on `Dispatchers.IO` and stops the old frame loop before restart.
+- Repeating `LARGE` on the corrected build triggered the expected camera compatibility downgrade, removed only `LARGE` for the session, maintained 6.0 observed FPS, and left no Live View error. Subsequent `SMALL`, `MEDIUM`, explicit Restart Live View and Disconnect operations all completed without closed-stream retries.
+- The media screen loaded its 500-item bound, rendered thumbnails, opened a display preview, and read the selected item's protection, archive, rating and rotation metadata. No download, metadata write, capture, recording, deletion or other media mutation was invoked.
+
+No camera identifier, media image or media filename is retained in this repository; the example filename above is intentionally omitted from the validation record.
 
 ## Next Physical Pass
 
 1. Install a development build containing the Android RTP readiness fix. Keep cellular data enabled while connected to the camera Wi-Fi, press Debug Refresh, and confirm `cameraRoute=WIFI_BOUND`, `cameraNetworkAvailable=true`, `systemDefaultTransport=CELLULAR`, `systemDefaultValidated=true`, and `wifiCellularCoexistence=true`. Open a public HTTPS page in another app without disconnecting the camera and record the result.
-2. Install a current Android build and verify the already proven protocol paths through the App UI: event-driven exposure refresh, AUTO multipart, exact effective size after `LARGE` fallback, 6/15/30 requested versus observed FPS, center Tap AF, storage list, thumbnail, preview, bounded download, reconnect, and stale-event isolation. Require matching `observedFeatures` before marking an App row passed.
+2. Repeat the AVD-proven Android paths on a physical phone: event-driven exposure refresh, AUTO multipart, exact effective size after `LARGE` fallback, 6/15/30 requested versus observed FPS, center Tap AF, storage list, thumbnail, preview, bounded download, reconnect, and stale-event isolation. Require matching `observedFeatures` before marking physical-device rows passed.
 3. On iPhone/iPad, repeat the direct CCAPI Live View, event, focus, and media read-only pass after the macOS package/App CI is green. RTP remains a separate test because this camera currently rejects start before UDP delivery.
 4. Test still capture, recording, Click WB, metadata writes, clock synchronization, directory/file naming changes, sensor cleaning and sleep only in an explicitly approved state-changing pass with suitable media and restore procedures.
 5. Connect over USB-C/OTG and complete the checklist in [Android USB/PTP](../android-usb-ptp.md).

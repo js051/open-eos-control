@@ -1,5 +1,7 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Response
 import java.io.Closeable
@@ -7,6 +9,11 @@ import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+
+internal suspend fun closeCcapiMultipartSession(session: AutoCloseable?) {
+    if (session == null) return
+    withContext(Dispatchers.IO) { session.close() }
+}
 
 internal const val CCAPI_MULTIPART_MAX_FRAME_BYTES = 12 * 1024 * 1024
 private const val MAX_BOUNDARY_CHARS = 200

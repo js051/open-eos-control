@@ -252,9 +252,11 @@ class CameraRepository(
 
     suspend fun deleteMedia(item: CameraMediaItem) = backend.deleteMedia(item)
 
-    suspend fun restartLiveView() {
+    suspend fun restartLiveView(): LiveViewRequest {
         backend.stopLiveView()
         backend.startLiveView(liveViewRequest)
+        liveViewRequest = liveViewRequest.clampTo(backend.capabilities().liveView)
+        return liveViewRequest
     }
 
     fun updateLiveViewRequest(
