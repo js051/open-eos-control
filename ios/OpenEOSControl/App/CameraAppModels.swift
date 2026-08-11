@@ -31,6 +31,7 @@ enum AppConnectionMode: String, CaseIterable, Identifiable {
 }
 
 enum CameraSheet: String, Identifiable {
+    case actions
     case iso
     case shutter
     case aperture

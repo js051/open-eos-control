@@ -7,6 +7,8 @@ struct CameraSheetHost: View {
 
     var body: some View {
         switch sheet {
+        case .actions:
+            CameraActionsView()
         case .iso, .shutter, .aperture, .whiteBalance:
             ExposureSettingsView(selectedSheet: sheet)
         case .liveView:
@@ -20,6 +22,91 @@ struct CameraSheetHost: View {
         case .language:
             LanguageSettingsView()
         }
+    }
+}
+
+private struct CameraActionsView: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Button {
+                    dismiss()
+                    camera.screen = .media
+                    Task { await camera.loadMedia() }
+                } label: {
+                    Label("camera_media", systemImage: "photo.on.rectangle")
+                }
+                .disabled(!camera.supports(.mediaBrowser))
+                .accessibilityIdentifier("camera-media-menu-button")
+
+                Button {
+                    camera.activeSheet = .focusDrive
+                } label: {
+                    Label("focus_drive", systemImage: "arrow.left.and.right")
+                }
+                .disabled(!camera.supports(.focusDrive))
+                .accessibilityIdentifier("focus-drive-menu-button")
+
+                Button {
+                    camera.activeSheet = .monitoring
+                } label: {
+                    Label("monitoring_assists", systemImage: "waveform.path.ecg")
+                }
+                .accessibilityIdentifier("monitoring-menu-button")
+
+                if camera.supports(.shutterHalfPress) {
+                    Button {
+                        dismiss()
+                        Task { await camera.halfPressShutter() }
+                    } label: {
+                        Label("half_press_shutter", systemImage: "camera.aperture")
+                    }
+                    .disabled(camera.isBusy(.focus))
+                    .accessibilityIdentifier("half-press-button")
+                }
+
+                Section {
+                    Button {
+                        dismiss()
+                        camera.screen = .debug
+                    } label: {
+                        Label("debug", systemImage: "ladybug")
+                    }
+                    .accessibilityIdentifier("debug-menu-button")
+
+                    Button {
+                        camera.activeSheet = .language
+                    } label: {
+                        Label("language", systemImage: "globe")
+                    }
+                    .accessibilityIdentifier("language-menu-button")
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        dismiss()
+                        Task { await camera.disconnect() }
+                    } label: {
+                        Label("disconnect", systemImage: "xmark.circle")
+                    }
+                    .accessibilityIdentifier("disconnect-menu-button")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.cameraSurface)
+            .navigationTitle(Text("more_actions"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 
