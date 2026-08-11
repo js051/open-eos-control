@@ -86,12 +86,13 @@ private struct CameraActionsView: View {
                 }
 
                 Section {
-                    Button(role: .destructive) {
+                    Button {
                         camera.requestDisconnect()
                         dismiss()
                     } label: {
                         Label("disconnect", systemImage: "xmark.circle")
                     }
+                    .foregroundStyle(Color.cameraRecording)
                     .accessibilityIdentifier("disconnect-menu-button")
                 }
             }

@@ -74,7 +74,7 @@ final class OpenEOSControlUITests: XCTestCase {
         openMoreActions(in: app)
         XCTAssertTrue(tapCameraAction(app.buttons["disconnect-menu-button"], in: app))
 
-        XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 8))
+        guard waitForConnectionScreen(in: app, timeout: 8) else { return }
     }
 
     func testOfflineMediaDeletionRequiresConfirmation() throws {
@@ -309,7 +309,7 @@ final class OpenEOSControlUITests: XCTestCase {
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
         guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
-        XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
+        guard waitForConnectionScreen(in: app, timeout: 15) else { return }
     }
 
     @MainActor
@@ -381,7 +381,7 @@ final class OpenEOSControlUITests: XCTestCase {
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
         guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
-        XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
+        guard waitForConnectionScreen(in: app, timeout: 15) else { return }
         try await waitForSimulatorState { state in
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
             return ((canonical["event_delete_count"] as? NSNumber)?.intValue ?? 0) >= 1 &&
@@ -444,6 +444,14 @@ final class OpenEOSControlUITests: XCTestCase {
         let moreActions = app.buttons["more-actions-button"]
         XCTAssertTrue(waitForInteraction(moreActions, timeout: 8))
         moreActions.tap()
+    }
+
+    private func waitForConnectionScreen(in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        guard app.buttons["connect-button"].waitForExistence(timeout: timeout) else {
+            XCTFail("The connection screen did not become visible.\n\(app.debugDescription)")
+            return false
+        }
+        return true
     }
 
     @discardableResult
