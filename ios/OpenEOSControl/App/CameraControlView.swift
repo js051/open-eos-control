@@ -165,53 +165,8 @@ private struct CameraOverlayHeader: View {
                 .disabled(camera.isBusy(.focus))
                 .accessibilityIdentifier("autofocus-button")
             }
-            Menu {
-                Button {
-                    camera.screen = .media
-                    Task { await camera.loadMedia() }
-                } label: {
-                    Label("camera_media", systemImage: "photo.on.rectangle")
-                }
-                .disabled(!camera.supports(.mediaBrowser))
-                .accessibilityIdentifier("camera-media-menu-button")
-                Button {
-                    camera.activeSheet = .focusDrive
-                } label: {
-                    Label("focus_drive", systemImage: "arrow.left.and.right")
-                }
-                .disabled(!camera.supports(.focusDrive))
-                .accessibilityIdentifier("focus-drive-menu-button")
-                Button {
-                    camera.activeSheet = .monitoring
-                } label: {
-                    Label("monitoring_assists", systemImage: "waveform.path.ecg")
-                }
-                if camera.supports(.shutterHalfPress) {
-                    Button {
-                        Task { await camera.halfPressShutter() }
-                    } label: {
-                        Label("half_press_shutter", systemImage: "camera.aperture")
-                    }
-                    .disabled(camera.isBusy(.focus))
-                    .accessibilityIdentifier("half-press-button")
-                }
-                Button {
-                    camera.screen = .debug
-                } label: {
-                    Label("debug", systemImage: "ladybug")
-                }
-                Button {
-                    camera.activeSheet = .language
-                } label: {
-                    Label("language", systemImage: "globe")
-                }
-                Divider()
-                Button(role: .destructive) {
-                    Task { await camera.disconnect() }
-                } label: {
-                    Label("disconnect", systemImage: "xmark.circle")
-                }
-                .accessibilityIdentifier("disconnect-menu-button")
+            Button {
+                camera.activeSheet = .actions
             } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "ellipsis")

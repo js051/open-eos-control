@@ -131,6 +131,23 @@ final class CameraAppTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "rtp-audio-enabled"))
     }
 
+    func testRequestedDisconnectClearsVisibleStateSynchronously() {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+        state.activeSheet = .actions
+
+        state.requestDisconnect()
+
+        XCTAssertFalse(state.connected)
+        XCTAssertFalse(state.isPreview)
+        XCTAssertNil(state.activeSheet)
+        XCTAssertEqual(state.screen, .control)
+        XCTAssertTrue(state.mediaItems.isEmpty)
+    }
+
     func testCCAPIPresetsCarryExplicitConnectionIntent() {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

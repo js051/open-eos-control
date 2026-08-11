@@ -26,14 +26,12 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "control-landscape")
 
         moreActions.tap()
-        let halfPress = app.buttons["Half-press shutter"]
-        XCTAssertTrue(halfPress.waitForExistence(timeout: 3))
-        halfPress.tap()
+        let halfPress = app.buttons["half-press-button"]
+        XCTAssertTrue(tapCameraAction(halfPress, in: app))
         XCTAssertTrue(halfPress.waitForNonExistence(timeout: 3))
         moreActions.tap()
-        let debug = app.buttons["Debug"]
-        XCTAssertTrue(debug.waitForExistence(timeout: 3))
-        debug.tap()
+        let debug = app.buttons["debug-menu-button"]
+        XCTAssertTrue(tapCameraAction(debug, in: app))
         XCTAssertTrue(app.buttons["copy-diagnostic-button"].waitForExistence(timeout: 5))
         let physicalCopy = app.buttons["copy-physical-validation-button"]
         XCTAssertTrue(physicalCopy.waitForExistence(timeout: 5))
@@ -68,6 +66,17 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "connection-desktop-bridge")
     }
 
+    func testOfflineDisconnectReturnsToConnectionScreen() throws {
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))
+        app.buttons["offline-preview-button"].tap()
+
+        openMoreActions(in: app)
+        XCTAssertTrue(tapCameraAction(app.buttons["disconnect-menu-button"], in: app))
+
+        guard waitForConnectionScreen(in: app, timeout: 8) else { return }
+    }
+
     func testOfflineMediaDeletionRequiresConfirmation() throws {
         let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
         let preview = app.buttons["offline-preview-button"]
@@ -77,9 +86,8 @@ final class OpenEOSControlUITests: XCTestCase {
         let moreActions = app.buttons["more-actions-button"]
         XCTAssertTrue(moreActions.waitForExistence(timeout: 5))
         moreActions.tap()
-        let media = app.buttons["Camera media"]
-        XCTAssertTrue(media.waitForExistence(timeout: 3))
-        media.tap()
+        let media = app.buttons["camera-media-menu-button"]
+        XCTAssertTrue(tapCameraAction(media, in: app))
 
         let item = app.staticTexts["R6M3_0001.JPG"]
         let actions = app.buttons["media-actions-preview-002"]
@@ -104,8 +112,7 @@ final class OpenEOSControlUITests: XCTestCase {
         app.buttons["offline-preview-button"].tap()
         XCTAssertTrue(app.buttons["more-actions-button"].waitForExistence(timeout: 5))
         app.buttons["more-actions-button"].tap()
-        XCTAssertTrue(app.buttons["Camera media"].waitForExistence(timeout: 3))
-        app.buttons["Camera media"].tap()
+        XCTAssertTrue(tapCameraAction(app.buttons["camera-media-menu-button"], in: app))
 
         XCTAssertFalse(app.buttons["upload-media-button"].waitForExistence(timeout: 2))
         let download = app.buttons["download-media-preview-001"]
@@ -123,9 +130,8 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(app.buttons["more-actions-button"].waitForExistence(timeout: 5))
         app.buttons["more-actions-button"].tap()
 
-        let monitoring = app.buttons["Monitoring assists"]
-        XCTAssertTrue(monitoring.waitForExistence(timeout: 3))
-        monitoring.tap()
+        let monitoring = app.buttons["monitoring-menu-button"]
+        XCTAssertTrue(tapCameraAction(monitoring, in: app))
 
         let unavailable = app.descendants(matching: .any)["monitor-pixel-analysis-unavailable"]
         XCTAssertTrue(unavailable.waitForExistence(timeout: 3))
@@ -222,7 +228,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         openMoreActions(in: app)
         let focusDrive = app.buttons["focus-drive-menu-button"]
-        guard tapMenuAction(focusDrive) else { return }
+        guard tapCameraAction(focusDrive, in: app) else { return }
         let driveNearLarge = app.buttons["focus-drive-near-large"]
         guard waitForInteraction(driveNearLarge, timeout: 5) else {
             XCTFail("The focus-drive sheet did not become interactive")
@@ -277,7 +283,7 @@ final class OpenEOSControlUITests: XCTestCase {
         }
 
         openMoreActions(in: app)
-        guard tapMenuAction(app.buttons["camera-media-menu-button"]) else { return }
+        guard tapCameraAction(app.buttons["camera-media-menu-button"], in: app) else { return }
         XCTAssertTrue(app.staticTexts["SIM_0003.PNG"].waitForExistence(timeout: 20))
 
         let previewMedia = app.buttons["preview-media-SIM_0003.PNG"]
@@ -302,8 +308,8 @@ final class OpenEOSControlUITests: XCTestCase {
 
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
-        tapMenuAction(app.buttons["disconnect-menu-button"])
-        XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
+        guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
+        guard waitForConnectionScreen(in: app, timeout: 15) else { return }
     }
 
     @MainActor
@@ -358,7 +364,7 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.buttons["exposure-iso"], containing: "3200", timeout: 20))
 
         openMoreActions(in: app)
-        guard tapMenuAction(app.buttons["camera-media-menu-button"]) else { return }
+        guard tapCameraAction(app.buttons["camera-media-menu-button"], in: app) else { return }
         XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 20))
 
         _ = try await simulatorRequest(
@@ -374,8 +380,8 @@ final class OpenEOSControlUITests: XCTestCase {
 
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
-        tapMenuAction(app.buttons["disconnect-menu-button"])
-        XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
+        guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
+        guard waitForConnectionScreen(in: app, timeout: 15) else { return }
         try await waitForSimulatorState { state in
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
             return ((canonical["event_delete_count"] as? NSNumber)?.intValue ?? 0) >= 1 &&
@@ -394,6 +400,7 @@ final class OpenEOSControlUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "-resetState",
+            "-disableAnimations",
             "-app-language", appLanguage,
             "-AppleLanguages", "(\(appleLanguage))",
             "-AppleLocale", locale,
@@ -439,17 +446,21 @@ final class OpenEOSControlUITests: XCTestCase {
         moreActions.tap()
     }
 
+    private func waitForConnectionScreen(in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        guard app.buttons["connect-button"].waitForExistence(timeout: timeout) else {
+            XCTFail("The connection screen did not become visible.\n\(app.debugDescription)")
+            return false
+        }
+        return true
+    }
+
     @discardableResult
-    private func tapMenuAction(_ element: XCUIElement) -> Bool {
-        guard element.waitForExistence(timeout: 5) else {
-            XCTFail("The requested menu action does not exist")
+    private func tapCameraAction(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        guard scrollToInteraction(element, in: app, timeout: 8) else {
+            XCTFail("The requested camera action did not become interactive")
             return false
         }
-        guard element.isEnabled, !element.frame.isEmpty else {
-            XCTFail("The requested menu action is disabled or has no tappable frame")
-            return false
-        }
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        element.tap()
         return true
     }
 

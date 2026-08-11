@@ -20,6 +20,7 @@ from open_eos_bridge.ccapi import (
     CcapiResponse,
     CcapiStreamResponse,
     UrllibCcapiTransport,
+    _media_id,
     normalize_base_url,
     parse_multipart_boundary,
 )
@@ -137,9 +138,11 @@ class FakeCcapiTransport:
         discovery: dict[str, object] | None = None,
         developer_discovery: dict[str, object] | None = None,
         external_media: bool = False,
+        media_routes: dict[str, CcapiResponse] | None = None,
         reject_autofocus_start: bool = False,
         reject_bulb_press: bool = False,
         reject_event_stop: bool = False,
+        event_stop_not_started: bool = False,
         reject_rtp_start: bool = False,
         camera_sleep_status: int = 202,
         sensor_cleaning_status: int = 200,
@@ -171,9 +174,11 @@ class FakeCcapiTransport:
         self.discovery = discovery or DISCOVERY
         self.developer_discovery = developer_discovery
         self.external_media = external_media
+        self.media_routes = media_routes or {}
         self.reject_autofocus_start = reject_autofocus_start
         self.reject_bulb_press = reject_bulb_press
         self.reject_event_stop = reject_event_stop
+        self.event_stop_not_started = event_stop_not_started
         self.reject_rtp_start = reject_rtp_start
         self.camera_sleep_status = camera_sleep_status
         self.sensor_cleaning_status = sensor_cleaning_status
@@ -292,6 +297,9 @@ class FakeCcapiTransport:
         path = _request_path(url)
         payload = json.loads(body) if body else None
         self.requests.append(RecordedRequest(method, path, payload))
+        if method == "GET" and path in self.media_routes:
+            response = self.media_routes[path]
+            return CcapiResponse(response.status, dict(response.headers), response.body)
         if method == "GET" and path == "/ccapi":
             return _json_response(self.discovery)
         if method == "GET" and path == "/ccapi/ver100/topurlfordev" and self.developer_discovery is not None:
@@ -300,7 +308,9 @@ class FakeCcapiTransport:
             return _json_response({"shootingsettings": {"iso": {"value": "1600"}}})
         if method == "DELETE" and path == "/ccapi/ver110/event/polling":
             if self.reject_event_stop:
-                return _json_response({"message": "event polling is still busy"}, status=503)
+                return _json_response({"message": "Event not started because it is still busy"}, status=503)
+            if self.event_stop_not_started:
+                return _json_response({"message": "Not started"}, status=503)
             return CcapiResponse(204, {}, b"")
         if method == "GET" and path == "/ccapi/ver100/deviceinformation":
             return _json_response(
@@ -812,6 +822,11 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert "iso" in capabilities.evidence.writable_settings
     assert "zoom" in capabilities.evidence.writable_settings
     assert capabilities.evidence.truncated is False
+    assert set(capabilities.supported) | set(capabilities.planned) == set(CameraFeature) - {
+        CameraFeature.USB_DIAGNOSTICS
+    }
+    assert set(capabilities.supported).isdisjoint(capabilities.planned)
+    assert CameraFeature.MEDIA_UPLOAD in capabilities.planned
 
     assert session.set_setting("iso", "1600").exposure.iso == "1600"
     session.set_setting("zoom", "75")
@@ -2205,6 +2220,21 @@ def test_ccapi_event_polling_uses_advertised_lifecycle_without_control_lock() ->
     ) in transport.requests
 
 
+def test_ccapi_event_polling_stop_is_idempotent_when_canon_reports_not_started() -> None:
+    transport = FakeCcapiTransport(discovery=EVENT_DISCOVERY, event_stop_not_started=True)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080/"
+    )
+
+    session.stop_event_polling()
+
+    assert RecordedRequest(
+        "DELETE",
+        "/ccapi/ver110/event/polling",
+        None,
+    ) in transport.requests
+
+
 def test_bridge_api_exposes_ccapi_events_and_stop() -> None:
     transport = FakeCcapiTransport(discovery=EVENT_DISCOVERY)
     application = create_app(
@@ -3119,6 +3149,122 @@ def test_ccapi_media_rejects_cross_origin_camera_paths() -> None:
     assert failure.value.code == "INVALID_CAMERA_RESOURCE"
 
 
+def test_ccapi_media_descending_order_fallback_is_remembered_across_containers() -> None:
+    root = "/ccapi/ver100/contents"
+    photo_container = f"{root}/card1/100CANON"
+    video_container = f"{root}/card1/VIDEO"
+    routes = {
+        f"{root}?kind=number": _json_response({"pagenumber": 0}),
+        root: _json_response({"path": [photo_container, video_container]}),
+        f"{photo_container}?kind=number": _json_response({"pagenumber": 2}),
+        f"{photo_container}?page=1&order=desc": _json_response(
+            {"message": "Illegal query parameter"}, status=400
+        ),
+        f"{photo_container}?page=1": _json_response(
+            {"path": [f"{photo_container}/IMG_0001.JPG", f"{photo_container}/IMG_0002.JPG"]}
+        ),
+        f"{photo_container}?page=2": _json_response(
+            {"path": [f"{photo_container}/IMG_0003.JPG", f"{photo_container}/IMG_0004.JPG"]}
+        ),
+        f"{video_container}?kind=number": _json_response({"pagenumber": 1}),
+        f"{video_container}?page=1": _json_response(
+            {"path": [f"{video_container}/VIDEO_0001.MP4", f"{video_container}/VIDEO_0002.MP4"]}
+        ),
+    }
+    transport = FakeCcapiTransport(media_routes=routes)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    items = session.list_media()
+
+    assert [item.name for item in items] == [
+        "IMG_0004.JPG",
+        "VIDEO_0002.MP4",
+        "IMG_0003.JPG",
+        "VIDEO_0001.MP4",
+        "IMG_0002.JPG",
+        "IMG_0001.JPG",
+    ]
+    media_requests = [request.path for request in transport.requests if request.path.startswith(root)]
+    assert media_requests.count(f"{photo_container}?page=1&order=desc") == 1
+    assert f"{video_container}?page=1&order=desc" not in media_requests
+    assert media_requests.count(f"{photo_container}?page=1") == 1
+    assert media_requests.count(f"{photo_container}?page=2") == 1
+    assert media_requests.count(f"{video_container}?page=1") == 1
+
+
+def test_ccapi_media_stops_paging_after_500_items_per_container() -> None:
+    root = "/ccapi/ver100/contents"
+    container = f"{root}/card1/100CANON"
+    routes = {
+        f"{root}?kind=number": _json_response({"pagenumber": 0}),
+        root: _json_response({"path": [container]}),
+        f"{container}?kind=number": _json_response({"pagenumber": 47}),
+    }
+    for page in range(1, 6):
+        routes[f"{container}?page={page}&order=desc"] = _json_response(
+            {
+                "path": [
+                    f"{container}/IMG_{number:04d}.JPG"
+                    for number in range((page - 1) * 100 + 1, page * 100 + 1)
+                ]
+            }
+        )
+    transport = FakeCcapiTransport(media_routes=routes)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    items = session.list_media()
+
+    assert len(items) == 500
+    assert items[0].name == "IMG_0001.JPG"
+    assert items[-1].name == "IMG_0500.JPG"
+    media_requests = [request.path for request in transport.requests if request.path.startswith(container)]
+    assert f"{container}?page=5&order=desc" in media_requests
+    assert f"{container}?page=6&order=desc" not in media_requests
+
+
+def test_ccapi_media_fairly_merges_sibling_containers_round_robin() -> None:
+    root = "/ccapi/ver100/contents"
+    photo_container = f"{root}/card1/100CANON"
+    video_container = f"{root}/card1/VIDEO"
+    routes = {
+        f"{root}?kind=number": _json_response({"pagenumber": 0}),
+        root: _json_response({"path": [photo_container, video_container]}),
+        f"{photo_container}?kind=number": _json_response({"pagenumber": 1}),
+        f"{photo_container}?page=1&order=desc": _json_response(
+            {
+                "path": [
+                    f"{photo_container}/IMG_0001.JPG",
+                    f"{photo_container}/IMG_0002.JPG",
+                    f"{photo_container}/IMG_0003.JPG",
+                ]
+            }
+        ),
+        f"{video_container}?kind=number": _json_response({"pagenumber": 1}),
+        f"{video_container}?page=1&order=desc": _json_response(
+            {
+                "path": [
+                    f"{video_container}/VIDEO_0001.MP4",
+                    f"{video_container}/VIDEO_0002.MP4",
+                    f"{video_container}/VIDEO_0003.MP4",
+                ]
+            }
+        ),
+    }
+    transport = FakeCcapiTransport(media_routes=routes)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    items = session.list_media()
+
+    assert [item.name for item in items] == [
+        "IMG_0001.JPG",
+        "VIDEO_0001.MP4",
+        "IMG_0002.JPG",
+        "VIDEO_0002.MP4",
+        "IMG_0003.JPG",
+        "VIDEO_0003.MP4",
+    ]
+
+
 @pytest.mark.parametrize(
     ("body", "content_type", "expected_code"),
     [
@@ -3164,6 +3310,18 @@ def test_ccapi_preview_uses_display_query_and_rejects_invalid_payloads(
 
     assert failure.value.code == expected_code
     assert any(request.path.endswith("IMG_0001.JPG?kind=display") for request in transport.requests)
+
+
+def test_ccapi_preview_rejects_non_jpeg_or_cr3_before_fetching() -> None:
+    transport = FakeCcapiTransport()
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+    png_path = "/ccapi/ver100/contents/card1/100CANON/IMG_0002.PNG"
+
+    with pytest.raises(BridgeError) as failure:
+        session.media_preview(_media_id(png_path))
+
+    assert failure.value.code == "INVALID_MEDIA_PREVIEW"
+    assert not any(request.path.endswith("IMG_0002.PNG?kind=display") for request in transport.requests)
 
 
 def test_ccapi_url_validation_rejects_credentials_and_non_origin_paths() -> None:

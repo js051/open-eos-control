@@ -655,6 +655,13 @@ class _CcapiHTTPError(BridgeError):
             engine=ENGINE_NAME,
         )
         self.camera_status = response.status
+        self.camera_message: str | None = None
+        try:
+            value = json.loads(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            value = None
+        if isinstance(value, dict) and isinstance(value.get("message"), str):
+            self.camera_message = value["message"].strip()
 
 
 class CcapiEngine:
@@ -761,6 +768,7 @@ class CcapiSession:
         self._frame_key = 0
         self._latest_live_view_geometry: CcapiLiveViewGeometry | None = None
         self._media_cache: dict[str, MediaItem] = {}
+        self._media_descending_order_supported: bool | None = None
         self._last_error: str | None = None
 
     def initialize(self) -> None:
@@ -1114,44 +1122,7 @@ class CcapiSession:
             if self._camera_sleep_path is not None:
                 supported.add(CameraFeature.CAMERA_SLEEP)
 
-            candidates = {
-                CameraFeature.RECORDABLE_STATUS,
-                CameraFeature.LENS_STATUS,
-                CameraFeature.TEMPERATURE_STATUS,
-                CameraFeature.EVENT_POLLING,
-                CameraFeature.LIVE_VIEW_MULTIPART,
-                CameraFeature.LIVE_VIEW_RTP,
-                CameraFeature.LIVE_VIEW_MAGNIFICATION,
-                CameraFeature.STILL_CAPTURE,
-                CameraFeature.BULB_EXPOSURE,
-                CameraFeature.AUTOFOCUS,
-                CameraFeature.SHUTTER_HALF_PRESS,
-                CameraFeature.MOVIE_MODE_CONTROL,
-                CameraFeature.VIDEO_RECORDING,
-                CameraFeature.TAP_FOCUS,
-                CameraFeature.CLICK_WHITE_BALANCE,
-                CameraFeature.FOCUS_DRIVE,
-                CameraFeature.MEDIA_BROWSER,
-                CameraFeature.MEDIA_THUMBNAIL,
-                CameraFeature.MEDIA_PREVIEW,
-                CameraFeature.MEDIA_DOWNLOAD,
-                CameraFeature.MEDIA_PROTECT,
-                CameraFeature.MEDIA_RATING,
-                CameraFeature.MEDIA_ROTATE,
-                CameraFeature.MEDIA_ARCHIVE,
-                CameraFeature.MEDIA_DELETE,
-                CameraFeature.CAMERA_CLOCK_SYNC,
-                CameraFeature.SENSOR_CLEANING,
-                CameraFeature.CAMERA_SLEEP,
-                CameraFeature.ZOOM_CONTROL,
-                CameraFeature.CARD_SELECTION_CONTROL,
-                CameraFeature.SOUND_RECORDING_CONTROL,
-                CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
-                CameraFeature.FOCUS_BRACKETING_CONTROL,
-                CameraFeature.MOVIE_SETTINGS_CONTROL,
-                CameraFeature.DIRECTORY_CONTROL,
-                CameraFeature.FILE_NAMING_CONTROL,
-            }
+            candidates = set(CameraFeature) - {CameraFeature.USB_DIAGNOSTICS}
             live_sizes = (
                 [
                     size
@@ -1201,6 +1172,14 @@ class CcapiSession:
                     ),
                     CameraFeature.MEDIA_ARCHIVE.value: (
                         "The camera must advertise PUT for Canon contents before media archive state can be changed."
+                    ),
+                    CameraFeature.MEDIA_PREVIEW.value: (
+                        "Canon kind=display requires an advertised GET contents operation and is eligible only "
+                        "for JPEG or CR3 items; the camera can still reject an individual file."
+                    ),
+                    CameraFeature.MEDIA_UPLOAD.value: (
+                        "Direct CCAPI upload remains unavailable because no verified Canon upload operation "
+                        "is advertised or implemented."
                     ),
                     CameraFeature.CAMERA_CLOCK_SYNC.value: (
                         "The camera must advertise both GET and PUT for the Canon date-time endpoint "
@@ -1336,7 +1315,12 @@ class CcapiSession:
         if operations is None or self._closed:
             return
         _, stop = operations
-        self._request_ok("DELETE", stop.path, timeout=5.0)
+        try:
+            self._request_ok("DELETE", stop.path, timeout=5.0)
+        except _CcapiHTTPError as error:
+            if error.camera_status == 503 and error.camera_message == "Not started":
+                return
+            raise
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
@@ -2267,27 +2251,31 @@ class CcapiSession:
                 raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
             pending: deque[tuple[str, int]] = deque([(self._api_path("GET", "/contents"), 0)])
             visited: set[str] = set()
-            media_paths: list[str] = []
-            while pending and len(media_paths) < MAX_MEDIA_ITEMS:
+            media_path_groups: list[list[str]] = []
+            while pending:
                 raw_container, depth = pending.popleft()
                 container = self._normalize_resource(raw_container).split("?", 1)[0]
                 if depth > MAX_MEDIA_TREE_DEPTH or container in visited:
                     continue
                 visited.add(container)
-                for raw_path in self._content_paths(container):
+                media_paths: list[str] = []
+                for raw_path in self._content_paths(container, max_paths=MAX_MEDIA_ITEMS):
                     path = self._normalize_resource(raw_path).split("?", 1)[0]
                     if _is_media_path(path):
                         if path not in media_paths:
                             media_paths.append(path)
                     elif path not in visited:
                         pending.append((path, depth + 1))
+                if media_paths:
+                    media_path_groups.append(media_paths)
+            media_paths = _merge_media_path_groups(media_path_groups, MAX_MEDIA_ITEMS)
             items = [
                 MediaItem(
                     id=_media_id(path),
                     name=path.rsplit("/", 1)[-1],
                     kind=_media_kind(path),
                     content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
-                    preview_available=_media_kind(path) in {"image", "raw"},
+                    preview_available=_supports_ccapi_display_preview(path),
                 )
                 for path in media_paths[:MAX_MEDIA_ITEMS]
             ]
@@ -2370,7 +2358,7 @@ class CcapiSession:
             name=path.rsplit("/", 1)[-1],
             kind=_media_kind(path),
             content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
-            preview_available=_media_kind(path) in {"image", "raw"},
+            preview_available=_supports_ccapi_display_preview(path),
         )
         item = base.model_copy(
             update={
@@ -2448,7 +2436,7 @@ class CcapiSession:
                         name=name,
                         kind=_media_kind(path),
                         content_type=content_type,
-                        preview_available=_media_kind(path) in {"image", "raw"},
+                        preview_available=_supports_ccapi_display_preview(path),
                     )
                     item = item.model_copy(update={"size_bytes": size, "content_type": content_type})
 
@@ -2487,10 +2475,10 @@ class CcapiSession:
 
     def media_preview(self, media_id: str) -> tuple[bytes, str]:
         path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
-        if _media_kind(path) not in {"image", "raw"}:
+        if not _supports_ccapi_display_preview(path):
             raise BridgeError(
                 "INVALID_MEDIA_PREVIEW",
-                "Display preview is available only for camera image items.",
+                "CCAPI display preview is available only for JPEG or CR3 items.",
                 status_code=422,
                 feature=CameraFeature.MEDIA_PREVIEW.value,
                 engine=self.engine_name,
@@ -2687,22 +2675,72 @@ class CcapiSession:
             )
         self._request_ok(operation.method, operation.path, payload)
 
-    def _content_paths(self, container: str) -> list[str]:
+    def _content_paths(self, container: str, *, max_paths: int = MAX_MEDIA_ITEMS) -> list[str]:
+        if max_paths <= 0:
+            return []
         page_info = self._first_json([f"{container}?kind=number", f"{container}?type=all,kind=number"])
         page_count = min(MAX_MEDIA_PAGES, _integer_value(page_info, "pagenumber") or 0)
-        pages = range(1, page_count + 1) if page_count > 0 else (0,)
-        paths: list[str] = []
-        for page in pages:
-            candidates = (
-                [container] if page == 0 else [f"{container}?page={page}&order=desc", f"{container}?page={page}"]
-            )
-            value = self._first_json(candidates, required=True)
-            if not isinstance(value, dict):
-                continue
-            raw_paths = value.get("path")
-            if isinstance(raw_paths, list):
-                paths.extend(item for item in raw_paths if isinstance(item, str) and item)
-        return list(dict.fromkeys(paths))
+        paths: dict[str, None] = {}
+        if page_count <= 0:
+            value = self._first_json([container], required=True)
+            if isinstance(value, dict):
+                self._add_content_paths(paths, value, reverse=False, max_paths=max_paths)
+            return list(paths)
+
+        first_value = self._content_page(container, 1)
+        if self._media_descending_order_supported is False:
+            pages = range(page_count, 0, -1)
+            for page in pages:
+                value = first_value if page == 1 else self._content_page(container, page)
+                self._add_content_paths(paths, value, reverse=True, max_paths=max_paths)
+                if len(paths) >= max_paths:
+                    break
+        else:
+            self._add_content_paths(paths, first_value, reverse=False, max_paths=max_paths)
+            for page in range(2, page_count + 1):
+                if len(paths) >= max_paths:
+                    break
+                self._add_content_paths(
+                    paths,
+                    self._content_page(container, page),
+                    reverse=False,
+                    max_paths=max_paths,
+                )
+        return list(paths)[:max_paths]
+
+    def _content_page(self, container: str, page: int) -> object:
+        plain_path = f"{container}?page={page}"
+        if self._media_descending_order_supported is False:
+            return self._request_json("GET", plain_path)
+        try:
+            value = self._request_json("GET", f"{plain_path}&order=desc")
+        except _CcapiHTTPError as error:
+            if error.camera_status != 400:
+                raise
+            self._media_descending_order_supported = False
+            return self._request_json("GET", plain_path)
+        self._media_descending_order_supported = True
+        return value
+
+    @staticmethod
+    def _add_content_paths(
+        paths: dict[str, None],
+        value: object,
+        *,
+        reverse: bool,
+        max_paths: int,
+    ) -> None:
+        if not isinstance(value, dict):
+            return
+        raw_paths = value.get("path")
+        if not isinstance(raw_paths, list):
+            return
+        values = reversed(raw_paths) if reverse else raw_paths
+        for item in values:
+            if isinstance(item, str) and item:
+                paths.setdefault(item, None)
+                if len(paths) >= max_paths:
+                    break
 
     def _load_settings(self, force: bool = False) -> dict[str, object]:
         if self._settings_cache is not None and not force:
@@ -4361,6 +4399,22 @@ def _is_media_path(path: str) -> bool:
     return "." in name and not name.endswith(".")
 
 
+def _merge_media_path_groups(groups: list[list[str]], max_items: int) -> list[str]:
+    positions = [0] * len(groups)
+    merged: dict[str, None] = {}
+    while len(merged) < max_items:
+        advanced = False
+        for index, group in enumerate(groups):
+            if len(merged) >= max_items or positions[index] >= len(group):
+                continue
+            merged.setdefault(group[positions[index]], None)
+            positions[index] += 1
+            advanced = True
+        if not advanced:
+            break
+    return list(merged)
+
+
 def _media_kind(path: str) -> str:
     extension = path.rsplit(".", 1)[-1].casefold() if "." in path else ""
     if extension in {"jpg", "jpeg", "hif", "heif", "png"}:
@@ -4370,6 +4424,12 @@ def _media_kind(path: str) -> str:
     if extension in {"mp4", "mov"}:
         return "video"
     return "other"
+
+
+def _supports_ccapi_display_preview(path: str) -> bool:
+    clean_path = path.split("?", 1)[0]
+    extension = clean_path.rsplit(".", 1)[-1].casefold() if "." in clean_path else ""
+    return extension in {"jpg", "jpeg", "cr3"}
 
 
 def _is_text_content_type(value: str) -> bool:
