@@ -221,7 +221,7 @@ final class OpenEOSControlUITests: XCTestCase {
         }
 
         openMoreActions(in: app)
-        let focusDrive = app.buttons["focus-drive-menu-button"]
+        let focusDrive = app.buttons["Focus drive"]
         guard tapMenuAction(focusDrive) else { return }
         let driveNearLarge = app.buttons["focus-drive-near-large"]
         guard waitForInteraction(driveNearLarge, timeout: 5) else {
@@ -277,7 +277,7 @@ final class OpenEOSControlUITests: XCTestCase {
         }
 
         openMoreActions(in: app)
-        guard tapMenuAction(app.buttons["camera-media-menu-button"]) else { return }
+        guard tapMenuAction(app.buttons["Camera media"]) else { return }
         XCTAssertTrue(app.staticTexts["SIM_0003.PNG"].waitForExistence(timeout: 20))
 
         let previewMedia = app.buttons["preview-media-SIM_0003.PNG"]
@@ -302,7 +302,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
-        guard tapMenuAction(app.buttons["disconnect-menu-button"]) else { return }
+        guard tapMenuAction(app.buttons["Disconnect"]) else { return }
         XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
     }
 
@@ -358,7 +358,7 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.buttons["exposure-iso"], containing: "3200", timeout: 20))
 
         openMoreActions(in: app)
-        guard tapMenuAction(app.buttons["camera-media-menu-button"]) else { return }
+        guard tapMenuAction(app.buttons["Camera media"]) else { return }
         XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 20))
 
         _ = try await simulatorRequest(
@@ -374,7 +374,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
-        guard tapMenuAction(app.buttons["disconnect-menu-button"]) else { return }
+        guard tapMenuAction(app.buttons["Disconnect"]) else { return }
         XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
         try await waitForSimulatorState { state in
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
