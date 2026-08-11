@@ -364,7 +364,19 @@ final class CameraAppState: ObservableObject {
         resetLiveViewMetrics()
     }
 
+    func requestDisconnect() {
+        let closingSession = prepareDisconnect()
+        Task {
+            if let closingSession { await closingSession.close() }
+        }
+    }
+
     func disconnect() async {
+        let closingSession = prepareDisconnect()
+        if let closingSession { await closingSession.close() }
+    }
+
+    private func prepareDisconnect() -> CameraSession? {
         stopLiveViewLoop()
         cancelLiveViewFPSUpdate()
         stopEventLoop()
@@ -398,7 +410,7 @@ final class CameraAppState: ObservableObject {
         lastError = nil
         busyOperations.removeAll()
         resetLiveViewMetrics()
-        if let closingSession { await closingSession.close() }
+        return closingSession
     }
 
     func refresh() async {

@@ -55,7 +55,8 @@ struct LiveViewSurface: View {
                     .accessibilityLabel(Text("live_view_tap_action"))
                     .accessibilityIdentifier("live-view-interaction-surface")
                     .accessibilityHidden(camera.effectiveLiveViewTapAction == nil)
-                    .allowsHitTesting(camera.effectiveLiveViewTapAction != nil)
+                    .disabled(!liveViewTapAvailable)
+                    .allowsHitTesting(liveViewTapAvailable)
 
                 if let overlayImage {
                     Image(uiImage: overlayImage)
@@ -253,6 +254,14 @@ struct LiveViewSurface: View {
             case .focus: await camera.tapFocus(x: x, y: y)
             case .whiteBalance: await camera.clickWhiteBalance(x: x, y: y)
             }
+        }
+    }
+
+    private var liveViewTapAvailable: Bool {
+        switch camera.effectiveLiveViewTapAction {
+        case .focus: !camera.isBusy(.focus)
+        case .whiteBalance: !camera.isBusy(.setting)
+        case nil: false
         }
     }
 
