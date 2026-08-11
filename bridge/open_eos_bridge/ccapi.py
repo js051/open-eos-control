@@ -72,6 +72,7 @@ MAX_MEDIA_PAGES = 100
 MAX_MEDIA_TREE_DEPTH = 4
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
+MULTIPART_START_RETRY_DELAYS = (0.1, 0.2, 0.4, 0.8)
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 MAX_DISCOVERY_TRACE_ATTEMPTS = 16
@@ -322,6 +323,26 @@ class CcapiMultipartOperations:
     stop_live_view: CcapiOperation
     open_stream: CcapiOperation
     close_stream: CcapiOperation
+    stop_payload: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class CcapiJpegOperations:
+    start_live_view: CcapiOperation
+    stop_live_view: CcapiOperation
+    frame_paths: tuple[str, ...]
+    stop_payload: Mapping[str, object] | None = None
+
+
+class _CcapiLiveViewSizeUnsupported(BridgeError):
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            "LIVE_VIEW_SIZE_UNSUPPORTED",
+            f"Canon rejected the requested Live View size at {path}: Mode not supported.",
+            status_code=502,
+            feature=CameraFeature.LIVE_VIEW.value,
+            engine=ENGINE_NAME,
+        )
 
 
 def parse_multipart_boundary(content_type: str | None) -> str:
@@ -456,6 +477,26 @@ class CcapiMultipartSession:
                     raise self._terminal_error
                 raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
             raise _multipart_error("Canon multipart Live View stream is closed.")
+
+    def wait_until_ready(self, timeout: float = 15.0) -> None:
+        deadline = time.monotonic() + max(timeout, 0.0)
+        with self._condition:
+            while (
+                not self._closed
+                and self._produced_generation == 0
+                and self._terminal_error is None
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _multipart_error("Timed out waiting for the first Canon multipart Live View frame.")
+                self._condition.wait(remaining)
+            if self._produced_generation > 0:
+                return
+            if self._terminal_error is not None:
+                if isinstance(self._terminal_error, BridgeError):
+                    raise self._terminal_error
+                raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
+            raise _multipart_error("Canon multipart Live View stream closed before its first frame.")
 
     def close(self) -> None:
         with self._condition:
@@ -710,8 +751,11 @@ class CcapiSession:
         self._active_live_view_source: str | None = None
         self._rtp_session: RtpLiveViewSession | None = None
         self._multipart_session: CcapiMultipartSession | None = None
+        self._active_multipart_operations: CcapiMultipartOperations | None = None
+        self._active_jpeg_operations: CcapiJpegOperations | None = None
         self._live_view_size_control = True
-        self._active_live_view_size = "MEDIUM"
+        self._rejected_live_view_sizes: set[str] = set()
+        self._active_live_view_size: str | None = None
         self._live_view_magnification: tuple[int, list[int]] | None = None
         self._requested_fps = 1
         self._frame_key = 0
@@ -1109,7 +1153,13 @@ class CcapiSession:
                 CameraFeature.FILE_NAMING_CONTROL,
             }
             live_sizes = (
-                [self._active_live_view_size] if not self._live_view_size_control else ["SMALL", "MEDIUM", "LARGE"]
+                [
+                    size
+                    for size in ("SMALL", "MEDIUM", "LARGE")
+                    if size not in self._rejected_live_view_sizes
+                ]
+                if jpeg_live_view_supported and self._live_view_size_control
+                else ([self._active_live_view_size] if jpeg_live_view_supported and self._active_live_view_size else [])
             )
             live_sources = []
             if rtp_live_view_supported:
@@ -1227,10 +1277,12 @@ class CcapiSession:
                         default_source=live_sources[0] if live_sources else None,
                         sizes=live_sizes if jpeg_live_view_supported else [],
                         default_size=(
-                            "MEDIUM" if jpeg_live_view_supported and "MEDIUM" in live_sizes else live_sizes[0]
-                        )
-                        if jpeg_live_view_supported
-                        else None,
+                            (
+                                "MEDIUM" if "MEDIUM" in live_sizes else live_sizes[0]
+                            )
+                            if jpeg_live_view_supported and live_sizes
+                            else None
+                        ),
                         magnifications=(
                             [value for value in live_view_magnification[1]]
                             if live_view_magnification is not None
@@ -1816,58 +1868,140 @@ class CcapiSession:
                 raise unsupported(CameraFeature.LIVE_VIEW.value, self.engine_name)
 
     def _start_jpeg_live_view(self, request: LiveViewStartRequest, size: str) -> None:
-        self._start_ccapi_live_view(request, size, self._api_path("POST", "/shooting/liveview"))
-        self._live_view_active = True
-        self._active_live_view_source = "CCAPI_JPEG_POLLING"
-        self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+        operations = self._jpeg_live_view_operations()
+        if operations is None:
+            raise unsupported(
+                CameraFeature.LIVE_VIEW.value,
+                self.engine_name,
+                "The camera must advertise a JPEG start, frame, and explicit stop lifecycle.",
+            )
+        started = False
+        try:
+            self._active_jpeg_operations = operations
+            size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+            started = True
+            try:
+                self._jpeg_live_view_frame()
+            except _CcapiLiveViewSizeUnsupported:
+                if size == "SMALL":
+                    raise
+                try:
+                    self._stop_jpeg_live_view(operations)
+                finally:
+                    started = False
+                    self._active_jpeg_operations = None
+                self._active_jpeg_operations = operations
+                self._rejected_live_view_sizes.add(size)
+                size = self._start_ccapi_live_view(request, "SMALL", operations.start_live_view.path)
+                started = True
+                self._jpeg_live_view_frame()
+            self._live_view_active = True
+            self._active_live_view_source = "CCAPI_JPEG_POLLING"
+            self._active_live_view_size = size if self._live_view_size_control else None
+            self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+        except Exception:
+            if started:
+                with suppress(BridgeError):
+                    self._stop_jpeg_live_view(operations)
+            self._active_jpeg_operations = None
+            self._active_live_view_size = None
+            raise
 
-    def _start_ccapi_live_view(self, request: LiveViewStartRequest, size: str, path: str) -> None:
+    def _start_ccapi_live_view(self, request: LiveViewStartRequest, size: str, path: str) -> str:
         try:
             self._request_ok("POST", path, {"cameradisplay": "on", "liveviewsize": size.casefold()})
             self._live_view_size_control = True
         except _CcapiHTTPError as error:
             if error.camera_status != 400:
                 raise
-            self._request_ok("POST", path, {"cameradisplay": "on"})
-            self._live_view_size_control = False
-        self._active_live_view_size = size
+            try:
+                self._request_ok("POST", path, {"cameradisplay": "on"})
+                self._live_view_size_control = False
+            except _CcapiHTTPError as parameter_error:
+                if parameter_error.camera_status != 400:
+                    raise
+                fallback_sizes = (
+                    ("MEDIUM", "SMALL") if size == "LARGE" else (("SMALL",) if size == "MEDIUM" else ())
+                )
+                for fallback_size in fallback_sizes:
+                    try:
+                        self._request_ok(
+                            "POST",
+                            path,
+                            {"cameradisplay": "on", "liveviewsize": fallback_size.casefold()},
+                        )
+                        self._rejected_live_view_sizes.add(size)
+                        self._live_view_size_control = True
+                        size = fallback_size
+                        break
+                    except _CcapiHTTPError as fallback_error:
+                        if fallback_error.camera_status != 400:
+                            raise
+                        self._rejected_live_view_sizes.add(fallback_size)
+                else:
+                    raise error
+        self._active_live_view_size = size if self._live_view_size_control else None
         self._requested_fps = max(1, min(30, request.fps))
+        return size
 
     def _start_multipart_live_view(self, request: LiveViewStartRequest, size: str) -> None:
         operations = self._multipart_live_view_operations()
         if operations is None:
             raise unsupported(CameraFeature.LIVE_VIEW_MULTIPART.value, self.engine_name)
-        self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+        size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
         response: CcapiStreamResponse | None = None
+        session: CcapiMultipartSession | None = None
         try:
-            response = self.transport.open_stream(
-                "GET",
-                self._url(operations.open_stream.path),
-                headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"},
-                timeout=60.0,
-            )
-            if response.status != 200:
+            for attempt in range(len(MULTIPART_START_RETRY_DELAYS) + 1):
+                response = self.transport.open_stream(
+                    "GET",
+                    self._url(operations.open_stream.path),
+                    headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"},
+                    timeout=60.0,
+                )
+                if response.status == 200:
+                    break
                 payload = response.body.read(MAX_ERROR_BYTES)
+                status = response.status
+                response.close()
+                response = None
+                retryable = (
+                    status == 503
+                    and b"live view not started" in payload.lower()
+                    and attempt < len(MULTIPART_START_RETRY_DELAYS)
+                )
+                if retryable:
+                    self._sleep(MULTIPART_START_RETRY_DELAYS[attempt])
+                    continue
                 raise _CcapiHTTPError(
                     "GET",
                     operations.open_stream.path,
-                    CcapiResponse(response.status, response.headers, payload),
+                    CcapiResponse(status, {}, payload),
                 )
+            assert response is not None
             boundary = parse_multipart_boundary(response.headers.get("content-type"))
             session = CcapiMultipartSession(response, boundary)
+            session.wait_until_ready(timeout=15.0)
             response = None
             if self._multipart_session is not None:
                 self._multipart_session.close()
             self._multipart_session = session
+            self._active_multipart_operations = operations
             self._live_view_active = True
             self._active_live_view_source = "CCAPI_MULTIPART"
         except Exception:
             if response is not None:
                 response.close()
-            with suppress(BridgeError):
-                self._request_ok("DELETE", operations.close_stream.path, expected_status=200)
-            with suppress(BridgeError):
-                self._request_ok("DELETE", operations.stop_live_view.path)
+            if session is not None:
+                session.close()
+            with suppress(Exception):
+                self._request_ok("DELETE", operations.close_stream.path)
+            with suppress(Exception):
+                self._request_ok(
+                    operations.stop_live_view.method,
+                    operations.stop_live_view.path,
+                    dict(operations.stop_payload) if operations.stop_payload is not None else None,
+                )
             raise
 
     def _start_rtp_live_view(self, request: LiveViewStartRequest) -> None:
@@ -1940,17 +2074,36 @@ class CcapiSession:
                     {"action": "stop", "ipaddress": ""},
                 )
             elif source == "CCAPI_MULTIPART":
+                operations = self._active_multipart_operations or self._multipart_live_view_operations()
+                if operations is None:
+                    raise BridgeError(
+                        "LIVE_VIEW_LIFECYCLE_MISSING",
+                        "Cannot stop multipart Live View because its advertised lifecycle is unavailable.",
+                        status_code=502,
+                        feature=CameraFeature.LIVE_VIEW_MULTIPART.value,
+                        engine=self.engine_name,
+                    )
                 if self._multipart_session is not None:
                     self._multipart_session.close()
                     self._multipart_session = None
-                operations = self._multipart_live_view_operations()
-                if operations is not None:
-                    try:
-                        self._request_ok("DELETE", operations.close_stream.path, expected_status=200)
-                    finally:
-                        self._request_ok("DELETE", operations.stop_live_view.path)
+                with suppress(Exception):
+                    self._request_ok("DELETE", operations.close_stream.path)
+                self._request_ok(
+                    operations.stop_live_view.method,
+                    operations.stop_live_view.path,
+                    dict(operations.stop_payload) if operations.stop_payload is not None else None,
+                )
             else:
-                self._request_ok("DELETE", self._api_path("DELETE", "/shooting/liveview"))
+                operations = self._active_jpeg_operations or self._jpeg_live_view_operations()
+                if operations is None:
+                    raise BridgeError(
+                        "LIVE_VIEW_LIFECYCLE_MISSING",
+                        "Cannot stop JPEG Live View because its advertised lifecycle is unavailable.",
+                        status_code=502,
+                        feature=CameraFeature.LIVE_VIEW.value,
+                        engine=self.engine_name,
+                    )
+                self._stop_jpeg_live_view(operations)
         finally:
             if self._rtp_session is not None:
                 with suppress(Exception):
@@ -1959,8 +2112,11 @@ class CcapiSession:
             if self._multipart_session is not None:
                 self._multipart_session.close()
                 self._multipart_session = None
+            self._active_multipart_operations = None
             self._live_view_active = False
             self._active_live_view_source = None
+            self._active_jpeg_operations = None
+            self._active_live_view_size = None
 
     def live_view_frame(self) -> bytes:
         with self._lock:
@@ -2047,9 +2203,13 @@ class CcapiSession:
         self._frame_key += 1
         candidates = self._live_view_frame_paths()
         failures: list[str] = []
+        size_error: BridgeError | None = None
         for candidate in candidates:
-            separator = "&" if "?" in candidate else "?"
-            path = f"{candidate}{separator}t={self._frame_key}"
+            if "/shooting/liveview/flipdetail" in candidate:
+                path = candidate
+            else:
+                separator = "&" if "?" in candidate else "?"
+                path = f"{candidate}{separator}t={self._frame_key}"
             try:
                 if "flipdetail" in candidate and "kind=both" in candidate:
                     self._latest_live_view_geometry = None
@@ -2084,8 +2244,14 @@ class CcapiSession:
                         )
                     return image
                 return _extract_jpeg(response.body)
+            except _CcapiHTTPError as error:
+                if error.camera_status == 503 and "mode not supported" in error.message.casefold():
+                    size_error = _CcapiLiveViewSizeUnsupported(candidate)
+                failures.append(f"{candidate}: {error.message}")
             except BridgeError as error:
                 failures.append(f"{candidate}: {error.message}")
+        if size_error is not None:
+            raise size_error
         raise BridgeError(
             "INVALID_LIVE_VIEW_FRAME",
             "Live View failed on every advertised JPEG endpoint.\n" + "\n".join(f"- {item}" for item in failures),
@@ -2428,6 +2594,10 @@ class CcapiSession:
     @property
     def live_view_source(self) -> str | None:
         return self._active_live_view_source
+
+    @property
+    def live_view_size(self) -> str | None:
+        return self._active_live_view_size
 
     def _temperature_restriction(self, feature: CameraFeature, message: str) -> BridgeError:
         return BridgeError(
@@ -3231,31 +3401,72 @@ class CcapiSession:
 
     def _live_view_frame_paths(self) -> list[str]:
         candidates: list[str] = []
-        flip = self._operation("GET", "/shooting/liveview/flip")
-        flip_detail = self._operation("GET", "/shooting/liveview/flipdetail")
-        live_view = self._operation("GET", "/shooting/liveview")
+        jpeg_operations = self._active_jpeg_operations or self._jpeg_live_view_operations()
+        frame_paths = jpeg_operations.frame_paths if jpeg_operations is not None else ()
+        flip = next((path for path in frame_paths if path.endswith("/shooting/liveview/flip")), None)
+        flip_detail = next((path for path in frame_paths if path.endswith("/shooting/liveview/flipdetail")), None)
+        live_view = next((path for path in frame_paths if path.endswith("/shooting/liveview")), None)
         if flip_detail and self._needs_live_view_geometry():
-            candidates.append(f"{flip_detail.path}?kind=both")
+            candidates.append(f"{flip_detail}?kind=both")
         if flip:
-            candidates.append(flip.path)
+            candidates.append(flip)
         if flip_detail:
-            candidates.append(f"{flip_detail.path}?kind=image")
+            candidates.append(f"{flip_detail}?kind=image")
         if live_view:
-            candidates.append(live_view.path)
+            candidates.append(live_view)
         return candidates
 
     def _supports_jpeg_live_view(self) -> bool:
-        return bool(
-            self._supports("POST", "/shooting/liveview")
-            and self._supports("DELETE", "/shooting/liveview")
-            and any(
-                self._operation("GET", suffix)
+        return self._jpeg_live_view_operations() is not None
+
+    def _jpeg_live_view_operations(self) -> CcapiJpegOperations | None:
+        starts = sorted(
+            (
+                operation
+                for operation in self._operations
+                if operation.method == "POST" and operation.path.endswith("/shooting/liveview")
+            ),
+            key=lambda operation: _path_version(operation.path),
+            reverse=True,
+        )
+        has_frame = any(
+            self._operation("GET", suffix)
+            for suffix in (
+                "/shooting/liveview/flip",
+                "/shooting/liveview/flipdetail",
+                "/shooting/liveview",
+            )
+        )
+        if not has_frame:
+            return None
+        for start in starts:
+            delete = CcapiOperation("DELETE", start.path)
+            stop_payload = None if delete in self._operations else {"cameradisplay": "on", "liveviewsize": "off"}
+            prefix = start.path.removesuffix("/shooting/liveview")
+            frame_paths = tuple(
+                f"{prefix}{suffix}"
                 for suffix in (
                     "/shooting/liveview/flip",
                     "/shooting/liveview/flipdetail",
                     "/shooting/liveview",
                 )
+                if CcapiOperation("GET", f"{prefix}{suffix}") in self._operations
             )
+            if not frame_paths:
+                continue
+            return CcapiJpegOperations(
+                start_live_view=start,
+                stop_live_view=delete if stop_payload is None else start,
+                frame_paths=frame_paths,
+                stop_payload=stop_payload,
+            )
+        return None
+
+    def _stop_jpeg_live_view(self, operations: CcapiJpegOperations) -> None:
+        self._request_ok(
+            operations.stop_live_view.method,
+            operations.stop_live_view.path,
+            dict(operations.stop_payload) if operations.stop_payload is not None else None,
         )
 
     def _multipart_live_view_operations(self) -> CcapiMultipartOperations | None:
@@ -3270,17 +3481,23 @@ class CcapiSession:
         )
         for read in reads:
             prefix = read.path.removesuffix("/shooting/liveview/multipart")
+            start = CcapiOperation("POST", f"{prefix}/shooting/liveview")
+            delete = CcapiOperation("DELETE", start.path)
             operations = CcapiMultipartOperations(
-                start_live_view=CcapiOperation("POST", f"{prefix}/shooting/liveview"),
-                stop_live_view=CcapiOperation("DELETE", f"{prefix}/shooting/liveview"),
+                start_live_view=start,
+                stop_live_view=delete if delete in self._operations else start,
                 open_stream=read,
                 close_stream=CcapiOperation("DELETE", read.path),
+                stop_payload=(
+                    None
+                    if delete in self._operations
+                    else {"cameradisplay": "on", "liveviewsize": "off"}
+                ),
             )
             if {
                 operations.start_live_view,
-                operations.stop_live_view,
                 operations.close_stream,
-            }.issubset(self._operations):
+            }.issubset(self._operations) and operations.stop_live_view in self._operations:
                 return operations
         return None
 
@@ -3315,10 +3532,9 @@ class CcapiSession:
         detail = self._operation("GET", "/shooting/liveview/flipdetail")
         if detail is None:
             return
-        self._frame_key += 1
         response = self._request(
             "GET",
-            f"{detail.path}?kind=both&t={self._frame_key}",
+            f"{detail.path}?kind=both",
             headers={"Accept": "application/octet-stream,*/*", "Cache-Control": "no-cache"},
             max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
         )

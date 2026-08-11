@@ -435,7 +435,7 @@ public enum LiveViewSource: String, Codable, Sendable {
     case simulatorFrame
 }
 
-public enum LiveViewSize: String, CaseIterable, Codable, Sendable {
+public enum LiveViewSize: String, CaseIterable, Codable, Hashable, Sendable {
     case small
     case medium
     case large
@@ -466,6 +466,7 @@ public struct LiveViewCapabilities: Equatable, Sendable {
     public let defaultSource: LiveViewSource
     public let sizes: [LiveViewSize]
     public let defaultSize: LiveViewSize
+    public let currentSize: LiveViewSize?
     public let magnifications: [LiveViewMagnification]
     public let currentMagnification: LiveViewMagnification?
     public let minimumFPS: Int
@@ -476,6 +477,7 @@ public struct LiveViewCapabilities: Equatable, Sendable {
         defaultSource: LiveViewSource = .auto,
         sizes: [LiveViewSize] = [],
         defaultSize: LiveViewSize = .medium,
+        currentSize: LiveViewSize? = nil,
         magnifications: [LiveViewMagnification] = [],
         currentMagnification: LiveViewMagnification? = nil,
         minimumFPS: Int = 1,
@@ -485,6 +487,7 @@ public struct LiveViewCapabilities: Equatable, Sendable {
         self.defaultSource = defaultSource
         self.sizes = sizes
         self.defaultSize = defaultSize
+        self.currentSize = currentSize
         self.magnifications = magnifications
         self.currentMagnification = currentMagnification
         self.minimumFPS = minimumFPS

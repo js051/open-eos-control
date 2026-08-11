@@ -430,6 +430,7 @@ class LiveViewState(ApiModel):
     active: bool
     requested_fps: int | None = None
     source: str | None = None
+    size: str | None = None
 
 
 class LiveViewMagnificationRequest(ApiModel):

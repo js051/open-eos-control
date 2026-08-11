@@ -96,6 +96,143 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
         )
     }
 
+    func testClientRetriesTransientMultipartNotStartedResponses() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: Self.discovery)
+        await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/liveview", body: Data())
+        for _ in 0..<2 {
+            await transport.enqueueJSON(
+                path: "/ccapi/ver110/shooting/liveview/multipart",
+                status: 503,
+                body: #"{"message":"Live view not started"}"#
+            )
+        }
+        await transport.enqueue(
+            path: "/ccapi/ver110/shooting/liveview/multipart",
+            headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
+            body: multipart(boundary: "canon", frame: jpeg)
+        )
+        await transport.enqueueJSON(
+            method: "DELETE",
+            path: "/ccapi/ver110/shooting/liveview/multipart",
+            body: "{}"
+        )
+        await transport.enqueue(method: "DELETE", path: "/ccapi/ver110/shooting/liveview", body: Data())
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        try await client.startLiveView(LiveViewRequest(source: .ccapiMultipart))
+        let frame = try await client.liveViewFrame(cacheKey: 1)
+        await client.stopLiveView()
+
+        XCTAssertEqual(frame.data, jpeg)
+        let requests = await transport.requests()
+        XCTAssertEqual(
+            requests.filter {
+                $0.method == "GET" && $0.path == "/ccapi/ver110/shooting/liveview/multipart"
+            }.count,
+            3
+        )
+    }
+
+    func testClientDoesNotRetryOtherMultipart503AndPreservesErrorBody() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: Self.discovery)
+        await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/liveview", body: Data())
+        await transport.enqueueJSON(
+            path: "/ccapi/ver110/shooting/liveview/multipart",
+            status: 503,
+            body: #"{"message":"Mode not supported"}"# + String(repeating: "x", count: 2_500)
+        )
+        await transport.enqueueJSON(
+            method: "DELETE",
+            path: "/ccapi/ver110/shooting/liveview/multipart",
+            body: "{}"
+        )
+        await transport.enqueue(method: "DELETE", path: "/ccapi/ver110/shooting/liveview", body: Data())
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        do {
+            try await client.startLiveView(LiveViewRequest(source: .ccapiMultipart))
+            XCTFail("Expected non-transient multipart failure")
+        } catch let CCAPIError.http(statusCode, _, _, body) {
+            XCTAssertEqual(statusCode, 503)
+            XCTAssertTrue(body.contains("Mode not supported"))
+            XCTAssertEqual(body.utf8.count, 2_000)
+        }
+
+        let requests = await transport.requests()
+        XCTAssertEqual(
+            requests.filter {
+                $0.method == "GET" && $0.path == "/ccapi/ver110/shooting/liveview/multipart"
+            }.count,
+            1
+        )
+    }
+
+    func testPostOnlyGeneralLifecycleUsesMultipartAndAlwaysSendsPostOffAfterReader503() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: Self.postOnlyDiscovery)
+        let streamBody = multipart(boundary: "canon", frame: jpeg)
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview",
+            status: 204,
+            body: Data()
+        )
+        await transport.enqueue(
+            method: "GET",
+            path: "/ccapi/ver130/shooting/liveview/multipart",
+            headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
+            body: streamBody
+        )
+        await transport.enqueue(
+            method: "DELETE",
+            path: "/ccapi/ver130/shooting/liveview/multipart",
+            status: 503,
+            body: #"{"message":"Mode not supported"}"#.data(using: .utf8)!
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        XCTAssertEqual(capabilities.liveView.sources, [.ccapiMultipart])
+        try await client.startLiveView(LiveViewRequest(source: .auto))
+        let activeSource = await client.currentLiveViewSource()
+        XCTAssertEqual(activeSource, .ccapiMultipart)
+        let frame = try await client.liveViewFrame(cacheKey: 31)
+        XCTAssertEqual(frame.data, jpeg)
+        await client.stopLiveView()
+
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map { "\($0.method) \($0.path)" }, [
+            "GET /ccapi",
+            "POST /ccapi/ver130/shooting/liveview",
+            "GET /ccapi/ver130/shooting/liveview/multipart",
+            "DELETE /ccapi/ver130/shooting/liveview/multipart",
+            "POST /ccapi/ver130/shooting/liveview",
+        ])
+        let stopBody = try XCTUnwrap(requests.last?.body)
+        let stop = try XCTUnwrap(JSONSerialization.jsonObject(with: stopBody) as? [String: String])
+        XCTAssertEqual(stop, ["liveviewsize": "off", "cameradisplay": "on"])
+    }
+
     func testClientDoesNotCombineMultipartLifecycleAcrossAPIVersions() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
@@ -142,6 +279,12 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
         )
         await transport.enqueue(method: "DELETE", path: "/ccapi/ver110/shooting/liveview", body: Data())
         await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/liveview", body: Data())
+        await transport.enqueue(
+            path: "/ccapi/ver110/shooting/liveview/flip?t=1",
+            headers: ["content-type": "image/jpeg"],
+            body: jpeg
+        )
+        await transport.enqueue(method: "DELETE", path: "/ccapi/ver110/shooting/liveview", body: Data())
         let client = try CCAPIClient(
             baseURL: "http://192.168.1.2:8080",
             mode: .camera,
@@ -149,9 +292,12 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
         )
 
         try await client.startLiveView(LiveViewRequest(source: .auto))
-
         let active = await client.currentLiveViewSource()
+        let frame = try await client.liveViewFrame(cacheKey: 1)
+        await client.stopLiveView()
+
         XCTAssertEqual(active, .ccapiJPEGPolling)
+        XCTAssertEqual(frame.data, jpeg)
         let capabilities = try await client.capabilities()
         XCTAssertFalse(capabilities.evidence.observedFeatures.contains(.liveViewMultipart))
         XCTAssertTrue(capabilities.evidence.observedFeatures.contains(.liveViewJPEGPolling))
@@ -165,6 +311,8 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
                 "DELETE /ccapi/ver110/shooting/liveview/multipart",
                 "DELETE /ccapi/ver110/shooting/liveview",
                 "POST /ccapi/ver110/shooting/liveview",
+                "GET /ccapi/ver110/shooting/liveview/flip?t=1",
+                "DELETE /ccapi/ver110/shooting/liveview",
             ]
         )
     }
@@ -186,7 +334,16 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
             {"path":"/shooting/liveview/multipart","get":true,"delete":true}
           ]
         }
-        """
+    """
+
+    private static let postOnlyDiscovery = """
+    {
+      "ver130":[
+        {"path":"/shooting/liveview","post":true},
+        {"path":"/shooting/liveview/multipart","get":true,"delete":true}
+      ]
+    }
+    """
 }
 
 private extension Data {
