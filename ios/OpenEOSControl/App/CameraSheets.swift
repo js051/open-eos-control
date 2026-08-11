@@ -31,72 +31,78 @@ private struct CameraActionsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            VStack(spacing: 0) {
+                List {
+                    Button {
+                        dismiss()
+                        camera.screen = .media
+                        Task { await camera.loadMedia() }
+                    } label: {
+                        Label("camera_media", systemImage: "photo.on.rectangle")
+                    }
+                    .disabled(!camera.supports(.mediaBrowser))
+                    .accessibilityIdentifier("camera-media-menu-button")
+
+                    Button {
+                        camera.activeSheet = .focusDrive
+                    } label: {
+                        Label("focus_drive", systemImage: "arrow.left.and.right")
+                    }
+                    .disabled(!camera.supports(.focusDrive))
+                    .accessibilityIdentifier("focus-drive-menu-button")
+
+                    Button {
+                        camera.activeSheet = .monitoring
+                    } label: {
+                        Label("monitoring_assists", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier("monitoring-menu-button")
+
+                    if camera.supports(.shutterHalfPress) {
+                        Button {
+                            dismiss()
+                            Task { await camera.halfPressShutter() }
+                        } label: {
+                            Label("half_press_shutter", systemImage: "camera.aperture")
+                        }
+                        .disabled(camera.isBusy(.focus))
+                        .accessibilityIdentifier("half-press-button")
+                    }
+
+                    Section {
+                        Button {
+                            dismiss()
+                            camera.screen = .debug
+                        } label: {
+                            Label("debug", systemImage: "ladybug")
+                        }
+                        .accessibilityIdentifier("debug-menu-button")
+
+                        Button {
+                            camera.activeSheet = .language
+                        } label: {
+                            Label("language", systemImage: "globe")
+                        }
+                        .accessibilityIdentifier("language-menu-button")
+                    }
+                }
+                .scrollContentBackground(.hidden)
+
+                Divider().overlay(Color.cameraBorder)
                 Button {
+                    camera.requestDisconnect()
                     dismiss()
-                    camera.screen = .media
-                    Task { await camera.loadMedia() }
                 } label: {
-                    Label("camera_media", systemImage: "photo.on.rectangle")
+                    Label("disconnect", systemImage: "xmark.circle")
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
-                .disabled(!camera.supports(.mediaBrowser))
-                .accessibilityIdentifier("camera-media-menu-button")
-
-                Button {
-                    camera.activeSheet = .focusDrive
-                } label: {
-                    Label("focus_drive", systemImage: "arrow.left.and.right")
-                }
-                .disabled(!camera.supports(.focusDrive))
-                .accessibilityIdentifier("focus-drive-menu-button")
-
-                Button {
-                    camera.activeSheet = .monitoring
-                } label: {
-                    Label("monitoring_assists", systemImage: "waveform.path.ecg")
-                }
-                .accessibilityIdentifier("monitoring-menu-button")
-
-                if camera.supports(.shutterHalfPress) {
-                    Button {
-                        dismiss()
-                        Task { await camera.halfPressShutter() }
-                    } label: {
-                        Label("half_press_shutter", systemImage: "camera.aperture")
-                    }
-                    .disabled(camera.isBusy(.focus))
-                    .accessibilityIdentifier("half-press-button")
-                }
-
-                Section {
-                    Button {
-                        dismiss()
-                        camera.screen = .debug
-                    } label: {
-                        Label("debug", systemImage: "ladybug")
-                    }
-                    .accessibilityIdentifier("debug-menu-button")
-
-                    Button {
-                        camera.activeSheet = .language
-                    } label: {
-                        Label("language", systemImage: "globe")
-                    }
-                    .accessibilityIdentifier("language-menu-button")
-                }
-
-                Section {
-                    Button {
-                        camera.requestDisconnect()
-                        dismiss()
-                    } label: {
-                        Label("disconnect", systemImage: "xmark.circle")
-                    }
-                    .foregroundStyle(Color.cameraRecording)
-                    .accessibilityIdentifier("disconnect-menu-button")
-                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.cameraRecording)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+                .accessibilityIdentifier("disconnect-menu-button")
             }
-            .scrollContentBackground(.hidden)
             .background(Color.cameraSurface)
             .navigationTitle(Text("more_actions"))
             .navigationBarTitleDisplayMode(.inline)
