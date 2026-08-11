@@ -8,6 +8,24 @@ import XCTest
 
 @MainActor
 final class CameraAppTests: XCTestCase {
+    func testDesktopBridgeFPSUpdateRequiresLiveViewRestart() async throws {
+        let client = try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181")
+        let session = CameraSession.desktopBridge(client)
+
+        let update = await session.setLiveViewTargetFPS(15)
+
+        XCTAssertEqual(update, .restartRequired)
+    }
+
+    func testDirectCCAPIFPSUpdateDoesNotRequireLiveViewRestart() async throws {
+        let client = try CCAPIClient(baseURL: "http://127.0.0.1:19090", mode: .camera)
+        let session = CameraSession.ccapi(client)
+
+        let update = await session.setLiveViewTargetFPS(15)
+
+        XCTAssertEqual(update, .appliedInPlace)
+    }
+
     func testRollingFrameRateUsesRecentWindow() {
         var tracker = LiveViewRateTracker(window: 1)
 

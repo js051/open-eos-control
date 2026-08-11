@@ -99,6 +99,8 @@ final class CameraAppState: ObservableObject {
     private let defaults: UserDefaults
     private var session: CameraSession?
     private var liveViewTask: Task<Void, Never>?
+    private var liveViewFPSUpdateTask: Task<Void, Never>?
+    private var liveViewFPSUpdateRevision: UInt64 = 0
     private var eventTask: Task<Void, Never>?
     private var eventGeneration = UUID()
     private var operationRevision: UInt64 = 0
@@ -267,6 +269,7 @@ final class CameraAppState: ObservableObject {
     func connect() async {
         guard begin(.connect) else { return }
         defer { end(.connect) }
+        cancelLiveViewFPSUpdate()
         operatorConfirmedFeatures.removeAll()
         do {
             let newSession: CameraSession
@@ -333,6 +336,7 @@ final class CameraAppState: ObservableObject {
 
     func openOfflinePreview() {
         stopLiveViewLoop()
+        cancelLiveViewFPSUpdate()
         stopEventLoop()
         resetMediaDownloadState()
         resetMediaUploadState()
@@ -362,6 +366,7 @@ final class CameraAppState: ObservableObject {
 
     func disconnect() async {
         stopLiveViewLoop()
+        cancelLiveViewFPSUpdate()
         stopEventLoop()
         resetMediaDownloadState()
         resetMediaUploadState()
@@ -411,12 +416,45 @@ final class CameraAppState: ObservableObject {
         let limits = capabilities?.liveView
         let minimum = limits?.minimumFPS ?? 1
         let maximum = limits?.maximumFPS ?? 30
-        requestedFPS = min(max(value, minimum), maximum)
+        let clampedFPS = min(max(value, minimum), maximum)
+        guard clampedFPS != requestedFPS else { return }
+        requestedFPS = clampedFPS
         defaults.set(requestedFPS, forKey: DefaultsKey.requestedFPS)
-        if let session {
-            let fps = requestedFPS
-            Task { await session.setLiveViewTargetFPS(fps) }
+        scheduleLiveViewFPSUpdate()
+    }
+
+    private func scheduleLiveViewFPSUpdate() {
+        cancelLiveViewFPSUpdate()
+        guard let session, activeLiveViewSource != nil else {
+            return
         }
+        let fps = requestedFPS
+        let revision = liveViewFPSUpdateRevision
+        liveViewFPSUpdateTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 200_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  let self,
+                  self.liveViewFPSUpdateRevision == revision else { return }
+            let update = await session.setLiveViewTargetFPS(fps)
+            guard !Task.isCancelled,
+                  self.liveViewFPSUpdateRevision == revision else { return }
+            if update == .restartRequired, self.activeLiveViewSource != nil {
+                await self.restartLiveView()
+            }
+            if self.liveViewFPSUpdateRevision == revision {
+                self.liveViewFPSUpdateTask = nil
+            }
+        }
+    }
+
+    private func cancelLiveViewFPSUpdate() {
+        liveViewFPSUpdateRevision &+= 1
+        liveViewFPSUpdateTask?.cancel()
+        liveViewFPSUpdateTask = nil
     }
 
     func setLiveViewSize(_ value: LiveViewSize) async {
