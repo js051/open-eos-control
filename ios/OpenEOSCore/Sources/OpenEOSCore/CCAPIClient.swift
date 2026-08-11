@@ -301,6 +301,7 @@ public actor CCAPIClient {
     private var simulatorEventSequence: Int64 = 0
     private var liveViewMagnifications: [LiveViewMagnification] = []
     private var currentLiveViewMagnification: LiveViewMagnification?
+    private var mediaDescendingOrderSupported: Bool?
 
     public init(
         baseURL value: String,
@@ -1717,12 +1718,13 @@ public actor CCAPIClient {
 
         var pending: [(path: String, depth: Int)] = [(apiPath(.get, suffix: "/contents"), 0)]
         var visited = Set<String>()
-        var mediaPaths: [String] = []
-        while !pending.isEmpty, mediaPaths.count < Self.maximumMediaItems {
+        var mediaPathGroups: [[String]] = []
+        while !pending.isEmpty {
             let next = pending.removeFirst()
             let container = try normalizeCameraResource(next.path).components(separatedBy: "?")[0]
             guard next.depth <= Self.maximumMediaTreeDepth, visited.insert(container).inserted else { continue }
-            for rawPath in try await contentPaths(container: container) {
+            var mediaPaths: [String] = []
+            for rawPath in try await contentPaths(container: container, maxPaths: Self.maximumMediaItems) {
                 let path = try normalizeCameraResource(rawPath).components(separatedBy: "?")[0]
                 if Self.isMediaPath(path) {
                     if !mediaPaths.contains(path) { mediaPaths.append(path) }
@@ -1730,9 +1732,11 @@ public actor CCAPIClient {
                     pending.append((path, next.depth + 1))
                 }
             }
+            if !mediaPaths.isEmpty { mediaPathGroups.append(mediaPaths) }
         }
+        let mediaPaths = mergeMediaPathGroups(mediaPathGroups, maxItems: Self.maximumMediaItems)
         observedFeatures.insert(.mediaBrowser)
-        return mediaPaths.prefix(Self.maximumMediaItems).map {
+        return mediaPaths.map {
             CameraMediaItem(
                 id: $0,
                 name: ($0 as NSString).lastPathComponent,
@@ -3842,22 +3846,97 @@ public actor CCAPIClient {
         )
     }
 
-    private func contentPaths(container: String) async throws -> [String] {
+    private func contentPaths(container: String, maxPaths: Int) async throws -> [String] {
+        guard maxPaths > 0 else { return [] }
         let pageInfo = try await firstJSON(
             paths: ["\(container)?kind=number", "\(container)?type=all,kind=number"],
             required: false
         )
         let pageCount = min(pageInfo?.integer("pagenumber") ?? 0, Self.maximumMediaPages)
-        let pages = pageCount > 0 ? Array(1...pageCount) : [0]
         var result: [String] = []
-        for page in pages {
-            let candidates = page == 0
-                ? [container]
-                : ["\(container)?page=\(page)&order=desc", "\(container)?page=\(page)"]
-            guard let value = try await firstJSON(paths: candidates, required: true) else { continue }
-            result.append(contentsOf: value.array("path")?.strings ?? [])
+        if pageCount <= 0 {
+            if let value = try await firstJSON(paths: [container], required: true) {
+                result.append(contentsOf: value.array("path")?.strings ?? [])
+            }
+        } else if mediaDescendingOrderSupported == false {
+            for page in stride(from: pageCount, through: 1, by: -1) {
+                guard let value = try await contentPage(container: container, page: page) else { continue }
+                let paths = value.array("path")?.strings ?? []
+                result.append(contentsOf: paths.reversed())
+                if result.count >= maxPaths { break }
+            }
+        } else {
+            guard let firstPage = try await contentPage(container: container, page: 1) else { return [] }
+            if mediaDescendingOrderSupported == false {
+                for page in stride(from: pageCount, through: 1, by: -1) {
+                    let value: JSONDictionary
+                    if page == 1 {
+                        value = firstPage
+                    } else {
+                        guard let response = try await contentPage(container: container, page: page) else {
+                            continue
+                        }
+                        value = response
+                    }
+                    let paths = value.array("path")?.strings ?? []
+                    result.append(contentsOf: paths.reversed())
+                    if result.count >= maxPaths { break }
+                }
+            } else {
+                result.append(contentsOf: firstPage.array("path")?.strings ?? [])
+                if pageCount >= 2 {
+                    for page in 2...pageCount {
+                        if result.count >= maxPaths { break }
+                        if let value = try await contentPage(container: container, page: page) {
+                            result.append(contentsOf: value.array("path")?.strings ?? [])
+                        }
+                    }
+                }
+            }
         }
-        return result.removingDuplicates()
+        return result.removingDuplicates().prefix(maxPaths).map { $0 }
+    }
+
+    private func contentPage(container: String, page: Int) async throws -> JSONDictionary? {
+        let plainPath = "\(container)?page=\(page)"
+        if mediaDescendingOrderSupported == false {
+            return try await firstJSON(paths: [plainPath], required: true)
+        }
+
+        do {
+            let orderedPath = "\(plainPath)&order=desc"
+            let value = try await requestJSON(path: orderedPath)
+            mediaDescendingOrderSupported = true
+            return value
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as CCAPIError {
+            if case let .http(statusCode, _, _, _) = error, statusCode == 400 {
+                mediaDescendingOrderSupported = false
+            }
+            return try await requestJSON(path: plainPath)
+        } catch {
+            return try await requestJSON(path: plainPath)
+        }
+    }
+
+    private func mergeMediaPathGroups(_ groups: [[String]], maxItems: Int) -> [String] {
+        guard maxItems > 0 else { return [] }
+        var positions = Array(repeating: 0, count: groups.count)
+        var merged: [String] = []
+        var seen = Set<String>()
+        while merged.count < maxItems {
+            var advanced = false
+            for index in groups.indices {
+                guard merged.count < maxItems, positions[index] < groups[index].count else { continue }
+                let path = groups[index][positions[index]]
+                positions[index] += 1
+                advanced = true
+                if seen.insert(path).inserted { merged.append(path) }
+            }
+            if !advanced { break }
+        }
+        return merged
     }
 
     private func normalizeCameraResource(_ value: String) throws -> String {

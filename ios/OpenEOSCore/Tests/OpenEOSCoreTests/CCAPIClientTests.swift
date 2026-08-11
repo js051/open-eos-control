@@ -3102,6 +3102,119 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(items.first?.archived, true)
     }
 
+    func testRealMediaListRemembersUnsupportedDescendingOrderAndReversesPlainPages() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":3}"#)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents?page=1&order=desc",
+            status: 400,
+            body: #"{"message":"Invalid parameter"}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents?page=1",
+            body: #"{"path":["/ccapi/ver100/contents/card1/A1.JPG","/ccapi/ver100/contents/card1/A2.JPG"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents?page=3",
+            body: #"{"path":["/ccapi/ver100/contents/card1/C1.JPG","/ccapi/ver100/contents/card1/C2.JPG"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents?page=2",
+            body: #"{"path":["/ccapi/ver100/contents/card1/B1.JPG","/ccapi/ver100/contents/card1/B2.JPG"]}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let items = try await client.listMedia()
+
+        XCTAssertEqual(items.map(\.name), ["C2.JPG", "C1.JPG", "B2.JPG", "B1.JPG", "A2.JPG", "A1.JPG"])
+        XCTAssertEqual(
+            (await transport.requests()).map(\.path),
+            [
+                "/ccapi",
+                "/ccapi/ver100/contents?kind=number",
+                "/ccapi/ver100/contents?page=1&order=desc",
+                "/ccapi/ver100/contents?page=1",
+                "/ccapi/ver100/contents?page=3",
+                "/ccapi/ver100/contents?page=2",
+            ]
+        )
+    }
+
+    func testRealMediaListStopsPagingAfter500ItemsPerContainer() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":3}"#)
+        let paths = (1...500).map { index in
+            "\"/ccapi/ver100/contents/card1/IMG_\(String(format: "%04d", index)).JPG\""
+        }.joined(separator: ",")
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents?page=1&order=desc",
+            body: "{\"path\":[\(paths)]}"
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let items = try await client.listMedia()
+
+        XCTAssertEqual(items.count, 500)
+        XCTAssertEqual(items.first?.name, "IMG_0001.JPG")
+        XCTAssertEqual(items.last?.name, "IMG_0500.JPG")
+        XCTAssertEqual(
+            (await transport.requests()).map(\.path),
+            [
+                "/ccapi",
+                "/ccapi/ver100/contents?kind=number",
+                "/ccapi/ver100/contents?page=1&order=desc",
+            ]
+        )
+    }
+
+    func testRealMediaListFairlyMergesSiblingMediaContainers() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":1}"#)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents?page=1&order=desc",
+            body: #"{"path":["/ccapi/ver100/contents/card1/photos","/ccapi/ver100/contents/card1/videos"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/photos?kind=number",
+            body: #"{"pagenumber":2}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/photos?page=1&order=desc",
+            body: #"{"path":["/ccapi/ver100/contents/card1/photos/P2.JPG","/ccapi/ver100/contents/card1/photos/P1.JPG"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/photos?page=2&order=desc",
+            body: #"{"path":["/ccapi/ver100/contents/card1/photos/P0.JPG"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/videos?kind=number",
+            body: #"{"pagenumber":1}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/videos?page=1&order=desc",
+            body: #"{"path":["/ccapi/ver100/contents/card1/videos/V2.MP4","/ccapi/ver100/contents/card1/videos/V1.MP4"]}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let items = try await client.listMedia()
+
+        XCTAssertEqual(items.map(\.name), ["P2.JPG", "V2.MP4", "P1.JPG", "V1.MP4", "P0.JPG"])
+        XCTAssertEqual(items.map(\.kind), ["image", "video", "image", "video", "image"])
+        XCTAssertEqual(await transport.remainingResponses(), 0)
+    }
+
     func testMediaMetadataRequiresAdvertisedContentsPut() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
