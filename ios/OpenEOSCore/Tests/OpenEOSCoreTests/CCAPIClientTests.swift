@@ -1148,6 +1148,40 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertNil(fallback["liveviewsize"])
     }
 
+    func testLiveViewFrameRetriesTransientCanonDeviceBusy() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
+            status: 503,
+            body: #"{"message":"Device busy"}"#
+        )
+        let jpeg = Data([0xFF, 0xD8, 0x09, 0x0A, 0xFF, 0xD9])
+        await transport.enqueue(
+            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
+            headers: ["content-type": "application/octet-stream"],
+            body: detailedLiveView(jpeg: jpeg)
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let frame = try await client.liveViewFrame(cacheKey: 33)
+        let requests = await transport.requests()
+
+        XCTAssertEqual(frame.data, jpeg)
+        XCTAssertEqual(
+            requests.map(\.path),
+            [
+                "/ccapi",
+                "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
+                "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
+            ]
+        )
+    }
+
     func testInvalidLargeLiveViewStartFallsBackToMediumAndPrunesLarge() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: postOnlyLiveViewDiscovery)

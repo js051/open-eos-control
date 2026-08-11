@@ -73,6 +73,7 @@ MAX_MEDIA_TREE_DEPTH = 4
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 MULTIPART_START_RETRY_DELAYS = (0.1, 0.2, 0.4, 0.8)
+JPEG_FRAME_BUSY_RETRY_DELAYS = (0.05, 0.1)
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 MAX_DISCOVERY_TRACE_ATTEMPTS = 16
@@ -2184,56 +2185,65 @@ class CcapiSession:
             ) from error
 
     def _jpeg_live_view_frame(self) -> bytes:
-        self._frame_key += 1
         candidates = self._live_view_frame_paths()
         failures: list[str] = []
         size_error: BridgeError | None = None
-        for candidate in candidates:
-            if "/shooting/liveview/flipdetail" in candidate:
-                path = candidate
-            else:
-                separator = "&" if "?" in candidate else "?"
-                path = f"{candidate}{separator}t={self._frame_key}"
-            try:
-                if "flipdetail" in candidate and "kind=both" in candidate:
-                    self._latest_live_view_geometry = None
-                response = self._request(
-                    "GET",
-                    path,
-                    headers={
-                        "Accept": "multipart/x-mixed-replace,image/jpeg,image/*,*/*",
-                        "Connection": "close",
-                        "Pragma": "no-cache",
-                    },
-                    max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
-                )
-                content_type = response.headers.get("content-type", "")
-                if _is_text_content_type(content_type):
-                    raise BridgeError(
-                        "INVALID_LIVE_VIEW_FRAME",
-                        f"Camera returned {content_type or 'text'} instead of image bytes.",
-                        status_code=502,
-                        engine=self.engine_name,
+        for attempt in range(len(JPEG_FRAME_BUSY_RETRY_DELAYS) + 1):
+            self._frame_key += 1
+            transient_busy = False
+            for candidate in candidates:
+                if "/shooting/liveview/flipdetail" in candidate:
+                    path = candidate
+                else:
+                    separator = "&" if "?" in candidate else "?"
+                    path = f"{candidate}{separator}t={self._frame_key}"
+                try:
+                    if "flipdetail" in candidate and "kind=both" in candidate:
+                        self._latest_live_view_geometry = None
+                    response = self._request(
+                        "GET",
+                        path,
+                        headers={
+                            "Accept": "multipart/x-mixed-replace,image/jpeg,image/*,*/*",
+                            "Connection": "close",
+                            "Pragma": "no-cache",
+                        },
+                        max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
                     )
-                if "flipdetail" in candidate and "kind=both" in candidate:
-                    image, geometry = _parse_detailed_live_view(response.body)
-                    if geometry is not None:
-                        self._latest_live_view_geometry = geometry
-                    if image is None:
+                    content_type = response.headers.get("content-type", "")
+                    if _is_text_content_type(content_type):
                         raise BridgeError(
                             "INVALID_LIVE_VIEW_FRAME",
-                            "Detailed Live View response did not contain an image packet.",
+                            f"Camera returned {content_type or 'text'} instead of image bytes.",
                             status_code=502,
                             engine=self.engine_name,
                         )
-                    return image
-                return _extract_jpeg(response.body)
-            except _CcapiHTTPError as error:
-                if error.camera_status == 503 and "mode not supported" in error.message.casefold():
-                    size_error = _CcapiLiveViewSizeUnsupported(candidate)
-                failures.append(f"{candidate}: {error.message}")
-            except BridgeError as error:
-                failures.append(f"{candidate}: {error.message}")
+                    if "flipdetail" in candidate and "kind=both" in candidate:
+                        image, geometry = _parse_detailed_live_view(response.body)
+                        if geometry is not None:
+                            self._latest_live_view_geometry = geometry
+                        if image is None:
+                            raise BridgeError(
+                                "INVALID_LIVE_VIEW_FRAME",
+                                "Detailed Live View response did not contain an image packet.",
+                                status_code=502,
+                                engine=self.engine_name,
+                            )
+                        return image
+                    return _extract_jpeg(response.body)
+                except _CcapiHTTPError as error:
+                    if error.camera_status == 503 and "mode not supported" in error.message.casefold():
+                        size_error = _CcapiLiveViewSizeUnsupported(candidate)
+                    failures.append(f"{candidate}: {error.message}")
+                    if error.camera_status == 503 and (error.camera_message or "").casefold() == "device busy":
+                        transient_busy = True
+                        break
+                except BridgeError as error:
+                    failures.append(f"{candidate}: {error.message}")
+            if transient_busy and attempt < len(JPEG_FRAME_BUSY_RETRY_DELAYS):
+                self._sleep(JPEG_FRAME_BUSY_RETRY_DELAYS[attempt])
+                continue
+            break
         if size_error is not None:
             raise size_error
         raise BridgeError(
