@@ -1484,7 +1484,7 @@ class CcapiClient(
 
     suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
         val previewEligible = if (isRealCamera) {
-            mediaItemPath(item).isCcapiDisplayPreviewPath()
+            item.kind.isCcapiPreviewKind() && mediaItemPath(item).isCcapiDisplayPreviewPath()
         } else {
             item.kind.isCcapiPreviewKind()
         }

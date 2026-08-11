@@ -1838,9 +1838,10 @@ public actor CCAPIClient {
     }
 
     public func mediaPreview(_ item: CameraMediaItem) async throws -> CameraMediaPreview {
+        let imageKind = ["image", "raw"].contains(item.kind.lowercased())
         let previewEligible = resolvedMode == .simulator
-            ? ["image", "raw"].contains(item.kind.lowercased())
-            : Self.isCCAPIDisplayPreviewPath(item.id)
+            ? imageKind
+            : imageKind && Self.isCCAPIDisplayPreviewPath(item.id)
         guard previewEligible else {
             throw CCAPIError.invalidResponse("CCAPI display preview is available only for JPEG or CR3 items.")
         }
