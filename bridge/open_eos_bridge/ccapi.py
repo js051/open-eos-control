@@ -72,6 +72,7 @@ MAX_MEDIA_PAGES = 100
 MAX_MEDIA_TREE_DEPTH = 4
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
+MULTIPART_START_RETRY_DELAYS = (0.1, 0.2, 0.4, 0.8)
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 MAX_DISCOVERY_TRACE_ATTEMPTS = 16
@@ -753,6 +754,7 @@ class CcapiSession:
         self._active_multipart_operations: CcapiMultipartOperations | None = None
         self._active_jpeg_operations: CcapiJpegOperations | None = None
         self._live_view_size_control = True
+        self._rejected_live_view_sizes: set[str] = set()
         self._active_live_view_size: str | None = None
         self._live_view_magnification: tuple[int, list[int]] | None = None
         self._requested_fps = 1
@@ -1151,7 +1153,11 @@ class CcapiSession:
                 CameraFeature.FILE_NAMING_CONTROL,
             }
             live_sizes = (
-                ["SMALL", "MEDIUM", "LARGE"]
+                [
+                    size
+                    for size in ("SMALL", "MEDIUM", "LARGE")
+                    if size not in self._rejected_live_view_sizes
+                ]
                 if jpeg_live_view_supported and self._live_view_size_control
                 else ([self._active_live_view_size] if jpeg_live_view_supported and self._active_live_view_size else [])
             )
@@ -1872,7 +1878,7 @@ class CcapiSession:
         started = False
         try:
             self._active_jpeg_operations = operations
-            self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+            size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
             started = True
             try:
                 self._jpeg_live_view_frame()
@@ -1885,10 +1891,10 @@ class CcapiSession:
                     started = False
                     self._active_jpeg_operations = None
                 self._active_jpeg_operations = operations
-                self._start_ccapi_live_view(request, "SMALL", operations.start_live_view.path)
+                self._rejected_live_view_sizes.add(size)
+                size = self._start_ccapi_live_view(request, "SMALL", operations.start_live_view.path)
                 started = True
                 self._jpeg_live_view_frame()
-                size = "SMALL"
             self._live_view_active = True
             self._active_live_view_source = "CCAPI_JPEG_POLLING"
             self._active_live_view_size = size if self._live_view_size_control else None
@@ -1901,39 +1907,78 @@ class CcapiSession:
             self._active_live_view_size = None
             raise
 
-    def _start_ccapi_live_view(self, request: LiveViewStartRequest, size: str, path: str) -> None:
+    def _start_ccapi_live_view(self, request: LiveViewStartRequest, size: str, path: str) -> str:
         try:
             self._request_ok("POST", path, {"cameradisplay": "on", "liveviewsize": size.casefold()})
             self._live_view_size_control = True
         except _CcapiHTTPError as error:
             if error.camera_status != 400:
                 raise
-            self._request_ok("POST", path, {"cameradisplay": "on"})
-            self._live_view_size_control = False
+            try:
+                self._request_ok("POST", path, {"cameradisplay": "on"})
+                self._live_view_size_control = False
+            except _CcapiHTTPError as parameter_error:
+                if parameter_error.camera_status != 400:
+                    raise
+                fallback_sizes = (
+                    ("MEDIUM", "SMALL") if size == "LARGE" else (("SMALL",) if size == "MEDIUM" else ())
+                )
+                for fallback_size in fallback_sizes:
+                    try:
+                        self._request_ok(
+                            "POST",
+                            path,
+                            {"cameradisplay": "on", "liveviewsize": fallback_size.casefold()},
+                        )
+                        self._rejected_live_view_sizes.add(size)
+                        self._live_view_size_control = True
+                        size = fallback_size
+                        break
+                    except _CcapiHTTPError as fallback_error:
+                        if fallback_error.camera_status != 400:
+                            raise
+                        self._rejected_live_view_sizes.add(fallback_size)
+                else:
+                    raise error
         self._active_live_view_size = size if self._live_view_size_control else None
         self._requested_fps = max(1, min(30, request.fps))
+        return size
 
     def _start_multipart_live_view(self, request: LiveViewStartRequest, size: str) -> None:
         operations = self._multipart_live_view_operations()
         if operations is None:
             raise unsupported(CameraFeature.LIVE_VIEW_MULTIPART.value, self.engine_name)
-        self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+        size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
         response: CcapiStreamResponse | None = None
         session: CcapiMultipartSession | None = None
         try:
-            response = self.transport.open_stream(
-                "GET",
-                self._url(operations.open_stream.path),
-                headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"},
-                timeout=60.0,
-            )
-            if response.status != 200:
+            for attempt in range(len(MULTIPART_START_RETRY_DELAYS) + 1):
+                response = self.transport.open_stream(
+                    "GET",
+                    self._url(operations.open_stream.path),
+                    headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"},
+                    timeout=60.0,
+                )
+                if response.status == 200:
+                    break
                 payload = response.body.read(MAX_ERROR_BYTES)
+                status = response.status
+                response.close()
+                response = None
+                retryable = (
+                    status == 503
+                    and b"live view not started" in payload.lower()
+                    and attempt < len(MULTIPART_START_RETRY_DELAYS)
+                )
+                if retryable:
+                    self._sleep(MULTIPART_START_RETRY_DELAYS[attempt])
+                    continue
                 raise _CcapiHTTPError(
                     "GET",
                     operations.open_stream.path,
-                    CcapiResponse(response.status, response.headers, payload),
+                    CcapiResponse(status, {}, payload),
                 )
+            assert response is not None
             boundary = parse_multipart_boundary(response.headers.get("content-type"))
             session = CcapiMultipartSession(response, boundary)
             session.wait_until_ready(timeout=15.0)
@@ -2160,8 +2205,11 @@ class CcapiSession:
         failures: list[str] = []
         size_error: BridgeError | None = None
         for candidate in candidates:
-            separator = "&" if "?" in candidate else "?"
-            path = f"{candidate}{separator}t={self._frame_key}"
+            if "/shooting/liveview/flipdetail" in candidate:
+                path = candidate
+            else:
+                separator = "&" if "?" in candidate else "?"
+                path = f"{candidate}{separator}t={self._frame_key}"
             try:
                 if "flipdetail" in candidate and "kind=both" in candidate:
                     self._latest_live_view_geometry = None
@@ -3484,10 +3532,9 @@ class CcapiSession:
         detail = self._operation("GET", "/shooting/liveview/flipdetail")
         if detail is None:
             return
-        self._frame_key += 1
         response = self._request(
             "GET",
-            f"{detail.path}?kind=both&t={self._frame_key}",
+            f"{detail.path}?kind=both",
             headers={"Accept": "application/octet-stream,*/*", "Cache-Control": "no-cache"},
             max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
         )

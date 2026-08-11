@@ -699,7 +699,7 @@ class CcapiClientTest {
         val frame = server.takeRequest()
         val click = server.takeRequest()
         val body = JSONObject(click.body.readUtf8())
-        assertEquals("/ccapi/ver110/shooting/liveview/flipdetail?kind=both&t=8", frame.path)
+        assertEquals("/ccapi/ver110/shooting/liveview/flipdetail?kind=both", frame.path)
         assertEquals("POST", click.method)
         assertEquals("/ccapi/ver110/shooting/liveview/clickwb", click.path)
         assertEquals(2500, body.getInt("positionx"))
@@ -750,7 +750,7 @@ class CcapiClientTest {
         val frame = server.takeRequest()
         val focus = server.takeRequest()
         val body = JSONObject(focus.body.readUtf8())
-        assertEquals("/ccapi/ver110/shooting/liveview/flipdetail?kind=both&t=7", frame.path)
+        assertEquals("/ccapi/ver110/shooting/liveview/flipdetail?kind=both", frame.path)
         assertEquals("PUT", focus.method)
         assertEquals("/ccapi/ver110/shooting/liveview/afframeposition", focus.path)
         assertEquals(1600, body.getInt("positionx"))
@@ -841,6 +841,25 @@ class CcapiClientTest {
         assertEquals("on", fallbackBody.getString("cameradisplay"))
         assertTrue(!fallbackBody.has("liveviewsize"))
         assertEquals(listOf(LiveViewSize.MEDIUM), capabilities.liveView.sizes)
+    }
+
+    @Test
+    fun startLiveViewFallsBackFromInvalidLargeToMediumAndPrunesLarge() = runTest {
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setResponseCode(400).setBody("""{"message":"Invalid parameter"}"""))
+        server.enqueue(MockResponse().setResponseCode(400).setBody("""{"message":"Invalid parameter"}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+
+        client.startLiveView(LiveViewRequest(size = LiveViewSize.LARGE))
+        val capabilities = client.capabilities()
+        val starts = List(3) { JSONObject(server.takeRequest().body.readUtf8()) }
+
+        assertEquals("large", starts[0].getString("liveviewsize"))
+        assertFalse(starts[1].has("liveviewsize"))
+        assertEquals("medium", starts[2].getString("liveviewsize"))
+        assertEquals(listOf(LiveViewSize.SMALL, LiveViewSize.MEDIUM), capabilities.liveView.sizes)
+        assertEquals(LiveViewSize.MEDIUM, capabilities.liveView.defaultSize)
     }
 
     @Test
@@ -1167,6 +1186,47 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonMultipartLiveViewRetriesTransientNotStartedResponses() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x31, 0xFF.toByte(), 0xD9.toByte())
+        val multipart = Buffer()
+            .writeUtf8("--canon\nContent-Type: image/jpeg\nContent-Length: ${jpeg.size}\n\n")
+            .write(jpeg)
+            .writeUtf8("\n--canon--\n")
+        server.enqueue(jsonResponse(DISCOVERY_MULTIPART_JSON))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        repeat(2) {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(503)
+                    .setBody("""{"message":"Live view not started"}"""),
+            )
+        }
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("content-type", "multipart/x-mixed-replace;boundary=canon")
+                .setChunkedBody(multipart, 3),
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        client.initialize()
+        client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_MULTIPART))
+        val frame = client.liveViewFrame(cacheKey = 1)
+        client.stopLiveView()
+
+        assertArrayEquals(jpeg, frame.bytes)
+        val requests = List(7) { server.takeRequest() }
+        assertEquals(3, requests.count { it.path == "/ccapi/ver110/shooting/liveview/multipart" && it.method == "GET" })
+        assertEquals("DELETE", requests[5].method)
+        assertEquals("DELETE", requests[6].method)
+    }
+
+    @Test
     fun multipartCapabilityRequiresAllOperationsInTheSameApiVersion() = runTest {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -1389,7 +1449,7 @@ class CcapiClientTest {
             initialCapabilities.liveView.sources,
         )
         assertEquals(LiveViewSource.CCAPI_JPEG_POLLING, client.currentLiveViewSource())
-        assertEquals(listOf(LiveViewSize.SMALL), activeCapabilities.liveView.sizes)
+        assertEquals(listOf(LiveViewSize.SMALL, LiveViewSize.LARGE), activeCapabilities.liveView.sizes)
         assertEquals(LiveViewSize.SMALL, activeCapabilities.liveView.defaultSize)
         assertFalse(CameraFeature.LIVE_VIEW_RTP in client.observedFeatureSnapshot())
         assertTrue(CameraFeature.LIVE_VIEW_JPEG_POLLING in client.observedFeatureSnapshot())
@@ -3716,7 +3776,7 @@ class CcapiClientTest {
         val flipDetailRequest = server.takeRequest()
 
         assertEquals("/ccapi/ver100/shooting/liveview/flip?t=9", flipRequest.path)
-        assertEquals("/ccapi/ver100/shooting/liveview/flipdetail?kind=image&t=9", flipDetailRequest.path)
+        assertEquals("/ccapi/ver100/shooting/liveview/flipdetail?kind=image", flipDetailRequest.path)
         assertArrayEquals(jpeg, frame.bytes)
     }
 

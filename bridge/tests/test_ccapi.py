@@ -162,9 +162,11 @@ class FakeCcapiTransport:
         temperature_response: object | None = None,
         live_view_magnification_response: object | None = None,
         reject_live_view_size: bool = True,
+        invalid_live_view_start_sizes: set[str] | None = None,
         live_view_mode_unsupported_sizes: set[str] | None = None,
         multipart_frame: bytes = JPEG,
         multipart_close_status: int = 200,
+        multipart_start_statuses: list[int] | None = None,
     ) -> None:
         self.discovery = discovery or DISCOVERY
         self.developer_discovery = developer_discovery
@@ -259,10 +261,12 @@ class FakeCcapiTransport:
         self.sensor_cleaning_count = 0
         self.sensor_cleaning_auto_power_off: bool | None = None
         self.reject_live_view_size = reject_live_view_size
+        self.invalid_live_view_start_sizes = invalid_live_view_start_sizes or set()
         self.live_view_mode_unsupported_sizes = live_view_mode_unsupported_sizes or set()
         self.live_view_size: str | None = None
         self.multipart_frame = multipart_frame
         self.multipart_close_status = multipart_close_status
+        self.multipart_start_statuses = list(multipart_start_statuses or [])
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.media_metadata: dict[str, object] = {
             "filesize": len(MEDIA),
@@ -543,6 +547,11 @@ class FakeCcapiTransport:
             self.settings[key]["value"] = payload["value"]
             return CcapiResponse(204, {}, b"")
         if method == "POST" and path == "/ccapi/ver100/shooting/liveview":
+            requested_size = str(payload.get("liveviewsize")) if payload and "liveviewsize" in payload else None
+            if requested_size in self.invalid_live_view_start_sizes or (
+                requested_size is None and self.invalid_live_view_start_sizes
+            ):
+                return _json_response({"message": "Invalid parameter"}, status=400)
             if self.reject_live_view_size and payload and "liveviewsize" in payload:
                 self.reject_live_view_size = False
                 return _json_response({"message": "Invalid parameter"}, status=400)
@@ -648,6 +657,14 @@ class FakeCcapiTransport:
         path = _request_path(url)
         self.requests.append(RecordedRequest(method, path, None))
         if method == "GET" and path == "/ccapi/ver100/shooting/liveview/multipart":
+            if self.multipart_start_statuses:
+                status = self.multipart_start_statuses.pop(0)
+                if status != 200:
+                    return CcapiStreamResponse(
+                        status,
+                        {"content-type": "application/json"},
+                        BytesIO(b'{"message":"Live view not started"}'),
+                    )
             multipart = (
                 b"--canon\nContent-Type: image/jpeg\nContent-Length: "
                 + str(len(self.multipart_frame)).encode()
@@ -2957,6 +2974,71 @@ def test_ccapi_latest_firmware_uses_advertised_post_off_jpeg_lifecycle() -> None
         ("POST", {"cameradisplay": "on", "liveviewsize": "off"}),
     ]
     assert not any(request.method == "DELETE" for request in transport.requests)
+
+
+def test_ccapi_invalid_large_start_falls_back_to_medium_and_prunes_rejected_size() -> None:
+    transport = FakeCcapiTransport(
+        reject_live_view_size=False,
+        invalid_live_view_start_sizes={"large"},
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    session.start_live_view(LiveViewStartRequest(size="LARGE", source="CCAPI_JPEG_POLLING"))
+
+    assert session.live_view_size == "MEDIUM"
+    assert session.live_view_frame() == JPEG
+    assert session.capabilities().live_view.sizes == ["SMALL", "MEDIUM"]
+    starts = [
+        request.body
+        for request in transport.requests
+        if request.method == "POST" and request.path == "/ccapi/ver100/shooting/liveview"
+    ]
+    assert starts == [
+        {"cameradisplay": "on", "liveviewsize": "large"},
+        {"cameradisplay": "on"},
+        {"cameradisplay": "on", "liveviewsize": "medium"},
+    ]
+    session.stop_live_view()
+
+
+def test_ccapi_detailed_live_view_uses_only_the_canon_kind_query() -> None:
+    transport = FakeCcapiTransport(reject_live_view_size=False)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    session.start_live_view(LiveViewStartRequest(size="MEDIUM", source="CCAPI_JPEG_POLLING"))
+
+    detail_paths = [
+        request.path
+        for request in transport.requests
+        if request.method == "GET" and "/shooting/liveview/flipdetail" in request.path
+    ]
+    assert detail_paths == ["/ccapi/ver100/shooting/liveview/flipdetail?kind=both"]
+    session.stop_live_view()
+
+
+def test_ccapi_multipart_retries_a_transient_not_started_response() -> None:
+    delays: list[float] = []
+    transport = FakeCcapiTransport(
+        discovery=R6M3_MULTIPART_POST_STOP_DISCOVERY,
+        reject_live_view_size=False,
+        multipart_start_statuses=[503, 503, 200],
+    )
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        sleeper=delays.append,
+    ).open_connection("http://192.168.1.2:8080")
+
+    session.start_live_view(LiveViewStartRequest(size="MEDIUM", source="CCAPI_MULTIPART"))
+
+    assert session.live_view_frame() == JPEG
+    assert delays == [0.1, 0.2]
+    multipart_gets = [
+        request
+        for request in transport.requests
+        if request.method == "GET" and request.path.endswith("/shooting/liveview/multipart")
+    ]
+    assert len(multipart_gets) == 3
+    session.stop_live_view()
 
 
 def test_ccapi_jpeg_first_frame_downgrades_mode_unsupported_size_to_small() -> None:

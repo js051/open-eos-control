@@ -435,7 +435,7 @@ public enum LiveViewSource: String, Codable, Sendable {
     case simulatorFrame
 }
 
-public enum LiveViewSize: String, CaseIterable, Codable, Sendable {
+public enum LiveViewSize: String, CaseIterable, Codable, Hashable, Sendable {
     case small
     case medium
     case large

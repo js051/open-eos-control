@@ -1113,7 +1113,7 @@ final class CCAPIClientTests: XCTestCase {
         let jpeg = Data([0xFF, 0xD8, 0x05, 0x06, 0xFF, 0xD9])
         await transport.enqueue(
             method: "GET",
-            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both&t=7",
+            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
             headers: ["content-type": "application/octet-stream"],
             body: detailedLiveView(jpeg: jpeg)
         )
@@ -1129,6 +1129,55 @@ final class CCAPIClientTests: XCTestCase {
         let fallback = try XCTUnwrap(JSONSerialization.jsonObject(with: startBodies[1]) as? [String: Any])
         XCTAssertEqual(fallback["cameradisplay"] as? String, "on")
         XCTAssertNil(fallback["liveviewsize"])
+    }
+
+    func testInvalidLargeLiveViewStartFallsBackToMediumAndPrunesLarge() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: postOnlyLiveViewDiscovery)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview",
+            status: 400,
+            body: #"{"message":"Invalid parameter"}"#
+        )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview",
+            status: 400,
+            body: #"{"message":"Invalid parameter"}"#
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        try await client.startLiveView(
+            LiveViewRequest(size: .large, source: .ccapiJPEGPolling)
+        )
+
+        let activeSize = await client.currentLiveViewSize()
+        XCTAssertEqual(activeSize, .medium)
+        let capabilities = try await client.capabilities()
+        XCTAssertEqual(capabilities.liveView.sizes, [.small, .medium])
+        XCTAssertEqual(capabilities.liveView.defaultSize, .medium)
+        let requests = await transport.requests()
+        let starts = requests.filter { $0.method == "POST" }
+        XCTAssertEqual(starts.count, 3)
+        let bodies = try starts.map { request in
+            try XCTUnwrap(
+                JSONSerialization.jsonObject(with: try XCTUnwrap(request.body)) as? [String: String]
+            )
+        }
+        XCTAssertEqual(bodies[0]["liveviewsize"], "large")
+        XCTAssertNil(bodies[1]["liveviewsize"])
+        XCTAssertEqual(bodies[2]["liveviewsize"], "medium")
     }
 
     func testPostOnlyJPEGLiveViewUsesCanonPostOffStopAndReportsActiveSize() async throws {
@@ -1227,7 +1276,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(activeSize, .small)
         let capabilities = try await client.capabilities()
         XCTAssertEqual(capabilities.liveView.currentSize, .small)
-        XCTAssertTrue(capabilities.liveView.sizes.contains(.medium))
+        XCTAssertFalse(capabilities.liveView.sizes.contains(.medium))
 
         let requests = await transport.requests()
         XCTAssertEqual(requests.map { "\($0.method) \($0.path)" }, [
@@ -1282,7 +1331,7 @@ final class CCAPIClientTests: XCTestCase {
         let jpeg = Data([0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9])
         await transport.enqueue(
             method: "GET",
-            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both&t=9",
+            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
             headers: ["content-type": "application/octet-stream"],
             body: detailedLiveView(jpeg: jpeg)
         )
@@ -1312,7 +1361,7 @@ final class CCAPIClientTests: XCTestCase {
         let jpeg = Data([0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9])
         await transport.enqueue(
             method: "GET",
-            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both&t=10",
+            path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
             headers: ["content-type": "application/octet-stream"],
             body: detailedLiveView(jpeg: jpeg)
         )

@@ -43,6 +43,7 @@ private const val MAX_CCAPI_EVENT_KEY_CHARS = 128
 private const val MAX_DEVICE_STATUS_TEXT_CHARS = 512
 private const val CCAPI_EVENT_READ_TIMEOUT_SECONDS = 40L
 private const val CCAPI_EVENT_CALL_TIMEOUT_SECONDS = 45L
+private val MULTIPART_START_RETRY_DELAYS_MILLIS = longArrayOf(100L, 200L, 400L, 800L)
 private const val CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 private const val CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
 private val CANON_DATETIME_FORMATTER = DateTimeFormatter.ofPattern(
@@ -172,6 +173,7 @@ class CcapiClient(
     private var settingsLoaded = false
     private var discoverySource = "unknown"
     private var liveViewSizeControlSupported = true
+    private val rejectedLiveViewSizes = mutableSetOf<LiveViewSize>()
     private var activeLiveViewSize = LiveViewSize.MEDIUM
     private var latestLiveViewGeometry: CcapiLiveViewGeometry? = null
     private var activeLiveViewSource: LiveViewSource? = null
@@ -750,7 +752,13 @@ class CcapiClient(
 
             val liveViewCapabilities = ccapiLiveViewCapabilities().let { capabilities ->
                 if (liveViewSizeControlSupported) {
-                    capabilities
+                    val sizes = capabilities.sizes.filterNot(rejectedLiveViewSizes::contains)
+                    capabilities.copy(
+                        sizes = sizes,
+                        defaultSize = LiveViewSize.MEDIUM.takeIf(sizes::contains)
+                            ?: sizes.firstOrNull()
+                            ?: activeLiveViewSize,
+                    )
                 } else {
                     capabilities.copy(
                         sizes = listOf(activeLiveViewSize),
@@ -1926,7 +1934,9 @@ class CcapiClient(
                 LiveViewSource.CCAPI_RTP -> error("CCAPI RTP Live View renders through the native H.264 surface, not the JPEG frame reader.")
 
                 else -> error("${request.source.label} is not available through the CCAPI network backend.")
-            }.map { it.withCacheBust(cacheKey) }
+            }.map { path ->
+                if (path.contains("/shooting/liveview/flipdetail")) path else path.withCacheBust(cacheKey)
+            }
         } else {
             listOf("$baseUrl/ccapi/liveview/frame".withCacheBust(cacheKey))
         }
@@ -2354,7 +2364,7 @@ class CcapiClient(
                     startCcapiLiveView(fallback, operations.startLiveView.path)
                     started = true
                     validateJpegLiveViewFrame(fallback)
-                    liveViewSizeControlSupported = false
+                    rejectedLiveViewSizes.add(request.size)
                     activeLiveViewSize = LiveViewSize.SMALL
                 }
             }
@@ -2389,6 +2399,7 @@ class CcapiClient(
         request: LiveViewRequest,
         path: String = apiPath("POST", "/shooting/liveview"),
     ) {
+        var effectiveSize = request.size
         val requestedPayload = JSONObject()
             .put("cameradisplay", "on")
             .put("liveviewsize", request.size.ccapiValue)
@@ -2397,10 +2408,39 @@ class CcapiClient(
             liveViewSizeControlSupported = true
         } catch (exception: CcapiHttpException) {
             if (exception.statusCode != 400) throw exception
-            postOk(path, JSONObject().put("cameradisplay", "on"))
-            liveViewSizeControlSupported = false
+            try {
+                postOk(path, JSONObject().put("cameradisplay", "on"))
+                liveViewSizeControlSupported = false
+            } catch (parameterException: CcapiHttpException) {
+                if (parameterException.statusCode != 400) throw parameterException
+                val fallbackSizes = when (request.size) {
+                    LiveViewSize.LARGE -> listOf(LiveViewSize.MEDIUM, LiveViewSize.SMALL)
+                    LiveViewSize.MEDIUM -> listOf(LiveViewSize.SMALL)
+                    LiveViewSize.SMALL -> emptyList()
+                }
+                var fallbackSucceeded = false
+                for (fallbackSize in fallbackSizes) {
+                    try {
+                        postOk(
+                            path,
+                            JSONObject()
+                                .put("cameradisplay", "on")
+                                .put("liveviewsize", fallbackSize.ccapiValue),
+                        )
+                        rejectedLiveViewSizes.add(request.size)
+                        liveViewSizeControlSupported = true
+                        effectiveSize = fallbackSize
+                        fallbackSucceeded = true
+                        break
+                    } catch (fallbackException: CcapiHttpException) {
+                        if (fallbackException.statusCode != 400) throw fallbackException
+                        rejectedLiveViewSizes.add(fallbackSize)
+                    }
+                }
+                if (!fallbackSucceeded) throw exception
+            }
         }
-        activeLiveViewSize = request.size
+        activeLiveViewSize = effectiveSize
     }
 
     private suspend fun startMultipartLiveView(request: LiveViewRequest) {
@@ -2417,29 +2457,40 @@ class CcapiClient(
             .build()
         try {
             val session = withContext(Dispatchers.IO) {
-                val call = multipartHttpClient.newCall(streamRequest)
-                val response = try {
-                    call.execute()
-                } catch (exception: Exception) {
-                    call.cancel()
-                    throw exception
-                }
-                if (response.code != 200) {
+                var lastFailure: CcapiHttpException? = null
+                repeat(MULTIPART_START_RETRY_DELAYS_MILLIS.size + 1) { attempt ->
+                    val call = multipartHttpClient.newCall(streamRequest)
+                    val response = try {
+                        call.execute()
+                    } catch (exception: Exception) {
+                        call.cancel()
+                        throw exception
+                    }
+                    if (response.code == 200) {
+                        val boundary = try {
+                            parseCcapiMultipartBoundary(response.header("content-type"))
+                        } catch (exception: Exception) {
+                            response.close()
+                            call.cancel()
+                            throw exception
+                        }
+                        return@withContext CcapiMultipartLiveViewSession(call, response, sourceUrl, boundary)
+                    }
+                    val statusCode = response.code
                     val preview = response.body?.string().orEmpty().trim().take(MAX_ERROR_BODY_CHARS)
                     response.close()
-                    throw CcapiHttpException(
-                        response.code,
-                        "Camera request failed: GET $sourceUrl returned HTTP ${response.code}\nBody: $preview",
-                    )
-                }
-                val boundary = try {
-                    parseCcapiMultipartBoundary(response.header("content-type"))
-                } catch (exception: Exception) {
-                    response.close()
                     call.cancel()
-                    throw exception
+                    lastFailure = CcapiHttpException(
+                        statusCode,
+                        "Camera request failed: GET $sourceUrl returned HTTP $statusCode\nBody: $preview",
+                    )
+                    val retryable = statusCode == 503 &&
+                        preview.contains("live view not started", ignoreCase = true) &&
+                        attempt < MULTIPART_START_RETRY_DELAYS_MILLIS.size
+                    if (!retryable) throw checkNotNull(lastFailure)
+                    delay(MULTIPART_START_RETRY_DELAYS_MILLIS[attempt])
                 }
-                CcapiMultipartLiveViewSession(call, response, sourceUrl, boundary)
+                throw checkNotNull(lastFailure)
             }
             multipartLiveViewSession?.close()
             multipartLiveViewSession = session
@@ -3544,7 +3595,7 @@ class CcapiClient(
         }
         if (latestLiveViewGeometry == null) {
             detailedLiveViewOperation()?.let { operation ->
-                val sourceUrl = "$baseUrl${operation.path}?kind=both".withCacheBust(System.nanoTime())
+                val sourceUrl = "$baseUrl${operation.path}?kind=both"
                 val request = Request.Builder()
                     .url(sourceUrl)
                     .get()

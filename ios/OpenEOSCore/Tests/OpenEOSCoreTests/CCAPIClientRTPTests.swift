@@ -268,7 +268,7 @@ final class CCAPIClientRTPTests: XCTestCase {
         )
         await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview/rtp", status: 204, body: Data())
         await transport.enqueue(
-            path: "/ccapi/ver130/shooting/liveview/flipdetail?kind=both&t=0",
+            path: "/ccapi/ver130/shooting/liveview/flipdetail?kind=both",
             headers: ["content-type": "application/octet-stream"],
             body: detailedLiveView()
         )
