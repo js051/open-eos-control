@@ -124,6 +124,134 @@ final class CCAPIClientRTPTests: XCTestCase {
         )
     }
 
+    func testAutomaticRTPHTTPStartFailureStopsRTPAndFallsBackToPostOnlyJPEG() async throws {
+        let transport = MockCameraHTTPTransport()
+        let nativeSession = MockRTPSession()
+        let factory = MockRTPSessionFactory(session: nativeSession)
+        await transport.enqueueJSON(path: "/ccapi", body: Self.postOnlyDiscovery)
+        await transport.enqueue(
+            path: "/ccapi/ver130/shooting/liveview/rtpsessiondesc",
+            headers: ["content-type": "application/sdp"],
+            body: Data(Self.canonSDP.utf8)
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview/rtp",
+            status: 503,
+            body: #"{"message":"Mode not supported"}"#.data(using: .utf8)!
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview/rtp",
+            status: 204,
+            body: Data()
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            rtpDestinationAddress: "192.168.1.3",
+            rtpSessionFactory: factory,
+            transport: transport
+        )
+
+        try await client.startLiveView(LiveViewRequest(source: .auto))
+
+        let activeSource = await client.currentLiveViewSource()
+        XCTAssertEqual(activeSource, .ccapiJPEGPolling)
+        let nativeState = await nativeSession.state()
+        XCTAssertTrue(nativeState.closed)
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map { "\($0.method) \($0.path)" }, [
+            "GET /ccapi",
+            "GET /ccapi/ver130/shooting/liveview/rtpsessiondesc",
+            "POST /ccapi/ver130/shooting/liveview/rtp",
+            "POST /ccapi/ver130/shooting/liveview/rtp",
+            "POST /ccapi/ver130/shooting/liveview",
+        ])
+        let rtpCommands = try requests
+            .filter { $0.path.hasSuffix("/shooting/liveview/rtp") }
+            .map { request in
+                try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: String])
+            }
+        XCTAssertEqual(rtpCommands, [
+            ["action": "start", "ipaddress": "192.168.1.3"],
+            ["action": "stop", "ipaddress": ""],
+        ])
+    }
+
+    func testAutomaticRTPFailurePrefersSameVersionPostOnlyMultipartLifecycle() async throws {
+        let transport = MockCameraHTTPTransport()
+        let nativeSession = MockRTPSession()
+        let factory = MockRTPSessionFactory(session: nativeSession)
+        let jpeg = Data([0xFF, 0xD8, 0x31, 0x32, 0xFF, 0xD9])
+        await transport.enqueueJSON(path: "/ccapi", body: Self.postOnlyMultipartDiscovery)
+        await transport.enqueue(
+            path: "/ccapi/ver130/shooting/liveview/rtpsessiondesc",
+            headers: ["content-type": "application/sdp"],
+            body: Data(Self.canonSDP.utf8)
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview/rtp",
+            status: 503,
+            body: #"{"message":"Mode not supported"}"#.data(using: .utf8)!
+        )
+        await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview/rtp", status: 204, body: Data())
+        await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview", status: 204, body: Data())
+        await transport.enqueue(
+            method: "GET",
+            path: "/ccapi/ver130/shooting/liveview/multipart",
+            headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
+            body: multipart(boundary: "canon", frame: jpeg)
+        )
+        await transport.enqueue(
+            method: "DELETE",
+            path: "/ccapi/ver130/shooting/liveview/multipart",
+            status: 503,
+            body: #"{"message":"Mode not supported"}"#.data(using: .utf8)!
+        )
+        await transport.enqueue(
+            method: "POST",
+            path: "/ccapi/ver130/shooting/liveview",
+            status: 204,
+            body: Data()
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            rtpDestinationAddress: "192.168.1.3",
+            rtpSessionFactory: factory,
+            transport: transport
+        )
+
+        try await client.startLiveView(LiveViewRequest(source: .auto))
+        let activeSource = await client.currentLiveViewSource()
+        XCTAssertEqual(activeSource, .ccapiMultipart)
+        let frame = try await client.liveViewFrame(cacheKey: 32)
+        XCTAssertEqual(frame.data, jpeg)
+        await client.stopLiveView()
+
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map { "\($0.method) \($0.path)" }, [
+            "GET /ccapi",
+            "GET /ccapi/ver130/shooting/liveview/rtpsessiondesc",
+            "POST /ccapi/ver130/shooting/liveview/rtp",
+            "POST /ccapi/ver130/shooting/liveview/rtp",
+            "POST /ccapi/ver130/shooting/liveview",
+            "GET /ccapi/ver130/shooting/liveview/multipart",
+            "DELETE /ccapi/ver130/shooting/liveview/multipart",
+            "POST /ccapi/ver130/shooting/liveview",
+        ])
+        let nativeState = await nativeSession.state()
+        XCTAssertTrue(nativeState.closed)
+    }
+
     func testRTPCoordinateFocusFetchesRealCanonGeometryBeforeWriting() async throws {
         let transport = MockCameraHTTPTransport()
         let nativeSession = MockRTPSession()
@@ -250,6 +378,28 @@ final class CCAPIClientRTPTests: XCTestCase {
     }
     """
 
+    private static let postOnlyDiscovery = """
+    {
+      "ver130": [
+        {"path":"/shooting/liveview","post":true},
+        {"path":"/shooting/liveview/flip","get":true},
+        {"path":"/shooting/liveview/rtpsessiondesc","get":true},
+        {"path":"/shooting/liveview/rtp","post":true}
+      ]
+    }
+    """
+
+    private static let postOnlyMultipartDiscovery = """
+    {
+      "ver130": [
+        {"path":"/shooting/liveview","post":true},
+        {"path":"/shooting/liveview/multipart","get":true,"delete":true},
+        {"path":"/shooting/liveview/rtpsessiondesc","get":true},
+        {"path":"/shooting/liveview/rtp","post":true}
+      ]
+    }
+    """
+
     private static let canonSDP = """
     v=0
     o=- 0 0 IN IP4 192.168.1.2
@@ -268,6 +418,15 @@ final class CCAPIClientRTPTests: XCTestCase {
             #"{"liveview":{"image":{"positionx":100,"positiony":200,"positionwidth":6000,"positionheight":4000}}}"#.utf8
         )
         return detailPacket(type: 0x00, payload: jpeg) + detailPacket(type: 0x01, payload: info)
+    }
+
+    private func multipart(boundary: String, frame: Data) -> Data {
+        var value = Data(
+            "--\(boundary)\nContent-Type: image/jpeg\nContent-Length: \(frame.count)\n\n".utf8
+        )
+        value.append(frame)
+        value.append(Data("\n--\(boundary)--\n".utf8))
+        return value
     }
 
     private func detailPacket(type: UInt8, payload: Data) -> Data {
