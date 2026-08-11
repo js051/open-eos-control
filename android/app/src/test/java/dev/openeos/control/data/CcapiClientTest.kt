@@ -3232,6 +3232,96 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realMediaListStopsRetryingUnsupportedDescendingOrder() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        server.enqueue(jsonResponse("""{"pagenumber":2}"""))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(400)
+                .setBody("""{"message":"Illegal query parameter"}"""),
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"path":["/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_0001.JPG","/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_0002.JPG"]}""",
+            ),
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"path":["/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_0003.JPG","/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_0004.JPG"]}""",
+            ),
+        )
+
+        val items = client.listMedia()
+
+        assertEquals(
+            listOf("IMG_0004.JPG", "IMG_0003.JPG", "IMG_0002.JPG", "IMG_0001.JPG"),
+            items.map { it.name },
+        )
+        assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/contents?page=1&order=desc", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/contents?page=1", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/contents?page=2", server.takeRequest().path)
+    }
+
+    @Test
+    fun realMediaListStopsPagingAtResultLimit() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        server.enqueue(jsonResponse("""{"pagenumber":47}"""))
+        repeat(5) { pageIndex ->
+            val paths = (1..100).joinToString(separator = ",") { itemIndex ->
+                val number = pageIndex * 100 + itemIndex
+                "\"/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_${number.toString().padStart(4, '0')}.JPG\""
+            }
+            server.enqueue(jsonResponse("""{"path":[$paths]}"""))
+        }
+
+        val items = client.listMedia()
+
+        assertEquals(500, items.size)
+        assertEquals("IMG_0001.JPG", items.first().name)
+        assertEquals("IMG_0500.JPG", items.last().name)
+        assertEquals(6, server.requestCount)
+        assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/contents?page=1&order=desc", server.takeRequest().path)
+        repeat(4) { pageIndex ->
+            assertEquals(
+                "/ccapi/ver140/contents?page=${pageIndex + 2}&order=desc",
+                server.takeRequest().path,
+            )
+        }
+    }
+
+    @Test
+    fun realMediaListFairlyMergesSiblingPhotoAndVideoContainers() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        val containers =
+            """{"path":["/ccapi/ver140/contents/card2/DCIM/100EOSR6","/ccapi/ver140/contents/card2/XFVC/REEL_0001"]}"""
+        server.enqueue(jsonResponse(containers))
+        server.enqueue(jsonResponse(containers))
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(
+            jsonResponse(
+                """{"path":["/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_0002.JPG","/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_0001.JPG"]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(
+            jsonResponse(
+                """{"path":["/ccapi/ver140/contents/card2/XFVC/REEL_0001/VIDEO_0002.MP4","/ccapi/ver140/contents/card2/XFVC/REEL_0001/VIDEO_0001.MP4"]}""",
+            ),
+        )
+
+        val items = client.listMedia()
+
+        assertEquals(
+            listOf("IMG_0002.JPG", "VIDEO_0002.MP4", "IMG_0001.JPG", "VIDEO_0001.MP4"),
+            items.map { it.name },
+        )
+        assertEquals(listOf("image", "video", "image", "video"), items.map { it.kind })
+        assertEquals(6, server.requestCount)
+    }
+
+    @Test
     fun realLiveViewMagnificationUsesAdvertisedStringValueAndReadback() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(

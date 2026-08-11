@@ -181,6 +181,7 @@ class CcapiClient(
     private var activeMultipartLiveViewOperations: CcapiMultipartOperations? = null
     private var multipartLiveViewSession: CcapiMultipartLiveViewSession? = null
     private var simulatorEventSequence = 0L
+    private var mediaDescendingOrderSupported: Boolean? = null
 
     var nativeLiveViewSession: NativeLiveViewSession? = null
         private set
@@ -2674,15 +2675,20 @@ class CcapiClient(
         val rootPath = apiPath("GET", "/contents")
         val pending = ArrayDeque<Pair<String, Int>>()
         val visited = mutableSetOf<String>()
-        val mediaPaths = linkedSetOf<String>()
+        val mediaPathGroups = mutableListOf<List<String>>()
         pending.add(rootPath to 0)
 
-        while (pending.isNotEmpty() && mediaPaths.size < MAX_MEDIA_ITEMS) {
+        while (pending.isNotEmpty()) {
             val (container, depth) = pending.removeFirst()
             val normalizedContainer = normalizeCameraResource(container).substringBefore('?')
             if (!visited.add(normalizedContainer) || depth > MAX_MEDIA_TREE_DEPTH) continue
 
-            listContentPaths(normalizedContainer).forEach { rawPath ->
+            val listedPaths = listContentPaths(
+                normalizedContainer,
+                maxPaths = MAX_MEDIA_ITEMS,
+            )
+            val mediaPaths = mutableListOf<String>()
+            listedPaths.forEach { rawPath ->
                 val path = normalizeCameraResource(rawPath).substringBefore('?')
                 if (path.isMediaFilePath()) {
                     mediaPaths.add(path)
@@ -2690,9 +2696,10 @@ class CcapiClient(
                     pending.add(path to depth + 1)
                 }
             }
+            if (mediaPaths.isNotEmpty()) mediaPathGroups.add(mediaPaths)
         }
 
-        return mediaPaths.take(MAX_MEDIA_ITEMS).map { path ->
+        return mergeMediaPathGroups(mediaPathGroups, MAX_MEDIA_ITEMS).map { path ->
             CameraMediaItem(
                 id = path,
                 name = path.substringAfterLast('/'),
@@ -2702,7 +2709,8 @@ class CcapiClient(
         }
     }
 
-    private suspend fun listContentPaths(containerPath: String): List<String> {
+    private suspend fun listContentPaths(containerPath: String, maxPaths: Int): List<String> {
+        if (maxPaths <= 0) return emptyList()
         val pageInfo = getFirstJson(
             listOf(
                 "$containerPath?kind=number",
@@ -2710,25 +2718,70 @@ class CcapiClient(
             ),
         )
         val pageCount = pageInfo?.optInt("pagenumber", 0)?.coerceAtMost(MAX_MEDIA_PAGES) ?: 0
-        val pages = if (pageCount > 0) 1..pageCount else 0..0
-        val paths = mutableListOf<String>()
-        pages.forEach { page ->
-            val candidates = if (page == 0) {
-                listOf(containerPath)
-            } else {
-                listOf(
-                    "$containerPath?page=$page&order=desc",
-                    "$containerPath?page=$page",
-                )
+        val paths = linkedSetOf<String>()
+        if (pageCount <= 0) {
+            paths.addAll(
+                getFirstJsonRequired(listOf(containerPath), "Reading camera media page")
+                    .contentPaths(),
+            )
+        } else if (mediaDescendingOrderSupported == false) {
+            for (page in pageCount downTo 1) {
+                paths.addAll(getContentPage(containerPath, page).contentPaths(reverse = true))
+                if (paths.size >= maxPaths) break
             }
-            val response = getFirstJsonRequired(candidates, "Reading camera media page")
-            response.optJSONArray("path")?.let { array ->
-                repeat(array.length()) { index ->
-                    array.optString(index).takeIf { it.isNotBlank() }?.let(paths::add)
+        } else {
+            val firstResponse = getContentPage(containerPath, 1)
+            if (mediaDescendingOrderSupported == false) {
+                for (page in pageCount downTo 1) {
+                    val response = if (page == 1) firstResponse else getContentPage(containerPath, page)
+                    paths.addAll(response.contentPaths(reverse = true))
+                    if (paths.size >= maxPaths) break
+                }
+            } else {
+                paths.addAll(firstResponse.contentPaths())
+                for (page in 2..pageCount) {
+                    if (paths.size >= maxPaths) break
+                    paths.addAll(getContentPage(containerPath, page).contentPaths())
                 }
             }
         }
-        return paths.distinct()
+        return paths.take(maxPaths)
+    }
+
+    private suspend fun getContentPage(containerPath: String, page: Int): JSONObject {
+        val plainPath = "$containerPath?page=$page"
+        if (mediaDescendingOrderSupported == false) {
+            return getFirstJsonRequired(listOf(plainPath), "Reading camera media page")
+        }
+
+        val orderedPath = "$plainPath&order=desc"
+        return try {
+            getJson(orderedPath).also { mediaDescendingOrderSupported = true }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            getFirstJsonRequired(listOf(plainPath), "Reading camera media page").also {
+                if (exception is CcapiHttpException && exception.statusCode == 400) {
+                    mediaDescendingOrderSupported = false
+                }
+            }
+        }
+    }
+
+    private fun mergeMediaPathGroups(groups: List<List<String>>, maxItems: Int): List<String> {
+        val positions = IntArray(groups.size)
+        val merged = linkedSetOf<String>()
+        while (merged.size < maxItems) {
+            var advanced = false
+            groups.forEachIndexed { index, group ->
+                if (merged.size >= maxItems || positions[index] >= group.size) return@forEachIndexed
+                merged.add(group[positions[index]])
+                positions[index] += 1
+                advanced = true
+            }
+            if (!advanced) break
+        }
+        return merged.toList()
     }
 
     private fun normalizeCameraResource(value: String): String {
@@ -2749,6 +2802,14 @@ class CcapiClient(
             "Camera returned an invalid media path: $value"
         }
         return normalized
+    }
+
+    private fun JSONObject.contentPaths(reverse: Boolean = false): List<String> {
+        val array = optJSONArray("path") ?: return emptyList()
+        val indices = if (reverse) array.length() - 1 downTo 0 else 0 until array.length()
+        return indices.mapNotNull { index ->
+            array.optString(index).takeIf { it.isNotBlank() }
+        }
     }
 
     private suspend fun requestMediaFile(
