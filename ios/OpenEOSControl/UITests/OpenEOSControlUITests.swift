@@ -302,7 +302,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
-        tapMenuAction(app.buttons["disconnect-menu-button"])
+        guard tapMenuAction(app.buttons["disconnect-menu-button"]) else { return }
         XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
     }
 
@@ -374,7 +374,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
         app.buttons["media-back-button"].tap()
         openMoreActions(in: app)
-        tapMenuAction(app.buttons["disconnect-menu-button"])
+        guard tapMenuAction(app.buttons["disconnect-menu-button"]) else { return }
         XCTAssertTrue(app.buttons["connect-button"].waitForExistence(timeout: 15))
         try await waitForSimulatorState { state in
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
@@ -394,6 +394,7 @@ final class OpenEOSControlUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "-resetState",
+            "-disableAnimations",
             "-app-language", appLanguage,
             "-AppleLanguages", "(\(appleLanguage))",
             "-AppleLocale", locale,
@@ -441,12 +442,13 @@ final class OpenEOSControlUITests: XCTestCase {
 
     @discardableResult
     private func tapMenuAction(_ element: XCUIElement) -> Bool {
-        guard element.waitForExistence(timeout: 5) else {
-            XCTFail("The requested menu action does not exist")
-            return false
+        let predicate = NSPredicate { value, _ in
+            guard let element = value as? XCUIElement else { return false }
+            return element.exists && element.isEnabled && !element.frame.isEmpty
         }
-        guard element.isEnabled, !element.frame.isEmpty else {
-            XCTFail("The requested menu action is disabled or has no tappable frame")
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        guard XCTWaiter().wait(for: [expectation], timeout: 8) == .completed else {
+            XCTFail("The requested menu action did not become interactive")
             return false
         }
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

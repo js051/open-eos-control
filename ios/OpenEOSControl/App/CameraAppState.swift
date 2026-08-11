@@ -370,7 +370,7 @@ final class CameraAppState: ObservableObject {
         stopEventLoop()
         resetMediaDownloadState()
         resetMediaUploadState()
-        if let session { await session.close() }
+        let closingSession = session
         session = nil
         snapshot = nil
         isPreview = false
@@ -398,6 +398,7 @@ final class CameraAppState: ObservableObject {
         lastError = nil
         busyOperations.removeAll()
         resetLiveViewMetrics()
+        if let closingSession { await closingSession.close() }
     }
 
     func refresh() async {
