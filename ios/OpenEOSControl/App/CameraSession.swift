@@ -1,6 +1,11 @@
 import Foundation
 import OpenEOSCore
 
+enum LiveViewTargetFPSUpdate: Equatable {
+    case appliedInPlace
+    case restartRequired
+}
+
 enum CameraSession: Sendable {
     case ccapi(CCAPIClient)
     case desktopBridge(DesktopBridgeClient)
@@ -200,10 +205,13 @@ enum CameraSession: Sendable {
         }
     }
 
-    func setLiveViewTargetFPS(_ fps: Int) async {
+    func setLiveViewTargetFPS(_ fps: Int) async -> LiveViewTargetFPSUpdate {
         switch self {
-        case let .ccapi(client): await client.setLiveViewTargetFPS(fps)
-        case .desktopBridge: break
+        case let .ccapi(client):
+            await client.setLiveViewTargetFPS(fps)
+            return .appliedInPlace
+        case .desktopBridge:
+            return .restartRequired
         }
     }
 
