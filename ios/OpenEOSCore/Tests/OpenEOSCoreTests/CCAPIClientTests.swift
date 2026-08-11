@@ -119,6 +119,13 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertFalse(snapshot.capabilities.matrix.planned.contains(.mediaPreview))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.focusDrive))
         XCTAssertTrue(snapshot.capabilities.matrix.supports(.cameraClockSync))
+        let directCCAPIFeatures = Set(CameraFeature.allCases).subtracting([.desktopBridge, .usbDiagnostics])
+        XCTAssertEqual(
+            snapshot.capabilities.matrix.supported.union(snapshot.capabilities.matrix.planned),
+            directCCAPIFeatures
+        )
+        XCTAssertTrue(snapshot.capabilities.matrix.supported.isDisjoint(with: snapshot.capabilities.matrix.planned))
+        XCTAssertTrue(snapshot.capabilities.matrix.planned.contains(.mediaUpload))
         XCTAssertEqual(snapshot.capabilities.evidence.source, "GET /ccapi")
         XCTAssertEqual(snapshot.capabilities.evidence.protocolVersions, ["ver100"])
         XCTAssertTrue(
@@ -520,7 +527,17 @@ final class CCAPIClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(
                 error as? CCAPIError,
-                .invalidResponse("Display preview is available only for camera image items.")
+                .invalidResponse("CCAPI display preview is available only for JPEG or CR3 items.")
+            )
+        }
+        do {
+            let pngPath = "/ccapi/ver100/contents/card1/100CANON/IMG_0002.PNG"
+            _ = try await client.mediaPreview(CameraMediaItem(id: pngPath, name: "IMG_0002.PNG", kind: "image"))
+            XCTFail("Expected PNG display preview rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? CCAPIError,
+                .invalidResponse("CCAPI display preview is available only for JPEG or CR3 items.")
             )
         }
         let requests = await transport.requests()

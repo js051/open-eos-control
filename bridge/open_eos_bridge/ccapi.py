@@ -1114,44 +1114,7 @@ class CcapiSession:
             if self._camera_sleep_path is not None:
                 supported.add(CameraFeature.CAMERA_SLEEP)
 
-            candidates = {
-                CameraFeature.RECORDABLE_STATUS,
-                CameraFeature.LENS_STATUS,
-                CameraFeature.TEMPERATURE_STATUS,
-                CameraFeature.EVENT_POLLING,
-                CameraFeature.LIVE_VIEW_MULTIPART,
-                CameraFeature.LIVE_VIEW_RTP,
-                CameraFeature.LIVE_VIEW_MAGNIFICATION,
-                CameraFeature.STILL_CAPTURE,
-                CameraFeature.BULB_EXPOSURE,
-                CameraFeature.AUTOFOCUS,
-                CameraFeature.SHUTTER_HALF_PRESS,
-                CameraFeature.MOVIE_MODE_CONTROL,
-                CameraFeature.VIDEO_RECORDING,
-                CameraFeature.TAP_FOCUS,
-                CameraFeature.CLICK_WHITE_BALANCE,
-                CameraFeature.FOCUS_DRIVE,
-                CameraFeature.MEDIA_BROWSER,
-                CameraFeature.MEDIA_THUMBNAIL,
-                CameraFeature.MEDIA_PREVIEW,
-                CameraFeature.MEDIA_DOWNLOAD,
-                CameraFeature.MEDIA_PROTECT,
-                CameraFeature.MEDIA_RATING,
-                CameraFeature.MEDIA_ROTATE,
-                CameraFeature.MEDIA_ARCHIVE,
-                CameraFeature.MEDIA_DELETE,
-                CameraFeature.CAMERA_CLOCK_SYNC,
-                CameraFeature.SENSOR_CLEANING,
-                CameraFeature.CAMERA_SLEEP,
-                CameraFeature.ZOOM_CONTROL,
-                CameraFeature.CARD_SELECTION_CONTROL,
-                CameraFeature.SOUND_RECORDING_CONTROL,
-                CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
-                CameraFeature.FOCUS_BRACKETING_CONTROL,
-                CameraFeature.MOVIE_SETTINGS_CONTROL,
-                CameraFeature.DIRECTORY_CONTROL,
-                CameraFeature.FILE_NAMING_CONTROL,
-            }
+            candidates = set(CameraFeature) - {CameraFeature.USB_DIAGNOSTICS}
             live_sizes = (
                 [
                     size
@@ -1201,6 +1164,14 @@ class CcapiSession:
                     ),
                     CameraFeature.MEDIA_ARCHIVE.value: (
                         "The camera must advertise PUT for Canon contents before media archive state can be changed."
+                    ),
+                    CameraFeature.MEDIA_PREVIEW.value: (
+                        "Canon kind=display requires an advertised GET contents operation and is eligible only "
+                        "for JPEG or CR3 items; the camera can still reject an individual file."
+                    ),
+                    CameraFeature.MEDIA_UPLOAD.value: (
+                        "Direct CCAPI upload remains unavailable because no verified Canon upload operation "
+                        "is advertised or implemented."
                     ),
                     CameraFeature.CAMERA_CLOCK_SYNC.value: (
                         "The camera must advertise both GET and PUT for the Canon date-time endpoint "
@@ -2287,7 +2258,7 @@ class CcapiSession:
                     name=path.rsplit("/", 1)[-1],
                     kind=_media_kind(path),
                     content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
-                    preview_available=_media_kind(path) in {"image", "raw"},
+                    preview_available=_supports_ccapi_display_preview(path),
                 )
                 for path in media_paths[:MAX_MEDIA_ITEMS]
             ]
@@ -2370,7 +2341,7 @@ class CcapiSession:
             name=path.rsplit("/", 1)[-1],
             kind=_media_kind(path),
             content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
-            preview_available=_media_kind(path) in {"image", "raw"},
+            preview_available=_supports_ccapi_display_preview(path),
         )
         item = base.model_copy(
             update={
@@ -2448,7 +2419,7 @@ class CcapiSession:
                         name=name,
                         kind=_media_kind(path),
                         content_type=content_type,
-                        preview_available=_media_kind(path) in {"image", "raw"},
+                        preview_available=_supports_ccapi_display_preview(path),
                     )
                     item = item.model_copy(update={"size_bytes": size, "content_type": content_type})
 
@@ -2487,10 +2458,10 @@ class CcapiSession:
 
     def media_preview(self, media_id: str) -> tuple[bytes, str]:
         path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
-        if _media_kind(path) not in {"image", "raw"}:
+        if not _supports_ccapi_display_preview(path):
             raise BridgeError(
                 "INVALID_MEDIA_PREVIEW",
-                "Display preview is available only for camera image items.",
+                "CCAPI display preview is available only for JPEG or CR3 items.",
                 status_code=422,
                 feature=CameraFeature.MEDIA_PREVIEW.value,
                 engine=self.engine_name,
@@ -4370,6 +4341,12 @@ def _media_kind(path: str) -> str:
     if extension in {"mp4", "mov"}:
         return "video"
     return "other"
+
+
+def _supports_ccapi_display_preview(path: str) -> bool:
+    clean_path = path.split("?", 1)[0]
+    extension = clean_path.rsplit(".", 1)[-1].casefold() if "." in clean_path else ""
+    return extension in {"jpg", "jpeg", "cr3"}
 
 
 def _is_text_content_type(value: str) -> bool:

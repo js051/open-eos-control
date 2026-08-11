@@ -3194,14 +3194,25 @@ class CcapiClientTest {
         server.enqueue(jsonResponse("""{"pagenumber":1}"""))
         server.enqueue(jsonResponse("""{"path":["/ccapi/ver110/contents/card1/100CANON"]}"""))
         server.enqueue(jsonResponse("""{"pagenumber":2}"""))
-        server.enqueue(jsonResponse("""{"path":["/ccapi/ver110/contents/card1/100CANON/IMG_0002.JPG"]}"""))
-        server.enqueue(jsonResponse("""{"path":["/ccapi/ver110/contents/card1/100CANON/IMG_0001.CR3"]}"""))
+        server.enqueue(
+            jsonResponse(
+                """{"path":["/ccapi/ver110/contents/card1/100CANON/IMG_0002.JPG","/ccapi/ver110/contents/card1/100CANON/IMG_0003.PNG"]}""",
+            ),
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"path":["/ccapi/ver110/contents/card1/100CANON/IMG_0001.CR3","/ccapi/ver110/contents/card1/100CANON/IMG_0004.CR2"]}""",
+            ),
+        )
 
         val items = client.listMedia()
 
-        assertEquals(listOf("IMG_0002.JPG", "IMG_0001.CR3"), items.map { it.name })
-        assertEquals(listOf("image", "raw"), items.map { it.kind })
-        assertTrue(items.all { it.previewAvailable })
+        assertEquals(
+            listOf("IMG_0002.JPG", "IMG_0003.PNG", "IMG_0001.CR3", "IMG_0004.CR2"),
+            items.map { it.name },
+        )
+        assertEquals(listOf("image", "image", "raw", "raw"), items.map { it.kind })
+        assertEquals(listOf(true, false, true, false), items.map { it.previewAvailable })
         assertEquals("/ccapi/ver110/contents?kind=number", server.takeRequest().path)
         assertEquals("/ccapi/ver110/contents?page=1&order=desc", server.takeRequest().path)
     }
@@ -3455,12 +3466,16 @@ class CcapiClientTest {
         val videoFailure = runCatching {
             client.mediaPreview(CameraMediaItem("$path/MVI_0001.MP4", "MVI_0001.MP4", "video"))
         }.exceptionOrNull()
+        val pngFailure = runCatching {
+            client.mediaPreview(CameraMediaItem("${path.substringBeforeLast('/')}/IMG_0002.PNG", "IMG_0002.PNG", "image"))
+        }.exceptionOrNull()
 
         assertEquals("$path?kind=display", server.takeRequest().path)
         assertArrayEquals(jpeg, preview.bytes)
         assertEquals("image/jpeg", preview.contentType)
         assertTrue(CameraFeature.MEDIA_PREVIEW in client.observedFeatureSnapshot())
         assertTrue(videoFailure is IllegalArgumentException)
+        assertTrue(pngFailure is IllegalArgumentException)
         assertEquals(2, server.requestCount)
     }
 

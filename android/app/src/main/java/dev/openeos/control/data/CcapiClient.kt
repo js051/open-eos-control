@@ -1483,8 +1483,13 @@ class CcapiClient(
     }
 
     suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
-        require(item.kind.equals("image", ignoreCase = true) || item.kind.equals("raw", ignoreCase = true)) {
-            "Display preview is available only for camera image items."
+        val previewEligible = if (isRealCamera) {
+            mediaItemPath(item).isCcapiDisplayPreviewPath()
+        } else {
+            item.kind.isCcapiPreviewKind()
+        }
+        require(previewEligible) {
+            "CCAPI display preview is available only for JPEG or CR3 items."
         }
         val (bytes, contentType) = mediaImageRepresentation(
             item = item,
@@ -2692,7 +2697,7 @@ class CcapiClient(
                 id = path,
                 name = path.substringAfterLast('/'),
                 kind = path.mediaKind(),
-                previewAvailable = path.mediaKind().isCcapiPreviewKind(),
+                previewAvailable = path.isCcapiDisplayPreviewPath(),
             )
         }
     }
@@ -3755,6 +3760,9 @@ private fun String.mediaKind(): String = when (substringAfterLast('.', "").lower
 
 private fun String.isCcapiPreviewKind(): Boolean =
     equals("image", ignoreCase = true) || equals("raw", ignoreCase = true)
+
+private fun String.isCcapiDisplayPreviewPath(): Boolean =
+    substringBefore('?').substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "cr3")
 
 private fun JSONObject.toCameraInfo(): CameraInfo = CameraInfo(
     connected = optBoolean("connected"),

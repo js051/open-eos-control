@@ -656,27 +656,7 @@ public actor CCAPIClient {
         if operation(.post, suffix: "/functions/sensorcleaning") != nil { supported.insert(.sensorCleaning) }
         if cameraSleepPath != nil { supported.insert(.cameraSleep) }
 
-        let allPlanned: Set<CameraFeature> = [
-            .recordableStatus,
-            .lensStatus, .temperatureStatus,
-            .eventPolling, .liveViewMultipart, .liveViewRTP,
-            .stillCapture, .bulbExposure, .autofocus, .shutterHalfPress,
-            .movieModeControl,
-            .videoRecording, .tapFocus,
-            .clickWhiteBalance,
-            .focusDrive, .mediaBrowser, .mediaThumbnail, .mediaPreview, .mediaDownload,
-            .mediaProtect, .mediaRating, .mediaRotate, .mediaArchive, .mediaDelete,
-            .cameraClockSync, .zoomControl, .cardSelectionControl,
-            .sensorCleaning,
-            .cameraSleep,
-            .soundRecordingControl,
-            .soundRecordingLevelControl,
-            .focusBracketingControl,
-            .movieSettingsControl,
-            .liveViewMagnification,
-            .directoryControl,
-            .fileNamingControl,
-        ]
+        let directCCAPIFeatures = Set(CameraFeature.allCases).subtracting([.desktopBridge, .usbDiagnostics])
         let liveSizes = liveViewSizeControlSupported
             ? LiveViewSize.allCases.filter { !rejectedLiveViewSizes.contains($0) }
             : [activeLiveViewSize]
@@ -685,7 +665,7 @@ public actor CCAPIClient {
             fileNaming: fileNaming,
             matrix: CapabilityMatrix(
                 supported: supported,
-                planned: allPlanned.subtracting(supported),
+                planned: directCCAPIFeatures.subtracting(supported),
                 reasons: [
                     .recordableStatus: "The camera must advertise GET shooting/information/recordable and return Canon's documented nullable integer payload.",
                     .lensStatus: "The camera must advertise GET devicestatus/lens and return Canon's documented mount/name payload.",
@@ -714,6 +694,8 @@ public actor CCAPIClient {
                     .mediaRating: "The camera must advertise PUT for Canon contents before file ratings can be changed.",
                     .mediaRotate: "The camera must advertise PUT for Canon contents before display rotation can be changed.",
                     .mediaArchive: "The camera must advertise PUT for Canon contents before media archiving can be changed.",
+                    .mediaPreview: "Canon kind=display requires an advertised GET contents operation and is eligible only for JPEG or CR3 items; the camera can still reject an individual file.",
+                    .mediaUpload: "Direct CCAPI upload remains unavailable because no verified Canon upload operation is advertised or implemented.",
                 ]
             ),
             liveView: LiveViewCapabilities(
@@ -1755,7 +1737,7 @@ public actor CCAPIClient {
                 id: $0,
                 name: ($0 as NSString).lastPathComponent,
                 kind: Self.mediaKind($0),
-                previewAvailable: ["image", "raw"].contains(Self.mediaKind($0))
+                previewAvailable: Self.isCCAPIDisplayPreviewPath($0)
             )
         }
     }
@@ -1856,8 +1838,11 @@ public actor CCAPIClient {
     }
 
     public func mediaPreview(_ item: CameraMediaItem) async throws -> CameraMediaPreview {
-        guard ["image", "raw"].contains(item.kind.lowercased()) else {
-            throw CCAPIError.invalidResponse("Display preview is available only for camera image items.")
+        let previewEligible = resolvedMode == .simulator
+            ? ["image", "raw"].contains(item.kind.lowercased())
+            : Self.isCCAPIDisplayPreviewPath(item.id)
+        guard previewEligible else {
+            throw CCAPIError.invalidResponse("CCAPI display preview is available only for JPEG or CR3 items.")
         }
         let response = try await mediaImageRepresentation(
             item,
@@ -4168,6 +4153,11 @@ public actor CCAPIClient {
         case "mp4", "mov": "video"
         default: "other"
         }
+    }
+
+    private static func isCCAPIDisplayPreviewPath(_ value: String) -> Bool {
+        let path = value.components(separatedBy: "?")[0]
+        return ["jpg", "jpeg", "cr3"].contains((path as NSString).pathExtension.lowercased())
     }
 
     private static func encodePathComponent(_ value: String) -> String {

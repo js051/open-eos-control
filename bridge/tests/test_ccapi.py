@@ -20,6 +20,7 @@ from open_eos_bridge.ccapi import (
     CcapiResponse,
     CcapiStreamResponse,
     UrllibCcapiTransport,
+    _media_id,
     normalize_base_url,
     parse_multipart_boundary,
 )
@@ -812,6 +813,11 @@ def test_ccapi_engine_runs_advertised_controls_live_view_and_media_end_to_end() 
     assert "iso" in capabilities.evidence.writable_settings
     assert "zoom" in capabilities.evidence.writable_settings
     assert capabilities.evidence.truncated is False
+    assert set(capabilities.supported) | set(capabilities.planned) == set(CameraFeature) - {
+        CameraFeature.USB_DIAGNOSTICS
+    }
+    assert set(capabilities.supported).isdisjoint(capabilities.planned)
+    assert CameraFeature.MEDIA_UPLOAD in capabilities.planned
 
     assert session.set_setting("iso", "1600").exposure.iso == "1600"
     session.set_setting("zoom", "75")
@@ -3164,6 +3170,18 @@ def test_ccapi_preview_uses_display_query_and_rejects_invalid_payloads(
 
     assert failure.value.code == expected_code
     assert any(request.path.endswith("IMG_0001.JPG?kind=display") for request in transport.requests)
+
+
+def test_ccapi_preview_rejects_non_jpeg_or_cr3_before_fetching() -> None:
+    transport = FakeCcapiTransport()
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+    png_path = "/ccapi/ver100/contents/card1/100CANON/IMG_0002.PNG"
+
+    with pytest.raises(BridgeError) as failure:
+        session.media_preview(_media_id(png_path))
+
+    assert failure.value.code == "INVALID_MEDIA_PREVIEW"
+    assert not any(request.path.endswith("IMG_0002.PNG?kind=display") for request in transport.requests)
 
 
 def test_ccapi_url_validation_rejects_credentials_and_non_origin_paths() -> None:

@@ -121,6 +121,11 @@ data class CapabilityMatrix(
     fun isPlanned(feature: CameraFeature): Boolean = feature in planned
 
     companion object {
+        private val directCcapiFeatures = CameraFeature.entries.toSet() - setOf(
+            CameraFeature.USB_DIAGNOSTICS,
+            CameraFeature.DESKTOP_BRIDGE,
+        )
+
         fun ccapiNetwork(
             supported: Set<CameraFeature> = setOf(
                 CameraFeature.CAMERA_IDENTITY,
@@ -137,45 +142,7 @@ data class CapabilityMatrix(
             ),
         ): CapabilityMatrix = CapabilityMatrix(
             supported = supported,
-            planned = setOf(
-                CameraFeature.RECORDABLE_STATUS,
-                CameraFeature.LENS_STATUS,
-                CameraFeature.TEMPERATURE_STATUS,
-                CameraFeature.EVENT_POLLING,
-                CameraFeature.LIVE_VIEW_MULTIPART,
-                CameraFeature.LIVE_VIEW_RTP,
-                CameraFeature.STILL_CAPTURE,
-                CameraFeature.BULB_EXPOSURE,
-                CameraFeature.AUTOFOCUS,
-                CameraFeature.SHUTTER_HALF_PRESS,
-                CameraFeature.MOVIE_MODE_CONTROL,
-                CameraFeature.VIDEO_RECORDING,
-                CameraFeature.TAP_FOCUS,
-                CameraFeature.CLICK_WHITE_BALANCE,
-                CameraFeature.FOCUS_DRIVE,
-                CameraFeature.LIVE_VIEW_MAGNIFICATION,
-                CameraFeature.ZOOM_CONTROL,
-                CameraFeature.CARD_SELECTION_CONTROL,
-                CameraFeature.SOUND_RECORDING_CONTROL,
-                CameraFeature.SOUND_RECORDING_LEVEL_CONTROL,
-                CameraFeature.FOCUS_BRACKETING_CONTROL,
-                CameraFeature.MOVIE_SETTINGS_CONTROL,
-                CameraFeature.MEDIA_BROWSER,
-                CameraFeature.MEDIA_THUMBNAIL,
-                CameraFeature.MEDIA_PREVIEW,
-                CameraFeature.MEDIA_DOWNLOAD,
-                CameraFeature.MEDIA_UPLOAD,
-                CameraFeature.MEDIA_PROTECT,
-                CameraFeature.MEDIA_ARCHIVE,
-                CameraFeature.MEDIA_RATING,
-                CameraFeature.MEDIA_ROTATE,
-                CameraFeature.MEDIA_DELETE,
-                CameraFeature.CAMERA_CLOCK_SYNC,
-                CameraFeature.DIRECTORY_CONTROL,
-                CameraFeature.FILE_NAMING_CONTROL,
-                CameraFeature.SENSOR_CLEANING,
-                CameraFeature.CAMERA_SLEEP,
-            ) - supported,
+            planned = directCcapiFeatures - supported,
             reasons = mapOf(
                 CameraFeature.RECORDABLE_STATUS to
                     "The camera must advertise GET shooting/information/recordable and return Canon's documented nullable integer payload.",
@@ -230,6 +197,10 @@ data class CapabilityMatrix(
                     "The camera must advertise PUT for Canon contents before file ratings can be changed.",
                 CameraFeature.MEDIA_ROTATE to
                     "The camera must advertise PUT for Canon contents before display rotation can be changed.",
+                CameraFeature.MEDIA_PREVIEW to
+                    "Canon kind=display requires an advertised GET contents operation and is eligible only for JPEG or CR3 items; the camera can still reject an individual file.",
+                CameraFeature.MEDIA_UPLOAD to
+                    "Direct CCAPI upload remains unavailable because no verified Canon upload operation is advertised or implemented.",
             ),
         )
 
