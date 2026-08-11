@@ -873,7 +873,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requestCount, 1)
     }
 
-    func testReadOnlySettingsWrongShutterMethodAndIncompleteLiveViewStayUnavailable() async throws {
+    func testReadOnlySettingsWrongShutterMethodAndPostOnlyLiveViewRemainDistinct() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
             path: "/ccapi",
@@ -888,7 +888,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertFalse(capabilities.matrix.supports(.exposureControl))
         XCTAssertFalse(capabilities.matrix.supports(.advancedSettings))
         XCTAssertFalse(capabilities.matrix.supports(.stillCapture))
-        XCTAssertFalse(capabilities.matrix.supports(.liveView))
+        XCTAssertTrue(capabilities.matrix.supports(.liveView))
         XCTAssertTrue(capabilities.settings.isEmpty)
 
         do {
@@ -903,14 +903,9 @@ final class CCAPIClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? CCAPIError, .invalidSetting(key: "iso", value: "1600"))
         }
-        do {
-            try await client.startLiveView()
-            XCTFail("Expected incomplete Live View rejection")
-        } catch {
-            XCTAssertEqual(error as? CCAPIError, .unsupported(.liveView))
-        }
+        try await client.startLiveView()
         let finalRequestCount = await transport.requests().count
-        XCTAssertEqual(finalRequestCount, requestCount)
+        XCTAssertEqual(finalRequestCount, requestCount + 1)
     }
 
     func testCapabilityEvidenceIsBoundedAndRemovesQueries() async throws {
