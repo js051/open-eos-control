@@ -48,14 +48,34 @@ data class NativeLiveViewAudioStatus(
     }
 }
 
+data class NativeLiveViewVideoStatus(
+    val rtpPort: Int? = null,
+    val datagramsReceived: Long = 0,
+    val accessUnitsReceived: Long = 0,
+    val keyFramesReceived: Long = 0,
+    val lastDatagramAtMillis: Long? = null,
+    val lastAccessUnitAtMillis: Long? = null,
+    val hasSequenceParameterSet: Boolean = false,
+    val hasPictureParameterSet: Boolean = false,
+    val ready: Boolean = false,
+    val error: String? = null,
+) {
+    companion object {
+        val None = NativeLiveViewVideoStatus()
+    }
+}
+
 interface NativeLiveViewSession : AutoCloseable {
     val source: LiveViewSource
     val sourceUrl: String
     val contentType: String
     val audioStatus: NativeLiveViewAudioStatus
         get() = NativeLiveViewAudioStatus.None
+    val videoStatus: NativeLiveViewVideoStatus
+        get() = NativeLiveViewVideoStatus.None
 
     fun start()
+    suspend fun awaitReady(timeoutMillis: Long)
     fun attachSurface(surface: Surface)
     fun detachSurface(surface: Surface)
     fun setTargetFps(fps: Int)

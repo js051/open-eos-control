@@ -1,8 +1,10 @@
 package dev.openeos.control.data
 
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.DatagramPacket
@@ -105,15 +107,103 @@ class AndroidCcapiRtpSessionTest {
         }
     }
 
+    @Test
+    fun rtpReadinessRequiresSpsPpsAndAKeyFrame() = runBlocking {
+        val videoPort = availableUdpPort()
+        val audioPort = availableUdpPort(excluding = setOf(videoPort))
+        val session = session(
+            videoPort = videoPort,
+            audioPort = audioPort,
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { error("Audio player is not used by this test.") },
+        )
+        val sender = DatagramSocket()
+
+        try {
+            session.start()
+            sender.send(videoPacket(videoPort, sequence = 1, timestamp = 1_000, payload = byteArrayOf(0x67, 0x42)))
+            sender.send(videoPacket(videoPort, sequence = 2, timestamp = 2_000, payload = byteArrayOf(0x68, 0x01)))
+            sender.send(videoPacket(videoPort, sequence = 3, timestamp = 3_000, payload = byteArrayOf(0x65, 0x01)))
+
+            session.awaitReady(timeoutMillis = 2_000)
+        } finally {
+            sender.close()
+            session.close()
+        }
+    }
+
+    @Test
+    fun rtpReadinessUsesSdpParameterSetsWhenTheStreamOnlySendsAKeyFrame() = runBlocking {
+        val videoPort = availableUdpPort()
+        val audioPort = availableUdpPort(excluding = setOf(videoPort))
+        val session = session(
+            videoPort = videoPort,
+            audioPort = audioPort,
+            videoFormatParameters = mapOf("sprop-parameter-sets" to "Z0I=,aAE="),
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { error("Audio player is not used by this test.") },
+        )
+        val sender = DatagramSocket()
+
+        try {
+            session.start()
+            sender.send(videoPacket(videoPort, sequence = 1, timestamp = 1_000, payload = byteArrayOf(0x65, 0x01)))
+
+            session.awaitReady(timeoutMillis = 2_000)
+            assertTrue(session.videoStatus.ready)
+            assertTrue(session.videoStatus.hasSequenceParameterSet)
+            assertTrue(session.videoStatus.hasPictureParameterSet)
+            assertEquals(1L, session.videoStatus.datagramsReceived)
+            assertEquals(1L, session.videoStatus.accessUnitsReceived)
+            assertEquals(1L, session.videoStatus.keyFramesReceived)
+        } finally {
+            sender.close()
+            session.close()
+        }
+    }
+
+    @Test
+    fun rtpReadinessTimesOutWithPacketDiagnostics() {
+        val videoPort = availableUdpPort()
+        val audioPort = availableUdpPort(excluding = setOf(videoPort))
+        val session = session(
+            videoPort = videoPort,
+            audioPort = audioPort,
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { error("Audio player is not used by this test.") },
+        )
+
+        try {
+            session.start()
+            val failure = assertThrows(IllegalStateException::class.java) {
+                runBlocking { session.awaitReady(timeoutMillis = 100) }
+            }
+
+            assertTrue(failure.message.orEmpty().contains("UDP datagrams=0"))
+            assertTrue(failure.message.orEmpty().contains("H.264 access units=0"))
+            assertTrue(failure.message.orEmpty().contains("key frames=0"))
+        } finally {
+            session.close()
+        }
+    }
+
     private fun session(
         videoPort: Int,
         audioPort: Int,
+        videoFormatParameters: Map<String, String> = emptyMap(),
         extractorFactory: () -> LatmSampleExtractor,
         audioPlayerFactory: () -> RtpAudioPlayer,
     ) = AndroidCcapiRtpSession(
         description = CcapiRtpSessionDescription(
             rawSdp = "test",
-            video = RtpMediaDescription("video", videoPort, 103, "H264", 90_000),
+            video = RtpMediaDescription(
+                "video",
+                videoPort,
+                103,
+                "H264",
+                90_000,
+                formatParameters = videoFormatParameters,
+            ),
             audio = RtpMediaDescription("audio", audioPort, 106, "MP4A-LATM", 48_000, 2),
         ),
         destinationAddress = "127.0.0.1",
@@ -131,6 +221,29 @@ class AndroidCcapiRtpSessionTest {
         val bytes = byteArrayOf(
             0x80.toByte(),
             (0x80 or 106).toByte(),
+            (sequence ushr 8).toByte(),
+            sequence.toByte(),
+            (timestamp ushr 24).toByte(),
+            (timestamp ushr 16).toByte(),
+            (timestamp ushr 8).toByte(),
+            timestamp.toByte(),
+            0,
+            0,
+            0,
+            1,
+        ) + payload
+        return DatagramPacket(bytes, bytes.size, InetAddress.getLoopbackAddress(), port)
+    }
+
+    private fun videoPacket(
+        port: Int,
+        sequence: Int,
+        timestamp: Long,
+        payload: ByteArray,
+    ): DatagramPacket {
+        val bytes = byteArrayOf(
+            0x80.toByte(),
+            (0x80 or 103).toByte(),
             (sequence ushr 8).toByte(),
             sequence.toByte(),
             (timestamp ushr 24).toByte(),

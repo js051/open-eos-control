@@ -8,10 +8,12 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.Surface
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.BufferOverflow
@@ -19,12 +21,14 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 class AndroidCcapiRtpSessionFactory(
@@ -46,7 +50,7 @@ internal fun interface DatagramSocketBinder {
 
 internal class AndroidCcapiRtpSession(
     private val description: CcapiRtpSessionDescription,
-    destinationAddress: String,
+    private val destinationAddress: String,
     private val socketBinder: DatagramSocketBinder,
     private val latmExtractorFactory: () -> LatmSampleExtractor = ::Media3LatmSampleExtractor,
     private val audioPlayerFactory: () -> RtpAudioPlayer = ::AndroidRtpAudioPlayer,
@@ -56,6 +60,19 @@ internal class AndroidCcapiRtpSession(
     override val contentType: String = "video/H264"
     override val audioStatus: NativeLiveViewAudioStatus
         get() = audioStatusState.get()
+    override val videoStatus: NativeLiveViewVideoStatus
+        get() = NativeLiveViewVideoStatus(
+            rtpPort = description.video.port,
+            datagramsReceived = videoDatagramsReceived.get(),
+            accessUnitsReceived = videoAccessUnitsReceived.get(),
+            keyFramesReceived = videoKeyFramesReceived.get(),
+            lastDatagramAtMillis = videoLastDatagramAtMillis.get().takeIf { it > 0 },
+            lastAccessUnitAtMillis = videoLastAccessUnitAtMillis.get().takeIf { it > 0 },
+            hasSequenceParameterSet = latestSps != null,
+            hasPictureParameterSet = latestPps != null,
+            ready = videoReady.get(),
+            error = videoError.get(),
+        )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val accessUnits = Channel<H264AccessUnit>(
@@ -72,6 +89,14 @@ internal class AndroidCcapiRtpSession(
     private val renderingEnabled = AtomicBoolean(true)
     private val started = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
+    private val firstDecodableVideo = CompletableDeferred<Unit>()
+    private val videoDatagramsReceived = AtomicLong()
+    private val videoAccessUnitsReceived = AtomicLong()
+    private val videoKeyFramesReceived = AtomicLong()
+    private val videoLastDatagramAtMillis = AtomicLong()
+    private val videoLastAccessUnitAtMillis = AtomicLong()
+    private val videoReady = AtomicBoolean(false)
+    private val videoError = AtomicReference<String?>(null)
     private val audioEnabled = AtomicBoolean(false)
     private val surface = AtomicReference<Surface?>(null)
     private val decoderGuard = Any()
@@ -96,8 +121,11 @@ internal class AndroidCcapiRtpSession(
     private var decoderJob: Job? = null
     private var audioReceiverJob: Job? = null
     private var audioPlayerJob: Job? = null
-    private var latestSps: ByteArray? = null
-    private var latestPps: ByteArray? = null
+    private val sdpParameterSets = description.video.h264ParameterSets()
+    @Volatile
+    private var latestSps: ByteArray? = sdpParameterSets?.sequenceParameterSet
+    @Volatile
+    private var latestPps: ByteArray? = sdpParameterSets?.pictureParameterSet
 
     override fun start() {
         check(!closed.get()) { "RTP Live View session is closed." }
@@ -122,6 +150,17 @@ internal class AndroidCcapiRtpSession(
         videoSocket = datagramSocket
         receiverJob = scope.launch { receivePackets(datagramSocket) }
         startAudioReceiverIfSupported()
+    }
+
+    override suspend fun awaitReady(timeoutMillis: Long) {
+        require(timeoutMillis > 0) { "RTP readiness timeout must be positive." }
+        try {
+            withTimeout(timeoutMillis) { firstDecodableVideo.await() }
+        } catch (exception: TimeoutCancellationException) {
+            val message = readinessFailureMessage(timeoutMillis)
+            videoError.compareAndSet(null, message)
+            throw IllegalStateException(message, exception)
+        }
     }
 
     override fun attachSurface(surface: Surface) {
@@ -186,6 +225,9 @@ internal class AndroidCcapiRtpSession(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        firstDecodableVideo.completeExceptionally(
+            IllegalStateException("Canon RTP session closed before receiving a decodable H.264 key frame.")
+        )
         listener.set(null)
         audioEnabled.set(false)
         videoSocket?.close()
@@ -248,21 +290,47 @@ internal class AndroidCcapiRtpSession(
             try {
                 packet.length = buffer.size
                 datagramSocket.receive(packet)
+                val nowMillis = System.currentTimeMillis()
+                videoDatagramsReceived.incrementAndGet()
+                videoLastDatagramAtMillis.set(nowMillis)
                 depacketizer.accept(packet.data, packet.length)?.let { accessUnit ->
+                    videoAccessUnitsReceived.incrementAndGet()
+                    videoLastAccessUnitAtMillis.set(nowMillis)
+                    if (accessUnit.keyFrame) videoKeyFramesReceived.incrementAndGet()
                     accessUnit.sequenceParameterSet?.let { latestSps = it }
                     accessUnit.pictureParameterSet?.let { latestPps = it }
                     accessUnits.trySend(accessUnit)
+                    if (accessUnit.keyFrame && latestSps != null && latestPps != null) {
+                        videoReady.set(true)
+                        videoError.set(null)
+                        firstDecodableVideo.complete(Unit)
+                    }
                 }
             } catch (_: SocketTimeoutException) {
                 currentCoroutineContext().ensureActive()
             } catch (_: CancellationException) {
                 throw CancellationException()
             } catch (exception: Exception) {
-                if (!closed.get()) reportFailure("Canon RTP receive failed", exception)
+                if (!closed.get()) {
+                    val failure = IllegalStateException(
+                        "Canon RTP receive failed: ${exception.message ?: exception.javaClass.simpleName}",
+                        exception,
+                    )
+                    videoError.set(failure.message)
+                    firstDecodableVideo.completeExceptionally(failure)
+                    reportFailure("Canon RTP receive failed", exception)
+                }
                 return
             }
         }
     }
+
+    private fun readinessFailureMessage(timeoutMillis: Long): String =
+        "Canon RTP video did not receive a decodable H.264 key frame within ${timeoutMillis} ms " +
+            "(UDP datagrams=${videoDatagramsReceived.get()}, " +
+            "H.264 access units=${videoAccessUnitsReceived.get()}, " +
+            "key frames=${videoKeyFramesReceived.get()}, " +
+            "SPS=${latestSps != null}, PPS=${latestPps != null})."
 
     private suspend fun receiveAudioPackets(
         datagramSocket: DatagramSocket,
@@ -452,6 +520,7 @@ internal class AndroidCcapiRtpSession(
     }
 
     private fun reportFailure(prefix: String, exception: Exception) {
+        videoError.set("$prefix: ${exception.message ?: exception.javaClass.simpleName}")
         listener.get()?.invoke(
             NativeLiveViewEvent.Failed(
                 "$prefix: ${exception.message ?: exception.javaClass.simpleName}"

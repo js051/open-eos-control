@@ -44,7 +44,7 @@ open-eos-control/
 - PC 控制介面透過浮點 WebGL2 3D texture 與明確的三線性插值，對 Bridge 解碼影格與本機 UVC／HDMI 視訊輸入套用匯入的 3D `.cube` LUT，再執行同一套有界 120x80 分析。監看輔助視窗也提供直方圖／亮度波形圖、斑馬紋、偽色、峰值對焦、畫幅框線、安全區域與變形鏡頭反擠壓，不會改動相機命令或偽造拍攝結果。本機視訊只替換取景畫面，Bridge session 仍持續控制相機；裝置 ID／名稱及 LUT 檔名／標題只留在記憶體且不會寫入診斷。相機媒體下載會顯示位元組進度並可取消；一般檔案使用串流式瀏覽器下載 fallback，未知大小或至少 64 MiB 的檔案則在瀏覽器支援時直接寫入具暫存保護的目的檔。
 
 LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast 資料列、`DOMAIN_MIN`／`DOMAIN_MAX` 或 `LUT_3D_INPUT_RANGE`、有限數值與三線性顯示插值。混合 1D／shaper LUT 或超過 16 MiB 的檔案會回報明確錯誤；專案不重新散布 Canon 或第三方 LUT。
-- Android、iOS 與 PC 上依能力開放的 Canon CCAPI Live View，AUTO 依序嘗試 RTP H.264、持續 multipart JPEG、JPEG 輪詢，並限制 1-30 FPS 顯示／輸出幀率。Multipart 必須在同一 API 版本完整公告一般 Live View 啟停與 `GET`／`DELETE /shooting/liveview/multipart`，背景會持續排空資料但只保留最新一張有界完整 JPEG；只有 AUTO 會在啟動失敗時降級。RTP 使用可達路由的 UDP、RFC 3550／RFC 6184、手機原生顯示或 PC PyAV 解碼；各來源只會在完整能力條件成立時顯示
+- Android、iOS 與 PC 上依能力開放的 Canon CCAPI Live View，AUTO 依序嘗試 RTP H.264、持續 multipart JPEG、JPEG 輪詢，並限制 1-30 FPS 顯示／輸出幀率。Multipart 必須在同一 API 版本完整公告一般 Live View 啟停與 `GET`／`DELETE /shooting/liveview/multipart`，背景會持續排空資料但只保留最新一張有界完整 JPEG；只有 AUTO 會在啟動失敗時降級。RTP 使用可達路由的 UDP、RFC 3550／RFC 6184、手機原生顯示或 PC PyAV 解碼；Android 另要求五秒內收到具 SPS/PPS 的可解碼關鍵畫面，失敗會先完整清理再讓 AUTO 降級，診斷則保留封包、access unit、keyframe 與 ready 證據。各來源只會在完整能力條件成立時顯示
 - Android、iOS 與 PC 依能力提供 Photo 模式 Live View 動態放大。直接 CCAPI 必須在同一 API 版本公告 `GET`／`PUT /shooting/settings/lvzoom`，只接受 Canon 文件的字串 `1`／`5`／`10` ability，以字串寫入並在每次 PUT 後 GET 回讀確認；Android USB/PTP 與 libgphoto2 仍只保留各自已有依據的 1x／5x，不會自行宣稱 10x
 - ISO、shutter、aperture、white balance 與動態 advanced settings，包含相機公告的 Canon CCAPI RAW／JPEG／HEIF 畫質、有界 B/A／M/G 白平衡偏移，以及相機同版本同時公告 GET／POST 時才出現的官方 0-100 變焦控制。變焦使用整數 POST；普通 EOS／鏡頭組合未提供此端點時會完全隱藏
 - Android、iOS 與 PC 依能力提供 Canon CCAPI 雙卡選擇。Photo 與 Video 分別顯示相片／影片記錄卡；只有相機在同一 API 版本公告成對 GET／PUT，且回傳 `none`、`card1`、`card2` 的有效選項時才出現，寫入保留精確協定值，畸形或只有單一選項的回應不會形成可操作控制
@@ -242,7 +242,7 @@ Android 必跑的裝置流程會使用僅供測試的 reset／state／mode endpo
 
 ## Roadmap
 
-- 保持 R6 Mark III 的 CCAPI 無線控制穩定，並驗證機身公告的 API 是否包含已實作的 Android／iOS／PC RTP H.264 與 AAC-LATM 路徑；若未公告就維持 JPEG 輪詢。
+- 以 Android 新增的第一畫面時限及封包／access unit／keyframe 診斷，重新驗證 R6 Mark III 現已公告的 RTP H.264 路徑；RTP 未 ready 時沿用另一個完整公告的 Live View 來源。
 - 在 R6 Mark III 真機驗證已實作的 Android USB/PTP 標準路徑、Canon EOS 相機時鐘同步、主機 RAM JPEG／RAW 傳輸與記憶卡拍攝，以及遠端快門、曝光、色彩、包圍曝光、錄影、進階設定、焦點移動與 Live View；後續只加入有可靠依據的其他專有設定或 Touch AF 命令。
 - 在 R6 Mark III 完成已實作 PC CCAPI、Android-to-Desktop-Bridge、持續 gphoto2 USB 預覽與 USB PC 控制介面的真機驗證，並保留 Canon EDSDK 作為使用者自行安裝的 optional adapter。
 - 以實體 iPhone 與 R6 Mark III 驗證已實作的 iOS SwiftUI CCAPI App、相機有公告時的 RTP，以及 Wi-Fi／行動網路共存；iOS USB/PTP 先列為研究線。

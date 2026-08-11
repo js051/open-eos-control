@@ -1,7 +1,7 @@
 # EOS R6 Mark III Android CCAPI Validation
 
 - Initial validation date: 2026-07-22
-- Latest diagnostic date: 2026-08-03
+- Latest diagnostic date: 2026-08-10
 
 This record captures physical-camera evidence reported from the Android app. Identifiers are intentionally redacted. It proves only the rows marked **Passed**; deterministic tests remain separate evidence and untested controls remain capability-gated.
 
@@ -23,7 +23,7 @@ This record captures physical-camera evidence reported from the Android app. Ide
 | Exposure capability discovery | Passed | ISO, Tv, Av, WB and advanced settings were advertised by the camera |
 | JPEG Live View | Passed | Requested 15 FPS, rolling observed 15.1 FPS, JPEG content type, 66,086-byte recorded frame |
 | Multipart JPEG Live View | Pending / not captured | A current build requires same-version regular Live View POST/DELETE plus multipart GET/DELETE advertisements. It marks the source observed only after parsing a complete bounded JPEG frame. R6 Mark III firmware 1.1.0 must be checked through fresh developer-list discovery rather than inferred from another EOS model. |
-| RTP H.264 Live View | Pending / not advertised in captured report | The recorded `supported` set contains JPEG polling but no RTP. A current build will expose RTP only if fresh discovery includes `GET rtpsessiondesc` and `POST rtp`; absence of those commands is a camera capability result, not a decoder failure. |
+| RTP H.264 Live View | Pending / advertised but no frame in 0.1.10 | The 2026-08-10 report advertises `GET rtpsessiondesc` and `POST rtp`, but Android 0.1.10 recorded zero FPS and no frame. The corrected client now requires a bounded first decodable key frame before accepting startup, uses bounded SDP `sprop-parameter-sets`, cleans up before AUTO fallback, and reports UDP/access-unit/keyframe evidence. A new physical pass is required. |
 | Live View size compatibility fallback | Passed | Initial POST with `liveviewsize` returned HTTP 400 `Invalid parameter`; retrying the camera-display-only payload restored Live View |
 | CCAPI event polling and body-dial synchronization | Pending | Current clients require advertised GET and DELETE `/event/polling`, use Canon's version-specific long mode, and refresh authoritative state after a change. The recorded report predates this implementation and does not prove the R6 Mark III endpoint or behavior. |
 | Still capture and half-press | Pending | The client did not expose these capabilities in either report. Current clients parse Canon's full same-origin discovery entries and query `topurlfordev` after either the exact marker or a zero-command root, but this camera still needs a fresh capability report and command result |
@@ -84,10 +84,40 @@ The report does not retain the raw `/ccapi` body, so it cannot prove which speci
 
 The network-coexistence route is now **Passed by diagnostics**. A public HTTPS request in another app while camera control remains active is still useful end-user confirmation, but this failure was discovery-related rather than caused by Android selecting cellular for camera traffic.
 
+## 2026-08-10 RTP Follow-Up
+
+Android 0.1.10 successfully recovered the full developer operation list and the R6 Mark III advertised Canon RTP. However, the selected RTP source never produced a frame and the old Android receiver had no first-video timeout, so the session remained silent instead of failing or allowing AUTO to continue to another complete source.
+
+```text
+productVersion=0.1.10
+camera=Canon EOS R6 Mark III
+transport=CCAPI_NETWORK
+cameraRoute=WIFI_BOUND
+cameraInterface=wlan0
+cameraNetworkAvailable=true
+systemDefaultTransport=CELLULAR
+systemDefaultValidated=true
+wifiCellularCoexistence=true
+capabilitySource=GET /ccapi/ver100/topurlfordev (Canon developer API fallback)
+protocolVersions=ver140, ver120, ver110, ver100
+advertisedCommandCount=246
+supported=... LIVE_VIEW, LIVE_VIEW_RTP ...
+liveViewSource=CCAPI_RTP
+observedFps=0.0
+frameBytes=unknown
+contentType=unknown
+source=unknown
+lastFrameAtMillis=unknown
+liveViewHealthy=false
+lastError=none
+```
+
+This record proves advertisement and the silent-start defect; it does not prove whether the camera sent no UDP, Android rejected the packets, or decoding lacked parameter sets. The corrected diagnostic adds RTP video port, datagram, access-unit, keyframe, SPS/PPS, readiness, timestamp and error fields so the next physical run can distinguish those cases without retaining identifiers.
+
 ## Next Physical Pass
 
-1. Install a development build produced after the zero-command developer-list fallback; the numeric app version remains `0.1.8` until the next release. Keep cellular data enabled while connected to the camera Wi-Fi, press Debug Refresh, and confirm `cameraRoute=WIFI_BOUND`, `cameraNetworkAvailable=true`, `systemDefaultTransport=CELLULAR`, `systemDefaultValidated=true`, and `wifiCellularCoexistence=true`. Open a public HTTPS page in another app without disconnecting the camera and record the result.
+1. Install a development build containing the Android RTP readiness fix. Keep cellular data enabled while connected to the camera Wi-Fi, press Debug Refresh, and confirm `cameraRoute=WIFI_BOUND`, `cameraNetworkAvailable=true`, `systemDefaultTransport=CELLULAR`, `systemDefaultValidated=true`, and `wifiCellularCoexistence=true`. Open a public HTTPS page in another app without disconnecting the camera and record the result.
 2. Install a current build and confirm discovery contains both `GET` and `DELETE .../event/polling`. Change ISO, Tv, Av, WB and shooting mode from the camera body without pressing App Refresh; each displayed value must converge to the camera state after one event. Start/stop recording on the body when allowed, remove/reinsert a card, disconnect, reconnect, and confirm no stale poll updates the new session. Require `EVENT_POLLING` in both `supported` and `observedFeatures` before marking this row passed.
 3. Confirm `capabilitySource=GET /ccapi/ver100/topurlfordev (Canon developer API fallback)`, `advertisedCommandCount` is greater than zero, and the expected commands appear explicitly. Exercise each available still, half-press, movie, Tap AF, Click White Balance, storage, browse and download control, and only then copy a fresh diagnostic report. Retain `reportSchema`, `generatedAt`, `productVersion`, `capabilitySource`, `protocolVersions`, `advertisedCommandCount`, `advertisedCommands`, `writableSettings`, `observedFeatures`, `unverifiedAdvertisedFeatures`, and `capabilityEvidenceTruncated`. The report redacts the physical camera serial automatically. Treat `supported` as advertisement evidence and require the matching `observedFeatures` entry before marking a physical control as passed.
-4. Check each API version independently for regular Live View POST/DELETE, multipart GET/DELETE, and RTP session-description/control pairs. When multipart is fully advertised in one version, run AUTO and explicit multipart at 6/15/30 FPS, verify `LIVE_VIEW_MULTIPART` is supported before start but appears in `observedFeatures` only after a complete frame, then confirm stop closes the local reader, deletes multipart with HTTP 200, and deletes regular Live View. Test RTP similarly when its pair is advertised. Record the effective `liveViewSource`, requested/observed FPS, content type, source path and any fallback error; absent pairs are unsupported for that camera/firmware rather than guessed from model name.
+4. Check each API version independently for regular Live View POST/DELETE, multipart GET/DELETE, and RTP session-description/control pairs. When multipart is fully advertised in one version, run AUTO and explicit multipart at 6/15/30 FPS, verify `LIVE_VIEW_MULTIPART` is supported before start but appears in `observedFeatures` only after a complete frame, then confirm stop closes the local reader, deletes multipart with HTTP 200, and deletes regular Live View. Test RTP similarly when its pair is advertised. Retain `rtpVideoPort`, datagram/access-unit/keyframe counts, SPS/PPS, ready state, timestamps and error. Record the effective `liveViewSource`, requested/observed FPS, content type, source path and any fallback error; absent pairs are unsupported for that camera/firmware rather than guessed from model name.
 5. Connect over USB-C/OTG and complete the checklist in [Android USB/PTP](../android-usb-ptp.md).

@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraDiscoveryAttempt
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraTransport
+import dev.openeos.control.data.NativeLiveViewVideoStatus
 import java.net.URI
 import java.security.MessageDigest
 import java.time.Instant
@@ -225,12 +226,26 @@ fun buildDiagnosticReport(
         appendLine(
             "monitorLut=${state.monitorSettings.cubeLut?.let { "loaded (${it.size}x${it.size}x${it.size})" } ?: "off"}"
         )
+        val nativeLiveView = state.nativeLiveViewSession
         appendLine("observedFps=${String.format(Locale.US, "%.1f", live.observedFps)}")
         appendLine("frameBytes=${live.frameBytes ?: "unknown"}")
-        appendLine("contentType=${live.contentType ?: "unknown"}")
-        appendLine("source=${live.sourceUrl?.let { redactDiagnosticText(it, state) } ?: "unknown"}")
+        appendLine("contentType=${live.contentType ?: nativeLiveView?.contentType ?: "unknown"}")
+        appendLine(
+            "source=${(live.sourceUrl ?: nativeLiveView?.sourceUrl)?.let { redactDiagnosticText(it, state) } ?: "unknown"}"
+        )
         appendLine("lastFrameAtMillis=${live.lastFrameAtMillis ?: "unknown"}")
         appendLine("liveViewHealthy=${live.lastFrameAtMillis != null}")
+        val video = nativeLiveView?.videoStatus ?: NativeLiveViewVideoStatus.None
+        appendLine("rtpVideoPort=${video.rtpPort ?: "none"}")
+        appendLine("rtpVideoDatagrams=${video.datagramsReceived}")
+        appendLine("rtpVideoAccessUnits=${video.accessUnitsReceived}")
+        appendLine("rtpVideoKeyFrames=${video.keyFramesReceived}")
+        appendLine("rtpVideoLastDatagramAtMillis=${video.lastDatagramAtMillis ?: "none"}")
+        appendLine("rtpVideoLastAccessUnitAtMillis=${video.lastAccessUnitAtMillis ?: "none"}")
+        appendLine("rtpVideoHasSps=${video.hasSequenceParameterSet}")
+        appendLine("rtpVideoHasPps=${video.hasPictureParameterSet}")
+        appendLine("rtpVideoReady=${video.ready}")
+        appendLine("rtpVideoError=${video.error ?: "none"}")
         val audio = state.liveViewAudioStatus
         appendLine("rtpAudioAdvertised=${audio.advertised}")
         appendLine("rtpAudioAvailable=${audio.available}")
