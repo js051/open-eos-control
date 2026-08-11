@@ -3156,12 +3156,15 @@ def test_ccapi_media_descending_order_fallback_is_remembered_across_containers()
     routes = {
         f"{root}?kind=number": _json_response({"pagenumber": 0}),
         root: _json_response({"path": [photo_container, video_container]}),
-        f"{photo_container}?kind=number": _json_response({"pagenumber": 1}),
+        f"{photo_container}?kind=number": _json_response({"pagenumber": 2}),
         f"{photo_container}?page=1&order=desc": _json_response(
             {"message": "Illegal query parameter"}, status=400
         ),
         f"{photo_container}?page=1": _json_response(
             {"path": [f"{photo_container}/IMG_0001.JPG", f"{photo_container}/IMG_0002.JPG"]}
+        ),
+        f"{photo_container}?page=2": _json_response(
+            {"path": [f"{photo_container}/IMG_0003.JPG", f"{photo_container}/IMG_0004.JPG"]}
         ),
         f"{video_container}?kind=number": _json_response({"pagenumber": 1}),
         f"{video_container}?page=1": _json_response(
@@ -3174,15 +3177,18 @@ def test_ccapi_media_descending_order_fallback_is_remembered_across_containers()
     items = session.list_media()
 
     assert [item.name for item in items] == [
-        "IMG_0002.JPG",
+        "IMG_0004.JPG",
         "VIDEO_0002.MP4",
-        "IMG_0001.JPG",
+        "IMG_0003.JPG",
         "VIDEO_0001.MP4",
+        "IMG_0002.JPG",
+        "IMG_0001.JPG",
     ]
     media_requests = [request.path for request in transport.requests if request.path.startswith(root)]
     assert media_requests.count(f"{photo_container}?page=1&order=desc") == 1
     assert f"{video_container}?page=1&order=desc" not in media_requests
     assert media_requests.count(f"{photo_container}?page=1") == 1
+    assert media_requests.count(f"{photo_container}?page=2") == 1
     assert media_requests.count(f"{video_container}?page=1") == 1
 
 
