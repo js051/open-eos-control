@@ -3885,6 +3885,31 @@ class CcapiClientTest {
         assertArrayEquals(jpeg, frame.bytes)
     }
 
+    @Test
+    fun liveViewFrameRetriesTransientCanonDeviceBusy() = runTest {
+        client.forceRealCamera()
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x07, 0x08, 0xFF.toByte(), 0xD9.toByte())
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(503)
+                .setHeader("content-type", "application/json")
+                .setBody("""{"message":"Device busy"}"""),
+        )
+        server.enqueue(binaryResponse(jpeg, "image/jpeg"))
+
+        val frame = client.liveViewFrame(cacheKey = 10)
+        val requests = List(2) { server.takeRequest() }
+
+        assertArrayEquals(jpeg, frame.bytes)
+        assertEquals(
+            listOf(
+                "/ccapi/ver100/shooting/liveview/flip?t=10",
+                "/ccapi/ver100/shooting/liveview/flip?t=10",
+            ),
+            requests.map { it.path },
+        )
+    }
+
     private fun jsonResponse(body: String): MockResponse =
         MockResponse()
             .setHeader("content-type", "application/json")

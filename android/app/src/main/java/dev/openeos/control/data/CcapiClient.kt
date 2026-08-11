@@ -44,6 +44,7 @@ private const val MAX_DEVICE_STATUS_TEXT_CHARS = 512
 private const val CCAPI_EVENT_READ_TIMEOUT_SECONDS = 40L
 private const val CCAPI_EVENT_CALL_TIMEOUT_SECONDS = 45L
 private val MULTIPART_START_RETRY_DELAYS_MILLIS = longArrayOf(100L, 200L, 400L, 800L)
+private val JPEG_FRAME_BUSY_RETRY_DELAYS_MILLIS = longArrayOf(50L, 100L)
 private const val CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 private const val CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
 private val CANON_DATETIME_FORMATTER = DateTimeFormatter.ofPattern(
@@ -1896,24 +1897,42 @@ class CcapiClient(
             }
         }
         val errors = mutableListOf<String>()
+        val sourceUrls = liveViewFrameUrls(cacheKey, request)
+        for (attempt in 0..JPEG_FRAME_BUSY_RETRY_DELAYS_MILLIS.size) {
+            var transientBusy = false
+            for (sourceUrl in sourceUrls) {
+                val frameRequest = Request.Builder()
+                    .url(sourceUrl)
+                    .get()
+                    .header("Accept", "multipart/x-mixed-replace,image/jpeg,image/*,*/*")
+                    .header("Cache-Control", "no-cache")
+                    .header("Pragma", "no-cache")
+                    .header("Connection", "close")
+                    .build()
 
-        liveViewFrameUrls(cacheKey, request).forEach { sourceUrl ->
-            val request = Request.Builder()
-                .url(sourceUrl)
-                .get()
-                .header("Accept", "multipart/x-mixed-replace,image/jpeg,image/*,*/*")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Connection", "close")
-                .build()
-
-            try {
-                return requestLiveViewFrame(request, sourceUrl).also {
-                    observedFeatures.add(CameraFeature.LIVE_VIEW)
-                    observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+                try {
+                    return requestLiveViewFrame(frameRequest, sourceUrl).also {
+                        observedFeatures.add(CameraFeature.LIVE_VIEW)
+                        observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+                    }
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    errors.add("$sourceUrl\n${exception.javaClass.simpleName}: ${exception.message ?: "Unknown error"}")
+                    if (
+                        exception is CcapiHttpException &&
+                        exception.statusCode == 503 &&
+                        exception.message.orEmpty().contains("Device busy", ignoreCase = true)
+                    ) {
+                        transientBusy = true
+                        break
+                    }
                 }
-            } catch (exception: Exception) {
-                errors.add("$sourceUrl\n${exception.javaClass.simpleName}: ${exception.message ?: "Unknown error"}")
+            }
+            if (transientBusy && attempt < JPEG_FRAME_BUSY_RETRY_DELAYS_MILLIS.size) {
+                delay(JPEG_FRAME_BUSY_RETRY_DELAYS_MILLIS[attempt])
+            } else {
+                break
             }
         }
 
@@ -3552,10 +3571,11 @@ class CcapiClient(
 
                 if (!response.isSuccessful) {
                     val preview = body.string().trim().take(MAX_ERROR_BODY_CHARS)
-                    error(
-                        "Live view frame failed: ${request.method} ${request.url} returned HTTP ${response.code}\n" +
+                    throw CcapiHttpException(
+                        statusCode = response.code,
+                        message = "Live view frame failed: ${request.method} ${request.url} returned HTTP ${response.code}\n" +
                             "Content-Type: ${contentType ?: "unknown"}\n" +
-                            "Body: $preview"
+                            "Body: $preview",
                     )
                 }
 

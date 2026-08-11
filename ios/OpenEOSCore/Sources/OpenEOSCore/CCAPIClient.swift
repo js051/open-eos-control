@@ -85,6 +85,7 @@ public actor CCAPIClient {
         400_000_000,
         800_000_000,
     ]
+    private static let jpegFrameBusyRetryNanoseconds: [UInt64] = [50_000_000, 100_000_000]
     private static let imageQualitySettingKey = "stillimagequality"
     private static let imageQualityFields = ["raw", "jpeg", "heif"]
     private static let wbShiftSettingKey = "wbshift"
@@ -1643,47 +1644,59 @@ public actor CCAPIClient {
 
         var failures: [String] = []
         var liveViewSizeRejected = false
-        for path in paths {
-            try Task.checkCancellation()
-            let sourceURL = try URLForPath(path, cacheKey: cacheKey)
-            var request = request(url: sourceURL, method: .get)
-            request.setValue("multipart/x-mixed-replace,image/jpeg,image/*,*/*", forHTTPHeaderField: "Accept")
-            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-            request.setValue("no-cache", forHTTPHeaderField: "Pragma")
-            request.setValue("close", forHTTPHeaderField: "Connection")
-            do {
-                let isDetailedFrame = path.contains("/shooting/liveview/flipdetail") && path.contains("kind=both")
-                if isDetailedFrame {
-                    latestLiveViewGeometry = nil
-                }
-                let response = try await transport.send(request)
-                try validate(response, request: request)
-                let contentType = response.header("content-type")
-                if Self.isTextContentType(contentType) {
-                    throw CCAPIError.invalidResponse("Live View returned \(contentType ?? "text") instead of image bytes.")
-                }
-                let frame: Data
-                if isDetailedFrame {
-                    let detailed = try Self.parseDetailedLiveView(response.body)
-                    if let geometry = detailed.geometry {
-                        latestLiveViewGeometry = geometry
+        for attempt in 0...Self.jpegFrameBusyRetryNanoseconds.count {
+            var transientBusy = false
+            for path in paths {
+                try Task.checkCancellation()
+                let sourceURL = try URLForPath(path, cacheKey: cacheKey)
+                var request = request(url: sourceURL, method: .get)
+                request.setValue("multipart/x-mixed-replace,image/jpeg,image/*,*/*", forHTTPHeaderField: "Accept")
+                request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+                request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+                request.setValue("close", forHTTPHeaderField: "Connection")
+                do {
+                    let isDetailedFrame = path.contains("/shooting/liveview/flipdetail") && path.contains("kind=both")
+                    if isDetailedFrame {
+                        latestLiveViewGeometry = nil
                     }
-                    guard let image = detailed.image else {
-                        throw CCAPIError.invalidResponse(
-                            "Detailed Live View response did not contain an image packet."
-                        )
+                    let response = try await transport.send(request)
+                    try validate(response, request: request)
+                    let contentType = response.header("content-type")
+                    if Self.isTextContentType(contentType) {
+                        throw CCAPIError.invalidResponse("Live View returned \(contentType ?? "text") instead of image bytes.")
                     }
-                    frame = image
-                } else {
-                    frame = try JPEGFrameParser.validatedImageData(response.body, contentType: contentType)
+                    let frame: Data
+                    if isDetailedFrame {
+                        let detailed = try Self.parseDetailedLiveView(response.body)
+                        if let geometry = detailed.geometry {
+                            latestLiveViewGeometry = geometry
+                        }
+                        guard let image = detailed.image else {
+                            throw CCAPIError.invalidResponse(
+                                "Detailed Live View response did not contain an image packet."
+                            )
+                        }
+                        frame = image
+                    } else {
+                        frame = try JPEGFrameParser.validatedImageData(response.body, contentType: contentType)
+                    }
+                    observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
+                    return LiveViewFrame(data: frame, contentType: contentType, sourceURL: sourceURL)
+                } catch {
+                    if error is CancellationError { throw error }
+                    liveViewSizeRejected = liveViewSizeRejected || shouldDowngradeLiveViewSize(for: error)
+                    failures.append("\(sourceURL.absoluteString): \(error.localizedDescription)")
+                    if shouldRetryBusyLiveViewFrame(error) {
+                        transientBusy = true
+                        break
+                    }
                 }
-                observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
-                return LiveViewFrame(data: frame, contentType: contentType, sourceURL: sourceURL)
-            } catch {
-                if error is CancellationError { throw error }
-                liveViewSizeRejected = liveViewSizeRejected || shouldDowngradeLiveViewSize(for: error)
-                failures.append("\(sourceURL.absoluteString): \(error.localizedDescription)")
             }
+            if transientBusy, attempt < Self.jpegFrameBusyRetryNanoseconds.count {
+                try await Task.sleep(nanoseconds: Self.jpegFrameBusyRetryNanoseconds[attempt])
+                continue
+            }
+            break
         }
         if liveViewSizeRejected {
             return try await retryJPEGLiveViewAtSmallSize(cacheKey: cacheKey)
@@ -2717,6 +2730,12 @@ public actor CCAPIClient {
               case let CCAPIError.http(statusCode, _, _, body) = error,
               statusCode == 503 else { return false }
         return body.range(of: "mode not supported", options: .caseInsensitive) != nil
+    }
+
+    private func shouldRetryBusyLiveViewFrame(_ error: Error) -> Bool {
+        guard case let CCAPIError.http(statusCode, _, _, body) = error,
+              statusCode == 503 else { return false }
+        return body.range(of: "device busy", options: .caseInsensitive) != nil
     }
 
     private func retryJPEGLiveViewAtSmallSize(cacheKey: Int64) async throws -> LiveViewFrame {

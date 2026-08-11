@@ -170,6 +170,7 @@ class FakeCcapiTransport:
         multipart_frame: bytes = JPEG,
         multipart_close_status: int = 200,
         multipart_start_statuses: list[int] | None = None,
+        jpeg_frame_statuses: list[int] | None = None,
     ) -> None:
         self.discovery = discovery or DISCOVERY
         self.developer_discovery = developer_discovery
@@ -272,6 +273,7 @@ class FakeCcapiTransport:
         self.multipart_frame = multipart_frame
         self.multipart_close_status = multipart_close_status
         self.multipart_start_statuses = list(multipart_start_statuses or [])
+        self.jpeg_frame_statuses = list(jpeg_frame_statuses or [])
         self.camera_clock = {"datetime": "Tue, 01 Jan 2019 01:23:45 +0000", "dst": False}
         self.media_metadata: dict[str, object] = {
             "filesize": len(MEDIA),
@@ -578,6 +580,15 @@ class FakeCcapiTransport:
             if self.reject_rtp_start and payload == {"action": "start", "ipaddress": "192.168.1.20"}:
                 return _json_response({"message": "RTP unavailable"}, status=503)
             return CcapiResponse(204, {}, b"")
+        if (
+            method == "GET"
+            and "/shooting/liveview/" in path
+            and ("/flip?" in path or "/flipdetail?" in path)
+            and self.jpeg_frame_statuses
+        ):
+            status = self.jpeg_frame_statuses.pop(0)
+            if status != 200:
+                return _json_response({"message": "Device busy"}, status=status)
         if method == "GET" and path.startswith("/ccapi/ver100/shooting/liveview/flip?"):
             if self.live_view_size in self.live_view_mode_unsupported_sizes:
                 return _json_response({"message": "Mode not supported"}, status=503)
@@ -3043,6 +3054,21 @@ def test_ccapi_detailed_live_view_uses_only_the_canon_kind_query() -> None:
         if request.method == "GET" and "/shooting/liveview/flipdetail" in request.path
     ]
     assert detail_paths == ["/ccapi/ver100/shooting/liveview/flipdetail?kind=both"]
+    session.stop_live_view()
+
+
+def test_ccapi_jpeg_frame_retries_transient_device_busy() -> None:
+    delays: list[float] = []
+    transport = FakeCcapiTransport(reject_live_view_size=False)
+    session = CcapiEngine(
+        lambda _username, _password: transport,
+        sleeper=delays.append,
+    ).open_connection("http://192.168.1.2:8080")
+    session.start_live_view(LiveViewStartRequest(size="MEDIUM", source="CCAPI_JPEG_POLLING"))
+    transport.jpeg_frame_statuses.extend([503, 503])
+
+    assert session.live_view_frame() == JPEG
+    assert delays == [0.05, 0.1]
     session.stop_live_view()
 
 
