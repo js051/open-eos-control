@@ -186,6 +186,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func currentLiveViewSize() async -> LiveViewSize? {
+        switch self {
+        case let .ccapi(client): return await client.currentLiveViewSize()
+        case .desktopBridge: return nil
+        }
+    }
+
     func currentNativeLiveViewSourceURL() async -> URL? {
         switch self {
         case let .ccapi(client): return await client.currentNativeLiveViewSourceURL()

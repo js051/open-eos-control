@@ -470,6 +470,10 @@ final class CameraAppState: ObservableObject {
                 LiveViewRequest(fps: requestedFPS, size: liveViewSize, source: effectiveRequestedLiveViewSource())
             )
             activeLiveViewSource = await session.currentLiveViewSource()
+            if let activeSize = await session.currentLiveViewSize() {
+                liveViewSize = activeSize
+                defaults.set(activeSize.rawValue, forKey: DefaultsKey.liveViewSize)
+            }
             lastError = nil
             if activeLiveViewSource == .ccapiRTP {
                 resetLiveViewMetrics()
