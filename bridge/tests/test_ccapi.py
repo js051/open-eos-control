@@ -141,6 +141,7 @@ class FakeCcapiTransport:
         reject_autofocus_start: bool = False,
         reject_bulb_press: bool = False,
         reject_event_stop: bool = False,
+        event_stop_not_started: bool = False,
         reject_rtp_start: bool = False,
         camera_sleep_status: int = 202,
         sensor_cleaning_status: int = 200,
@@ -175,6 +176,7 @@ class FakeCcapiTransport:
         self.reject_autofocus_start = reject_autofocus_start
         self.reject_bulb_press = reject_bulb_press
         self.reject_event_stop = reject_event_stop
+        self.event_stop_not_started = event_stop_not_started
         self.reject_rtp_start = reject_rtp_start
         self.camera_sleep_status = camera_sleep_status
         self.sensor_cleaning_status = sensor_cleaning_status
@@ -301,7 +303,9 @@ class FakeCcapiTransport:
             return _json_response({"shootingsettings": {"iso": {"value": "1600"}}})
         if method == "DELETE" and path == "/ccapi/ver110/event/polling":
             if self.reject_event_stop:
-                return _json_response({"message": "event polling is still busy"}, status=503)
+                return _json_response({"message": "Event not started because it is still busy"}, status=503)
+            if self.event_stop_not_started:
+                return _json_response({"message": "Not started"}, status=503)
             return CcapiResponse(204, {}, b"")
         if method == "GET" and path == "/ccapi/ver100/deviceinformation":
             return _json_response(
@@ -2204,6 +2208,21 @@ def test_ccapi_event_polling_uses_advertised_lifecycle_without_control_lock() ->
         "/ccapi/ver110/event/polling?timeout=long",
         None,
     ) in transport.requests
+    assert RecordedRequest(
+        "DELETE",
+        "/ccapi/ver110/event/polling",
+        None,
+    ) in transport.requests
+
+
+def test_ccapi_event_polling_stop_is_idempotent_when_canon_reports_not_started() -> None:
+    transport = FakeCcapiTransport(discovery=EVENT_DISCOVERY, event_stop_not_started=True)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080/"
+    )
+
+    session.stop_event_polling()
+
     assert RecordedRequest(
         "DELETE",
         "/ccapi/ver110/event/polling",

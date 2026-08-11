@@ -655,6 +655,13 @@ class _CcapiHTTPError(BridgeError):
             engine=ENGINE_NAME,
         )
         self.camera_status = response.status
+        self.camera_message: str | None = None
+        try:
+            value = json.loads(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            value = None
+        if isinstance(value, dict) and isinstance(value.get("message"), str):
+            self.camera_message = value["message"].strip()
 
 
 class CcapiEngine:
@@ -1307,7 +1314,12 @@ class CcapiSession:
         if operations is None or self._closed:
             return
         _, stop = operations
-        self._request_ok("DELETE", stop.path, timeout=5.0)
+        try:
+            self._request_ok("DELETE", stop.path, timeout=5.0)
+        except _CcapiHTTPError as error:
+            if error.camera_status == 503 and error.camera_message == "Not started":
+                return
+            raise
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
