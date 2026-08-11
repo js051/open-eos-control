@@ -87,7 +87,6 @@ private struct CameraActionsView: View {
 
                 Section {
                     Button(role: .destructive) {
-                        dismiss()
                         Task { await camera.disconnect() }
                     } label: {
                         Label("disconnect", systemImage: "xmark.circle")
