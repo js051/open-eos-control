@@ -39,6 +39,40 @@ class CcapiRtpTest {
     }
 
     @Test
+    fun decodesBoundedH264ParameterSetsFromSdp() {
+        val sps = byteArrayOf(0x67, 0x42, 0x00, 0x1F)
+        val pps = byteArrayOf(0x68, 0x01, 0x02)
+        val description = CcapiRtpSessionDescriptionParser.parse(
+            CANON_SDP + "a=fmtp:103 packetization-mode=1; sprop-parameter-sets=" +
+                "${Base64.getEncoder().encodeToString(sps)},${Base64.getEncoder().encodeToString(pps)}\n"
+        )
+
+        val parameterSets = description.video.h264ParameterSets()
+
+        assertNotNull(parameterSets)
+        assertArrayEquals(byteArrayOf(0, 0, 0, 1) + sps, parameterSets?.sequenceParameterSet)
+        assertArrayEquals(byteArrayOf(0, 0, 0, 1) + pps, parameterSets?.pictureParameterSet)
+    }
+
+    @Test
+    fun rejectsIncompleteOrMalformedSdpParameterSets() {
+        val missingPps = RtpMediaDescription(
+            "video",
+            12000,
+            103,
+            "H264",
+            90_000,
+            formatParameters = mapOf("sprop-parameter-sets" to "Z0I="),
+        )
+        val malformed = missingPps.copy(
+            formatParameters = mapOf("sprop-parameter-sets" to "not-base64,aAE="),
+        )
+
+        assertNull(missingPps.h264ParameterSets())
+        assertNull(malformed.h264ParameterSets())
+    }
+
+    @Test
     fun rejectsUnsupportedLatmClockRateAndCpresentValue() {
         val wrongClock = RtpMediaDescription("audio", 12010, 106, "MP4A-LATM", 44_100)
         val invalidCpresent = RtpMediaDescription(

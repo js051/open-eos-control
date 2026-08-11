@@ -590,7 +590,9 @@ class CameraViewModel(
                 liveViewBitmap = null,
                 liveViewFrameUrl = null,
                 liveViewMagnification = null,
-                liveViewDiagnostics = LiveViewDiagnostics(),
+                liveViewDiagnostics = nativeSession?.let { session ->
+                    LiveViewDiagnostics(contentType = session.contentType, sourceUrl = session.sourceUrl)
+                } ?: LiveViewDiagnostics(),
                 liveViewAudioStatus = nativeSession?.audioStatus
                     ?: NativeLiveViewAudioStatus.None,
             )
@@ -1946,6 +1948,7 @@ class CameraViewModel(
         const val MAX_MEDIA_UPLOAD_BYTES = MAX_PTP_OBJECT_BYTES
         val EVENT_RETRY_DELAYS_MILLIS = longArrayOf(1_000L, 2_000L, 5_000L)
         val CAPABILITY_EVIDENCE_OPERATIONS = setOf(
+            CameraOperation.CONNECT,
             CameraOperation.SETTING,
             CameraOperation.CLOCK,
             CameraOperation.CAPTURE,

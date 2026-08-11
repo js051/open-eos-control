@@ -1,6 +1,7 @@
 package dev.openeos.control.data
 
 import java.io.ByteArrayOutputStream
+import java.util.Base64
 
 data class RtpMediaDescription(
     val kind: String,
@@ -19,6 +20,29 @@ data class CcapiRtpSessionDescription(
     val video: RtpMediaDescription,
     val audio: RtpMediaDescription? = null,
 )
+
+internal data class H264ParameterSets(
+    val sequenceParameterSet: ByteArray,
+    val pictureParameterSet: ByteArray,
+)
+
+internal fun RtpMediaDescription.h264ParameterSets(): H264ParameterSets? {
+    val encoded = parameter("sprop-parameter-sets")?.takeIf(String::isNotBlank) ?: return null
+    val values = encoded.split(',').map(String::trim)
+    if (values.isEmpty() || values.size > MAX_H264_PARAMETER_SET_COUNT) return null
+    val decoded = values.mapNotNull { value ->
+        runCatching { Base64.getDecoder().decode(value) }
+            .getOrNull()
+            ?.takeIf { it.size in 1..MAX_H264_PARAMETER_SET_BYTES }
+    }
+    if (decoded.size != values.size) return null
+    val sps = decoded.firstOrNull { it.first().toInt() and H264_NAL_TYPE_MASK == H264_SPS } ?: return null
+    val pps = decoded.firstOrNull { it.first().toInt() and H264_NAL_TYPE_MASK == H264_PPS } ?: return null
+    return H264ParameterSets(
+        sequenceParameterSet = sps.withStartCode(),
+        pictureParameterSet = pps.withStartCode(),
+    )
+}
 
 object CcapiRtpSessionDescriptionParser {
     private val rtpMapPattern = Regex("""^a=rtpmap:(\d+)\s+([^/\s]+)/([0-9]+)(?:/([0-9]+))?$""", RegexOption.IGNORE_CASE)
@@ -348,4 +372,6 @@ private const val H264_FU_START = 0x80
 private const val H264_FU_END = 0x40
 private const val H264_FU_RESERVED = 0x20
 private const val MAX_H264_ACCESS_UNIT_BYTES = 8 * 1024 * 1024
+private const val MAX_H264_PARAMETER_SET_COUNT = 8
+private const val MAX_H264_PARAMETER_SET_BYTES = 64 * 1024
 private val H264_START_CODE = byteArrayOf(0, 0, 0, 1)

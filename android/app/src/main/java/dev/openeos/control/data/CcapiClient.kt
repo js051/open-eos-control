@@ -2382,6 +2382,7 @@ class CcapiClient(
                     .put("action", "start")
                     .put("ipaddress", checkNotNull(rtpDestinationAddress)),
             )
+            session.awaitReady(RTP_FIRST_VIDEO_TIMEOUT_MILLIS)
         } catch (exception: Exception) {
             session.close()
             withContext(NonCancellable) {
@@ -4137,6 +4138,7 @@ private val CARD_SELECTION_ENDPOINTS = linkedMapOf(
 private const val BEEP_SETTING_KEY = "beep"
 private const val DISPLAY_OFF_SETTING_KEY = "displayoff"
 private const val AUTO_POWER_OFF_SETTING_KEY = "autopoweroff"
+private const val RTP_FIRST_VIDEO_TIMEOUT_MILLIS = 5_000L
 private const val AUTO_POWER_OFF_IMMEDIATELY = "immediately"
 
 private data class DeviceFunctionSettingEndpoint(

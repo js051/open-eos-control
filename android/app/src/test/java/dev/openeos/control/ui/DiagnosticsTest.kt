@@ -1,5 +1,6 @@
 package dev.openeos.control.ui
 
+import android.view.Surface
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraCapabilityEvidence
@@ -13,6 +14,9 @@ import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.ExposureState
 import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.NativeLiveViewAudioStatus
+import dev.openeos.control.data.NativeLiveViewEvent
+import dev.openeos.control.data.NativeLiveViewSession
+import dev.openeos.control.data.NativeLiveViewVideoStatus
 import dev.openeos.control.data.SystemNetworkTransport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -195,6 +199,7 @@ class DiagnosticsTest {
             ),
             liveViewDiagnostics = LiveViewDiagnostics(lastFrameAtMillis = 1_000L),
             liveViewSource = LiveViewSource.CCAPI_RTP,
+            nativeLiveViewSession = DiagnosticNativeLiveViewSession,
             liveViewAudioStatus = NativeLiveViewAudioStatus(
                 advertised = true,
                 available = true,
@@ -239,6 +244,15 @@ class DiagnosticsTest {
         assertTrue(report.contains("wifiCellularCoexistence=true"))
         assertTrue(report.contains("liveViewHealthy=true"))
         assertTrue(report.contains("liveViewSource=CCAPI_RTP"))
+        assertTrue(report.contains("contentType=video/H264"))
+        assertTrue(report.contains("source=rtp://192.168.1.100:12000"))
+        assertTrue(report.contains("rtpVideoPort=12000"))
+        assertTrue(report.contains("rtpVideoDatagrams=24"))
+        assertTrue(report.contains("rtpVideoAccessUnits=20"))
+        assertTrue(report.contains("rtpVideoKeyFrames=2"))
+        assertTrue(report.contains("rtpVideoHasSps=true"))
+        assertTrue(report.contains("rtpVideoHasPps=true"))
+        assertTrue(report.contains("rtpVideoReady=true"))
         assertTrue(report.contains("rtpAudioAdvertised=true"))
         assertTrue(report.contains("rtpAudioAvailable=true"))
         assertTrue(report.contains("rtpAudioEnabled=false"))
@@ -274,6 +288,32 @@ class DiagnosticsTest {
         assertTrue(report.contains("POST /ccapi/ver100/shooting/control/shutterbutton"))
         assertTrue(report.contains("writableSettings=iso, tv"))
         assertTrue(report.contains("observedFeatures=CAMERA_IDENTITY, LIVE_VIEW"))
+    }
+
+    private object DiagnosticNativeLiveViewSession : NativeLiveViewSession {
+        override val source = LiveViewSource.CCAPI_RTP
+        override val sourceUrl = "rtp://192.168.1.100:12000"
+        override val contentType = "video/H264"
+        override val videoStatus = NativeLiveViewVideoStatus(
+            rtpPort = 12_000,
+            datagramsReceived = 24,
+            accessUnitsReceived = 20,
+            keyFramesReceived = 2,
+            lastDatagramAtMillis = 990,
+            lastAccessUnitAtMillis = 980,
+            hasSequenceParameterSet = true,
+            hasPictureParameterSet = true,
+            ready = true,
+        )
+
+        override fun start() = Unit
+        override suspend fun awaitReady(timeoutMillis: Long) = Unit
+        override fun attachSurface(surface: Surface) = Unit
+        override fun detachSurface(surface: Surface) = Unit
+        override fun setTargetFps(fps: Int) = Unit
+        override fun setRenderingEnabled(enabled: Boolean) = Unit
+        override fun setListener(listener: ((NativeLiveViewEvent) -> Unit)?) = Unit
+        override fun close() = Unit
     }
 
     @Test

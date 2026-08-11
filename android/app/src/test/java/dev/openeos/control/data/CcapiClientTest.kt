@@ -1252,6 +1252,7 @@ class CcapiClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.LIVE_VIEW_RTP))
         assertEquals(listOf(LiveViewSource.CCAPI_RTP), capabilities.liveView.sources)
         assertTrue(nativeSession.started)
+        assertTrue(nativeSession.readyAwaited)
         assertEquals(15, nativeSession.selectedFps)
         assertEquals("rtp://192.168.11.5:12000", nativeSession.sourceUrl)
         assertEquals(nativeSession, client.nativeLiveViewSession)
@@ -1305,6 +1306,82 @@ class CcapiClientTest {
         assertTrue(nativeSession.closed)
         assertNull(client.nativeLiveViewSession)
         assertTrue(client.liveViewFrameUrl(1, LiveViewRequest(source = LiveViewSource.AUTO)).contains("/flip"))
+    }
+
+    @Test
+    fun automaticLiveViewCleansUpRtpWithoutVideoAndFallsBackToJpeg() = runTest {
+        lateinit var nativeSession: FakeNativeLiveViewSession
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+            rtpDestinationAddress = "192.168.11.5",
+            rtpSessionFactory = CcapiRtpSessionFactory { description, destinationAddress ->
+                FakeNativeLiveViewSession(
+                    description,
+                    destinationAddress,
+                    readyError = IllegalStateException("Canon RTP video received no packets."),
+                ).also { nativeSession = it }
+            },
+        )
+        server.enqueue(jsonResponse(DISCOVERY_RTP_AND_JPEG_JSON))
+        server.enqueue(MockResponse().setHeader("content-type", "text/plain").setBody(CANON_RTP_SDP))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        client.initialize()
+        client.startLiveView(LiveViewRequest(source = LiveViewSource.AUTO))
+
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/shooting/liveview/rtpsessiondesc", server.takeRequest().path)
+        assertEquals("start", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        assertEquals("stop", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        assertEquals("/ccapi/ver110/shooting/liveview", server.takeRequest().path)
+        assertTrue(nativeSession.readyAwaited)
+        assertTrue(nativeSession.closed)
+        assertNull(client.nativeLiveViewSession)
+        assertEquals(LiveViewSource.CCAPI_JPEG_POLLING, client.currentLiveViewSource())
+        assertFalse(CameraFeature.LIVE_VIEW_RTP in client.observedFeatureSnapshot())
+        assertTrue(CameraFeature.LIVE_VIEW_JPEG_POLLING in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun explicitRtpWithoutVideoStopsTheCameraAndReportsTheReadinessFailure() = runTest {
+        lateinit var nativeSession: FakeNativeLiveViewSession
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+            rtpDestinationAddress = "192.168.11.5",
+            rtpSessionFactory = CcapiRtpSessionFactory { description, destinationAddress ->
+                FakeNativeLiveViewSession(
+                    description,
+                    destinationAddress,
+                    readyError = IllegalStateException("Canon RTP video received no decodable key frame."),
+                ).also { nativeSession = it }
+            },
+        )
+        server.enqueue(jsonResponse(DISCOVERY_RTP_JSON))
+        server.enqueue(MockResponse().setHeader("content-type", "text/plain").setBody(CANON_RTP_SDP))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("{}"))
+
+        client.initialize()
+        val failure = runCatching {
+            client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_RTP))
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("no decodable key frame"))
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver110/shooting/liveview/rtpsessiondesc", server.takeRequest().path)
+        assertEquals("start", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        assertEquals("stop", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        assertTrue(nativeSession.readyAwaited)
+        assertTrue(nativeSession.closed)
+        assertNull(client.nativeLiveViewSession)
+        assertNull(client.currentLiveViewSource())
+        assertFalse(CameraFeature.LIVE_VIEW in client.observedFeatureSnapshot())
+        assertFalse(CameraFeature.LIVE_VIEW_RTP in client.observedFeatureSnapshot())
     }
 
     @Test
@@ -3598,6 +3675,7 @@ class CcapiClientTest {
     private class FakeNativeLiveViewSession(
         description: CcapiRtpSessionDescription,
         destinationAddress: String,
+        private val readyError: Exception? = null,
     ) : NativeLiveViewSession {
         override val source: LiveViewSource = LiveViewSource.CCAPI_RTP
         override val sourceUrl: String = "rtp://$destinationAddress:${description.video.port}"
@@ -3605,9 +3683,15 @@ class CcapiClientTest {
         var started = false
         var closed = false
         var selectedFps = 0
+        var readyAwaited = false
 
         override fun start() {
             started = true
+        }
+
+        override suspend fun awaitReady(timeoutMillis: Long) {
+            readyAwaited = true
+            readyError?.let { throw it }
         }
 
         override fun attachSurface(surface: Surface) = Unit
