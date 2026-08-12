@@ -17,6 +17,14 @@ class CameraValueLabelsTest {
             movieQualityDisplayValue("fhd_2997_ipb_light_crop", lightLabel = "Lite", cropLabel = "Cropped"),
         )
         assertEquals("4096x2160 / 120.00p / ALL-I", movieQualityDisplayValue("4096x2160_12000_alli_standard"))
+        assertEquals(
+            "4096x2160 / 59.94p / Long GOP / Fine",
+            movieQualityDisplayValue("4096x2160_5994_longgop_standard_fine"),
+        )
+        assertEquals("XF-HEVC S / 4:2:2 / 10-bit", movieFormatDisplayValue("xfhevcs-ycc422-10bit"))
+        assertEquals("XF-AVC S / 4:2:0 / 8-bit", movieFormatDisplayValue("xfavcs-ycc420-8bit"))
+        assertEquals("RAW", movieFormatDisplayValue("raw"))
+        assertEquals("MP4", movieFormatDisplayValue("mp4"))
         assertNull(movieQualityDisplayValue("4K Fine 59.94p"))
     }
 
@@ -54,8 +62,11 @@ class CameraValueLabelsTest {
             Triple("cardselectionmovie", "card2", R.string.camera_value_card_2),
             Triple("cardselectionmovie", "none", R.string.camera_value_none),
             Triple("soundrecording", "manual", R.string.camera_value_manual),
+            Triple("soundrecordingmodeintmic", "manual", R.string.camera_value_manual),
             Triple("windfilter", "enable", R.string.camera_value_enable),
+            Triple("windfilterintmic", "enable", R.string.camera_value_enable),
             Triple("attenuator", "disable", R.string.camera_value_disable),
+            Triple("attenuatorextmic", "disable", R.string.camera_value_disable),
             Triple("aeb", "off", R.string.camera_value_off),
             Triple("stillimagequalitycf", "cRAW + Large Fine JPEG", R.string.camera_value_craw_large_fine_jpeg),
             Triple("stillimagequality.raw", "none", R.string.camera_value_none),

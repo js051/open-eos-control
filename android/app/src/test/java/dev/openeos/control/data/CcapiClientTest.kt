@@ -143,6 +143,44 @@ class CcapiClientTest {
     }
 
     @Test
+    fun simulatorSourceAudioControlsUseBackedEndpoints() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{
+                    "iso":["800"],"shutter":["1/50"],"aperture":["2.8"],"white_balance":["auto"],
+                    "soundrecordingmodeintmic":{"value":"manual","ability":["auto","manual"]},
+                    "soundrecordinglevelintmic":{"value":32,"ability":{"min":0,"max":63,"step":1}},
+                    "windfilterintmic":{"value":"enable","ability":["enable","disable"]}
+                }""".trimIndent(),
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(jsonResponse(STATUS_JSON))
+
+        val capabilities = client.capabilities()
+        client.setSetting("soundrecordingmodeintmic", "auto")
+        client.setSetting("soundrecordinglevelintmic", "41")
+
+        assertEquals(listOf("auto", "manual"), capabilities.advancedSettings.single {
+            it.key == "soundrecordingmodeintmic"
+        }.values)
+        assertEquals((0..63).map(Int::toString), capabilities.advancedSettings.single {
+            it.key == "soundrecordinglevelintmic"
+        }.values)
+        assertEquals(listOf("enable", "disable"), capabilities.advancedSettings.single {
+            it.key == "windfilterintmic"
+        }.values)
+        assertEquals("/ccapi/capabilities", server.takeRequest().path)
+        assertEquals("/ccapi/sound-recording-mode/internal-mic", server.takeRequest().path)
+        assertEquals("/ccapi/status", server.takeRequest().path)
+        val levelWrite = server.takeRequest()
+        assertEquals("/ccapi/sound-recording-level/internal-mic", levelWrite.path)
+        assertEquals(41, JSONObject(levelWrite.body.readUtf8()).getInt("value"))
+    }
+
+    @Test
     fun simulatorLiveViewMagnificationUsesBackedIntegerEndpoint() = runTest {
         server.enqueue(jsonResponse(CAPABILITIES_JSON))
         server.enqueue(jsonResponse("""{"accepted":true,"value":10}"""))
@@ -2186,6 +2224,55 @@ class CcapiClientTest {
     }
 
     @Test
+    fun canonCurrentSourceAudioControlsExposeR6MarkIIIAbilities() = runTest {
+        val discovery = """{
+            "ver100":[
+                {"path":"/devicestatus/batterylist","get":true},
+                {"path":"/devicestatus/storage","get":true},
+                {"path":"/shooting/settings","get":true},
+                {"path":"/shooting/settings/soundrecording/mode/intmic","get":true,"put":true},
+                {"path":"/shooting/settings/soundrecording/level/intmic","get":true,"put":true},
+                {"path":"/shooting/settings/soundrecording/windfilter/intmic","get":true,"put":true}
+            ],
+            "ver110":[
+                {"path":"/shooting/settings/soundrecording","get":true,"put":true}
+            ]
+        }""".trimIndent()
+        val soundRecording = """{"value":"enable","ability":["enable","disable"]}"""
+        val mode = """{"value":"auto","ability":["auto","manual"]}"""
+        val windFilter = """{"value":"enable","ability":["enable","disable"]}"""
+        val level = """{"value":32,"ability":{"min":0,"max":63,"step":1}}"""
+        fun enqueueSettings(modeResponse: String = mode) {
+            server.enqueue(jsonResponse("{}"))
+            listOf(soundRecording, modeResponse, windFilter, level).forEach { server.enqueue(jsonResponse(it)) }
+        }
+        server.enqueue(jsonResponse(discovery))
+        enqueueSettings()
+        enqueueSettings()
+        server.enqueue(jsonResponse("""{"value":"manual"}"""))
+        server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
+        server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertEquals(listOf("enable", "disable"), capabilities.advancedSettings.single { it.key == "soundrecording" }.values)
+        assertEquals(listOf("auto", "manual"), capabilities.advancedSettings.single { it.key == "soundrecordingmodeintmic" }.values)
+        assertEquals(listOf("enable", "disable"), capabilities.advancedSettings.single { it.key == "windfilterintmic" }.values)
+        assertEquals((0..63).map(Int::toString), capabilities.advancedSettings.single { it.key == "soundrecordinglevelintmic" }.values)
+        assertTrue(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_CONTROL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL))
+
+        client.setSetting("soundrecordingmodeintmic", "manual")
+
+        val requests = generateSequence { server.takeRequest(100, TimeUnit.MILLISECONDS) }.toList()
+        val write = requests.single { it.method == "PUT" }
+        assertEquals("/ccapi/ver100/shooting/settings/soundrecording/mode/intmic", write.path)
+        assertEquals("manual", JSONObject(write.body.readUtf8()).getString("value"))
+    }
+
+    @Test
     fun canonSoundRecordingControlsRejectMalformedStringAbilities() = runTest {
         val discovery = """{"ver100":[
             {"path":"/shooting/settings","get":true},
@@ -2393,7 +2480,7 @@ class CcapiClientTest {
         }""".trimIndent()
         val quality = """{"value":"3840x2160_5994_ipb_standard","ability":["3840x2160_5994_ipb_standard","1920x1080_2997_ipb_standard"]}"""
         val toggle = """{"value":"disable","ability":["enable","disable"]}"""
-        val format = """{"value":"mp4","ability":["raw","mp4"]}"""
+        val format = """{"value":"xfavcs-ycc420-8bit","ability":["raw","xfhevcs-ycc422-10bit","xfhevcs-ycc420-10bit","xfavcs-ycc422-10bit","xfavcs-ycc420-8bit"]}"""
         fun enqueueSettings(movieFormat: String = format) {
             server.enqueue(jsonResponse("{}"))
             listOf(quality, toggle, toggle, movieFormat).forEach { server.enqueue(jsonResponse(it)) }
@@ -2401,10 +2488,10 @@ class CcapiClientTest {
         server.enqueue(jsonResponse(discovery))
         enqueueSettings()
         enqueueSettings()
-        server.enqueue(jsonResponse("""{"value":"raw"}"""))
+        server.enqueue(jsonResponse("""{"value":"xfhevcs-ycc422-10bit"}"""))
         server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
         server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
-        enqueueSettings(format.replace("\"value\":\"mp4\"", "\"value\":\"raw\""))
+        enqueueSettings(format.replace("\"value\":\"xfavcs-ycc420-8bit\"", "\"value\":\"xfhevcs-ycc422-10bit\""))
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
 
         client.initialize()
@@ -2417,17 +2504,20 @@ class CcapiClientTest {
         )
         assertEquals(listOf("enable", "disable"), capabilities.advancedSettings.single { it.key == "highframerate" }.values)
         assertEquals("disable", capabilities.advancedSettings.single { it.key == "moviecropping" }.value)
-        assertEquals(listOf("raw", "mp4"), capabilities.advancedSettings.single { it.key == "movieformat" }.values)
+        assertEquals(
+            listOf("raw", "xfhevcs-ycc422-10bit", "xfhevcs-ycc420-10bit", "xfavcs-ycc422-10bit", "xfavcs-ycc420-8bit"),
+            capabilities.advancedSettings.single { it.key == "movieformat" }.values,
+        )
         assertTrue(setOf("moviequality", "highframerate", "moviecropping", "movieformat").all {
             it in capabilities.evidence.writableSettings
         })
 
-        client.setSetting("movieformat", "raw")
+        client.setSetting("movieformat", "xfhevcs-ycc422-10bit")
 
         val requests = generateSequence { server.takeRequest(100, TimeUnit.MILLISECONDS) }.toList()
         val write = requests.single { it.method == "PUT" }
         assertEquals("/ccapi/ver110/shooting/settings/movieformat", write.path)
-        assertEquals("raw", JSONObject(write.body.readUtf8()).getString("value"))
+        assertEquals("xfhevcs-ycc422-10bit", JSONObject(write.body.readUtf8()).getString("value"))
         assertTrue(requests.count { it.path == "/ccapi/ver110/shooting/settings/movieformat" } >= 3)
     }
 

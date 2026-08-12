@@ -49,6 +49,7 @@ class DesktopBridgeClientTest {
         val capabilities = client.capabilities()
         val exposureStatus = client.setExposure(iso = "800")
         val whiteBalanceStatus = client.setWhiteBalance("Daylight")
+        client.setSetting("soundrecordinglevelintmic", "41")
         client.syncCameraClock()
         client.cleanSensor(autoPowerOff = false)
         client.sleepCamera()
@@ -111,6 +112,7 @@ class DesktopBridgeClientTest {
         assertTrue(capabilities.matrix.supports(CameraFeature.CAMERA_SLEEP))
         assertTrue(capabilities.matrix.supports(CameraFeature.DIRECTORY_CONTROL))
         assertTrue(capabilities.matrix.supports(CameraFeature.FILE_NAMING_CONTROL))
+        assertTrue(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL in observedFeatures)
         assertEquals("IMG_", capabilities.fileNaming?.stillUserSetting1)
         assertEquals("EOS_", updatedFileNaming.stillUserSetting1)
         assertTrue(capabilities.matrix.isPlanned(CameraFeature.LIVE_VIEW_RTP))
@@ -193,6 +195,9 @@ class DesktopBridgeClientTest {
         assertEquals("camera-r6m3", sessionPayload.getString("cameraId"))
         assertEquals("edsdk", sessionPayload.getString("engine"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/settings/iso") == true })
+        assertTrue(requests.any {
+            it.requestUrl?.encodedPath?.endsWith("/settings/soundrecordinglevelintmic") == true
+        })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/clock/sync") == true })
         val sensorCleaningRequest = requests.first {
             it.requestUrl?.encodedPath?.endsWith("/maintenance/sensor-cleaning") == true
@@ -548,6 +553,7 @@ class DesktopBridgeClientTest {
                     whiteBalance = JSONObject(request.body.readUtf8()).getString("value")
                     json(statusJson())
                 }
+                path.endsWith("/settings/soundrecordinglevelintmic") -> json(statusJson())
                 path.endsWith("/whitebalance/click") -> {
                     whiteBalance = "click"
                     json(statusJson())

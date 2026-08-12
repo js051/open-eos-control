@@ -2001,9 +2001,21 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
     "aspectratio" -> stringResource(R.string.setting_aspect_ratio)
     "zoom" -> stringResource(R.string.setting_zoom)
     "soundrecording" -> stringResource(R.string.setting_sound_recording)
+    "soundrecordingmodeintmic" -> stringResource(R.string.setting_internal_microphone_mode)
+    "soundrecordingmodeextmic" -> stringResource(R.string.setting_external_microphone_mode)
+    "soundrecordingmodeacc" -> stringResource(R.string.setting_accessory_microphone_mode)
     "soundrecordinglevel" -> stringResource(R.string.setting_sound_recording_level)
+    "soundrecordinglevelintmic" -> stringResource(R.string.setting_internal_microphone_level)
+    "soundrecordinglevelextmic" -> stringResource(R.string.setting_external_microphone_level)
+    "soundrecordinglevelacc" -> stringResource(R.string.setting_accessory_microphone_level)
     "windfilter" -> stringResource(R.string.setting_wind_filter)
+    "windfilterintmic" -> stringResource(R.string.setting_internal_microphone_wind_filter)
+    "windfilterextmic" -> stringResource(R.string.setting_external_microphone_wind_filter)
+    "windfilteracc" -> stringResource(R.string.setting_accessory_microphone_wind_filter)
     "attenuator" -> stringResource(R.string.setting_attenuator)
+    "attenuatorintmic" -> stringResource(R.string.setting_internal_microphone_attenuator)
+    "attenuatorextmic" -> stringResource(R.string.setting_external_microphone_attenuator)
+    "attenuatoracc" -> stringResource(R.string.setting_accessory_microphone_attenuator)
     "focusbracketing" -> stringResource(R.string.setting_focus_bracketing)
     "focusbracketingnumberofshots" -> stringResource(R.string.setting_focus_bracketing_shots)
     "focusbracketingfocusincrement" -> stringResource(R.string.setting_focus_bracketing_increment)
@@ -2031,6 +2043,9 @@ private fun cameraSettingLabel(setting: CameraSettingControl): String = when (se
 private val RANGE_SETTING_KEYS = setOf(
     "zoom",
     "soundrecordinglevel",
+    "soundrecordinglevelintmic",
+    "soundrecordinglevelextmic",
+    "soundrecordinglevelacc",
     "focusbracketingnumberofshots",
     "focusbracketingfocusincrement",
 )

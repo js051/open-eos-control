@@ -326,6 +326,10 @@ async function run() {
       (state) => state.movie_cropping.value === "enable" && state.movie_cropping.update_count === 1,
       "Canon movie cropping string write",
     );
+    assert.deepEqual(
+      await page.locator('#advanced-settings select[data-setting-key="movieformat"] option').allInnerTexts(),
+      ["RAW", "MP4"],
+    );
     await page.selectOption('#advanced-settings select[data-setting-key="movieformat"]', "raw");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -352,6 +356,34 @@ async function run() {
       (state) => state.sound_recording_level.value === 48 &&
         state.sound_recording_level.update_count === 1,
       "Canon sound recording level integer write",
+    );
+    const sourceSoundLevel = page.locator(
+      '#advanced-settings input[type="range"][data-setting-key="soundrecordinglevelintmic"]',
+    );
+    await sourceSoundLevel.waitFor({ state: "visible" });
+    await page.waitForFunction(() => {
+      const input = document.querySelector(
+        '#advanced-settings input[type="range"][data-setting-key="soundrecordinglevelintmic"]',
+      );
+      return input && !input.disabled;
+    });
+    await sourceSoundLevel.evaluate((input) => {
+      input.value = "41";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.sound_recording_level_intmic.value === 41 &&
+        state.sound_recording_level_intmic.update_count === 1,
+      "Canon internal microphone level integer write",
+    );
+    await page.selectOption('#advanced-settings select[data-setting-key="windfilterintmic"]', "disable");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.wind_filter_intmic.value === "disable" &&
+        state.wind_filter_intmic.update_count === 1,
+      "Canon internal microphone wind filter write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="windfilter"]', "enable");
     await waitForSimulatorState(
@@ -440,7 +472,10 @@ async function run() {
       (state) => state.movie_mode === "off" && state.movie_mode_update_count === 2,
       "Canon movie mode off",
     );
-    const soundRecordingKeys = ["soundrecording", "soundrecordinglevel", "windfilter", "attenuator"];
+    const soundRecordingKeys = [
+      "soundrecording", "soundrecordinglevel", "windfilter", "attenuator",
+      "soundrecordingmodeintmic", "soundrecordinglevelintmic", "windfilterintmic",
+    ];
     await page.waitForFunction(({ hiddenKeys, visibleKeys }) => {
       const settings = document.querySelector("#advanced-settings");
       const photoMode = document.querySelector("#photo-mode-button");

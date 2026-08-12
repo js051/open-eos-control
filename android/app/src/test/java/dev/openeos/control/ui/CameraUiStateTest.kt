@@ -108,6 +108,19 @@ class CameraUiStateTest {
     }
 
     @Test
+    fun sourceSpecificAudioControlsStayInVideoMode() {
+        val settings = listOf(
+            CameraSettingControl("soundrecordingmodeintmic", "Internal mic", "auto", listOf("auto", "manual")),
+            CameraSettingControl("soundrecordinglevelintmic", "Internal mic level", "32", (0..63).map(Int::toString)),
+            CameraSettingControl("windfilterintmic", "Internal wind filter", "enable", listOf("enable", "disable")),
+            CameraSettingControl("attenuatoracc", "Accessory attenuator", "enable", listOf("enable", "disable")),
+        )
+
+        assertTrue(settingsForMode(settings, CaptureMode.PHOTO).isEmpty())
+        assertEquals(settings, settingsForMode(settings, CaptureMode.VIDEO))
+    }
+
+    @Test
     fun eventMediaRefreshPreservesCurrentItemsAndClosesRemovedPreview() {
         val retained = CameraMediaItem("media-1", "IMG_0001.JPG", "image", previewAvailable = true)
         val removed = CameraMediaItem("media-2", "IMG_0002.JPG", "image", previewAvailable = true)
