@@ -19,6 +19,7 @@ from open_eos_bridge.gphoto2 import (
     parse_abilities,
     parse_auto_detect,
     parse_config_dump,
+    parse_media_info,
     parse_media_list,
     parse_storage_info,
     parse_wait_event_keys,
@@ -33,7 +34,18 @@ from open_eos_bridge.models import (
     LiveViewStartRequest,
 )
 
-from .fakes import ABILITIES, AUTO_DETECT, JPEG, MEDIA, MEDIA_BYTES, STORAGE, SUMMARY, THUMBNAIL, FakeRunner
+from .fakes import (
+    ABILITIES,
+    AUTO_DETECT,
+    JPEG,
+    MEDIA,
+    MEDIA_BYTES,
+    MEDIA_INFO,
+    STORAGE,
+    SUMMARY,
+    THUMBNAIL,
+    FakeRunner,
+)
 
 
 def test_gphoto_command_resolution_prefers_native_and_supports_wsl_distribution() -> None:
@@ -254,6 +266,106 @@ def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
     assert summary_supports_file_upload(SUMMARY) is True
     assert summary_supports_file_upload(SUMMARY.replace("File Upload", "File Transfer")) is False
     assert summary_supports_file_upload(SUMMARY.replace("File Upload", "No File Upload")) is False
+
+
+def test_media_info_parser_reads_only_the_primary_file_section() -> None:
+    info = parse_media_info(MEDIA_INFO)
+
+    assert info.file_section_available is True
+    assert info.content_type == "image/jpeg"
+    assert info.size_bytes == 6
+    assert info.capture_time is not None
+
+    missing = parse_media_info("Information on file 'EMPTY.JPG':\nFile:\n  None available.\n")
+    assert missing.file_section_available is True
+    assert missing.content_type is None
+    assert missing.size_bytes is None
+    assert missing.capture_time is None
+
+    unquoted = parse_media_info("File:\n  Mime type: image/jpeg\n")
+    half_quoted = parse_media_info("File:\n  Mime type: 'image/jpeg\n")
+    assert unquoted.content_type is None
+    assert half_quoted.content_type is None
+
+
+def test_media_info_rejects_an_unrecognized_gphoto2_response() -> None:
+    class InvalidInfoRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            if "--show-info" in self._without_camera(arguments):
+                self.commands.append(tuple(arguments))
+                return CommandOutput(b"unexpected output\n")
+            return super().run(arguments, timeout=timeout)
+
+    runner = InvalidInfoRunner()
+    session = GPhoto2Engine(runner).open()
+    item = session.list_media()[0]
+    session.start_live_view(LiveViewStartRequest(fps=15))
+    assert session.live_view_frame() == JPEG
+
+    with pytest.raises(BridgeError) as failure:
+        session.media_info(item.id)
+
+    assert failure.value.code == "INVALID_MEDIA_INFO"
+    assert failure.value.status_code == 502
+    assert session.live_view_frame() == JPEG
+    assert len(runner.movie_streams) == 2
+    session.stop_live_view()
+
+
+def test_media_info_does_not_reuse_stale_listing_fields_when_gphoto2_reports_none() -> None:
+    class MissingInfoRunner(FakeRunner):
+        def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+            if "--show-info" in self._without_camera(arguments):
+                self.commands.append(tuple(arguments))
+                return CommandOutput(b"File:\n  None available.\nThumbnail:\n  Mime type: 'image/jpeg'\n")
+            return super().run(arguments, timeout=timeout)
+
+    session = GPhoto2Engine(MissingInfoRunner()).open()
+    listed = session.list_media()[0]
+    assert listed.size_bytes == 6
+    assert listed.content_type == "image/jpeg"
+
+    refreshed = session.media_info(listed.id)
+
+    assert refreshed.size_bytes == 0
+    assert refreshed.content_type == "application/octet-stream"
+    assert refreshed.capture_time is None
+    assert refreshed.preview_available is False
+
+
+def test_media_info_temporarily_releases_and_restores_persistent_live_view() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+    item = session.list_media()[0]
+    session.start_live_view(LiveViewStartRequest(fps=15))
+
+    assert session.live_view_frame() == JPEG
+    assert session.media_info(item.id).name == "IMG_0001.JPG"
+    assert runner.movie_streams[0].closed is True
+    assert session.live_view_frame() == JPEG
+    assert len(runner.movie_streams) == 2
+
+    session.stop_live_view()
+
+
+def test_media_info_uses_one_read_only_camera_command() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+    item = session.list_media()[0]
+    command_count = len(runner.commands)
+
+    session.media_info(item.id)
+
+    assert runner.commands[command_count:] == [
+        (
+            "--port",
+            "usb:001,007",
+            "--folder",
+            "/store_00010001/DCIM/100CANON",
+            "--show-info",
+            "IMG_0001.JPG",
+        )
+    ]
 
 
 def test_storage_parser_keeps_libgphoto2_summary_compatibility() -> None:
@@ -528,6 +640,7 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert runner.movie_streams[-1].closed is True
 
     media = session.list_media()
+    media_info = session.media_info(media[0].id)
     thumbnail, thumbnail_type = session.media_thumbnail(media[0].id)
     preview, preview_type = session.media_preview(media[0].id)
     with pytest.raises(BridgeError) as raw_preview:
@@ -538,6 +651,16 @@ def test_session_capabilities_and_controls_are_backed_by_real_commands(tmp_path:
     assert preview == JPEG
     assert preview_type == "image/jpeg"
     assert raw_preview.value.code == "MEDIA_PREVIEW_UNAVAILABLE"
+    assert media_info.name == "IMG_0001.JPG"
+    assert media_info.size_bytes == 6
+    assert media_info.content_type == "image/jpeg"
+    assert media_info.preview_available is True
+    assert any(command[-4:] == (
+        "--folder",
+        "/store_00010001/DCIM/100CANON",
+        "--show-info",
+        "IMG_0001.JPG",
+    ) for command in runner.commands)
     assert item.name == "IMG_0001.JPG"
     assert b"".join(chunks) == MEDIA_BYTES
     session.delete_media(media[0].id)
@@ -786,6 +909,13 @@ def test_capture_downloads_host_ram_and_exposes_local_media_lifecycle(tmp_path: 
     assert preview_type == "image/jpeg"
     assert downloaded_item == local_item
     assert b"".join(chunks).startswith(b"\xff\xd8")
+
+    local_path = tmp_path / local_item.name
+    original_size = local_path.stat().st_size
+    local_path.write_bytes(local_path.read_bytes() + b"refreshed")
+    refreshed_local_item = session.media_info(local_item.id)
+    assert refreshed_local_item.size_bytes == original_size + len(b"refreshed")
+    assert not any("--show-info" in command for command in runner.commands)
 
     session.delete_media(local_item.id)
 
