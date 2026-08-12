@@ -271,6 +271,7 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
         )
         media = client.get(f"/v1/session/{session_id}/media", headers=headers)
         media_id = media.json()["items"][0]["id"]
+        media_info = client.get(f"/v1/session/{session_id}/media/{media_id}/info", headers=headers)
         thumbnail = client.get(f"/v1/session/{session_id}/media/{media_id}/thumbnail", headers=headers)
         preview = client.get(f"/v1/session/{session_id}/media/{media_id}/preview", headers=headers)
         download = client.get(f"/v1/session/{session_id}/media/{media_id}", headers=headers)
@@ -330,6 +331,10 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert focus.json()["accepted"] is True
     assert unsupported_tap.status_code == 409
     assert unsupported_tap.json()["error"]["code"] == "UNSUPPORTED_FEATURE"
+    assert media_info.status_code == 200
+    assert media_info.json()["sizeBytes"] == 6
+    assert media_info.json()["contentType"] == "image/jpeg"
+    assert media_info.json()["previewAvailable"] is True
     assert thumbnail.content == THUMBNAIL
     assert thumbnail.headers["content-type"].startswith("image/jpeg")
     assert thumbnail.headers["cache-control"] == "private, no-store, max-age=0"

@@ -60,6 +60,24 @@ There are 2 files in folder '/store_00010001/DCIM/100CANON'.
 #2 IMG_0001.JPG rd 6 B image/jpeg 1784600001
 """
 
+MEDIA_INFO = """Information on file 'IMG_0001.JPG' (folder '/store_00010001/DCIM/100CANON'):
+File:
+  Mime type:   'image/jpeg'
+  Size:        6 byte(s)
+  Width:       16 pixel(s)
+  Height:      12 pixel(s)
+  Downloaded:  no
+  Permissions: read/delete
+  Time:        Tue Jul 21 10:13:21 2026
+Thumbnail:
+  Mime type:   'image/png'
+  Size:        633 byte(s)
+  Width:       8 pixel(s)
+  Height:      6 pixel(s)
+Audio data:
+  None available.
+"""
+
 def _jpeg_fixture(width: int, height: int, color: tuple[int, int, int]) -> bytes:
     output = BytesIO()
     Image.new("RGB", (width, height), color=color).save(output, format="JPEG")
@@ -173,6 +191,13 @@ class FakeRunner:
                 for (folder, name), payload in self.uploaded_files.items()
             )
             return CommandOutput((MEDIA + extra).encode())
+        if command == [
+            "--folder",
+            "/store_00010001/DCIM/100CANON",
+            "--show-info",
+            "IMG_0001.JPG",
+        ]:
+            return CommandOutput(MEDIA_INFO.encode())
         if command == ["--capture-preview", "--stdout"]:
             return CommandOutput(JPEG)
         if (

@@ -759,6 +759,14 @@ class GPhotoAbilities:
 
 
 @dataclass(frozen=True)
+class GPhotoMediaInfo:
+    file_section_available: bool = False
+    content_type: str | None = None
+    size_bytes: int | None = None
+    capture_time: str | None = None
+
+
+@dataclass(frozen=True)
 class StorageDevice:
     storage_id: str | None
     label: str
@@ -1074,6 +1082,45 @@ def parse_media_list(output: str) -> list[MediaItem]:
             )
         )
     return list(reversed(items[-MAX_MEDIA_ITEMS:]))
+
+
+def parse_media_info(output: str) -> GPhotoMediaInfo:
+    in_file_section = False
+    file_section_available = False
+    content_type: str | None = None
+    size_bytes: int | None = None
+    capture_time: str | None = None
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line == "File:":
+            in_file_section = True
+            file_section_available = True
+            continue
+        if line in {"Thumbnail:", "Audio data:"}:
+            in_file_section = False
+            continue
+        if not in_file_section or ":" not in line:
+            continue
+
+        key, value = (part.strip() for part in line.split(":", 1))
+        if key == "Mime type":
+            match = re.fullmatch(r"'([^'\s/]+/[^'\s/]+)'", value)
+            if match and len(match.group(1)) <= 127:
+                content_type = match.group(1)
+        elif key == "Size":
+            match = re.fullmatch(r"(\d+)\s+byte\(s\)", value)
+            if match:
+                size_bytes = int(match.group(1))
+        elif key == "Time":
+            capture_time = _parse_gphoto_local_time(value)
+
+    return GPhotoMediaInfo(
+        file_section_available=file_section_available,
+        content_type=content_type,
+        size_bytes=size_bytes,
+        capture_time=capture_time,
+    )
 
 
 def parse_wait_event_keys(output: str) -> list[str]:
@@ -2161,8 +2208,47 @@ class GPhoto2Session:
             self._observed.add(CameraFeature.MEDIA_DELETE)
 
     def media_info(self, media_id: str) -> MediaItem:
-        del media_id
-        raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+        if is_host_media_id(media_id):
+            with self._lock:
+                self._require_open()
+                item, _ = self._capture_store.item(media_id)
+                self._media_cache[media_id] = item
+                self._observed.add(CameraFeature.MEDIA_BROWSER)
+                return item
+
+        folder, name = _decode_media_id(media_id)
+        with self._lock:
+            self._require_open()
+            if not self._camera_media_supported:
+                raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+            output = self._run(
+                ["--folder", folder, "--show-info", name],
+                timeout=60.0,
+            ).text
+            info = parse_media_info(output)
+            if not info.file_section_available:
+                raise BridgeError(
+                    "INVALID_MEDIA_INFO",
+                    "gphoto2 returned an invalid file-information response.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_BROWSER.value,
+                    engine=self.engine_name,
+                )
+
+            content_type = info.content_type or "application/octet-stream"
+            size_bytes = info.size_bytes if info.size_bytes is not None else 0
+            item = MediaItem(
+                id=media_id,
+                name=name,
+                kind=_media_kind(name, content_type),
+                size_bytes=size_bytes,
+                capture_time=info.capture_time,
+                content_type=content_type,
+                preview_available=is_previewable_media(name, content_type, size_bytes),
+            )
+            self._media_cache[media_id] = item
+            self._observed.add(CameraFeature.MEDIA_BROWSER)
+            return item
 
     def set_media_protection(self, media_id: str, enabled: bool) -> MediaItem:
         del media_id, enabled
@@ -2772,6 +2858,15 @@ def _decode_media_id(media_id: str) -> tuple[str, str]:
 def _leading_int(value: str) -> int | None:
     match = re.match(r"(-?\d+)", value.strip())
     return int(match.group(1)) if match else None
+
+
+def _parse_gphoto_local_time(value: str) -> str | None:
+    try:
+        local_time = datetime.strptime(re.sub(r"\s+", " ", value.strip()), "%a %b %d %H:%M:%S %Y")
+        timestamp = time.mktime(local_time.timetuple())
+    except (OSError, OverflowError, ValueError):
+        return None
+    return datetime.fromtimestamp(timestamp, UTC).isoformat().replace("+00:00", "Z")
 
 
 def _storage_size_bytes(value: str, *, default_unit: str) -> int | None:
