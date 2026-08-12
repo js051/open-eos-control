@@ -4,6 +4,14 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-12
+
+- Hardened Android, iOS, and PC Canon CCAPI discovery and Live View for EOS R6 Mark III firmware 1.1.0, including Canon developer-list fallback, POST-only lifecycle cleanup, advertised-size downgrade, bounded multipart and busy retries, RTP first-frame readiness, and deterministic AUTO fallback.
+- Added capability-gated R6 Mark III movie quality, cropping, recording-format, sound-recording, microphone, wind-filter, attenuator, and manual-level handling across Android, iOS, PC, and Simulator, with exact advertised values and fresh readback contracts.
+- Completed a non-destructive production-engine and installed-Android-AVD pass against a physical EOS R6 Mark III, covering discovery, 118 advertised reads, 28 reversible setting writes/restores, JPEG and multipart Live View, 6/15/30 FPS reporting, focus, events, and bounded media traversal/preview/download.
+- Added fresh, read-only libgphoto2 per-item media information through the existing Desktop Bridge API, while preserving Live View restart and rejecting malformed or stale metadata.
+- Improved iOS Desktop Bridge FPS control, cross-platform media enumeration, event cleanup, capability evidence, and camera-control UI reliability.
+
 ## [0.1.10] - 2026-08-10
 
 - Added capability-gated Canon CCAPI media archive state and writes across Android, iOS, PC and Simulator. Clients require an advertised contents `PUT`, send Canon's exact `archive` action with `enable` or `disable`, and require a matching bounded `kind=info` readback before reporting success or observed evidence. Unknown archive state stays hidden, offline previews mutate locally, and the iOS metadata sheet now opens at a usable large detent.
@@ -93,3 +101,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.1.8]: https://github.com/js051/open-eos-control/releases/tag/v0.1.8
 [0.1.9]: https://github.com/js051/open-eos-control/releases/tag/v0.1.9
 [0.1.10]: https://github.com/js051/open-eos-control/releases/tag/v0.1.10
+[0.2.0]: https://github.com/js051/open-eos-control/releases/tag/v0.2.0
