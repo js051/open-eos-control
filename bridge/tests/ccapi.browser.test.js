@@ -412,6 +412,8 @@ async function run() {
     const movieIndexInput = page.locator('input[aria-label="Movie index"]');
     await movieIndexInput.waitFor({ state: "visible" });
     await movieIndexInput.fill("B_");
+    await page.waitForTimeout(500);
+    assert.equal(await movieIndexInput.inputValue(), "B_");
     const movieIndexRequest = page.waitForRequest((request) =>
       request.method() === "PUT" && request.url().includes("/file-naming/"));
     await movieIndexInput.locator("xpath=..").getByRole("button", { name: "Apply" }).click();

@@ -1900,6 +1900,15 @@
   }
 
   function renderAdvancedSettings() {
+    const focusedControl = document.activeElement;
+    if (focusedControl && ui.advancedSettings.contains(focusedControl)) {
+      const fileNamingField = focusedControl.dataset?.fileNamingField;
+      if (fileNamingField) state.fileNamingDrafts[fileNamingField] = focusedControl.value;
+      const settingKey = focusedControl.dataset?.settingKey;
+      if (settingKey && focusedControl.matches('input[type="text"]')) {
+        state.settingDrafts[settingKey] = focusedControl.value;
+      }
+    }
     ui.advancedSettings.replaceChildren();
     const settings = (state.capabilities?.settings || []).filter(
       (setting) => !CORE_SETTINGS.includes(setting.key) && settingMatchesCaptureMode(setting),
@@ -2197,6 +2206,7 @@
     input.type = numeric ? "number" : "text";
     input.value = state.fileNamingDrafts[field] ?? current;
     input.maxLength = maximumLength;
+    input.dataset.fileNamingField = field;
     input.setAttribute("aria-label", t(labelKey));
     if (numeric) {
       const range = field === "movie-reel-number"
