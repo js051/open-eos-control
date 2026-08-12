@@ -125,21 +125,75 @@ DEVICE_FUNCTION_SETTING_ENDPOINTS = {
     ),
 }
 SOUND_RECORDING_LEVEL_SETTING_KEY = "soundrecordinglevel"
-SOUND_RECORDING_LEVEL_PATH_SUFFIX = "/shooting/settings/soundrecording/level"
+SOUND_RECORDING_LEVEL_INTMIC_SETTING_KEY = "soundrecordinglevelintmic"
+SOUND_RECORDING_LEVEL_EXTMIC_SETTING_KEY = "soundrecordinglevelextmic"
+SOUND_RECORDING_LEVEL_ACC_SETTING_KEY = "soundrecordinglevelacc"
+SOUND_RECORDING_LEVEL_ENDPOINTS = {
+    SOUND_RECORDING_LEVEL_SETTING_KEY: "/shooting/settings/soundrecording/level",
+    SOUND_RECORDING_LEVEL_INTMIC_SETTING_KEY: "/shooting/settings/soundrecording/level/intmic",
+    SOUND_RECORDING_LEVEL_EXTMIC_SETTING_KEY: "/shooting/settings/soundrecording/level/extmic",
+    SOUND_RECORDING_LEVEL_ACC_SETTING_KEY: "/shooting/settings/soundrecording/level/acc",
+}
+SOUND_RECORDING_LEVEL_SETTING_KEYS = SOUND_RECORDING_LEVEL_ENDPOINTS.keys()
 SOUND_RECORDING_SETTING_KEY = "soundrecording"
+SOUND_RECORDING_MODE_INTMIC_SETTING_KEY = "soundrecordingmodeintmic"
+SOUND_RECORDING_MODE_EXTMIC_SETTING_KEY = "soundrecordingmodeextmic"
+SOUND_RECORDING_MODE_ACC_SETTING_KEY = "soundrecordingmodeacc"
 WIND_FILTER_SETTING_KEY = "windfilter"
+WIND_FILTER_INTMIC_SETTING_KEY = "windfilterintmic"
+WIND_FILTER_EXTMIC_SETTING_KEY = "windfilterextmic"
+WIND_FILTER_ACC_SETTING_KEY = "windfilteracc"
 ATTENUATOR_SETTING_KEY = "attenuator"
+ATTENUATOR_INTMIC_SETTING_KEY = "attenuatorintmic"
+ATTENUATOR_EXTMIC_SETTING_KEY = "attenuatorextmic"
+ATTENUATOR_ACC_SETTING_KEY = "attenuatoracc"
 SOUND_RECORDING_ENDPOINTS = {
     SOUND_RECORDING_SETTING_KEY: (
         "/shooting/settings/soundrecording",
+        frozenset({"auto", "manual", "enable", "disable"}),
+    ),
+    SOUND_RECORDING_MODE_INTMIC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/mode/intmic",
+        frozenset({"auto", "manual", "disable"}),
+    ),
+    SOUND_RECORDING_MODE_EXTMIC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/mode/extmic",
+        frozenset({"auto", "manual", "disable"}),
+    ),
+    SOUND_RECORDING_MODE_ACC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/mode/acc",
         frozenset({"auto", "manual", "disable"}),
     ),
     WIND_FILTER_SETTING_KEY: (
         "/shooting/settings/soundrecording/windfilter",
         frozenset({"auto", "enable", "disable"}),
     ),
+    WIND_FILTER_INTMIC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/windfilter/intmic",
+        frozenset({"auto", "enable", "disable"}),
+    ),
+    WIND_FILTER_EXTMIC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/windfilter/extmic",
+        frozenset({"auto", "enable", "disable"}),
+    ),
+    WIND_FILTER_ACC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/windfilter/acc",
+        frozenset({"auto", "enable", "disable"}),
+    ),
     ATTENUATOR_SETTING_KEY: (
         "/shooting/settings/soundrecording/attenuator",
+        frozenset({"enable", "disable", "auto", "manual"}),
+    ),
+    ATTENUATOR_INTMIC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/attenuator/intmic",
+        frozenset({"enable", "disable", "auto", "manual"}),
+    ),
+    ATTENUATOR_EXTMIC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/attenuator/extmic",
+        frozenset({"enable", "disable", "auto", "manual"}),
+    ),
+    ATTENUATOR_ACC_SETTING_KEY: (
+        "/shooting/settings/soundrecording/attenuator/acc",
         frozenset({"enable", "disable", "auto", "manual"}),
     ),
 }
@@ -182,7 +236,7 @@ MOVIE_SETTING_ENDPOINTS: dict[str, tuple[str, frozenset[str] | None]] = {
     ),
     MOVIE_FORMAT_SETTING_KEY: (
         "/shooting/settings/movieformat",
-        frozenset({"raw", "mp4"}),
+        None,
     ),
 }
 MOVIE_SETTING_KEYS = MOVIE_SETTING_ENDPOINTS.keys()
@@ -229,9 +283,21 @@ SETTING_LABELS = {
     DISPLAY_OFF_SETTING_KEY: "Auto display off",
     AUTO_POWER_OFF_SETTING_KEY: "Auto power off",
     SOUND_RECORDING_LEVEL_SETTING_KEY: "Sound recording level",
+    SOUND_RECORDING_LEVEL_INTMIC_SETTING_KEY: "Internal microphone level",
+    SOUND_RECORDING_LEVEL_EXTMIC_SETTING_KEY: "External microphone level",
+    SOUND_RECORDING_LEVEL_ACC_SETTING_KEY: "Accessory microphone level",
     SOUND_RECORDING_SETTING_KEY: "Sound recording",
+    SOUND_RECORDING_MODE_INTMIC_SETTING_KEY: "Internal microphone mode",
+    SOUND_RECORDING_MODE_EXTMIC_SETTING_KEY: "External microphone mode",
+    SOUND_RECORDING_MODE_ACC_SETTING_KEY: "Accessory microphone mode",
     WIND_FILTER_SETTING_KEY: "Wind filter",
+    WIND_FILTER_INTMIC_SETTING_KEY: "Internal microphone wind filter",
+    WIND_FILTER_EXTMIC_SETTING_KEY: "External microphone wind filter",
+    WIND_FILTER_ACC_SETTING_KEY: "Accessory microphone wind filter",
     ATTENUATOR_SETTING_KEY: "Attenuator",
+    ATTENUATOR_INTMIC_SETTING_KEY: "Internal microphone attenuator",
+    ATTENUATOR_EXTMIC_SETTING_KEY: "External microphone attenuator",
+    ATTENUATOR_ACC_SETTING_KEY: "Accessory microphone attenuator",
     FOCUS_BRACKETING_SETTING_KEY: "Focus bracketing",
     FOCUS_BRACKETING_NUMBER_SETTING_KEY: "Focus bracketing shots",
     FOCUS_BRACKETING_INCREMENT_SETTING_KEY: "Focus increment",
@@ -1039,7 +1105,7 @@ class CcapiSession:
                 supported.add(CameraFeature.MOVIE_MODE_CONTROL)
             if control_keys & CARD_SELECTION_ENDPOINTS.keys():
                 supported.add(CameraFeature.CARD_SELECTION_CONTROL)
-            if SOUND_RECORDING_LEVEL_SETTING_KEY in control_keys:
+            if control_keys & SOUND_RECORDING_LEVEL_SETTING_KEYS:
                 supported.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
             if control_keys & SOUND_RECORDING_ENDPOINTS.keys():
                 supported.add(CameraFeature.SOUND_RECORDING_CONTROL)
@@ -1331,7 +1397,8 @@ class CcapiSession:
                 canonical in CARD_SELECTION_ENDPOINTS
                 or canonical in DEVICE_FUNCTION_SETTING_ENDPOINTS
                 or canonical in SOUND_RECORDING_ENDPOINTS
-                or canonical in (SOUND_RECORDING_LEVEL_SETTING_KEY, DIRECTORY_SELECTION_SETTING_KEY)
+                or canonical in SOUND_RECORDING_LEVEL_SETTING_KEYS
+                or canonical == DIRECTORY_SELECTION_SETTING_KEY
                 or canonical in FOCUS_BRACKETING_SETTING_KEYS
                 or canonical in MOVIE_SETTING_KEYS
             )
@@ -1372,7 +1439,7 @@ class CcapiSession:
                         engine=self.engine_name,
                     )
                 self._request_json("POST", path, {"value": zoom})
-            elif canonical == SOUND_RECORDING_LEVEL_SETTING_KEY:
+            elif canonical in SOUND_RECORDING_LEVEL_SETTING_KEYS:
                 try:
                     level = int(value)
                 except ValueError as error:
@@ -2776,7 +2843,7 @@ class CcapiSession:
                     setting_path = f"{prefix}/shooting/settings/{raw_key}"
                     if (
                         key not in SOUND_RECORDING_ENDPOINTS
-                        and key != SOUND_RECORDING_LEVEL_SETTING_KEY
+                        and key not in SOUND_RECORDING_LEVEL_SETTING_KEYS
                         and key not in DEVICE_FUNCTION_SETTING_ENDPOINTS
                         and key not in FOCUS_BRACKETING_SETTING_KEYS
                         and key not in MOVIE_SETTING_KEYS
@@ -2838,13 +2905,15 @@ class CcapiSession:
                 merged[key] = setting
                 setting_paths[key] = write.path
                 self._observed.add(CameraFeature.SOUND_RECORDING_CONTROL)
-        sound_operations = self._sound_recording_level_operations()
-        if sound_operations is not None:
+        for key, suffix in SOUND_RECORDING_LEVEL_ENDPOINTS.items():
+            sound_operations = self._sound_recording_level_operations(suffix)
+            if sound_operations is None:
+                continue
             read, write = sound_operations
             sound_recording_level = _validated_integer_range_setting(self._first_json([read.path]))
             if sound_recording_level is not None:
-                merged[SOUND_RECORDING_LEVEL_SETTING_KEY] = sound_recording_level
-                setting_paths[SOUND_RECORDING_LEVEL_SETTING_KEY] = write.path
+                merged[key] = sound_recording_level
+                setting_paths[key] = write.path
                 self._observed.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
         focus_bracketing_available = False
         for key, (suffix, allowed_values) in FOCUS_BRACKETING_STRING_ENDPOINTS.items():
@@ -3318,12 +3387,12 @@ class CcapiSession:
                 return read, write
         return None
 
-    def _sound_recording_level_operations(self) -> tuple[CcapiOperation, CcapiOperation] | None:
+    def _sound_recording_level_operations(self, suffix: str) -> tuple[CcapiOperation, CcapiOperation] | None:
         reads = sorted(
             (
                 operation
                 for operation in self._operations
-                if operation.method == "GET" and operation.path.endswith(SOUND_RECORDING_LEVEL_PATH_SUFFIX)
+                if operation.method == "GET" and operation.path.endswith(suffix)
             ),
             key=lambda operation: _path_version(operation.path),
             reverse=True,
@@ -4345,7 +4414,7 @@ def _feature_for_setting(key: str) -> CameraFeature:
         return CameraFeature.MOVIE_MODE_CONTROL
     if key == ZOOM_SETTING_KEY:
         return CameraFeature.ZOOM_CONTROL
-    if key == SOUND_RECORDING_LEVEL_SETTING_KEY:
+    if key in SOUND_RECORDING_LEVEL_SETTING_KEYS:
         return CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
     if key in SOUND_RECORDING_ENDPOINTS:
         return CameraFeature.SOUND_RECORDING_CONTROL

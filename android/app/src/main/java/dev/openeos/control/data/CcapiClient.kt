@@ -663,7 +663,7 @@ class CcapiClient(
             if (advancedSettings.any { it.key in SOUND_RECORDING_SETTING_KEYS }) {
                 supportedFeatures.add(CameraFeature.SOUND_RECORDING_CONTROL)
             }
-            if (advancedSettings.any { it.key == SOUND_RECORDING_LEVEL_SETTING_KEY }) {
+            if (advancedSettings.any { it.key in SOUND_RECORDING_LEVEL_SETTING_KEYS }) {
                 supportedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
             }
             if (advancedSettings.any { it.key == FOCUS_BRACKETING_SETTING_KEY }) {
@@ -896,9 +896,9 @@ class CcapiClient(
                     loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
-                key.equals(SOUND_RECORDING_LEVEL_SETTING_KEY, ignoreCase = true) -> {
+                key.lowercase() in SOUND_RECORDING_LEVEL_SETTING_KEYS -> {
                     loadShootingSettings()
-                    putIntegerSettingValue(SOUND_RECORDING_LEVEL_SETTING_KEY, value)
+                    putIntegerSettingValue(key.lowercase(), value)
                 }
                 key.lowercase() in FOCUS_BRACKETING_STRING_SETTING_KEYS -> {
                     loadShootingSettings()
@@ -957,11 +957,15 @@ class CcapiClient(
                         JSONObject().put("value", value),
                     )
                 }
-                key.equals(SOUND_RECORDING_LEVEL_SETTING_KEY, ignoreCase = true) -> {
+                key.lowercase() in SOUND_RECORDING_LEVEL_SETTING_KEYS -> {
+                    val canonical = key.lowercase()
                     val level = value.toIntOrNull()
                         ?.takeIf { it.toString() == value && value in SOUND_RECORDING_LEVEL_VALUES }
                         ?: error("Sound recording level is not supported.")
-                    putOk("/ccapi/sound-recording-level", JSONObject().put("value", level))
+                    putOk(
+                        "/ccapi/${SOUND_RECORDING_LEVEL_SIMULATOR_PATHS.getValue(canonical)}",
+                        JSONObject().put("value", level),
+                    )
                 }
                 key.lowercase() in FOCUS_BRACKETING_STRING_SETTING_KEYS -> {
                     val canonical = key.lowercase()
@@ -2058,7 +2062,7 @@ class CcapiClient(
         STILL_CARD_SELECTION_SETTING_KEY, MOVIE_CARD_SELECTION_SETTING_KEY ->
             CameraFeature.CARD_SELECTION_CONTROL
         in SOUND_RECORDING_SETTING_KEYS -> CameraFeature.SOUND_RECORDING_CONTROL
-        SOUND_RECORDING_LEVEL_SETTING_KEY -> CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
+        in SOUND_RECORDING_LEVEL_SETTING_KEYS -> CameraFeature.SOUND_RECORDING_LEVEL_CONTROL
         in FOCUS_BRACKETING_SETTING_KEYS -> CameraFeature.FOCUS_BRACKETING_CONTROL
         in MOVIE_SETTING_KEYS -> CameraFeature.MOVIE_SETTINGS_CONTROL
         else -> CameraFeature.ADVANCED_SETTINGS
@@ -2097,9 +2101,9 @@ class CcapiClient(
         }
     }
 
-    private fun soundRecordingLevelOperations(): Pair<CcapiApiOperation, CcapiApiOperation>? {
+    private fun soundRecordingLevelOperations(pathSuffix: String): Pair<CcapiApiOperation, CcapiApiOperation>? {
         val reads = apiOperations
-            .filter { it.method == "GET" && it.path.endsWith(SOUND_RECORDING_LEVEL_PATH_SUFFIX) }
+            .filter { it.method == "GET" && it.path.endsWith(pathSuffix) }
             .sortedByDescending { it.apiVersionNumber() }
         return reads.firstNotNullOfOrNull { read ->
             apiOperations.firstOrNull { it.method == "PUT" && it.path == read.path }
@@ -2997,7 +3001,7 @@ class CcapiClient(
                 val settingPath = "$prefix/shooting/settings/$key"
                 if (
                     key !in SOUND_RECORDING_SETTING_KEYS &&
-                    key != SOUND_RECORDING_LEVEL_SETTING_KEY &&
+                    key !in SOUND_RECORDING_LEVEL_SETTING_KEYS &&
                     key != LIVE_VIEW_MAGNIFICATION_SETTING_KEY &&
                     key !in DEVICE_FUNCTION_SETTING_KEYS &&
                     key !in FOCUS_BRACKETING_SETTING_KEYS &&
@@ -3172,20 +3176,22 @@ class CcapiClient(
             }
         }
 
-        soundRecordingLevelOperations()?.let { (read, write) ->
-            val soundRecordingLevel = try {
-                getJson(read.path).toValidatedIntegerRangeSetting()
-            } catch (exception: CancellationException) {
-                throw exception
-            } catch (_: Exception) {
-                null
-            }
-            if (soundRecordingLevel != null) {
-                val values = soundRecordingLevel.getJSONArray("ability").toStringList().toSet()
-                settingPathsByKey[SOUND_RECORDING_LEVEL_SETTING_KEY] = write.path
-                settingValuesByKey[SOUND_RECORDING_LEVEL_SETTING_KEY] = values
-                merged.put(SOUND_RECORDING_LEVEL_SETTING_KEY, soundRecordingLevel)
-                observedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+        SOUND_RECORDING_LEVEL_ENDPOINTS.forEach { (key, pathSuffix) ->
+            soundRecordingLevelOperations(pathSuffix)?.let { (read, write) ->
+                val soundRecordingLevel = try {
+                    getJson(read.path).toValidatedIntegerRangeSetting()
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    null
+                }
+                if (soundRecordingLevel != null) {
+                    val values = soundRecordingLevel.getJSONArray("ability").toStringList().toSet()
+                    settingPathsByKey[key] = write.path
+                    settingValuesByKey[key] = values
+                    merged.put(key, soundRecordingLevel)
+                    observedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
+                }
             }
         }
 
@@ -3979,16 +3985,18 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
                 )
             }
     }
-    val soundRecordingLevel = optJSONObject(SOUND_RECORDING_LEVEL_SETTING_KEY)
-        ?.toValidatedIntegerRangeSetting()
-        ?.let { setting ->
-            CameraSettingControl(
-                key = SOUND_RECORDING_LEVEL_SETTING_KEY,
-                label = SOUND_RECORDING_LEVEL_SETTING_KEY.toSettingLabel(),
-                value = setting.getString("value"),
-                values = setting.getJSONArray("ability").toStringList(),
-            )
-        }
+    val soundRecordingLevels = SOUND_RECORDING_LEVEL_SETTING_KEYS.mapNotNull { key ->
+        optJSONObject(key)
+            ?.toValidatedIntegerRangeSetting()
+            ?.let { setting ->
+                CameraSettingControl(
+                    key = key,
+                    label = key.toSettingLabel(),
+                    value = setting.getString("value"),
+                    values = setting.getJSONArray("ability").toStringList(),
+                )
+            }
+    }
     val focusBracketingControls = buildList {
         val rootDefinition = FOCUS_BRACKETING_STRING_ENDPOINTS.getValue(FOCUS_BRACKETING_SETTING_KEY)
         val root = optJSONObject(FOCUS_BRACKETING_SETTING_KEY)
@@ -4118,7 +4126,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
         } else {
             emptySet()
         }) +
-        (if (soundRecordingLevel != null) {
+        (if (soundRecordingLevels.isNotEmpty()) {
             setOf(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
         } else {
             emptySet()
@@ -4156,7 +4164,7 @@ private fun JSONObject.toCameraCapabilities(): CameraCapabilities {
             movieCardSelection,
             *deviceFunctionControls.toTypedArray(),
             *soundRecordingControls.toTypedArray(),
-            soundRecordingLevel,
+            *soundRecordingLevels.toTypedArray(),
             *focusBracketingControls.toTypedArray(),
             *movieSettingControls.toTypedArray(),
         ),
@@ -4325,9 +4333,21 @@ private fun String.toSettingLabel(): String =
         DISPLAY_OFF_SETTING_KEY -> "Auto display off"
         AUTO_POWER_OFF_SETTING_KEY -> "Auto power off"
         SOUND_RECORDING_SETTING_KEY -> "Sound recording"
+        SOUND_RECORDING_MODE_INTMIC_SETTING_KEY -> "Internal microphone mode"
+        SOUND_RECORDING_MODE_EXTMIC_SETTING_KEY -> "External microphone mode"
+        SOUND_RECORDING_MODE_ACC_SETTING_KEY -> "Accessory microphone mode"
         WIND_FILTER_SETTING_KEY -> "Wind filter"
+        WIND_FILTER_INTMIC_SETTING_KEY -> "Internal microphone wind filter"
+        WIND_FILTER_EXTMIC_SETTING_KEY -> "External microphone wind filter"
+        WIND_FILTER_ACC_SETTING_KEY -> "Accessory microphone wind filter"
         ATTENUATOR_SETTING_KEY -> "Attenuator"
+        ATTENUATOR_INTMIC_SETTING_KEY -> "Internal microphone attenuator"
+        ATTENUATOR_EXTMIC_SETTING_KEY -> "External microphone attenuator"
+        ATTENUATOR_ACC_SETTING_KEY -> "Accessory microphone attenuator"
         SOUND_RECORDING_LEVEL_SETTING_KEY -> "Sound recording level"
+        SOUND_RECORDING_LEVEL_INTMIC_SETTING_KEY -> "Internal microphone level"
+        SOUND_RECORDING_LEVEL_EXTMIC_SETTING_KEY -> "External microphone level"
+        SOUND_RECORDING_LEVEL_ACC_SETTING_KEY -> "Accessory microphone level"
         FOCUS_BRACKETING_SETTING_KEY -> "Focus bracketing"
         FOCUS_BRACKETING_NUMBER_SETTING_KEY -> "Focus bracketing shots"
         FOCUS_BRACKETING_INCREMENT_SETTING_KEY -> "Focus increment"
@@ -4424,11 +4444,19 @@ private val DEVICE_FUNCTION_SETTING_ENDPOINTS = linkedMapOf(
 )
 private val DEVICE_FUNCTION_SETTING_KEYS = DEVICE_FUNCTION_SETTING_ENDPOINTS.keys
 private const val SOUND_RECORDING_LEVEL_SETTING_KEY = "soundrecordinglevel"
-private const val SOUND_RECORDING_LEVEL_PATH_SUFFIX = "/shooting/settings/soundrecording/level"
 private val SOUND_RECORDING_LEVEL_VALUES = (0..63).map(Int::toString).toSet()
 private const val SOUND_RECORDING_SETTING_KEY = "soundrecording"
+private const val SOUND_RECORDING_MODE_INTMIC_SETTING_KEY = "soundrecordingmodeintmic"
+private const val SOUND_RECORDING_MODE_EXTMIC_SETTING_KEY = "soundrecordingmodeextmic"
+private const val SOUND_RECORDING_MODE_ACC_SETTING_KEY = "soundrecordingmodeacc"
 private const val WIND_FILTER_SETTING_KEY = "windfilter"
+private const val WIND_FILTER_INTMIC_SETTING_KEY = "windfilterintmic"
+private const val WIND_FILTER_EXTMIC_SETTING_KEY = "windfilterextmic"
+private const val WIND_FILTER_ACC_SETTING_KEY = "windfilteracc"
 private const val ATTENUATOR_SETTING_KEY = "attenuator"
+private const val ATTENUATOR_INTMIC_SETTING_KEY = "attenuatorintmic"
+private const val ATTENUATOR_EXTMIC_SETTING_KEY = "attenuatorextmic"
+private const val ATTENUATOR_ACC_SETTING_KEY = "attenuatoracc"
 private data class SoundRecordingEndpoint(
     val pathSuffix: String,
     val simulatorPath: String,
@@ -4438,6 +4466,21 @@ private val SOUND_RECORDING_ENDPOINTS = linkedMapOf(
     SOUND_RECORDING_SETTING_KEY to SoundRecordingEndpoint(
         pathSuffix = "/shooting/settings/soundrecording",
         simulatorPath = "sound-recording",
+        values = linkedSetOf("auto", "manual", "enable", "disable"),
+    ),
+    SOUND_RECORDING_MODE_INTMIC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/mode/intmic",
+        simulatorPath = "sound-recording-mode/internal-mic",
+        values = linkedSetOf("auto", "manual", "disable"),
+    ),
+    SOUND_RECORDING_MODE_EXTMIC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/mode/extmic",
+        simulatorPath = "sound-recording-mode/external-mic",
+        values = linkedSetOf("auto", "manual", "disable"),
+    ),
+    SOUND_RECORDING_MODE_ACC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/mode/acc",
+        simulatorPath = "sound-recording-mode/accessory",
         values = linkedSetOf("auto", "manual", "disable"),
     ),
     WIND_FILTER_SETTING_KEY to SoundRecordingEndpoint(
@@ -4445,13 +4488,59 @@ private val SOUND_RECORDING_ENDPOINTS = linkedMapOf(
         simulatorPath = "wind-filter",
         values = linkedSetOf("auto", "enable", "disable"),
     ),
+    WIND_FILTER_INTMIC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/windfilter/intmic",
+        simulatorPath = "wind-filter/internal-mic",
+        values = linkedSetOf("auto", "enable", "disable"),
+    ),
+    WIND_FILTER_EXTMIC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/windfilter/extmic",
+        simulatorPath = "wind-filter/external-mic",
+        values = linkedSetOf("auto", "enable", "disable"),
+    ),
+    WIND_FILTER_ACC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/windfilter/acc",
+        simulatorPath = "wind-filter/accessory",
+        values = linkedSetOf("auto", "enable", "disable"),
+    ),
     ATTENUATOR_SETTING_KEY to SoundRecordingEndpoint(
         pathSuffix = "/shooting/settings/soundrecording/attenuator",
         simulatorPath = "attenuator",
         values = linkedSetOf("enable", "disable", "auto", "manual"),
     ),
+    ATTENUATOR_INTMIC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/attenuator/intmic",
+        simulatorPath = "attenuator/internal-mic",
+        values = linkedSetOf("enable", "disable", "auto", "manual"),
+    ),
+    ATTENUATOR_EXTMIC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/attenuator/extmic",
+        simulatorPath = "attenuator/external-mic",
+        values = linkedSetOf("enable", "disable", "auto", "manual"),
+    ),
+    ATTENUATOR_ACC_SETTING_KEY to SoundRecordingEndpoint(
+        pathSuffix = "/shooting/settings/soundrecording/attenuator/acc",
+        simulatorPath = "attenuator/accessory",
+        values = linkedSetOf("enable", "disable", "auto", "manual"),
+    ),
 )
 private val SOUND_RECORDING_SETTING_KEYS = SOUND_RECORDING_ENDPOINTS.keys
+private const val SOUND_RECORDING_LEVEL_INTMIC_SETTING_KEY = "soundrecordinglevelintmic"
+private const val SOUND_RECORDING_LEVEL_EXTMIC_SETTING_KEY = "soundrecordinglevelextmic"
+private const val SOUND_RECORDING_LEVEL_ACC_SETTING_KEY = "soundrecordinglevelacc"
+private val SOUND_RECORDING_LEVEL_ENDPOINTS = linkedMapOf(
+    SOUND_RECORDING_LEVEL_SETTING_KEY to "/shooting/settings/soundrecording/level",
+    SOUND_RECORDING_LEVEL_INTMIC_SETTING_KEY to "/shooting/settings/soundrecording/level/intmic",
+    SOUND_RECORDING_LEVEL_EXTMIC_SETTING_KEY to "/shooting/settings/soundrecording/level/extmic",
+    SOUND_RECORDING_LEVEL_ACC_SETTING_KEY to "/shooting/settings/soundrecording/level/acc",
+)
+private val SOUND_RECORDING_LEVEL_SETTING_KEYS = SOUND_RECORDING_LEVEL_ENDPOINTS.keys
+private val SOUND_RECORDING_LEVEL_SIMULATOR_PATHS = linkedMapOf(
+    SOUND_RECORDING_LEVEL_SETTING_KEY to "sound-recording-level",
+    SOUND_RECORDING_LEVEL_INTMIC_SETTING_KEY to "sound-recording-level/internal-mic",
+    SOUND_RECORDING_LEVEL_EXTMIC_SETTING_KEY to "sound-recording-level/external-mic",
+    SOUND_RECORDING_LEVEL_ACC_SETTING_KEY to "sound-recording-level/accessory",
+)
 private const val MAX_STRUCTURED_SETTING_OPTIONS = 256
 private const val MAX_FOCUS_BRACKETING_OPTIONS = 1024
 private const val FOCUS_BRACKETING_SETTING_KEY = "focusbracketing"
@@ -4526,7 +4615,6 @@ private val MOVIE_SETTING_ENDPOINTS = linkedMapOf(
     MOVIE_FORMAT_SETTING_KEY to MovieSettingEndpoint(
         pathSuffix = "/shooting/settings/movieformat",
         simulatorPath = "movie-settings/format",
-        values = linkedSetOf("raw", "mp4"),
     ),
 )
 private val MOVIE_SETTING_KEYS = MOVIE_SETTING_ENDPOINTS.keys

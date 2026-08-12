@@ -152,6 +152,7 @@ class FakeCcapiTransport:
         preview_content_type: str = "image/jpeg",
         zoom_response: object | None = None,
         sound_recording_level_response: object | None = None,
+        sound_recording_level_responses: dict[str, object] | None = None,
         sound_recording_responses: dict[str, object] | None = None,
         focus_bracketing_responses: dict[str, object] | None = None,
         movie_setting_responses: dict[str, object] | None = None,
@@ -189,6 +190,7 @@ class FakeCcapiTransport:
         self.preview_content_type = preview_content_type
         self.zoom_response = zoom_response
         self.sound_recording_level_response = sound_recording_level_response
+        self.sound_recording_level_responses = sound_recording_level_responses or {}
         self.sound_recording_responses = sound_recording_responses or {}
         self.focus_bracketing_responses = focus_bracketing_responses or {}
         self.movie_setting_responses = movie_setting_responses or {}
@@ -231,11 +233,25 @@ class FakeCcapiTransport:
             },
         }
         self.zoom = 50
-        self.sound_recording_level = 32
+        self.sound_recording_levels = {
+            "soundrecordinglevel": 32,
+            "soundrecordinglevelintmic": 32,
+            "soundrecordinglevelextmic": 21,
+            "soundrecordinglevelacc": 11,
+        }
         self.sound_recording = {
             "soundrecording": "manual",
+            "soundrecordingmodeintmic": "auto",
+            "soundrecordingmodeextmic": "auto",
+            "soundrecordingmodeacc": "auto",
             "windfilter": "auto",
+            "windfilterintmic": "enable",
+            "windfilterextmic": "disable",
+            "windfilteracc": "disable",
             "attenuator": "disable",
+            "attenuatorintmic": "disable",
+            "attenuatorextmic": "disable",
+            "attenuatoracc": "disable",
         }
         self.focus_bracketing: dict[str, str | int] = {
             "focusbracketing": "disable",
@@ -352,31 +368,69 @@ class FakeCcapiTransport:
             assert payload is not None and isinstance(payload.get("value"), int)
             self.zoom = payload["value"]
             return _json_response({"value": self.zoom})
-        if method == "GET" and path == "/ccapi/ver100/shooting/settings/soundrecording/level":
-            if self.sound_recording_level_response is not None:
-                return _json_response(self.sound_recording_level_response)
-            return _json_response(
-                {"value": self.sound_recording_level, "ability": {"min": 0, "max": 63, "step": 1}}
+        sound_level_paths = {
+            "/shooting/settings/soundrecording/level": "soundrecordinglevel",
+            "/shooting/settings/soundrecording/level/intmic": "soundrecordinglevelintmic",
+            "/shooting/settings/soundrecording/level/extmic": "soundrecordinglevelextmic",
+            "/shooting/settings/soundrecording/level/acc": "soundrecordinglevelacc",
+        }
+        sound_level_key = next(
+            (key for suffix, key in sound_level_paths.items() if path.endswith(suffix)),
+            None,
+        )
+        if method == "GET" and sound_level_key is not None:
+            response = self.sound_recording_level_responses.get(
+                sound_level_key,
+                self.sound_recording_level_response,
             )
-        if method == "PUT" and path == "/ccapi/ver100/shooting/settings/soundrecording/level":
+            if isinstance(response, CcapiResponse):
+                return response
+            if response is not None:
+                return _json_response(response)
+            return _json_response(
+                {"value": self.sound_recording_levels[sound_level_key], "ability": {"min": 0, "max": 63, "step": 1}}
+            )
+        if method == "PUT" and sound_level_key is not None:
             assert payload is not None
             value = payload.get("value")
             assert isinstance(value, int) and not isinstance(value, bool)
-            self.sound_recording_level = value
+            self.sound_recording_levels[sound_level_key] = value
             return _json_response({"value": value})
-        sound_match = re.fullmatch(
-            r"/ccapi/ver100/shooting/settings/soundrecording(?:/(windfilter|attenuator))?",
-            path,
-        )
-        if sound_match:
-            key = sound_match.group(1) or "soundrecording"
+        sound_paths = {
+            "/shooting/settings/soundrecording": "soundrecording",
+            "/shooting/settings/soundrecording/mode/intmic": "soundrecordingmodeintmic",
+            "/shooting/settings/soundrecording/mode/extmic": "soundrecordingmodeextmic",
+            "/shooting/settings/soundrecording/mode/acc": "soundrecordingmodeacc",
+            "/shooting/settings/soundrecording/windfilter": "windfilter",
+            "/shooting/settings/soundrecording/windfilter/intmic": "windfilterintmic",
+            "/shooting/settings/soundrecording/windfilter/extmic": "windfilterextmic",
+            "/shooting/settings/soundrecording/windfilter/acc": "windfilteracc",
+            "/shooting/settings/soundrecording/attenuator": "attenuator",
+            "/shooting/settings/soundrecording/attenuator/intmic": "attenuatorintmic",
+            "/shooting/settings/soundrecording/attenuator/extmic": "attenuatorextmic",
+            "/shooting/settings/soundrecording/attenuator/acc": "attenuatoracc",
+        }
+        sound_key = next((key for suffix, key in sound_paths.items() if path.endswith(suffix)), None)
+        if sound_key is not None:
+            key = sound_key
             abilities = {
                 "soundrecording": ["auto", "manual", "disable"],
+                "soundrecordingmodeintmic": ["auto", "manual", "disable"],
+                "soundrecordingmodeextmic": ["auto", "manual", "disable"],
+                "soundrecordingmodeacc": ["auto", "manual", "disable"],
                 "windfilter": ["auto", "enable", "disable"],
+                "windfilterintmic": ["auto", "enable", "disable"],
+                "windfilterextmic": ["auto", "enable", "disable"],
+                "windfilteracc": ["auto", "enable", "disable"],
                 "attenuator": ["enable", "disable", "auto", "manual"],
+                "attenuatorintmic": ["enable", "disable", "auto", "manual"],
+                "attenuatorextmic": ["enable", "disable", "auto", "manual"],
+                "attenuatoracc": ["enable", "disable", "auto", "manual"],
             }
             if method == "GET":
                 response = self.sound_recording_responses.get(key)
+                if isinstance(response, CcapiResponse):
+                    return response
                 return _json_response(
                     response
                     if response is not None
@@ -385,6 +439,8 @@ class FakeCcapiTransport:
             if method == "PUT":
                 assert payload is not None and payload.get("value") in abilities[key]
                 self.sound_recording[key] = str(payload["value"])
+                if isinstance(self.sound_recording_responses.get(key), dict):
+                    self.sound_recording_responses[key]["value"] = self.sound_recording[key]
                 return _json_response({"value": self.sound_recording[key]})
         focus_paths = {
             "/ccapi/ver100/shooting/settings/focusbracketing": "focusbracketing",
@@ -431,8 +487,10 @@ class FakeCcapiTransport:
                 "moviecropping": ["enable", "disable"],
                 "movieformat": ["raw", "mp4"],
             }
+            response = self.movie_setting_responses.get(key)
+            if isinstance(response, dict) and isinstance(response.get("ability"), list):
+                abilities[key] = response["ability"]
             if method == "GET":
-                response = self.movie_setting_responses.get(key)
                 return _json_response(
                     response
                     if response is not None
@@ -441,6 +499,8 @@ class FakeCcapiTransport:
             if method == "PUT":
                 assert payload is not None and payload.get("value") in abilities[key]
                 self.movie_settings[key] = str(payload["value"])
+                if isinstance(response, dict):
+                    response["value"] = self.movie_settings[key]
                 return _json_response({"value": self.movie_settings[key]})
         if method == "GET" and path == "/ccapi/ver100/shooting/control/moviemode":
             if self.movie_mode_response is not None:
@@ -1220,7 +1280,7 @@ def test_ccapi_sound_recording_level_requires_matching_get_put_and_writes_intege
 
     session.set_setting("soundrecordinglevel", "48")
 
-    assert transport.sound_recording_level == 48
+    assert transport.sound_recording_levels["soundrecordinglevel"] == 48
     assert RecordedRequest(
         "PUT",
         "/ccapi/ver100/shooting/settings/soundrecording/level",
@@ -1326,6 +1386,98 @@ def test_ccapi_sound_recording_controls_require_matching_pairs_and_refresh_befor
     with pytest.raises(BridgeError, match="not advertised"):
         session.set_setting("windfilter", "enable")
     assert sum(request.method == "PUT" for request in transport.requests) == put_count
+
+
+def test_r6_mark_iii_current_movie_format_and_source_audio_controls_are_writable() -> None:
+    discovery = {
+        "ver100": [
+            {"path": "/shooting/settings", "get": True},
+            {"path": "/shooting/settings/soundrecording/mode/intmic", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/mode/extmic", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/mode/acc", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/level/intmic", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/level/extmic", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/level/acc", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/windfilter/intmic", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/windfilter/extmic", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/windfilter/acc", "get": True, "put": True},
+            {"path": "/shooting/settings/soundrecording/attenuator/intmic", "get": True, "put": True},
+        ],
+        "ver110": [
+            {"path": "/shooting/settings/soundrecording", "get": True, "put": True},
+            {"path": "/shooting/settings/movieformat", "get": True, "put": True},
+        ],
+    }
+    movie_formats = [
+        "raw",
+        "xfhevcs-ycc422-10bit",
+        "xfhevcs-ycc420-10bit",
+        "xfavcs-ycc422-10bit",
+        "xfavcs-ycc420-8bit",
+    ]
+    transport = FakeCcapiTransport(
+        discovery=discovery,
+        sound_recording_responses={
+            "soundrecording": {"value": "enable", "ability": ["enable", "disable"]},
+            "soundrecordingmodeintmic": {"value": "auto", "ability": ["auto", "manual"]},
+            "soundrecordingmodeextmic": {"value": "disable", "ability": ["disable"]},
+            "soundrecordingmodeacc": _json_response({"message": "Mode not supported"}, status=503),
+            "windfilterintmic": {"value": "enable", "ability": ["enable", "disable"]},
+            "windfilterextmic": {"value": "disable", "ability": ["disable"]},
+            "windfilteracc": _json_response({"message": "Mode not supported"}, status=503),
+            "attenuatorintmic": _json_response({"message": "Mode not supported"}, status=503),
+        },
+        sound_recording_level_responses={
+            "soundrecordinglevelextmic": {"value": 21, "ability": {"min": 21, "max": 21, "step": 1}},
+            "soundrecordinglevelacc": _json_response({"message": "Mode not supported"}, status=503),
+        },
+        movie_setting_responses={
+            "movieformat": {"value": "xfavcs-ycc420-8bit", "ability": movie_formats},
+        },
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    capabilities = session.capabilities()
+    controls = {setting.key: setting for setting in capabilities.settings}
+
+    assert controls["movieformat"].values == movie_formats
+    assert controls["soundrecording"].values == ["enable", "disable"]
+    assert controls["soundrecordingmodeintmic"].values == ["auto", "manual"]
+    assert controls["soundrecordinglevelintmic"].values == [str(value) for value in range(64)]
+    assert controls["windfilterintmic"].values == ["enable", "disable"]
+    assert {
+        "soundrecordingmodeextmic",
+        "soundrecordingmodeacc",
+        "soundrecordinglevelextmic",
+        "soundrecordinglevelacc",
+        "windfilterextmic",
+        "windfilteracc",
+        "attenuatorintmic",
+    }.isdisjoint(controls)
+    assert CameraFeature.MOVIE_SETTINGS_CONTROL in capabilities.supported
+    assert CameraFeature.SOUND_RECORDING_CONTROL in capabilities.supported
+    assert CameraFeature.SOUND_RECORDING_LEVEL_CONTROL in capabilities.supported
+
+    for key, value in (
+        ("movieformat", "xfhevcs-ycc422-10bit"),
+        ("soundrecording", "disable"),
+        ("soundrecordingmodeintmic", "manual"),
+        ("soundrecordinglevelintmic", "48"),
+        ("windfilterintmic", "disable"),
+    ):
+        session.set_setting(key, value)
+
+    writes = {(request.path, request.body and request.body.get("value")) for request in transport.requests}
+    assert ("/ccapi/ver110/shooting/settings/movieformat", "xfhevcs-ycc422-10bit") in writes
+    assert ("/ccapi/ver110/shooting/settings/soundrecording", "disable") in writes
+    assert ("/ccapi/ver100/shooting/settings/soundrecording/mode/intmic", "manual") in writes
+    assert ("/ccapi/ver100/shooting/settings/soundrecording/level/intmic", 48) in writes
+    assert ("/ccapi/ver100/shooting/settings/soundrecording/windfilter/intmic", "disable") in writes
+    assert transport.sound_recording_levels["soundrecordinglevelintmic"] == 48
+    assert transport.sound_recording_levels["soundrecordinglevelextmic"] == 21
+    assert transport.sound_recording_levels["soundrecordinglevelacc"] == 11
 
 
 @pytest.mark.parametrize(

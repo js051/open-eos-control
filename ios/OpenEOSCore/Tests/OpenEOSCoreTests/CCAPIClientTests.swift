@@ -1768,6 +1768,62 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(object["value"] as? String, "enable")
     }
 
+    func testCanonCurrentSourceAudioControlsExposeR6MarkIIIAbilities() async throws {
+        let transport = MockCameraHTTPTransport()
+        let overallPath = "/ccapi/ver110/shooting/settings/soundrecording"
+        let modePath = "/ccapi/ver100/shooting/settings/soundrecording/mode/intmic"
+        let levelPath = "/ccapi/ver100/shooting/settings/soundrecording/level/intmic"
+        let windPath = "/ccapi/ver100/shooting/settings/soundrecording/windfilter/intmic"
+        let overall = #"{"value":"enable","ability":["enable","disable"]}"#
+        let mode = #"{"value":"auto","ability":["auto","manual"]}"#
+        let level = #"{"value":32,"ability":{"min":0,"max":63,"step":1}}"#
+        let wind = #"{"value":"enable","ability":["enable","disable"]}"#
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/soundrecording/mode/intmic","get":true,"put":true},{"path":"/shooting/settings/soundrecording/level/intmic","get":true,"put":true},{"path":"/shooting/settings/soundrecording/windfilter/intmic","get":true,"put":true}],"ver110":[{"path":"/shooting/settings/soundrecording","get":true,"put":true}]}"#
+        )
+        for _ in 0..<2 {
+            await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
+            for (path, body) in [
+                (overallPath, overall), (modePath, mode), (windPath, wind), (levelPath, level),
+            ] {
+                await transport.enqueueJSON(path: path, body: body)
+            }
+        }
+        await transport.enqueueJSON(method: "PUT", path: modePath, body: #"{"value":"manual"}"#)
+        await enqueueStatus(on: transport)
+        for (path, body) in [
+            (overallPath, overall),
+            (modePath, #"{"value":"manual","ability":["auto","manual"]}"#),
+            (windPath, wind),
+            (levelPath, level),
+        ] {
+            await transport.enqueueJSON(path: path, body: body)
+        }
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+
+        XCTAssertEqual(capabilities.setting("soundrecording")?.values, ["enable", "disable"])
+        XCTAssertEqual(capabilities.setting("soundrecordingmodeintmic")?.values, ["auto", "manual"])
+        XCTAssertEqual(capabilities.setting("windfilterintmic")?.values, ["enable", "disable"])
+        XCTAssertEqual(capabilities.setting("soundrecordinglevelintmic")?.values, (0...63).map(String.init))
+        XCTAssertTrue(capabilities.matrix.supports(.soundRecordingControl))
+        XCTAssertTrue(capabilities.matrix.supports(.soundRecordingLevelControl))
+
+        _ = try await client.setSetting(key: "soundrecordingmodeintmic", value: "manual")
+
+        let requests = await transport.requests()
+        let write = try XCTUnwrap(requests.first { $0.method == "PUT" && $0.path == modePath })
+        let body = try XCTUnwrap(write.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(object["value"], "manual")
+    }
+
     func testCanonSoundRecordingControlsRejectMalformedStringAbilities() async throws {
         let responses = [
             #"{"value":"on","ability":["enable","disable"]}"#,
@@ -2057,6 +2113,55 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(object, ["value": "disabletouch"])
     }
 
+    func testSimulatorSourceAudioControlsUseBackedEndpoints() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/capabilities",
+            body: #"{"iso":["800"],"shutter":["1/50"],"aperture":["2.8"],"white_balance":["auto"],"soundrecordingmodeintmic":{"value":"manual","ability":["auto","manual"]},"soundrecordinglevelintmic":{"value":32,"ability":{"min":0,"max":63,"step":1}},"windfilterintmic":{"value":"enable","ability":["enable","disable"]}}"#
+        )
+        await transport.enqueue(
+            method: "PUT",
+            path: "/ccapi/sound-recording-mode/internal-mic",
+            status: 204,
+            body: Data()
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/status",
+            body: #"{"connected":true,"battery":{"level":82,"status":"good"},"media":{"available":true},"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"auto"}}"#
+        )
+        await transport.enqueue(
+            method: "PUT",
+            path: "/ccapi/sound-recording-level/internal-mic",
+            status: 204,
+            body: Data()
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/status",
+            body: #"{"connected":true,"battery":{"level":82,"status":"good"},"media":{"available":true},"exposure":{"iso":"800","shutter":"1/50","aperture":"2.8","white_balance":"auto"}}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+
+        let capabilities = try await client.capabilities()
+        _ = try await client.setSetting(key: "soundrecordingmodeintmic", value: "auto")
+        _ = try await client.setSetting(key: "soundrecordinglevelintmic", value: "41")
+
+        XCTAssertEqual(capabilities.setting("soundrecordingmodeintmic")?.values, ["auto", "manual"])
+        XCTAssertEqual(capabilities.setting("soundrecordinglevelintmic")?.values, (0...63).map(String.init))
+        XCTAssertEqual(capabilities.setting("windfilterintmic")?.values, ["enable", "disable"])
+        let requests = await transport.requests()
+        XCTAssertTrue(requests.contains { $0.path == "/ccapi/sound-recording-mode/internal-mic" })
+        let levelWrite = try XCTUnwrap(
+            requests.first { $0.path == "/ccapi/sound-recording-level/internal-mic" }
+        )
+        let body = try XCTUnwrap(levelWrite.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["value"] as? Int, 41)
+    }
+
     func testSimulatorAutoPowerOffSeparatesTimedSettingAndSleepAction() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
@@ -2190,7 +2295,7 @@ final class CCAPIClientTests: XCTestCase {
         let formatPath = "/ccapi/ver110/shooting/settings/movieformat"
         let quality = #"{"value":"3840x2160_5994_ipb_standard","ability":["3840x2160_5994_ipb_standard","1920x1080_2997_ipb_standard"]}"#
         let toggle = #"{"value":"disable","ability":["enable","disable"]}"#
-        let format = #"{"value":"mp4","ability":["raw","mp4"]}"#
+        let format = #"{"value":"xfavcs-ycc420-8bit","ability":["raw","xfhevcs-ycc422-10bit","xfhevcs-ycc420-10bit","xfavcs-ycc422-10bit","xfavcs-ycc420-8bit"]}"#
         await transport.enqueueJSON(
             path: "/ccapi",
             body: #"{"ver100":[{"path":"/devicestatus/batterylist","get":true},{"path":"/devicestatus/storage","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/settings/moviequality","get":true,"put":true}],"ver110":[{"path":"/shooting/settings/highframerate","get":true,"put":true},{"path":"/shooting/settings/moviecropping","get":true,"put":true},{"path":"/shooting/settings/movieformat","get":true,"put":true}]}"#
@@ -2206,13 +2311,20 @@ final class CCAPIClientTests: XCTestCase {
                 await transport.enqueueJSON(path: path, body: body)
             }
         }
-        await transport.enqueueJSON(method: "PUT", path: formatPath, body: #"{"value":"raw"}"#)
+        await transport.enqueueJSON(
+            method: "PUT",
+            path: formatPath,
+            body: #"{"value":"xfhevcs-ycc422-10bit"}"#
+        )
         await enqueueStatus(on: transport)
         for (path, body) in [
             (qualityPath, quality),
             (highFrameRatePath, toggle),
             (croppingPath, toggle),
-            (formatPath, #"{"value":"raw","ability":["raw","mp4"]}"#),
+            (
+                formatPath,
+                #"{"value":"xfhevcs-ycc422-10bit","ability":["raw","xfhevcs-ycc422-10bit","xfhevcs-ycc420-10bit","xfavcs-ycc422-10bit","xfavcs-ycc420-8bit"]}"#
+            ),
         ] {
             await transport.enqueueJSON(path: path, body: body)
         }
@@ -2231,19 +2343,25 @@ final class CCAPIClientTests: XCTestCase {
         )
         XCTAssertEqual(capabilities.setting("highframerate")?.values, ["enable", "disable"])
         XCTAssertEqual(capabilities.setting("moviecropping")?.value, "disable")
-        XCTAssertEqual(capabilities.setting("movieformat")?.values, ["raw", "mp4"])
+        XCTAssertEqual(
+            capabilities.setting("movieformat")?.values,
+            [
+                "raw", "xfhevcs-ycc422-10bit", "xfhevcs-ycc420-10bit",
+                "xfavcs-ycc422-10bit", "xfavcs-ycc420-8bit",
+            ]
+        )
         XCTAssertTrue(
             Set(["moviequality", "highframerate", "moviecropping", "movieformat"])
                 .isSubset(of: Set(capabilities.evidence.writableSettings))
         )
 
-        _ = try await client.setSetting(key: "movieformat", value: "raw")
+        _ = try await client.setSetting(key: "movieformat", value: "xfhevcs-ycc422-10bit")
 
         let requests = await transport.requests()
         let write = try XCTUnwrap(requests.first { $0.method == "PUT" && $0.path == formatPath })
         let body = try XCTUnwrap(write.body)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-        XCTAssertEqual(object["value"] as? String, "raw")
+        XCTAssertEqual(object["value"] as? String, "xfhevcs-ycc422-10bit")
         XCTAssertGreaterThanOrEqual(requests.filter { $0.path == formatPath }.count, 3)
     }
 

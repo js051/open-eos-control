@@ -157,7 +157,7 @@ extension ExposureState {
 func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) -> [CameraSetting] {
     let primary = Set(["iso", "shutter", "aperture", "whitebalance"])
     let videoTokens = ["movie", "video", "frame", "codec", "record", "sound"]
-    let videoOnlyKeys = Set(["windfilter", "attenuator"])
+    let videoOnlyPrefixes = ["windfilter", "attenuator"]
     let photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage", "directory"]
     return settings.filter { setting in
         guard setting.inputKind == .text || Set(setting.values).count > 1 else { return false }
@@ -165,7 +165,9 @@ func advancedSettingsForMode(_ settings: [CameraSetting], mode: AppCaptureMode) 
         guard setting.key.lowercased() != "moviemode" else { return false }
         let key = setting.key.lowercased()
         switch mode {
-        case .photo: return !videoOnlyKeys.contains(key) && !videoTokens.contains(where: key.contains)
+        case .photo:
+            return !videoOnlyPrefixes.contains(where: key.hasPrefix) &&
+                !videoTokens.contains(where: key.contains)
         case .video: return !key.hasPrefix("focusbracketing") && !photoTokens.contains(where: key.contains)
         }
     }
@@ -260,9 +262,21 @@ func settingLabelLocalizationKey(_ key: String) -> String? {
     case "cardselectionmovie": "setting_movie_card"
     case "directoryselection": "setting_capture_directory"
     case "soundrecordinglevel": "setting_sound_recording_level"
+    case "soundrecordinglevelintmic": "setting_internal_microphone_level"
+    case "soundrecordinglevelextmic": "setting_external_microphone_level"
+    case "soundrecordinglevelacc": "setting_accessory_microphone_level"
     case "soundrecording": "setting_sound_recording"
+    case "soundrecordingmodeintmic": "setting_internal_microphone_mode"
+    case "soundrecordingmodeextmic": "setting_external_microphone_mode"
+    case "soundrecordingmodeacc": "setting_accessory_microphone_mode"
     case "windfilter": "setting_wind_filter"
+    case "windfilterintmic": "setting_internal_microphone_wind_filter"
+    case "windfilterextmic": "setting_external_microphone_wind_filter"
+    case "windfilteracc": "setting_accessory_microphone_wind_filter"
     case "attenuator": "setting_attenuator"
+    case "attenuatorintmic": "setting_internal_microphone_attenuator"
+    case "attenuatorextmic": "setting_external_microphone_attenuator"
+    case "attenuatoracc": "setting_accessory_microphone_attenuator"
     case "focusbracketing": "setting_focus_bracketing"
     case "focusbracketingnumberofshots": "setting_focus_bracketing_shots"
     case "focusbracketingfocusincrement": "setting_focus_bracketing_increment"
@@ -387,7 +401,8 @@ func settingValueLocalizationKey(key: String, value: String) -> String? {
 func movieQualityDisplayValue(
     _ rawValue: String,
     lightLabel: String = "Light",
-    cropLabel: String = "Crop"
+    cropLabel: String = "Crop",
+    fineLabel: String = "Fine"
 ) -> String? {
     let parts = rawValue.split(separator: "_", omittingEmptySubsequences: false).map(String.init)
     guard (4...5).contains(parts.count), parts.allSatisfy({ !$0.isEmpty }) else { return nil }
@@ -409,6 +424,7 @@ func movieQualityDisplayValue(
     case "raw": compression = "RAW"
     case "alli": compression = "ALL-I"
     case "ipb": compression = "IPB"
+    case "longgop": compression = "Long GOP"
     default: return nil
     }
     var labels = [size, frameRate, compression]
@@ -418,8 +434,23 @@ func movieQualityDisplayValue(
     default: return nil
     }
     if parts.count == 5 {
-        guard parts[4].lowercased() == "crop" else { return nil }
-        labels.append(cropLabel)
+        switch parts[4].lowercased() {
+        case "crop": labels.append(cropLabel)
+        case "fine": labels.append(fineLabel)
+        default: return nil
+        }
     }
     return labels.joined(separator: " / ")
+}
+
+func movieFormatDisplayValue(_ rawValue: String) -> String? {
+    let normalized = rawValue.lowercased().filter { $0.isLetter || $0.isNumber }
+    if normalized == "raw" { return "RAW" }
+    if normalized == "mp4" { return "MP4" }
+    return [
+        "xfhevcsycc42210bit": "XF-HEVC S / 4:2:2 / 10-bit",
+        "xfhevcsycc42010bit": "XF-HEVC S / 4:2:0 / 10-bit",
+        "xfavcsycc42210bit": "XF-AVC S / 4:2:2 / 10-bit",
+        "xfavcsycc4208bit": "XF-AVC S / 4:2:0 / 8-bit",
+    ][normalized]
 }

@@ -135,16 +135,68 @@ public actor CCAPIClient {
     ]
     private static let deviceFunctionSettingKeys = Set(deviceFunctionSettingEndpoints.map { $0.key })
     private static let soundRecordingLevelSettingKey = "soundrecordinglevel"
-    private static let soundRecordingLevelPathSuffix = "/shooting/settings/soundrecording/level"
+    private static let soundRecordingLevelIntMicSettingKey = "soundrecordinglevelintmic"
+    private static let soundRecordingLevelExtMicSettingKey = "soundrecordinglevelextmic"
+    private static let soundRecordingLevelAccessorySettingKey = "soundrecordinglevelacc"
+    private static let soundRecordingLevelEndpoints = [
+        (
+            key: soundRecordingLevelSettingKey,
+            suffix: "/shooting/settings/soundrecording/level",
+            simulatorPath: "/ccapi/sound-recording-level"
+        ),
+        (
+            key: soundRecordingLevelIntMicSettingKey,
+            suffix: "/shooting/settings/soundrecording/level/intmic",
+            simulatorPath: "/ccapi/sound-recording-level/internal-mic"
+        ),
+        (
+            key: soundRecordingLevelExtMicSettingKey,
+            suffix: "/shooting/settings/soundrecording/level/extmic",
+            simulatorPath: "/ccapi/sound-recording-level/external-mic"
+        ),
+        (
+            key: soundRecordingLevelAccessorySettingKey,
+            suffix: "/shooting/settings/soundrecording/level/acc",
+            simulatorPath: "/ccapi/sound-recording-level/accessory"
+        ),
+    ]
+    private static let soundRecordingLevelSettingKeys = Set(soundRecordingLevelEndpoints.map(\.key))
     private static let simulatorSoundRecordingLevelValues = Set((0...63).map(String.init))
     private static let soundRecordingSettingKey = "soundrecording"
+    private static let soundRecordingModeIntMicSettingKey = "soundrecordingmodeintmic"
+    private static let soundRecordingModeExtMicSettingKey = "soundrecordingmodeextmic"
+    private static let soundRecordingModeAccessorySettingKey = "soundrecordingmodeacc"
     private static let windFilterSettingKey = "windfilter"
+    private static let windFilterIntMicSettingKey = "windfilterintmic"
+    private static let windFilterExtMicSettingKey = "windfilterextmic"
+    private static let windFilterAccessorySettingKey = "windfilteracc"
     private static let attenuatorSettingKey = "attenuator"
+    private static let attenuatorIntMicSettingKey = "attenuatorintmic"
+    private static let attenuatorExtMicSettingKey = "attenuatorextmic"
+    private static let attenuatorAccessorySettingKey = "attenuatoracc"
     private static let soundRecordingEndpoints = [
         (
             key: soundRecordingSettingKey,
             suffix: "/shooting/settings/soundrecording",
             simulatorPath: "/ccapi/sound-recording",
+            values: Set(["auto", "manual", "enable", "disable"])
+        ),
+        (
+            key: soundRecordingModeIntMicSettingKey,
+            suffix: "/shooting/settings/soundrecording/mode/intmic",
+            simulatorPath: "/ccapi/sound-recording-mode/internal-mic",
+            values: Set(["auto", "manual", "disable"])
+        ),
+        (
+            key: soundRecordingModeExtMicSettingKey,
+            suffix: "/shooting/settings/soundrecording/mode/extmic",
+            simulatorPath: "/ccapi/sound-recording-mode/external-mic",
+            values: Set(["auto", "manual", "disable"])
+        ),
+        (
+            key: soundRecordingModeAccessorySettingKey,
+            suffix: "/shooting/settings/soundrecording/mode/acc",
+            simulatorPath: "/ccapi/sound-recording-mode/accessory",
             values: Set(["auto", "manual", "disable"])
         ),
         (
@@ -154,9 +206,45 @@ public actor CCAPIClient {
             values: Set(["auto", "enable", "disable"])
         ),
         (
+            key: windFilterIntMicSettingKey,
+            suffix: "/shooting/settings/soundrecording/windfilter/intmic",
+            simulatorPath: "/ccapi/wind-filter/internal-mic",
+            values: Set(["auto", "enable", "disable"])
+        ),
+        (
+            key: windFilterExtMicSettingKey,
+            suffix: "/shooting/settings/soundrecording/windfilter/extmic",
+            simulatorPath: "/ccapi/wind-filter/external-mic",
+            values: Set(["auto", "enable", "disable"])
+        ),
+        (
+            key: windFilterAccessorySettingKey,
+            suffix: "/shooting/settings/soundrecording/windfilter/acc",
+            simulatorPath: "/ccapi/wind-filter/accessory",
+            values: Set(["auto", "enable", "disable"])
+        ),
+        (
             key: attenuatorSettingKey,
             suffix: "/shooting/settings/soundrecording/attenuator",
             simulatorPath: "/ccapi/attenuator",
+            values: Set(["enable", "disable", "auto", "manual"])
+        ),
+        (
+            key: attenuatorIntMicSettingKey,
+            suffix: "/shooting/settings/soundrecording/attenuator/intmic",
+            simulatorPath: "/ccapi/attenuator/internal-mic",
+            values: Set(["enable", "disable", "auto", "manual"])
+        ),
+        (
+            key: attenuatorExtMicSettingKey,
+            suffix: "/shooting/settings/soundrecording/attenuator/extmic",
+            simulatorPath: "/ccapi/attenuator/external-mic",
+            values: Set(["enable", "disable", "auto", "manual"])
+        ),
+        (
+            key: attenuatorAccessorySettingKey,
+            suffix: "/shooting/settings/soundrecording/attenuator/acc",
+            simulatorPath: "/ccapi/attenuator/accessory",
             values: Set(["enable", "disable", "auto", "manual"])
         ),
     ]
@@ -230,7 +318,7 @@ public actor CCAPIClient {
             movieFormatSettingKey,
             "/shooting/settings/movieformat",
             "/ccapi/movie-settings/format",
-            Set(["raw", "mp4"])
+            nil
         ),
     ]
     private static let movieSettingKeys = Set(movieSettingEndpoints.map(\.key))
@@ -606,7 +694,7 @@ public actor CCAPIClient {
         if controls.contains(where: { Self.soundRecordingSettingKeys.contains($0.key) }) {
             supported.insert(.soundRecordingControl)
         }
-        if controls.contains(where: { $0.key == Self.soundRecordingLevelSettingKey }) {
+        if controls.contains(where: { Self.soundRecordingLevelSettingKeys.contains($0.key) }) {
             supported.insert(.soundRecordingLevelControl)
         }
         if controls.contains(where: { $0.key == Self.focusBracketingSettingKey }) {
@@ -794,14 +882,15 @@ public actor CCAPIClient {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
                 try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
-            case Self.soundRecordingLevelSettingKey:
-                guard let level = Int(value),
+            case let soundLevelKey where Self.soundRecordingLevelSettingKeys.contains(soundLevelKey):
+                guard let endpoint = Self.soundRecordingLevelEndpoints.first(where: { $0.key == soundLevelKey }),
+                      let level = Int(value),
                       String(level) == value,
                       Self.simulatorSoundRecordingLevelValues.contains(value) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
                 try await requestOK(
-                    path: "/ccapi/sound-recording-level",
+                    path: endpoint.simulatorPath,
                     method: .put,
                     json: ["value": level]
                 )
@@ -847,7 +936,7 @@ public actor CCAPIClient {
         if Self.cardSelectionSettingKeys.contains(key.lowercased()) ||
             Self.deviceFunctionSettingKeys.contains(key.lowercased()) ||
             Self.soundRecordingSettingKeys.contains(key.lowercased()) ||
-            key.lowercased() == Self.soundRecordingLevelSettingKey ||
+            Self.soundRecordingLevelSettingKeys.contains(key.lowercased()) ||
             Self.focusBracketingSettingKeys.contains(key.lowercased()) ||
             Self.movieSettingKeys.contains(key.lowercased()) ||
             key.lowercased() == Self.directorySelectionSettingKey {
@@ -872,8 +961,8 @@ public actor CCAPIClient {
             }
             _ = try await requestJSON(path: path, method: .post, json: ["value": zoom])
             cachedSettings = nil
-        } else if key == Self.soundRecordingLevelSettingKey {
-            guard let path = settingPaths[Self.soundRecordingLevelSettingKey],
+        } else if Self.soundRecordingLevelSettingKeys.contains(key) {
+            guard let path = settingPaths[key],
                   let level = Int(value), String(level) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
@@ -2293,9 +2382,11 @@ public actor CCAPIClient {
         return nil
     }
 
-    private func soundRecordingLevelOperations() -> (read: CCAPIOperation, write: CCAPIOperation)? {
+    private func soundRecordingLevelOperations(
+        suffix: String
+    ) -> (read: CCAPIOperation, write: CCAPIOperation)? {
         let reads = operations
-            .filter { $0.method == .get && $0.path.hasSuffix(Self.soundRecordingLevelPathSuffix) }
+            .filter { $0.method == .get && $0.path.hasSuffix(suffix) }
             .sorted { Self.pathVersion($0.path) > Self.pathVersion($1.path) }
         for read in reads {
             if let write = operations.first(where: { $0.method == .put && $0.path == read.path }) {
@@ -2876,7 +2967,7 @@ public actor CCAPIClient {
             for (key, setting) in value {
                 let settingPath = "\(prefix)/shooting/settings/\(key)"
                 if !Self.soundRecordingSettingKeys.contains(key),
-                   key != Self.soundRecordingLevelSettingKey,
+                   !Self.soundRecordingLevelSettingKeys.contains(key),
                    key != Self.liveViewMagnificationSettingKey,
                    !Self.deviceFunctionSettingKeys.contains(key),
                    !Self.focusBracketingSettingKeys.contains(key),
@@ -2945,12 +3036,14 @@ public actor CCAPIClient {
             merged[endpoint.key] = setting
             observedFeatures.insert(.soundRecordingControl)
         }
-        if let operations = soundRecordingLevelOperations(),
-           let raw = try await firstJSON(paths: [operations.read.path], required: false),
-           let soundRecordingLevel = Self.validatedIntegerRangeSetting(raw) {
-            settingPaths[Self.soundRecordingLevelSettingKey] = operations.write.path
-            merged[Self.soundRecordingLevelSettingKey] = soundRecordingLevel
-            observedFeatures.insert(.soundRecordingLevelControl)
+        for endpoint in Self.soundRecordingLevelEndpoints {
+            if let operations = soundRecordingLevelOperations(suffix: endpoint.suffix),
+               let raw = try await firstJSON(paths: [operations.read.path], required: false),
+               let soundRecordingLevel = Self.validatedIntegerRangeSetting(raw) {
+                settingPaths[endpoint.key] = operations.write.path
+                merged[endpoint.key] = soundRecordingLevel
+                observedFeatures.insert(.soundRecordingLevelControl)
+            }
         }
         var focusBracketingAvailable = false
         for endpoint in Self.focusBracketingStringEndpoints {
@@ -3427,7 +3520,8 @@ public actor CCAPIClient {
         case Self.zoomSettingKey: .zoomControl
         case Self.stillCardSelectionSettingKey, Self.movieCardSelectionSettingKey: .cardSelectionControl
         case let soundKey where Self.soundRecordingSettingKeys.contains(soundKey): .soundRecordingControl
-        case Self.soundRecordingLevelSettingKey: .soundRecordingLevelControl
+        case let soundLevelKey where Self.soundRecordingLevelSettingKeys.contains(soundLevelKey):
+            .soundRecordingLevelControl
         case let focusKey where Self.focusBracketingSettingKeys.contains(focusKey): .focusBracketingControl
         case let movieKey where Self.movieSettingKeys.contains(movieKey): .movieSettingsControl
         case Self.directorySelectionSettingKey: .directoryControl
@@ -3593,13 +3687,10 @@ public actor CCAPIClient {
                   let control = control(endpoint.key, Self.settingLabel(endpoint.key), normalized) else { continue }
             controls.append(control)
         }
-        if let raw = value.object(Self.soundRecordingLevelSettingKey),
-           let normalized = Self.validatedIntegerRangeSetting(raw),
-           let control = control(
-               Self.soundRecordingLevelSettingKey,
-               Self.settingLabel(Self.soundRecordingLevelSettingKey),
-               normalized
-           ) {
+        for endpoint in Self.soundRecordingLevelEndpoints {
+            guard let raw = value.object(endpoint.key),
+                  let normalized = Self.validatedIntegerRangeSetting(raw),
+                  let control = control(endpoint.key, Self.settingLabel(endpoint.key), normalized) else { continue }
             controls.append(control)
         }
         var focusBracketingAvailable = false
@@ -4189,9 +4280,21 @@ public actor CCAPIClient {
             Self.displayOffSettingKey: "Auto display off",
             Self.autoPowerOffSettingKey: "Auto power off",
             Self.soundRecordingSettingKey: "Sound recording",
+            Self.soundRecordingModeIntMicSettingKey: "Internal microphone mode",
+            Self.soundRecordingModeExtMicSettingKey: "External microphone mode",
+            Self.soundRecordingModeAccessorySettingKey: "Accessory microphone mode",
             Self.windFilterSettingKey: "Wind filter",
+            Self.windFilterIntMicSettingKey: "Internal microphone wind filter",
+            Self.windFilterExtMicSettingKey: "External microphone wind filter",
+            Self.windFilterAccessorySettingKey: "Accessory microphone wind filter",
             Self.attenuatorSettingKey: "Attenuator",
+            Self.attenuatorIntMicSettingKey: "Internal microphone attenuator",
+            Self.attenuatorExtMicSettingKey: "External microphone attenuator",
+            Self.attenuatorAccessorySettingKey: "Accessory microphone attenuator",
             Self.soundRecordingLevelSettingKey: "Sound recording level",
+            Self.soundRecordingLevelIntMicSettingKey: "Internal microphone level",
+            Self.soundRecordingLevelExtMicSettingKey: "External microphone level",
+            Self.soundRecordingLevelAccessorySettingKey: "Accessory microphone level",
             Self.focusBracketingSettingKey: "Focus bracketing",
             Self.focusBracketingNumberSettingKey: "Focus bracketing shots",
             Self.focusBracketingIncrementSettingKey: "Focus increment",

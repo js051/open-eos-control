@@ -890,6 +890,54 @@ def test_sound_recording_controls_use_documented_string_abilities_and_mode_gates
     assert test_state["attenuator"] == {"value": "manual", "update_count": 1}
 
 
+def test_source_audio_controls_match_current_r6_contract_and_hide_absent_sources() -> None:
+    client.post("/ccapi/test/reset")
+
+    mode = client.get("/ccapi/ver100/shooting/settings/soundrecording/mode/intmic")
+    level = client.get("/ccapi/ver100/shooting/settings/soundrecording/level/intmic")
+    wind = client.get("/ccapi/ver100/shooting/settings/soundrecording/windfilter/intmic")
+    absent_external = client.get("/ccapi/ver100/shooting/settings/soundrecording/mode/extmic")
+    absent_attenuator = client.get("/ccapi/ver100/shooting/settings/soundrecording/attenuator/intmic")
+    simulator_mode = client.put(
+        "/ccapi/sound-recording-mode/internal-mic",
+        json={"value": "auto"},
+    )
+    hidden_level = client.get("/ccapi/ver100/shooting/settings/soundrecording/level/intmic")
+    canonical_mode = client.put(
+        "/ccapi/ver100/shooting/settings/soundrecording/mode/intmic",
+        json={"value": "manual"},
+    )
+    simulator_level = client.put(
+        "/ccapi/sound-recording-level/internal-mic",
+        json={"value": 41},
+    )
+    canonical_wind = client.put(
+        "/ccapi/ver100/shooting/settings/soundrecording/windfilter/intmic",
+        json={"value": "disable"},
+    )
+    capabilities = client.get("/ccapi/capabilities").json()
+    test_state = client.get("/ccapi/test/state").json()
+
+    assert mode.json() == {"value": "manual", "ability": ["auto", "manual"]}
+    assert level.json() == {"value": 32, "ability": {"min": 0, "max": 63, "step": 1}}
+    assert wind.json() == {"value": "enable", "ability": ["enable", "disable"]}
+    assert absent_external.status_code == 503
+    assert absent_attenuator.status_code == 503
+    assert simulator_mode.status_code == 204
+    assert hidden_level.status_code == 503
+    assert canonical_mode.json() == {"value": "manual"}
+    assert simulator_level.status_code == 204
+    assert canonical_wind.json() == {"value": "disable"}
+    assert capabilities["soundrecordingmodeintmic"]["value"] == "manual"
+    assert capabilities["soundrecordinglevelintmic"]["value"] == 41
+    assert capabilities["windfilterintmic"]["value"] == "disable"
+    assert "soundrecordingmodeextmic" not in capabilities
+    assert "attenuatorintmic" not in capabilities
+    assert test_state["sound_recording_mode_intmic"] == {"value": "manual", "update_count": 2}
+    assert test_state["sound_recording_level_intmic"] == {"value": 41, "update_count": 1}
+    assert test_state["wind_filter_intmic"] == {"value": "disable", "update_count": 1}
+
+
 def test_focus_bracketing_contract_uses_exact_types_ranges_and_photo_mode_gate() -> None:
     client.post("/ccapi/test/reset")
 

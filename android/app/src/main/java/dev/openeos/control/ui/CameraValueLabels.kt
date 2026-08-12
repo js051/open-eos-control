@@ -13,7 +13,11 @@ internal fun localizedCameraValue(settingKey: String?, rawValue: String): String
             rawValue = rawValue,
             lightLabel = stringResource(R.string.camera_value_light),
             cropLabel = stringResource(R.string.camera_value_crop),
+            fineLabel = stringResource(R.string.camera_value_fine),
         )?.let { return it }
+    }
+    if (settingKey.orEmpty().normalizedCameraKey() == "movieformat") {
+        movieFormatDisplayValue(rawValue)?.let { return it }
     }
     val resource = cameraValueLabelResource(settingKey, rawValue) ?: return rawValue
     return stringResource(resource)
@@ -23,6 +27,7 @@ internal fun movieQualityDisplayValue(
     rawValue: String,
     lightLabel: String = "Light",
     cropLabel: String = "Crop",
+    fineLabel: String = "Fine",
 ): String? {
     val parts = rawValue.split('_')
     if (parts.size !in 4..5 || parts.any(String::isBlank)) return null
@@ -37,6 +42,7 @@ internal fun movieQualityDisplayValue(
         "raw" -> "RAW"
         "alli" -> "ALL-I"
         "ipb" -> "IPB"
+        "longgop" -> "Long GOP"
         else -> return null
     }
     val labels = mutableListOf(size, frameRate, compression)
@@ -46,10 +52,31 @@ internal fun movieQualityDisplayValue(
         else -> return null
     }
     if (parts.size == 5) {
-        if (!parts[4].equals("crop", ignoreCase = true)) return null
-        labels.add(cropLabel)
+        when (parts[4].lowercase(Locale.ROOT)) {
+            "crop" -> labels.add(cropLabel)
+            "fine" -> labels.add(fineLabel)
+            else -> return null
+        }
     }
     return labels.joinToString(" / ")
+}
+
+internal fun movieFormatDisplayValue(rawValue: String): String? {
+    val normalized = rawValue.normalizedCameraValue().replace(" ", "")
+    if (normalized == "raw") return "RAW"
+    if (normalized == "mp4") return "MP4"
+    val match = MOVIE_FORMAT_PATTERN.matchEntire(normalized) ?: return null
+    val codec = when (match.groupValues[1]) {
+        "xfhevcs" -> "XF-HEVC S"
+        "xfavcs" -> "XF-AVC S"
+        else -> return null
+    }
+    val chroma = when (match.groupValues[2]) {
+        "ycc422" -> "4:2:2"
+        "ycc420" -> "4:2:0"
+        else -> return null
+    }
+    return "$codec / $chroma / ${match.groupValues[3]}-bit"
 }
 
 private fun String.toMovieFrameRateLabel(): String? {
@@ -82,7 +109,10 @@ internal fun cameraValueLabelResource(settingKey: String?, rawValue: String): In
         "capturetarget" -> captureTargetValueLabels[value]
         "capturestorage" -> captureStorageValueLabels[value]
         "cardselectionstillimage", "cardselectionmovie" -> cardSelectionValueLabels[value]
-        "soundrecording", "windfilter", "attenuator" -> soundRecordingValueLabels[value]
+        "soundrecording", "soundrecordingmodeintmic", "soundrecordingmodeextmic", "soundrecordingmodeacc",
+        "windfilter", "windfilterintmic", "windfilterextmic", "windfilteracc",
+        "attenuator", "attenuatorintmic", "attenuatorextmic", "attenuatoracc" ->
+            soundRecordingValueLabels[value]
         "aeb" -> toggleValueLabels[value]
         "stillimagequality", "stillimagequalityraw", "stillimagequalityjpeg", "stillimagequalityheif",
         "stillimagequalitysd", "stillimagequalitycf" ->
@@ -389,4 +419,5 @@ private val shootingModeValueLabels = mapOf(
     "portrait" to R.string.camera_value_portrait,
 )
 
+private val MOVIE_FORMAT_PATTERN = Regex("^(xfhevcs|xfavcs)(ycc422|ycc420)(8|10)bit$")
 private val WHITESPACE = Regex("\\s+")

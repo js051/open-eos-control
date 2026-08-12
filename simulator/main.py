@@ -95,6 +95,8 @@ capabilities = {
 ZOOM_ABILITY = {"min": 0, "max": 100, "step": 1}
 SOUND_RECORDING_LEVEL_ABILITY = {"min": 0, "max": 63, "step": 1}
 SOUND_RECORDING_ABILITY = ["auto", "manual", "disable"]
+SOURCE_SOUND_RECORDING_MODE_ABILITY = ["auto", "manual"]
+SOURCE_WIND_FILTER_ABILITY = ["enable", "disable"]
 WIND_FILTER_ABILITY = ["auto", "enable", "disable"]
 ATTENUATOR_ABILITY = ["enable", "disable", "auto", "manual"]
 CARD_SELECTION_ABILITY = ["none", "card1", "card2"]
@@ -184,6 +186,12 @@ def initial_state() -> dict[str, object]:
         "sound_recording_level_update_count": 0,
         "sound_recording": "manual",
         "sound_recording_update_count": 0,
+        "sound_recording_mode_intmic": "manual",
+        "sound_recording_mode_intmic_update_count": 0,
+        "sound_recording_level_intmic": 32,
+        "sound_recording_level_intmic_update_count": 0,
+        "wind_filter_intmic": "enable",
+        "wind_filter_intmic_update_count": 0,
         "wind_filter": "auto",
         "wind_filter_update_count": 0,
         "attenuator": "disable",
@@ -415,6 +423,18 @@ async def get_test_state() -> dict[str, object]:
             "value": state["sound_recording"],
             "update_count": state["sound_recording_update_count"],
         },
+        "sound_recording_mode_intmic": {
+            "value": state["sound_recording_mode_intmic"],
+            "update_count": state["sound_recording_mode_intmic_update_count"],
+        },
+        "sound_recording_level_intmic": {
+            "value": state["sound_recording_level_intmic"],
+            "update_count": state["sound_recording_level_intmic_update_count"],
+        },
+        "wind_filter_intmic": {
+            "value": state["wind_filter_intmic"],
+            "update_count": state["wind_filter_intmic_update_count"],
+        },
         "wind_filter": {
             "value": state["wind_filter"],
             "update_count": state["wind_filter_update_count"],
@@ -531,6 +551,14 @@ async def get_capabilities() -> dict[str, object]:
         "moviemode": {"status": state["movie_mode"], "ability": ["off", "on"]},
         "zoom": {"value": state["zoom"], "ability": ZOOM_ABILITY},
         "soundrecording": {"value": state["sound_recording"], "ability": SOUND_RECORDING_ABILITY},
+        "soundrecordingmodeintmic": {
+            "value": state["sound_recording_mode_intmic"],
+            "ability": SOURCE_SOUND_RECORDING_MODE_ABILITY,
+        },
+        "windfilterintmic": {
+            "value": state["wind_filter_intmic"],
+            "ability": SOURCE_WIND_FILTER_ABILITY,
+        },
         "cardselectionstillimage": {
             "value": state["still_card_selection"],
             "ability": CARD_SELECTION_ABILITY,
@@ -582,6 +610,11 @@ async def get_capabilities() -> dict[str, object]:
     if state["sound_recording"] == "manual":
         result["soundrecordinglevel"] = {
             "value": state["sound_recording_level"],
+            "ability": SOUND_RECORDING_LEVEL_ABILITY,
+        }
+    if state["sound_recording"] != "disable" and state["sound_recording_mode_intmic"] == "manual":
+        result["soundrecordinglevelintmic"] = {
+            "value": state["sound_recording_level_intmic"],
             "ability": SOUND_RECORDING_LEVEL_ABILITY,
         }
     return result
@@ -782,6 +815,21 @@ def sound_recording_unavailable(*, requires_manual: bool = False) -> JSONRespons
     return None
 
 
+def source_sound_recording_unavailable(
+    source: str,
+    *,
+    requires_manual: bool = False,
+) -> JSONResponse | None:
+    unavailable = sound_recording_unavailable()
+    if unavailable is not None:
+        return unavailable
+    if source not in {"intmic", "internal-mic"}:
+        return JSONResponse(status_code=503, content={"message": "Mode not supported"})
+    if requires_manual and state["sound_recording_mode_intmic"] != "manual":
+        return JSONResponse(status_code=503, content={"message": "Mode not supported"})
+    return None
+
+
 def device_function_unavailable() -> JSONResponse | None:
     if state["recording"]:
         return JSONResponse(status_code=503, content={"message": "During shooting or recording"})
@@ -899,6 +947,60 @@ async def update_simulator_sound_recording_level(payload: dict[str, object]) -> 
     if unavailable is not None:
         return unavailable
     if not update_sound_recording_level(payload):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/sound-recording-mode/{source}", status_code=204)
+async def update_simulator_source_sound_recording_mode(
+    source: str,
+    payload: dict[str, object],
+) -> Response:
+    unavailable = source_sound_recording_unavailable(source)
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="sound_recording_mode_intmic",
+        ability=SOURCE_SOUND_RECORDING_MODE_ABILITY,
+        event_key="soundrecordingmodeintmic",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/sound-recording-level/{source}", status_code=204)
+async def update_simulator_source_sound_recording_level(
+    source: str,
+    payload: dict[str, object],
+) -> Response:
+    unavailable = source_sound_recording_unavailable(source, requires_manual=True)
+    if unavailable is not None:
+        return unavailable
+    if not update_integer_setting(
+        payload,
+        state_key="sound_recording_level_intmic",
+        ability=SOUND_RECORDING_LEVEL_ABILITY,
+        event_key="soundrecordinglevelintmic",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return Response(status_code=204)
+
+
+@app.put("/ccapi/wind-filter/{source}", status_code=204)
+async def update_simulator_source_wind_filter(
+    source: str,
+    payload: dict[str, object],
+) -> Response:
+    unavailable = source_sound_recording_unavailable(source)
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="wind_filter_intmic",
+        ability=SOURCE_WIND_FILTER_ABILITY,
+        event_key="windfilterintmic",
+    ):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return Response(status_code=204)
 
@@ -1318,8 +1420,20 @@ CANON_DISCOVERY = {
         {"path": "/shooting/settings/lvzoom", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording/level", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/mode/intmic", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/mode/extmic", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/mode/acc", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/level/intmic", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/level/extmic", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/level/acc", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording/windfilter", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/windfilter/intmic", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/windfilter/extmic", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/windfilter/acc", "get": True, "put": True},
         {"path": "/shooting/settings/soundrecording/attenuator", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/attenuator/intmic", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/attenuator/extmic", "get": True, "put": True},
+        {"path": "/shooting/settings/soundrecording/attenuator/acc", "get": True, "put": True},
         {"path": "/shooting/settings/focusbracketing", "get": True, "put": True},
         {"path": "/shooting/settings/focusbracketing/numberofshots", "get": True, "put": True},
         {"path": "/shooting/settings/focusbracketing/focusincrement", "get": True, "put": True},
@@ -1701,6 +1815,103 @@ async def canon_set_attenuator(payload: dict[str, object]) -> Response:
     ):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
     return JSONResponse(content={"value": state["attenuator"]})
+
+
+@app.get("/ccapi/ver100/shooting/settings/soundrecording/mode/{source}")
+async def canon_get_source_sound_recording_mode(source: str) -> Response:
+    unavailable = source_sound_recording_unavailable(source)
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(
+        content={
+            "value": state["sound_recording_mode_intmic"],
+            "ability": SOURCE_SOUND_RECORDING_MODE_ABILITY,
+        }
+    )
+
+
+@app.put("/ccapi/ver100/shooting/settings/soundrecording/mode/{source}")
+async def canon_set_source_sound_recording_mode(
+    source: str,
+    payload: dict[str, object],
+) -> Response:
+    unavailable = source_sound_recording_unavailable(source)
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="sound_recording_mode_intmic",
+        ability=SOURCE_SOUND_RECORDING_MODE_ABILITY,
+        event_key="soundrecordingmodeintmic",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["sound_recording_mode_intmic"]})
+
+
+@app.get("/ccapi/ver100/shooting/settings/soundrecording/level/{source}")
+async def canon_get_source_sound_recording_level(source: str) -> Response:
+    unavailable = source_sound_recording_unavailable(source, requires_manual=True)
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(
+        content={
+            "value": state["sound_recording_level_intmic"],
+            "ability": SOUND_RECORDING_LEVEL_ABILITY,
+        }
+    )
+
+
+@app.put("/ccapi/ver100/shooting/settings/soundrecording/level/{source}")
+async def canon_set_source_sound_recording_level(
+    source: str,
+    payload: dict[str, object],
+) -> Response:
+    unavailable = source_sound_recording_unavailable(source, requires_manual=True)
+    if unavailable is not None:
+        return unavailable
+    if not update_integer_setting(
+        payload,
+        state_key="sound_recording_level_intmic",
+        ability=SOUND_RECORDING_LEVEL_ABILITY,
+        event_key="soundrecordinglevelintmic",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["sound_recording_level_intmic"]})
+
+
+@app.get("/ccapi/ver100/shooting/settings/soundrecording/windfilter/{source}")
+async def canon_get_source_wind_filter(source: str) -> Response:
+    unavailable = source_sound_recording_unavailable(source)
+    if unavailable is not None:
+        return unavailable
+    return JSONResponse(
+        content={"value": state["wind_filter_intmic"], "ability": SOURCE_WIND_FILTER_ABILITY}
+    )
+
+
+@app.put("/ccapi/ver100/shooting/settings/soundrecording/windfilter/{source}")
+async def canon_set_source_wind_filter(source: str, payload: dict[str, object]) -> Response:
+    unavailable = source_sound_recording_unavailable(source)
+    if unavailable is not None:
+        return unavailable
+    if not update_string_setting(
+        payload,
+        state_key="wind_filter_intmic",
+        ability=SOURCE_WIND_FILTER_ABILITY,
+        event_key="windfilterintmic",
+    ):
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter"})
+    return JSONResponse(content={"value": state["wind_filter_intmic"]})
+
+
+@app.get("/ccapi/ver100/shooting/settings/soundrecording/attenuator/{source}")
+async def canon_get_source_attenuator(source: str) -> Response:
+    return JSONResponse(status_code=503, content={"message": "Mode not supported"})
+
+
+@app.put("/ccapi/ver100/shooting/settings/soundrecording/attenuator/{source}")
+async def canon_set_source_attenuator(source: str, payload: dict[str, object]) -> Response:
+    return JSONResponse(status_code=503, content={"message": "Mode not supported"})
 
 
 @app.get("/ccapi/ver100/shooting/settings/focusbracketing")

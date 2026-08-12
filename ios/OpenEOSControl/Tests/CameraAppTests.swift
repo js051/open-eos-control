@@ -229,8 +229,12 @@ final class CameraAppTests: XCTestCase {
             CameraSetting(key: "cardselectionmovie", label: "Movie card", value: "card2", values: ["none", "card1", "card2"]),
             CameraSetting(key: "soundrecording", label: "Sound recording", value: "manual", values: ["auto", "manual", "disable"]),
             CameraSetting(key: "soundrecordinglevel", label: "Sound recording level", value: "32", values: (0...63).map(String.init)),
+            CameraSetting(key: "soundrecordingmodeintmic", label: "Internal mic", value: "auto", values: ["auto", "manual"]),
+            CameraSetting(key: "soundrecordinglevelintmic", label: "Internal mic level", value: "32", values: (0...63).map(String.init)),
             CameraSetting(key: "windfilter", label: "Wind filter", value: "auto", values: ["auto", "enable", "disable"]),
+            CameraSetting(key: "windfilterintmic", label: "Internal wind filter", value: "enable", values: ["enable", "disable"]),
             CameraSetting(key: "attenuator", label: "Attenuator", value: "disable", values: ["enable", "disable", "auto", "manual"]),
+            CameraSetting(key: "attenuatoracc", label: "Accessory attenuator", value: "disable", values: ["enable", "disable"]),
             CameraSetting(key: "beep", label: "Beep", value: "enable", values: ["enable", "disable", "disabletouch"]),
             CameraSetting(key: "displayoff", label: "Auto display off", value: "60", values: ["10", "20", "30", "60", "120", "180"]),
             CameraSetting(key: "focusbracketing", label: "Focus bracketing", value: "disable", values: ["enable", "disable"]),
@@ -253,7 +257,8 @@ final class CameraAppTests: XCTestCase {
             [
                 "moviequality", "highframerate", "moviecropping", "movieformat", "meteringmode",
                 "cardselectionmovie", "soundrecording",
-                "soundrecordinglevel", "windfilter", "attenuator", "beep", "displayoff",
+                "soundrecordinglevel", "soundrecordingmodeintmic", "soundrecordinglevelintmic",
+                "windfilter", "windfilterintmic", "attenuator", "attenuatoracc", "beep", "displayoff",
             ]
         )
 
@@ -847,6 +852,14 @@ final class CameraAppTests: XCTestCase {
             movieQualityDisplayValue("4096x2160_12000_alli_standard"),
             "4096x2160 / 120.00p / ALL-I"
         )
+        XCTAssertEqual(
+            movieQualityDisplayValue("4096x2160_5994_longgop_standard_fine"),
+            "4096x2160 / 59.94p / Long GOP / Fine"
+        )
+        XCTAssertEqual(movieFormatDisplayValue("xfhevcs-ycc422-10bit"), "XF-HEVC S / 4:2:2 / 10-bit")
+        XCTAssertEqual(movieFormatDisplayValue("xfavcs-ycc420-8bit"), "XF-AVC S / 4:2:0 / 8-bit")
+        XCTAssertEqual(movieFormatDisplayValue("raw"), "RAW")
+        XCTAssertEqual(movieFormatDisplayValue("mp4"), "MP4")
         XCTAssertNil(movieQualityDisplayValue("4K Fine 59.94p"))
     }
 

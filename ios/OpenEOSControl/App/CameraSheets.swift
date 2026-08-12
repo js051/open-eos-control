@@ -1014,6 +1014,9 @@ private struct MoreSettingsView: View {
         } else if [
             "zoom",
             "soundrecordinglevel",
+            "soundrecordinglevelintmic",
+            "soundrecordinglevelextmic",
+            "soundrecordinglevelacc",
             "focusbracketingnumberofshots",
             "focusbracketingfocusincrement",
         ].contains(setting.key.lowercased()) {
@@ -1157,8 +1160,13 @@ private struct MoreSettingsView: View {
            let display = movieQualityDisplayValue(
                value,
                lightLabel: language.string("camera_value_light"),
-               cropLabel: language.string("camera_value_crop")
+               cropLabel: language.string("camera_value_crop"),
+               fineLabel: language.string("camera_value_fine")
            ) {
+            return LocalizedStringKey(display)
+        }
+        if setting.key.lowercased() == "movieformat",
+           let display = movieFormatDisplayValue(value) {
             return LocalizedStringKey(display)
         }
         return LocalizedStringKey(settingValueLocalizationKey(key: setting.key, value: value) ?? value)

@@ -256,9 +256,21 @@
       aspectratio: "Aspect ratio",
       zoom: "Zoom",
       soundrecording: "Sound recording",
+      soundrecordingmodeintmic: "Internal microphone mode",
+      soundrecordingmodeextmic: "External microphone mode",
+      soundrecordingmodeacc: "Accessory microphone mode",
       soundrecordinglevel: "Sound recording level",
+      soundrecordinglevelintmic: "Internal microphone level",
+      soundrecordinglevelextmic: "External microphone level",
+      soundrecordinglevelacc: "Accessory microphone level",
       windfilter: "Wind filter",
+      windfilterintmic: "Internal microphone wind filter",
+      windfilterextmic: "External microphone wind filter",
+      windfilteracc: "Accessory microphone wind filter",
       attenuator: "Attenuator",
+      attenuatorintmic: "Internal microphone attenuator",
+      attenuatorextmic: "External microphone attenuator",
+      attenuatoracc: "Accessory microphone attenuator",
       focusbracketing: "Focus bracketing",
       focusbracketingnumberofshots: "Number of shots",
       focusbracketingfocusincrement: "Focus increment",
@@ -269,6 +281,7 @@
       movieformat: "Movie recording format",
       movieQualityLight: "Light",
       movieQualityCrop: "Crop",
+      movieQualityFine: "Fine",
       zoomspeed: "Power zoom speed",
       autopoweroff: "Auto power off",
       beep: "Beep",
@@ -605,10 +618,22 @@
       colorspace: "色彩空間",
       aspectratio: "畫面比例",
       zoom: "變焦",
-      soundrecording: "錄音模式",
+      soundrecording: "錄音",
+      soundrecordingmodeintmic: "內建麥克風模式",
+      soundrecordingmodeextmic: "外接麥克風模式",
+      soundrecordingmodeacc: "配件麥克風模式",
       soundrecordinglevel: "錄音音量",
+      soundrecordinglevelintmic: "內建麥克風音量",
+      soundrecordinglevelextmic: "外接麥克風音量",
+      soundrecordinglevelacc: "配件麥克風音量",
       windfilter: "風聲抑制",
+      windfilterintmic: "內建麥克風風聲抑制",
+      windfilterextmic: "外接麥克風風聲抑制",
+      windfilteracc: "配件麥克風風聲抑制",
       attenuator: "衰減器",
+      attenuatorintmic: "內建麥克風衰減器",
+      attenuatorextmic: "外接麥克風衰減器",
+      attenuatoracc: "配件麥克風衰減器",
       focusbracketing: "對焦包圍拍攝",
       focusbracketingnumberofshots: "拍攝張數",
       focusbracketingfocusincrement: "對焦增量",
@@ -619,6 +644,7 @@
       movieformat: "短片錄影格式",
       movieQualityLight: "輕量",
       movieQualityCrop: "裁切",
+      movieQualityFine: "精細",
       zoomspeed: "電動變焦速度",
       autopoweroff: "自動關閉電源",
       beep: "提示音",
@@ -1664,6 +1690,7 @@
     const key = typeof settingOrKey === "string" ? settingOrKey : settingOrKey.key;
     const rawValue = String(value);
     if (key === "moviequality") return movieQualityDisplayValue(rawValue) || rawValue;
+    if (key === "movieformat") return movieFormatDisplayValue(rawValue) || rawValue;
     if (key === "zoom") return `${rawValue}%`;
     let messageKey = commonSettingValueKeys[rawValue.toLowerCase()];
     if (key === "alomode") {
@@ -1707,16 +1734,29 @@
     if (!/^\d{4,5}$/.test(parts[1])) return null;
     const frameRateHundredths = Number(parts[1]);
     const frameRate = `${Math.floor(frameRateHundredths / 100)}.${String(frameRateHundredths % 100).padStart(2, "0")}p`;
-    const compression = { raw: "RAW", alli: "ALL-I", ipb: "IPB" }[parts[2].toLowerCase()];
+    const compression = { raw: "RAW", alli: "ALL-I", ipb: "IPB", longgop: "Long GOP" }[parts[2].toLowerCase()];
     if (!frameRate || !compression) return null;
     const labels = [size, frameRate, compression];
     if (parts[3].toLowerCase() === "light") labels.push(t("movieQualityLight"));
     else if (parts[3].toLowerCase() !== "standard") return null;
     if (parts.length === 5) {
-      if (parts[4].toLowerCase() !== "crop") return null;
-      labels.push(t("movieQualityCrop"));
+      if (parts[4].toLowerCase() === "crop") labels.push(t("movieQualityCrop"));
+      else if (parts[4].toLowerCase() === "fine") labels.push(t("movieQualityFine"));
+      else return null;
     }
     return labels.join(" / ");
+  }
+
+  function movieFormatDisplayValue(rawValue) {
+    const normalized = String(rawValue).toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normalized === "raw") return "RAW";
+    if (normalized === "mp4") return "MP4";
+    return {
+      xfhevcsycc42210bit: "XF-HEVC S / 4:2:2 / 10-bit",
+      xfhevcsycc42010bit: "XF-HEVC S / 4:2:0 / 10-bit",
+      xfavcsycc42210bit: "XF-AVC S / 4:2:2 / 10-bit",
+      xfavcsycc4208bit: "XF-AVC S / 4:2:0 / 8-bit",
+    }[normalized] || null;
   }
 
   function currentSettingValue(setting) {
@@ -1860,6 +1900,15 @@
   }
 
   function renderAdvancedSettings() {
+    const focusedControl = document.activeElement;
+    if (focusedControl && ui.advancedSettings.contains(focusedControl)) {
+      const fileNamingField = focusedControl.dataset?.fileNamingField;
+      if (fileNamingField) state.fileNamingDrafts[fileNamingField] = focusedControl.value;
+      const settingKey = focusedControl.dataset?.settingKey;
+      if (settingKey && focusedControl.matches('input[type="text"]')) {
+        state.settingDrafts[settingKey] = focusedControl.value;
+      }
+    }
     ui.advancedSettings.replaceChildren();
     const settings = (state.capabilities?.settings || []).filter(
       (setting) => !CORE_SETTINGS.includes(setting.key) && settingMatchesCaptureMode(setting),
@@ -2044,6 +2093,9 @@
       if ([
         "zoom",
         "soundrecordinglevel",
+        "soundrecordinglevelintmic",
+        "soundrecordinglevelextmic",
+        "soundrecordinglevelacc",
         "focusbracketingnumberofshots",
         "focusbracketingfocusincrement",
       ].includes(setting.key)) {
@@ -2154,6 +2206,7 @@
     input.type = numeric ? "number" : "text";
     input.value = state.fileNamingDrafts[field] ?? current;
     input.maxLength = maximumLength;
+    input.dataset.fileNamingField = field;
     input.setAttribute("aria-label", t(labelKey));
     if (numeric) {
       const range = field === "movie-reel-number"
@@ -2386,10 +2439,11 @@
     const key = setting.key.toLowerCase();
     if (key === "moviemode") return false;
     const videoTokens = ["movie", "video", "frame", "codec", "record", "sound"];
-    const videoOnlyKeys = new Set(["windfilter", "attenuator"]);
+    const videoOnlyPrefixes = ["windfilter", "attenuator"];
     const photoTokens = ["still", "photo", "drive", "imagequality", "capturetarget", "capturestorage", "directory"];
     if (state.captureMode === "photo") {
-      return !videoOnlyKeys.has(key) && !videoTokens.some((token) => key.includes(token));
+      return !videoOnlyPrefixes.some((prefix) => key.startsWith(prefix))
+        && !videoTokens.some((token) => key.includes(token));
     }
     return !key.startsWith("focusbracketing") && !photoTokens.some((token) => key.includes(token));
   }
