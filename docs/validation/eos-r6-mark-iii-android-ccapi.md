@@ -1,7 +1,7 @@
 # EOS R6 Mark III Android CCAPI Validation
 
 - Initial validation date: 2026-07-22
-- Latest protocol recheck: 2026-08-12
+- Latest protocol recheck: 2026-08-13
 
 This record captures physical-camera evidence reported from the Android app. Identifiers are intentionally redacted. It proves only the rows marked **Passed**; deterministic tests remain separate evidence and untested controls remain capability-gated.
 
@@ -160,9 +160,21 @@ A production-path debug APK was installed on a Pixel 6 Pro API 34 AVD. The emula
 
 No camera identifier, media image or media filename is retained in this repository; the example filename above is intentionally omitted from the validation record.
 
+## 2026-08-13 v0.2.0 Post-Release Recheck
+
+The physical camera was connected to the PC only through its Wi-Fi access point. This pass used the released `0.2.0` production `CcapiEngine`; no Android device was visible to ADB, so these results do not close the physical-phone validation item. No serial, SSID, credential, media filename, media bytes or image was retained.
+
+- Discovery again required Canon's developer-list fallback and returned firmware `1.1.0`, four protocol versions, 246 validated commands, 42 writable setting keys, 38 supported features and 8 planned features. Status reported one storage device, a mounted lens and normal temperature.
+- AUTO Live View rejected RTP with HTTP 503 `Mode not supported`, cleaned it up and selected multipart. Explicit multipart and JPEG polling returned complete in-memory JPEGs at `SMALL` and `MEDIUM`. The camera again rejected advertised `LARGE`; both sources downgraded it to effective `MEDIUM` without leaving Live View active.
+- Requested 6 and 15 FPS produced 6.0 and 15.0 FPS through multipart, and 6.1 and 14.6 FPS through polling. A 30 FPS request produced 16.2 FPS through multipart and 14.2 FPS through polling in this short pass. Requested FPS therefore remains a cap rather than a throughput promise.
+- Independent AF, balanced Near Small/Far Small focus drive and center Tap AF all succeeded. A following frame proved Live View recovered after those commands. Timed half-press again returned Canon HTTP 503 `AF NG`; the guaranteed release path still ran, so this is recorded as unconfirmed autofocus for the current scene rather than a stuck shutter or successful half-press.
+- The bounded media list returned 500 items: 487 images and 13 videos. One anonymous JPEG passed fresh information, decoded 160x120 thumbnail, decoded 1620x1080 display preview and exact streamed download checks. The declared and received download lengths were both 8,776,167 bytes across 134 chunks, and the stream was discarded without persistence.
+- Event long polling returned 64 bounded structural change keys. Explicit stop, a repeated already-stopped stop and session close all completed successfully. Final Live View state was inactive.
+- No still capture, recording, Bulb exposure, Click White Balance, media mutation/deletion, setting write, clock synchronization, directory/file naming write, sensor cleaning, sleep or power command was sent.
+
 ## Next Physical Pass
 
-1. Install a development build containing the Android RTP readiness fix. Keep cellular data enabled while connected to the camera Wi-Fi, press Debug Refresh, and confirm `cameraRoute=WIFI_BOUND`, `cameraNetworkAvailable=true`, `systemDefaultTransport=CELLULAR`, `systemDefaultValidated=true`, and `wifiCellularCoexistence=true`. Open a public HTTPS page in another app without disconnecting the camera and record the result.
+1. Install `0.2.0` or a newer development build on a physical Android phone. Keep cellular data enabled while connected to the camera Wi-Fi, press Debug Refresh, and confirm `cameraRoute=WIFI_BOUND`, `cameraNetworkAvailable=true`, `systemDefaultTransport=CELLULAR`, `systemDefaultValidated=true`, and `wifiCellularCoexistence=true`. Open a public HTTPS page in another app without disconnecting the camera and record the result.
 2. Repeat the AVD-proven Android paths on a physical phone: event-driven exposure refresh, AUTO multipart, exact effective size after `LARGE` fallback, 6/15/30 requested versus observed FPS, center Tap AF, storage list, thumbnail, preview, bounded download, reconnect, and stale-event isolation. Require matching `observedFeatures` before marking physical-device rows passed.
 3. On iPhone/iPad, repeat the direct CCAPI Live View, event, focus, and media read-only pass after the macOS package/App CI is green. RTP remains a separate test because this camera currently rejects start before UDP delivery.
 4. Test still capture, recording, Click WB, metadata writes, clock synchronization, directory/file naming changes, sensor cleaning and sleep only in an explicitly approved state-changing pass with suitable media and restore procedures.
