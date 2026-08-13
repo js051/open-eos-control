@@ -807,12 +807,40 @@ private struct CameraVideoPreview: View {
                 .ignoresSafeArea()
                 .onAppear { playback.play() }
                 .onDisappear { playback.pause() }
-            if playback.errorMessage != nil {
-                Text(language.string("media_video_unavailable"))
-                    .foregroundStyle(Color.cameraSecondaryText)
-                    .padding(24)
-                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+            if playback.isPreparingFallback {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .tint(.white)
+                    Text(language.string("media_video_preparing"))
+                }
+                .foregroundStyle(.white)
+                .padding(24)
+                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+            } else if let failure = playback.failure {
+                VStack(spacing: 8) {
+                    Text(language.string(videoFailureKey(failure)))
+                        .multilineTextAlignment(.center)
+                    if failure == .unsupportedFormat {
+                        Text(language.string("media_video_download_hint"))
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .foregroundStyle(Color.cameraSecondaryText)
+                .padding(24)
+                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
             }
+        }
+    }
+
+    private func videoFailureKey(_ failure: CameraMediaPlaybackFailure) -> String {
+        switch failure {
+        case .unsupportedFormat:
+            return "media_video_unsupported_format"
+        case .incompleteRange:
+            return "media_video_incomplete"
+        case .transport:
+            return "media_video_unavailable"
         }
     }
 }
