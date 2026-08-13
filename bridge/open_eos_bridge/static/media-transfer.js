@@ -23,6 +23,17 @@
     return error;
   }
 
+  function lengthMismatchError(expectedBytes, actualBytes) {
+    const error = new Error(
+      `Media response length mismatch: received ${actualBytes} of ${expectedBytes} bytes`,
+    );
+    error.name = "MediaLengthMismatchError";
+    error.code = "MEDIA_LENGTH_MISMATCH";
+    error.expectedBytes = expectedBytes;
+    error.actualBytes = actualBytes;
+    return error;
+  }
+
   function isAbortError(error) {
     return error?.name === "AbortError" || error?.code === 20;
   }
@@ -62,7 +73,8 @@
     }
 
     throwIfAborted(signal);
-    let totalBytes = totalBytesForResponse(response, expectedBytes);
+    const declaredBytes = totalBytesForResponse(response, expectedBytes);
+    let totalBytes = declaredBytes;
     let bytesTransferred = 0;
     const chunks = writeChunk ? null : [];
     const report = () => onProgress({ bytesTransferred, totalBytes });
@@ -74,7 +86,9 @@
       if (writeChunk) await writeChunk(chunk);
       else chunks.push(chunk);
       bytesTransferred += chunk.byteLength;
-      if (totalBytes !== null && bytesTransferred > totalBytes) totalBytes = null;
+      if (declaredBytes !== null && bytesTransferred > declaredBytes) {
+        throw lengthMismatchError(declaredBytes, bytesTransferred);
+      }
       report();
     };
 
@@ -106,6 +120,9 @@
     }
 
     throwIfAborted(signal);
+    if (declaredBytes !== null && bytesTransferred !== declaredBytes) {
+      throw lengthMismatchError(declaredBytes, bytesTransferred);
+    }
     totalBytes = bytesTransferred;
     report();
     const contentType = response.headers?.get?.("content-type") || "application/octet-stream";
@@ -120,6 +137,7 @@
   return {
     DIRECT_FILE_WRITE_THRESHOLD_BYTES,
     cancellationError,
+    lengthMismatchError,
     isAbortError,
     readResponse,
     safeDownloadName,

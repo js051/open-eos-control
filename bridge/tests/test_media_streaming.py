@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
 import pytest
 
 from open_eos_bridge.media_streaming import (
     InvalidMediaRange,
     MediaByteRange,
+    MediaPlaybackCache,
     MediaPlaybackTickets,
     parse_media_range,
     ranged_chunks,
 )
+from open_eos_bridge.models import MediaItem
 
 
 @pytest.mark.parametrize(
@@ -51,3 +56,33 @@ def test_playback_tickets_are_bound_to_session_and_media_and_can_be_revoked() ->
 
     tickets.revoke_session("session-a")
     assert tickets.resolve(token) is None
+
+
+def test_playback_cache_expires_files_and_evicts_old_entries(tmp_path: Path) -> None:
+    cache = MediaPlaybackCache(max_bytes=10, max_entries=1)
+    item = MediaItem(id="media-a", name="A.MP4", kind="video", size_bytes=5, content_type="video/mp4")
+    first = tmp_path / "first.bin"
+    second = tmp_path / "second.bin"
+    first.write_bytes(b"12345")
+    second.write_bytes(b"67890")
+
+    cache.put("ticket-a", "session-a", item, first, time.monotonic() + 60)
+    cache.put(
+        "ticket-b",
+        "session-a",
+        item.model_copy(update={"id": "media-b", "name": "B.MP4"}),
+        second,
+        time.monotonic() + 60,
+    )
+
+    assert cache.get("ticket-a") is None
+    assert not first.exists()
+    assert cache.get("ticket-b") is not None
+    cache.remove("ticket-b")
+    assert not second.exists()
+
+    expired = tmp_path / "expired.bin"
+    expired.write_bytes(b"12345")
+    cache.put("ticket-expired", "session-a", item, expired, time.monotonic() - 1)
+    assert cache.get("ticket-expired") is None
+    assert not expired.exists()

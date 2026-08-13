@@ -416,10 +416,100 @@ def test_authenticated_video_playback_ticket_supports_head_range_and_revocation(
     assert partial.content == payload[3:10]
     assert partial.headers["content-range"] == f"bytes 3-9/{len(payload)}"
     assert partial.headers["content-length"] == "7"
+    assert partial.headers["content-type"].startswith("video/mp4")
+    assert partial.headers["x-open-eos-range-mode"] == "staged-file"
     assert invalid.status_code == 416
     assert invalid.headers["content-range"] == f"bytes */{len(payload)}"
     assert revoked.status_code == 204
     assert after_revoke.status_code == 404
+
+
+def test_media_response_rejects_truncated_camera_stream_before_headers() -> None:
+    runner = FakeRunner()
+    video_name = "CLIP_0001.MP4"
+    camera_folder = "/store_00010001/DCIM/100CANON"
+    runner.uploaded_files[(camera_folder, video_name)] = b"declared-video"
+    runner.stream_payloads[(camera_folder, video_name)] = b"short"
+    engine = GPhoto2Engine(runner)
+    headers = {"Authorization": "Bearer test-token"}
+
+    with TestClient(create_app(engine=engine, token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        media = client.get(f"/v1/session/{session_id}/media", headers=headers).json()["items"]
+        video = next(item for item in media if item["name"] == video_name)
+        response = client.get(f"/v1/session/{session_id}/media/{video['id']}", headers=headers)
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "MEDIA_LENGTH_MISMATCH"
+    assert "truncated" in response.json()["error"]["message"]
+
+
+def test_failed_video_playback_revokes_ticket() -> None:
+    runner = FakeRunner()
+    video_name = "CLIP_0001.MP4"
+    camera_folder = "/store_00010001/DCIM/100CANON"
+    runner.uploaded_files[(camera_folder, video_name)] = b"declared-video"
+    runner.stream_payloads[(camera_folder, video_name)] = b"short"
+    engine = GPhoto2Engine(runner)
+    headers = {"Authorization": "Bearer test-token"}
+
+    with TestClient(create_app(engine=engine, token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        media = client.get(f"/v1/session/{session_id}/media", headers=headers).json()["items"]
+        video = next(item for item in media if item["name"] == video_name)
+        ticket = client.post(
+            f"/v1/session/{session_id}/media/{video['id']}/playback",
+            headers=headers,
+        )
+        playback_url = ticket.json()["url"]
+        failed = client.get(playback_url)
+        after_failure = client.get(playback_url)
+
+    assert ticket.status_code == 200
+    assert failed.status_code == 502
+    assert failed.json()["error"]["code"] == "MEDIA_LENGTH_MISMATCH"
+    assert after_failure.status_code == 404
+
+
+def test_video_playback_reuses_verified_staging_for_multiple_ranges() -> None:
+    runner = FakeRunner()
+    video_name = "CLIP_0001.MP4"
+    camera_folder = "/store_00010001/DCIM/100CANON"
+    payload = b"0123456789abc"
+    runner.uploaded_files[(camera_folder, video_name)] = payload
+    runner.stream_payloads[(camera_folder, video_name)] = payload
+    engine = GPhoto2Engine(runner)
+    headers = {"Authorization": "Bearer test-token"}
+
+    with TestClient(create_app(engine=engine, token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        media = client.get(f"/v1/session/{session_id}/media", headers=headers).json()["items"]
+        video = next(item for item in media if item["name"] == video_name)
+        ticket = client.post(
+            f"/v1/session/{session_id}/media/{video['id']}/playback",
+            headers=headers,
+        )
+        playback_url = ticket.json()["url"]
+        first = client.get(playback_url, headers={"Range": "bytes=0-3"})
+        second = client.get(playback_url, headers={"Range": "bytes=4-7"})
+        head = client.head(playback_url)
+        client.delete(playback_url)
+
+    upstream_reads = [
+        command
+        for command in runner.commands
+        if "--get-file" in command and video_name in command
+    ]
+    assert first.status_code == 206
+    assert first.content == payload[:4]
+    assert second.status_code == 206
+    assert second.content == payload[4:8]
+    assert head.status_code == 200
+    assert head.headers["content-length"] == str(len(payload))
+    assert len(upstream_reads) == 1
 
 
 def test_video_playback_ticket_rejects_images_and_expires_with_session(tmp_path: Path) -> None:
