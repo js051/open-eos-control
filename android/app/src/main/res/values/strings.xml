@@ -320,6 +320,7 @@
     <string name="media_sort">Sort media</string>
     <string name="media_newest_first">Newest first</string>
     <string name="media_oldest_first">Oldest first</string>
+    <string name="media_filename">File name</string>
     <string name="no_filtered_media">No media matches this filter.</string>
     <string name="previous_media">Previous media</string>
     <string name="next_media">Next media</string>

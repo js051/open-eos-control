@@ -591,8 +591,52 @@ async function run() {
       "Canon Bulb release",
     );
 
+    const bulkMedia = Array.from({ length: 145 }, (_, index) => ({
+      id: `BULK_${index + 1}.JPG`,
+      name: `BULK_${index + 1}.JPG`,
+      kind: "image",
+      sizeBytes: 2048 + index,
+      captureTime: null,
+      previewAvailable: false,
+    }));
+    const mediaListRoute = /\/v1\/session\/[^/]+\/media(?:\?.*)?$/;
+    const bulkThumbnailRoute = /\/v1\/session\/[^/]+\/media\/BULK_[^/]+\/thumbnail(?:\?.*)?$/;
+    const bulkThumbnail = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    );
+    await page.route(mediaListRoute, (route) => route.fulfill({ json: { items: bulkMedia } }));
+    await page.route(bulkThumbnailRoute, (route) => route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: bulkThumbnail,
+    }));
     await page.click('.tab[data-view="media"]');
     await page.waitForSelector("#media-panel:not([hidden])");
+    await page.waitForFunction(() => document.querySelectorAll(".media-card").length === 72);
+    assert.equal(await page.locator("#media-page-status").innerText(), "1-72 of 145");
+    await page.click("#media-page-next");
+    assert.equal(await page.locator(".media-card").count(), 72);
+    assert.equal(await page.locator("#media-page-status").innerText(), "73-144 of 145");
+    await page.click("#media-page-next");
+    assert.equal(await page.locator(".media-card").count(), 1);
+    assert.equal(await page.locator("#media-page-status").innerText(), "145-145 of 145");
+    await page.selectOption("#media-sort-select", "name");
+    assert.equal(await page.locator("#media-page-status").innerText(), "1-72 of 145");
+    assert.match(await page.locator(".media-card").first().innerText(), /BULK_1\.JPG/);
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    await page.locator("#media-panel").screenshot({
+      path: path.join(RESULTS_DIR, "desktop-large-media-library.png"),
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await page.locator("#media-panel").screenshot({
+      path: path.join(RESULTS_DIR, "narrow-large-media-library.png"),
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.unroute(mediaListRoute);
+    await page.unroute(bulkThumbnailRoute);
+    await page.click("#media-refresh-button");
     const capturedMedia = page.locator(".media-card").filter({ hasText: "SIM_0003.JPG" });
     await capturedMedia.waitFor({ state: "visible" });
     assert.equal(await page.locator("#media-filter-control button.active").innerText(), "All");

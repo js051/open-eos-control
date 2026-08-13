@@ -43,6 +43,20 @@ class MediaLibraryTest {
     }
 
     @Test
+    fun filenameSortUsesNaturalAscendingOrderRegardlessOfCaptureDate() {
+        val items = listOf(
+            media("ten", "IMG_10.JPG", "2026-08-14T10:00:00Z"),
+            media("two", "img_2.jpg", "2026-08-15T10:00:00Z"),
+            media("one", "IMG_1.JPG"),
+        )
+
+        assertEquals(
+            listOf("one", "two", "ten"),
+            mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NAME).map { it.id },
+        )
+    }
+
+    @Test
     fun groupsSortedItemsByCameraDateWithoutChangingOrder() {
         val items = listOf(
             media("new-a", "IMG_0003.JPG", "2026-08-14T10:00:00Z"),
@@ -57,8 +71,36 @@ class MediaLibraryTest {
                 MediaDateGroup("2026-08-13", listOf(items[2])),
                 MediaDateGroup(null, listOf(items[3])),
             ),
-            mediaDateGroups(items),
+            mediaGroupsForDisplay(items, MediaSort.NEWEST),
         )
+    }
+
+    @Test
+    fun filenameSortGroupsOnlyContiguousNaturalNameInitials() {
+        val items = listOf(
+            media("a2", "A2.JPG"),
+            media("a10", "A10.JPG"),
+            media("b1", "B1.JPG"),
+        )
+
+        assertEquals(
+            listOf(
+                MediaDateGroup("A", items.take(2)),
+                MediaDateGroup("B", listOf(items.last())),
+            ),
+            mediaGroupsForDisplay(items, MediaSort.NAME),
+        )
+    }
+
+    @Test
+    fun touchingCachedThumbnailMovesItToTheMostRecentPosition() {
+        val cache = linkedMapOf("one" to 1, "two" to 2, "three" to 3)
+
+        assertEquals(
+            listOf("one", "three", "two"),
+            touchMediaCacheEntry(cache, "two").keys.toList(),
+        )
+        assertEquals(cache, touchMediaCacheEntry(cache, "missing"))
     }
 
     private fun media(

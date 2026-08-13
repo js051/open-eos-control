@@ -104,6 +104,10 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "media-transfer-status",
         "media-transfer-progress",
         "media-transfer-cancel",
+        "media-pagination",
+        "media-page-previous",
+        "media-page-status",
+        "media-page-next",
         "physical-validation-title",
         "physical-validation-status",
         "physical-validation-list",
@@ -120,6 +124,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
     assert "/app/local-video.js" in parser.assets
     assert "/app/rtp-audio.js" in parser.assets
     assert "/app/media-transfer.js" in parser.assets
+    assert "/app/media-library.js" in parser.assets
 
 
 def test_static_labels_exist_in_both_supported_languages() -> None:

@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "test:browser": "node tests/local-video.browser.test.js && node tests/ccapi.browser.test.js",
-    "test:modules": "node tests/diagnostics.test.js && node tests/monitoring.test.js && node tests/lut.test.js && node tests/local-video.test.js && node tests/rtp-audio.test.js && node tests/media-transfer.test.js"
+    "test:modules": "node tests/diagnostics.test.js && node tests/monitoring.test.js && node tests/lut.test.js && node tests/local-video.test.js && node tests/rtp-audio.test.js && node tests/media-transfer.test.js && node tests/media-library.test.js"
   },
   "devDependencies": {
     "playwright": "1.62.0"

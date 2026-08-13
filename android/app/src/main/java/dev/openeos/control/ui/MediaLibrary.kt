@@ -12,12 +12,17 @@ import java.time.format.DateTimeParseException
 
 enum class MediaFilter { ALL, PHOTOS, VIDEOS }
 
-enum class MediaSort { NEWEST, OLDEST }
+enum class MediaSort { NEWEST, OLDEST, NAME }
 
 data class MediaDateGroup(
     val date: String?,
     val items: List<CameraMediaItem>,
 )
+
+internal fun <Value : Any> touchMediaCacheEntry(values: Map<String, Value>, id: String): Map<String, Value> {
+    val value = values[id] ?: return values
+    return values.filterKeys { it != id } + (id to value)
+}
 
 internal fun mediaItemsForDisplay(
     items: List<CameraMediaItem>,
@@ -40,10 +45,23 @@ internal val CameraMediaItem.isVideo: Boolean
     get() = kind.equals("video", ignoreCase = true) ||
         name.substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS
 
-internal fun mediaDateGroups(items: List<CameraMediaItem>): List<MediaDateGroup> =
-    items.groupBy(CameraMediaItem::mediaDate).map { (date, datedItems) ->
-        MediaDateGroup(date = date, items = datedItems)
+internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort): List<MediaDateGroup> {
+    val groups = mutableListOf<MediaDateGroup>()
+    items.forEach { item ->
+        val heading = if (sort == MediaSort.NAME) {
+            item.name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "#"
+        } else {
+            item.mediaDate
+        }
+        if (groups.lastOrNull()?.date == heading) {
+            val last = groups.removeLast()
+            groups += last.copy(items = last.items + item)
+        } else {
+            groups += MediaDateGroup(date = heading, items = listOf(item))
+        }
     }
+    return groups
+}
 
 private val CameraMediaItem.mediaDate: String?
     get() = captureTime?.trim()?.let { value ->
@@ -56,6 +74,10 @@ private val CameraMediaItem.mediaDate: String?
     }
 
 private fun compareMediaItems(left: CameraMediaItem, right: CameraMediaItem, sort: MediaSort): Int {
+    if (sort == MediaSort.NAME) {
+        return naturalCompare(left.name, right.name).takeIf { it != 0 }
+            ?: left.id.compareTo(right.id)
+    }
     val leftTime = left.captureTime.toMediaInstant()
     val rightTime = right.captureTime.toMediaInstant()
     if (leftTime != null || rightTime != null) {

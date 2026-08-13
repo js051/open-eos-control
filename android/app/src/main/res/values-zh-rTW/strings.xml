@@ -367,6 +367,7 @@
     <string name="media_sort">排序媒體</string>
     <string name="media_newest_first">最新優先</string>
     <string name="media_oldest_first">最舊優先</string>
+    <string name="media_filename">檔案名稱</string>
     <string name="no_filtered_media">沒有符合此篩選條件的媒體。</string>
     <string name="previous_media">上一個媒體</string>
     <string name="next_media">下一個媒體</string>

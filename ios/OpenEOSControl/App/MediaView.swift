@@ -353,7 +353,7 @@ struct MediaView: View {
                     .font(.title3)
                     .foregroundStyle(Color.cameraAccent)
             }
-            if item.kind.lowercased() == "video" {
+            if mediaIsVideo(item) {
                 Image(systemName: "play.fill")
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -485,22 +485,14 @@ struct MediaView: View {
 
     private func canPreview(_ item: CameraMediaItem) -> Bool {
         guard !camera.isPreview else { return false }
-        if item.kind.lowercased() == "video" {
+        if mediaIsVideo(item) {
             return camera.supports(.mediaDownload)
         }
         return item.previewAvailable && camera.supports(.mediaPreview)
     }
 
     private var displayedMedia: [CameraMediaItem] {
-        camera.mediaItems
-            .filter { item in
-                switch mediaFilter {
-                case .all: true
-                case .photos: item.kind.lowercased() != "video"
-                case .videos: item.kind.lowercased() == "video"
-                }
-            }
-            .sorted(by: mediaSortComparator)
+        mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort)
     }
 
     private var mediaGroups: [MediaGroup] {
@@ -522,65 +514,6 @@ struct MediaView: View {
         return groups
     }
 
-    private func mediaSortComparator(_ lhs: CameraMediaItem, _ rhs: CameraMediaItem) -> Bool {
-        switch mediaSort {
-        case .newest:
-            return compareDates(lhs, rhs, newestFirst: true)
-        case .oldest:
-            return compareDates(lhs, rhs, newestFirst: false)
-        case .name:
-            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-        }
-    }
-
-    private func compareDates(_ lhs: CameraMediaItem, _ rhs: CameraMediaItem, newestFirst: Bool) -> Bool {
-        let left = mediaCaptureDate(lhs)
-        let right = mediaCaptureDate(rhs)
-        if left == right {
-            return lhs.name.localizedStandardCompare(rhs.name) == (newestFirst ? .orderedDescending : .orderedAscending)
-        }
-        guard let left else { return false }
-        guard let right else { return true }
-        return newestFirst ? left > right : left < right
-    }
-
-    private func mediaCaptureDate(_ item: CameraMediaItem) -> Date? {
-        guard let value = item.captureTime else { return nil }
-        return Self.mediaDateFormatter.date(from: value) ?? Self.mediaDateFormatterWithoutFraction.date(from: value)
-    }
-
-    private static let mediaDateFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let mediaDateFormatterWithoutFraction = ISO8601DateFormatter()
-}
-
-private enum MediaFilter: String, CaseIterable, Identifiable {
-    case all
-    case photos
-    case videos
-
-    var id: String { rawValue }
-    var localizationKey: String { "media_filter_\(rawValue)" }
-}
-
-private enum MediaSort: String, CaseIterable, Identifiable {
-    case newest
-    case oldest
-    case name
-
-    var id: String { rawValue }
-    var localizationKey: String { "media_sort_\(rawValue)" }
-    var systemImage: String {
-        switch self {
-        case .newest: "calendar.badge.clock"
-        case .oldest: "calendar"
-        case .name: "textformat"
-        }
-    }
 }
 
 private struct MediaGroup: Identifiable {

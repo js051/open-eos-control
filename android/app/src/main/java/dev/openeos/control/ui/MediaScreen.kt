@@ -281,6 +281,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             displayedItems.isEmpty() && !state.isBusy(CameraOperation.MEDIA) && !state.mediaLibraryLoading -> MediaMessage(R.string.no_filtered_media)
             else -> MediaGalleryGrid(
                 items = displayedItems,
+                sort = mediaSort,
                 state = state,
                 actions = actions,
                 onPreview = actions.openMediaPreview,

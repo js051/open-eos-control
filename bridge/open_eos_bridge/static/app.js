@@ -13,6 +13,8 @@
   if (!rtpAudio) throw new Error("Open EOS RTP audio module is unavailable.");
   const mediaTransfer = globalThis.OpenEOSMediaTransfer;
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
+  const mediaLibrary = globalThis.OpenEOSMediaLibrary;
+  if (!mediaLibrary) throw new Error("Open EOS media library module is unavailable.");
 
   const FEATURES = {
     RECORDABLE_STATUS: "RECORDABLE_STATUS",
@@ -57,6 +59,8 @@
   const CCAPI_USERNAME_KEY = "open-eos-control-ccapi-username";
   const MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024;
   const MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024;
+  const MEDIA_PAGE_SIZE = 72;
+  const MAX_MEDIA_THUMBNAIL_CACHE_ITEMS = 96;
   const LOCAL_VIDEO_RENDER_INTERVAL_MILLIS = 100;
 
   const messages = {
@@ -359,6 +363,10 @@
       mediaNewest: "Newest first",
       mediaOldest: "Oldest first",
       mediaName: "File name",
+      mediaPages: "Media pages",
+      previousMediaPage: "Previous media page",
+      nextMediaPage: "Next media page",
+      mediaPageStatus: "{start}-{end} of {total}",
       mediaUnknownDate: "Unknown date",
       manageMedia: "Manage {name}",
       mediaDetails: "Media details",
@@ -729,6 +737,10 @@
       mediaNewest: "最新優先",
       mediaOldest: "最舊優先",
       mediaName: "檔案名稱",
+      mediaPages: "媒體頁面",
+      previousMediaPage: "上一頁媒體",
+      nextMediaPage: "下一頁媒體",
+      mediaPageStatus: "第 {start}-{end} 個，共 {total} 個",
       mediaUnknownDate: "日期不明",
       manageMedia: "管理 {name}",
       mediaDetails: "媒體詳細資料",
@@ -1032,6 +1044,7 @@
     mediaRefreshPromise: null,
     mediaFilter: "all",
     mediaSort: "newest",
+    mediaPage: 0,
     mediaThumbnailUrls: new Map(),
     mediaThumbnailLoads: new Set(),
     mediaThumbnailFailures: new Set(),
@@ -1153,6 +1166,10 @@
     mediaList: byId("media-list"),
     mediaFilterControl: byId("media-filter-control"),
     mediaSortSelect: byId("media-sort-select"),
+    mediaPagination: byId("media-pagination"),
+    mediaPagePrevious: byId("media-page-previous"),
+    mediaPageNext: byId("media-page-next"),
+    mediaPageStatus: byId("media-page-status"),
     mediaTransfer: byId("media-transfer"),
     mediaTransferName: byId("media-transfer-name"),
     mediaTransferStatus: byId("media-transfer-status"),
@@ -1610,6 +1627,7 @@
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
     state.media = [];
+    state.mediaPage = 0;
     state.mediaLoaded = false;
     state.mediaDownloadPreparing = false;
     state.mediaDownload = null;
@@ -4132,10 +4150,17 @@
     if (!ui.mediaList) return;
     mediaThumbnailObserver?.disconnect();
     const visibleItems = displayedMedia();
+    const mediaPage = mediaLibrary.page(visibleItems, state.mediaPage, MEDIA_PAGE_SIZE);
+    state.mediaPage = mediaPage.pageIndex;
+    mediaPage.items.forEach((item) => mediaLibrary.touch(state.mediaThumbnailUrls, item.id));
     ui.mediaSummary.textContent = visibleItems.length === state.media.length
       ? t("mediaCount", { count: state.media.length })
       : t("mediaFilteredCount", { visible: visibleItems.length, total: state.media.length });
     ui.mediaSortSelect.value = state.mediaSort;
+    ui.mediaPagination.hidden = mediaPage.pageCount <= 1;
+    ui.mediaPageStatus.textContent = t("mediaPageStatus", mediaPage);
+    ui.mediaPagePrevious.disabled = mediaPage.pageIndex === 0;
+    ui.mediaPageNext.disabled = mediaPage.pageIndex >= mediaPage.pageCount - 1;
     ui.mediaFilterControl.querySelectorAll("[data-media-filter]").forEach((button) => {
       const active = button.dataset.mediaFilter === state.mediaFilter;
       button.classList.toggle("active", active);
@@ -4150,7 +4175,7 @@
       return;
     }
     let previousDate = null;
-    visibleItems.forEach((item) => {
+    mediaPage.items.forEach((item) => {
       const date = mediaDateGroup(item);
       if (date !== previousDate) {
         const heading = document.createElement("h3");
@@ -4215,40 +4240,24 @@
   }
 
   function mediaIsVideo(item) {
-    return String(item?.kind || "").toLowerCase() === "video" ||
-      String(item?.contentType || "").toLowerCase().startsWith("video/");
+    return mediaLibrary.isVideo(item);
   }
 
   function mediaTime(item) {
-    const value = Date.parse(item.captureTime || "");
-    return Number.isFinite(value) ? value : null;
+    return mediaLibrary.mediaTime(item);
   }
 
   function naturalMediaName(left, right) {
-    return String(left.name).localeCompare(String(right.name), resolvedLanguage(), {
-      numeric: true,
-      sensitivity: "base",
-    });
+    return mediaLibrary.naturalName(left, right, resolvedLanguage());
   }
 
   function displayedMedia() {
-    const filtered = state.media.filter((item) => {
-      if (state.mediaFilter === "video") return mediaIsVideo(item);
-      if (state.mediaFilter === "photo") return !mediaIsVideo(item);
-      return true;
-    });
-    return filtered.sort((left, right) => {
-      if (state.mediaSort === "name") return naturalMediaName(left, right);
-      const leftTime = mediaTime(left);
-      const rightTime = mediaTime(right);
-      if (leftTime === null && rightTime !== null) return 1;
-      if (leftTime !== null && rightTime === null) return -1;
-      if (leftTime !== null && rightTime !== null && leftTime !== rightTime) {
-        return state.mediaSort === "oldest" ? leftTime - rightTime : rightTime - leftTime;
-      }
-      const nameOrder = naturalMediaName(left, right);
-      return state.mediaSort === "oldest" ? nameOrder : -nameOrder;
-    });
+    return mediaLibrary.itemsForDisplay(
+      state.media,
+      state.mediaFilter,
+      state.mediaSort,
+      resolvedLanguage(),
+    );
   }
 
   function mediaDateGroup(item) {
@@ -4277,7 +4286,7 @@
     } else {
       const icon = document.createElement("span");
       icon.className = "icon";
-      icon.dataset.icon = item.kind === "video" ? "video" : "images";
+      icon.dataset.icon = mediaIsVideo(item) ? "video" : "images";
       container.append(icon);
     }
     if (mediaIsVideo(item)) {
@@ -4308,11 +4317,26 @@
       if (!blob.type.startsWith("image/") || blob.size <= 0 || blob.size > MAX_MEDIA_THUMBNAIL_BYTES) {
         throw new ApiError("Invalid media thumbnail", { code: "INVALID_MEDIA_THUMBNAIL" });
       }
-      if (generation !== state.mediaGeneration || !state.media.some((candidate) => candidate.id === item.id)) return;
+      if (
+        generation !== state.mediaGeneration ||
+        !state.media.some((candidate) => candidate.id === item.id) ||
+        !Array.from(ui.mediaList.querySelectorAll(".media-thumbnail"))
+          .some((candidate) => candidate.dataset.mediaId === item.id)
+      ) return;
       const url = URL.createObjectURL(blob);
-      const previous = state.mediaThumbnailUrls.get(item.id);
-      state.mediaThumbnailUrls.set(item.id, url);
-      releaseObjectUrl(previous);
+      const evicted = mediaLibrary.setBounded(
+        state.mediaThumbnailUrls,
+        item.id,
+        url,
+        MAX_MEDIA_THUMBNAIL_CACHE_ITEMS,
+      );
+      evicted.forEach(([evictedId, evictedUrl]) => {
+        if (evictedId !== item.id) {
+          const evictedItem = state.media.find((candidate) => candidate.id === evictedId);
+          if (evictedItem) updateVisibleMediaThumbnail(evictedItem);
+        }
+        releaseObjectUrl(evictedUrl);
+      });
     } catch (_) {
       if (generation === state.mediaGeneration) state.mediaThumbnailFailures.add(item.id);
     } finally {
@@ -5272,13 +5296,27 @@
       const button = event.target.closest?.("[data-media-filter]");
       if (!button) return;
       state.mediaFilter = button.dataset.mediaFilter;
+      state.mediaPage = 0;
       closeMediaPreview();
       renderMedia();
     });
     ui.mediaSortSelect.addEventListener("change", () => {
       state.mediaSort = ui.mediaSortSelect.value;
+      state.mediaPage = 0;
       closeMediaPreview();
       renderMedia();
+    });
+    ui.mediaPagePrevious.addEventListener("click", () => {
+      state.mediaPage = Math.max(0, state.mediaPage - 1);
+      closeMediaPreview();
+      renderMedia();
+      ui.mediaPagination.scrollIntoView({ block: "start" });
+    });
+    ui.mediaPageNext.addEventListener("click", () => {
+      state.mediaPage += 1;
+      closeMediaPreview();
+      renderMedia();
+      ui.mediaPagination.scrollIntoView({ block: "start" });
     });
     ui.mediaUploadButton.addEventListener("click", () => ui.mediaUploadInput.click());
     ui.mediaUploadInput.addEventListener("change", () => {

@@ -90,6 +90,7 @@ internal fun MediaSortButton(sort: MediaSort, onSort: (MediaSort) -> Unit) {
             listOf(
                 MediaSort.NEWEST to R.string.media_newest_first,
                 MediaSort.OLDEST to R.string.media_oldest_first,
+                MediaSort.NAME to R.string.media_filename,
             ).forEach { (value, label) ->
                 DropdownMenuItem(
                     text = {
@@ -145,12 +146,13 @@ internal fun MediaFilterBar(
 @Composable
 internal fun MediaGalleryGrid(
     items: List<CameraMediaItem>,
+    sort: MediaSort,
     state: CameraUiState,
     actions: CameraActions,
     onPreview: (CameraMediaItem) -> Unit,
     onActions: (CameraMediaItem) -> Unit,
 ) {
-    val groups = remember(items) { mediaDateGroups(items) }
+    val groups = remember(items, sort) { mediaGroupsForDisplay(items, sort) }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(116.dp),
         modifier = Modifier.fillMaxSize(),
