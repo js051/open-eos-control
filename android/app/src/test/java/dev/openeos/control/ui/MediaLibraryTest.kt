@@ -93,6 +93,23 @@ class MediaLibraryTest {
     }
 
     @Test
+    fun groupsUnknownDateItemsWhenTheyAppearFirst() {
+        val items = listOf(
+            media("unknown-a", "RECOVERED_1.JPG"),
+            media("unknown-b", "RECOVERED_2.JPG"),
+            media("dated", "IMG_1.JPG", "2026-08-14T10:00:00Z"),
+        )
+
+        assertEquals(
+            listOf(
+                MediaDateGroup(null, items.take(2)),
+                MediaDateGroup("2026-08-14", listOf(items.last())),
+            ),
+            mediaGroupsForDisplay(items, MediaSort.NEWEST),
+        )
+    }
+
+    @Test
     fun touchingCachedThumbnailMovesItToTheMostRecentPosition() {
         val cache = linkedMapOf("one" to 1, "two" to 2, "three" to 3)
 
