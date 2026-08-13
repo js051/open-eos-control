@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.isVideoMedia
 import java.math.BigInteger
 import java.time.Instant
 import java.time.LocalDateTime
@@ -42,8 +43,7 @@ internal fun mediaItemsForDisplay(
 }
 
 internal val CameraMediaItem.isVideo: Boolean
-    get() = kind.equals("video", ignoreCase = true) ||
-        name.substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS
+    get() = isVideoMedia
 
 internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort): List<MediaDateGroup> {
     val groups = mutableListOf<MediaDateGroup>()
@@ -132,4 +132,3 @@ private val LOCAL_DATE_TIME_FORMATS = listOf(
 private val NATURAL_PART = Regex("\\d+|\\D+")
 private val ISO_DATE_PREFIX = Regex("\\d{4}-\\d{2}-\\d{2}")
 private val COMPACT_DATE_PREFIX = Regex("\\d{8}")
-private val VIDEO_EXTENSIONS = setOf("mp4", "mov", "m4v", "avi", "mkv")

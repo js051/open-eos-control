@@ -88,6 +88,7 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "media-preview-video",
         "media-preview-previous",
         "media-preview-next",
+        "media-preview-download",
         "media-details-dialog",
         "media-details-close",
         "media-protect-button",
@@ -274,6 +275,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'querySelectorAll("[data-media-filter]")' in script
     assert "state.mediaPreviewTicketUrl = ticket.url" in script
     assert "ui.mediaPreviewVideo.src = ticket.url" in script
+    assert "failMediaVideoPreview" in script
+    assert "ui.mediaPreviewDownload.hidden" in script
     assert "openAdjacentMedia(-1)" in script
     assert "openAdjacentMedia(1)" in script
     assert 'data-view="media" data-i18n-aria="media"' in html

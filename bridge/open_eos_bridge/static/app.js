@@ -389,6 +389,7 @@
       loadingPreview: "Loading camera preview",
       previewUnavailable: "The camera preview could not be displayed.",
       videoPlaybackUnavailable: "This camera video could not be played.",
+      downloadOriginal: "Download original",
       previousMedia: "Previous media",
       nextMedia: "Next media",
       download: "Download",
@@ -763,6 +764,7 @@
       loadingPreview: "正在載入相機預覽",
       previewUnavailable: "無法顯示相機提供的預覽影像。",
       videoPlaybackUnavailable: "無法播放相機中的這部影片。",
+      downloadOriginal: "下載原檔",
       previousMedia: "上一個媒體",
       nextMedia: "下一個媒體",
       download: "下載",
@@ -1185,6 +1187,7 @@
     mediaPreviewNext: byId("media-preview-next"),
     mediaPreviewLoading: byId("media-preview-loading"),
     mediaPreviewUnavailable: byId("media-preview-unavailable"),
+    mediaPreviewDownload: byId("media-preview-download"),
     mediaDetailsDialog: byId("media-details-dialog"),
     mediaDetailsClose: byId("media-details-close"),
     mediaDetailsName: byId("media-details-name"),
@@ -4402,7 +4405,23 @@
     ui.mediaPreviewImage.hidden = true;
     ui.mediaPreviewLoading.hidden = false;
     ui.mediaPreviewUnavailable.hidden = true;
+    ui.mediaPreviewDownload.hidden = true;
     renderMediaPreviewNavigation();
+  }
+
+  function failMediaVideoPreview() {
+    if (!state.mediaPreviewItem || !mediaIsVideo(state.mediaPreviewItem)) return;
+    ui.mediaPreviewVideo.pause();
+    ui.mediaPreviewVideo.removeAttribute("src");
+    ui.mediaPreviewVideo.load();
+    ui.mediaPreviewVideo.hidden = true;
+    const ticketUrl = state.mediaPreviewTicketUrl;
+    state.mediaPreviewTicketUrl = null;
+    if (ticketUrl) fetch(ticketUrl, { method: "DELETE", cache: "no-store", keepalive: true }).catch(() => {});
+    ui.mediaPreviewLoading.hidden = true;
+    ui.mediaPreviewUnavailable.textContent = t("videoPlaybackUnavailable");
+    ui.mediaPreviewUnavailable.hidden = false;
+    ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
   }
 
   function mediaMetadataSupported() {
@@ -4572,6 +4591,7 @@
         }
         state.mediaPreviewTicketUrl = ticket.url;
         ui.mediaPreviewVideo.src = ticket.url;
+        ui.mediaPreviewDownload.hidden = true;
         ui.mediaPreviewVideo.hidden = false;
         ui.mediaPreviewVideo.load();
         ui.mediaPreviewLoading.hidden = true;
@@ -4602,6 +4622,7 @@
       ui.mediaPreviewLoading.hidden = true;
       ui.mediaPreviewUnavailable.textContent = t(video ? "videoPlaybackUnavailable" : "previewUnavailable");
       ui.mediaPreviewUnavailable.hidden = false;
+      if (video) ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
       showToast(normalized.message, true);
     }
   }
@@ -5329,10 +5350,10 @@
     ui.mediaPreviewPrevious.addEventListener("click", () => openAdjacentMedia(-1));
     ui.mediaPreviewNext.addEventListener("click", () => openAdjacentMedia(1));
     ui.mediaPreviewVideo.addEventListener("error", () => {
-      if (!state.mediaPreviewItem || !mediaIsVideo(state.mediaPreviewItem)) return;
-      ui.mediaPreviewLoading.hidden = true;
-      ui.mediaPreviewUnavailable.textContent = t("videoPlaybackUnavailable");
-      ui.mediaPreviewUnavailable.hidden = false;
+      failMediaVideoPreview();
+    });
+    ui.mediaPreviewDownload.addEventListener("click", () => {
+      if (state.mediaPreviewItem) void downloadMedia(state.mediaPreviewItem);
     });
     ui.mediaPreviewDialog.addEventListener("close", clearMediaPreview);
     ui.mediaPreviewDialog.addEventListener("click", (event) => {

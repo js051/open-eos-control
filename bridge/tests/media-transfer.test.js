@@ -72,6 +72,16 @@ async function testCancellationStopsTheReader() {
   await assert.rejects(transfer, (error) => mediaTransfer.isAbortError(error));
 }
 
+async function testDeclaredLengthMismatchFails() {
+  const response = new Response(new Uint8Array([1, 2, 3]), {
+    headers: { "content-length": "4", "content-type": "video/mp4" },
+  });
+  await assert.rejects(
+    mediaTransfer.readResponse(response),
+    (error) => error.code === "MEDIA_LENGTH_MISMATCH" && error.expectedBytes === 4 && error.actualBytes === 3,
+  );
+}
+
 async function run() {
   assert.equal(mediaTransfer.safeDownloadName("DCIM/100CANON/IMG_0001.CR3"), "IMG_0001.CR3");
   assert.equal(mediaTransfer.safeDownloadName("../CON"), "_CON");
@@ -97,6 +107,7 @@ async function run() {
   await testBufferedStreamingProgress();
   await testDirectWriterAvoidsBlobBuffer();
   await testCancellationStopsTheReader();
+  await testDeclaredLengthMismatchFails();
 }
 
 run().catch((error) => {

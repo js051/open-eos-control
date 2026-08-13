@@ -81,6 +81,11 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             canMoveNext = previewIndex in 0 until displayedItems.lastIndex,
             onPrevious = { actions.previewAdjacentMedia(displayedItems, -1) },
             onNext = { actions.previewAdjacentMedia(displayedItems, 1) },
+            downloadEnabled = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+            onDownload = {
+                pendingDownload = item
+                createDocument.launch(item.name)
+            },
             onDismiss = actions.closeMediaPreview,
         )
     }

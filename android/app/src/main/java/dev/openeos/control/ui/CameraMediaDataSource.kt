@@ -47,6 +47,8 @@ internal class CameraMediaDataSource(
                 if (count > 0) {
                     bytesRemaining = bytesRemaining?.minus(count)
                     bytesTransferred(count)
+                } else if (count < 0 && bytesRemaining?.let { it > 0L } == true) {
+                    throw IOException("Camera video ended with $bytesRemaining bytes still expected.")
                 }
             }
         } catch (error: Throwable) {

@@ -1916,7 +1916,7 @@ class CameraScreensTest {
         val playable = CameraMediaItem(
             id = "video-playable",
             name = "CLIP_0001.MP4",
-            kind = "video",
+            kind = "file",
             streamAvailable = true,
         )
         val downloadOnly = CameraMediaItem(

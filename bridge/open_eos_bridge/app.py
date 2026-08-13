@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Respons
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from . import __version__
 from .ccapi import CcapiEngine
@@ -22,7 +23,13 @@ from .engine import CameraEngine, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
-from .media_streaming import InvalidMediaRange, MediaPlaybackTickets, parse_media_range, ranged_chunks
+from .media_streaming import (
+    InvalidMediaRange,
+    MediaPlaybackCache,
+    MediaPlaybackCacheFull,
+    MediaPlaybackTickets,
+    parse_media_range,
+)
 from .media_upload import validate_upload_request
 from .models import (
     CameraCapabilities,
@@ -75,6 +82,82 @@ UI_HEADERS = {
 }
 
 
+def _remove_staged_media(path: Path) -> None:
+    with suppress(FileNotFoundError, OSError):
+        path.unlink()
+
+
+def _stage_media(item: MediaItem, chunks, *, max_bytes: int | None = None) -> tuple[MediaItem, Path]:
+    """Read a camera response completely so HTTP length errors happen before headers."""
+    descriptor, name = tempfile.mkstemp(prefix="open-eos-media-", suffix=".bin")
+    os.close(descriptor)
+    staged = Path(name)
+    expected = item.size_bytes
+    actual = 0
+    iterator = iter(chunks)
+    try:
+        if max_bytes is not None and expected > max_bytes:
+            raise BridgeError(
+                "MEDIA_PLAYBACK_CACHE_LIMIT",
+                f"Camera media '{item.name}' exceeds the playback cache limit.",
+                status_code=413,
+                feature=CameraFeature.MEDIA_DOWNLOAD.value,
+            )
+        with staged.open("wb") as destination:
+            for chunk in iterator:
+                if not chunk:
+                    continue
+                actual += len(chunk)
+                if max_bytes is not None and actual > max_bytes:
+                    raise BridgeError(
+                        "MEDIA_PLAYBACK_CACHE_LIMIT",
+                        f"Camera media '{item.name}' exceeds the playback cache limit.",
+                        status_code=413,
+                        feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                    )
+                if expected > 0 and actual > expected:
+                    raise BridgeError(
+                        "MEDIA_LENGTH_MISMATCH",
+                        f"Camera media '{item.name}' exceeded its declared size ({expected} bytes).",
+                        status_code=502,
+                        feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                    )
+                destination.write(chunk)
+            if expected > 0 and actual != expected:
+                raise BridgeError(
+                    "MEDIA_LENGTH_MISMATCH",
+                    f"Camera media '{item.name}' was truncated ({actual} of {expected} bytes).",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                )
+        return item.model_copy(update={"size_bytes": actual}), staged
+    except Exception:
+        _remove_staged_media(staged)
+        raise
+    finally:
+        close = getattr(iterator, "close", None)
+        if callable(close):
+            close()
+
+
+def _staged_media_chunks(path: Path, byte_range):
+    with path.open("rb") as source:
+        if byte_range is not None:
+            source.seek(byte_range.start)
+            remaining = byte_range.length
+        else:
+            remaining = None
+        while True:
+            chunk = source.read(1024 * 1024 if remaining is None else min(1024 * 1024, remaining))
+            if not chunk:
+                return
+            yield chunk
+            if remaining is not None:
+                remaining -= len(chunk)
+                if remaining <= 0:
+                    return
+
+
 async def _run_media_upload(
     request: Request,
     upload: Callable[[str, Path, int, str, threading.Event | None], MediaItem],
@@ -119,10 +202,12 @@ def create_app(
     configured_token = token if token is not None else os.environ.get("OPEN_EOS_BRIDGE_TOKEN")
     manager = SessionManager(local_engines, network_engine)
     playback_tickets = MediaPlaybackTickets()
+    playback_cache = MediaPlaybackCache(max_bytes=1024 * 1024 * 1024, max_entries=4)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        playback_cache.clear()
         manager.close_all()
 
     application = FastAPI(
@@ -144,18 +229,50 @@ def create_app(
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
-    def media_response(session_id: str, media_id: str, request: Request, *, inline: bool) -> Response:
+    def media_response(
+        session_id: str,
+        media_id: str,
+        request: Request,
+        *,
+        inline: bool,
+        playback_token: str | None = None,
+        playback_expires_at: float | None = None,
+    ) -> Response:
         session = manager.get(session_id)
         range_header = request.headers.get("range")
-        item = session.media_info(media_id) if request.method == "HEAD" or range_header else None
-        if item is None:
-            item, chunks = session.download_media(media_id)
+        cached = playback_cache.get(playback_token) if playback_token else None
+        cache_owned = cached is not None
+        if cached is not None:
+            item = cached.item
+            staged = cached.path
+        elif request.method == "HEAD":
+            item = session.media_info(media_id)
+            staged = None
         else:
-            chunks = None
+            item, chunks = session.download_media(media_id)
+            item, staged = _stage_media(
+                item,
+                chunks,
+                max_bytes=playback_cache.max_bytes if playback_token else None,
+            )
+            if playback_token:
+                try:
+                    playback_cache.put(playback_token, session_id, item, staged, playback_expires_at or 0.0)
+                except MediaPlaybackCacheFull as error:
+                    _remove_staged_media(staged)
+                    raise BridgeError(
+                        "MEDIA_PLAYBACK_CACHE_LIMIT",
+                        f"Camera media '{item.name}' exceeds the playback cache limit.",
+                        status_code=413,
+                        feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                    ) from error
+                cache_owned = True
         size_bytes = item.size_bytes
         try:
             byte_range = parse_media_range(range_header, size_bytes)
         except InvalidMediaRange:
+            if staged is not None and not cache_owned:
+                _remove_staged_media(staged)
             return Response(
                 status_code=416,
                 headers={"Content-Range": f"bytes */{size_bytes}", "Cache-Control": "no-store"},
@@ -165,6 +282,8 @@ def create_app(
             "Cache-Control": "private, no-store, max-age=0",
             "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(item.name)}",
         }
+        if byte_range is not None:
+            headers["X-Open-EOS-Range-Mode"] = "staged-file"
         status_code = 200
         if byte_range is not None:
             status_code = 206
@@ -174,31 +293,38 @@ def create_app(
             headers["Content-Length"] = str(size_bytes)
         if request.method == "HEAD":
             return Response(status_code=status_code, media_type=item.content_type, headers=headers)
-        if chunks is None:
-            downloaded_item, chunks = session.download_media(media_id)
-            item = downloaded_item.model_copy(
-                update={
-                    "size_bytes": item.size_bytes or downloaded_item.size_bytes,
-                    "content_type": item.content_type or downloaded_item.content_type,
-                }
-            )
         return StreamingResponse(
-            ranged_chunks(chunks, byte_range),
+            _staged_media_chunks(staged, byte_range),
             status_code=status_code,
             media_type=item.content_type,
             headers=headers,
+            background=None if cache_owned else BackgroundTask(_remove_staged_media, staged),
         )
 
     @application.api_route("/v1/media-playback/{ticket}", methods=["GET", "HEAD"], include_in_schema=False)
     def play_media(ticket: str, request: Request) -> Response:
         grant = playback_tickets.resolve(ticket)
         if grant is None:
+            playback_cache.remove(ticket)
             return Response(status_code=404, headers={"Cache-Control": "no-store"})
-        return media_response(grant.session_id, grant.media_id, request, inline=True)
+        try:
+            return media_response(
+                grant.session_id,
+                grant.media_id,
+                request,
+                inline=True,
+                playback_token=ticket,
+                playback_expires_at=grant.expires_at,
+            )
+        except BridgeError:
+            playback_tickets.revoke(ticket)
+            playback_cache.remove(ticket)
+            raise
 
     @application.delete("/v1/media-playback/{ticket}", status_code=204, include_in_schema=False)
     def revoke_media_playback(ticket: str) -> Response:
         playback_tickets.revoke(ticket)
+        playback_cache.remove(ticket)
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     @application.exception_handler(BridgeError)
@@ -568,6 +694,7 @@ def create_app(
     @router.delete("/session/{session_id}", status_code=204)
     def delete_session(session_id: str) -> Response:
         playback_tickets.revoke_session(session_id)
+        playback_cache.remove_session(session_id)
         manager.delete(session_id)
         return Response(status_code=204)
 

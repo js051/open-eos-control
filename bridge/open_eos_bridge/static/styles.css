@@ -1557,6 +1557,12 @@ button.media-thumbnail:focus-visible {
   text-align: center;
 }
 
+.media-preview-download {
+  position: absolute;
+  z-index: 3;
+  bottom: max(20px, env(safe-area-inset-bottom));
+}
+
 .media-details-heading {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 48px;

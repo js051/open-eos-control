@@ -75,6 +75,8 @@ import dev.openeos.control.R
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaStreamSource
+import kotlinx.coroutines.CancellationException
+import java.io.File
 
 @Composable
 internal fun MediaSortButton(sort: MediaSort, onSort: (MediaSort) -> Unit) {
@@ -293,6 +295,8 @@ internal fun MediaViewerDialog(
     canMoveNext: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    downloadEnabled: Boolean = false,
+    onDownload: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     Dialog(
@@ -303,7 +307,12 @@ internal fun MediaViewerDialog(
             Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
             when {
-                item.isVideo && streamSource != null -> CameraVideoPlayer(item, streamSource)
+                item.isVideo && streamSource != null -> CameraVideoPlayer(
+                    item = item,
+                    source = streamSource,
+                    downloadEnabled = downloadEnabled,
+                    onDownload = onDownload,
+                )
                 !item.isVideo && bytes != null -> ZoomableMediaImage(item, bytes)
                 loading -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center).size(36.dp),
@@ -387,49 +396,145 @@ private fun ZoomableMediaImage(item: CameraMediaItem, bytes: ByteArray) {
 
 @OptIn(markerClass = [UnstableApi::class])
 @Composable
-private fun CameraVideoPlayer(item: CameraMediaItem, source: CameraMediaStreamSource) {
+private fun CameraVideoPlayer(
+    item: CameraMediaItem,
+    source: CameraMediaStreamSource,
+    downloadEnabled: Boolean,
+    onDownload: () -> Unit,
+) {
     val context = LocalContext.current
-    var playbackFailed by remember(source) { mutableStateOf(false) }
-    val player = remember(source) {
-        ExoPlayer.Builder(context).build().apply {
-            val mediaSource = ProgressiveMediaSource.Factory(CameraMediaDataSource.Factory(source))
-                .createMediaSource(MediaItem.fromUri(Uri.parse("oec-media://camera/${item.id.hashCode()}")))
-            setMediaSource(mediaSource)
-            playWhenReady = true
-            prepare()
+    var mode by remember(source) { mutableStateOf(CameraVideoPlaybackMode.STREAM) }
+    var fallbackFile by remember(source) { mutableStateOf<File?>(null) }
+    var fallbackProgress by remember(source) { mutableFloatStateOf(0f) }
+    var failure by remember(source) { mutableStateOf<CameraVideoPlaybackFailure?>(null) }
+
+    DisposableEffect(source, fallbackFile) {
+        val fileToDelete = fallbackFile
+        onDispose { fileToDelete?.delete() }
+    }
+    LaunchedEffect(mode, source) {
+        if (mode != CameraVideoPlaybackMode.CACHE) return@LaunchedEffect
+        try {
+            val file = cacheCameraMediaForPlayback(
+                source = source,
+                cacheDirectory = File(context.cacheDir, "media-playback"),
+            ) { transferred, total ->
+                fallbackProgress = (transferred.toDouble() / total).coerceIn(0.0, 1.0).toFloat()
+            }
+            fallbackFile = file
+            mode = CameraVideoPlaybackMode.FILE
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            failure = CameraVideoPlaybackFailure.TRANSFER
+            mode = CameraVideoPlaybackMode.FAILED
         }
     }
-    DisposableEffect(player) {
-        val listener = object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) {
-                playbackFailed = true
+
+    Box(Modifier.fillMaxSize().padding(vertical = 64.dp)) {
+        if (mode == CameraVideoPlaybackMode.STREAM || mode == CameraVideoPlaybackMode.FILE) {
+            val localFile = fallbackFile.takeIf { mode == CameraVideoPlaybackMode.FILE }
+            val player = remember(source, localFile) {
+                ExoPlayer.Builder(context).build().apply {
+                    if (localFile == null) {
+                        val mediaSource = ProgressiveMediaSource.Factory(CameraMediaDataSource.Factory(source))
+                            .createMediaSource(MediaItem.fromUri(Uri.parse("oec-media://camera/${item.id.hashCode()}")))
+                        setMediaSource(mediaSource)
+                    } else {
+                        setMediaItem(MediaItem.fromUri(Uri.fromFile(localFile)))
+                    }
+                    playWhenReady = true
+                    prepare()
+                }
+            }
+            DisposableEffect(player, localFile) {
+                val listener = object : Player.Listener {
+                    override fun onPlayerError(error: PlaybackException) {
+                        if (localFile == null) {
+                            val directFailure = error.toCameraVideoPlaybackFailure()
+                            if (directFailure == CameraVideoPlaybackFailure.CODEC) {
+                                failure = directFailure
+                                mode = CameraVideoPlaybackMode.FAILED
+                            } else {
+                                mode = CameraVideoPlaybackMode.CACHE
+                            }
+                        } else {
+                            failure = error.toCameraVideoPlaybackFailure()
+                            mode = CameraVideoPlaybackMode.FAILED
+                        }
+                    }
+                }
+                player.addListener(listener)
+                onDispose {
+                    player.removeListener(listener)
+                    player.release()
+                }
+            }
+            AndroidView(
+                factory = { playerContext ->
+                    PlayerView(playerContext).apply {
+                        useController = true
+                        controllerAutoShow = true
+                        this.player = player
+                    }
+                },
+                update = { it.player = player },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (mode == CameraVideoPlaybackMode.CACHE) {
+            Column(
+                Modifier.align(Alignment.Center).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CircularProgressIndicator(
+                    progress = { fallbackProgress },
+                    color = AppAccent,
+                )
+                Text(
+                    stringResource(R.string.media_video_preparing_local, (fallbackProgress * 100).toInt()),
+                    color = AppSubtleText,
+                )
             }
         }
-        player.addListener(listener)
-        playbackFailed = player.playerError != null
-        onDispose {
-            player.removeListener(listener)
-            player.release()
-        }
-    }
-    Box(Modifier.fillMaxSize().padding(vertical = 64.dp)) {
-        AndroidView(
-            factory = { playerContext ->
-                PlayerView(playerContext).apply {
-                    useController = true
-                    controllerAutoShow = true
-                    this.player = player
+        if (mode == CameraVideoPlaybackMode.FAILED) {
+            Column(
+                Modifier.align(Alignment.Center).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    stringResource(
+                        if (failure == CameraVideoPlaybackFailure.CODEC) {
+                            R.string.media_video_codec_unsupported
+                        } else {
+                            R.string.media_video_playback_failed
+                        },
+                    ),
+                    color = AppSubtleText,
+                )
+                if (downloadEnabled) {
+                    TextButton(onClick = onDownload) {
+                        Text(stringResource(R.string.download_media, item.name), color = AppAccent)
+                    }
                 }
-            },
-            update = { it.player = player },
-            modifier = Modifier.fillMaxSize(),
-        )
-        if (playbackFailed) {
-            Text(
-                stringResource(R.string.media_video_playback_failed),
-                color = AppSubtleText,
-                modifier = Modifier.align(Alignment.Center).padding(24.dp),
-            )
+            }
         }
     }
 }
+
+private enum class CameraVideoPlaybackMode { STREAM, CACHE, FILE, FAILED }
+
+private enum class CameraVideoPlaybackFailure { TRANSFER, CODEC }
+
+private fun PlaybackException.toCameraVideoPlaybackFailure(): CameraVideoPlaybackFailure =
+    if (
+        errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ||
+        errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
+        errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+    ) {
+        CameraVideoPlaybackFailure.CODEC
+    } else {
+        CameraVideoPlaybackFailure.TRANSFER
+    }

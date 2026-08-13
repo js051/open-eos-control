@@ -35,6 +35,78 @@ final class CameraAppTests: XCTestCase {
         XCTAssertEqual(tracker.record(1.2), 1, accuracy: 0.001)
     }
 
+    func testMediaPlaybackRejectsTruncatedRequestedRanges() {
+        XCTAssertEqual(
+            CameraMediaPlaybackValidation.expectedBytes(
+                requestedLength: 64,
+                totalBytes: 512,
+                requestedOffset: 128
+            ),
+            64
+        )
+        XCTAssertFalse(
+            CameraMediaPlaybackValidation.isComplete(
+                deliveredBytes: 63,
+                requestedLength: 64,
+                totalBytes: 512,
+                requestedOffset: 128
+            )
+        )
+        XCTAssertTrue(
+            CameraMediaPlaybackValidation.isComplete(
+                deliveredBytes: 64,
+                requestedLength: 64,
+                totalBytes: 512,
+                requestedOffset: 128
+            )
+        )
+        XCTAssertFalse(
+            CameraMediaPlaybackValidation.isComplete(
+                deliveredBytes: 64,
+                requestedLength: nil,
+                totalBytes: nil,
+                requestedOffset: 128
+            )
+        )
+    }
+
+    func testMediaPlaybackOnlyConfirmsExplicitMatchingByteRanges() {
+        XCTAssertTrue(
+            CameraMediaPlaybackValidation.rangeSupportConfirmed(
+                statusCode: 206,
+                responseRangeStart: 128,
+                requestedOffset: 128
+            )
+        )
+        XCTAssertFalse(
+            CameraMediaPlaybackValidation.rangeSupportConfirmed(
+                statusCode: 200,
+                responseRangeStart: 0,
+                requestedOffset: 128
+            )
+        )
+        XCTAssertFalse(
+            CameraMediaPlaybackValidation.rangeSupportConfirmed(
+                statusCode: 206,
+                responseRangeStart: 0,
+                requestedOffset: 128
+            )
+        )
+    }
+
+    func testMediaPlaybackIgnoresCancelledTransportErrors() {
+        XCTAssertTrue(CameraMediaPlaybackValidation.isCancellation(URLError(.cancelled)))
+        XCTAssertTrue(CameraMediaPlaybackValidation.isCancellation(CancellationError()))
+        XCTAssertFalse(CameraMediaPlaybackValidation.isCancellation(URLError(.networkConnectionLost)))
+    }
+
+    func testMediaPlaybackDoesNotDownloadAgainForUnsupportedCodec() {
+        XCTAssertFalse(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .unsupportedFormat))
+        XCTAssertFalse(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .fallbackTooLarge))
+        XCTAssertTrue(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .incompleteRange))
+        XCTAssertTrue(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .transport))
+    }
+
     func testCameraStatusReplacementPreservesDeviceStatus() {
         let original = CameraStatus(
             recording: false,

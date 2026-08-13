@@ -332,6 +332,8 @@
     <string name="media_preview_content">Preview of %1$s</string>
     <string name="media_preview_unavailable">The camera preview could not be displayed.</string>
     <string name="media_video_playback_failed">This video could not be played from the camera.</string>
+    <string name="media_video_preparing_local">Preparing a local playback copy… %1$d%%</string>
+    <string name="media_video_codec_unsupported">This device cannot decode the camera video format. R6 Mark III 10-bit or 4:2:2 recordings may require compatible editing software. You can still download the original.</string>
     <string name="refresh_media">Refresh camera media</string>
     <string name="media_downloaded">Saved %1$s</string>
     <string name="downloading_media">Downloading %1$s</string>

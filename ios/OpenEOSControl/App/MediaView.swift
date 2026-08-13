@@ -705,7 +705,15 @@ private struct MediaPreviewView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let playback = camera.mediaVideoPlayback {
-                CameraVideoPreview(playback: playback)
+                CameraVideoPreview(
+                    playback: playback,
+                    downloadAvailable: camera.supports(.mediaDownload) && !camera.isBusy(.media),
+                    onDownload: {
+                        if let item = camera.mediaPreviewItem {
+                            camera.startMediaDownload(item)
+                        }
+                    }
+                )
             } else if let data = camera.mediaPreviewData, let image = UIImage(data: data) {
                 Image(uiImage: image)
                     .resizable()
@@ -800,6 +808,8 @@ private struct MediaPreviewView: View {
 private struct CameraVideoPreview: View {
     @EnvironmentObject private var language: AppLanguageStore
     @ObservedObject var playback: CameraMediaPlayback
+    let downloadAvailable: Bool
+    let onDownload: () -> Void
 
     var body: some View {
         ZStack {
@@ -807,12 +817,49 @@ private struct CameraVideoPreview: View {
                 .ignoresSafeArea()
                 .onAppear { playback.play() }
                 .onDisappear { playback.pause() }
-            if playback.errorMessage != nil {
-                Text(language.string("media_video_unavailable"))
-                    .foregroundStyle(Color.cameraSecondaryText)
-                    .padding(24)
-                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+            if playback.isPreparingFallback {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .tint(.white)
+                    Text(language.string("media_video_preparing"))
+                }
+                .foregroundStyle(.white)
+                .padding(24)
+                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+            } else if let failure = playback.failure {
+                VStack(spacing: 8) {
+                    Text(language.string(videoFailureKey(failure)))
+                        .multilineTextAlignment(.center)
+                    if failure == .unsupportedFormat {
+                        Text(language.string("media_video_download_hint"))
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                    }
+                    if downloadAvailable {
+                        Button(action: onDownload) {
+                            Label(language.string("download_media"), systemImage: "arrow.down.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Color.cameraAccent)
+                    }
+                }
+                .foregroundStyle(Color.cameraSecondaryText)
+                .padding(24)
+                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
             }
+        }
+    }
+
+    private func videoFailureKey(_ failure: CameraMediaPlaybackFailure) -> String {
+        switch failure {
+        case .unsupportedFormat:
+            return "media_video_unsupported_format"
+        case .incompleteRange:
+            return "media_video_incomplete"
+        case .fallbackTooLarge:
+            return "media_video_too_large"
+        case .transport:
+            return "media_video_unavailable"
         }
     }
 }

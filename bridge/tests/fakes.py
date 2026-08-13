@@ -78,6 +78,17 @@ Audio data:
   None available.
 """
 
+VIDEO_MEDIA_INFO = """Information on file 'CLIP_0001.MP4' (folder '/store_00010001/DCIM/100CANON'):
+File:
+  Mime type:   'video/mp4'
+  Size:        13 byte(s)
+  Downloaded:  no
+  Permissions: read/delete
+  Time:        Tue Jul 21 10:13:21 2026
+Audio data:
+  None available.
+"""
+
 def _jpeg_fixture(width: int, height: int, color: tuple[int, int, int]) -> bytes:
     output = BytesIO()
     Image.new("RGB", (width, height), color=color).save(output, format="JPEG")
@@ -119,6 +130,7 @@ class FakeRunner:
         self.commands: list[tuple[str, ...]] = []
         self.cancellable_commands: list[tuple[str, ...]] = []
         self.movie_streams: list[FakeMovieStream] = []
+        self.stream_payloads: dict[tuple[str, str], bytes] = {}
         self.uploaded_files: dict[tuple[str, str], bytes] = {}
         self.values = {
             "/main/status/eosserialnumber": "TEST-SERIAL-0001",
@@ -198,6 +210,12 @@ class FakeRunner:
             "IMG_0001.JPG",
         ]:
             return CommandOutput(MEDIA_INFO.encode())
+        if (
+            len(command) == 4
+            and command[:3] == ["--folder", "/store_00010001/DCIM/100CANON", "--show-info"]
+            and command[3].casefold().endswith(".mp4")
+        ):
+            return CommandOutput(VIDEO_MEDIA_INFO.encode())
         if command == ["--capture-preview", "--stdout"]:
             return CommandOutput(JPEG)
         if (
@@ -285,15 +303,14 @@ class FakeRunner:
         del timeout
         self.commands.append(tuple(arguments))
         command = self._without_camera(arguments)
-        assert command == [
+        assert len(command) == 5 and command[:3] == [
             "--folder",
             "/store_00010001/DCIM/100CANON",
             "--get-file",
-            "IMG_0001.JPG",
-            "--stdout",
-        ]
-        yield MEDIA_BYTES[:3]
-        yield MEDIA_BYTES[3:]
+        ] and command[4] == "--stdout"
+        payload = self.stream_payloads.get((command[1], command[3]), MEDIA_BYTES)
+        yield payload[:3]
+        yield payload[3:]
 
     def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> FakeMovieStream:
         del timeout

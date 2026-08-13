@@ -243,6 +243,11 @@
 "media_sort_name" = "File name";
 "media_unknown_date" = "Unknown date";
 "media_video_unavailable" = "This video could not be played from the camera.";
+"media_video_preparing" = "Preparing a full download for playback...";
+"media_video_unsupported_format" = "This video format is not supported by this iPhone or iPad.";
+"media_video_incomplete" = "The camera returned an incomplete video. Try again.";
+"media_video_too_large" = "This video is too large to prepare automatically. Download the original instead.";
+"media_video_download_hint" = "Download the original file to open it in a compatible video app.";
 "previous_media" = "Previous media";
 "next_media" = "Next media";
 "refresh_media" = "Refresh camera media";

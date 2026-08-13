@@ -4,7 +4,11 @@ import secrets
 import threading
 import time
 from collections.abc import Iterable, Iterator
+from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
+
+from .models import MediaItem
 
 
 @dataclass(frozen=True)
@@ -18,6 +22,10 @@ class MediaByteRange:
 
 
 class InvalidMediaRange(ValueError):
+    pass
+
+
+class MediaPlaybackCacheFull(ValueError):
     pass
 
 
@@ -72,6 +80,76 @@ def ranged_chunks(chunks: Iterable[bytes], byte_range: MediaByteRange | None) ->
         close = getattr(iterator, "close", None)
         if callable(close):
             close()
+
+
+@dataclass(frozen=True)
+class MediaPlaybackCacheEntry:
+    session_id: str
+    item: MediaItem
+    path: Path
+    expires_at: float
+
+
+class MediaPlaybackCache:
+    def __init__(self, *, max_bytes: int = 1024 * 1024 * 1024, max_entries: int = 4) -> None:
+        self.max_bytes = max_bytes
+        self.max_entries = max_entries
+        self._values: dict[str, MediaPlaybackCacheEntry] = {}
+        self._timers: dict[str, threading.Timer] = {}
+        self._total_bytes = 0
+        self._lock = threading.RLock()
+
+    def get(self, token: str) -> MediaPlaybackCacheEntry | None:
+        with self._lock:
+            self._remove_expired(time.monotonic())
+            return self._values.get(token)
+
+    def put(self, token: str, session_id: str, item: MediaItem, path: Path, expires_at: float) -> None:
+        if item.size_bytes <= 0 or item.size_bytes > self.max_bytes:
+            raise MediaPlaybackCacheFull("The media is larger than the playback cache limit.")
+        with self._lock:
+            self._remove_expired(time.monotonic())
+            self._remove(token)
+            if len(self._values) >= self.max_entries or self._total_bytes + item.size_bytes > self.max_bytes:
+                raise MediaPlaybackCacheFull("The playback cache is currently full.")
+            entry = MediaPlaybackCacheEntry(session_id, item, path, expires_at)
+            self._values[token] = entry
+            self._total_bytes += item.size_bytes
+            timer = threading.Timer(max(0.0, expires_at - time.monotonic()), self.remove, args=(token,))
+            timer.daemon = True
+            self._timers[token] = timer
+            timer.start()
+
+    def remove(self, token: str) -> None:
+        with self._lock:
+            self._remove(token)
+
+    def remove_session(self, session_id: str) -> None:
+        with self._lock:
+            for token, entry in tuple(self._values.items()):
+                if entry.session_id == session_id:
+                    self._remove(token)
+
+    def clear(self) -> None:
+        with self._lock:
+            for token in tuple(self._values):
+                self._remove(token)
+
+    def _remove_expired(self, now: float) -> None:
+        for token, entry in tuple(self._values.items()):
+            if entry.expires_at <= now:
+                self._remove(token)
+
+    def _remove(self, token: str) -> None:
+        entry = self._values.pop(token, None)
+        timer = self._timers.pop(token, None)
+        if timer is not None:
+            timer.cancel()
+        if entry is None:
+            return
+        self._total_bytes -= entry.item.size_bytes
+        with suppress(FileNotFoundError, OSError):
+            entry.path.unlink()
 
 
 @dataclass(frozen=True)
