@@ -350,6 +350,16 @@
       imageQualitySmall2: "Small 2",
       mediaCount: "{count} media item(s)",
       mediaEmpty: "No media was reported by the camera",
+      mediaFilteredCount: "{visible} of {total} media items",
+      mediaFilter: "Filter media",
+      mediaAll: "All",
+      mediaPhotos: "Photos",
+      mediaVideos: "Videos",
+      mediaSort: "Sort media",
+      mediaNewest: "Newest first",
+      mediaOldest: "Oldest first",
+      mediaName: "File name",
+      mediaUnknownDate: "Unknown date",
       manageMedia: "Manage {name}",
       mediaDetails: "Media details",
       closeMediaDetails: "Close media details",
@@ -370,6 +380,9 @@
       closeMediaPreview: "Close media preview",
       loadingPreview: "Loading camera preview",
       previewUnavailable: "The camera preview could not be displayed.",
+      videoPlaybackUnavailable: "This camera video could not be played.",
+      previousMedia: "Previous media",
+      nextMedia: "Next media",
       download: "Download",
       preparingDownload: "Preparing camera download",
       downloading: "Downloading {name}",
@@ -707,6 +720,16 @@
       imageQualitySmall2: "小型 2",
       mediaCount: "共 {count} 個媒體檔案",
       mediaEmpty: "相機未回報任何媒體檔案",
+      mediaFilteredCount: "顯示 {visible}／{total} 個媒體檔案",
+      mediaFilter: "篩選媒體",
+      mediaAll: "全部",
+      mediaPhotos: "相片",
+      mediaVideos: "影片",
+      mediaSort: "排序媒體",
+      mediaNewest: "最新優先",
+      mediaOldest: "最舊優先",
+      mediaName: "檔案名稱",
+      mediaUnknownDate: "日期不明",
       manageMedia: "管理 {name}",
       mediaDetails: "媒體詳細資料",
       closeMediaDetails: "關閉媒體詳細資料",
@@ -727,6 +750,9 @@
       closeMediaPreview: "關閉媒體預覽",
       loadingPreview: "正在載入相機預覽",
       previewUnavailable: "無法顯示相機提供的預覽影像。",
+      videoPlaybackUnavailable: "無法播放相機中的這部影片。",
+      previousMedia: "上一個媒體",
+      nextMedia: "下一個媒體",
       download: "下載",
       preparingDownload: "正在準備相機檔案下載",
       downloading: "正在下載 {name}",
@@ -1004,11 +1030,14 @@
     media: [],
     mediaLoaded: false,
     mediaRefreshPromise: null,
+    mediaFilter: "all",
+    mediaSort: "newest",
     mediaThumbnailUrls: new Map(),
     mediaThumbnailLoads: new Set(),
     mediaThumbnailFailures: new Set(),
     mediaGeneration: 0,
     mediaPreviewUrl: null,
+    mediaPreviewTicketUrl: null,
     mediaPreviewItem: null,
     mediaPreviewGeneration: 0,
     mediaDetailsItem: null,
@@ -1122,6 +1151,8 @@
     mediaUploadInput: byId("media-upload-input"),
     mediaSummary: byId("media-summary"),
     mediaList: byId("media-list"),
+    mediaFilterControl: byId("media-filter-control"),
+    mediaSortSelect: byId("media-sort-select"),
     mediaTransfer: byId("media-transfer"),
     mediaTransferName: byId("media-transfer-name"),
     mediaTransferStatus: byId("media-transfer-status"),
@@ -1132,6 +1163,9 @@
     mediaPreviewTitle: byId("media-preview-title"),
     mediaPreviewKind: byId("media-preview-kind"),
     mediaPreviewImage: byId("media-preview-image"),
+    mediaPreviewVideo: byId("media-preview-video"),
+    mediaPreviewPrevious: byId("media-preview-previous"),
+    mediaPreviewNext: byId("media-preview-next"),
     mediaPreviewLoading: byId("media-preview-loading"),
     mediaPreviewUnavailable: byId("media-preview-unavailable"),
     mediaDetailsDialog: byId("media-details-dialog"),
@@ -4097,21 +4131,41 @@
   function renderMedia() {
     if (!ui.mediaList) return;
     mediaThumbnailObserver?.disconnect();
-    ui.mediaSummary.textContent = t("mediaCount", { count: state.media.length });
+    const visibleItems = displayedMedia();
+    ui.mediaSummary.textContent = visibleItems.length === state.media.length
+      ? t("mediaCount", { count: state.media.length })
+      : t("mediaFilteredCount", { visible: visibleItems.length, total: state.media.length });
+    ui.mediaSortSelect.value = state.mediaSort;
+    ui.mediaFilterControl.querySelectorAll("[data-media-filter]").forEach((button) => {
+      const active = button.dataset.mediaFilter === state.mediaFilter;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
     ui.mediaList.replaceChildren();
-    if (!state.media.length) {
+    if (!visibleItems.length) {
       const empty = document.createElement("div");
       empty.className = "empty-state";
       empty.textContent = t("mediaEmpty");
       ui.mediaList.append(empty);
       return;
     }
-    state.media.forEach((item) => {
-      const row = document.createElement("div");
-      row.className = "media-row";
-      const previewSupported = item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW);
-      const thumbnail = document.createElement(previewSupported ? "button" : "span");
-      thumbnail.className = "media-thumbnail";
+    let previousDate = null;
+    visibleItems.forEach((item) => {
+      const date = mediaDateGroup(item);
+      if (date !== previousDate) {
+        const heading = document.createElement("h3");
+        heading.className = "media-date-heading";
+        heading.textContent = date;
+        ui.mediaList.append(heading);
+        previousDate = date;
+      }
+      const card = document.createElement("article");
+      card.className = "media-card";
+      const previewSupported = mediaIsVideo(item)
+        ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
+        : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW);
+      const thumbnail = document.createElement(previewSupported ? "button" : "div");
+      thumbnail.className = "media-thumbnail media-card-preview";
       thumbnail.dataset.mediaId = item.id;
       if (previewSupported) {
         thumbnail.type = "button";
@@ -4124,7 +4178,7 @@
       const name = document.createElement("strong");
       name.textContent = item.name;
       const time = document.createElement("span");
-      time.textContent = formatDate(item.captureTime) || item.contentType;
+      time.textContent = formatMediaTime(item.captureTime) || String(item.kind).toUpperCase();
       copy.append(name, time);
       const size = document.createElement("span");
       size.className = "media-size";
@@ -4147,13 +4201,69 @@
         manage.addEventListener("click", () => openMediaDetails(item));
         actions.append(manage);
       }
-      row.append(thumbnail, copy, size, actions);
-      ui.mediaList.append(row);
-      if (featureSupported(FEATURES.MEDIA_THUMBNAIL) && !state.mediaThumbnailUrls.has(item.id)) {
+      card.append(thumbnail, copy, size, actions);
+      ui.mediaList.append(card);
+      if (
+        featureSupported(FEATURES.MEDIA_THUMBNAIL) &&
+        !(mediaIsVideo(item) && String(item.id).startsWith("gphoto2-host:")) &&
+        !state.mediaThumbnailUrls.has(item.id)
+      ) {
         observeMediaThumbnail(thumbnail);
       }
     });
     window.OpenEosIcons?.render(ui.mediaList);
+  }
+
+  function mediaIsVideo(item) {
+    return String(item?.kind || "").toLowerCase() === "video" ||
+      String(item?.contentType || "").toLowerCase().startsWith("video/");
+  }
+
+  function mediaTime(item) {
+    const value = Date.parse(item.captureTime || "");
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function naturalMediaName(left, right) {
+    return String(left.name).localeCompare(String(right.name), resolvedLanguage(), {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+
+  function displayedMedia() {
+    const filtered = state.media.filter((item) => {
+      if (state.mediaFilter === "video") return mediaIsVideo(item);
+      if (state.mediaFilter === "photo") return !mediaIsVideo(item);
+      return true;
+    });
+    return filtered.sort((left, right) => {
+      if (state.mediaSort === "name") return naturalMediaName(left, right);
+      const leftTime = mediaTime(left);
+      const rightTime = mediaTime(right);
+      if (leftTime === null && rightTime !== null) return 1;
+      if (leftTime !== null && rightTime === null) return -1;
+      if (leftTime !== null && rightTime !== null && leftTime !== rightTime) {
+        return state.mediaSort === "oldest" ? leftTime - rightTime : rightTime - leftTime;
+      }
+      const nameOrder = naturalMediaName(left, right);
+      return state.mediaSort === "oldest" ? nameOrder : -nameOrder;
+    });
+  }
+
+  function mediaDateGroup(item) {
+    if (state.mediaSort === "name") {
+      return String(item.name || "#").trim().charAt(0).toLocaleUpperCase(resolvedLanguage()) || "#";
+    }
+    const value = mediaTime(item);
+    if (value === null) return t("mediaUnknownDate");
+    return new Intl.DateTimeFormat(resolvedLanguage(), { dateStyle: "long" }).format(new Date(value));
+  }
+
+  function formatMediaTime(value) {
+    const time = Date.parse(value || "");
+    if (!Number.isFinite(time)) return "";
+    return new Intl.DateTimeFormat(resolvedLanguage(), { timeStyle: "short" }).format(new Date(time));
   }
 
   function renderMediaThumbnail(container, item, url = null) {
@@ -4164,12 +4274,18 @@
       image.src = url;
       image.alt = t("mediaThumbnail", { name: item.name });
       container.append(image);
-      return;
+    } else {
+      const icon = document.createElement("span");
+      icon.className = "icon";
+      icon.dataset.icon = item.kind === "video" ? "video" : "images";
+      container.append(icon);
     }
-    const icon = document.createElement("span");
-    icon.className = "icon";
-    icon.dataset.icon = item.kind === "video" ? "video" : "images";
-    container.append(icon);
+    if (mediaIsVideo(item)) {
+      const play = document.createElement("span");
+      play.className = "media-play-badge icon";
+      play.dataset.icon = "play";
+      container.append(play);
+    }
     window.OpenEosIcons?.render(container);
   }
 
@@ -4247,14 +4363,22 @@
 
   function clearMediaPreview() {
     state.mediaPreviewGeneration += 1;
+    ui.mediaPreviewVideo.pause();
+    ui.mediaPreviewVideo.removeAttribute("src");
+    ui.mediaPreviewVideo.load();
+    ui.mediaPreviewVideo.hidden = true;
     ui.mediaPreviewImage.removeAttribute("src");
     releaseObjectUrl(state.mediaPreviewUrl);
     state.mediaPreviewUrl = null;
+    const ticketUrl = state.mediaPreviewTicketUrl;
+    state.mediaPreviewTicketUrl = null;
+    if (ticketUrl) fetch(ticketUrl, { method: "DELETE", cache: "no-store", keepalive: true }).catch(() => {});
     state.mediaPreviewItem = null;
     ui.mediaPreviewImage.alt = "";
     ui.mediaPreviewImage.hidden = true;
     ui.mediaPreviewLoading.hidden = false;
     ui.mediaPreviewUnavailable.hidden = true;
+    renderMediaPreviewNavigation();
   }
 
   function mediaMetadataSupported() {
@@ -4399,14 +4523,36 @@
   }
 
   async function openMediaPreview(item) {
-    if (!state.session || item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)) return;
+    const video = mediaIsVideo(item);
+    if (
+      !state.session ||
+      (video && !featureSupported(FEATURES.MEDIA_DOWNLOAD)) ||
+      (!video && (item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)))
+    ) return;
     clearMediaPreview();
     const generation = state.mediaPreviewGeneration;
     state.mediaPreviewItem = item;
     ui.mediaPreviewTitle.textContent = item.name;
     ui.mediaPreviewKind.textContent = String(item.kind).toUpperCase();
     ui.mediaPreviewDialog.showModal();
+    renderMediaPreviewNavigation();
     try {
+      if (video) {
+        const ticket = await api(
+          `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/playback`,
+          { method: "POST" },
+        );
+        if (generation !== state.mediaPreviewGeneration || state.mediaPreviewItem?.id !== item.id) {
+          fetch(ticket.url, { method: "DELETE", cache: "no-store", keepalive: true }).catch(() => {});
+          return;
+        }
+        state.mediaPreviewTicketUrl = ticket.url;
+        ui.mediaPreviewVideo.src = ticket.url;
+        ui.mediaPreviewVideo.hidden = false;
+        ui.mediaPreviewVideo.load();
+        ui.mediaPreviewLoading.hidden = true;
+        return;
+      }
       const blob = await api(
         `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/preview`,
         { responseType: "blob" },
@@ -4430,9 +4576,24 @@
       ui.mediaPreviewImage.hidden = true;
       const normalized = captureError(error);
       ui.mediaPreviewLoading.hidden = true;
+      ui.mediaPreviewUnavailable.textContent = t(video ? "videoPlaybackUnavailable" : "previewUnavailable");
       ui.mediaPreviewUnavailable.hidden = false;
       showToast(normalized.message, true);
     }
+  }
+
+  function renderMediaPreviewNavigation() {
+    const items = displayedMedia();
+    const index = items.findIndex((item) => item.id === state.mediaPreviewItem?.id);
+    ui.mediaPreviewPrevious.disabled = index <= 0;
+    ui.mediaPreviewNext.disabled = index < 0 || index >= items.length - 1;
+  }
+
+  function openAdjacentMedia(offset) {
+    const items = displayedMedia();
+    const index = items.findIndex((item) => item.id === state.mediaPreviewItem?.id);
+    const item = items[index + offset];
+    if (item) void openMediaPreview(item);
   }
 
   function scheduleMediaTransferRender() {
@@ -5107,6 +5268,18 @@
       });
     });
     ui.mediaRefreshButton.addEventListener("click", refreshMedia);
+    ui.mediaFilterControl.addEventListener("click", (event) => {
+      const button = event.target.closest?.("[data-media-filter]");
+      if (!button) return;
+      state.mediaFilter = button.dataset.mediaFilter;
+      closeMediaPreview();
+      renderMedia();
+    });
+    ui.mediaSortSelect.addEventListener("change", () => {
+      state.mediaSort = ui.mediaSortSelect.value;
+      closeMediaPreview();
+      renderMedia();
+    });
     ui.mediaUploadButton.addEventListener("click", () => ui.mediaUploadInput.click());
     ui.mediaUploadInput.addEventListener("change", () => {
       const [file] = ui.mediaUploadInput.files || [];
@@ -5115,6 +5288,14 @@
     });
     ui.mediaTransferCancel.addEventListener("click", cancelMediaTransfer);
     ui.mediaPreviewClose.addEventListener("click", closeMediaPreview);
+    ui.mediaPreviewPrevious.addEventListener("click", () => openAdjacentMedia(-1));
+    ui.mediaPreviewNext.addEventListener("click", () => openAdjacentMedia(1));
+    ui.mediaPreviewVideo.addEventListener("error", () => {
+      if (!state.mediaPreviewItem || !mediaIsVideo(state.mediaPreviewItem)) return;
+      ui.mediaPreviewLoading.hidden = true;
+      ui.mediaPreviewUnavailable.textContent = t("videoPlaybackUnavailable");
+      ui.mediaPreviewUnavailable.hidden = false;
+    });
     ui.mediaPreviewDialog.addEventListener("close", clearMediaPreview);
     ui.mediaPreviewDialog.addEventListener("click", (event) => {
       if (event.target === ui.mediaPreviewDialog) closeMediaPreview();

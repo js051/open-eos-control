@@ -65,7 +65,7 @@ LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast �
 - 獨立 AF-ON：CCAPI 使用相機公告的自動對焦命令；Canon USB 優先使用 `DoAf`／`AfCancel`，沒有這組專用操作時才以確實釋放的半按流程作為後備
 - 依相機公告能力執行手動快門半按，並保證送出釋放命令
 - CCAPI、Android USB/PTP、Desktop Bridge、PC 與 iOS 共用依能力開放的 Bulb 長曝光：只有相機公告 Bulb 模式與完整按壓／釋放路徑時，中央快門才切換成可計時的開始／停止控制；曝光期間暫停主動 JPEG 輪詢，失敗可重試釋放，結束工作階段也會盡力釋放快門
-- 支援分頁與按需縮圖；相機公告時的 CCAPI 相片／RAW 全螢幕預覽；依單筆能力開放、上限 32 MiB 的 Android USB/PTP 與 Desktop Bridge JPEG／PNG 預覽；串流下載，以及依能力開放並具進度／取消的檔案選擇器上傳；需確認後才執行的刪除；以及具回讀驗證的 Canon CCAPI 檔案保護、封存狀態、評分與顯示旋轉。Android 直接 USB 上傳必須同時有標準 PTP `SendObjectInfo`／`SendObject`、可寫記憶卡、相機公告的相符格式、精確位元組數與 ObjectInfo 回讀；Desktop Bridge 則必須有 libgphoto2 runtime File Upload 證據並重新核對檔名與大小。Android、iOS 與 PC 在能力不足時都隱藏上傳，直接 CCAPI 也不會收到推測出的上傳請求。Android 直接 USB 另在相機公告 `SetObjectProtection` 時支援標準 PTP 記憶卡檔案保護，且必須精確回讀 ObjectInfo。標準 MTP `Rating (0xDC8A)` 只有在相機公告四個 object-property 操作、該物件格式回傳可寫的 `UINT16` 描述符並明確允許 `0／20／40／60／80／100`，且實際記憶卡物件讀值成功後才會出現；UI 五星對應這六個 wire 值，非整星值保留為未知，每次寫入後都必須從同一 handle 精確回讀。未知狀態與 App 私有的手機端拍攝檔案不顯示不支援的操作。有線 RAW、HEIF 與影片仍可下載，但不顯示無法執行的預覽按鈕。USB 封存／顯示旋轉與 libgphoto2 單筆媒體 metadata 寫入仍不提供；已驗證協定的相機擁有者／作者／著作權／暱稱屬於機身設定，不是媒體項目修改。
+- 完整讀取相機公告的所有媒體分頁，不再以 500 筆截斷，並提供按需縮圖、照片／影片篩選、自然檔名排序與日期分組；相片／RAW 可全螢幕縮放預覽，Android、iOS 與 PC 影片則使用可取消的位元組範圍串流播放，不會先把整支影片載入記憶體。瀏覽器 `<video>` 無法附帶 Bridge Bearer header，因此 PC 使用隨機、15 分鐘有效且綁定單一 session／媒體的短效 capability URL；關閉預覽可撤銷，session 結束時必定失效，診斷也不會輸出。Android USB/PTP 與 Desktop Bridge JPEG／PNG 預覽仍依能力開放且上限 32 MiB。串流下載與檔案選擇器上傳提供進度／取消，刪除必須確認，Canon CCAPI 檔案保護、封存、評分與顯示旋轉都需精確回讀。Android 直接 USB 上傳必須同時有標準 PTP `SendObjectInfo`／`SendObject`、可寫記憶卡、相機公告的相符格式、精確位元組數與 ObjectInfo 回讀；Desktop Bridge 則必須有 libgphoto2 runtime File Upload 證據並重新核對檔名與大小。Android、iOS 與 PC 在能力不足時都隱藏上傳，直接 CCAPI 也不會收到推測出的上傳請求。Android 直接 USB 另在相機公告 `SetObjectProtection` 時支援標準 PTP 記憶卡檔案保護，且必須精確回讀 ObjectInfo。標準 MTP `Rating (0xDC8A)` 只有在相機公告四個 object-property 操作、該物件格式回傳可寫的 `UINT16` 描述符並明確允許 `0／20／40／60／80／100`，且實際記憶卡物件讀值成功後才會出現；UI 五星對應這六個 wire 值，非整星值保留為未知，每次寫入後都必須從同一 handle 精確回讀。未知狀態與 App 私有的手機端拍攝檔案不顯示不支援的操作。USB 封存／顯示旋轉與 libgphoto2 單筆媒體 metadata 寫入仍不提供；已驗證協定的相機擁有者／作者／著作權／暱稱屬於機身設定，不是媒體項目修改。
 
 預設直連相機 URL：
 
@@ -142,7 +142,7 @@ cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG 輪詢／multipart 或相機公告的 RTP H.264 Live View、曝光設定 sheet、具真實位元組進度與取消操作的檔案式媒體傳輸、需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。RTP 使用同子網 Wi-Fi IPv4、限定 Wi-Fi 的 Network.framework UDP listener 與原生 sample-buffer 顯示；multipart 使用 URLSession 串流 delegate 與最新幀合併。AUTO 依 RTP、multipart、輪詢順序完整清理後降級，FPS 維持 1-30 顯示上限。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
+`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG 輪詢／multipart 或相機公告的 RTP H.264 Live View、曝光設定 sheet、可篩選與依日期分組的媒體網格、可縮放相片預覽、具認證的 AVFoundation 位元組範圍影片播放、具真實位元組進度與取消操作的檔案式媒體傳輸、需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。RTP 使用同子網 Wi-Fi IPv4、限定 Wi-Fi 的 Network.framework UDP listener 與原生 sample-buffer 顯示；multipart 使用 URLSession 串流 delegate 與最新幀合併。AUTO 依 RTP、multipart、輪詢順序完整清理後降級，FPS 維持 1-30 顯示上限。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
 
 在具備 Xcode 與 XcodeGen 的 macOS 主機執行：
 

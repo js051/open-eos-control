@@ -687,6 +687,55 @@ public actor DesktopBridgeClient {
         )
     }
 
+    public func openMediaStream(
+        _ item: CameraMediaItem,
+        offset: Int64,
+        length: Int64? = nil
+    ) async throws -> CameraMediaStreamResponse {
+        guard offset >= 0, length.map({ $0 > 0 }) ?? true else {
+            throw DesktopBridgeError.invalidResponse("Media byte range must be positive.")
+        }
+        let url = try sessionEndpoint(["media", item.id])
+        var request = makeRequest(
+            url: url,
+            method: "GET",
+            accept: "video/*, application/octet-stream",
+            timeoutInterval: 120
+        )
+        request.setValue(Self.mediaRangeHeader(offset: offset, length: length), forHTTPHeaderField: "Range")
+        let response = try await transport.openStream(request)
+        guard response.statusCode == 200 || response.statusCode == 206 else {
+            response.cancel()
+            throw Self.httpError(
+                statusCode: response.statusCode,
+                body: Data(),
+                method: "GET",
+                url: url
+            )
+        }
+        if response.header("content-type")?.lowercased().hasPrefix("text/") == true ||
+            response.header("content-type")?.lowercased().contains("json") == true {
+            response.cancel()
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned text instead of media bytes.")
+        }
+        do {
+            return try CameraMediaStreamResponse(
+                item: item,
+                response: response,
+                fallbackTotalBytes: item.sizeBytes
+            )
+        } catch {
+            response.cancel()
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid media byte range.")
+        }
+    }
+
+    private static func mediaRangeHeader(offset: Int64, length: Int64?) -> String {
+        guard let length else { return "bytes=\(offset)-" }
+        let (end, overflow) = offset.addingReportingOverflow(length - 1)
+        return overflow ? "bytes=\(offset)-" : "bytes=\(offset)-\(end)"
+    }
+
     public func uploadMedia(
         from fileURL: URL,
         contentType: String? = nil,

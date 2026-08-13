@@ -10,6 +10,10 @@ const { chromium } = require("playwright");
 
 const BRIDGE_ROOT = path.resolve(__dirname, "..");
 const RESULTS_DIR = path.join(BRIDGE_ROOT, "test-results");
+const VIDEO_FIXTURE = Buffer.from(
+  "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAN2bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAqF0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAKAAAABaAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAQAAABAAAAAAIZbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAAKABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABxG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAYRzdGJsAAAAwHN0c2QAAAAAAAAAAQAAALBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAKAAWgBIAAAASAAAAAAAAAABFExhdmM2MS4zLjEwMCBsaWJ4MjY0AAAAAAAAAAAAAAAAGP//AAAANmF2Y0MBZAAK/+EAGWdkAAqs2UKN+TARAAADAAEAAAMACg8SJZYBAAZo6+PLIsD9+PgAAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAGQgAABkIAAAAGHN0dHMAAAAAAAAAAQAAAAUAAAgAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAA4Y3R0cwAAAAAAAAAFAAAAAQAAEAAAAAABAAAoAAAAAAEAABAAAAAAAQAAAAAAAAABAAAIAAAAABxzdHNjAAAAAAAAAAEAAAABAAAABQAAAAEAAAAoc3RzegAAAAAAAAAAAAAABQAAAuoAAAAQAAAADQAAAA0AAAANAAAAFHN0Y28AAAAAAAAAAQAAA6YAAABhdWR0YQAAAFltZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAACxpbHN0AAAAJKl0b28AAAAcZGF0YQAAAAEAAAAATGF2ZjYxLjEuMTAwAAAACGZyZWUAAAMpbWRhdAAAAq0GBf//qdxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxOTAgN2VkNzUzYiAtIEguMjY0L01QRUctNCBBVkMgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI0IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MSByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4MTEzIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0xIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS0yIHRocmVhZHM9MyBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTMgYl9weXJhbWlkPTIgYl9hZGFwdD0xIGJfYmlhcz0wIGRpcmVjdD0xIHdlaWdodGI9MSBvcGVuX2dvcD0wIHdlaWdodHA9MiBrZXlpbnQ9MjUwIGtleWludF9taW49NSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNfbG9va2FoZWFkPTQwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MjMuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAAADVliIQAEv/+6Mn8yypZT9PvtJfrulpRzCPR0w6vUco+Q2riUyd9khRleSt1VbJAZcABgwWpXQAAAAxGmSRsQ//+qZYA5oAAAAAJQZ5CeIIfACDhAAAACQGeYXRD/wBJRQAAAAgBnmNqQ/8ASUE=",
+  "base64",
+);
 
 async function freePort() {
   return new Promise((resolve, reject) => {
@@ -81,6 +85,7 @@ async function run() {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const captureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "open-eos-browser-test-"));
+  fs.writeFileSync(path.join(captureDirectory, "CLIP_0001.MP4"), VIDEO_FIXTURE);
   const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
   const server = spawn(
     python,
@@ -540,11 +545,31 @@ async function run() {
 
     await page.click('.tab[data-view="media"]');
     await page.waitForSelector("#media-panel:not([hidden])");
-    const jpegMedia = page.locator(".media-row").filter({ hasText: "IMG_0001.JPG" });
+    const jpegMedia = page.locator(".media-card").filter({ hasText: "IMG_0001.JPG" });
     await jpegMedia.waitFor({ state: "visible" });
     await jpegMedia.locator("button.media-thumbnail").click();
     await page.waitForSelector("#media-preview-dialog[open] #media-preview-image:not([hidden])");
     await page.click("#media-preview-close");
+    const videoMedia = page.locator(".media-card").filter({ hasText: "CLIP_0001.MP4" });
+    await videoMedia.waitFor({ state: "visible" });
+    await page.click('#media-filter-control button[data-media-filter="video"]');
+    await videoMedia.waitFor({ state: "visible" });
+    assert.equal(await jpegMedia.isVisible(), false);
+    const playbackRequest = page.waitForRequest((request) => (
+      request.url().includes("/v1/media-playback/") && request.headers().range?.startsWith("bytes=")
+    ));
+    await videoMedia.locator("button.media-thumbnail").click();
+    await page.waitForSelector("#media-preview-dialog[open] #media-preview-video:not([hidden])");
+    const rangeRequest = await playbackRequest;
+    assert.match(rangeRequest.headers().range, /^bytes=\d+-/);
+    await page.waitForFunction(() => document.querySelector("#media-preview-video")?.readyState >= 1);
+    await page.click("#media-preview-close");
+    await page.click('#media-filter-control button[data-media-filter="all"]');
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-media-library.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(RESULTS_DIR, "narrow-media-library.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await waitForBridgeState(
       origin,
       (candidate) => commandIndex(candidate, [
@@ -560,7 +585,7 @@ async function run() {
     await jpegMedia.locator('button[aria-label="Manage IMG_0001.JPG"]').click();
     await page.click("#media-details-delete");
     await page.waitForFunction(() => (
-      !Array.from(document.querySelectorAll(".media-row"))
+      !Array.from(document.querySelectorAll(".media-card"))
         .some((row) => row.textContent.includes("IMG_0001.JPG"))
     ));
     await waitForBridgeState(

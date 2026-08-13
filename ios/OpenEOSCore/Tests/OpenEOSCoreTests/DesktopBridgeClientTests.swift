@@ -80,6 +80,50 @@ final class DesktopBridgeClientTests: XCTestCase {
         }
     }
 
+    func testDesktopBridgeMediaStreamUsesBearerAuthenticatedByteRange() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_stream","engine":"libgphoto2","camera":{"id":"gphoto2:test","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
+        )
+        await transport.enqueue(
+            path: "/v1/session/session_stream/media/video-1",
+            status: 206,
+            headers: [
+                "content-type": "video/mp4",
+                "content-length": "32",
+                "content-range": "bytes 4096-4127/16384",
+            ],
+            body: Data(repeating: 0x24, count: 32)
+        )
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            token: "bridge-secret",
+            cameraID: "gphoto2:test",
+            transport: transport
+        )
+        try await client.initialize()
+
+        let stream = try await client.openMediaStream(
+            CameraMediaItem(id: "video-1", name: "MVI_0001.MP4", kind: "video", sizeBytes: 16384),
+            offset: 4096,
+            length: 32
+        )
+        var data = Data()
+        for try await chunk in stream.chunks { data.append(chunk) }
+
+        XCTAssertEqual(stream.rangeStart, 4096)
+        XCTAssertEqual(stream.totalBytes, 16384)
+        XCTAssertEqual(data.count, 32)
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.last)
+        XCTAssertEqual(request.headers.first { $0.key.caseInsensitiveCompare("Range") == .orderedSame }?.value, "bytes=4096-4127")
+        XCTAssertEqual(request.headers.first { $0.key.caseInsensitiveCompare("Authorization") == .orderedSame }?.value, "Bearer bridge-secret")
+    }
+
     func testDiscoveryValidatesServiceAndUsesBearerAuthentication() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/health", body: health)
