@@ -3385,6 +3385,46 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realMediaListTraversesMoreThanOneHundredPages() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        server.enqueue(jsonResponse("""{"pagenumber":101}"""))
+        repeat(101) { pageIndex ->
+            val page = pageIndex + 1
+            server.enqueue(
+                jsonResponse(
+                    """{"path":["/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_${page.toString().padStart(4, '0')}.JPG"]}""",
+                ),
+            )
+        }
+
+        val items = client.listMedia()
+
+        assertEquals(101, items.size)
+        assertEquals("IMG_0001.JPG", items.first().name)
+        assertEquals("IMG_0101.JPG", items.last().name)
+        assertEquals(102, server.requestCount)
+        assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
+        repeat(101) { pageIndex ->
+            assertEquals(
+                "/ccapi/ver140/contents?page=${pageIndex + 1}&order=desc",
+                server.takeRequest().path,
+            )
+        }
+    }
+
+    @Test
+    fun realMediaListRejectsNegativePageCount() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        server.enqueue(jsonResponse("""{"pagenumber":-1}"""))
+
+        val failure = runCatching { client.listMedia() }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("negative media page count"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun realMediaListFairlyMergesSiblingPhotoAndVideoContainers() = runTest {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val containers =

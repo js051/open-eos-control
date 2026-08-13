@@ -3401,15 +3401,39 @@ def test_ccapi_media_returns_more_than_500_items_per_container() -> None:
     assert f"{container}?page=6&order=desc" in media_requests
 
 
-def test_ccapi_media_rejects_reported_page_count_above_safety_limit() -> None:
+def test_ccapi_media_traverses_more_than_one_hundred_pages() -> None:
+    root = "/ccapi/ver100/contents"
+    container = f"{root}/card1/100CANON"
+    routes = {
+        f"{root}?kind=number": _json_response({"pagenumber": 0}),
+        root: _json_response({"path": [container]}),
+        f"{container}?kind=number": _json_response({"pagenumber": 101}),
+    }
+    for page in range(1, 102):
+        routes[f"{container}?page={page}&order=desc"] = _json_response(
+            {"path": [f"{container}/IMG_{page:04d}.JPG"]}
+        )
+    transport = FakeCcapiTransport(media_routes=routes)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    items = session.list_media()
+
+    assert len(items) == 101
+    assert items[0].name == "IMG_0001.JPG"
+    assert items[-1].name == "IMG_0101.JPG"
+
+
+def test_ccapi_media_rejects_negative_page_count() -> None:
     root = "/ccapi/ver100/contents"
     transport = FakeCcapiTransport(
-        media_routes={f"{root}?kind=number": _json_response({"pagenumber": 101})}
+        media_routes={f"{root}?kind=number": _json_response({"pagenumber": -1})}
     )
     session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
 
-    with pytest.raises(BridgeError, match="above the safety limit"):
+    with pytest.raises(BridgeError, match="negative media page count") as failure:
         session.list_media()
+
+    assert failure.value.code == "INVALID_MEDIA_PAGE_COUNT"
 
 
 def test_ccapi_media_fairly_merges_sibling_containers_round_robin() -> None:
