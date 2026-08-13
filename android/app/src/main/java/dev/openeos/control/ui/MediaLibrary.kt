@@ -54,7 +54,7 @@ internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort
             item.mediaDate
         }
         if (groups.lastOrNull()?.date == heading) {
-            val last = groups.removeLast()
+            val last = groups.removeAt(groups.lastIndex)
             groups += last.copy(items = last.items + item)
         } else {
             groups += MediaDateGroup(date = heading, items = listOf(item))
