@@ -290,6 +290,21 @@
             </button>
           </div>
         </div>
+        <div class="media-toolbar">
+          <div id="media-filter-control" class="media-filter-control" role="group" data-i18n-aria="mediaFilter">
+            <button type="button" data-media-filter="all" data-i18n="mediaAll" aria-pressed="true">All</button>
+            <button type="button" data-media-filter="photo" data-i18n="mediaPhotos" aria-pressed="false">Photos</button>
+            <button type="button" data-media-filter="video" data-i18n="mediaVideos" aria-pressed="false">Videos</button>
+          </div>
+          <label class="media-sort-control">
+            <span class="sr-only" data-i18n="mediaSort">Sort media</span>
+            <select id="media-sort-select" data-i18n-aria="mediaSort">
+              <option value="newest" data-i18n="mediaNewest">Newest first</option>
+              <option value="oldest" data-i18n="mediaOldest">Oldest first</option>
+              <option value="name" data-i18n="mediaName">File name</option>
+            </select>
+          </label>
+        </div>
         <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
           <span class="media-transfer-icon icon" data-icon="download" aria-hidden="true"></span>
           <div class="media-transfer-copy">
@@ -430,6 +445,13 @@
     </div>
     <div class="media-preview-stage">
       <img id="media-preview-image" alt="" hidden>
+      <video id="media-preview-video" controls playsinline preload="metadata" hidden></video>
+      <button id="media-preview-previous" class="icon-button media-preview-navigation previous" type="button" data-i18n-aria="previousMedia">
+        <span class="icon" data-icon="chevron-left" aria-hidden="true"></span>
+      </button>
+      <button id="media-preview-next" class="icon-button media-preview-navigation next" type="button" data-i18n-aria="nextMedia">
+        <span class="icon" data-icon="chevron-right" aria-hidden="true"></span>
+      </button>
       <div id="media-preview-loading" class="media-preview-message" data-i18n="loadingPreview">Loading camera preview</div>
       <div id="media-preview-unavailable" class="media-preview-message" data-i18n="previewUnavailable" hidden>The camera preview could not be displayed.</div>
     </div>

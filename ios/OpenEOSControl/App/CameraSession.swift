@@ -236,6 +236,19 @@ enum CameraSession: Sendable {
         }
     }
 
+    func openMediaStream(
+        _ item: CameraMediaItem,
+        offset: Int64,
+        length: Int64? = nil
+    ) async throws -> CameraMediaStreamResponse {
+        switch self {
+        case let .ccapi(client):
+            return try await client.openMediaStream(item, offset: offset, length: length)
+        case let .desktopBridge(client):
+            return try await client.openMediaStream(item, offset: offset, length: length)
+        }
+    }
+
     func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
         switch self {
         case let .ccapi(client): return try await client.mediaInfo(item)

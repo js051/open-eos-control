@@ -563,6 +563,47 @@ final class CCAPIClientTests: XCTestCase {
         }
     }
 
+    func testDirectCCAPIMediaStreamUsesAuthenticatedByteRangeWithoutBufferingWholeVideo() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let path = "/ccapi/ver100/contents/card1/100CANON/MVI_0001.MP4"
+        await transport.enqueue(
+            path: path,
+            status: 206,
+            headers: [
+                "content-type": "video/mp4",
+                "content-length": "16",
+                "content-range": "bytes 1024-1039/8192",
+            ],
+            body: Data(repeating: 0x42, count: 16)
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://192.168.1.2:8080",
+            username: "camera-user",
+            password: "camera-password",
+            mode: .camera,
+            transport: transport
+        )
+
+        let stream = try await client.openMediaStream(
+            CameraMediaItem(id: path, name: "MVI_0001.MP4", kind: "video", sizeBytes: 8192),
+            offset: 1024,
+            length: 16
+        )
+        var data = Data()
+        for try await chunk in stream.chunks { data.append(chunk) }
+
+        XCTAssertEqual(stream.statusCode, 206)
+        XCTAssertEqual(stream.rangeStart, 1024)
+        XCTAssertEqual(stream.contentLength, 16)
+        XCTAssertEqual(stream.totalBytes, 8192)
+        XCTAssertEqual(data, Data(repeating: 0x42, count: 16))
+        let requests = await transport.requests()
+        let request = try XCTUnwrap(requests.last)
+        XCTAssertEqual(request.headers.first { $0.key.caseInsensitiveCompare("Range") == .orderedSame }?.value, "bytes=1024-1039")
+        XCTAssertNotNil(request.headers.first { $0.key.caseInsensitiveCompare("Authorization") == .orderedSame })
+    }
+
     func testStillCaptureUsesAdvertisedPostAndAutofocusPayload() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)

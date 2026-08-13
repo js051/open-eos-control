@@ -22,6 +22,7 @@ from .engine import CameraEngine, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
+from .media_streaming import InvalidMediaRange, MediaPlaybackTickets, parse_media_range, ranged_chunks
 from .media_upload import validate_upload_request
 from .models import (
     CameraCapabilities,
@@ -48,6 +49,7 @@ from .models import (
     MediaArchiveUpdate,
     MediaItem,
     MediaList,
+    MediaPlaybackTicket,
     MediaProtectionUpdate,
     MediaRatingUpdate,
     MediaRotationUpdate,
@@ -116,6 +118,7 @@ def create_app(
     network_engine = ccapi_engine or CcapiEngine()
     configured_token = token if token is not None else os.environ.get("OPEN_EOS_BRIDGE_TOKEN")
     manager = SessionManager(local_engines, network_engine)
+    playback_tickets = MediaPlaybackTickets()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -140,6 +143,63 @@ def create_app(
             media_type="image/png",
             headers={"Cache-Control": "public, max-age=86400"},
         )
+
+    def media_response(session_id: str, media_id: str, request: Request, *, inline: bool) -> Response:
+        session = manager.get(session_id)
+        range_header = request.headers.get("range")
+        item = session.media_info(media_id) if request.method == "HEAD" or range_header else None
+        if item is None:
+            item, chunks = session.download_media(media_id)
+        else:
+            chunks = None
+        size_bytes = item.size_bytes
+        try:
+            byte_range = parse_media_range(range_header, size_bytes)
+        except InvalidMediaRange:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size_bytes}", "Cache-Control": "no-store"},
+            )
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, no-store, max-age=0",
+            "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(item.name)}",
+        }
+        status_code = 200
+        if byte_range is not None:
+            status_code = 206
+            headers["Content-Range"] = f"bytes {byte_range.start}-{byte_range.end}/{size_bytes}"
+            headers["Content-Length"] = str(byte_range.length)
+        elif size_bytes > 0:
+            headers["Content-Length"] = str(size_bytes)
+        if request.method == "HEAD":
+            return Response(status_code=status_code, media_type=item.content_type, headers=headers)
+        if chunks is None:
+            downloaded_item, chunks = session.download_media(media_id)
+            item = downloaded_item.model_copy(
+                update={
+                    "size_bytes": item.size_bytes or downloaded_item.size_bytes,
+                    "content_type": item.content_type or downloaded_item.content_type,
+                }
+            )
+        return StreamingResponse(
+            ranged_chunks(chunks, byte_range),
+            status_code=status_code,
+            media_type=item.content_type,
+            headers=headers,
+        )
+
+    @application.api_route("/v1/media-playback/{ticket}", methods=["GET", "HEAD"], include_in_schema=False)
+    def play_media(ticket: str, request: Request) -> Response:
+        grant = playback_tickets.resolve(ticket)
+        if grant is None:
+            return Response(status_code=404, headers={"Cache-Control": "no-store"})
+        return media_response(grant.session_id, grant.media_id, request, inline=True)
+
+    @application.delete("/v1/media-playback/{ticket}", status_code=204, include_in_schema=False)
+    def revoke_media_playback(ticket: str) -> Response:
+        playback_tickets.revoke(ticket)
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     @application.exception_handler(BridgeError)
     async def bridge_error_handler(_: Request, error: BridgeError) -> JSONResponse:
@@ -452,6 +512,30 @@ def create_app(
     def media_info(session_id: str, media_id: str) -> MediaItem:
         return manager.get(session_id).media_info(media_id)
 
+    @router.post(
+        "/session/{session_id}/media/{media_id}/playback",
+        response_model=MediaPlaybackTicket,
+    )
+    def issue_media_playback(session_id: str, media_id: str) -> MediaPlaybackTicket:
+        session = manager.get(session_id)
+        item = next((candidate for candidate in session.list_media() if candidate.id == media_id), None)
+        if item is None:
+            raise BridgeError("MEDIA_NOT_FOUND", "Camera media was not found.", status_code=404)
+        if item.kind.casefold() != "video":
+            raise BridgeError("MEDIA_NOT_VIDEO", "Only camera video items can be played.", status_code=422)
+        item = session.media_info(media_id)
+        if item.size_bytes <= 0:
+            raise BridgeError(
+                "MEDIA_SIZE_UNAVAILABLE",
+                "The camera did not report a video size required for playback.",
+                status_code=422,
+            )
+        token = playback_tickets.issue(session_id, media_id)
+        return MediaPlaybackTicket(
+            url=f"/v1/media-playback/{token}",
+            expires_in_seconds=playback_tickets.lifetime_seconds,
+        )
+
     @router.put("/session/{session_id}/media/{media_id}/protection", response_model=MediaItem)
     def set_media_protection(
         session_id: str,
@@ -472,16 +556,9 @@ def create_app(
     def set_media_archive(session_id: str, media_id: str, update: MediaArchiveUpdate) -> MediaItem:
         return manager.get(session_id).set_media_archive(media_id, update.enabled)
 
-    @router.get("/session/{session_id}/media/{media_id}")
-    def download_media(session_id: str, media_id: str) -> StreamingResponse:
-        item, chunks = manager.get(session_id).download_media(media_id)
-        headers = {
-            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(item.name)}",
-            "Cache-Control": "no-store",
-        }
-        if item.size_bytes > 0:
-            headers["Content-Length"] = str(item.size_bytes)
-        return StreamingResponse(chunks, media_type=item.content_type, headers=headers)
+    @router.api_route("/session/{session_id}/media/{media_id}", methods=["GET", "HEAD"])
+    def download_media(session_id: str, media_id: str, request: Request) -> Response:
+        return media_response(session_id, media_id, request, inline=False)
 
     @router.delete("/session/{session_id}/media/{media_id}", status_code=204)
     def delete_media(session_id: str, media_id: str) -> Response:
@@ -490,6 +567,7 @@ def create_app(
 
     @router.delete("/session/{session_id}", status_code=204)
     def delete_session(session_id: str) -> Response:
+        playback_tickets.revoke_session(session_id)
         manager.delete(session_id)
         return Response(status_code=204)
 

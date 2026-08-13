@@ -1922,6 +1922,71 @@ public actor CCAPIClient {
         )
     }
 
+    public func openMediaStream(
+        _ item: CameraMediaItem,
+        offset: Int64,
+        length: Int64? = nil
+    ) async throws -> CameraMediaStreamResponse {
+        try await ensureInitialized()
+        guard offset >= 0, length.map({ $0 > 0 }) ?? true else {
+            throw CCAPIError.invalidResponse("Media byte range must be positive.")
+        }
+        if resolvedMode != .simulator,
+           !supports(.get, suffix: "/contents"),
+           !observedFeatures.contains(.mediaDownload) {
+            throw CCAPIError.unsupported(.mediaDownload)
+        }
+
+        let paths: [String]
+        if resolvedMode == .simulator {
+            paths = ["/ccapi/media/\(Self.encodePathComponent(item.id))"]
+        } else {
+            let path = try normalizeCameraResource(item.id).components(separatedBy: "?")[0]
+            paths = [path, "\(path)?kind=main", "\(path)?type=main"]
+        }
+
+        var failures: [String] = []
+        for path in paths {
+            try Task.checkCancellation()
+            var streamRequest = try request(path: path, method: .get, timeoutInterval: 120)
+            streamRequest.setValue("video/*, application/octet-stream", forHTTPHeaderField: "Accept")
+            streamRequest.setValue(Self.mediaRangeHeader(offset: offset, length: length), forHTTPHeaderField: "Range")
+            let response = try await transport.openStream(streamRequest)
+            guard response.statusCode == 200 || response.statusCode == 206 else {
+                response.cancel()
+                failures.append("\(path): HTTP \(response.statusCode)")
+                continue
+            }
+            let contentType = response.header("content-type")
+            guard !Self.isTextContentType(contentType) else {
+                response.cancel()
+                failures.append("\(path): camera returned \(contentType ?? "text")")
+                continue
+            }
+            do {
+                let stream = try CameraMediaStreamResponse(
+                    item: item,
+                    response: response,
+                    fallbackTotalBytes: item.sizeBytes
+                )
+                observedFeatures.insert(.mediaDownload)
+                return stream
+            } catch {
+                response.cancel()
+                failures.append("\(path): invalid byte-range response")
+            }
+        }
+        throw CCAPIError.invalidResponse(
+            "Media streaming failed for '\(item.name)'.\n" + failures.map { "- \($0)" }.joined(separator: "\n")
+        )
+    }
+
+    private static func mediaRangeHeader(offset: Int64, length: Int64?) -> String {
+        guard let length else { return "bytes=\(offset)-" }
+        let (end, overflow) = offset.addingReportingOverflow(length - 1)
+        return overflow ? "bytes=\(offset)-" : "bytes=\(offset)-\(end)"
+    }
+
     public func uploadMedia(
         from fileURL: URL,
         contentType: String? = nil,

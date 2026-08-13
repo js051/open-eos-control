@@ -494,6 +494,11 @@ class MediaList(ApiModel):
     items: list[MediaItem]
 
 
+class MediaPlaybackTicket(ApiModel):
+    url: str
+    expires_in_seconds: int = Field(gt=0, le=3600)
+
+
 class ErrorDetail(ApiModel):
     code: str
     message: str

@@ -80,6 +80,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var loadingMediaThumbnailIDs = Set<String>()
     @Published private(set) var mediaPreviewItem: CameraMediaItem?
     @Published private(set) var mediaPreviewData: Data?
+    @Published private(set) var mediaVideoPlayback: CameraMediaPlayback?
     @Published private(set) var mediaPreviewLoading = false
     @Published private(set) var downloadedFileURL: URL?
     @Published private(set) var downloadedFileName: String?
@@ -966,6 +967,14 @@ final class CameraAppState: ObservableObject {
     }
 
     func openMediaPreview(_ item: CameraMediaItem) async {
+        if item.kind.lowercased() == "video" {
+            guard !isPreview, supports(.mediaDownload), let session else { return }
+            resetMediaPreview()
+            mediaPreviewItem = item
+            mediaVideoPlayback = CameraMediaPlayback(item: item, session: session)
+            lastError = nil
+            return
+        }
         guard
             !isPreview,
             item.previewAvailable,
@@ -974,6 +983,8 @@ final class CameraAppState: ObservableObject {
             begin(.media)
         else { return }
 
+        mediaVideoPlayback?.close()
+        mediaVideoPlayback = nil
         mediaPreviewItem = item
         mediaPreviewData = nil
         mediaPreviewLoading = true
@@ -1728,6 +1739,8 @@ final class CameraAppState: ObservableObject {
     }
 
     private func resetMediaPreview() {
+        mediaVideoPlayback?.close()
+        mediaVideoPlayback = nil
         mediaPreviewItem = nil
         mediaPreviewData = nil
         mediaPreviewLoading = false

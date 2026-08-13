@@ -123,6 +123,25 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "media-download-complete")
     }
 
+    func testOfflineMediaGridFiltersPhotosAndVideos() throws {
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))
+        app.buttons["offline-preview-button"].tap()
+        XCTAssertTrue(app.buttons["more-actions-button"].waitForExistence(timeout: 5))
+        app.buttons["more-actions-button"].tap()
+        XCTAssertTrue(tapCameraAction(app.buttons["camera-media-menu-button"], in: app))
+
+        let filter = app.segmentedControls["media-filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["R6M3_0001.JPG"].exists)
+        filter.buttons["Videos"].tap()
+        XCTAssertTrue(app.staticTexts["R6M3_0002.MP4"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["R6M3_0001.JPG"].exists)
+        filter.buttons["All"].tap()
+        XCTAssertTrue(app.staticTexts["R6M3_0001.JPG"].waitForExistence(timeout: 3))
+        addScreenshot(name: "media-grid-filtered")
+    }
+
     func testOfflineMonitoringAssistsKeepGeometryControlsAvailable() throws {
         let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
         XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))

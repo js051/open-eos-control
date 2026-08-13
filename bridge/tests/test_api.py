@@ -382,6 +382,76 @@ def test_host_ram_capture_runs_end_to_end_through_media_api(tmp_path: Path) -> N
     assert not [path for path in tmp_path.iterdir() if path.is_file()]
 
 
+def test_authenticated_video_playback_ticket_supports_head_range_and_revocation(tmp_path: Path) -> None:
+    payload = b"0123456789-camera-video"
+    source = tmp_path / "CLIP_0001.MP4"
+    source.write_bytes(payload)
+    engine = GPhoto2Engine(FakeRunner(), capture_directory=tmp_path)
+    headers = {"Authorization": "Bearer test-token"}
+
+    with TestClient(create_app(engine=engine, token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        media = client.get(f"/v1/session/{session_id}/media", headers=headers).json()["items"]
+        video = next(item for item in media if item["name"] == source.name)
+        ticket_path = f"/v1/session/{session_id}/media/{video['id']}/playback"
+
+        unauthorized = client.post(ticket_path)
+        issued = client.post(ticket_path, headers=headers)
+        playback_url = issued.json()["url"]
+        head = client.head(playback_url)
+        partial = client.get(playback_url, headers={"Range": "bytes=3-9"})
+        invalid = client.get(playback_url, headers={"Range": f"bytes={len(payload)}-"})
+        revoked = client.delete(playback_url)
+        after_revoke = client.get(playback_url)
+
+    assert unauthorized.status_code == 401
+    assert issued.status_code == 200
+    assert issued.json()["expiresInSeconds"] == 900
+    assert head.status_code == 200
+    assert head.headers["accept-ranges"] == "bytes"
+    assert head.headers["content-length"] == str(len(payload))
+    assert head.headers["content-type"].startswith("video/mp4")
+    assert partial.status_code == 206
+    assert partial.content == payload[3:10]
+    assert partial.headers["content-range"] == f"bytes 3-9/{len(payload)}"
+    assert partial.headers["content-length"] == "7"
+    assert invalid.status_code == 416
+    assert invalid.headers["content-range"] == f"bytes */{len(payload)}"
+    assert revoked.status_code == 204
+    assert after_revoke.status_code == 404
+
+
+def test_video_playback_ticket_rejects_images_and_expires_with_session(tmp_path: Path) -> None:
+    image = tmp_path / "PHOTO_0001.JPG"
+    image.write_bytes(JPEG)
+    video = tmp_path / "CLIP_0001.MP4"
+    video.write_bytes(b"camera-video")
+    engine = GPhoto2Engine(FakeRunner(), capture_directory=tmp_path)
+    headers = {"Authorization": "Bearer test-token"}
+
+    with TestClient(create_app(engine=engine, token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        media = client.get(f"/v1/session/{session_id}/media", headers=headers).json()["items"]
+        image_item = next(item for item in media if item["name"] == image.name)
+        video_item = next(item for item in media if item["name"] == video.name)
+        image_ticket = client.post(
+            f"/v1/session/{session_id}/media/{image_item['id']}/playback",
+            headers=headers,
+        )
+        issued = client.post(
+            f"/v1/session/{session_id}/media/{video_item['id']}/playback",
+            headers=headers,
+        )
+        client.delete(f"/v1/session/{session_id}", headers=headers)
+        after_close = client.get(issued.json()["url"])
+
+    assert image_ticket.status_code == 422
+    assert image_ticket.json()["error"]["code"] == "MEDIA_NOT_VIDEO"
+    assert after_close.status_code == 404
+
+
 def test_camera_cannot_be_opened_by_two_bridge_sessions() -> None:
     headers = {"Authorization": "Bearer test-token"}
     with TestClient(create_app(engine=GPhoto2Engine(FakeRunner()), token="test-token")) as client:

@@ -592,8 +592,15 @@ async function run() {
     );
 
     await page.click('.tab[data-view="media"]');
-    const capturedMedia = page.locator(".media-row").filter({ hasText: "SIM_0003.JPG" });
+    await page.waitForSelector("#media-panel:not([hidden])");
+    const capturedMedia = page.locator(".media-card").filter({ hasText: "SIM_0003.JPG" });
     await capturedMedia.waitFor({ state: "visible" });
+    assert.equal(await page.locator("#media-filter-control button.active").innerText(), "All");
+    await page.click('#media-filter-control button[data-media-filter="video"]');
+    assert.equal(await capturedMedia.isVisible(), false);
+    await page.click('#media-filter-control button[data-media-filter="photo"]');
+    await capturedMedia.waitFor({ state: "visible" });
+    await page.selectOption("#media-sort-select", "name");
     await capturedMedia.locator("button.media-thumbnail").click();
     await page.waitForSelector("#media-preview-dialog[open] #media-preview-image:not([hidden])");
     await page.click("#media-preview-close");
@@ -609,7 +616,7 @@ async function run() {
       .canonical.event_delivery_count;
     const externalCapture = await fetch(`${simulatorOrigin}/ccapi/capture/still`, { method: "POST" });
     assert.equal(externalCapture.ok, true);
-    await page.locator(".media-row").filter({ hasText: "SIM_0004.PNG" }).waitFor({ state: "visible" });
+    await page.locator(".media-card").filter({ hasText: "SIM_0004.PNG" }).waitFor({ state: "visible" });
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.canonical.event_delivery_count > deliveredBeforeExternalCapture,

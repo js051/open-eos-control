@@ -81,6 +81,13 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "local-video-device-select",
         "local-video-support",
         "media-list",
+        "media-filter-control",
+        "media-sort-select",
+        "media-preview-dialog",
+        "media-preview-image",
+        "media-preview-video",
+        "media-preview-previous",
+        "media-preview-next",
         "media-details-dialog",
         "media-details-close",
         "media-protect-button",
@@ -258,6 +265,12 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "lut.createWebGLRenderer" in script
     assert "item.previewAvailable === true" in script
     assert "await ui.mediaPreviewImage.decode()" in script
+    assert '/media/${encodeURIComponent(item.id)}/playback`' in script
+    assert 'querySelectorAll("[data-media-filter]")' in script
+    assert "state.mediaPreviewTicketUrl = ticket.url" in script
+    assert "ui.mediaPreviewVideo.src = ticket.url" in script
+    assert "openAdjacentMedia(-1)" in script
+    assert "openAdjacentMedia(1)" in script
     assert 'data-view="media" data-i18n-aria="media"' in html
     assert 'CLICK_WHITE_BALANCE: "CLICK_WHITE_BALANCE"' in script
     assert 'SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS"' in script
