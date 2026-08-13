@@ -579,9 +579,9 @@ final class CCAPIClientTests: XCTestCase {
         )
         let client = try CCAPIClient(
             baseURL: "http://192.168.1.2:8080",
+            mode: .camera,
             username: "camera-user",
             password: "camera-password",
-            mode: .camera,
             transport: transport
         )
 
