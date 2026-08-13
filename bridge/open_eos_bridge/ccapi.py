@@ -67,7 +67,6 @@ MAX_MULTIPART_HEADER_BYTES = 16 * 1024
 MAX_MULTIPART_HEADER_COUNT = 32
 MAX_RTP_SESSION_DESCRIPTION_BYTES = 64 * 1024
 RTP_AUDIO_FEATURE = "LIVE_VIEW_RTP_AUDIO"
-MAX_MEDIA_ITEMS = 500
 MAX_MEDIA_PAGES = 100
 MAX_MEDIA_TREE_DEPTH = 4
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
@@ -2336,7 +2335,7 @@ class CcapiSession:
                     continue
                 visited.add(container)
                 media_paths: list[str] = []
-                for raw_path in self._content_paths(container, max_paths=MAX_MEDIA_ITEMS):
+                for raw_path in self._content_paths(container):
                     path = self._normalize_resource(raw_path).split("?", 1)[0]
                     if _is_media_path(path):
                         if path not in media_paths:
@@ -2345,7 +2344,7 @@ class CcapiSession:
                         pending.append((path, depth + 1))
                 if media_paths:
                     media_path_groups.append(media_paths)
-            media_paths = _merge_media_path_groups(media_path_groups, MAX_MEDIA_ITEMS)
+            media_paths = _merge_media_path_groups(media_path_groups)
             items = [
                 MediaItem(
                     id=_media_id(path),
@@ -2354,7 +2353,7 @@ class CcapiSession:
                     content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
                     preview_available=_supports_ccapi_display_preview(path),
                 )
-                for path in media_paths[:MAX_MEDIA_ITEMS]
+                for path in media_paths
             ]
             self._media_cache = {item.id: item for item in items}
             self._observed.add(CameraFeature.MEDIA_BROWSER)
@@ -2752,16 +2751,30 @@ class CcapiSession:
             )
         self._request_ok(operation.method, operation.path, payload)
 
-    def _content_paths(self, container: str, *, max_paths: int = MAX_MEDIA_ITEMS) -> list[str]:
-        if max_paths <= 0:
-            return []
+    def _content_paths(self, container: str) -> list[str]:
         page_info = self._first_json([f"{container}?kind=number", f"{container}?type=all,kind=number"])
-        page_count = min(MAX_MEDIA_PAGES, _integer_value(page_info, "pagenumber") or 0)
+        page_count = _integer_value(page_info, "pagenumber") or 0
+        if page_count < 0:
+            raise BridgeError(
+                "INVALID_MEDIA_PAGE_COUNT",
+                "The camera returned a negative media page count.",
+                status_code=502,
+                feature=CameraFeature.MEDIA_BROWSER.value,
+                engine=self.engine_name,
+            )
+        if page_count > MAX_MEDIA_PAGES:
+            raise BridgeError(
+                "MEDIA_PAGE_LIMIT_EXCEEDED",
+                f"The camera reported {page_count} media pages, above the safety limit of {MAX_MEDIA_PAGES}.",
+                status_code=502,
+                feature=CameraFeature.MEDIA_BROWSER.value,
+                engine=self.engine_name,
+            )
         paths: dict[str, None] = {}
         if page_count <= 0:
             value = self._first_json([container], required=True)
             if isinstance(value, dict):
-                self._add_content_paths(paths, value, reverse=False, max_paths=max_paths)
+                self._add_content_paths(paths, value, reverse=False, max_paths=None)
             return list(paths)
 
         first_value = self._content_page(container, 1)
@@ -2769,21 +2782,17 @@ class CcapiSession:
             pages = range(page_count, 0, -1)
             for page in pages:
                 value = first_value if page == 1 else self._content_page(container, page)
-                self._add_content_paths(paths, value, reverse=True, max_paths=max_paths)
-                if len(paths) >= max_paths:
-                    break
+                self._add_content_paths(paths, value, reverse=True, max_paths=None)
         else:
-            self._add_content_paths(paths, first_value, reverse=False, max_paths=max_paths)
+            self._add_content_paths(paths, first_value, reverse=False, max_paths=None)
             for page in range(2, page_count + 1):
-                if len(paths) >= max_paths:
-                    break
                 self._add_content_paths(
                     paths,
                     self._content_page(container, page),
                     reverse=False,
-                    max_paths=max_paths,
+                    max_paths=None,
                 )
-        return list(paths)[:max_paths]
+        return list(paths)
 
     def _content_page(self, container: str, page: int) -> object:
         plain_path = f"{container}?page={page}"
@@ -2805,7 +2814,7 @@ class CcapiSession:
         value: object,
         *,
         reverse: bool,
-        max_paths: int,
+        max_paths: int | None,
     ) -> None:
         if not isinstance(value, dict):
             return
@@ -2816,7 +2825,7 @@ class CcapiSession:
         for item in values:
             if isinstance(item, str) and item:
                 paths.setdefault(item, None)
-                if len(paths) >= max_paths:
+                if max_paths is not None and len(paths) >= max_paths:
                     break
 
     def _load_settings(self, force: bool = False) -> dict[str, object]:
@@ -4478,13 +4487,13 @@ def _is_media_path(path: str) -> bool:
     return "." in name and not name.endswith(".")
 
 
-def _merge_media_path_groups(groups: list[list[str]], max_items: int) -> list[str]:
+def _merge_media_path_groups(groups: list[list[str]]) -> list[str]:
     positions = [0] * len(groups)
     merged: dict[str, None] = {}
-    while len(merged) < max_items:
+    while True:
         advanced = False
         for index, group in enumerate(groups):
-            if len(merged) >= max_items or positions[index] >= len(group):
+            if positions[index] >= len(group):
                 continue
             merged.setdefault(group[positions[index]], None)
             positions[index] += 1

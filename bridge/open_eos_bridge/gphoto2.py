@@ -54,7 +54,6 @@ MAX_COMMAND_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_COMMAND_STDERR_BYTES = 256 * 1024
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
-MAX_MEDIA_ITEMS = 500
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
 MAX_CAPABILITY_EVIDENCE_ITEM_CHARS = 512
 CONFIG_REFRESH_SECONDS = 1.0
@@ -1081,7 +1080,7 @@ def parse_media_list(output: str) -> list[MediaItem]:
                 preview_available=is_previewable_media(name, content_type, size),
             )
         )
-    return list(reversed(items[-MAX_MEDIA_ITEMS:]))
+    return list(reversed(items))
 
 
 def parse_media_info(output: str) -> GPhotoMediaInfo:
@@ -1990,7 +1989,7 @@ class GPhoto2Session:
                 [*host_items, *camera_items],
                 key=lambda item: item.capture_time or "",
                 reverse=True,
-            )[:MAX_MEDIA_ITEMS]
+            )
             self._media_cache = {item.id: item for item in items}
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items

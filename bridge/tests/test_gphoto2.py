@@ -26,7 +26,7 @@ from open_eos_bridge.gphoto2 import (
     resolve_gphoto_command,
     summary_supports_file_upload,
 )
-from open_eos_bridge.local_media import default_capture_directory, preview_content_type
+from open_eos_bridge.local_media import LocalCaptureStore, default_capture_directory, preview_content_type
 from open_eos_bridge.models import (
     CameraFeature,
     CameraModelFamily,
@@ -266,6 +266,29 @@ def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
     assert summary_supports_file_upload(SUMMARY) is True
     assert summary_supports_file_upload(SUMMARY.replace("File Upload", "File Transfer")) is False
     assert summary_supports_file_upload(SUMMARY.replace("File Upload", "No File Upload")) is False
+
+
+def test_media_parser_does_not_truncate_more_than_five_hundred_items() -> None:
+    output = "\n".join(
+        ["There are 501 files in folder '/store_00010001/DCIM/100CANON'."]
+        + [f"#{index} IMG_{index:04}.JPG rd 1 KB image/jpeg 1784600000" for index in range(1, 502)]
+    )
+
+    items = parse_media_list(output)
+
+    assert len(items) == 501
+    assert items[0].name == "IMG_0501.JPG"
+    assert items[-1].name == "IMG_0001.JPG"
+
+
+def test_local_media_store_does_not_truncate_more_than_five_hundred_items(tmp_path: Path) -> None:
+    for index in range(1, 502):
+        (tmp_path / f"IMG_{index:04}.JPG").write_bytes(b"x")
+
+    items = LocalCaptureStore(tmp_path).list_items()
+
+    assert len(items) == 501
+    assert {item.name for item in items} == {f"IMG_{index:04}.JPG" for index in range(1, 502)}
 
 
 def test_media_info_parser_reads_only_the_primary_file_section() -> None:

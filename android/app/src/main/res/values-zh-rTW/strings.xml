@@ -246,6 +246,7 @@
     <string name="close_media_preview">關閉媒體預覽</string>
     <string name="media_preview_content">%1$s 的預覽</string>
     <string name="media_preview_unavailable">無法顯示相機提供的預覽影像。</string>
+    <string name="media_video_playback_failed">無法直接播放相機中的這部影片。</string>
     <string name="start_bulb_exposure">開始 Bulb 長曝光</string>
     <string name="stop_bulb_exposure">停止 Bulb 長曝光</string>
     <string name="bulb_exposure_time">BULB %1$s</string>
@@ -359,4 +360,16 @@
     <string name="media_rotation">顯示旋轉</string>
     <string name="media_rotation_value">%1$d 度</string>
     <string name="rotation_degrees_short">%1$d°</string>
+    <string name="media_all">全部</string>
+    <string name="media_photos">照片</string>
+    <string name="media_videos">影片</string>
+    <string name="media_filter_count">%1$s %2$d</string>
+    <string name="media_sort">排序媒體</string>
+    <string name="media_newest_first">最新優先</string>
+    <string name="media_oldest_first">最舊優先</string>
+    <string name="no_filtered_media">沒有符合此篩選條件的媒體。</string>
+    <string name="previous_media">上一個媒體</string>
+    <string name="next_media">下一個媒體</string>
+    <string name="media_unknown_date">日期不明</string>
+    <string name="media_raw_badge">RAW</string>
 </resources>

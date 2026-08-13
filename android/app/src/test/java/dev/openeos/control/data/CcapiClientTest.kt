@@ -3354,26 +3354,29 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaListStopsPagingAtResultLimit() = runTest {
+    fun realMediaListReturnsMoreThanFiveHundredItemsAndPublishesProgress() = runTest {
         client.forceRealCamera(prefix = "/ccapi/ver140")
-        server.enqueue(jsonResponse("""{"pagenumber":47}"""))
-        repeat(5) { pageIndex ->
-            val paths = (1..100).joinToString(separator = ",") { itemIndex ->
+        server.enqueue(jsonResponse("""{"pagenumber":6}"""))
+        repeat(6) { pageIndex ->
+            val pageSize = if (pageIndex == 5) 1 else 100
+            val paths = (1..pageSize).joinToString(separator = ",") { itemIndex ->
                 val number = pageIndex * 100 + itemIndex
                 "\"/ccapi/ver140/contents/card2/DCIM/100EOSR6/IMG_${number.toString().padStart(4, '0')}.JPG\""
             }
             server.enqueue(jsonResponse("""{"path":[$paths]}"""))
         }
 
-        val items = client.listMedia()
+        val progressCounts = mutableListOf<Int>()
+        val items = client.listMedia { progressCounts += it.size }
 
-        assertEquals(500, items.size)
+        assertEquals(501, items.size)
         assertEquals("IMG_0001.JPG", items.first().name)
-        assertEquals("IMG_0500.JPG", items.last().name)
-        assertEquals(6, server.requestCount)
+        assertEquals("IMG_0501.JPG", items.last().name)
+        assertEquals(listOf(100, 200, 300, 400, 500, 501), progressCounts)
+        assertEquals(7, server.requestCount)
         assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
         assertEquals("/ccapi/ver140/contents?page=1&order=desc", server.takeRequest().path)
-        repeat(4) { pageIndex ->
+        repeat(5) { pageIndex ->
             assertEquals(
                 "/ccapi/ver140/contents?page=${pageIndex + 2}&order=desc",
                 server.takeRequest().path,

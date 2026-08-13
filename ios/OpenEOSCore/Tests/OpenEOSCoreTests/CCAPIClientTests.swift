@@ -3297,27 +3297,30 @@ final class CCAPIClientTests: XCTestCase {
         )
     }
 
-    func testRealMediaListStopsPagingAfter500ItemsPerContainer() async throws {
+    func testRealMediaListReturnsMoreThan500ItemsPerContainer() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
             path: "/ccapi",
             body: #"{"ver100":[{"path":"/contents","get":true}]}"#
         )
-        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":3}"#)
-        let paths = (1...500).map { index in
-            "\"/ccapi/ver100/contents/card1/IMG_\(String(format: "%04d", index)).JPG\""
-        }.joined(separator: ",")
-        await transport.enqueueJSON(
-            path: "/ccapi/ver100/contents?page=1&order=desc",
-            body: "{\"path\":[\(paths)]}"
-        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":2}"#)
+        for page in 1...2 {
+            let range = page == 1 ? 1...500 : 501...501
+            let paths = range.map { index in
+                "\"/ccapi/ver100/contents/card1/IMG_\(String(format: "%04d", index)).JPG\""
+            }.joined(separator: ",")
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/contents?page=\(page)&order=desc",
+                body: "{\"path\":[\(paths)]}"
+            )
+        }
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
         let items = try await client.listMedia()
 
-        XCTAssertEqual(items.count, 500)
+        XCTAssertEqual(items.count, 501)
         XCTAssertEqual(items.first?.name, "IMG_0001.JPG")
-        XCTAssertEqual(items.last?.name, "IMG_0500.JPG")
+        XCTAssertEqual(items.last?.name, "IMG_0501.JPG")
         let requests = await transport.requests()
         XCTAssertEqual(
             requests.map(\.path),
@@ -3325,6 +3328,7 @@ final class CCAPIClientTests: XCTestCase {
                 "/ccapi",
                 "/ccapi/ver100/contents?kind=number",
                 "/ccapi/ver100/contents?page=1&order=desc",
+                "/ccapi/ver100/contents?page=2&order=desc",
             ]
         )
     }

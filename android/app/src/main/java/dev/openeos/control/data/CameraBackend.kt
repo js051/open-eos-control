@@ -102,11 +102,14 @@ interface CameraControlBackend {
     suspend fun setLiveViewMagnification(
         magnification: LiveViewMagnification,
     ): LiveViewMagnificationResult = unsupported(CameraFeature.LIVE_VIEW_MAGNIFICATION)
-    suspend fun listMedia(): List<CameraMediaItem> = unsupported(CameraFeature.MEDIA_BROWSER)
+    suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit = {}): List<CameraMediaItem> =
+        unsupported(CameraFeature.MEDIA_BROWSER)
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail =
         unsupported(CameraFeature.MEDIA_THUMBNAIL)
     suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview =
         unsupported(CameraFeature.MEDIA_PREVIEW)
+    suspend fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource =
+        unsupported(CameraFeature.MEDIA_DOWNLOAD)
     suspend fun downloadMedia(
         item: CameraMediaItem,
         destination: OutputStream,
@@ -226,11 +229,15 @@ class CcapiCameraBackend(
         magnification: LiveViewMagnification,
     ): LiveViewMagnificationResult = client.setLiveViewMagnification(magnification)
 
-    override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
+    override suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit): List<CameraMediaItem> =
+        client.listMedia(onProgress)
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
 
     override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview = client.mediaPreview(item)
+
+    override suspend fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource =
+        client.openMediaStream(item)
 
     override suspend fun downloadMedia(
         item: CameraMediaItem,
@@ -352,11 +359,15 @@ class DesktopBridgeCameraBackend(
         magnification: LiveViewMagnification,
     ): LiveViewMagnificationResult = client.setLiveViewMagnification(magnification)
 
-    override suspend fun listMedia(): List<CameraMediaItem> = client.listMedia()
+    override suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit): List<CameraMediaItem> =
+        client.listMedia().also(onProgress)
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
 
     override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview = client.mediaPreview(item)
+
+    override suspend fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource =
+        client.openMediaStream(item)
 
     override suspend fun downloadMedia(
         item: CameraMediaItem,

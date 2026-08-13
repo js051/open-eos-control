@@ -138,10 +138,11 @@ class CameraUiStateTest {
         }
 
         assertEquals(listOf(retained, added), refreshed.mediaItems)
-        assertTrue(refreshed.mediaThumbnailLoadingIds.isEmpty())
+        assertEquals(setOf("media-1"), refreshed.mediaThumbnailLoadingIds)
         assertNull(refreshed.mediaPreviewItem)
         assertNull(refreshed.mediaPreviewBytes)
         assertFalse(refreshed.mediaPreviewLoading)
+        assertNull(refreshed.mediaStreamSource)
 
         val preservedPreview = with(CameraViewModel()) {
             state.copy(mediaPreviewItem = retained).withEventMediaItems(listOf(retained, added))

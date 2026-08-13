@@ -645,6 +645,23 @@ class DesktopBridgeClient(
         return CameraMediaPreview(item = item, bytes = bytes, contentType = contentType)
     }
 
+    fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
+        require(item.kind.equals("video", ignoreCase = true)) { "Media streaming is available only for video items." }
+        return OkHttpCameraMediaStreamSource(
+            item = item,
+            httpClient = httpClient,
+            requestFactory = { position ->
+                fun request() = Request.Builder()
+                    .url(sessionEndpoint("media", item.id))
+                    .header("Accept", "video/*,application/octet-stream;q=0.8")
+                buildList {
+                    if (position > 0L) add(request().header("Range", "bytes=$position-").get().build())
+                    add(request().get().build())
+                }
+            },
+        )
+    }
+
     private suspend fun mediaImageRepresentation(
         item: CameraMediaItem,
         endpoint: String,
@@ -872,10 +889,11 @@ class DesktopBridgeClient(
         val id = item.optString("id").trim()
         val name = item.optString("name").trim()
         if (id.isBlank() || name.isBlank()) return null
+        val kind = item.optString("kind", "other")
         return CameraMediaItem(
             id = id,
             name = name,
-            kind = item.optString("kind", "other"),
+            kind = kind,
             sizeBytes = item.optNullableLong("sizeBytes"),
             captureTime = item.optNullableString("captureTime"),
             previewAvailable = item.optBoolean("previewAvailable", false),
@@ -883,6 +901,7 @@ class DesktopBridgeClient(
             archived = item.optNullableBoolean("archived"),
             rating = item.optNullableInt("rating")?.takeIf { it in 0..5 },
             rotationDegrees = item.optNullableInt("rotationDegrees")?.takeIf { it in MEDIA_ROTATIONS },
+            streamAvailable = kind.equals("video", ignoreCase = true),
         )
     }
 

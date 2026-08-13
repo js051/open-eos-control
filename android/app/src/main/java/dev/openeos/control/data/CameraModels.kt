@@ -579,6 +579,7 @@ data class CameraMediaItem(
     val rotationDegrees: Int? = null,
     val ratingWritable: Boolean? = null,
     val archived: Boolean? = null,
+    val streamAvailable: Boolean = false,
 )
 
 data class CameraMediaThumbnail(

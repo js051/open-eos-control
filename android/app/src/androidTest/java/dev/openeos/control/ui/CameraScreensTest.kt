@@ -1807,9 +1807,13 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.camera_media)).assertIsDisplayed()
-        compose.onNodeWithText("R6M3_0001.CR3").assertIsDisplayed()
+        compose.onNodeWithText("2026-07-21").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.download_media, "R6M3_0001.CR3"))
-            .assertIsNotEnabled()
+            .assertDoesNotExist()
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, "R6M3_0001.CR3"))
+            .performClick()
+        compose.onNodeWithText(resourceText(R.string.delete_media, "R6M3_0001.CR3"))
+            .assertDoesNotExist()
     }
 
     @Test
@@ -1904,13 +1908,40 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithContentDescription(resourceText(R.string.preview_media, item.name)).assertDoesNotExist()
-        compose.onNodeWithText(item.name).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, item.name)).assertIsDisplayed()
+    }
+
+    @Test
+    fun mediaVideoPlaybackRequiresPerItemStreamingSupport() {
+        val playable = CameraMediaItem(
+            id = "video-playable",
+            name = "CLIP_0001.MP4",
+            kind = "video",
+            streamAvailable = true,
+        )
+        val downloadOnly = CameraMediaItem(
+            id = "video-download-only",
+            name = "CLIP_0002.MP4",
+            kind = "video",
+            streamAvailable = false,
+        )
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(
+            previewMode = false,
+            mediaItems = listOf(playable, downloadOnly),
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.preview_media, playable.name)).assertIsEnabled()
+        compose.onNodeWithContentDescription(resourceText(R.string.preview_media, downloadOnly.name)).assertDoesNotExist()
     }
 
     @Test
     fun mediaDeleteRequiresConfirmationBeforeDispatchingCameraAction() {
         var deletedName: String? = null
-        val state = CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA)
+        val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA)
         val actions = noOpActions().copy(deleteMedia = { deletedName = it.name })
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
