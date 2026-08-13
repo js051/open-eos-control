@@ -1,5 +1,7 @@
 package dev.openeos.control.ui
 
+import android.system.ErrnoException
+import android.system.OsConstants
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaStreamHandle
 import dev.openeos.control.data.CameraMediaStreamSource
@@ -36,6 +38,27 @@ class CameraMediaPlaybackCacheTest {
 
         assertTrue(failure?.message.orEmpty().contains("5 of 10 bytes"))
         assertFalse(temporaryFolder.root.listFiles().orEmpty().any { it.name.startsWith("camera-video-") })
+    }
+
+    @Test
+    fun capacityPolicyAllowsVideosLargerThanOneGiBWhenSpaceExists() {
+        val twoGiB = 2L * 1024L * 1024L * 1024L
+
+        assertTrue(hasPlaybackCacheCapacity(twoGiB, twoGiB + 512L * 1024L * 1024L))
+    }
+
+    @Test
+    fun capacityPolicyPreservesFreeSpaceReserve() {
+        val oneGiB = 1024L * 1024L * 1024L
+
+        assertFalse(hasPlaybackCacheCapacity(oneGiB, oneGiB + 64L * 1024L * 1024L))
+    }
+
+    @Test
+    fun classifiesStorageFailureThroughWrappedErrno() {
+        val error = java.io.IOException("write failed", ErrnoException("write", OsConstants.ENOSPC))
+
+        assertTrue(error.isPlaybackStorageFailure())
     }
 
     private class ByteArrayMediaSource(

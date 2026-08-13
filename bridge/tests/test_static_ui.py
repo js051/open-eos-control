@@ -276,6 +276,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "state.mediaPreviewTicketUrl = ticket.url" in script
     assert "ui.mediaPreviewVideo.src = ticket.url" in script
     assert "failMediaVideoPreview" in script
+    assert "videoPlaybackStorageUnavailable" in script
+    assert 'normalized.code === "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE"' in script
     assert "ui.mediaPreviewDownload.hidden" in script
     assert "openAdjacentMedia(-1)" in script
     assert "openAdjacentMedia(1)" in script

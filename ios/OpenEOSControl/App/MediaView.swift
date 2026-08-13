@@ -856,8 +856,8 @@ private struct CameraVideoPreview: View {
             return "media_video_unsupported_format"
         case .incompleteRange:
             return "media_video_incomplete"
-        case .fallbackTooLarge:
-            return "media_video_too_large"
+        case .storageUnavailable:
+            return "media_video_storage_unavailable"
         case .transport:
             return "media_video_unavailable"
         }

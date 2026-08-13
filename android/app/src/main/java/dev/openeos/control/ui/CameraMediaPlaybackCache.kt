@@ -1,5 +1,7 @@
 package dev.openeos.control.ui
 
+import android.system.ErrnoException
+import android.system.OsConstants
 import dev.openeos.control.data.CameraMediaStreamSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -18,17 +20,13 @@ internal suspend fun cacheCameraMediaForPlayback(
     val expectedBytes = requireNotNull(source.item.sizeBytes?.takeIf { it > 0L }) {
         "The camera did not report a file size, so a bounded local preview cannot be prepared."
     }
-    require(expectedBytes <= MAX_AUTOMATIC_PLAYBACK_CACHE_BYTES) {
-        "This video is too large for automatic local playback preparation. Download the original instead."
-    }
     cacheDirectory.listFiles()
         .orEmpty()
         .filter { it.isFile && it.name.startsWith("camera-video-") }
         .forEach(File::delete)
     val usableSpace = cacheDirectory.usableSpace
-    val reserveBytes = minOf(PLAYBACK_CACHE_RESERVE_BYTES, usableSpace / 10L)
-    check(usableSpace - reserveBytes >= expectedBytes) {
-        "There is not enough free space to prepare this video for playback."
+    if (!hasPlaybackCacheCapacity(expectedBytes, usableSpace)) {
+        throw CameraMediaPlaybackStorageException(expectedBytes, usableSpace)
     }
     val suffix = source.item.name.substringAfterLast('.', "mp4")
         .takeIf { it.matches(Regex("[A-Za-z0-9]{1,8}")) }
@@ -71,6 +69,29 @@ internal suspend fun cacheCameraMediaForPlayback(
     }
 }
 
+internal class CameraMediaPlaybackStorageException(
+    val requiredBytes: Long,
+    val availableBytes: Long,
+) : IOException("There is not enough free space to prepare this video for playback.")
+
+internal fun hasPlaybackCacheCapacity(expectedBytes: Long, usableSpace: Long): Boolean {
+    if (expectedBytes <= 0L || usableSpace <= 0L) return false
+    val reserveBytes = minOf(PLAYBACK_CACHE_RESERVE_BYTES, usableSpace / 10L)
+    return expectedBytes <= usableSpace - reserveBytes
+}
+
+internal fun Throwable.isPlaybackStorageFailure(): Boolean {
+    var current: Throwable? = this
+    repeat(8) {
+        when (val error = current) {
+            is CameraMediaPlaybackStorageException -> return true
+            is ErrnoException -> if (error.errno == OsConstants.ENOSPC) return true
+        }
+        current = current?.cause
+        if (current == null) return false
+    }
+    return false
+}
+
 private const val PLAYBACK_COPY_BUFFER_BYTES = 256 * 1024
 private const val PLAYBACK_CACHE_RESERVE_BYTES = 128L * 1024L * 1024L
-private const val MAX_AUTOMATIC_PLAYBACK_CACHE_BYTES = 1L * 1024L * 1024L * 1024L

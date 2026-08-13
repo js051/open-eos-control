@@ -424,6 +424,36 @@ def test_authenticated_video_playback_ticket_supports_head_range_and_revocation(
     assert after_revoke.status_code == 404
 
 
+def test_video_playback_rejects_insufficient_temporary_storage_before_issuing_ticket(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    bridge_app = importlib.import_module("open_eos_bridge.app")
+    source = tmp_path / "CLIP_0001.MP4"
+    source.write_bytes(b"camera-video")
+    engine = GPhoto2Engine(FakeRunner(), capture_directory=tmp_path)
+    headers = {"Authorization": "Bearer test-token"}
+    usage = bridge_app.shutil.disk_usage(Path(tempfile.gettempdir()))
+    monkeypatch.setattr(
+        bridge_app.shutil,
+        "disk_usage",
+        lambda _: usage._replace(free=1),
+    )
+
+    with TestClient(create_app(engine=engine, token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+        media = client.get(f"/v1/session/{session_id}/media", headers=headers).json()["items"]
+        video = next(item for item in media if item["name"] == source.name)
+        response = client.post(
+            f"/v1/session/{session_id}/media/{video['id']}/playback",
+            headers=headers,
+        )
+
+    assert response.status_code == 507
+    assert response.json()["error"]["code"] == "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE"
+
+
 def test_media_response_rejects_truncated_camera_stream_before_headers() -> None:
     runner = FakeRunner()
     video_name = "CLIP_0001.MP4"

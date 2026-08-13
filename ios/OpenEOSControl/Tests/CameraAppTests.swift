@@ -102,9 +102,41 @@ final class CameraAppTests: XCTestCase {
 
     func testMediaPlaybackDoesNotDownloadAgainForUnsupportedCodec() {
         XCTAssertFalse(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .unsupportedFormat))
-        XCTAssertFalse(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .fallbackTooLarge))
+        XCTAssertFalse(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .storageUnavailable))
         XCTAssertTrue(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .incompleteRange))
         XCTAssertTrue(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .transport))
+    }
+
+    func testMediaPlaybackCapacityAllowsVideosLargerThanOneGiBWhenSpaceExists() {
+        let twoGiB: Int64 = 2 * 1024 * 1024 * 1024
+
+        XCTAssertTrue(
+            CameraMediaPlaybackValidation.hasFallbackCapacity(
+                mediaBytes: twoGiB,
+                availableCapacity: twoGiB + 512 * 1024 * 1024
+            )
+        )
+        XCTAssertFalse(
+            CameraMediaPlaybackValidation.hasFallbackCapacity(
+                mediaBytes: twoGiB,
+                availableCapacity: twoGiB + 64 * 1024 * 1024
+            )
+        )
+    }
+
+    func testMediaPlaybackClassifiesStorageExhaustion() {
+        XCTAssertEqual(
+            CameraMediaPlaybackValidation.failure(
+                for: CocoaError(.fileWriteOutOfSpace)
+            ),
+            .storageUnavailable
+        )
+        XCTAssertEqual(
+            CameraMediaPlaybackValidation.failure(
+                for: POSIXError(.ENOSPC)
+            ),
+            .storageUnavailable
+        )
     }
 
     func testCameraStatusReplacementPreservesDeviceStatus() {

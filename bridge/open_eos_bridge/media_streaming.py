@@ -4,11 +4,13 @@ import secrets
 import threading
 import time
 from collections.abc import Iterable, Iterator
-from contextlib import suppress
-from dataclasses import dataclass
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .models import MediaItem
+
+PLAYBACK_STORAGE_RESERVE_BYTES = 128 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,13 @@ class InvalidMediaRange(ValueError):
 
 class MediaPlaybackCacheFull(ValueError):
     pass
+
+
+def has_playback_storage_capacity(expected_bytes: int, available_bytes: int) -> bool:
+    if expected_bytes <= 0 or available_bytes <= 0:
+        return False
+    reserve = min(PLAYBACK_STORAGE_RESERVE_BYTES, available_bytes // 10)
+    return expected_bytes <= available_bytes - reserve
 
 
 def parse_media_range(value: str | None, size_bytes: int) -> MediaByteRange | None:
@@ -91,13 +100,26 @@ class MediaPlaybackCacheEntry:
 
 
 class MediaPlaybackCache:
-    def __init__(self, *, max_bytes: int = 1024 * 1024 * 1024, max_entries: int = 4) -> None:
-        self.max_bytes = max_bytes
+    def __init__(self, *, max_entries: int = 4) -> None:
         self.max_entries = max_entries
         self._values: dict[str, MediaPlaybackCacheEntry] = {}
         self._timers: dict[str, threading.Timer] = {}
-        self._total_bytes = 0
+        self._preparations: dict[str, _MediaPlaybackPreparation] = {}
         self._lock = threading.RLock()
+
+    @contextmanager
+    def preparing(self, token: str) -> Iterator[None]:
+        with self._lock:
+            preparation = self._preparations.setdefault(token, _MediaPlaybackPreparation())
+            preparation.users += 1
+        try:
+            with preparation.lock:
+                yield
+        finally:
+            with self._lock:
+                preparation.users -= 1
+                if preparation.users == 0 and self._preparations.get(token) is preparation:
+                    self._preparations.pop(token, None)
 
     def get(self, token: str) -> MediaPlaybackCacheEntry | None:
         with self._lock:
@@ -105,20 +127,46 @@ class MediaPlaybackCache:
             return self._values.get(token)
 
     def put(self, token: str, session_id: str, item: MediaItem, path: Path, expires_at: float) -> None:
-        if item.size_bytes <= 0 or item.size_bytes > self.max_bytes:
-            raise MediaPlaybackCacheFull("The media is larger than the playback cache limit.")
+        if item.size_bytes <= 0:
+            raise MediaPlaybackCacheFull("The media size required for playback is unavailable.")
         with self._lock:
             self._remove_expired(time.monotonic())
             self._remove(token)
-            if len(self._values) >= self.max_entries or self._total_bytes + item.size_bytes > self.max_bytes:
+            if len(self._values) >= self.max_entries:
                 raise MediaPlaybackCacheFull("The playback cache is currently full.")
             entry = MediaPlaybackCacheEntry(session_id, item, path, expires_at)
             self._values[token] = entry
-            self._total_bytes += item.size_bytes
-            timer = threading.Timer(max(0.0, expires_at - time.monotonic()), self.remove, args=(token,))
+            timer = threading.Timer(
+                max(0.0, expires_at - time.monotonic()),
+                self._expire,
+                args=(token, expires_at),
+            )
             timer.daemon = True
             self._timers[token] = timer
             timer.start()
+
+    def renew(self, token: str, expires_at: float) -> None:
+        with self._lock:
+            entry = self._values.get(token)
+            if entry is None:
+                return
+            self._values[token] = MediaPlaybackCacheEntry(
+                entry.session_id,
+                entry.item,
+                entry.path,
+                expires_at,
+            )
+            timer = self._timers.pop(token, None)
+            if timer is not None:
+                timer.cancel()
+            replacement = threading.Timer(
+                max(0.0, expires_at - time.monotonic()),
+                self._expire,
+                args=(token, expires_at),
+            )
+            replacement.daemon = True
+            self._timers[token] = replacement
+            replacement.start()
 
     def remove(self, token: str) -> None:
         with self._lock:
@@ -135,9 +183,27 @@ class MediaPlaybackCache:
             for token in tuple(self._values):
                 self._remove(token)
 
+    def cleanup_orphan(self, token: str, path: Path) -> None:
+        with self._lock:
+            entry = self._values.get(token)
+            retained = entry is not None and entry.path == path
+        if not retained:
+            with suppress(FileNotFoundError, OSError):
+                path.unlink()
+
     def _remove_expired(self, now: float) -> None:
         for token, entry in tuple(self._values.items()):
             if entry.expires_at <= now:
+                self._remove(token)
+
+    def _expire(self, token: str, expected_expires_at: float) -> None:
+        with self._lock:
+            entry = self._values.get(token)
+            if (
+                entry is not None
+                and entry.expires_at == expected_expires_at
+                and entry.expires_at <= time.monotonic()
+            ):
                 self._remove(token)
 
     def _remove(self, token: str) -> None:
@@ -147,7 +213,6 @@ class MediaPlaybackCache:
             timer.cancel()
         if entry is None:
             return
-        self._total_bytes -= entry.item.size_bytes
         with suppress(FileNotFoundError, OSError):
             entry.path.unlink()
 
@@ -157,6 +222,12 @@ class MediaPlaybackGrant:
     session_id: str
     media_id: str
     expires_at: float
+
+
+@dataclass
+class _MediaPlaybackPreparation:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    users: int = 0
 
 
 class MediaPlaybackTickets:
@@ -177,11 +248,19 @@ class MediaPlaybackTickets:
             )
         return token
 
-    def resolve(self, token: str) -> MediaPlaybackGrant | None:
+    def resolve(self, token: str, *, renew: bool = False) -> MediaPlaybackGrant | None:
         now = time.monotonic()
         with self._lock:
             self._remove_expired(now)
-            return self._values.get(token)
+            grant = self._values.get(token)
+            if grant is not None and renew:
+                grant = MediaPlaybackGrant(
+                    session_id=grant.session_id,
+                    media_id=grant.media_id,
+                    expires_at=now + self.lifetime_seconds,
+                )
+                self._values[token] = grant
+            return grant
 
     def revoke(self, token: str) -> None:
         with self._lock:
