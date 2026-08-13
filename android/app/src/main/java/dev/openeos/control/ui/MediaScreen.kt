@@ -1,11 +1,8 @@
 package dev.openeos.control.ui
 
-import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -21,8 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,23 +35,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.foundation.shape.RoundedCornerShape
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraFeature
@@ -69,6 +54,11 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     var pendingDownload by remember { mutableStateOf<CameraMediaItem?>(null) }
     var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
+    var mediaFilter by remember { mutableStateOf(MediaFilter.ALL) }
+    var mediaSort by remember { mutableStateOf(MediaSort.NEWEST) }
+    val displayedItems = remember(state.mediaItems, mediaFilter, mediaSort) {
+        mediaItemsForDisplay(state.mediaItems, mediaFilter, mediaSort)
+    }
     val createDocument = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { destination ->
@@ -81,10 +71,16 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     }
 
     state.mediaPreviewItem?.let { item ->
-        MediaPreviewDialog(
+        val previewIndex = displayedItems.indexOfFirst { it.id == item.id }
+        MediaViewerDialog(
             item = item,
             bytes = state.mediaPreviewBytes,
+            streamSource = state.mediaStreamSource,
             loading = state.mediaPreviewLoading,
+            canMovePrevious = previewIndex > 0,
+            canMoveNext = previewIndex in 0 until displayedItems.lastIndex,
+            onPrevious = { actions.previewAdjacentMedia(displayedItems, -1) },
+            onNext = { actions.previewAdjacentMedia(displayedItems, 1) },
             onDismiss = actions.closeMediaPreview,
         )
     }
@@ -129,12 +125,18 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 archiveSupported = state.supports(CameraFeature.MEDIA_ARCHIVE) && item.archived != null,
                 ratingSupported = state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false,
                 rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
-                deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
+                downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+                deleteSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DELETE),
                 onDismiss = { activeMetadataItemId = null },
                 onProtect = { actions.setMediaProtection(item, it) },
                 onArchive = { actions.setMediaArchived(item, it) },
                 onRate = { actions.setMediaRating(item, it) },
                 onRotate = { actions.setMediaRotation(item, it) },
+                onDownload = {
+                    activeMetadataItemId = null
+                    pendingDownload = item
+                    createDocument.launch(item.name)
+                },
                 onDelete = {
                     activeMetadataItemId = null
                     pendingDelete = item
@@ -176,15 +178,18 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                     enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
                 )
             }
+            MediaSortButton(mediaSort, onSort = { mediaSort = it })
             ToolIconButton(
                 LucideR.drawable.lucide_ic_refresh_cw,
                 stringResource(R.string.refresh_media),
                 actions.refreshMedia,
-                enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
+                enabled = !state.previewMode && !state.mediaLibraryLoading && !state.isBusy(CameraOperation.MEDIA),
             )
         }
 
-        if (state.isBusy(CameraOperation.MEDIA)) {
+        MediaFilterBar(mediaFilter, state.mediaItems, onSelected = { mediaFilter = it })
+
+        if (state.isBusy(CameraOperation.MEDIA) || state.mediaLibraryLoading) {
             val progress = state.mediaUploadProgress ?: state.mediaDownloadProgress
             val totalBytes = progress?.totalBytes
             if (progress != null && totalBytes != null && totalBytes > 0L) {
@@ -272,42 +277,15 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
 
         when {
             !state.supports(CameraFeature.MEDIA_BROWSER) -> MediaMessage(R.string.media_not_supported)
-            state.mediaItems.isEmpty() && !state.isBusy(CameraOperation.MEDIA) -> MediaMessage(R.string.no_media)
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(state.mediaItems, key = { it.id }) { item ->
-                    val thumbnailSupported = state.supports(CameraFeature.MEDIA_THUMBNAIL)
-                    LaunchedEffect(item.id, thumbnailSupported) {
-                        if (thumbnailSupported) actions.loadMediaThumbnail(item)
-                    }
-                    MediaRow(
-                        item = item,
-                        thumbnail = state.mediaThumbnails[item.id],
-                        thumbnailLoading = item.id in state.mediaThumbnailLoadingIds,
-                        previewEnabled = !state.previewMode &&
-                            state.supports(CameraFeature.MEDIA_PREVIEW) &&
-                            item.previewAvailable &&
-                            !state.isBusy(CameraOperation.MEDIA),
-                        deleteSupported = state.supports(CameraFeature.MEDIA_DELETE),
-                        metadataSupported = state.supports(CameraFeature.MEDIA_PROTECT) ||
-                            state.supports(CameraFeature.MEDIA_ARCHIVE) ||
-                            (state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false) ||
-                            state.supports(CameraFeature.MEDIA_ROTATE),
-                        deleteEnabled = !state.isBusy(CameraOperation.MEDIA),
-                        downloadEnabled = !state.previewMode &&
-                            state.supports(CameraFeature.MEDIA_DOWNLOAD) &&
-                            !state.isBusy(CameraOperation.MEDIA),
-                        downloadSupported = state.supports(CameraFeature.MEDIA_DOWNLOAD),
-                        onDelete = { pendingDelete = item },
-                        onPreview = { actions.openMediaPreview(item) },
-                        onDownload = {
-                            pendingDownload = item
-                            createDocument.launch(item.name)
-                        },
-                        onMetadata = { activeMetadataItemId = item.id },
-                    )
-                }
-                item { Spacer(Modifier.height(24.dp)) }
-            }
+            state.mediaItems.isEmpty() && !state.isBusy(CameraOperation.MEDIA) && !state.mediaLibraryLoading -> MediaMessage(R.string.no_media)
+            displayedItems.isEmpty() && !state.isBusy(CameraOperation.MEDIA) && !state.mediaLibraryLoading -> MediaMessage(R.string.no_filtered_media)
+            else -> MediaGalleryGrid(
+                items = displayedItems,
+                state = state,
+                actions = actions,
+                onPreview = actions.openMediaPreview,
+                onActions = { activeMetadataItemId = it.id },
+            )
         }
     }
 }
@@ -320,123 +298,6 @@ private fun MediaMessage(message: Int) {
 }
 
 @Composable
-private fun MediaRow(
-    item: CameraMediaItem,
-    thumbnail: Bitmap?,
-    thumbnailLoading: Boolean,
-    previewEnabled: Boolean,
-    deleteSupported: Boolean,
-    metadataSupported: Boolean,
-    deleteEnabled: Boolean,
-    downloadSupported: Boolean,
-    downloadEnabled: Boolean,
-    onDelete: () -> Unit,
-    onPreview: () -> Unit,
-    onDownload: () -> Unit,
-    onMetadata: () -> Unit,
-) {
-    val previewDescription = stringResource(R.string.preview_media, item.name)
-    Row(
-        Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(AppSurfaceHigh)
-                .then(
-                    if (previewEnabled) {
-                        Modifier
-                            .semantics { contentDescription = previewDescription }
-                            .clickable(
-                                role = Role.Button,
-                                onClickLabel = previewDescription,
-                                onClick = onPreview,
-                            )
-                    } else {
-                        Modifier
-                    },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (thumbnail != null) {
-                Image(
-                    bitmap = thumbnail.asImageBitmap(),
-                    contentDescription = stringResource(R.string.media_thumbnail, item.name),
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else if (thumbnailLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = AppAccent,
-                    strokeWidth = 2.dp,
-                )
-            } else {
-                Icon(
-                    painterResource(
-                        if (item.kind.equals("video", ignoreCase = true)) {
-                            LucideR.drawable.lucide_ic_file_video_camera
-                        } else {
-                            LucideR.drawable.lucide_ic_image
-                        },
-                    ),
-                    contentDescription = null,
-                    tint = if (item.kind.equals("raw", ignoreCase = true)) AppWarning else AppAccent,
-                    modifier = Modifier.size(26.dp),
-                )
-            }
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                item.name,
-                color = AppText,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOfNotNull(
-                    item.kind.uppercase(Locale.ROOT),
-                    item.sizeBytes?.let(::formatMediaSize),
-                    item.captureTime?.let(::formatMediaCaptureTime),
-                ).joinToString(" | "),
-                color = AppSubtleText,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (deleteSupported && !metadataSupported) {
-            ToolIconButton(
-                LucideR.drawable.lucide_ic_trash_2,
-                stringResource(R.string.delete_media, item.name),
-                onDelete,
-                enabled = deleteEnabled,
-                tint = AppRecord,
-            )
-        }
-        if (metadataSupported) {
-            ToolIconButton(
-                LucideR.drawable.lucide_ic_ellipsis_vertical,
-                stringResource(R.string.media_actions, item.name),
-                onMetadata,
-                enabled = deleteEnabled,
-            )
-        }
-        if (downloadSupported) {
-            ToolIconButton(
-                LucideR.drawable.lucide_ic_download,
-                stringResource(R.string.download_media, item.name),
-                onDownload,
-                enabled = downloadEnabled,
-            )
-        }
-    }
-}
-
-@Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun MediaMetadataSheet(
     item: CameraMediaItem,
@@ -445,12 +306,14 @@ private fun MediaMetadataSheet(
     archiveSupported: Boolean,
     ratingSupported: Boolean,
     rotationSupported: Boolean,
+    downloadSupported: Boolean,
     deleteSupported: Boolean,
     onDismiss: () -> Unit,
     onProtect: (Boolean) -> Unit,
     onArchive: (Boolean) -> Unit,
     onRate: (Int) -> Unit,
     onRotate: (Int) -> Unit,
+    onDownload: () -> Unit,
     onDelete: () -> Unit,
 ) {
     ModalBottomSheet(
@@ -577,6 +440,27 @@ private fun MediaMetadataSheet(
                 }
             }
 
+            if (downloadSupported) {
+                val downloadDescription = stringResource(R.string.download_media, item.name)
+                HorizontalDivider(color = AppSurfaceHigh)
+                TextButton(
+                    onClick = onDownload,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().height(48.dp).semantics {
+                        contentDescription = downloadDescription
+                    },
+                ) {
+                    Icon(
+                        painterResource(LucideR.drawable.lucide_ic_download),
+                        contentDescription = null,
+                        tint = AppText,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(stringResource(R.string.download_media, item.name), color = AppText)
+                }
+            }
+
             if (deleteSupported) {
                 HorizontalDivider(color = AppSurfaceHigh)
                 TextButton(
@@ -606,79 +490,6 @@ private fun MetadataSectionTitle(title: String, value: String) {
     }
 }
 
-@Composable
-private fun MediaPreviewDialog(
-    item: CameraMediaItem,
-    bytes: ByteArray?,
-    loading: Boolean,
-    onDismiss: () -> Unit,
-) {
-    val context = LocalContext.current
-    var decodeFailed by remember(bytes) { mutableStateOf(false) }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        ),
-    ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color.Black)
-                .windowInsetsPadding(WindowInsets.safeDrawing),
-        ) {
-            when {
-                bytes != null && !decodeFailed -> AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(bytes)
-                        .crossfade(false)
-                        .build(),
-                    contentDescription = stringResource(R.string.media_preview_content, item.name),
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(vertical = 64.dp),
-                    onError = { decodeFailed = true },
-                )
-                loading -> CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center).size(36.dp),
-                    color = AppAccent,
-                    strokeWidth = 3.dp,
-                )
-                else -> Text(
-                    stringResource(R.string.media_preview_unavailable),
-                    color = AppSubtleText,
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                )
-            }
-
-            Row(
-                Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ToolIconButton(
-                    LucideR.drawable.lucide_ic_x,
-                    stringResource(R.string.close_media_preview),
-                    onDismiss,
-                )
-                Text(
-                    item.name,
-                    color = AppText,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                )
-                Text(
-                    item.kind.uppercase(Locale.ROOT),
-                    color = AppSubtleText,
-                    maxLines = 1,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
-            }
-        }
-    }
-}
-
 private fun formatMediaSize(bytes: Long): String = when {
     bytes >= 1024L * 1024L * 1024L -> String.format(Locale.ROOT, "%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
     bytes >= 1024L * 1024L -> String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0))
@@ -692,10 +503,3 @@ private fun formatMediaProgress(progress: CameraMediaTransferProgress): String {
     val percent = ((progress.bytesTransferred.toDouble() / total) * 100.0).coerceIn(0.0, 100.0).toInt()
     return "$transferred / ${formatMediaSize(total)} ($percent%)"
 }
-
-private fun formatMediaCaptureTime(value: String): String =
-    if (value.length >= 16 && value[10] == 'T') {
-        "${value.take(10)} ${value.substring(11, 16)}"
-    } else {
-        value
-    }

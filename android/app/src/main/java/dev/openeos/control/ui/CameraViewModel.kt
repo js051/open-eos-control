@@ -64,6 +64,8 @@ class CameraViewModel(
     private var eventPollingGeneration = 0L
     private var mediaDownloadJob: Job? = null
     private var mediaUploadJob: Job? = null
+    private var mediaLibraryJob: Job? = null
+    private var mediaLibraryGeneration = 0L
     private val mediaThumbnailJobs = mutableMapOf<String, Job>()
     private val unavailableMediaThumbnailIds = mutableSetOf<String>()
     private var mediaThumbnailGeneration = 0
@@ -96,6 +98,7 @@ class CameraViewModel(
     }
 
     fun setUiMode(mode: UiMode) {
+        if (mode != UiMode.MEDIA) _uiState.value.mediaStreamSource?.close()
         _uiState.update {
             it.copy(
                 uiMode = mode,
@@ -103,6 +106,7 @@ class CameraViewModel(
                 mediaPreviewItem = if (mode == UiMode.MEDIA) it.mediaPreviewItem else null,
                 mediaPreviewBytes = if (mode == UiMode.MEDIA) it.mediaPreviewBytes else null,
                 mediaPreviewLoading = mode == UiMode.MEDIA && it.mediaPreviewLoading,
+                mediaStreamSource = if (mode == UiMode.MEDIA) it.mediaStreamSource else null,
             )
         }
         if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
@@ -316,6 +320,7 @@ class CameraViewModel(
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
+        cancelMediaLibraryLoad()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -338,6 +343,7 @@ class CameraViewModel(
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
+        cancelMediaLibraryLoad()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -376,6 +382,7 @@ class CameraViewModel(
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
+        cancelMediaLibraryLoad()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -457,6 +464,8 @@ class CameraViewModel(
         stopLiveViewLoop()
         stopEventPollingLoop()
         detachNativeLiveViewListener()
+        cancelMediaLibraryLoad()
+        closeMediaStream()
         cancelMediaDownload()
         val uploadJob = mediaUploadJob
         mediaUploadJob = null
@@ -744,6 +753,7 @@ class CameraViewModel(
             uploadJob?.join()
             repository.sleepCamera()
             runCatching { repository.disconnect() }
+            closeMediaStream()
             resetFrameMetrics()
             lastPhotoShootingMode = null
             _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
@@ -779,6 +789,7 @@ class CameraViewModel(
             repository.cleanSensor(autoPowerOff)
             if (autoPowerOff) {
                 runCatching { repository.disconnect() }
+                closeMediaStream()
                 resetFrameMetrics()
                 lastPhotoShootingMode = null
                 _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
@@ -939,8 +950,10 @@ class CameraViewModel(
     }
 
     fun refreshMedia() {
-        if (!_uiState.value.connected || _uiState.value.previewMode) return
+        if (!_uiState.value.connected || _uiState.value.previewMode || _uiState.value.mediaLibraryLoading) return
+        val generation = ++mediaLibraryGeneration
         cancelMediaThumbnailLoads()
+        _uiState.value.mediaStreamSource?.close()
         _uiState.update {
             it.copy(
                 mediaThumbnails = emptyMap(),
@@ -948,20 +961,45 @@ class CameraViewModel(
                 mediaPreviewItem = null,
                 mediaPreviewBytes = null,
                 mediaPreviewLoading = false,
+                mediaStreamSource = null,
+                mediaLibraryLoading = true,
             )
         }
-        runCamera(CameraOperation.MEDIA) {
-            val items = repository.listMedia()
-            val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
-            _uiState.update {
-                it.copy(
-                    mediaItems = items,
-                    capabilities = capabilities ?: it.capabilities,
-                    lastDownloadedMediaName = null,
-                    lastUploadedMediaName = null,
-                    lastDeletedMediaName = null,
-                )
+        val job = viewModelScope.launch {
+            try {
+                val items = repository.listMedia { partialItems ->
+                    if (generation == mediaLibraryGeneration) {
+                        applyMediaItems(partialItems)
+                    }
+                }
+                if (generation != mediaLibraryGeneration) return@launch
+                val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
+                _uiState.update {
+                    it.copy(
+                        mediaItems = items,
+                        capabilities = capabilities ?: it.capabilities,
+                        lastDownloadedMediaName = null,
+                        lastUploadedMediaName = null,
+                        lastDeletedMediaName = null,
+                    )
+                }
+                refreshCapabilityEvidence()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                exception.printStackTrace()
+                _uiState.update {
+                    it.copy(error = formatException(exception), errorOperation = CameraOperation.MEDIA)
+                }
+            } finally {
+                if (generation == mediaLibraryGeneration) {
+                    _uiState.update { it.copy(mediaLibraryLoading = false) }
+                }
             }
+        }
+        mediaLibraryJob = job
+        job.invokeOnCompletion {
+            if (mediaLibraryJob === job) mediaLibraryJob = null
         }
     }
 
@@ -972,6 +1010,7 @@ class CameraViewModel(
             !state.supports(CameraFeature.MEDIA_THUMBNAIL) ||
             item.id in state.mediaThumbnails ||
             item.id in state.mediaThumbnailLoadingIds ||
+            item.id in mediaThumbnailJobs ||
             item.id in unavailableMediaThumbnailIds
         ) return
 
@@ -988,7 +1027,13 @@ class CameraViewModel(
                     _uiState.value.mediaItems.none { current -> current.id == item.id }
                 ) return@launch
                 _uiState.update { current ->
-                    current.copy(mediaThumbnails = current.mediaThumbnails + (item.id to bitmap))
+                    val retained = current.mediaThumbnails.entries
+                        .asSequence()
+                        .filterNot { it.key == item.id }
+                        .toList()
+                        .takeLast(MAX_MEDIA_THUMBNAIL_CACHE_ITEMS - 1)
+                        .associateTo(linkedMapOf()) { it.toPair() }
+                    current.copy(mediaThumbnails = retained + (item.id to bitmap))
                 }
                 refreshCapabilityEvidence()
             } catch (exception: CancellationException) {
@@ -1008,14 +1053,21 @@ class CameraViewModel(
 
     fun openMediaPreview(item: CameraMediaItem) {
         val state = _uiState.value
+        val isVideo = item.isVideo
         if (
             state.previewMode ||
             state.isBusy(CameraOperation.MEDIA) ||
-            !state.supports(CameraFeature.MEDIA_PREVIEW) ||
-            !item.previewAvailable
+            if (isVideo) !item.streamAvailable
+            else !state.supports(CameraFeature.MEDIA_PREVIEW) || !item.previewAvailable
         ) return
+        state.mediaStreamSource?.close()
         _uiState.update {
-            it.copy(mediaPreviewItem = item, mediaPreviewBytes = null, mediaPreviewLoading = true)
+            it.copy(
+                mediaPreviewItem = item,
+                mediaPreviewBytes = null,
+                mediaPreviewLoading = true,
+                mediaStreamSource = null,
+            )
         }
         runCamera(
             operation = CameraOperation.MEDIA,
@@ -1025,11 +1077,17 @@ class CameraViewModel(
                 }
             },
         ) {
-            val preview = repository.mediaPreview(item)
+            val stream = if (isVideo) repository.openMediaStream(item) else null
+            val preview = if (isVideo) null else repository.mediaPreview(item)
             _uiState.update { current ->
                 if (current.mediaPreviewItem?.id == item.id) {
-                    current.copy(mediaPreviewBytes = preview.bytes, mediaPreviewLoading = false)
+                    current.copy(
+                        mediaPreviewBytes = preview?.bytes,
+                        mediaPreviewLoading = false,
+                        mediaStreamSource = stream,
+                    )
                 } else {
+                    stream?.close()
                     current
                 }
             }
@@ -1037,8 +1095,14 @@ class CameraViewModel(
     }
 
     fun closeMediaPreview() {
+        _uiState.value.mediaStreamSource?.close()
         _uiState.update {
-            it.copy(mediaPreviewItem = null, mediaPreviewBytes = null, mediaPreviewLoading = false)
+            it.copy(
+                mediaPreviewItem = null,
+                mediaPreviewBytes = null,
+                mediaPreviewLoading = false,
+                mediaStreamSource = null,
+            )
         }
     }
 
@@ -1049,6 +1113,16 @@ class CameraViewModel(
             val updated = repository.mediaInfo(item)
             _uiState.update { current -> current.withUpdatedMedia(updated) }
         }
+    }
+
+    fun previewAdjacentMedia(items: List<CameraMediaItem>, direction: Int) {
+        if (direction == 0) return
+        val currentId = _uiState.value.mediaPreviewItem?.id ?: return
+        val index = items.indexOfFirst { it.id == currentId }
+        val next = items.getOrNull(index + direction) ?: return
+        _uiState.value.mediaStreamSource?.close()
+        _uiState.update { it.copy(mediaPreviewItem = null, mediaPreviewBytes = null, mediaStreamSource = null) }
+        openMediaPreview(next)
     }
 
     fun setMediaProtection(item: CameraMediaItem, enabled: Boolean) = updateMediaMetadata(
@@ -1296,6 +1370,7 @@ class CameraViewModel(
                 return@launch
             }
             withContext(NonCancellable + Dispatchers.IO) { runCatching { repository.disconnect() } }
+            closeMediaStream()
             _uiState.update { current ->
                 if (current.transport == CameraTransport.USB_PTP) {
                     current.withClearedSession(
@@ -1331,12 +1406,12 @@ class CameraViewModel(
         val state = _uiState.value
         if (state.isBusy(CameraOperation.MEDIA) || !state.supports(CameraFeature.MEDIA_DELETE)) return
         if (state.previewMode) {
-            _uiState.update { current -> current.withDeletedMedia(item) }
+            applyDeletedMedia(item)
             return
         }
         runCamera(CameraOperation.MEDIA) {
             repository.deleteMedia(item)
-            _uiState.update { current -> current.withDeletedMedia(item) }
+            applyDeletedMedia(item)
         }
     }
 
@@ -1717,7 +1792,7 @@ class CameraViewModel(
                         null
                     }
                     if (mediaItems != null) cancelMediaThumbnailLoads()
-                    _uiState.update { current ->
+                    val updateState: (CameraUiState) -> CameraUiState = { current ->
                         if (
                             generation == eventPollingGeneration &&
                             current.connected &&
@@ -1737,6 +1812,7 @@ class CameraViewModel(
                             current
                         }
                     }
+                    if (mediaItems != null) transitionMediaState(updateState) else _uiState.update(updateState)
                 } catch (exception: CancellationException) {
                     throw exception
                 } catch (_: Exception) {
@@ -1776,6 +1852,8 @@ class CameraViewModel(
         stopLiveViewLoop()
         stopEventPollingLoop()
         detachNativeLiveViewListener()
+        cancelMediaLibraryLoad()
+        closeMediaStream()
         cancelMediaDownload()
         val uploadJob = mediaUploadJob
         mediaUploadJob = null
@@ -1804,6 +1882,8 @@ class CameraViewModel(
         mediaPreviewItem = null,
         mediaPreviewBytes = null,
         mediaPreviewLoading = false,
+        mediaStreamSource = null,
+        mediaLibraryLoading = false,
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
@@ -1840,6 +1920,7 @@ class CameraViewModel(
             mediaPreviewItem = mediaPreviewItem.takeUnless { deletesOpenPreview },
             mediaPreviewBytes = mediaPreviewBytes.takeUnless { deletesOpenPreview },
             mediaPreviewLoading = mediaPreviewLoading && !deletesOpenPreview,
+            mediaStreamSource = mediaStreamSource.takeUnless { deletesOpenPreview },
             lastDownloadedMediaName = lastDownloadedMediaName.takeUnless { it == item.name },
             lastDeletedMediaName = item.name,
         )
@@ -1856,11 +1937,31 @@ class CameraViewModel(
         return copy(
             mediaItems = items,
             mediaThumbnails = mediaThumbnails.filterKeys(itemIds::contains),
-            mediaThumbnailLoadingIds = emptySet(),
+            mediaThumbnailLoadingIds = mediaThumbnailLoadingIds.intersect(itemIds),
             mediaPreviewItem = mediaPreviewItem.takeIf { previewStillExists },
             mediaPreviewBytes = mediaPreviewBytes.takeIf { previewStillExists },
             mediaPreviewLoading = mediaPreviewLoading && previewStillExists,
+            mediaStreamSource = mediaStreamSource.takeIf { previewStillExists },
         )
+    }
+
+    private fun applyMediaItems(items: List<CameraMediaItem>) = transitionMediaState { current ->
+        current.withEventMediaItems(items)
+    }
+
+    private fun applyDeletedMedia(item: CameraMediaItem) = transitionMediaState { current ->
+        current.withDeletedMedia(item)
+    }
+
+    private inline fun transitionMediaState(transform: (CameraUiState) -> CameraUiState) {
+        while (true) {
+            val current = _uiState.value
+            val updated = transform(current)
+            if (_uiState.compareAndSet(current, updated)) {
+                if (current.mediaStreamSource !== updated.mediaStreamSource) current.mediaStreamSource?.close()
+                return
+            }
+        }
     }
 
     private fun cancelMediaThumbnailLoads() {
@@ -1868,6 +1969,18 @@ class CameraViewModel(
         mediaThumbnailJobs.values.forEach(Job::cancel)
         mediaThumbnailJobs.clear()
         unavailableMediaThumbnailIds.clear()
+    }
+
+    private fun cancelMediaLibraryLoad() {
+        mediaLibraryGeneration += 1
+        mediaLibraryJob?.cancel()
+        mediaLibraryJob = null
+        _uiState.update { it.copy(mediaLibraryLoading = false) }
+    }
+
+    private fun closeMediaStream() {
+        _uiState.value.mediaStreamSource?.close()
+        _uiState.update { it.copy(mediaStreamSource = null) }
     }
 
     private fun recordFrame(
@@ -1948,6 +2061,7 @@ class CameraViewModel(
         const val FPS_WINDOW_SIZE = 30
         const val MEDIA_UPLOAD_BUFFER_BYTES = 64 * 1024
         const val MAX_MEDIA_UPLOAD_BYTES = MAX_PTP_OBJECT_BYTES
+        const val MAX_MEDIA_THUMBNAIL_CACHE_ITEMS = 96
         val EVENT_RETRY_DELAYS_MILLIS = longArrayOf(1_000L, 2_000L, 5_000L)
         val CAPABILITY_EVIDENCE_OPERATIONS = setOf(
             CameraOperation.CONNECT,

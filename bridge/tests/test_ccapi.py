@@ -3370,20 +3370,21 @@ def test_ccapi_media_descending_order_fallback_is_remembered_across_containers()
     assert media_requests.count(f"{video_container}?page=1") == 1
 
 
-def test_ccapi_media_stops_paging_after_500_items_per_container() -> None:
+def test_ccapi_media_returns_more_than_500_items_per_container() -> None:
     root = "/ccapi/ver100/contents"
     container = f"{root}/card1/100CANON"
     routes = {
         f"{root}?kind=number": _json_response({"pagenumber": 0}),
         root: _json_response({"path": [container]}),
-        f"{container}?kind=number": _json_response({"pagenumber": 47}),
+        f"{container}?kind=number": _json_response({"pagenumber": 6}),
     }
-    for page in range(1, 6):
+    for page in range(1, 7):
+        last = page * 100 if page < 6 else 501
         routes[f"{container}?page={page}&order=desc"] = _json_response(
             {
                 "path": [
                     f"{container}/IMG_{number:04d}.JPG"
-                    for number in range((page - 1) * 100 + 1, page * 100 + 1)
+                    for number in range((page - 1) * 100 + 1, last + 1)
                 ]
             }
         )
@@ -3392,12 +3393,23 @@ def test_ccapi_media_stops_paging_after_500_items_per_container() -> None:
 
     items = session.list_media()
 
-    assert len(items) == 500
+    assert len(items) == 501
     assert items[0].name == "IMG_0001.JPG"
-    assert items[-1].name == "IMG_0500.JPG"
+    assert items[-1].name == "IMG_0501.JPG"
     media_requests = [request.path for request in transport.requests if request.path.startswith(container)]
     assert f"{container}?page=5&order=desc" in media_requests
-    assert f"{container}?page=6&order=desc" not in media_requests
+    assert f"{container}?page=6&order=desc" in media_requests
+
+
+def test_ccapi_media_rejects_reported_page_count_above_safety_limit() -> None:
+    root = "/ccapi/ver100/contents"
+    transport = FakeCcapiTransport(
+        media_routes={f"{root}?kind=number": _json_response({"pagenumber": 101})}
+    )
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    with pytest.raises(BridgeError, match="above the safety limit"):
+        session.list_media()
 
 
 def test_ccapi_media_fairly_merges_sibling_containers_round_robin() -> None:

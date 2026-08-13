@@ -170,8 +170,7 @@ class SimulatorEndToEndTest {
 
         compose.onNodeWithContentDescription(text(R.string.more_actions)).performClick()
         compose.onNodeWithText(text(R.string.camera_media)).performClick()
-        waitForText("SIM_0003.PNG")
-        compose.onNodeWithText("SIM_0003.PNG").assertIsDisplayed()
+        waitForContentDescription(text(R.string.preview_media, "SIM_0003.PNG"))
         compose.onNodeWithContentDescription(text(R.string.preview_media, "SIM_0003.PNG")).performClick()
         waitForContentDescription(text(R.string.media_preview_content, "SIM_0003.PNG"))
         compose.onNodeWithContentDescription(text(R.string.close_media_preview)).performClick()

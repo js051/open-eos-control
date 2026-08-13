@@ -169,6 +169,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
         CameraMediaItem(
             "preview-003", "R6M3_0002.MP4", "video", 128_450_560,
             "2026-07-21T10:10:02+08:00", archived = false,
+            streamAvailable = true,
         ),
     ),
     mediaThumbnails = emptyMap(),

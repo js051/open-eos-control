@@ -29,6 +29,9 @@ interface UsbHostCaptureStore {
 
     suspend fun preview(item: CameraMediaItem): CameraMediaPreview
 
+    suspend fun openStream(item: CameraMediaItem): CameraMediaStreamSource =
+        throw UnsupportedOperationException("Host media streaming is not available.")
+
     suspend fun download(
         item: CameraMediaItem,
         destination: OutputStream,
@@ -83,7 +86,6 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
             .filter(File::isFile)
             .filterNot { it.name.startsWith(".") || it.name.endsWith(".part") }
             .sortedByDescending(File::lastModified)
-            .take(MAX_HOST_CAPTURE_ITEMS)
             .map { it.toMediaItem(kindForFilename(it.name)) }
             .toList()
     }
@@ -134,6 +136,12 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
         val contentType = hostPreviewContentType(item.name, bytes)
             ?: throw PtpProtocolException("${item.name} is not a complete JPEG or PNG image.")
         CameraMediaPreview(item = item, bytes = bytes, contentType = contentType)
+    }
+
+    override suspend fun openStream(item: CameraMediaItem): CameraMediaStreamSource = withContext(Dispatchers.IO) {
+        val file = requireFile(item)
+        require(item.kind.equals("video", ignoreCase = true)) { "Media streaming is available only for video items." }
+        FileCameraMediaStreamSource(item, file, hostContentType(item.name, item.kind))
     }
 
     override suspend fun download(
@@ -203,6 +211,7 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
         captureTime = Instant.ofEpochMilli(lastModified()).toString(),
         previewAvailable = kind == "image" && length() in 1..MAX_HOST_PREVIEW_BYTES && hasHostPreviewExtension(name),
         ratingWritable = false,
+        streamAvailable = kind == "video",
     )
 }
 
@@ -271,7 +280,6 @@ private fun scaleToFit(bitmap: Bitmap, maxEdge: Int): Bitmap {
 
 private const val HOST_MEDIA_ID_PREFIX = "usb-host:"
 private const val CAPTURE_DIRECTORY = "usb-host-captures"
-private const val MAX_HOST_CAPTURE_ITEMS = 500
 private const val MAX_CAPTURE_FILENAME_CHARS = 160
 private const val MAX_FILENAME_COLLISIONS = 9_999
 private const val HOST_THUMBNAIL_EDGE = 512

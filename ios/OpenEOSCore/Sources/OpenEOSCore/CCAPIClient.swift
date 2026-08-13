@@ -61,7 +61,6 @@ private struct CCAPIDetailedLiveView {
 public actor CCAPIClient {
     private static let maxDeviceStatusTextCharacters = 512
     private static let maximumErrorBodyCharacters = 2_000
-    private static let maximumMediaItems = 500
     private static let noAPIListValue = "No list of APIs"
     private static let developerAPIPath = "/ccapi/ver100/topurlfordev"
     private static let maximumMediaPages = 100
@@ -1826,7 +1825,7 @@ public actor CCAPIClient {
             let container = try normalizeCameraResource(next.path).components(separatedBy: "?")[0]
             guard next.depth <= Self.maximumMediaTreeDepth, visited.insert(container).inserted else { continue }
             var mediaPaths: [String] = []
-            for rawPath in try await contentPaths(container: container, maxPaths: Self.maximumMediaItems) {
+            for rawPath in try await contentPaths(container: container) {
                 let path = try normalizeCameraResource(rawPath).components(separatedBy: "?")[0]
                 if Self.isMediaPath(path) {
                     if !mediaPaths.contains(path) { mediaPaths.append(path) }
@@ -1836,7 +1835,7 @@ public actor CCAPIClient {
             }
             if !mediaPaths.isEmpty { mediaPathGroups.append(mediaPaths) }
         }
-        let mediaPaths = mergeMediaPathGroups(mediaPathGroups, maxItems: Self.maximumMediaItems)
+        let mediaPaths = mergeMediaPathGroups(mediaPathGroups)
         observedFeatures.insert(.mediaBrowser)
         return mediaPaths.map {
             CameraMediaItem(
@@ -3956,13 +3955,20 @@ public actor CCAPIClient {
         )
     }
 
-    private func contentPaths(container: String, maxPaths: Int) async throws -> [String] {
-        guard maxPaths > 0 else { return [] }
+    private func contentPaths(container: String) async throws -> [String] {
         let pageInfo = try await firstJSON(
             paths: ["\(container)?kind=number", "\(container)?type=all,kind=number"],
             required: false
         )
-        let pageCount = min(pageInfo?.integer("pagenumber") ?? 0, Self.maximumMediaPages)
+        let pageCount = pageInfo?.integer("pagenumber") ?? 0
+        guard pageCount >= 0 else {
+            throw CCAPIError.invalidResponse("Camera returned a negative media page count.")
+        }
+        guard pageCount <= Self.maximumMediaPages else {
+            throw CCAPIError.invalidResponse(
+                "Camera reported \(pageCount) media pages, above the safety limit of \(Self.maximumMediaPages)."
+            )
+        }
         var result: [String] = []
         if pageCount <= 0 {
             if let value = try await firstJSON(paths: [container], required: true) {
@@ -3973,7 +3979,6 @@ public actor CCAPIClient {
                 guard let value = try await contentPage(container: container, page: page) else { continue }
                 let paths = value.array("path")?.strings ?? []
                 result.append(contentsOf: paths.reversed())
-                if result.count >= maxPaths { break }
             }
         } else {
             guard let firstPage = try await contentPage(container: container, page: 1) else { return [] }
@@ -3990,13 +3995,11 @@ public actor CCAPIClient {
                     }
                     let paths = value.array("path")?.strings ?? []
                     result.append(contentsOf: paths.reversed())
-                    if result.count >= maxPaths { break }
                 }
             } else {
                 result.append(contentsOf: firstPage.array("path")?.strings ?? [])
                 if pageCount >= 2 {
                     for page in 2...pageCount {
-                        if result.count >= maxPaths { break }
                         if let value = try await contentPage(container: container, page: page) {
                             result.append(contentsOf: value.array("path")?.strings ?? [])
                         }
@@ -4004,7 +4007,7 @@ public actor CCAPIClient {
                 }
             }
         }
-        return result.removingDuplicates().prefix(maxPaths).map { $0 }
+        return result.removingDuplicates()
     }
 
     private func contentPage(container: String, page: Int) async throws -> JSONDictionary? {
@@ -4030,15 +4033,14 @@ public actor CCAPIClient {
         }
     }
 
-    private func mergeMediaPathGroups(_ groups: [[String]], maxItems: Int) -> [String] {
-        guard maxItems > 0 else { return [] }
+    private func mergeMediaPathGroups(_ groups: [[String]]) -> [String] {
         var positions = Array(repeating: 0, count: groups.count)
         var merged: [String] = []
         var seen = Set<String>()
-        while merged.count < maxItems {
+        while true {
             var advanced = false
             for index in groups.indices {
-                guard merged.count < maxItems, positions[index] < groups[index].count else { continue }
+                guard positions[index] < groups[index].count else { continue }
                 let path = groups[index][positions[index]]
                 positions[index] += 1
                 advanced = true

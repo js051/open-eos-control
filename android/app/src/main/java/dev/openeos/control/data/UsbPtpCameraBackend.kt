@@ -748,32 +748,42 @@ class UsbPtpCameraBackend(
         return status()
     }
 
-    override suspend fun listMedia(): List<CameraMediaItem> {
+    override suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit): List<CameraMediaItem> {
         requireMediaBrowser()
         val hostItems = hostCaptureStore?.list().orEmpty()
         if (!supportsMediaBrowser(requireDeviceInfo())) {
             if (hostItems.isNotEmpty()) observedFeatures.add(CameraFeature.MEDIA_BROWSER)
-            return hostItems
+            return hostItems.also(onProgress)
         }
         val ptp = requireSession()
+        val streamAvailable = requireDeviceInfo().supports(PtpOperationCode.GET_PARTIAL_OBJECT)
         val handles = ptp.storageIds()
             .flatMap { storageId -> ptp.objectHandles(storageId) }
             .distinct()
-            .takeLast(MAX_USB_MEDIA_ITEMS)
             .reversed()
 
         var firstFailure: Exception? = null
         mediaInfo.clear()
         mediaRatingContracts.clear()
         validatedMediaRatingFormats.clear()
-        val objectInfos = handles.mapNotNull { handle ->
+        val objectInfos = mutableListOf<PtpObjectInfo>()
+        handles.forEach { handle ->
             try {
                 ptp.objectInfo(handle)
                     .takeUnless { it.objectFormat == PtpObjectFormat.ASSOCIATION || it.filename.isBlank() }
-                    ?.also { mediaInfo[handle] = it }
+                    ?.also {
+                        mediaInfo[handle] = it
+                        objectInfos += it
+                        if (objectInfos.size % MEDIA_LIST_PROGRESS_BATCH_SIZE == 0) {
+                            onProgress(
+                                hostItems + objectInfos.map { objectInfo ->
+                                    objectInfo.toMediaItem(streamAvailable = streamAvailable)
+                                },
+                            )
+                        }
+                    }
             } catch (exception: Exception) {
                 if (firstFailure == null) firstFailure = exception
-                null
             }
         }
         val ratingSamples = mutableMapOf<Long, MtpMediaRatingRead>()
@@ -789,11 +799,12 @@ class UsbPtpCameraBackend(
             objectInfo.toMediaItem(
                 rating = ratingSamples[objectInfo.handle]?.stars,
                 ratingWritable = objectInfo.objectFormat in validatedMediaRatingFormats,
+                streamAvailable = streamAvailable,
             )
         }
         if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null && hostItems.isEmpty()) throw firstFailure!!
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
-        return (hostItems + items).take(MAX_USB_MEDIA_ITEMS)
+        return (hostItems + items).also(onProgress)
     }
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
@@ -846,6 +857,24 @@ class UsbPtpCameraBackend(
             bytes = bytes,
             contentType = contentType,
         ).also { observedFeatures.add(CameraFeature.MEDIA_PREVIEW) }
+    }
+
+    override suspend fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
+        hostCaptureStore?.takeIf { it.owns(item) }?.let { return it.openStream(item) }
+        require(item.kind.equals("video", ignoreCase = true)) { "Media streaming is available only for video items." }
+        requireOperation(PtpOperationCode.GET_PARTIAL_OBJECT, CameraFeature.MEDIA_DOWNLOAD)
+        val handle = item.ptpHandle()
+        val objectInfo = mediaInfo[handle] ?: requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
+        val mediaItem = objectInfo.toMediaItem()
+        require(mediaItem.sizeBytes != null && mediaItem.sizeBytes > 0L) {
+            "${item.name} does not report a valid video size."
+        }
+        return ChunkedCameraMediaStreamSource(
+            item = mediaItem,
+            contentType = contentTypeFor(mediaItem.name, mediaItem.kind),
+        ) { position, maxBytes ->
+            requireSession().partialObject(handle, position, maxBytes)
+        }
     }
 
     override suspend fun downloadMedia(
@@ -955,7 +984,9 @@ class UsbPtpCameraBackend(
         }
         mediaInfo[readback.handle] = readback
         refreshStorageSnapshot(info)
-        val item = readback.toMediaItem()
+        val item = readback.toMediaItem(
+            streamAvailable = requireDeviceInfo().supports(PtpOperationCode.GET_PARTIAL_OBJECT),
+        )
         observedFeatures.addAll(setOf(CameraFeature.MEDIA_UPLOAD, CameraFeature.MEDIA_BROWSER))
         return CameraMediaUploadResult(item = item, bytesTransferred = sizeBytes)
     }
@@ -975,6 +1006,7 @@ class UsbPtpCameraBackend(
         return objectInfo.toMediaItem(
             rating = rating?.stars,
             ratingWritable = rating != null,
+            streamAvailable = item.streamAvailable,
         )
     }
 
@@ -992,6 +1024,7 @@ class UsbPtpCameraBackend(
             latest = refreshed.toMediaItem(
                 rating = item.rating,
                 ratingWritable = refreshed.objectFormat in validatedMediaRatingFormats,
+                streamAvailable = item.streamAvailable,
             )
             if (latest.protected == enabled) {
                 observedFeatures.add(CameraFeature.MEDIA_PROTECT)
@@ -1040,7 +1073,11 @@ class UsbPtpCameraBackend(
             if (lastReadback == requested) {
                 validatedMediaRatingFormats += objectInfo.objectFormat
                 observedFeatures.add(CameraFeature.MEDIA_RATING)
-                return objectInfo.toMediaItem(rating = rating, ratingWritable = true)
+                return objectInfo.toMediaItem(
+                    rating = rating,
+                    ratingWritable = true,
+                    streamAvailable = item.streamAvailable,
+                )
             }
             if (attempt < MTP_RATING_READBACK_ATTEMPTS - 1) delay(MTP_RATING_READBACK_DELAY_MILLIS)
         }
@@ -2148,6 +2185,7 @@ private data class MtpMediaRatingRead(
 private fun PtpObjectInfo.toMediaItem(
     rating: Int? = null,
     ratingWritable: Boolean? = null,
+    streamAvailable: Boolean = false,
 ): CameraMediaItem = CameraMediaItem(
     id = "ptp:${handle.toString(16).uppercase(Locale.ROOT).padStart(8, '0')}",
     name = filename,
@@ -2163,6 +2201,7 @@ private fun PtpObjectInfo.toMediaItem(
     },
     rating = rating,
     ratingWritable = ratingWritable,
+    streamAvailable = streamAvailable && mediaKind(filename, objectFormat) == "video",
 )
 
 private fun CameraMediaItem.ptpHandle(): Long {
@@ -2363,7 +2402,7 @@ private fun String.toDisplayPtpDate(): String? {
 private fun formatPtpVersion(value: Int): String =
     "${value / 100}.${(value % 100).toString().padStart(2, '0')}"
 
-private const val MAX_USB_MEDIA_ITEMS = 500
+private const val MEDIA_LIST_PROGRESS_BATCH_SIZE = 50
 private const val PTP_STORAGE_READ_WRITE = 0
 private const val PTP_ROOT_OBJECT_HANDLE = UINT32_MAX
 private const val MAX_PTP_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024

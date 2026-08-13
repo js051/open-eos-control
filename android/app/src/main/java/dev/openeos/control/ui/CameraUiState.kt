@@ -5,6 +5,7 @@ import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraMediaStreamSource
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
@@ -65,11 +66,13 @@ data class CameraUiState(
     val status: CameraStatus? = null,
     val capabilities: CameraCapabilities? = null,
     val mediaItems: List<CameraMediaItem> = emptyList(),
+    val mediaLibraryLoading: Boolean = false,
     val mediaThumbnails: Map<String, Bitmap> = emptyMap(),
     val mediaThumbnailLoadingIds: Set<String> = emptySet(),
     val mediaPreviewItem: CameraMediaItem? = null,
     val mediaPreviewBytes: ByteArray? = null,
     val mediaPreviewLoading: Boolean = false,
+    val mediaStreamSource: CameraMediaStreamSource? = null,
     val activeMediaDownloadName: String? = null,
     val mediaDownloadProgress: CameraMediaTransferProgress? = null,
     val lastDownloadedMediaName: String? = null,

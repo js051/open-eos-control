@@ -20,7 +20,6 @@ ENGINE_NAME = "libgphoto2"
 HOST_MEDIA_PREFIX = "gphoto2-host:"
 MAX_CAPTURE_FILES_PER_SHOT = 8
 MAX_CAPTURE_FILE_BYTES = 4 * 1024**3
-MAX_LOCAL_MEDIA_ITEMS = 500
 MAX_LOCAL_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_LOCAL_PREVIEW_BYTES = 32 * 1024 * 1024
 LOCAL_THUMBNAIL_SIZE = (960, 960)
@@ -139,7 +138,7 @@ class LocalCaptureStore:
                 if path.is_file() and not path.is_symlink()
             ]
             files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-            return [self._item(path) for path in files[:MAX_LOCAL_MEDIA_ITEMS]]
+            return [self._item(path) for path in files]
         except OSError as error:
             raise _store_error("read the local media library", error) from error
 
