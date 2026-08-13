@@ -1005,10 +1005,16 @@ class CameraViewModel(
 
     fun loadMediaThumbnail(item: CameraMediaItem) {
         val state = _uiState.value
+        state.mediaThumbnails[item.id]?.let {
+            _uiState.update { current ->
+                if (item.id !in current.mediaThumbnails) return@update current
+                current.copy(mediaThumbnails = touchMediaCacheEntry(current.mediaThumbnails, item.id))
+            }
+            return
+        }
         if (
             state.previewMode ||
             !state.supports(CameraFeature.MEDIA_THUMBNAIL) ||
-            item.id in state.mediaThumbnails ||
             item.id in state.mediaThumbnailLoadingIds ||
             item.id in mediaThumbnailJobs ||
             item.id in unavailableMediaThumbnailIds

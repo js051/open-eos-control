@@ -113,6 +113,7 @@ final class CameraAppState: ObservableObject {
     private var downloadedMediaID: String?
     private var unavailableMediaThumbnailIDs = Set<String>()
     private var mediaThumbnailGeneration = 0
+    private var mediaThumbnailCache = MediaThumbnailCache()
     let rtpController: IOSCcapiRTPController
 
     var connected: Bool { snapshot?.status.connected == true }
@@ -930,10 +931,13 @@ final class CameraAppState: ObservableObject {
     }
 
     func loadMediaThumbnail(_ item: CameraMediaItem) async {
+        if mediaThumbnailCache.touch(item.id) {
+            mediaThumbnails = mediaThumbnailCache.values
+            return
+        }
         guard
             !isPreview,
             supports(.mediaThumbnail),
-            mediaThumbnails[item.id] == nil,
             !loadingMediaThumbnailIDs.contains(item.id),
             !unavailableMediaThumbnailIDs.contains(item.id),
             let session
@@ -956,7 +960,8 @@ final class CameraAppState: ObservableObject {
                 unavailableMediaThumbnailIDs.insert(item.id)
                 return
             }
-            mediaThumbnails[item.id] = thumbnail.data
+            mediaThumbnailCache.insert(thumbnail.data, for: item.id)
+            mediaThumbnails = mediaThumbnailCache.values
         } catch is CancellationError {
             return
         } catch {
@@ -967,7 +972,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func openMediaPreview(_ item: CameraMediaItem) async {
-        if item.kind.lowercased() == "video" {
+        if mediaIsVideo(item) {
             guard !isPreview, supports(.mediaDownload), let session else { return }
             resetMediaPreview()
             mediaPreviewItem = item
@@ -1719,7 +1724,8 @@ final class CameraAppState: ObservableObject {
             removeDownloadedFile()
         }
         mediaItems.removeAll { $0.id == item.id }
-        mediaThumbnails.removeValue(forKey: item.id)
+        mediaThumbnailCache.removeValue(for: item.id)
+        mediaThumbnails = mediaThumbnailCache.values
         loadingMediaThumbnailIDs.remove(item.id)
         unavailableMediaThumbnailIDs.remove(item.id)
         if mediaPreviewItem?.id == item.id { resetMediaPreview() }
@@ -1733,7 +1739,8 @@ final class CameraAppState: ObservableObject {
 
     private func resetMediaThumbnails() {
         mediaThumbnailGeneration &+= 1
-        mediaThumbnails = [:]
+        mediaThumbnailCache.removeAll()
+        mediaThumbnails = mediaThumbnailCache.values
         loadingMediaThumbnailIDs = []
         unavailableMediaThumbnailIDs = []
     }

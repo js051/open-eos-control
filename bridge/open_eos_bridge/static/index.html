@@ -304,6 +304,15 @@
               <option value="name" data-i18n="mediaName">File name</option>
             </select>
           </label>
+          <nav id="media-pagination" class="media-pagination" data-i18n-aria="mediaPages" hidden>
+            <button id="media-page-previous" class="icon-button" type="button" data-i18n-aria="previousMediaPage">
+              <span class="icon" data-icon="chevron-left" aria-hidden="true"></span>
+            </button>
+            <span id="media-page-status" class="supporting" aria-live="polite"></span>
+            <button id="media-page-next" class="icon-button" type="button" data-i18n-aria="nextMediaPage">
+              <span class="icon" data-icon="chevron-right" aria-hidden="true"></span>
+            </button>
+          </nav>
         </div>
         <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
           <span class="media-transfer-icon icon" data-icon="download" aria-hidden="true"></span>
@@ -523,6 +532,7 @@
   <script src="/app/local-video.js"></script>
   <script src="/app/rtp-audio.js"></script>
   <script src="/app/media-transfer.js"></script>
+  <script src="/app/media-library.js"></script>
   <script src="/app/app.js"></script>
 </body>
 </html>

@@ -1190,6 +1190,22 @@ input:disabled {
   font-weight: 650;
 }
 
+.media-pagination {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 12px;
+}
+
+.media-pagination[hidden] {
+  display: none;
+}
+
+.media-pagination .supporting {
+  min-width: 116px;
+  text-align: center;
+}
+
 .media-transfer {
   display: grid;
   min-height: 76px;
@@ -1847,6 +1863,10 @@ button.media-thumbnail:focus-visible {
 
   .media-sort-control select {
     width: 100%;
+  }
+
+  .media-pagination {
+    justify-content: space-between;
   }
 
   .media-list {
