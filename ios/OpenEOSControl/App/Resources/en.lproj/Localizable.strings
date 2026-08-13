@@ -246,7 +246,7 @@
 "media_video_preparing" = "Preparing a full download for playback...";
 "media_video_unsupported_format" = "This video format is not supported by this iPhone or iPad.";
 "media_video_incomplete" = "The camera returned an incomplete video. Try again.";
-"media_video_too_large" = "This video is too large to prepare automatically. Download the original instead.";
+"media_video_storage_unavailable" = "There is not enough free space to prepare this video. Free some storage or download it to another destination.";
 "media_video_download_hint" = "Download the original file to open it in a compatible video app.";
 "previous_media" = "Previous media";
 "next_media" = "Next media";

@@ -22,6 +22,7 @@ final class CameraMediaPlayback: ObservableObject {
     init(item: CameraMediaItem, session: CameraSession) {
         self.item = item
         self.session = session
+        Self.removeStalePlaybackDirectories()
         resourceLoader = CameraMediaResourceLoader(item: item) { offset, length in
             try await session.openMediaStream(item, offset: offset, length: length)
         }
@@ -116,8 +117,16 @@ final class CameraMediaPlayback: ObservableObject {
             }
         }
         do {
-            if let sizeBytes = item.sizeBytes, sizeBytes > maximumAutomaticFallbackBytes {
-                throw CameraMediaPlaybackError.fallbackTooLarge(sizeBytes)
+            if let sizeBytes = item.sizeBytes, sizeBytes > 0,
+               let availableCapacity = Self.availablePlaybackCapacity(),
+               !CameraMediaPlaybackValidation.hasFallbackCapacity(
+                   mediaBytes: sizeBytes,
+                   availableCapacity: availableCapacity
+               ) {
+                throw CameraMediaPlaybackError.insufficientStorage(
+                    required: sizeBytes,
+                    available: availableCapacity
+                )
             }
             let createdDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("OpenEOSControl", isDirectory: true)
@@ -167,7 +176,26 @@ final class CameraMediaPlayback: ObservableObject {
         return name.isEmpty ? "media-\(item.id)" : name
     }
 
-    private var maximumAutomaticFallbackBytes: Int64 { 1_073_741_824 }
+    private static func availablePlaybackCapacity() -> Int64? {
+        let keys: Set<URLResourceKey> = [.volumeAvailableCapacityForImportantUsageKey]
+        guard let values = try? FileManager.default.temporaryDirectory.resourceValues(forKeys: keys) else {
+            return nil
+        }
+        return values.volumeAvailableCapacityForImportantUsage
+    }
+
+    private static func removeStalePlaybackDirectories() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OpenEOSControl", isDirectory: true)
+            .appendingPathComponent("VideoPlayback", isDirectory: true)
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for child in children {
+            try? FileManager.default.removeItem(at: child)
+        }
+    }
 
     private func removeFallbackFile() {
         guard let fallbackFileURL else { return }
@@ -180,7 +208,7 @@ final class CameraMediaPlayback: ObservableObject {
 enum CameraMediaPlaybackFailure: Equatable {
     case unsupportedFormat
     case incompleteRange
-    case fallbackTooLarge
+    case storageUnavailable
     case transport
 }
 
@@ -235,8 +263,11 @@ enum CameraMediaPlaybackValidation {
             return .incompleteRange
         }
         if let error = error as? CameraMediaPlaybackError,
-           case .fallbackTooLarge = error {
-            return .fallbackTooLarge
+           case .insufficientStorage = error {
+            return .storageUnavailable
+        }
+        if let error, isOutOfSpace(error) {
+            return .storageUnavailable
         }
         if let nsError = error as NSError?, nsError.domain == AVFoundationErrorDomain {
             switch AVError.Code(rawValue: nsError.code) {
@@ -251,7 +282,30 @@ enum CameraMediaPlaybackValidation {
     }
 
     static func shouldPrepareFallback(for failure: CameraMediaPlaybackFailure) -> Bool {
-        failure != .unsupportedFormat && failure != .fallbackTooLarge
+        failure != .unsupportedFormat && failure != .storageUnavailable
+    }
+
+    static func hasFallbackCapacity(mediaBytes: Int64, availableCapacity: Int64) -> Bool {
+        guard mediaBytes > 0, availableCapacity > 0 else { return false }
+        let reserve = min(128 * 1024 * 1024, availableCapacity / 10)
+        return mediaBytes <= availableCapacity - reserve
+    }
+
+    private static func isOutOfSpace(_ error: Error) -> Bool {
+        var current: NSError? = error as NSError
+        for _ in 0..<8 {
+            guard let value = current else { return false }
+            if value.domain == NSCocoaErrorDomain,
+               value.code == CocoaError.fileWriteOutOfSpace.rawValue {
+                return true
+            }
+            if value.domain == NSPOSIXErrorDomain,
+               value.code == POSIXErrorCode.ENOSPC.rawValue {
+                return true
+            }
+            current = value.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 }
 
@@ -405,7 +459,7 @@ private enum CameraMediaPlaybackError: LocalizedError {
     case invalidRange
     case incompleteRange
     case incompleteFile(expected: Int64, actual: Int64)
-    case fallbackTooLarge(Int64)
+    case insufficientStorage(required: Int64, available: Int64)
 
     var errorDescription: String? {
         switch self {
@@ -415,8 +469,8 @@ private enum CameraMediaPlaybackError: LocalizedError {
             return "The camera returned an incomplete media byte range."
         case let .incompleteFile(expected, actual):
             return "The camera returned an incomplete media file (expected \(expected), received \(actual))."
-        case let .fallbackTooLarge(sizeBytes):
-            return "The video is too large for automatic playback preparation (\(sizeBytes) bytes)."
+        case let .insufficientStorage(required, available):
+            return "Video playback needs \(required) bytes, but only \(available) bytes are available."
         }
     }
 }

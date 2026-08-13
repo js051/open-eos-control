@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hmac
 import os
+import shutil
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -28,6 +31,7 @@ from .media_streaming import (
     MediaPlaybackCache,
     MediaPlaybackCacheFull,
     MediaPlaybackTickets,
+    has_playback_storage_capacity,
     parse_media_range,
 )
 from .media_upload import validate_upload_request
@@ -87,7 +91,13 @@ def _remove_staged_media(path: Path) -> None:
         path.unlink()
 
 
-def _stage_media(item: MediaItem, chunks, *, max_bytes: int | None = None) -> tuple[MediaItem, Path]:
+def _stage_media(
+    item: MediaItem,
+    chunks,
+    *,
+    playback: bool = False,
+    on_activity: Callable[[], bool] | None = None,
+) -> tuple[MediaItem, Path]:
     """Read a camera response completely so HTTP length errors happen before headers."""
     descriptor, name = tempfile.mkstemp(prefix="open-eos-media-", suffix=".bin")
     os.close(descriptor)
@@ -95,26 +105,33 @@ def _stage_media(item: MediaItem, chunks, *, max_bytes: int | None = None) -> tu
     expected = item.size_bytes
     actual = 0
     iterator = iter(chunks)
+    next_activity_at = 0.0
     try:
-        if max_bytes is not None and expected > max_bytes:
+        if playback and not has_playback_storage_capacity(expected, shutil.disk_usage(staged.parent).free):
             raise BridgeError(
-                "MEDIA_PLAYBACK_CACHE_LIMIT",
-                f"Camera media '{item.name}' exceeds the playback cache limit.",
-                status_code=413,
+                "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE",
+                f"There is not enough free space to prepare camera media '{item.name}' for playback.",
+                status_code=507,
                 feature=CameraFeature.MEDIA_DOWNLOAD.value,
             )
         with staged.open("wb") as destination:
             for chunk in iterator:
                 if not chunk:
                     continue
-                actual += len(chunk)
-                if max_bytes is not None and actual > max_bytes:
+                if (
+                    on_activity is not None
+                    and time.monotonic() >= next_activity_at
+                    and not on_activity()
+                ):
                     raise BridgeError(
-                        "MEDIA_PLAYBACK_CACHE_LIMIT",
-                        f"Camera media '{item.name}' exceeds the playback cache limit.",
-                        status_code=413,
+                        "MEDIA_PLAYBACK_EXPIRED",
+                        "The camera video playback ticket expired while preparing the file.",
+                        status_code=404,
                         feature=CameraFeature.MEDIA_DOWNLOAD.value,
                     )
+                if on_activity is not None and time.monotonic() >= next_activity_at:
+                    next_activity_at = time.monotonic() + 30
+                actual += len(chunk)
                 if expected > 0 and actual > expected:
                     raise BridgeError(
                         "MEDIA_LENGTH_MISMATCH",
@@ -131,6 +148,16 @@ def _stage_media(item: MediaItem, chunks, *, max_bytes: int | None = None) -> tu
                     feature=CameraFeature.MEDIA_DOWNLOAD.value,
                 )
         return item.model_copy(update={"size_bytes": actual}), staged
+    except OSError as error:
+        _remove_staged_media(staged)
+        if playback and error.errno == errno.ENOSPC:
+            raise BridgeError(
+                "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE",
+                f"There is not enough free space to prepare camera media '{item.name}' for playback.",
+                status_code=507,
+                feature=CameraFeature.MEDIA_DOWNLOAD.value,
+            ) from error
+        raise
     except Exception:
         _remove_staged_media(staged)
         raise
@@ -140,22 +167,40 @@ def _stage_media(item: MediaItem, chunks, *, max_bytes: int | None = None) -> tu
             close()
 
 
-def _staged_media_chunks(path: Path, byte_range):
-    with path.open("rb") as source:
-        if byte_range is not None:
-            source.seek(byte_range.start)
-            remaining = byte_range.length
-        else:
-            remaining = None
-        while True:
-            chunk = source.read(1024 * 1024 if remaining is None else min(1024 * 1024, remaining))
-            if not chunk:
-                return
-            yield chunk
-            if remaining is not None:
-                remaining -= len(chunk)
-                if remaining <= 0:
+def _staged_media_chunks(
+    path: Path,
+    byte_range,
+    on_activity: Callable[[], bool] | None = None,
+    on_close: Callable[[], None] | None = None,
+):
+    try:
+        with path.open("rb") as source:
+            if byte_range is not None:
+                source.seek(byte_range.start)
+                remaining = byte_range.length
+            else:
+                remaining = None
+            next_activity_at = 0.0
+            while True:
+                if (
+                    on_activity is not None
+                    and time.monotonic() >= next_activity_at
+                    and not on_activity()
+                ):
                     return
+                if on_activity is not None and time.monotonic() >= next_activity_at:
+                    next_activity_at = time.monotonic() + 30
+                chunk = source.read(1024 * 1024 if remaining is None else min(1024 * 1024, remaining))
+                if not chunk:
+                    return
+                yield chunk
+                if remaining is not None:
+                    remaining -= len(chunk)
+                    if remaining <= 0:
+                        return
+    finally:
+        if on_close is not None:
+            on_close()
 
 
 async def _run_media_upload(
@@ -202,7 +247,7 @@ def create_app(
     configured_token = token if token is not None else os.environ.get("OPEN_EOS_BRIDGE_TOKEN")
     manager = SessionManager(local_engines, network_engine)
     playback_tickets = MediaPlaybackTickets()
-    playback_cache = MediaPlaybackCache(max_bytes=1024 * 1024 * 1024, max_entries=4)
+    playback_cache = MediaPlaybackCache(max_entries=4)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -229,6 +274,13 @@ def create_app(
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
+    def renew_playback(ticket: str) -> bool:
+        grant = playback_tickets.resolve(ticket, renew=True)
+        if grant is None:
+            return False
+        playback_cache.renew(ticket, grant.expires_at)
+        return True
+
     def media_response(
         session_id: str,
         media_id: str,
@@ -236,7 +288,6 @@ def create_app(
         *,
         inline: bool,
         playback_token: str | None = None,
-        playback_expires_at: float | None = None,
     ) -> Response:
         session = manager.get(session_id)
         range_header = request.headers.get("range")
@@ -253,17 +304,30 @@ def create_app(
             item, staged = _stage_media(
                 item,
                 chunks,
-                max_bytes=playback_cache.max_bytes if playback_token else None,
+                playback=playback_token is not None,
+                on_activity=(
+                    lambda: renew_playback(playback_token)
+                    if playback_token
+                    else True
+                ),
             )
             if playback_token:
                 try:
-                    playback_cache.put(playback_token, session_id, item, staged, playback_expires_at or 0.0)
+                    grant = playback_tickets.resolve(playback_token, renew=True)
+                    if grant is None:
+                        raise BridgeError(
+                            "MEDIA_PLAYBACK_EXPIRED",
+                            "The camera video playback ticket expired while preparing the file.",
+                            status_code=404,
+                            feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                        )
+                    playback_cache.put(playback_token, session_id, item, staged, grant.expires_at)
                 except MediaPlaybackCacheFull as error:
                     _remove_staged_media(staged)
                     raise BridgeError(
-                        "MEDIA_PLAYBACK_CACHE_LIMIT",
-                        f"Camera media '{item.name}' exceeds the playback cache limit.",
-                        status_code=413,
+                        "MEDIA_PLAYBACK_BUSY",
+                        "Too many camera videos are already prepared for playback.",
+                        status_code=503,
                         feature=CameraFeature.MEDIA_DOWNLOAD.value,
                     ) from error
                 cache_owned = True
@@ -294,7 +358,20 @@ def create_app(
         if request.method == "HEAD":
             return Response(status_code=status_code, media_type=item.content_type, headers=headers)
         return StreamingResponse(
-            _staged_media_chunks(staged, byte_range),
+            _staged_media_chunks(
+                staged,
+                byte_range,
+                on_activity=(
+                    lambda: renew_playback(playback_token)
+                    if playback_token
+                    else True
+                ),
+                on_close=(
+                    lambda: playback_cache.cleanup_orphan(playback_token, staged)
+                    if playback_token
+                    else None
+                ),
+            ),
             status_code=status_code,
             media_type=item.content_type,
             headers=headers,
@@ -303,19 +380,33 @@ def create_app(
 
     @application.api_route("/v1/media-playback/{ticket}", methods=["GET", "HEAD"], include_in_schema=False)
     def play_media(ticket: str, request: Request) -> Response:
-        grant = playback_tickets.resolve(ticket)
+        grant = playback_tickets.resolve(ticket, renew=True)
         if grant is None:
             playback_cache.remove(ticket)
             return Response(status_code=404, headers={"Cache-Control": "no-store"})
+        playback_cache.renew(ticket, grant.expires_at)
         try:
-            return media_response(
-                grant.session_id,
-                grant.media_id,
-                request,
-                inline=True,
-                playback_token=ticket,
-                playback_expires_at=grant.expires_at,
-            )
+            if request.method == "HEAD":
+                return media_response(
+                    grant.session_id,
+                    grant.media_id,
+                    request,
+                    inline=True,
+                    playback_token=ticket,
+                )
+            with playback_cache.preparing(ticket):
+                active_grant = playback_tickets.resolve(ticket, renew=True)
+                if active_grant is None:
+                    playback_cache.remove(ticket)
+                    return Response(status_code=404, headers={"Cache-Control": "no-store"})
+                playback_cache.renew(ticket, active_grant.expires_at)
+                return media_response(
+                    active_grant.session_id,
+                    active_grant.media_id,
+                    request,
+                    inline=True,
+                    playback_token=ticket,
+                )
         except BridgeError:
             playback_tickets.revoke(ticket)
             playback_cache.remove(ticket)
@@ -655,6 +746,16 @@ def create_app(
                 "MEDIA_SIZE_UNAVAILABLE",
                 "The camera did not report a video size required for playback.",
                 status_code=422,
+            )
+        if not has_playback_storage_capacity(
+            item.size_bytes,
+            shutil.disk_usage(Path(tempfile.gettempdir())).free,
+        ):
+            raise BridgeError(
+                "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE",
+                "There is not enough free space to prepare this camera video for playback.",
+                status_code=507,
+                feature=CameraFeature.MEDIA_DOWNLOAD.value,
             )
         token = playback_tickets.issue(session_id, media_id)
         return MediaPlaybackTicket(

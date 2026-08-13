@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from open_eos_bridge.media_streaming import (
     MediaPlaybackCache,
     MediaPlaybackCacheFull,
     MediaPlaybackTickets,
+    has_playback_storage_capacity,
     parse_media_range,
     ranged_chunks,
 )
@@ -47,6 +49,13 @@ def test_ranged_chunks_skips_and_stops_without_buffering_the_file() -> None:
     assert b"".join(ranged_chunks([b"abc", b"defg", b"hij"], MediaByteRange(2, 7))) == b"cdefgh"
 
 
+def test_playback_capacity_allows_files_larger_than_one_gibibyte_when_space_exists() -> None:
+    two_gibibytes = 2 * 1024 * 1024 * 1024
+
+    assert has_playback_storage_capacity(two_gibibytes, two_gibibytes + 512 * 1024 * 1024)
+    assert not has_playback_storage_capacity(two_gibibytes, two_gibibytes + 64 * 1024 * 1024)
+
+
 def test_playback_tickets_are_bound_to_session_and_media_and_can_be_revoked() -> None:
     tickets = MediaPlaybackTickets(lifetime_seconds=60)
     token = tickets.issue("session-a", "media-a")
@@ -59,8 +68,29 @@ def test_playback_tickets_are_bound_to_session_and_media_and_can_be_revoked() ->
     assert tickets.resolve(token) is None
 
 
+def test_playback_ticket_and_cache_can_be_renewed_without_old_expiry_removing_file(tmp_path: Path) -> None:
+    tickets = MediaPlaybackTickets(lifetime_seconds=60)
+    token = tickets.issue("session-a", "media-a")
+    original = tickets.resolve(token)
+    renewed = tickets.resolve(token, renew=True)
+    assert original is not None and renewed is not None
+    assert renewed.expires_at >= original.expires_at
+
+    cache = MediaPlaybackCache()
+    item = MediaItem(id="media-a", name="A.MP4", kind="video", size_bytes=5, content_type="video/mp4")
+    media = tmp_path / "renewed.bin"
+    media.write_bytes(b"12345")
+    cache.put(token, "session-a", item, media, original.expires_at)
+    cache.renew(token, renewed.expires_at + 60)
+    cache._expire(token, original.expires_at)  # noqa: SLF001 - verifies stale timer behavior.
+
+    assert cache.get(token) is not None
+    assert media.exists()
+    cache.remove(token)
+
+
 def test_playback_cache_expires_files_and_never_evicts_active_entries(tmp_path: Path) -> None:
-    cache = MediaPlaybackCache(max_bytes=10, max_entries=1)
+    cache = MediaPlaybackCache(max_entries=1)
     item = MediaItem(id="media-a", name="A.MP4", kind="video", size_bytes=5, content_type="video/mp4")
     first = tmp_path / "first.bin"
     second = tmp_path / "second.bin"
@@ -88,3 +118,46 @@ def test_playback_cache_expires_files_and_never_evicts_active_entries(tmp_path: 
     cache.put("ticket-expired", "session-a", item, expired, time.monotonic() - 1)
     assert cache.get("ticket-expired") is None
     assert not expired.exists()
+
+
+def test_playback_cache_serializes_preparation_for_the_same_ticket() -> None:
+    cache = MediaPlaybackCache()
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+
+    def first() -> None:
+        with cache.preparing("ticket"):
+            first_entered.set()
+            assert release_first.wait(timeout=2)
+
+    def second() -> None:
+        assert first_entered.wait(timeout=2)
+        with cache.preparing("ticket"):
+            second_entered.set()
+
+    first_thread = threading.Thread(target=first)
+    second_thread = threading.Thread(target=second)
+    first_thread.start()
+    second_thread.start()
+    assert first_entered.wait(timeout=2)
+    assert not second_entered.wait(timeout=0.05)
+    release_first.set()
+    first_thread.join(timeout=2)
+    second_thread.join(timeout=2)
+
+    assert second_entered.is_set()
+
+
+def test_playback_cache_cleans_file_after_revoked_stream_releases_it(tmp_path: Path) -> None:
+    cache = MediaPlaybackCache()
+    item = MediaItem(id="media-a", name="A.MP4", kind="video", size_bytes=5, content_type="video/mp4")
+    media = tmp_path / "active.bin"
+    media.write_bytes(b"12345")
+    cache.put("ticket", "session-a", item, media, time.monotonic() + 60)
+
+    cache.remove("ticket")
+    media.write_bytes(b"12345")  # Simulates Windows unlink failure while the stream handle was open.
+    cache.cleanup_orphan("ticket", media)
+
+    assert not media.exists()

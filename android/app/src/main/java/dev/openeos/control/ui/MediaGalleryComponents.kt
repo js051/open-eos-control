@@ -426,7 +426,11 @@ private fun CameraVideoPlayer(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            failure = CameraVideoPlaybackFailure.TRANSFER
+            failure = if (exception.isPlaybackStorageFailure()) {
+                CameraVideoPlaybackFailure.STORAGE
+            } else {
+                CameraVideoPlaybackFailure.TRANSFER
+            }
             mode = CameraVideoPlaybackMode.FAILED
         }
     }
@@ -506,10 +510,10 @@ private fun CameraVideoPlayer(
             ) {
                 Text(
                     stringResource(
-                        if (failure == CameraVideoPlaybackFailure.CODEC) {
-                            R.string.media_video_codec_unsupported
-                        } else {
-                            R.string.media_video_playback_failed
+                        when (failure) {
+                            CameraVideoPlaybackFailure.CODEC -> R.string.media_video_codec_unsupported
+                            CameraVideoPlaybackFailure.STORAGE -> R.string.media_video_storage_unavailable
+                            else -> R.string.media_video_playback_failed
                         },
                     ),
                     color = AppSubtleText,
@@ -526,7 +530,7 @@ private fun CameraVideoPlayer(
 
 private enum class CameraVideoPlaybackMode { STREAM, CACHE, FILE, FAILED }
 
-private enum class CameraVideoPlaybackFailure { TRANSFER, CODEC }
+private enum class CameraVideoPlaybackFailure { TRANSFER, CODEC, STORAGE }
 
 private fun PlaybackException.toCameraVideoPlaybackFailure(): CameraVideoPlaybackFailure =
     if (

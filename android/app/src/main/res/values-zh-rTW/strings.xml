@@ -249,6 +249,7 @@
     <string name="media_video_playback_failed">無法直接播放相機中的這部影片。</string>
     <string name="media_video_preparing_local">正在準備本機播放檔… %1$d%%</string>
     <string name="media_video_codec_unsupported">此手機無法解碼相機的影片格式。R6 Mark III 的 10-bit 或 4:2:2 錄影可能需要相容的剪輯軟體；仍可下載原始檔案。</string>
+    <string name="media_video_storage_unavailable">可用空間不足，無法準備這部影片。請釋放儲存空間，或將原檔下載到其他位置。</string>
     <string name="start_bulb_exposure">開始 Bulb 長曝光</string>
     <string name="stop_bulb_exposure">停止 Bulb 長曝光</string>
     <string name="bulb_exposure_time">BULB %1$s</string>

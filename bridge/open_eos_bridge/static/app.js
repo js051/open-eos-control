@@ -389,6 +389,7 @@
       loadingPreview: "Loading camera preview",
       previewUnavailable: "The camera preview could not be displayed.",
       videoPlaybackUnavailable: "This camera video could not be played.",
+      videoPlaybackStorageUnavailable: "There is not enough free space to prepare this camera video. Free some storage or download the original.",
       downloadOriginal: "Download original",
       previousMedia: "Previous media",
       nextMedia: "Next media",
@@ -764,6 +765,7 @@
       loadingPreview: "正在載入相機預覽",
       previewUnavailable: "無法顯示相機提供的預覽影像。",
       videoPlaybackUnavailable: "無法播放相機中的這部影片。",
+      videoPlaybackStorageUnavailable: "可用空間不足，無法準備這部相機影片。請釋放儲存空間，或下載原始檔案。",
       downloadOriginal: "下載原檔",
       previousMedia: "上一個媒體",
       nextMedia: "下一個媒體",
@@ -4620,7 +4622,13 @@
       ui.mediaPreviewImage.hidden = true;
       const normalized = captureError(error);
       ui.mediaPreviewLoading.hidden = true;
-      ui.mediaPreviewUnavailable.textContent = t(video ? "videoPlaybackUnavailable" : "previewUnavailable");
+      ui.mediaPreviewUnavailable.textContent = t(
+        video && normalized.code === "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE"
+          ? "videoPlaybackStorageUnavailable"
+          : video
+            ? "videoPlaybackUnavailable"
+            : "previewUnavailable",
+      );
       ui.mediaPreviewUnavailable.hidden = false;
       if (video) ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
       showToast(normalized.message, true);
