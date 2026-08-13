@@ -582,6 +582,15 @@ data class CameraMediaItem(
     val streamAvailable: Boolean = false,
 )
 
+val CameraMediaItem.isVideoMedia: Boolean
+    get() = cameraMediaIsVideo(kind = kind, name = name)
+
+fun cameraMediaIsVideo(kind: String, name: String): Boolean =
+    kind.equals("video", ignoreCase = true) ||
+        name.substringAfterLast('.', "").lowercase() in CAMERA_VIDEO_EXTENSIONS
+
+private val CAMERA_VIDEO_EXTENSIONS = setOf("mp4", "mov", "m4v", "avi", "mkv")
+
 data class CameraMediaThumbnail(
     val item: CameraMediaItem,
     val bytes: ByteArray,

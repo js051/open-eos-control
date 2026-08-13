@@ -100,6 +100,13 @@ final class CameraAppTests: XCTestCase {
         XCTAssertFalse(CameraMediaPlaybackValidation.isCancellation(URLError(.networkConnectionLost)))
     }
 
+    func testMediaPlaybackDoesNotDownloadAgainForUnsupportedCodec() {
+        XCTAssertFalse(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .unsupportedFormat))
+        XCTAssertFalse(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .fallbackTooLarge))
+        XCTAssertTrue(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .incompleteRange))
+        XCTAssertTrue(CameraMediaPlaybackValidation.shouldPrepareFallback(for: .transport))
+    }
+
     func testCameraStatusReplacementPreservesDeviceStatus() {
         let original = CameraStatus(
             recording: false,

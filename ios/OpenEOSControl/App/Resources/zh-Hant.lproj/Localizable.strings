@@ -246,6 +246,7 @@
 "media_video_preparing" = "正在下載完整影片以準備播放……";
 "media_video_unsupported_format" = "此影片格式不受這部 iPhone 或 iPad 支援。";
 "media_video_incomplete" = "相機回傳的影片不完整，請再試一次。";
+"media_video_too_large" = "這部影片太大，無法自動準備播放；請改為下載原始檔案。";
 "media_video_download_hint" = "請下載原始檔案，再使用相容的影片 App 開啟。";
 "previous_media" = "上一個媒體";
 "next_media" = "下一個媒體";

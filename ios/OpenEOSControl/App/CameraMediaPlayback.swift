@@ -89,9 +89,14 @@ final class CameraMediaPlayback: ObservableObject {
 
     private func handlePlaybackFailure(_ error: Error?) {
         guard !isClosed, !CameraMediaPlaybackValidation.isCancellation(error) else { return }
+        let classifiedFailure = CameraMediaPlaybackValidation.failure(for: error)
         if fallbackFileURL != nil {
             isPreparingFallback = false
-            failure = CameraMediaPlaybackValidation.failure(for: error)
+            failure = classifiedFailure
+            return
+        }
+        if !CameraMediaPlaybackValidation.shouldPrepareFallback(for: classifiedFailure) {
+            failure = classifiedFailure
             return
         }
         guard !hasStartedFallback else { return }
@@ -111,6 +116,9 @@ final class CameraMediaPlayback: ObservableObject {
             }
         }
         do {
+            if let sizeBytes = item.sizeBytes, sizeBytes > maximumAutomaticFallbackBytes {
+                throw CameraMediaPlaybackError.fallbackTooLarge(sizeBytes)
+            }
             let createdDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("OpenEOSControl", isDirectory: true)
                 .appendingPathComponent("VideoPlayback", isDirectory: true)
@@ -159,6 +167,8 @@ final class CameraMediaPlayback: ObservableObject {
         return name.isEmpty ? "media-\(item.id)" : name
     }
 
+    private var maximumAutomaticFallbackBytes: Int64 { 1_073_741_824 }
+
     private func removeFallbackFile() {
         guard let fallbackFileURL else { return }
         let directory = fallbackFileURL.deletingLastPathComponent()
@@ -170,6 +180,7 @@ final class CameraMediaPlayback: ObservableObject {
 enum CameraMediaPlaybackFailure: Equatable {
     case unsupportedFormat
     case incompleteRange
+    case fallbackTooLarge
     case transport
 }
 
@@ -223,6 +234,10 @@ enum CameraMediaPlaybackValidation {
            case .incompleteFile = error {
             return .incompleteRange
         }
+        if let error = error as? CameraMediaPlaybackError,
+           case .fallbackTooLarge = error {
+            return .fallbackTooLarge
+        }
         if let nsError = error as NSError?, nsError.domain == AVFoundationErrorDomain {
             switch AVError.Code(rawValue: nsError.code) {
             case .fileFormatNotRecognized, .fileFailedToParse, .decoderNotFound,
@@ -233,6 +248,10 @@ enum CameraMediaPlaybackValidation {
             }
         }
         return .transport
+    }
+
+    static func shouldPrepareFallback(for failure: CameraMediaPlaybackFailure) -> Bool {
+        failure != .unsupportedFormat && failure != .fallbackTooLarge
     }
 }
 
@@ -386,6 +405,7 @@ private enum CameraMediaPlaybackError: LocalizedError {
     case invalidRange
     case incompleteRange
     case incompleteFile(expected: Int64, actual: Int64)
+    case fallbackTooLarge(Int64)
 
     var errorDescription: String? {
         switch self {
@@ -395,6 +415,8 @@ private enum CameraMediaPlaybackError: LocalizedError {
             return "The camera returned an incomplete media byte range."
         case let .incompleteFile(expected, actual):
             return "The camera returned an incomplete media file (expected \(expected), received \(actual))."
+        case let .fallbackTooLarge(sizeBytes):
+            return "The video is too large for automatic playback preparation (\(sizeBytes) bytes)."
         }
     }
 }

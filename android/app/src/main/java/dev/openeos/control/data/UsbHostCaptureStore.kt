@@ -140,7 +140,7 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
 
     override suspend fun openStream(item: CameraMediaItem): CameraMediaStreamSource = withContext(Dispatchers.IO) {
         val file = requireFile(item)
-        require(item.kind.equals("video", ignoreCase = true)) { "Media streaming is available only for video items." }
+        require(item.isVideoMedia) { "Media streaming is available only for video items." }
         FileCameraMediaStreamSource(item, file, hostContentType(item.name, item.kind))
     }
 

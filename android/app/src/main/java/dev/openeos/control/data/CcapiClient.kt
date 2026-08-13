@@ -1508,7 +1508,7 @@ class CcapiClient(
     }
 
     fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
-        require(item.kind.equals("video", ignoreCase = true)) { "Media streaming is available only for video items." }
+        require(item.isVideoMedia) { "Media streaming is available only for video items." }
         if (isRealCamera && !supportsApi("GET", "/contents")) {
             error("Camera did not advertise CCAPI media browsing.")
         }
@@ -2716,7 +2716,7 @@ class CcapiClient(
             rating = item.optInt("rating").takeIf { item.has("rating") && it in 0..5 },
             rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
             ratingWritable = true,
-            streamAvailable = kind.equals("video", ignoreCase = true),
+            streamAvailable = cameraMediaIsVideo(kind, name),
         )
     }
 

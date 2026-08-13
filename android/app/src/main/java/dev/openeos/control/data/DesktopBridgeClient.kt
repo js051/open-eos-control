@@ -646,7 +646,7 @@ class DesktopBridgeClient(
     }
 
     fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
-        require(item.kind.equals("video", ignoreCase = true)) { "Media streaming is available only for video items." }
+        require(item.isVideoMedia) { "Media streaming is available only for video items." }
         return OkHttpCameraMediaStreamSource(
             item = item,
             httpClient = httpClient,
@@ -901,7 +901,7 @@ class DesktopBridgeClient(
             archived = item.optNullableBoolean("archived"),
             rating = item.optNullableInt("rating")?.takeIf { it in 0..5 },
             rotationDegrees = item.optNullableInt("rotationDegrees")?.takeIf { it in MEDIA_ROTATIONS },
-            streamAvailable = kind.equals("video", ignoreCase = true),
+            streamAvailable = cameraMediaIsVideo(kind, name),
         )
     }
 

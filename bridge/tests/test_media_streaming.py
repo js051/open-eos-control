@@ -9,6 +9,7 @@ from open_eos_bridge.media_streaming import (
     InvalidMediaRange,
     MediaByteRange,
     MediaPlaybackCache,
+    MediaPlaybackCacheFull,
     MediaPlaybackTickets,
     parse_media_range,
     ranged_chunks,
@@ -58,7 +59,7 @@ def test_playback_tickets_are_bound_to_session_and_media_and_can_be_revoked() ->
     assert tickets.resolve(token) is None
 
 
-def test_playback_cache_expires_files_and_evicts_old_entries(tmp_path: Path) -> None:
+def test_playback_cache_expires_files_and_never_evicts_active_entries(tmp_path: Path) -> None:
     cache = MediaPlaybackCache(max_bytes=10, max_entries=1)
     item = MediaItem(id="media-a", name="A.MP4", kind="video", size_bytes=5, content_type="video/mp4")
     first = tmp_path / "first.bin"
@@ -67,19 +68,20 @@ def test_playback_cache_expires_files_and_evicts_old_entries(tmp_path: Path) -> 
     second.write_bytes(b"67890")
 
     cache.put("ticket-a", "session-a", item, first, time.monotonic() + 60)
-    cache.put(
-        "ticket-b",
-        "session-a",
-        item.model_copy(update={"id": "media-b", "name": "B.MP4"}),
-        second,
-        time.monotonic() + 60,
-    )
+    with pytest.raises(MediaPlaybackCacheFull):
+        cache.put(
+            "ticket-b",
+            "session-a",
+            item.model_copy(update={"id": "media-b", "name": "B.MP4"}),
+            second,
+            time.monotonic() + 60,
+        )
 
-    assert cache.get("ticket-a") is None
+    assert cache.get("ticket-a") is not None
+    assert first.exists()
+    assert second.exists()
+    cache.remove("ticket-a")
     assert not first.exists()
-    assert cache.get("ticket-b") is not None
-    cache.remove("ticket-b")
-    assert not second.exists()
 
     expired = tmp_path / "expired.bin"
     expired.write_bytes(b"12345")

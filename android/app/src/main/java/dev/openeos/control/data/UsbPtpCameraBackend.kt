@@ -861,7 +861,7 @@ class UsbPtpCameraBackend(
 
     override suspend fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
         hostCaptureStore?.takeIf { it.owns(item) }?.let { return it.openStream(item) }
-        require(item.kind.equals("video", ignoreCase = true)) { "Media streaming is available only for video items." }
+        require(item.isVideoMedia) { "Media streaming is available only for video items." }
         requireOperation(PtpOperationCode.GET_PARTIAL_OBJECT, CameraFeature.MEDIA_DOWNLOAD)
         val handle = item.ptpHandle()
         val objectInfo = mediaInfo[handle] ?: requireSession().objectInfo(handle).also { mediaInfo[handle] = it }

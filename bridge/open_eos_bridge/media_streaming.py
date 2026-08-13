@@ -110,11 +110,8 @@ class MediaPlaybackCache:
         with self._lock:
             self._remove_expired(time.monotonic())
             self._remove(token)
-            while self._values and (
-                len(self._values) >= self.max_entries or self._total_bytes + item.size_bytes > self.max_bytes
-            ):
-                oldest = min(self._values, key=lambda value: self._values[value].expires_at)
-                self._remove(oldest)
+            if len(self._values) >= self.max_entries or self._total_bytes + item.size_bytes > self.max_bytes:
+                raise MediaPlaybackCacheFull("The playback cache is currently full.")
             entry = MediaPlaybackCacheEntry(session_id, item, path, expires_at)
             self._values[token] = entry
             self._total_bytes += item.size_bytes

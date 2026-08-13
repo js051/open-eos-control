@@ -52,6 +52,26 @@ internal class OkHttpCameraMediaStreamSource(
                 response.close()
                 error("Camera returned a partial video response without a valid Content-Range for ${item.name}.")
             }
+            if (
+                response.code == 206 && contentRange?.total != null && item.sizeBytes != null &&
+                contentRange.total != item.sizeBytes
+            ) {
+                response.close()
+                error("Camera changed the reported size of ${item.name} during playback.")
+            }
+            val responseLength = body.contentLength().takeIf { it >= 0L }
+            val rangeLength = contentRange?.let { it.endInclusive - it.start + 1L }
+            if (rangeLength != null && responseLength != null && responseLength != rangeLength) {
+                response.close()
+                error("Camera returned a media range with an invalid Content-Length for ${item.name}.")
+            }
+            if (
+                response.code == 200 && item.sizeBytes != null && responseLength != null &&
+                responseLength != item.sizeBytes
+            ) {
+                response.close()
+                error("Camera returned ${responseLength} bytes for ${item.name}, expected ${item.sizeBytes}.")
+            }
             val responseContentType = response.header("Content-Type")?.substringBefore(';')?.trim()
             if (responseContentType.isTextMediaResponse()) {
                 latestFailure = "unexpected $responseContentType response"
@@ -60,9 +80,9 @@ internal class OkHttpCameraMediaStreamSource(
             }
             val input = body.byteStream()
             if (response.code == 200 && position > 0L) input.skipExactly(position, item.name)
-            val totalBytes = contentRange?.total ?: item.sizeBytes ?: body.contentLength().takeIf { it >= 0L }
-            val remaining = totalBytes?.let { (it - position).coerceAtLeast(0L) }
-                ?: body.contentLength().takeIf { it >= 0L }?.let { length ->
+            val totalBytes = contentRange?.total ?: item.sizeBytes ?: responseLength
+            val remaining = rangeLength ?: totalBytes?.let { (it - position).coerceAtLeast(0L) }
+                ?: responseLength?.let { length ->
                     if (response.code == 200) (length - position).coerceAtLeast(0L) else length
                 }
             return@withContext OkHttpCameraMediaStreamHandle(response, remaining)
@@ -136,13 +156,16 @@ private class OkHttpCameraMediaStreamHandle(
     override fun close() = response.close()
 }
 
-private data class HttpContentRange(val start: Long, val total: Long?)
+private data class HttpContentRange(val start: Long, val endInclusive: Long, val total: Long?)
 
 private fun String.toContentRange(): HttpContentRange? {
     val match = CONTENT_RANGE.matchEntire(trim()) ?: return null
     val start = match.groupValues[1].toLongOrNull() ?: return null
+    val endInclusive = match.groupValues[2].toLongOrNull() ?: return null
+    if (endInclusive < start) return null
     val total = match.groupValues[3].takeUnless { it == "*" }?.toLongOrNull()
-    return HttpContentRange(start, total)
+    if (total != null && (total <= endInclusive || start >= total)) return null
+    return HttpContentRange(start, endInclusive, total)
 }
 
 private fun String?.isTextMediaResponse(): Boolean =
