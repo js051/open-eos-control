@@ -2722,15 +2722,16 @@ class CcapiClient(
 
     private suspend fun listRealMedia(onProgress: (List<CameraMediaItem>) -> Unit): List<CameraMediaItem> {
         val rootPath = apiPath("GET", "/contents")
-        val pending = ArrayDeque<Pair<String, Int>>()
+        val pending = ArrayDeque<String>()
         val visited = mutableSetOf<String>()
         val mediaPathGroups = mutableListOf<List<String>>()
-        pending.add(rootPath to 0)
+        pending.add(rootPath)
 
         while (pending.isNotEmpty()) {
-            val (container, depth) = pending.removeFirst()
+            currentCoroutineContext().ensureActive()
+            val container = pending.removeFirst()
             val normalizedContainer = normalizeCameraResource(container).substringBefore('?')
-            if (!visited.add(normalizedContainer) || depth > MAX_MEDIA_TREE_DEPTH) continue
+            if (!visited.add(normalizedContainer)) continue
 
             val mediaPaths = mutableListOf<String>()
             mediaPathGroups.add(mediaPaths)
@@ -2750,7 +2751,7 @@ class CcapiClient(
             }
             val listedPaths = listContentPaths(normalizedContainer, ::publish)
             if (mediaPaths != listedPaths) publish(listedPaths)
-            discoveredContainers.forEach { pending.add(it to depth + 1) }
+            discoveredContainers.forEach(pending::add)
             if (mediaPaths.isEmpty()) mediaPathGroups.remove(mediaPaths)
         }
 
@@ -2778,10 +2779,8 @@ class CcapiClient(
                 "$containerPath?type=all,kind=number",
             ),
         )
-        val pageCount = pageInfo?.optInt("pagenumber", 0)?.coerceAtLeast(0) ?: 0
-        check(pageCount <= MAX_MEDIA_PAGES) {
-            "Camera reported $pageCount media pages at $containerPath; safety limit is $MAX_MEDIA_PAGES."
-        }
+        val pageCount = pageInfo?.optInt("pagenumber", 0) ?: 0
+        check(pageCount >= 0) { "Camera returned a negative media page count at $containerPath." }
         val paths = linkedSetOf<String>()
         if (pageCount <= 0) {
             paths.addAll(
@@ -3826,8 +3825,6 @@ class CcapiClient(
         const val MAX_LIVE_VIEW_INFO_BYTES = 1024 * 1024
         const val MAX_ERROR_BODY_CHARS = 2_000
         const val HALF_PRESS_DURATION_MILLIS = 350L
-        const val MAX_MEDIA_PAGES = 100
-        const val MAX_MEDIA_TREE_DEPTH = 4
         const val MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
         const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
         const val MEDIA_TRANSFER_BUFFER_BYTES = 64 * 1024

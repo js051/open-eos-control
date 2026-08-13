@@ -63,8 +63,6 @@ public actor CCAPIClient {
     private static let maximumErrorBodyCharacters = 2_000
     private static let noAPIListValue = "No list of APIs"
     private static let developerAPIPath = "/ccapi/ver100/topurlfordev"
-    private static let maximumMediaPages = 100
-    private static let maximumMediaTreeDepth = 4
     private static let maximumMediaThumbnailBytes = 8 * 1024 * 1024
     private static let maximumMediaPreviewBytes = 32 * 1024 * 1024
     private static let mediaRotations = Set([0, 90, 180, 270])
@@ -1817,20 +1815,22 @@ public actor CCAPIClient {
         }
         guard supports(.get, suffix: "/contents") else { throw CCAPIError.unsupported(.mediaBrowser) }
 
-        var pending: [(path: String, depth: Int)] = [(apiPath(.get, suffix: "/contents"), 0)]
+        var pending = [apiPath(.get, suffix: "/contents")]
+        var pendingIndex = 0
         var visited = Set<String>()
         var mediaPathGroups: [[String]] = []
-        while !pending.isEmpty {
-            let next = pending.removeFirst()
-            let container = try normalizeCameraResource(next.path).components(separatedBy: "?")[0]
-            guard next.depth <= Self.maximumMediaTreeDepth, visited.insert(container).inserted else { continue }
+        while pendingIndex < pending.count {
+            try Task.checkCancellation()
+            let container = try normalizeCameraResource(pending[pendingIndex]).components(separatedBy: "?")[0]
+            pendingIndex += 1
+            guard visited.insert(container).inserted else { continue }
             var mediaPaths: [String] = []
             for rawPath in try await contentPaths(container: container) {
                 let path = try normalizeCameraResource(rawPath).components(separatedBy: "?")[0]
                 if Self.isMediaPath(path) {
                     if !mediaPaths.contains(path) { mediaPaths.append(path) }
                 } else if !visited.contains(path) {
-                    pending.append((path, next.depth + 1))
+                    pending.append(path)
                 }
             }
             if !mediaPaths.isEmpty { mediaPathGroups.append(mediaPaths) }
@@ -4028,11 +4028,6 @@ public actor CCAPIClient {
         let pageCount = pageInfo?.integer("pagenumber") ?? 0
         guard pageCount >= 0 else {
             throw CCAPIError.invalidResponse("Camera returned a negative media page count.")
-        }
-        guard pageCount <= Self.maximumMediaPages else {
-            throw CCAPIError.invalidResponse(
-                "Camera reported \(pageCount) media pages, above the safety limit of \(Self.maximumMediaPages)."
-            )
         }
         var result: [String] = []
         if pageCount <= 0 {

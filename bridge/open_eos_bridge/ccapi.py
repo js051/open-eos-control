@@ -67,8 +67,6 @@ MAX_MULTIPART_HEADER_BYTES = 16 * 1024
 MAX_MULTIPART_HEADER_COUNT = 32
 MAX_RTP_SESSION_DESCRIPTION_BYTES = 64 * 1024
 RTP_AUDIO_FEATURE = "LIVE_VIEW_RTP_AUDIO"
-MAX_MEDIA_PAGES = 100
-MAX_MEDIA_TREE_DEPTH = 4
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
 MULTIPART_START_RETRY_DELAYS = (0.1, 0.2, 0.4, 0.8)
@@ -2325,13 +2323,13 @@ class CcapiSession:
             self._ensure_initialized()
             if not self._supports("GET", "/contents"):
                 raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
-            pending: deque[tuple[str, int]] = deque([(self._api_path("GET", "/contents"), 0)])
+            pending = deque([self._api_path("GET", "/contents")])
             visited: set[str] = set()
             media_path_groups: list[list[str]] = []
             while pending:
-                raw_container, depth = pending.popleft()
+                raw_container = pending.popleft()
                 container = self._normalize_resource(raw_container).split("?", 1)[0]
-                if depth > MAX_MEDIA_TREE_DEPTH or container in visited:
+                if container in visited:
                     continue
                 visited.add(container)
                 media_paths: list[str] = []
@@ -2341,7 +2339,7 @@ class CcapiSession:
                         if path not in media_paths:
                             media_paths.append(path)
                     elif path not in visited:
-                        pending.append((path, depth + 1))
+                        pending.append(path)
                 if media_paths:
                     media_path_groups.append(media_paths)
             media_paths = _merge_media_path_groups(media_path_groups)
@@ -2758,14 +2756,6 @@ class CcapiSession:
             raise BridgeError(
                 "INVALID_MEDIA_PAGE_COUNT",
                 "The camera returned a negative media page count.",
-                status_code=502,
-                feature=CameraFeature.MEDIA_BROWSER.value,
-                engine=self.engine_name,
-            )
-        if page_count > MAX_MEDIA_PAGES:
-            raise BridgeError(
-                "MEDIA_PAGE_LIMIT_EXCEEDED",
-                f"The camera reported {page_count} media pages, above the safety limit of {MAX_MEDIA_PAGES}.",
                 status_code=502,
                 feature=CameraFeature.MEDIA_BROWSER.value,
                 engine=self.engine_name,

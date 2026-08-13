@@ -3374,6 +3374,53 @@ final class CCAPIClientTests: XCTestCase {
         )
     }
 
+    func testRealMediaListTraversesMoreThanOneHundredPages() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":101}"#)
+        for page in 1...101 {
+            let name = String(format: "IMG_%04d.JPG", page)
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/contents?page=\(page)&order=desc",
+                body: "{\"path\":[\"/ccapi/ver100/contents/card1/\(name)\"]}"
+            )
+        }
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let items = try await client.listMedia()
+
+        XCTAssertEqual(items.count, 101)
+        XCTAssertEqual(items.first?.name, "IMG_0001.JPG")
+        XCTAssertEqual(items.last?.name, "IMG_0101.JPG")
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 103)
+        XCTAssertEqual(requests.last?.path, "/ccapi/ver100/contents?page=101&order=desc")
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
+    func testRealMediaListRejectsNegativePageCount() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":-1}"#)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        do {
+            _ = try await client.listMedia()
+            XCTFail("Expected the negative page count to be rejected")
+        } catch {
+            XCTAssertTrue(String(describing: error).contains("negative media page count"))
+        }
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 0)
+    }
+
     func testRealMediaListFairlyMergesSiblingMediaContainers() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
