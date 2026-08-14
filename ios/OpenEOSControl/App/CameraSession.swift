@@ -238,16 +238,15 @@ enum CameraSession: Sendable {
         }
     }
 
-    func openMediaStream(
-        _ item: CameraMediaItem,
-        offset: Int64,
-        length: Int64? = nil
-    ) async throws -> CameraMediaStreamResponse {
+    func beginMediaPlayback(_ item: CameraMediaItem) async throws -> CameraMediaPlaybackStream {
         switch self {
         case let .ccapi(client):
-            return try await client.openMediaStream(item, offset: offset, length: length)
+            return CameraMediaPlaybackStream(item: item, backend: .ccapi(client))
         case let .desktopBridge(client):
-            return try await client.openMediaStream(item, offset: offset, length: length)
+            return CameraMediaPlaybackStream(
+                item: item,
+                backend: .desktopBridge(try await client.beginMediaPlayback(item))
+            )
         }
     }
 
@@ -336,6 +335,46 @@ enum CameraSession: Sendable {
         switch self {
         case let .ccapi(client): await client.close()
         case let .desktopBridge(client): await client.close()
+        }
+    }
+}
+
+actor CameraMediaPlaybackStream {
+    enum Backend: Sendable {
+        case ccapi(CCAPIClient)
+        case desktopBridge(DesktopBridgeMediaPlayback)
+    }
+
+    private let item: CameraMediaItem
+    private let backend: Backend
+    private var closed = false
+
+    init(item: CameraMediaItem, backend: Backend) {
+        self.item = item
+        self.backend = backend
+    }
+
+    func open(offset: Int64, length: Int64?) async throws -> CameraMediaStreamResponse {
+        guard !closed else { throw CancellationError() }
+        let response: CameraMediaStreamResponse
+        switch backend {
+        case let .ccapi(client):
+            response = try await client.openMediaStream(item, offset: offset, length: length)
+        case let .desktopBridge(playback):
+            response = try await playback.open(offset: offset, length: length)
+        }
+        guard !closed else {
+            response.cancel()
+            throw CancellationError()
+        }
+        return response
+    }
+
+    func close() async {
+        guard !closed else { return }
+        closed = true
+        if case let .desktopBridge(playback) = backend {
+            await playback.close()
         }
     }
 }

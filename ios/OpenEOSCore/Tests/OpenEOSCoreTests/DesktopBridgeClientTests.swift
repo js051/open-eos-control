@@ -80,7 +80,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         }
     }
 
-    func testDesktopBridgeMediaStreamUsesBearerAuthenticatedByteRange() async throws {
+    func testDesktopBridgeMediaPlaybackReusesTicketAndRevokesAfterLastStreamCloses() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/health", body: health)
         await transport.enqueueJSON(
@@ -89,8 +89,13 @@ final class DesktopBridgeClientTests: XCTestCase {
             status: 201,
             body: #"{"id":"session_stream","engine":"libgphoto2","camera":{"id":"gphoto2:test","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
         )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session/session_stream/media/video-1/playback",
+            body: #"{"url":"/v1/media-playback/ticket_123","expiresInSeconds":900}"#
+        )
         await transport.enqueue(
-            path: "/v1/session/session_stream/media/video-1",
+            path: "/v1/media-playback/ticket_123",
             status: 206,
             headers: [
                 "content-type": "video/mp4",
@@ -99,6 +104,17 @@ final class DesktopBridgeClientTests: XCTestCase {
             ],
             body: Data(repeating: 0x24, count: 32)
         )
+        await transport.enqueue(
+            path: "/v1/media-playback/ticket_123",
+            status: 206,
+            headers: [
+                "content-type": "video/mp4",
+                "content-length": "16",
+                "content-range": "bytes 8192-8207/16384",
+            ],
+            body: Data(repeating: 0x42, count: 16)
+        )
+        await transport.enqueue(method: "DELETE", path: "/v1/media-playback/ticket_123", status: 204)
         let client = try DesktopBridgeClient(
             baseURL: "http://192.168.1.10:18181",
             token: "bridge-secret",
@@ -106,22 +122,123 @@ final class DesktopBridgeClientTests: XCTestCase {
             transport: transport
         )
         try await client.initialize()
+        let item = CameraMediaItem(id: "video-1", name: "MVI_0001.MP4", kind: "video", sizeBytes: 16384)
+        let playback = try await client.beginMediaPlayback(item)
 
-        let stream = try await client.openMediaStream(
-            CameraMediaItem(id: "video-1", name: "MVI_0001.MP4", kind: "video", sizeBytes: 16384),
-            offset: 4096,
-            length: 32
+        let first = try await playback.open(offset: 4096, length: 32)
+        var firstData = Data()
+        for try await chunk in first.chunks { firstData.append(chunk) }
+        first.cancel()
+        let second = try await playback.open(offset: 8192, length: 16)
+        var secondData = Data()
+        for try await chunk in second.chunks { secondData.append(chunk) }
+        await playback.close()
+        let requestsBeforeLastStreamClosed = await transport.requests()
+        XCTAssertEqual(requestsBeforeLastStreamClosed.count, 5)
+        second.cancel()
+        second.cancel()
+        await playback.close()
+        let requests = await waitForRequests(6, on: transport)
+
+        XCTAssertEqual(first.rangeStart, 4096)
+        XCTAssertEqual(first.totalBytes, 16384)
+        XCTAssertEqual(firstData.count, 32)
+        XCTAssertEqual(second.rangeStart, 8192)
+        XCTAssertEqual(secondData.count, 16)
+        XCTAssertEqual(requests.filter { $0.method == "POST" && $0.path.hasSuffix("/playback") }.count, 1)
+        XCTAssertEqual(requests[2].path, "/v1/session/session_stream/media/video-1/playback")
+        XCTAssertEqual(requests[3].path, "/v1/media-playback/ticket_123")
+        XCTAssertEqual(
+            requests[3].headers.first { $0.key.caseInsensitiveCompare("Range") == .orderedSame }?.value,
+            "bytes=4096-4127"
         )
-        var data = Data()
-        for try await chunk in stream.chunks { data.append(chunk) }
+        XCTAssertEqual(requests[4].path, "/v1/media-playback/ticket_123")
+        XCTAssertEqual(
+            requests[4].headers.first { $0.key.caseInsensitiveCompare("Range") == .orderedSame }?.value,
+            "bytes=8192-8207"
+        )
+        XCTAssertEqual(requests[5].method, "DELETE")
+        XCTAssertEqual(requests[5].path, "/v1/media-playback/ticket_123")
+        XCTAssertTrue(requests[2...5].allSatisfy { request in
+            request.headers.first { $0.key.caseInsensitiveCompare("Authorization") == .orderedSame }?.value
+                == "Bearer bridge-secret"
+        })
+    }
 
-        XCTAssertEqual(stream.rangeStart, 4096)
-        XCTAssertEqual(stream.totalBytes, 16384)
-        XCTAssertEqual(data.count, 32)
+    func testDesktopBridgeMediaPlaybackRejectsCrossOriginTicketURL() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_stream_invalid","engine":"libgphoto2","camera":{"id":"gphoto2:test","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
+        )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session/session_stream_invalid/media/video-1/playback",
+            body: #"{"url":"https://example.invalid/v1/media-playback/stolen","expiresInSeconds":900}"#
+        )
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "gphoto2:test",
+            transport: transport
+        )
+        try await client.initialize()
+
+        do {
+            _ = try await client.beginMediaPlayback(
+                CameraMediaItem(id: "video-1", name: "MVI_0001.MP4", kind: "video", sizeBytes: 16384)
+            )
+            XCTFail("Expected a cross-origin playback ticket to be rejected")
+        } catch let error as DesktopBridgeError {
+            guard case .invalidResponse(let message) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertTrue(message.contains("outside its own origin"))
+        }
         let requests = await transport.requests()
-        let request = try XCTUnwrap(requests.last)
-        XCTAssertEqual(request.headers.first { $0.key.caseInsensitiveCompare("Range") == .orderedSame }?.value, "bytes=4096-4127")
-        XCTAssertEqual(request.headers.first { $0.key.caseInsensitiveCompare("Authorization") == .orderedSame }?.value, "Bearer bridge-secret")
+        XCTAssertEqual(requests.count, 3)
+    }
+
+    func testDesktopBridgeMediaPlaybackRedactsTicketFromHTTPError() async throws {
+        let transport = MockCameraHTTPTransport()
+        let secretTicket = "ticket_private_value"
+        await transport.enqueueJSON(path: "/health", body: health)
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session",
+            status: 201,
+            body: #"{"id":"session_stream_error","engine":"libgphoto2","camera":{"id":"gphoto2:test","model":"Canon EOS R6 Mark III","port":"usb:001,007","engine":"libgphoto2"}}"#
+        )
+        await transport.enqueueJSON(
+            method: "POST",
+            path: "/v1/session/session_stream_error/media/video-1/playback",
+            body: #"{"url":"/v1/media-playback/ticket_private_value","expiresInSeconds":900}"#
+        )
+        await transport.enqueue(path: "/v1/media-playback/\(secretTicket)", status: 404)
+        await transport.enqueue(method: "DELETE", path: "/v1/media-playback/\(secretTicket)", status: 204)
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            cameraID: "gphoto2:test",
+            transport: transport
+        )
+        try await client.initialize()
+        let playback = try await client.beginMediaPlayback(
+            CameraMediaItem(id: "video-1", name: "MVI_0001.MP4", kind: "video", sizeBytes: 16384)
+        )
+
+        do {
+            _ = try await playback.open(offset: 0, length: 1024)
+            XCTFail("Expected the playback request to fail")
+        } catch let error as DesktopBridgeError {
+            let description = error.localizedDescription
+            XCTAssertFalse(description.contains(secretTicket))
+            XCTAssertTrue(description.contains("/v1/media-playback/[redacted]"))
+        }
+        await playback.close()
+        let requests = await waitForRequests(5, on: transport)
+        XCTAssertEqual(requests.last?.method, "DELETE")
     }
 
     func testDiscoveryValidatesServiceAndUsesBearerAuthentication() async throws {
@@ -782,5 +899,17 @@ final class DesktopBridgeClientTests: XCTestCase {
 
     private func enqueueStatus(method: String, path: String, on transport: MockCameraHTTPTransport) async {
         await transport.enqueueJSON(method: method, path: path, body: status)
+    }
+
+    private func waitForRequests(
+        _ count: Int,
+        on transport: MockCameraHTTPTransport
+    ) async -> [RecordedRequest] {
+        for _ in 0..<100 {
+            let requests = await transport.requests()
+            if requests.count >= count { return requests }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return await transport.requests()
     }
 }

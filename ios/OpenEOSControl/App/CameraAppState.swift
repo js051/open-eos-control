@@ -1004,11 +1004,30 @@ final class CameraAppState: ObservableObject {
 
     func openMediaPreview(_ item: CameraMediaItem) async {
         if mediaIsVideo(item) {
-            guard !isPreview, supports(.mediaDownload), let session else { return }
+            guard !isPreview, supports(.mediaDownload), let session, begin(.media) else { return }
             resetMediaPreview()
             mediaPreviewItem = item
-            mediaVideoPlayback = CameraMediaPlayback(item: item, session: session)
-            lastError = nil
+            mediaPreviewLoading = true
+            defer {
+                end(.media)
+                if mediaPreviewItem?.id == item.id { mediaPreviewLoading = false }
+            }
+            do {
+                let playbackStream = try await session.beginMediaPlayback(item)
+                guard mediaPreviewItem?.id == item.id else {
+                    await playbackStream.close()
+                    return
+                }
+                mediaVideoPlayback = CameraMediaPlayback(
+                    item: item,
+                    session: session,
+                    playbackStream: playbackStream
+                )
+                lastError = nil
+            } catch {
+                guard mediaPreviewItem?.id == item.id else { return }
+                record(error)
+            }
             return
         }
         guard

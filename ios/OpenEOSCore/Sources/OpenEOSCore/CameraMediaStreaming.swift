@@ -40,6 +40,43 @@ public struct CameraMediaStreamResponse: Sendable {
         cancelAction()
     }
 
+    func addingCancelAction(_ action: @escaping @Sendable () -> Void) -> CameraMediaStreamResponse {
+        let cancellation = CameraMediaStreamCancellation {
+            cancel()
+            action()
+        }
+        return CameraMediaStreamResponse(
+            item: item,
+            statusCode: statusCode,
+            contentType: contentType,
+            contentLength: contentLength,
+            totalBytes: totalBytes,
+            rangeStart: rangeStart,
+            chunks: chunks,
+            cancel: cancellation.run
+        )
+    }
+
+    private init(
+        item: CameraMediaItem,
+        statusCode: Int,
+        contentType: String?,
+        contentLength: Int64?,
+        totalBytes: Int64?,
+        rangeStart: Int64,
+        chunks: AsyncThrowingStream<Data, Error>,
+        cancel: @escaping @Sendable () -> Void
+    ) {
+        self.item = item
+        self.statusCode = statusCode
+        self.contentType = contentType
+        self.contentLength = contentLength
+        self.totalBytes = totalBytes
+        self.rangeStart = rangeStart
+        self.chunks = chunks
+        cancelAction = cancel
+    }
+
     private static func parseContentRange(_ value: String?) throws -> ParsedContentRange? {
         guard let value else { return nil }
         let parts = value.split(separator: " ", maxSplits: 1)
@@ -70,6 +107,23 @@ public struct CameraMediaStreamResponse: Sendable {
             throw CameraMediaStreamValidationError.invalidContentRange
         }
         return ParsedContentRange(start: start, end: end, totalBytes: totalBytes)
+    }
+}
+
+private final class CameraMediaStreamCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var action: (@Sendable () -> Void)?
+
+    init(_ action: @escaping @Sendable () -> Void) {
+        self.action = action
+    }
+
+    func run() {
+        lock.lock()
+        let action = action
+        self.action = nil
+        lock.unlock()
+        action?()
     }
 }
 
