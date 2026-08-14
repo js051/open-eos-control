@@ -1586,8 +1586,28 @@ button.media-thumbnail:focus-visible {
 }
 
 .media-preview-message {
+  display: grid;
+  max-width: min(560px, calc(100% - 136px));
+  gap: 12px;
+  justify-items: center;
   color: var(--muted);
   text-align: center;
+}
+
+.media-preview-message p {
+  margin: 0;
+}
+
+.media-preview-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.media-preview-recovery-actions .button {
+  max-width: 100%;
+  min-height: 48px;
 }
 
 .media-preview-reset-zoom {

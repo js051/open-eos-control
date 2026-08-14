@@ -5,6 +5,8 @@ All notable release-level changes to Open EOS Control are documented here.
 ## [Unreleased]
 
 - Hardened camera-resident video preview across Android, iOS, and PC. Mobile CCAPI sessions now preflight missing file sizes through the advertised media-info representation so non-seekable camera responses can fall back to an exact verified local file; Android supplies the real filename and container MIME to Media3; iOS ignores generic `application/octet-stream`, clamps tail byte ranges to the declared file length, and decodes a real H.264 fixture through the production AVFoundation resource loader. Browser errors now distinguish unsupported codecs from transport failures while preserving original download.
+- Added in-place camera-video playback recovery across Android, iOS, and PC. Transport, truncated-range, staging, and storage failures retain an explicit retry that rebuilds the platform playback source, Swift camera stream, or browser playback ticket; codec failures identify the MP4/MOV/M4V/AVI/MKV container and keep original download available without promising that a retry can add a missing decoder.
+- Kept the iOS progressive media-load indicator inside the compact summary region so upload and cancel remain visible and hittable on narrow iPhones.
 
 ## [0.2.0] - 2026-08-12
 

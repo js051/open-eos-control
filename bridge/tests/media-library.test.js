@@ -117,6 +117,13 @@ function run() {
   assert.equal(mediaLibrary.videoPlaybackFailure(4), "codec");
   assert.equal(mediaLibrary.videoPlaybackFailure(2), "transport");
   assert.equal(mediaLibrary.videoPlaybackFailure(null), "transport");
+  assert.equal(mediaLibrary.videoContainerLabel("MVI_0001.MP4"), "MP4");
+  assert.equal(mediaLibrary.videoContainerLabel("clip.mov"), "QuickTime MOV");
+  assert.equal(mediaLibrary.videoContainerLabel("clip.m4v"), "M4V");
+  assert.equal(mediaLibrary.videoContainerLabel("clip.avi"), "AVI");
+  assert.equal(mediaLibrary.videoContainerLabel("clip.mkv"), "Matroska MKV");
+  assert.equal(mediaLibrary.videoContainerLabel("clip.bin"), "BIN");
+  assert.equal(mediaLibrary.videoContainerLabel("clip"), "VIDEO");
 }
 
 run();

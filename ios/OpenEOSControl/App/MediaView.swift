@@ -160,11 +160,24 @@ struct MediaView: View {
             .accessibilityIdentifier("media-back-button")
             RotatingControl(degrees: controlRotation) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("camera_media").font(.headline)
-                    Text(mediaLibrarySummary)
-                        .font(.caption)
-                        .foregroundStyle(Color.cameraSecondaryText)
-                        .accessibilityIdentifier("media-library-summary")
+                    Text("camera_media")
+                        .font(.headline)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        if camera.mediaLibraryLoading, !camera.mediaItems.isEmpty {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(Color.cameraAccent)
+                                .accessibilityLabel(Text("loading_media"))
+                                .accessibilityIdentifier("media-library-loading-progressive")
+                        }
+                        Text(mediaLibrarySummary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .accessibilityIdentifier("media-library-summary")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraSecondaryText)
                     if let name = camera.deletedMediaName {
                         Text(language.format("media_deleted", name))
                             .font(.caption)
@@ -173,15 +186,7 @@ struct MediaView: View {
                     }
                 }
             }
-            Spacer()
-            if camera.mediaLibraryLoading, !camera.mediaItems.isEmpty {
-                RotatingControl(degrees: controlRotation) {
-                    ProgressView()
-                        .tint(Color.cameraAccent)
-                        .accessibilityLabel(Text("loading_media"))
-                }
-                .accessibilityIdentifier("media-library-loading-progressive")
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             if camera.supports(.mediaUpload) {
                 uploadControl
             }
@@ -205,6 +210,7 @@ struct MediaView: View {
                     (!camera.mediaLibraryLoading && camera.isBusy(.media))
             )
             .accessibilityIdentifier(camera.mediaLibraryLoadCancellable ? "cancel-media-library-load" : "refresh-media")
+            .fixedSize()
         }
         .foregroundStyle(Color.cameraText)
         .padding(.horizontal, 10)
@@ -764,8 +770,19 @@ private struct MediaPreviewView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let playback = camera.mediaVideoPlayback {
-                CameraVideoPreview(playback: playback)
+            if let playback = camera.mediaVideoPlayback,
+               let item = camera.mediaPreviewItem {
+                CameraVideoPreview(
+                    playback: playback,
+                    item: item,
+                    downloadEnabled: camera.supports(.mediaDownload) && !camera.isBusy(.media),
+                    onRetry: {
+                        Task { await camera.openMediaPreview(item) }
+                    },
+                    onDownload: {
+                        camera.startMediaDownload(item)
+                    }
+                )
             } else if let item = camera.mediaPreviewItem,
                       let data = camera.mediaPreviewData,
                       let image = UIImage(data: data) {
@@ -1053,6 +1070,10 @@ private struct ZoomableMediaImage: View {
 private struct CameraVideoPreview: View {
     @EnvironmentObject private var language: AppLanguageStore
     @ObservedObject var playback: CameraMediaPlayback
+    let item: CameraMediaItem
+    let downloadEnabled: Bool
+    let onRetry: () -> Void
+    let onDownload: () -> Void
 
     var body: some View {
         ZStack {
@@ -1071,12 +1092,28 @@ private struct CameraVideoPreview: View {
                 .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
             } else if let failure = playback.failure {
                 VStack(spacing: 8) {
-                    Text(language.string(videoFailureKey(failure)))
+                    Text(videoFailureText(failure))
                         .multilineTextAlignment(.center)
                     if failure == .unsupportedFormat {
                         Text(language.string("media_video_download_hint"))
                             .font(.caption)
                             .multilineTextAlignment(.center)
+                    }
+                    if failure.retryable {
+                        Button(action: onRetry) {
+                            Label(language.string("retry_media_video"), systemImage: "arrow.clockwise")
+                                .frame(minHeight: 48)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("retry-media-video")
+                    }
+                    if downloadEnabled {
+                        Button(action: onDownload) {
+                            Label(language.string("download_original"), systemImage: "arrow.down.circle")
+                                .frame(minHeight: 48)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("download-original-video")
                     }
                 }
                 .foregroundStyle(Color.cameraSecondaryText)
@@ -1084,6 +1121,10 @@ private struct CameraVideoPreview: View {
                 .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
             }
         }
+    }
+
+    private func videoFailureText(_ failure: CameraMediaPlaybackFailure) -> String {
+        language.format(videoFailureKey(failure), cameraVideoContainerLabel(item.name))
     }
 
     private func videoFailureKey(_ failure: CameraMediaPlaybackFailure) -> String {

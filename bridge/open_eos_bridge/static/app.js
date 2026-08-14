@@ -396,8 +396,10 @@
       loadingPreview: "Loading camera preview",
       previewUnavailable: "The camera preview could not be displayed.",
       videoPlaybackUnavailable: "This camera video could not be played.",
-      videoPlaybackCodecUnsupported: "This browser cannot decode the camera video format. R6 Mark III 10-bit or 4:2:2 recordings may require compatible editing software. Download the original to keep working with it.",
-      videoPlaybackStorageUnavailable: "There is not enough free space to prepare this camera video. Free some storage or download the original.",
+      videoPlaybackCodecUnsupported: "This browser cannot decode the {container} camera video. R6 Mark III 10-bit or 4:2:2 recordings may require compatible editing software.",
+      videoPlaybackStorageUnavailable: "There is not enough free space to prepare this {container} camera video. Free some storage or download the original.",
+      videoPlaybackTransportUnavailable: "This {container} camera video could not be played. Check the camera connection and try again.",
+      tryVideoAgain: "Try video again",
       downloadOriginal: "Download original",
       previousMedia: "Previous media",
       nextMedia: "Next media",
@@ -780,8 +782,10 @@
       loadingPreview: "正在載入相機預覽",
       previewUnavailable: "無法顯示相機提供的預覽影像。",
       videoPlaybackUnavailable: "無法播放相機中的這部影片。",
-      videoPlaybackCodecUnsupported: "此瀏覽器無法解碼相機的影片格式。R6 Mark III 的 10-bit 或 4:2:2 錄影可能需要相容的剪輯軟體；請下載原始檔案後繼續處理。",
-      videoPlaybackStorageUnavailable: "可用空間不足，無法準備這部相機影片。請釋放儲存空間，或下載原始檔案。",
+      videoPlaybackCodecUnsupported: "此瀏覽器無法解碼相機中的 {container} 影片。R6 Mark III 的 10-bit 或 4:2:2 錄影可能需要相容的剪輯軟體。",
+      videoPlaybackStorageUnavailable: "可用空間不足，無法準備這部相機中的 {container} 影片。請釋放儲存空間，或下載原始檔案。",
+      videoPlaybackTransportUnavailable: "無法播放相機中的 {container} 影片。請檢查相機連線後再試一次。",
+      tryVideoAgain: "重新嘗試播放",
       downloadOriginal: "下載原檔",
       previousMedia: "上一個媒體",
       nextMedia: "下一個媒體",
@@ -1211,6 +1215,9 @@
     mediaPreviewNext: byId("media-preview-next"),
     mediaPreviewLoading: byId("media-preview-loading"),
     mediaPreviewUnavailable: byId("media-preview-unavailable"),
+    mediaPreviewUnavailableCopy: byId("media-preview-unavailable-copy"),
+    mediaPreviewRetry: byId("media-preview-retry"),
+    mediaPreviewFailureDownload: byId("media-preview-failure-download"),
     mediaPreviewDownload: byId("media-preview-download"),
     mediaPreviewDetails: byId("media-preview-details"),
     mediaPreviewResetZoom: byId("media-preview-reset-zoom"),
@@ -4483,6 +4490,7 @@
 
   function clearMediaPreview() {
     state.mediaPreviewGeneration += 1;
+    state.mediaPreviewItem = null;
     ui.mediaPreviewVideo.pause();
     ui.mediaPreviewVideo.removeAttribute("src");
     ui.mediaPreviewVideo.load();
@@ -4493,12 +4501,13 @@
     const ticketUrl = state.mediaPreviewTicketUrl;
     state.mediaPreviewTicketUrl = null;
     if (ticketUrl) fetch(ticketUrl, { method: "DELETE", cache: "no-store", keepalive: true }).catch(() => {});
-    state.mediaPreviewItem = null;
     resetMediaPreviewTransform();
     ui.mediaPreviewImage.alt = "";
     ui.mediaPreviewImage.hidden = true;
     ui.mediaPreviewLoading.hidden = false;
     ui.mediaPreviewUnavailable.hidden = true;
+    ui.mediaPreviewRetry.hidden = true;
+    ui.mediaPreviewFailureDownload.hidden = true;
     ui.mediaPreviewDownload.hidden = true;
     ui.mediaPreviewDetails.hidden = true;
     ui.mediaPreviewTitle.textContent = "";
@@ -4509,6 +4518,7 @@
 
   function failMediaVideoPreview() {
     if (!state.mediaPreviewItem || !mediaIsVideo(state.mediaPreviewItem)) return;
+    const errorCode = ui.mediaPreviewVideo.error?.code;
     ui.mediaPreviewVideo.pause();
     ui.mediaPreviewVideo.removeAttribute("src");
     ui.mediaPreviewVideo.load();
@@ -4517,10 +4527,14 @@
     state.mediaPreviewTicketUrl = null;
     if (ticketUrl) fetch(ticketUrl, { method: "DELETE", cache: "no-store", keepalive: true }).catch(() => {});
     ui.mediaPreviewLoading.hidden = true;
-    const failure = mediaLibrary.videoPlaybackFailure(ui.mediaPreviewVideo.error?.code);
-    ui.mediaPreviewUnavailable.textContent = t(
-      failure === "codec" ? "videoPlaybackCodecUnsupported" : "videoPlaybackUnavailable",
+    const failure = mediaLibrary.videoPlaybackFailure(errorCode);
+    const container = mediaLibrary.videoContainerLabel(state.mediaPreviewItem.name);
+    ui.mediaPreviewUnavailableCopy.textContent = t(
+      failure === "codec" ? "videoPlaybackCodecUnsupported" : "videoPlaybackTransportUnavailable",
+      { container },
     );
+    ui.mediaPreviewRetry.hidden = failure === "codec";
+    ui.mediaPreviewFailureDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
     ui.mediaPreviewUnavailable.hidden = false;
     renderMediaPreviewNavigation();
   }
@@ -4680,7 +4694,7 @@
     clearMediaPreview();
     const generation = state.mediaPreviewGeneration;
     state.mediaPreviewItem = item;
-    ui.mediaPreviewDialog.showModal();
+    if (!ui.mediaPreviewDialog.open) ui.mediaPreviewDialog.showModal();
     renderMediaPreviewNavigation();
     try {
       if (video) {
@@ -4723,13 +4737,17 @@
       ui.mediaPreviewImage.hidden = true;
       const normalized = captureError(error);
       ui.mediaPreviewLoading.hidden = true;
-      ui.mediaPreviewUnavailable.textContent = t(
+      const container = mediaLibrary.videoContainerLabel(item.name);
+      ui.mediaPreviewUnavailableCopy.textContent = t(
         video && normalized.code === "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE"
           ? "videoPlaybackStorageUnavailable"
           : video
-            ? "videoPlaybackUnavailable"
+            ? "videoPlaybackTransportUnavailable"
             : "previewUnavailable",
+        { container },
       );
+      ui.mediaPreviewRetry.hidden = !video;
+      ui.mediaPreviewFailureDownload.hidden = !video || !featureSupported(FEATURES.MEDIA_DOWNLOAD);
       ui.mediaPreviewUnavailable.hidden = false;
       renderMediaPreviewNavigation();
       showToast(normalized.message, true);
@@ -5481,6 +5499,13 @@
     ui.mediaPreviewNext.addEventListener("click", () => openAdjacentMedia(1));
     ui.mediaPreviewVideo.addEventListener("error", () => {
       failMediaVideoPreview();
+    });
+    ui.mediaPreviewRetry.addEventListener("click", () => {
+      const item = state.mediaPreviewItem;
+      if (item) void openMediaPreview(item);
+    });
+    ui.mediaPreviewFailureDownload.addEventListener("click", () => {
+      if (state.mediaPreviewItem) void downloadMedia(state.mediaPreviewItem);
     });
     ui.mediaPreviewDownload.addEventListener("click", () => {
       if (state.mediaPreviewItem) void downloadMedia(state.mediaPreviewItem);

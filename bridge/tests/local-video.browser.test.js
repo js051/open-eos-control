@@ -578,6 +578,80 @@ async function run() {
     assert.equal(Number.isFinite(playbackState.currentTime), true);
     assert.equal(Number.isFinite(playbackState.duration), true);
     assert.equal(playbackState.currentTime > 0, true);
+
+    const retryPlaybackRequest = page.waitForRequest((request) => (
+      request.url().includes("/v1/media-playback/") && request.headers().range?.startsWith("bytes=")
+    ));
+    await page.evaluate(() => {
+      const video = document.querySelector("#media-preview-video");
+      let error = { code: 2 };
+      const load = video.load.bind(video);
+      Object.defineProperty(video, "error", { configurable: true, get: () => error });
+      video.load = () => {
+        error = null;
+        load();
+      };
+      video.dispatchEvent(new Event("error"));
+    });
+    await page.waitForSelector("#media-preview-retry:not([hidden])");
+    assert.match(await page.locator("#media-preview-unavailable-copy").innerText(), /MP4/);
+    await page.evaluate(() => {
+      const video = document.querySelector("#media-preview-video");
+      delete video.error;
+      delete video.load;
+    });
+    await page.click("#media-preview-retry");
+    await retryPlaybackRequest;
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#media-preview-video");
+      return !video.hidden && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+    });
+
+    await page.evaluate(() => {
+      const video = document.querySelector("#media-preview-video");
+      let error = { code: 4 };
+      const load = video.load.bind(video);
+      Object.defineProperty(video, "error", { configurable: true, get: () => error });
+      video.load = () => {
+        error = null;
+        load();
+      };
+      video.dispatchEvent(new Event("error"));
+    });
+    await page.waitForSelector("#media-preview-unavailable:not([hidden])");
+    assert.match(await page.locator("#media-preview-unavailable-copy").innerText(), /MP4/);
+    assert.equal(await page.locator("#media-preview-retry").isHidden(), true);
+    assert.equal(await page.locator("#media-preview-failure-download").isVisible(), true);
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(RESULTS_DIR, "video-playback-codec-error-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const narrowRecoveryLayout = await page.evaluate(() => {
+      const stage = document.querySelector("#media-preview-stage").getBoundingClientRect();
+      const message = document.querySelector("#media-preview-unavailable").getBoundingClientRect();
+      const previous = document.querySelector("#media-preview-previous").getBoundingClientRect();
+      const next = document.querySelector("#media-preview-next").getBoundingClientRect();
+      const intersects = (left, right) => !(
+        left.right <= right.left || left.left >= right.right ||
+        left.bottom <= right.top || left.top >= right.bottom
+      );
+      return {
+        insideStage: message.left >= stage.left && message.right <= stage.right &&
+          message.top >= stage.top && message.bottom <= stage.bottom,
+        navigationClear: !intersects(message, previous) && !intersects(message, next),
+        noHorizontalOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      };
+    });
+    assert.deepEqual(
+      narrowRecoveryLayout,
+      { insideStage: true, navigationClear: true, noHorizontalOverflow: true },
+    );
+    await page.screenshot({ path: path.join(RESULTS_DIR, "video-playback-codec-error-narrow.png") });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(() => {
+      const video = document.querySelector("#media-preview-video");
+      delete video.error;
+      delete video.load;
+    });
     await page.click("#media-preview-close");
     await page.click('#media-filter-control button[data-media-filter="all"]');
     fs.mkdirSync(RESULTS_DIR, { recursive: true });

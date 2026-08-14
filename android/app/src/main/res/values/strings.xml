@@ -343,10 +343,12 @@
     <string name="media_viewer_position">%1$d of %2$d</string>
     <string name="reset_media_zoom">Reset zoom</string>
     <string name="media_preview_unavailable">The camera preview could not be displayed.</string>
-    <string name="media_video_playback_failed">This video could not be played from the camera.</string>
+    <string name="media_video_playback_failed">This %1$s camera video could not be played. Check the camera connection and try again.</string>
     <string name="media_video_preparing_local">Preparing a local playback copy… %1$d%%</string>
-    <string name="media_video_codec_unsupported">This device cannot decode the camera video format. R6 Mark III 10-bit or 4:2:2 recordings may require compatible editing software. You can still download the original.</string>
-    <string name="media_video_storage_unavailable">There is not enough free space to prepare this video. Free some storage or download it to another destination.</string>
+    <string name="media_video_codec_unsupported">This device cannot decode the %1$s camera video. R6 Mark III 10-bit or 4:2:2 recordings may require compatible editing software.</string>
+    <string name="media_video_storage_unavailable">There is not enough free space to prepare this %1$s video. Free some storage or download it to another destination.</string>
+    <string name="retry_media_video">Try video again</string>
+    <string name="download_original">Download original</string>
     <string name="refresh_media">Refresh camera media</string>
     <string name="media_downloaded">Saved %1$s</string>
     <string name="downloading_media">Downloading %1$s</string>

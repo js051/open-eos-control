@@ -167,6 +167,20 @@ final class CameraAppTests: XCTestCase {
         )
     }
 
+    func testMediaPlaybackRecoveryAndContainerLabels() {
+        XCTAssertEqual(cameraVideoContainerLabel("MVI_0001.MP4"), "MP4")
+        XCTAssertEqual(cameraVideoContainerLabel("clip.mov"), "QuickTime MOV")
+        XCTAssertEqual(cameraVideoContainerLabel("clip.m4v"), "M4V")
+        XCTAssertEqual(cameraVideoContainerLabel("clip.avi"), "AVI")
+        XCTAssertEqual(cameraVideoContainerLabel("clip.mkv"), "Matroska MKV")
+        XCTAssertEqual(cameraVideoContainerLabel("clip.bin"), "BIN")
+        XCTAssertEqual(cameraVideoContainerLabel("clip"), "VIDEO")
+        XCTAssertTrue(CameraMediaPlaybackFailure.transport.retryable)
+        XCTAssertTrue(CameraMediaPlaybackFailure.incompleteRange.retryable)
+        XCTAssertTrue(CameraMediaPlaybackFailure.storageUnavailable.retryable)
+        XCTAssertFalse(CameraMediaPlaybackFailure.unsupportedFormat.retryable)
+    }
+
     func testMediaResourceLoaderDecodesBaselineH264FromCameraRanges() async throws {
         let fixtureURL = try XCTUnwrap(
             Bundle(for: Self.self).url(

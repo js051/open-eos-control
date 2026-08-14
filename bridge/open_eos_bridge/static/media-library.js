@@ -138,6 +138,17 @@
     return "transport";
   }
 
+  function videoContainerLabel(filename) {
+    const name = String(filename || "");
+    const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+    if (extension === "mp4") return "MP4";
+    if (extension === "mov") return "QuickTime MOV";
+    if (extension === "m4v") return "M4V";
+    if (extension === "avi") return "AVI";
+    if (extension === "mkv") return "Matroska MKV";
+    return extension ? extension.toUpperCase() : "VIDEO";
+  }
+
   return {
     isVideo,
     mediaTime,
@@ -149,5 +160,6 @@
     imagePanBounds,
     clampImagePan,
     videoPlaybackFailure,
+    videoContainerLabel,
   };
 });

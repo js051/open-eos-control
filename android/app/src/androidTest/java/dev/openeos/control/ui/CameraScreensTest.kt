@@ -209,6 +209,52 @@ class CameraScreensTest {
     }
 
     @Test
+    fun videoPlaybackTransportFailureOffersWorkingRecoveryActions() {
+        var retryCount = 0
+        var downloadCount = 0
+        val item = CameraMediaItem("video-1", "MVI_0001.MP4", "video")
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraVideoPlaybackFailureContent(
+                    item = item,
+                    failure = CameraVideoPlaybackFailure.TRANSFER,
+                    downloadEnabled = true,
+                    onRetry = { retryCount += 1 },
+                    onDownload = { downloadCount += 1 },
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.media_video_playback_failed, "MP4")).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.retry_media_video)).performClick()
+        compose.onNodeWithText(resourceText(R.string.download_original)).performClick()
+        compose.runOnIdle {
+            assertEquals(1, retryCount)
+            assertEquals(1, downloadCount)
+        }
+    }
+
+    @Test
+    fun videoPlaybackCodecFailureNamesContainerAndOmitsIneffectiveRetry() {
+        val item = CameraMediaItem("video-1", "MVI_0001.MP4", "video")
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraVideoPlaybackFailureContent(
+                    item = item,
+                    failure = CameraVideoPlaybackFailure.CODEC,
+                    downloadEnabled = true,
+                    onRetry = {},
+                    onDownload = {},
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.media_video_codec_unsupported, "MP4")).assertIsDisplayed()
+        compose.onAllNodesWithText(resourceText(R.string.retry_media_video)).assertCountEquals(0)
+        compose.onNodeWithText(resourceText(R.string.download_original)).assertIsDisplayed()
+    }
+
+    @Test
     fun offlinePreviewTapActionDoesNotCoverEmptyState() {
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
