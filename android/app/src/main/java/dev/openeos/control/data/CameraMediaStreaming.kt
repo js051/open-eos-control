@@ -7,6 +7,7 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.Closeable
 import java.io.RandomAccessFile
+import java.util.concurrent.atomic.AtomicBoolean
 
 interface CameraMediaStreamSource : Closeable {
     val item: CameraMediaItem
@@ -88,6 +89,115 @@ internal class OkHttpCameraMediaStreamSource(
             return@withContext OkHttpCameraMediaStreamHandle(response, remaining)
         }
         error("Camera video stream failed for ${item.name}: ${latestFailure ?: "no usable media endpoint"}")
+    }
+}
+
+internal class CloseAwareCameraMediaStreamSource(
+    private val delegate: CameraMediaStreamSource,
+    private val onClosed: () -> Unit,
+) : CameraMediaStreamSource {
+    override val item: CameraMediaItem = delegate.item
+    private val stateLock = Any()
+    private var closed = false
+    private var openingStreams = 0
+    private var activeHandles = 0
+    private var cleanupStarted = false
+
+    override suspend fun open(position: Long): CameraMediaStreamHandle {
+        synchronized(stateLock) {
+            check(!closed) { "Media stream source for ${item.name} is closed." }
+            openingStreams += 1
+        }
+        val handle = try {
+            delegate.open(position)
+        } catch (error: Throwable) {
+            finishOpeningWithoutHandle()
+            throw error
+        }
+        var shouldCleanup = false
+        val accepted = synchronized(stateLock) {
+            check(openingStreams > 0) { "Media stream opening accounting underflow for ${item.name}." }
+            openingStreams -= 1
+            if (closed) {
+                shouldCleanup = claimCleanupIfReady()
+                false
+            } else {
+                activeHandles += 1
+                true
+            }
+        }
+        if (!accepted) {
+            try {
+                handle.close()
+            } finally {
+                if (shouldCleanup) cleanup()
+            }
+            error("Media stream source for ${item.name} was closed while opening.")
+        }
+        return CloseAwareCameraMediaStreamHandle(handle, ::releaseHandle)
+    }
+
+    override fun close() {
+        val shouldCleanup = synchronized(stateLock) {
+            if (!closed) closed = true
+            claimCleanupIfReady()
+        }
+        if (shouldCleanup) cleanup()
+    }
+
+    private fun finishOpeningWithoutHandle() {
+        val shouldCleanup = synchronized(stateLock) {
+            check(openingStreams > 0) { "Media stream opening accounting underflow for ${item.name}." }
+            openingStreams -= 1
+            claimCleanupIfReady()
+        }
+        if (shouldCleanup) cleanup()
+    }
+
+    private fun releaseHandle() {
+        val shouldCleanup = synchronized(stateLock) {
+            check(activeHandles > 0) { "Media stream handle accounting underflow for ${item.name}." }
+            activeHandles -= 1
+            claimCleanupIfReady()
+        }
+        if (shouldCleanup) cleanup()
+    }
+
+    private fun claimCleanupIfReady(): Boolean {
+        if (!closed || openingStreams > 0 || activeHandles > 0 || cleanupStarted) return false
+        cleanupStarted = true
+        return true
+    }
+
+    private fun cleanup() {
+        try {
+            delegate.close()
+        } finally {
+            onClosed()
+        }
+    }
+}
+
+private class CloseAwareCameraMediaStreamHandle(
+    private val delegate: CameraMediaStreamHandle,
+    private val onClosed: () -> Unit,
+) : CameraMediaStreamHandle {
+    private val closed = AtomicBoolean(false)
+    override val bytesRemaining: Long?
+        get() = delegate.bytesRemaining
+    override val contentType: String?
+        get() = delegate.contentType
+
+    override suspend fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+        delegate.read(buffer, offset, length)
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        try {
+            delegate.close()
+        } finally {
+            onClosed()
+        }
     }
 }
 

@@ -9,6 +9,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -16,12 +17,14 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import okhttp3.ResponseBody
 import okio.BufferedSink
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.io.IOException
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -645,21 +648,33 @@ class DesktopBridgeClient(
         return CameraMediaPreview(item = item, bytes = bytes, contentType = contentType)
     }
 
-    fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
+    suspend fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
         require(item.isVideoMedia) { "Media streaming is available only for video items." }
-        return OkHttpCameraMediaStreamSource(
+        val ticket = postEmptyJson(sessionEndpoint("media", item.id, "playback"))
+        val expiresInSeconds = ticket.optInt("expiresInSeconds", -1)
+        check(expiresInSeconds in 1..MAX_PLAYBACK_TICKET_LIFETIME_SECONDS) {
+            "Desktop Bridge returned an invalid media playback ticket lifetime."
+        }
+        val playbackUrl = resolvePlaybackUrl(
+            ticket.requireString("url", "Desktop Bridge did not return a media playback URL."),
+        )
+        val stream = OkHttpCameraMediaStreamSource(
             item = item,
             httpClient = httpClient,
             requestFactory = { position ->
                 fun request() = Request.Builder()
-                    .url(sessionEndpoint("media", item.id))
+                    .url(playbackUrl)
                     .header("Accept", "video/*,application/octet-stream;q=0.8")
+                    .header("Cache-Control", "no-cache")
                 buildList {
                     if (position > 0L) add(request().header("Range", "bytes=$position-").get().build())
                     add(request().get().build())
                 }
             },
         )
+        return CloseAwareCameraMediaStreamSource(stream) {
+            revokePlaybackTicket(playbackUrl)
+        }
     }
 
     private suspend fun mediaImageRepresentation(
@@ -963,6 +978,13 @@ class DesktopBridgeClient(
             .build()
     )
 
+    private suspend fun postEmptyJson(url: HttpUrl): JSONObject = requestJson(
+        Request.Builder()
+            .url(url)
+            .post(ByteArray(0).toRequestBody(null))
+            .build(),
+    )
+
     private suspend fun putJson(url: HttpUrl, payload: JSONObject): JSONObject = requestJson(
         Request.Builder()
             .url(url)
@@ -1054,6 +1076,48 @@ class DesktopBridgeClient(
         .addQueryParameter("t", cacheKey.toString())
         .build()
 
+    private fun resolvePlaybackUrl(rawUrl: String): HttpUrl {
+        check(rawUrl.length in 1..MAX_PLAYBACK_URL_CHARS) {
+            "Desktop Bridge returned an invalid media playback URL."
+        }
+        val resolved = rootUrl.resolve(rawUrl)
+            ?: error("Desktop Bridge returned an invalid media playback URL.")
+        check(
+            resolved.scheme == rootUrl.scheme &&
+                resolved.host == rootUrl.host &&
+                resolved.port == rootUrl.port &&
+                resolved.username.isEmpty() &&
+                resolved.password.isEmpty() &&
+                resolved.query == null &&
+                resolved.fragment == null
+        ) {
+            "Desktop Bridge returned a media playback URL outside its own origin."
+        }
+        val segments = resolved.pathSegments
+        check(
+            segments.size == 3 &&
+                segments[0] == "v1" &&
+                segments[1] == "media-playback" &&
+                segments[2].length in 1..MAX_PLAYBACK_TOKEN_CHARS &&
+                segments[2].all { it.isLetterOrDigit() || it == '-' || it == '_' }
+        ) {
+            "Desktop Bridge returned an invalid media playback URL."
+        }
+        return resolved
+    }
+
+    private fun revokePlaybackTicket(playbackUrl: HttpUrl) {
+        httpClient.newCall(Request.Builder().url(playbackUrl).delete().build()).enqueue(
+            object : Callback {
+                override fun onFailure(call: Call, e: IOException) = Unit
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.close()
+                }
+            },
+        )
+    }
+
     private companion object {
         val SUPPORTED_LOCAL_ENGINES = setOf("libgphoto2", "edsdk")
         const val BRIDGE_SERVICE_NAME = "open-eos-control-bridge"
@@ -1067,6 +1131,9 @@ class DesktopBridgeClient(
         const val EVENT_CALL_TIMEOUT_SECONDS = 45L
         const val MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024L
         const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024L
+        const val MAX_PLAYBACK_TICKET_LIFETIME_SECONDS = 3_600
+        const val MAX_PLAYBACK_URL_CHARS = 2_048
+        const val MAX_PLAYBACK_TOKEN_CHARS = 512
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
         const val MAX_MEDIA_UPLOAD_BYTES = UINT32_MAX
