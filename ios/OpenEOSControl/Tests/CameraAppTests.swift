@@ -206,8 +206,10 @@ final class CameraAppTests: XCTestCase {
         let asset = AVURLAsset(url: loader.assetURL)
         asset.resourceLoader.setDelegate(loader, queue: loader.delegateQueue)
 
-        XCTAssertTrue(try await asset.load(.isPlayable))
-        let track = try XCTUnwrap(try await asset.loadTracks(withMediaType: .video).first)
+        let isPlayable = try await asset.load(.isPlayable)
+        XCTAssertTrue(isPlayable)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(videoTracks.first)
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderTrackOutput(
             track: track,
