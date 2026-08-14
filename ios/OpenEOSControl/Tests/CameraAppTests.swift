@@ -1,7 +1,9 @@
 import AVFoundation
 import CoreGraphics
+import CoreVideo
 import Foundation
 import OpenEOSCore
+import UniformTypeIdentifiers
 import XCTest
 
 @testable import OpenEOSControl
@@ -122,6 +124,108 @@ final class CameraAppTests: XCTestCase {
                 availableCapacity: twoGiB + 64 * 1024 * 1024
             )
         )
+        XCTAssertEqual(
+            CameraMediaPlaybackValidation.expectedBytes(
+                requestedLength: 64,
+                totalBytes: 150,
+                requestedOffset: 128
+            ),
+            22
+        )
+        XCTAssertTrue(
+            CameraMediaPlaybackValidation.isComplete(
+                deliveredBytes: 22,
+                requestedLength: 64,
+                totalBytes: 150,
+                requestedOffset: 128
+            )
+        )
+    }
+
+    func testMediaPlaybackUsesFilenameWhenCameraReturnsGenericContentType() throws {
+        let expected = try XCTUnwrap(UTType(filenameExtension: "mp4")?.identifier)
+
+        XCTAssertEqual(
+            CameraMediaPlaybackContentType.identifier(
+                responseContentType: "application/octet-stream; charset=binary",
+                filename: "MVI_0001.MP4"
+            ),
+            expected
+        )
+        XCTAssertEqual(
+            CameraMediaPlaybackContentType.identifier(
+                responseContentType: "video/mp4",
+                filename: "MVI_0001.BIN"
+            ),
+            expected
+        )
+        XCTAssertNil(
+            CameraMediaPlaybackContentType.identifier(
+                responseContentType: "application/octet-stream",
+                filename: "MVI_0001.BIN"
+            )
+        )
+    }
+
+    func testMediaResourceLoaderDecodesBaselineH264FromCameraRanges() async throws {
+        let fixtureURL = try XCTUnwrap(
+            Bundle(for: Self.self).url(
+                forResource: "valid-h264-baseline",
+                withExtension: "mp4"
+            )
+        )
+        let fixture = try Data(contentsOf: fixtureURL)
+        let media = CameraMediaItem(
+            id: "fixture-video",
+            name: "MVI_FIXTURE.MP4",
+            kind: "video",
+            sizeBytes: Int64(fixture.count)
+        )
+        let requests = MediaPlaybackRequestRecorder()
+        let loader = CameraMediaResourceLoader(item: media) { offset, length in
+            await requests.record(offset: offset, length: length)
+            let available = max(0, Int64(fixture.count) - offset)
+            let count = min(length ?? available, available)
+            let start = Int(offset)
+            let end = start + Int(count)
+            let payload = start <= fixture.count && end <= fixture.count
+                ? Data(fixture[start..<end])
+                : Data()
+            return CameraMediaPlaybackResource(
+                statusCode: 206,
+                contentType: "application/octet-stream",
+                totalBytes: Int64(fixture.count),
+                rangeStart: offset,
+                chunks: AsyncThrowingStream { continuation in
+                    if !payload.isEmpty { continuation.yield(payload) }
+                    continuation.finish()
+                }
+            )
+        }
+        defer { loader.invalidate() }
+        let asset = AVURLAsset(url: loader.assetURL)
+        asset.resourceLoader.setDelegate(loader, queue: loader.delegateQueue)
+
+        XCTAssertTrue(try await asset.load(.isPlayable))
+        let track = try XCTUnwrap(try await asset.loadTracks(withMediaType: .video).first)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(
+            track: track,
+            outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+            ]
+        )
+        XCTAssertTrue(reader.canAdd(output))
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        let sample = try XCTUnwrap(output.copyNextSampleBuffer())
+        let imageBuffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+
+        XCTAssertGreaterThan(CVPixelBufferGetWidth(imageBuffer), 0)
+        XCTAssertGreaterThan(CVPixelBufferGetHeight(imageBuffer), 0)
+        let recordedRequests = await requests.values()
+        XCTAssertFalse(recordedRequests.isEmpty)
+        XCTAssertNotEqual(reader.status, .failed, reader.error?.localizedDescription ?? "decoder failed")
     }
 
     func testMediaPlaybackClassifiesStorageExhaustion() {
@@ -982,6 +1086,23 @@ final class CameraAppTests: XCTestCase {
         XCTAssertNil(movieQualityDisplayValue("4K Fine 59.94p"))
     }
 
+}
+
+private actor MediaPlaybackRequestRecorder {
+    struct Request: Equatable {
+        let offset: Int64
+        let length: Int64?
+    }
+
+    private var requests: [Request] = []
+
+    func record(offset: Int64, length: Int64?) {
+        requests.append(Request(offset: offset, length: length))
+    }
+
+    func values() -> [Request] {
+        requests
+    }
 }
 
 private final class RTPAudioStatusRecorder: @unchecked Sendable {

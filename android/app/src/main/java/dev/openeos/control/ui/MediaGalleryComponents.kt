@@ -69,6 +69,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -624,7 +625,7 @@ private fun CameraVideoPlayer(
                 ExoPlayer.Builder(context).build().apply {
                     if (localFile == null) {
                         val mediaSource = ProgressiveMediaSource.Factory(CameraMediaDataSource.Factory(source))
-                            .createMediaSource(MediaItem.fromUri(Uri.parse("oec-media://camera/${item.id.hashCode()}")))
+                            .createMediaSource(cameraVideoMediaItem(item))
                         setMediaSource(mediaSource)
                     } else {
                         setMediaItem(MediaItem.fromUri(Uri.fromFile(localFile)))
@@ -724,3 +725,25 @@ private fun PlaybackException.toCameraVideoPlaybackFailure(): CameraVideoPlaybac
     } else {
         CameraVideoPlaybackFailure.TRANSFER
     }
+
+internal fun cameraVideoMediaItem(item: CameraMediaItem): MediaItem {
+    val extension = item.name.substringAfterLast('.', "").lowercase()
+    val mimeType = when (extension) {
+        "mp4", "m4v" -> MimeTypes.VIDEO_MP4
+        "mov" -> "video/quicktime"
+        "avi" -> "video/x-msvideo"
+        "mkv" -> "video/x-matroska"
+        else -> null
+    }
+    val uri = Uri.Builder()
+        .scheme("oec-media")
+        .authority("camera")
+        .appendPath(item.id.hashCode().toString())
+        .appendPath(item.name.ifBlank { "camera-video" })
+        .build()
+    return MediaItem.Builder()
+        .setMediaId(item.id)
+        .setUri(uri)
+        .setMimeType(mimeType)
+        .build()
+}

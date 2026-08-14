@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Hardened camera-resident video preview across Android, iOS, and PC. Mobile CCAPI sessions now preflight missing file sizes through the advertised media-info representation so non-seekable camera responses can fall back to an exact verified local file; Android supplies the real filename and container MIME to Media3; iOS ignores generic `application/octet-stream`, clamps tail byte ranges to the declared file length, and decodes a real H.264 fixture through the production AVFoundation resource loader. Browser errors now distinguish unsupported codecs from transport failures while preserving original download.
+
 ## [0.2.0] - 2026-08-12
 
 - Hardened Android, iOS, and PC Canon CCAPI discovery and Live View for EOS R6 Mark III firmware 1.1.0, including Canon developer-list fallback, POST-only lifecycle cleanup, advertised-size downgrade, bounded multipart and busy retries, RTP first-frame readiness, and deterministic AUTO fallback.

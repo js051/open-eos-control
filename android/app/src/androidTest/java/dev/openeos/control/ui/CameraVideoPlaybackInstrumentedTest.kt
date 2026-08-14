@@ -2,9 +2,7 @@ package dev.openeos.control.ui
 
 import android.content.Context
 import android.graphics.SurfaceTexture
-import android.net.Uri
 import android.view.Surface
-import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -79,9 +77,12 @@ class CameraVideoPlaybackInstrumentedTest {
 
     private fun createPlayer(context: Context, source: CameraMediaStreamSource): ExoPlayer =
         ExoPlayer.Builder(context).build().apply {
+            val mediaItem = cameraVideoMediaItem(source.item)
+            assertEquals("video/mp4", mediaItem.localConfiguration?.mimeType)
+            assertTrue(mediaItem.localConfiguration?.uri?.lastPathSegment?.endsWith(".MP4") == true)
             setMediaSource(
                 ProgressiveMediaSource.Factory(CameraMediaDataSource.Factory(source))
-                    .createMediaSource(MediaItem.fromUri(Uri.parse("oec-media://test/valid-h264.mp4"))),
+                    .createMediaSource(mediaItem),
             )
         }
 

@@ -396,6 +396,7 @@
       loadingPreview: "Loading camera preview",
       previewUnavailable: "The camera preview could not be displayed.",
       videoPlaybackUnavailable: "This camera video could not be played.",
+      videoPlaybackCodecUnsupported: "This browser cannot decode the camera video format. R6 Mark III 10-bit or 4:2:2 recordings may require compatible editing software. Download the original to keep working with it.",
       videoPlaybackStorageUnavailable: "There is not enough free space to prepare this camera video. Free some storage or download the original.",
       downloadOriginal: "Download original",
       previousMedia: "Previous media",
@@ -779,6 +780,7 @@
       loadingPreview: "正在載入相機預覽",
       previewUnavailable: "無法顯示相機提供的預覽影像。",
       videoPlaybackUnavailable: "無法播放相機中的這部影片。",
+      videoPlaybackCodecUnsupported: "此瀏覽器無法解碼相機的影片格式。R6 Mark III 的 10-bit 或 4:2:2 錄影可能需要相容的剪輯軟體；請下載原始檔案後繼續處理。",
       videoPlaybackStorageUnavailable: "可用空間不足，無法準備這部相機影片。請釋放儲存空間，或下載原始檔案。",
       downloadOriginal: "下載原檔",
       previousMedia: "上一個媒體",
@@ -4515,7 +4517,10 @@
     state.mediaPreviewTicketUrl = null;
     if (ticketUrl) fetch(ticketUrl, { method: "DELETE", cache: "no-store", keepalive: true }).catch(() => {});
     ui.mediaPreviewLoading.hidden = true;
-    ui.mediaPreviewUnavailable.textContent = t("videoPlaybackUnavailable");
+    const failure = mediaLibrary.videoPlaybackFailure(ui.mediaPreviewVideo.error?.code);
+    ui.mediaPreviewUnavailable.textContent = t(
+      failure === "codec" ? "videoPlaybackCodecUnsupported" : "videoPlaybackUnavailable",
+    );
     ui.mediaPreviewUnavailable.hidden = false;
     renderMediaPreviewNavigation();
   }
