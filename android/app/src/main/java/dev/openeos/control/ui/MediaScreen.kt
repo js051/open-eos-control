@@ -183,12 +183,35 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             )
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.camera_media), color = AppText, fontWeight = FontWeight.Bold)
+                val sortLabel = stringResource(mediaSort.labelResource)
                 Text(
-                    stringResource(
-                        R.string.media_item_count_sort,
-                        state.mediaItems.size,
-                        stringResource(mediaSort.labelResource),
-                    ),
+                    when (state.mediaLibraryLoadStatus) {
+                        MediaLibraryLoadStatus.LOADING -> stringResource(
+                            R.string.media_loading_count_sort,
+                            state.mediaItems.size,
+                            sortLabel,
+                        )
+                        MediaLibraryLoadStatus.CANCELLED -> stringResource(
+                            R.string.media_cancelled_count_sort,
+                            state.mediaItems.size,
+                            sortLabel,
+                        )
+                        MediaLibraryLoadStatus.FAILED -> stringResource(
+                            R.string.media_failed_count_sort,
+                            state.mediaItems.size,
+                            sortLabel,
+                        )
+                        MediaLibraryLoadStatus.NOT_LOADED -> stringResource(
+                            R.string.media_not_loaded_count_sort,
+                            state.mediaItems.size,
+                            sortLabel,
+                        )
+                        MediaLibraryLoadStatus.COMPLETE -> stringResource(
+                            R.string.media_item_count_sort,
+                            state.mediaItems.size,
+                            sortLabel,
+                        )
+                    },
                     color = AppSubtleText,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -204,10 +227,12 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             }
             MediaSortButton(mediaSort, onSort = { mediaSort = it })
             ToolIconButton(
-                LucideR.drawable.lucide_ic_refresh_cw,
-                stringResource(R.string.refresh_media),
-                actions.refreshMedia,
-                enabled = !state.previewMode && !state.mediaLibraryLoading && !state.isBusy(CameraOperation.MEDIA),
+                if (state.mediaLibraryLoading) LucideR.drawable.lucide_ic_x else LucideR.drawable.lucide_ic_refresh_cw,
+                stringResource(
+                    if (state.mediaLibraryLoading) R.string.cancel_loading_media else R.string.refresh_media,
+                ),
+                if (state.mediaLibraryLoading) actions.cancelMediaLibraryLoad else actions.refreshMedia,
+                enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
             )
         }
 
@@ -301,6 +326,10 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
 
         when {
             !state.supports(CameraFeature.MEDIA_BROWSER) -> MediaMessage(R.string.media_not_supported)
+            state.mediaItems.isEmpty() && state.mediaLibraryLoadStatus == MediaLibraryLoadStatus.CANCELLED ->
+                MediaMessage(R.string.media_load_cancelled)
+            state.mediaItems.isEmpty() && state.mediaLibraryLoadStatus == MediaLibraryLoadStatus.FAILED ->
+                MediaMessage(R.string.media_load_failed)
             state.mediaItems.isEmpty() && !state.isBusy(CameraOperation.MEDIA) && !state.mediaLibraryLoading -> MediaMessage(R.string.no_media)
             displayedItems.isEmpty() && !state.isBusy(CameraOperation.MEDIA) && !state.mediaLibraryLoading -> MediaMessage(R.string.no_filtered_media)
             else -> MediaGalleryGrid(

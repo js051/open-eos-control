@@ -370,6 +370,13 @@
     <string name="media_sort">排序媒體</string>
     <string name="media_camera_order">相機順序</string>
     <string name="media_item_count_sort">%1$d 個項目 - %2$s</string>
+    <string name="media_loading_count_sort">已收到 %1$d 個 - 載入中 - %2$s</string>
+    <string name="media_cancelled_count_sort">已收到 %1$d 個 - 清單不完整 - %2$s</string>
+    <string name="media_failed_count_sort">顯示 %1$d 個 - 重新整理失敗 - %2$s</string>
+    <string name="media_not_loaded_count_sort">顯示 %1$d 個 - 尚未載入 - %2$s</string>
+    <string name="cancel_loading_media">取消載入相機媒體</string>
+    <string name="media_load_cancelled">已取消載入媒體。請重新整理以載入完整相機清單。</string>
+    <string name="media_load_failed">無法載入完整相機清單。請重新整理後再試一次。</string>
     <string name="media_sort_current">排序媒體：%1$s</string>
     <string name="media_newest_first">最新優先</string>
     <string name="media_oldest_first">最舊優先</string>

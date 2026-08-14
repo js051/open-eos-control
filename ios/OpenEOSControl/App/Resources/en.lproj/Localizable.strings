@@ -254,6 +254,12 @@
 "refresh_media" = "Refresh camera media";
 "loading_media" = "Loading camera media";
 "cancel_loading_media" = "Cancel loading camera media";
+"media_loading_count_format" = "Loading - %d items received";
+"media_cancelled_count_format" = "%d items received - incomplete";
+"media_failed_count_format" = "%d items shown - refresh failed";
+"media_not_loaded_count_format" = "%d items shown - not loaded";
+"media_load_cancelled" = "Media loading was cancelled. Refresh to load the complete camera library.";
+"media_load_failed" = "The complete camera library could not be loaded. Refresh to try again.";
 "no_media" = "No media files were found on the camera.";
 "download_media" = "Download media";
 "cancel_media_download" = "Cancel media download";

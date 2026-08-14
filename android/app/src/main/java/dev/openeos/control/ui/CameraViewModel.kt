@@ -320,7 +320,7 @@ class CameraViewModel(
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
-        cancelMediaLibraryLoad()
+        resetMediaLibraryLoad()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -343,7 +343,7 @@ class CameraViewModel(
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
-        cancelMediaLibraryLoad()
+        resetMediaLibraryLoad()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -382,7 +382,7 @@ class CameraViewModel(
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
-        cancelMediaLibraryLoad()
+        resetMediaLibraryLoad()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -464,7 +464,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         stopEventPollingLoop()
         detachNativeLiveViewListener()
-        cancelMediaLibraryLoad()
+        resetMediaLibraryLoad()
         closeMediaStream()
         cancelMediaDownload()
         val uploadJob = mediaUploadJob
@@ -1012,6 +1012,11 @@ class CameraViewModel(
         job.invokeOnCompletion {
             if (mediaLibraryJob === job) mediaLibraryJob = null
         }
+    }
+
+    fun cancelMediaLibraryLoad() {
+        if (!_uiState.value.mediaLibraryLoading) return
+        invalidateMediaLibraryLoad(MediaLibraryLoadStatus.CANCELLED)
     }
 
     fun loadMediaThumbnail(item: CameraMediaItem) {
@@ -1906,7 +1911,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         stopEventPollingLoop()
         detachNativeLiveViewListener()
-        cancelMediaLibraryLoad()
+        resetMediaLibraryLoad()
         closeMediaStream()
         cancelMediaDownload()
         val uploadJob = mediaUploadJob
@@ -2026,14 +2031,18 @@ class CameraViewModel(
         unavailableMediaThumbnailIds.clear()
     }
 
-    private fun cancelMediaLibraryLoad() {
+    private fun resetMediaLibraryLoad() {
+        invalidateMediaLibraryLoad(MediaLibraryLoadStatus.NOT_LOADED)
+    }
+
+    private fun invalidateMediaLibraryLoad(status: MediaLibraryLoadStatus) {
         mediaLibraryGeneration += 1
         mediaLibraryJob?.cancel()
         mediaLibraryJob = null
         _uiState.update {
             it.copy(
                 mediaLibraryLoading = false,
-                mediaLibraryLoadStatus = MediaLibraryLoadStatus.NOT_LOADED,
+                mediaLibraryLoadStatus = status,
             )
         }
     }

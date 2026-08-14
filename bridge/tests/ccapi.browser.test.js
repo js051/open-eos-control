@@ -605,7 +605,18 @@ async function run() {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
       "base64",
     );
-    await page.route(mediaListRoute, (route) => route.fulfill({ json: { items: bulkMedia } }));
+    let releaseBulkMediaResponse = () => {};
+    const bulkMediaResponseHeld = new Promise((resolve) => {
+      releaseBulkMediaResponse = resolve;
+    });
+    let holdBulkMediaResponse = true;
+    await page.route(mediaListRoute, async (route) => {
+      if (holdBulkMediaResponse) {
+        holdBulkMediaResponse = false;
+        await bulkMediaResponseHeld;
+      }
+      await route.fulfill({ json: { items: bulkMedia } });
+    });
     await page.route(bulkThumbnailRoute, (route) => route.fulfill({
       status: 200,
       contentType: "image/png",
@@ -613,8 +624,15 @@ async function run() {
     }));
     await page.click('.tab[data-view="media"]');
     await page.waitForSelector("#media-panel:not([hidden])");
+    await page.waitForFunction(() => {
+      const summary = document.querySelector("#media-summary");
+      return summary?.dataset.loadStatus === "LOADING" && summary.textContent.includes("Loading");
+    });
+    releaseBulkMediaResponse();
     assert.equal(await page.locator("#media-sort-select").inputValue(), "newest");
     await page.waitForFunction(() => document.querySelectorAll(".media-card").length === 72);
+    assert.equal(await page.locator("#media-summary").getAttribute("data-load-status"), "COMPLETE");
+    assert.equal(await page.locator("#media-summary").innerText(), "145 media item(s)");
     assert.equal(await page.locator("#media-page-status").innerText(), "1-72 of 145");
     await page.click("#media-page-next");
     assert.equal(await page.locator(".media-card").count(), 72);

@@ -1824,6 +1824,68 @@ class CameraScreensTest {
     }
 
     @Test
+    fun mediaLibraryLoadingExposesCancellationAndNeverLabelsPartialItemsAsComplete() {
+        val preview = CameraUiState().withOfflinePreview()
+        val state = mutableStateOf(
+            preview.copy(
+                previewMode = false,
+                mediaLibraryLoading = true,
+                mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING,
+            ),
+        )
+        var cancelled = false
+        val actions = noOpActions().copy(
+            cancelMediaLibraryLoad = {
+                cancelled = true
+                state.value = state.value.copy(
+                    mediaLibraryLoading = false,
+                    mediaLibraryLoadStatus = MediaLibraryLoadStatus.CANCELLED,
+                )
+            },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state.value, actions)
+            }
+        }
+
+        compose.onNodeWithText(
+            resourceText(
+                R.string.media_loading_count_sort,
+                state.value.mediaItems.size,
+                resourceText(R.string.media_newest_first),
+            ),
+        ).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.cancel_loading_media)).performClick()
+        compose.runOnIdle { assertTrue(cancelled) }
+        compose.onNodeWithText(
+            resourceText(
+                R.string.media_cancelled_count_sort,
+                state.value.mediaItems.size,
+                resourceText(R.string.media_newest_first),
+            ),
+        ).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.refresh_media)).assertIsDisplayed()
+    }
+
+    @Test
+    fun cancelledEmptyMediaLibraryOffersACompleteReloadInsteadOfClaimingTheCameraIsEmpty() {
+        val state = CameraUiState().withOfflinePreview().copy(
+            previewMode = false,
+            mediaItems = emptyList(),
+            mediaLibraryLoadStatus = MediaLibraryLoadStatus.CANCELLED,
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state, noOpActions())
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.media_load_cancelled)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.no_media)).assertDoesNotExist()
+    }
+
+    @Test
     fun mediaThumbnailLoadsWhenAdvertisedAndExposesAnAccessibleDescription() {
         val item = CameraMediaItem("ptp:00000042", "IMG_0042.JPG", "image")
         val preview = CameraUiState().withOfflinePreview()

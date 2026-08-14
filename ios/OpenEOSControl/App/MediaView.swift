@@ -32,6 +32,12 @@ struct MediaView: View {
                 ProgressView("loading_media").tint(Color.cameraAccent)
                     .accessibilityIdentifier("media-library-loading-empty")
                 Spacer()
+            } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .cancelled {
+                ContentUnavailableView("media_load_cancelled", systemImage: "pause.circle")
+                    .frame(maxHeight: .infinity)
+            } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .failed {
+                ContentUnavailableView("media_load_failed", systemImage: "exclamationmark.triangle")
+                    .frame(maxHeight: .infinity)
             } else if camera.mediaItems.isEmpty {
                 ContentUnavailableView("no_media", systemImage: "photo.on.rectangle.angled")
                     .frame(maxHeight: .infinity)
@@ -155,9 +161,10 @@ struct MediaView: View {
             RotatingControl(degrees: controlRotation) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("camera_media").font(.headline)
-                    Text(language.format("media_filtered_count_format", displayedMedia.count, camera.mediaItems.count))
+                    Text(mediaLibrarySummary)
                         .font(.caption)
                         .foregroundStyle(Color.cameraSecondaryText)
+                        .accessibilityIdentifier("media-library-summary")
                     if let name = camera.deletedMediaName {
                         Text(language.format("media_deleted", name))
                             .font(.caption)
@@ -527,6 +534,21 @@ struct MediaView: View {
 
     private var displayedMedia: [CameraMediaItem] {
         mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort)
+    }
+
+    private var mediaLibrarySummary: String {
+        switch camera.mediaLibraryLoadStatus {
+        case .notLoaded:
+            language.format("media_not_loaded_count_format", camera.mediaItems.count)
+        case .loading:
+            language.format("media_loading_count_format", camera.mediaItems.count)
+        case .complete:
+            language.format("media_filtered_count_format", displayedMedia.count, camera.mediaItems.count)
+        case .cancelled:
+            language.format("media_cancelled_count_format", camera.mediaItems.count)
+        case .failed:
+            language.format("media_failed_count_format", camera.mediaItems.count)
+        }
     }
 
     private var mediaGroups: [MediaGroup] {

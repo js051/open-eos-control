@@ -448,11 +448,14 @@ final class OpenEOSControlUITests: XCTestCase {
         guard tapCameraAction(app.buttons["camera-media-menu-button"], in: app) else { return }
         XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.descendants(matching: .any)["media-library-loading-progressive"].waitForExistence(timeout: 3))
+        let mediaSummary = app.staticTexts["media-library-summary"]
+        XCTAssertTrue(waitForLabel(mediaSummary, containing: "Loading", timeout: 3))
         let cancel = app.buttons["cancel-media-library-load"]
         XCTAssertTrue(waitForInteraction(cancel, timeout: 3))
         cancel.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["media-library-loading-progressive"].waitForNonExistence(timeout: 3))
+        XCTAssertTrue(waitForLabel(mediaSummary, containing: "incomplete", timeout: 3))
         XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].exists)
         XCTAssertTrue(app.staticTexts["SIM_0001.PNG"].waitForNonExistence(timeout: 6))
         XCTAssertTrue(app.buttons["refresh-media"].waitForExistence(timeout: 3))

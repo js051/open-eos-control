@@ -26,6 +26,8 @@ For CCAPI firmware/discovery problems, preserve the `discoveryAttemptCount` and 
 
 For media-library validation, read `mediaItemCount` together with `mediaLoadStatus` on Android/iOS, or `mediaLibrary.itemCount` together with `mediaLibrary.loadStatus` on PC. Only `COMPLETE` means the current count came from a traversal that reached every container and page advertised by the camera. `LOADING`, `CANCELLED`, `FAILED`, and `NOT_LOADED` are intentionally incomplete evidence. There is no 500-item product limit.
 
+Android and iOS also surface progressive counts in the media screen and can cancel the active camera traversal. The PC Bridge exposes an honest loading or failed summary but does not offer a browser cancel control because its current `/media` request is synchronous and cancelling the browser request would not cancel engine work.
+
 The source report must remain private. It is accepted only when it:
 
 - uses report schema 1 and identifies a non-unknown product version;

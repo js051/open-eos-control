@@ -314,6 +314,13 @@
     <string name="back_to_camera">Back to camera</string>
     <string name="media_item_count">%1$d items</string>
     <string name="media_item_count_sort">%1$d items - %2$s</string>
+    <string name="media_loading_count_sort">%1$d received - loading - %2$s</string>
+    <string name="media_cancelled_count_sort">%1$d received - incomplete - %2$s</string>
+    <string name="media_failed_count_sort">%1$d shown - refresh failed - %2$s</string>
+    <string name="media_not_loaded_count_sort">%1$d shown - not loaded - %2$s</string>
+    <string name="cancel_loading_media">Cancel loading camera media</string>
+    <string name="media_load_cancelled">Media loading was cancelled. Refresh to load the complete camera library.</string>
+    <string name="media_load_failed">The complete camera library could not be loaded. Refresh to try again.</string>
     <string name="media_all">All</string>
     <string name="media_photos">Photos</string>
     <string name="media_videos">Videos</string>

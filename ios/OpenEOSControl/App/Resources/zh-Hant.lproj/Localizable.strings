@@ -254,6 +254,12 @@
 "refresh_media" = "重新整理相機媒體";
 "loading_media" = "正在載入相機媒體";
 "cancel_loading_media" = "取消載入相機媒體";
+"media_loading_count_format" = "載入中 - 已收到 %d 個項目";
+"media_cancelled_count_format" = "已收到 %d 個項目 - 清單不完整";
+"media_failed_count_format" = "顯示 %d 個項目 - 重新整理失敗";
+"media_not_loaded_count_format" = "顯示 %d 個項目 - 尚未載入";
+"media_load_cancelled" = "已取消載入媒體。請重新整理以載入完整相機清單。";
+"media_load_failed" = "無法載入完整相機清單。請重新整理後再試一次。";
 "no_media" = "相機中找不到媒體檔案。";
 "download_media" = "下載媒體";
 "cancel_media_download" = "取消媒體下載";
