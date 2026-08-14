@@ -36,7 +36,7 @@ private struct CameraActionsView: View {
                     Button {
                         dismiss()
                         camera.screen = .media
-                        Task { await camera.loadMedia() }
+                        camera.startMediaLibraryLoad()
                     } label: {
                         Label("camera_media", systemImage: "photo.on.rectangle")
                     }

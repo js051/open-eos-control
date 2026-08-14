@@ -215,10 +215,12 @@ enum CameraSession: Sendable {
         }
     }
 
-    func listMedia() async throws -> [CameraMediaItem] {
+    func listMedia(
+        onProgress: CameraMediaListProgressHandler = { _ in }
+    ) async throws -> [CameraMediaItem] {
         switch self {
-        case let .ccapi(client): return try await client.listMedia()
-        case let .desktopBridge(client): return try await client.listMedia()
+        case let .ccapi(client): return try await client.listMedia(onProgress: onProgress)
+        case let .desktopBridge(client): return try await client.listMedia(onProgress: onProgress)
         }
     }
 

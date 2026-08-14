@@ -409,6 +409,57 @@ final class OpenEOSControlUITests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testCanonicalCCAPIMediaPagesAppearProgressivelyAndCanBeCancelled() async throws {
+        let available = await waitForSimulatorHealth()
+        guard available else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
+            return
+            #else
+            throw XCTSkip("Start the fake camera at \(simulatorURL.absoluteString) to run the network end-to-end test")
+            #endif
+        }
+        _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+        _ = try await simulatorRequest(
+            path: "/ccapi/test/media-pagination",
+            method: "POST",
+            jsonBody: ["page_size": 1, "page_delay_ms": 5_000]
+        )
+
+        let app = launch(
+            appLanguage: "english",
+            appleLanguage: "en",
+            locale: "en_US",
+            environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString]
+        )
+        let httpPreset = app.buttons["preset-http-button"]
+        XCTAssertTrue(httpPreset.waitForExistence(timeout: 8))
+        httpPreset.tap()
+        let connect = app.buttons["connect-button"]
+        XCTAssertTrue(waitForInteraction(connect, timeout: 8))
+        connect.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
+
+        openMoreActions(in: app)
+        guard tapCameraAction(app.buttons["camera-media-menu-button"], in: app) else { return }
+        XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["media-library-loading-progressive"].waitForExistence(timeout: 3))
+        let cancel = app.buttons["cancel-media-library-load"]
+        XCTAssertTrue(waitForInteraction(cancel, timeout: 3))
+        cancel.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["media-library-loading-progressive"].waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].exists)
+        XCTAssertTrue(app.staticTexts["SIM_0001.PNG"].waitForNonExistence(timeout: 6))
+        XCTAssertTrue(app.buttons["refresh-media"].waitForExistence(timeout: 3))
+
+        app.buttons["media-back-button"].tap()
+        openMoreActions(in: app)
+        guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
+        guard waitForConnectionScreen(in: app, timeout: 15) else { return }
+    }
+
     private func launch(
         appLanguage: String,
         appleLanguage: String,

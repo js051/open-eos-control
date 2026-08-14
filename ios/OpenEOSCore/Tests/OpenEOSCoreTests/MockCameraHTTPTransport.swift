@@ -178,3 +178,15 @@ final class DownloadProgressRecorder: @unchecked Sendable {
         return recorded
     }
 }
+
+actor MediaListProgressRecorder {
+    private var recorded: [[CameraMediaItem]] = []
+
+    func record(_ items: [CameraMediaItem]) {
+        recorded.append(items)
+    }
+
+    func values() -> [[CameraMediaItem]] {
+        recorded
+    }
+}

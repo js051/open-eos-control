@@ -536,9 +536,13 @@ public actor DesktopBridgeClient {
         return LiveViewFrame(data: response.body, contentType: response.header("content-type"), sourceURL: url)
     }
 
-    public func listMedia() async throws -> [CameraMediaItem] {
+    public func listMedia(
+        onProgress: CameraMediaListProgressHandler = { _ in }
+    ) async throws -> [CameraMediaItem] {
         let body = try await getJSON(sessionEndpoint(["media"]))
-        return body.array("items").compactMap { ($0 as? BridgeJSON).flatMap(Self.parseMediaItem) }
+        let items = body.array("items").compactMap { ($0 as? BridgeJSON).flatMap(Self.parseMediaItem) }
+        await onProgress(items)
+        return items
     }
 
     public func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {

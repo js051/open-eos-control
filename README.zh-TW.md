@@ -135,14 +135,14 @@ iOS App 會在 iPhone Simulator 完成編譯與測試，但 Release 不會附上
 
 ## iOS App 與相機 Core
 
-`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；除了完整 JPEG 輪詢與持續 multipart Live View 生命週期，也會在相機公告兩個 RTP operation 時驗證 Canon SDP、RFC 3550 與 RFC 6184 H.264 access unit，並負責精確清理 RTP start／stop。Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、Live View、拍照、相機時鐘同步、Bulb 計時開始／停止、獨立自動對焦、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及含版本、產生時間、公告／實測差異與有界能力證據的診斷報告；帳密與相機序號都會遮蔽。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
+`ios/OpenEOSCore` 是原生 Swift Package，包含 CCAPI 與具 Bearer 驗證的 Desktop Bridge client。CCAPI 會解析 Canon 公告的同源完整 `url` 或相對 `path`，再依 API 版本與 operation 建立能力；除了完整 JPEG 輪詢與持續 multipart Live View 生命週期，也會在相機公告兩個 RTP operation 時驗證 Canon SDP、RFC 3550 與 RFC 6184 H.264 access unit，並負責精確清理 RTP start／stop。Bridge 會驗證服務、掃描 USB 相機、管理 session，並把動態能力映射到同一套模型。兩條路徑都依能力支援設定控制、Live View、拍照、相機時鐘同步、Bulb 計時開始／停止、獨立自動對焦、半按、錄影、對焦、媒體瀏覽／下載／刪除，以及含版本、產生時間、公告／實測差異與有界能力證據的診斷報告；帳密與相機序號都會遮蔽。直接 CCAPI 的媒體遍歷沒有固定總筆數、頁數或目錄深度上限，完成的頁面會在其餘頁面仍載入時先發布，手動載入也可以取消。套件包含可重現的 HTTP 契約測試，並由 macOS GitHub Actions job 實際編譯：
 
 ```bash
 cd ios/OpenEOSCore
 swift test
 ```
 
-`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG 輪詢／multipart 或相機公告的 RTP H.264 Live View、曝光設定 sheet、可篩選與依日期分組的媒體網格、可縮放相片預覽、具認證的 AVFoundation 位元組範圍影片播放、具真實位元組進度與取消操作的檔案式媒體傳輸、需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。RTP 使用同子網 Wi-Fi IPv4、限定 Wi-Fi 的 Network.framework UDP listener 與原生 sample-buffer 顯示；multipart 使用 URLSession 串流 delegate 與最新幀合併。AUTO 依 RTP、multipart、輪詢順序完整清理後降級，FPS 維持 1-30 顯示上限。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
+`ios/OpenEOSControl` 是 iOS 17 SwiftUI App，提供 CCAPI 直接連線，或輸入 Desktop Bridge URL／token 後掃描並選擇 USB 相機；同時具備離線 UI 預覽、依能力開放的拍照／錄影與手動焦點驅動、JPEG 輪詢／multipart 或相機公告的 RTP H.264 Live View、曝光設定 sheet、可在 CCAPI 分頁持續抵達時操作的篩選與日期分組媒體網格、可縮放相片預覽、具認證的 AVFoundation 位元組範圍影片播放、具真實位元組進度與取消操作的檔案式媒體傳輸、需確認後執行的刪除、遮蔽敏感資料的診斷、手動語言選擇，以及安全的直向／橫向布局。RTP 使用同子網 Wi-Fi IPv4、限定 Wi-Fi 的 Network.framework UDP listener 與原生 sample-buffer 顯示；multipart 使用 URLSession 串流 delegate 與最新幀合併。AUTO 依 RTP、multipart、輪詢順序完整清理後降級，FPS 維持 1-30 顯示上限。Bridge token 與 CCAPI 密碼都只留在記憶體。整個視窗不會上下顛倒，只有關鍵控制會依實體裝置方向旋轉。
 
 在具備 Xcode 與 XcodeGen 的 macOS 主機執行：
 

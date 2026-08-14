@@ -533,7 +533,12 @@ final class DesktopBridgeClientTests: XCTestCase {
         let frame = try await client.liveViewFrame(cacheKey: 9)
         XCTAssertEqual(frame.data, jpeg)
 
-        let media = try await client.listMedia()
+        let mediaProgress = MediaListProgressRecorder()
+        let media = try await client.listMedia { items in
+            await mediaProgress.record(items)
+        }
+        let mediaSnapshots = await mediaProgress.values()
+        XCTAssertEqual(mediaSnapshots, [media])
         let item = try XCTUnwrap(media.first)
         XCTAssertTrue(item.previewAvailable)
         let thumbnail = try await client.mediaThumbnail(item)

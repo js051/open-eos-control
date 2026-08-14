@@ -58,6 +58,7 @@ enum CameraOperation: Hashable {
     case recording
     case focus
     case liveView
+    case mediaLibrary
     case media
 }
 
