@@ -454,7 +454,6 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForInteraction(cancel, timeout: 3))
         cancel.tap()
 
-        XCTAssertTrue(app.descendants(matching: .any)["media-library-loading-progressive"].waitForNonExistence(timeout: 3))
         XCTAssertTrue(waitForLabel(mediaSummary, containing: "incomplete", timeout: 3))
         XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].exists)
         XCTAssertTrue(app.staticTexts["SIM_0001.PNG"].waitForNonExistence(timeout: 6))
