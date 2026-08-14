@@ -10,6 +10,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.util.Locale
 
 enum class MediaFilter { ALL, PHOTOS, VIDEOS }
 
@@ -49,6 +50,8 @@ internal val CameraMediaItem.isVideo: Boolean
     get() = isVideoMedia
 
 internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort): List<MediaDateGroup> {
+    if (items.isEmpty()) return emptyList()
+    if (sort == MediaSort.CAMERA) return listOf(MediaDateGroup(date = null, items = items))
     val groups = mutableListOf<MediaDateGroup>()
     items.forEach { item ->
         val heading = if (sort == MediaSort.NAME) {
@@ -88,8 +91,31 @@ private fun compareMediaItems(left: CameraMediaItem, right: CameraMediaItem, sor
         if (rightTime == null) return -1
         val compared = leftTime.compareTo(rightTime)
         if (compared != 0) return if (sort == MediaSort.NEWEST) -compared else compared
+        return 0
     }
-    return 0
+    val comparedName = naturalCompare(left.name, right.name)
+        .takeIf { it != 0 }
+        ?: left.id.compareTo(right.id)
+    return if (sort == MediaSort.NEWEST) -comparedName else comparedName
+}
+
+internal fun mediaCaptureTimeLabel(value: String?): String? = value.toMediaInstant()
+    ?.atZone(ZoneId.systemDefault())
+    ?.format(MEDIA_DISPLAY_DATE_TIME)
+
+internal fun mediaByteSizeLabel(value: Long?): String? {
+    val bytes = value?.takeIf { it >= 0 } ?: return null
+    val (amount, unit) = when {
+        bytes < KIBIBYTE -> bytes.toDouble() to "B"
+        bytes < MEBIBYTE -> bytes.toDouble() / KIBIBYTE to "KB"
+        bytes < GIBIBYTE -> bytes.toDouble() / MEBIBYTE to "MB"
+        else -> bytes.toDouble() / GIBIBYTE to "GB"
+    }
+    return if (unit == "B") {
+        "${bytes.toString()} $unit"
+    } else {
+        String.format(Locale.ROOT, "%.1f %s", amount, unit)
+    }
 }
 
 private fun String?.toMediaInstant(): Instant? {
@@ -130,6 +156,10 @@ private val LOCAL_DATE_TIME_FORMATS = listOf(
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
     DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss"),
 )
+private val MEDIA_DISPLAY_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 private val NATURAL_PART = Regex("\\d+|\\D+")
 private val ISO_DATE_PREFIX = Regex("\\d{4}-\\d{2}-\\d{2}")
 private val COMPACT_DATE_PREFIX = Regex("\\d{8}")
+private const val KIBIBYTE = 1024L
+private const val MEBIBYTE = KIBIBYTE * 1024L
+private const val GIBIBYTE = MEBIBYTE * 1024L

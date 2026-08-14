@@ -313,11 +313,13 @@
     <string name="camera_media">Camera media</string>
     <string name="back_to_camera">Back to camera</string>
     <string name="media_item_count">%1$d items</string>
+    <string name="media_item_count_sort">%1$d items - %2$s</string>
     <string name="media_all">All</string>
     <string name="media_photos">Photos</string>
     <string name="media_videos">Videos</string>
     <string name="media_filter_count">%1$s %2$d</string>
     <string name="media_sort">Sort media</string>
+    <string name="media_sort_current">Sort media: %1$s</string>
     <string name="media_camera_order">Camera order</string>
     <string name="media_newest_first">Newest first</string>
     <string name="media_oldest_first">Oldest first</string>
@@ -331,6 +333,8 @@
     <string name="preview_media">Preview %1$s</string>
     <string name="close_media_preview">Close media preview</string>
     <string name="media_preview_content">Preview of %1$s</string>
+    <string name="media_viewer_position">%1$d of %2$d</string>
+    <string name="reset_media_zoom">Reset zoom</string>
     <string name="media_preview_unavailable">The camera preview could not be displayed.</string>
     <string name="media_video_playback_failed">This video could not be played from the camera.</string>
     <string name="media_video_preparing_local">Preparing a local playback copy… %1$d%%</string>

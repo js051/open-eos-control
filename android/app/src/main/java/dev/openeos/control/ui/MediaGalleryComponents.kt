@@ -1,12 +1,14 @@
 package dev.openeos.control.ui
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,11 +46,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -57,6 +63,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -77,23 +84,26 @@ import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaStreamSource
 import kotlinx.coroutines.CancellationException
 import java.io.File
+import kotlin.math.max
+import kotlin.math.min
 
 @Composable
 internal fun MediaSortButton(sort: MediaSort, onSort: (MediaSort) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val currentLabel = stringResource(sort.labelResource)
     Box {
         ToolIconButton(
             LucideR.drawable.lucide_ic_list_filter,
-            stringResource(R.string.media_sort),
+            stringResource(R.string.media_sort_current, currentLabel),
             { expanded = true },
             tint = AppText,
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             listOf(
-                MediaSort.CAMERA to R.string.media_camera_order,
                 MediaSort.NEWEST to R.string.media_newest_first,
                 MediaSort.OLDEST to R.string.media_oldest_first,
                 MediaSort.NAME to R.string.media_filename,
+                MediaSort.CAMERA to R.string.media_camera_order,
             ).forEach { (value, label) ->
                 DropdownMenuItem(
                     text = {
@@ -112,6 +122,14 @@ internal fun MediaSortButton(sort: MediaSort, onSort: (MediaSort) -> Unit) {
         }
     }
 }
+
+internal val MediaSort.labelResource: Int
+    get() = when (this) {
+        MediaSort.CAMERA -> R.string.media_camera_order
+        MediaSort.NEWEST -> R.string.media_newest_first
+        MediaSort.OLDEST -> R.string.media_oldest_first
+        MediaSort.NAME -> R.string.media_filename
+    }
 
 @Composable
 internal fun MediaFilterBar(
@@ -164,16 +182,18 @@ internal fun MediaGalleryGrid(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         groups.forEachIndexed { groupIndex, group ->
-            item(
-                key = "media-date-${group.date ?: "unknown"}-$groupIndex",
-                span = { GridItemSpan(maxLineSpan) },
-            ) {
-                Text(
-                    text = group.date ?: stringResource(R.string.media_unknown_date),
-                    color = AppSubtleText,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                )
+            if (sort != MediaSort.CAMERA) {
+                item(
+                    key = "media-date-${group.date ?: "unknown"}-$groupIndex",
+                    span = { GridItemSpan(maxLineSpan) },
+                ) {
+                    Text(
+                        text = group.date ?: stringResource(R.string.media_unknown_date),
+                        color = AppSubtleText,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
             }
             items(group.items, key = CameraMediaItem::id) { item ->
                 val thumbnailSupported = state.supports(CameraFeature.MEDIA_THUMBNAIL)
@@ -292,14 +312,20 @@ internal fun MediaViewerDialog(
     bytes: ByteArray?,
     streamSource: CameraMediaStreamSource?,
     loading: Boolean,
+    position: Int,
+    totalCount: Int,
     canMovePrevious: Boolean,
     canMoveNext: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     downloadEnabled: Boolean = false,
     onDownload: () -> Unit = {},
+    actionsEnabled: Boolean = false,
+    onActions: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
+    val captureTime = mediaCaptureTimeLabel(item.captureTime)
+    val size = mediaByteSizeLabel(item.sizeBytes)
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -314,7 +340,11 @@ internal fun MediaViewerDialog(
                     downloadEnabled = downloadEnabled,
                     onDownload = onDownload,
                 )
-                !item.isVideo && bytes != null -> ZoomableMediaImage(item, bytes)
+                !item.isVideo && bytes != null -> ZoomableMediaImage(
+                    item = item,
+                    bytes = bytes,
+                    hasBottomMetadata = captureTime != null || size != null,
+                )
                 loading -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center).size(36.dp),
                     color = AppAccent,
@@ -327,7 +357,7 @@ internal fun MediaViewerDialog(
                 )
             }
             Row(
-                Modifier.align(Alignment.TopCenter).fillMaxWidth().height(64.dp)
+                Modifier.align(Alignment.TopCenter).fillMaxWidth().height(76.dp)
                     .background(Color.Black.copy(alpha = 0.76f)).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -337,30 +367,155 @@ internal fun MediaViewerDialog(
                     onDismiss,
                     tint = Color.White,
                 )
-                Text(
-                    item.name,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                )
+                Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                    Text(
+                        item.name,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (position > 0 && totalCount > 0) {
+                        Text(
+                            stringResource(R.string.media_viewer_position, position, totalCount),
+                            color = Color.White.copy(alpha = 0.72f),
+                            maxLines = 1,
+                        )
+                    }
+                }
+                if (downloadEnabled) {
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_download,
+                        stringResource(R.string.download_media, item.name),
+                        onDownload,
+                        tint = Color.White,
+                    )
+                }
+                if (actionsEnabled) {
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_ellipsis_vertical,
+                        stringResource(R.string.media_actions, item.name),
+                        onActions,
+                        tint = Color.White,
+                    )
+                }
             }
             if (canMovePrevious) {
-                ToolIconButton(
-                    LucideR.drawable.lucide_ic_chevron_left,
-                    stringResource(R.string.previous_media),
-                    onPrevious,
+                ViewerNavigationButton(
+                    icon = LucideR.drawable.lucide_ic_chevron_left,
+                    description = stringResource(R.string.previous_media),
+                    onClick = onPrevious,
                     modifier = Modifier.align(Alignment.CenterStart),
-                    tint = Color.White,
                 )
             }
             if (canMoveNext) {
-                ToolIconButton(
-                    LucideR.drawable.lucide_ic_chevron_right,
-                    stringResource(R.string.next_media),
-                    onNext,
+                ViewerNavigationButton(
+                    icon = LucideR.drawable.lucide_ic_chevron_right,
+                    description = stringResource(R.string.next_media),
+                    onClick = onNext,
                     modifier = Modifier.align(Alignment.CenterEnd),
+                )
+            }
+            if (captureTime != null || size != null) {
+                Column(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.76f))
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    captureTime?.let {
+                        Text(it, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    size?.let {
+                        Text(it, color = Color.White.copy(alpha = 0.72f), maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZoomableMediaImage(
+    item: CameraMediaItem,
+    bytes: ByteArray,
+    hasBottomMetadata: Boolean,
+) {
+    val context = LocalContext.current
+    var scale by remember(bytes) { mutableFloatStateOf(1f) }
+    var offset by remember(bytes) { mutableStateOf(Offset.Zero) }
+    var viewport by remember(bytes) { mutableStateOf(IntSize.Zero) }
+    val imageSize = remember(bytes) { decodeMediaImageSize(bytes) }
+    Box(
+        Modifier.fillMaxSize().padding(vertical = 76.dp).clipToBounds().onSizeChanged { viewport = it },
+    ) {
+        AsyncImage(
+            model = ImageRequest.Builder(context).data(bytes).crossfade(false).build(),
+            contentDescription = stringResource(R.string.media_preview_content, item.name),
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize()
+                .pointerInput(bytes, viewport, imageSize) {
+                    detectTapGestures(
+                        onDoubleTap = { tap ->
+                            if (scale > 1.01f) {
+                                scale = 1f
+                                offset = Offset.Zero
+                            } else {
+                                scale = MEDIA_DOUBLE_TAP_SCALE
+                                val center = Offset(viewport.width / 2f, viewport.height / 2f)
+                                offset = clampMediaImageOffset(
+                                    proposed = Offset(
+                                        x = (center.x - tap.x) * (scale - 1f),
+                                        y = (center.y - tap.y) * (scale - 1f),
+                                    ),
+                                    scale = scale,
+                                    viewport = viewport,
+                                    imageSize = imageSize,
+                                )
+                            }
+                        },
+                    )
+                }
+                .pointerInput(bytes, viewport, imageSize) {
+                    detectTransformGestures { centroid, pan, zoom, _ ->
+                        val oldScale = scale
+                        val newScale = (oldScale * zoom).coerceIn(1f, MEDIA_MAX_SCALE)
+                        if (newScale <= 1.01f) {
+                            scale = 1f
+                            offset = Offset.Zero
+                            return@detectTransformGestures
+                        }
+                        val center = Offset(viewport.width / 2f, viewport.height / 2f)
+                        val zoomRatio = newScale / oldScale
+                        val proposed = offset + pan + (center - centroid) * (zoomRatio - 1f)
+                        scale = newScale
+                        offset = clampMediaImageOffset(proposed, newScale, viewport, imageSize)
+                    }
+                }
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offset.x,
+                    translationY = offset.y,
+                ),
+        )
+        if (scale > 1.01f) {
+            Box(
+                Modifier.align(Alignment.BottomEnd)
+                    .padding(
+                        end = 12.dp,
+                        bottom = if (hasBottomMetadata) 112.dp else 12.dp,
+                    )
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.68f)),
+            ) {
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_zoom_out,
+                    stringResource(R.string.reset_media_zoom),
+                    {
+                        scale = 1f
+                        offset = Offset.Zero
+                    },
                     tint = Color.White,
                 )
             }
@@ -369,31 +524,57 @@ internal fun MediaViewerDialog(
 }
 
 @Composable
-private fun ZoomableMediaImage(item: CameraMediaItem, bytes: ByteArray) {
-    val context = LocalContext.current
-    var scale by remember(bytes) { mutableFloatStateOf(1f) }
-    var offsetX by remember(bytes) { mutableFloatStateOf(0f) }
-    var offsetY by remember(bytes) { mutableFloatStateOf(0f) }
-    AsyncImage(
-        model = ImageRequest.Builder(context).data(bytes).crossfade(false).build(),
-        contentDescription = stringResource(R.string.media_preview_content, item.name),
-        contentScale = ContentScale.Fit,
-        modifier = Modifier.fillMaxSize().padding(vertical = 64.dp)
-            .pointerInput(bytes) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 6f)
-                    if (scale == 1f) {
-                        offsetX = 0f
-                        offsetY = 0f
-                    } else {
-                        offsetX += pan.x
-                        offsetY += pan.y
-                    }
-                }
-            }
-            .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offsetX, translationY = offsetY),
+private fun ViewerNavigationButton(
+    icon: Int,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier.padding(horizontal = 8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.68f)),
+    ) {
+        ToolIconButton(icon, description, onClick, tint = Color.White)
+    }
+}
+
+private fun decodeMediaImageSize(bytes: ByteArray): IntSize {
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    return if (options.outWidth > 0 && options.outHeight > 0) {
+        IntSize(options.outWidth, options.outHeight)
+    } else {
+        IntSize.Zero
+    }
+}
+
+internal fun clampMediaImageOffset(
+    proposed: Offset,
+    scale: Float,
+    viewport: IntSize,
+    imageSize: IntSize,
+): Offset {
+    val bounds = mediaImagePanBounds(scale, viewport, imageSize)
+    return Offset(
+        x = proposed.x.coerceIn(-bounds.width, bounds.width),
+        y = proposed.y.coerceIn(-bounds.height, bounds.height),
     )
 }
+
+internal fun mediaImagePanBounds(scale: Float, viewport: IntSize, imageSize: IntSize): Size {
+    if (scale <= 1f || viewport.width <= 0 || viewport.height <= 0 || imageSize.width <= 0 || imageSize.height <= 0) {
+        return Size.Zero
+    }
+    val fit = min(viewport.width.toFloat() / imageSize.width, viewport.height.toFloat() / imageSize.height)
+    val fittedWidth = imageSize.width * fit
+    val fittedHeight = imageSize.height * fit
+    return Size(
+        width = max(0f, (fittedWidth * scale - viewport.width) / 2f),
+        height = max(0f, (fittedHeight * scale - viewport.height) / 2f),
+    )
+}
+
+private const val MEDIA_DOUBLE_TAP_SCALE = 2.5f
+private const val MEDIA_MAX_SCALE = 6f
 
 @OptIn(markerClass = [UnstableApi::class])
 @Composable

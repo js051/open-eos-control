@@ -1807,6 +1807,13 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.camera_media)).assertIsDisplayed()
+        compose.onNodeWithText(
+            resourceText(
+                R.string.media_item_count_sort,
+                state.mediaItems.size,
+                resourceText(R.string.media_newest_first),
+            ),
+        ).assertIsDisplayed()
         compose.onNodeWithText("2026-07-21").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.download_media, "R6M3_0001.CR3"))
             .assertDoesNotExist()
@@ -1887,6 +1894,54 @@ class CameraScreensTest {
         compose.onNodeWithContentDescription(resourceText(R.string.close_media_preview)).assertIsDisplayed()
             .performClick()
         compose.onNodeWithContentDescription(resourceText(R.string.close_media_preview)).assertDoesNotExist()
+    }
+
+    @Test
+    fun mediaViewerExposesPositionDownloadActionsAndAdjacentNavigation() {
+        val item = CameraMediaItem(
+            id = "ccapi:image",
+            name = "IMG_0042.JPG",
+            kind = "image",
+            sizeBytes = 2 * 1024L * 1024L,
+            captureTime = "2026-08-14T10:05:00",
+        )
+        var downloaded = false
+        var openedActions = false
+        var movedNext = false
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaViewerDialog(
+                    item = item,
+                    bytes = null,
+                    streamSource = null,
+                    loading = true,
+                    position = 2,
+                    totalCount = 8,
+                    canMovePrevious = false,
+                    canMoveNext = true,
+                    onPrevious = {},
+                    onNext = { movedNext = true },
+                    downloadEnabled = true,
+                    onDownload = { downloaded = true },
+                    actionsEnabled = true,
+                    onActions = { openedActions = true },
+                    onDismiss = {},
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.media_viewer_position, 2, 8)).assertIsDisplayed()
+        compose.onNodeWithText("2026-08-14 10:05").assertIsDisplayed()
+        compose.onNodeWithText("2.0 MB").assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.previous_media)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(resourceText(R.string.next_media)).performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.download_media, item.name)).performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, item.name)).performClick()
+        compose.runOnIdle {
+            assertTrue(movedNext)
+            assertTrue(downloaded)
+            assertTrue(openedActions)
+        }
     }
 
     @Test
