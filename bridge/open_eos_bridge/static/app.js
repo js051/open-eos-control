@@ -387,6 +387,9 @@
       mediaThumbnail: "Thumbnail for {name}",
       previewMedia: "Preview {name}",
       closeMediaPreview: "Close media preview",
+      mediaPreviewPosition: "{position} of {total}",
+      openMediaDetails: "Open media details",
+      resetMediaZoom: "Reset zoom",
       loadingPreview: "Loading camera preview",
       previewUnavailable: "The camera preview could not be displayed.",
       videoPlaybackUnavailable: "This camera video could not be played.",
@@ -764,6 +767,9 @@
       mediaThumbnail: "{name} 的縮圖",
       previewMedia: "預覽 {name}",
       closeMediaPreview: "關閉媒體預覽",
+      mediaPreviewPosition: "第 {position} 個，共 {total} 個",
+      openMediaDetails: "開啟媒體詳細資料",
+      resetMediaZoom: "重設縮放",
       loadingPreview: "正在載入相機預覽",
       previewUnavailable: "無法顯示相機提供的預覽影像。",
       videoPlaybackUnavailable: "無法播放相機中的這部影片。",
@@ -1049,7 +1055,7 @@
     mediaLoaded: false,
     mediaRefreshPromise: null,
     mediaFilter: "all",
-    mediaSort: "camera",
+    mediaSort: "newest",
     mediaPage: 0,
     mediaThumbnailUrls: new Map(),
     mediaThumbnailLoads: new Set(),
@@ -1059,6 +1065,9 @@
     mediaPreviewTicketUrl: null,
     mediaPreviewItem: null,
     mediaPreviewGeneration: 0,
+    mediaPreviewScale: 1,
+    mediaPreviewOffset: { x: 0, y: 0 },
+    mediaPreviewDrag: null,
     mediaDetailsItem: null,
     mediaDetailsGeneration: 0,
     mediaDetailsBusy: false,
@@ -1184,7 +1193,9 @@
     mediaPreviewDialog: byId("media-preview-dialog"),
     mediaPreviewClose: byId("media-preview-close"),
     mediaPreviewTitle: byId("media-preview-title"),
+    mediaPreviewMeta: byId("media-preview-meta"),
     mediaPreviewKind: byId("media-preview-kind"),
+    mediaPreviewStage: byId("media-preview-stage"),
     mediaPreviewImage: byId("media-preview-image"),
     mediaPreviewVideo: byId("media-preview-video"),
     mediaPreviewPrevious: byId("media-preview-previous"),
@@ -1192,6 +1203,8 @@
     mediaPreviewLoading: byId("media-preview-loading"),
     mediaPreviewUnavailable: byId("media-preview-unavailable"),
     mediaPreviewDownload: byId("media-preview-download"),
+    mediaPreviewDetails: byId("media-preview-details"),
+    mediaPreviewResetZoom: byId("media-preview-reset-zoom"),
     mediaDetailsDialog: byId("media-details-dialog"),
     mediaDetailsClose: byId("media-details-close"),
     mediaDetailsName: byId("media-details-name"),
@@ -1282,6 +1295,7 @@
     renderLocalVideoDevices();
     renderLiveState();
     renderMedia();
+    renderMediaPreviewNavigation();
     renderMediaDetails();
     renderMediaTransfer();
     renderDiagnostics();
@@ -4267,6 +4281,12 @@
     );
   }
 
+  function previewableMedia() {
+    return displayedMedia().filter((item) => mediaIsVideo(item)
+      ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
+      : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
+  }
+
   function mediaDateGroup(item) {
     if (state.mediaSort === "name") {
       return String(item.name || "#").trim().charAt(0).toLocaleUpperCase(resolvedLanguage()) || "#";
@@ -4392,6 +4412,42 @@
     state.mediaGeneration += 1;
   }
 
+  function resetMediaPreviewTransform() {
+    state.mediaPreviewScale = 1;
+    state.mediaPreviewOffset = { x: 0, y: 0 };
+    state.mediaPreviewDrag = null;
+    ui.mediaPreviewImage.style.removeProperty("transform");
+    ui.mediaPreviewImage.classList.remove("zoomed", "dragging");
+    ui.mediaPreviewResetZoom.hidden = true;
+  }
+
+  function renderMediaPreviewTransform() {
+    const viewport = {
+      width: ui.mediaPreviewImage.clientWidth,
+      height: ui.mediaPreviewImage.clientHeight,
+    };
+    const image = {
+      width: ui.mediaPreviewImage.naturalWidth,
+      height: ui.mediaPreviewImage.naturalHeight,
+    };
+    state.mediaPreviewOffset = mediaLibrary.clampImagePan(
+      state.mediaPreviewOffset,
+      state.mediaPreviewScale,
+      viewport,
+      image,
+    );
+    const { x, y } = state.mediaPreviewOffset;
+    ui.mediaPreviewImage.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${state.mediaPreviewScale})`;
+    ui.mediaPreviewImage.classList.toggle("zoomed", state.mediaPreviewScale > 1);
+    ui.mediaPreviewResetZoom.hidden = state.mediaPreviewScale <= 1;
+  }
+
+  function setMediaPreviewScale(value) {
+    state.mediaPreviewScale = Math.min(6, Math.max(1, Number(value) || 1));
+    if (state.mediaPreviewScale <= 1) state.mediaPreviewOffset = { x: 0, y: 0 };
+    renderMediaPreviewTransform();
+  }
+
   function clearMediaPreview() {
     state.mediaPreviewGeneration += 1;
     ui.mediaPreviewVideo.pause();
@@ -4405,11 +4461,16 @@
     state.mediaPreviewTicketUrl = null;
     if (ticketUrl) fetch(ticketUrl, { method: "DELETE", cache: "no-store", keepalive: true }).catch(() => {});
     state.mediaPreviewItem = null;
+    resetMediaPreviewTransform();
     ui.mediaPreviewImage.alt = "";
     ui.mediaPreviewImage.hidden = true;
     ui.mediaPreviewLoading.hidden = false;
     ui.mediaPreviewUnavailable.hidden = true;
     ui.mediaPreviewDownload.hidden = true;
+    ui.mediaPreviewDetails.hidden = true;
+    ui.mediaPreviewTitle.textContent = "";
+    ui.mediaPreviewMeta.textContent = "";
+    ui.mediaPreviewKind.textContent = "";
     renderMediaPreviewNavigation();
   }
 
@@ -4425,12 +4486,16 @@
     ui.mediaPreviewLoading.hidden = true;
     ui.mediaPreviewUnavailable.textContent = t("videoPlaybackUnavailable");
     ui.mediaPreviewUnavailable.hidden = false;
-    ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+    renderMediaPreviewNavigation();
   }
 
   function mediaMetadataSupported() {
     return featureSupported(FEATURES.MEDIA_PROTECT) || featureSupported(FEATURES.MEDIA_RATING) ||
       featureSupported(FEATURES.MEDIA_ROTATE) || featureSupported(FEATURES.MEDIA_ARCHIVE);
+  }
+
+  function mediaManagementSupported() {
+    return mediaMetadataSupported() || featureSupported(FEATURES.MEDIA_DELETE);
   }
 
   function replaceMediaItem(item) {
@@ -4579,8 +4644,6 @@
     clearMediaPreview();
     const generation = state.mediaPreviewGeneration;
     state.mediaPreviewItem = item;
-    ui.mediaPreviewTitle.textContent = item.name;
-    ui.mediaPreviewKind.textContent = String(item.kind).toUpperCase();
     ui.mediaPreviewDialog.showModal();
     renderMediaPreviewNavigation();
     try {
@@ -4595,7 +4658,6 @@
         }
         state.mediaPreviewTicketUrl = ticket.url;
         ui.mediaPreviewVideo.src = ticket.url;
-        ui.mediaPreviewDownload.hidden = true;
         ui.mediaPreviewVideo.hidden = false;
         ui.mediaPreviewVideo.load();
         ui.mediaPreviewLoading.hidden = true;
@@ -4614,6 +4676,7 @@
       ui.mediaPreviewImage.alt = t("previewMedia", { name: item.name });
       await ui.mediaPreviewImage.decode();
       if (generation !== state.mediaPreviewGeneration || state.mediaPreviewItem?.id !== item.id) return;
+      resetMediaPreviewTransform();
       ui.mediaPreviewImage.hidden = false;
       ui.mediaPreviewLoading.hidden = true;
     } catch (error) {
@@ -4632,20 +4695,34 @@
             : "previewUnavailable",
       );
       ui.mediaPreviewUnavailable.hidden = false;
-      if (video) ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+      renderMediaPreviewNavigation();
       showToast(normalized.message, true);
     }
   }
 
   function renderMediaPreviewNavigation() {
-    const items = displayedMedia();
+    const items = previewableMedia();
     const index = items.findIndex((item) => item.id === state.mediaPreviewItem?.id);
     ui.mediaPreviewPrevious.disabled = index <= 0;
     ui.mediaPreviewNext.disabled = index < 0 || index >= items.length - 1;
+    const item = state.mediaPreviewItem;
+    if (!item) return;
+    ui.mediaPreviewTitle.textContent = item.name;
+    ui.mediaPreviewKind.textContent = String(item.kind || "").toUpperCase();
+    const summary = [
+      t("mediaPreviewPosition", { position: Math.max(0, index + 1), total: items.length }),
+      formatDate(item.captureTime),
+      formatBytes(item.sizeBytes),
+    ].filter((value) => value && value !== "-");
+    ui.mediaPreviewMeta.textContent = summary.join(" · ");
+    ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+    ui.mediaPreviewDownload.disabled = cameraInteractionBusy();
+    ui.mediaPreviewDetails.hidden = !mediaManagementSupported();
+    ui.mediaPreviewDetails.disabled = cameraInteractionBusy();
   }
 
   function openAdjacentMedia(offset) {
-    const items = displayedMedia();
+    const items = previewableMedia();
     const index = items.findIndex((item) => item.id === state.mediaPreviewItem?.id);
     const item = items[index + offset];
     if (item) void openMediaPreview(item);
@@ -4727,6 +4804,7 @@
     setOperationState(t("preparingDownload"));
     renderMedia();
     renderAvailability();
+    renderMediaPreviewNavigation();
     let writable = null;
     let writableClosed = false;
     let transfer = null;
@@ -4753,6 +4831,7 @@
       setOperationState(t("downloading", { name: item.name }));
       renderMedia();
       renderMediaTransfer();
+      renderMediaPreviewNavigation();
       const response = await api(
         `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}`,
         { responseType: "response", signal: controller.signal },
@@ -4803,6 +4882,7 @@
       if (state.mediaDownload === transfer) state.mediaDownload = null;
       renderMedia();
       renderAvailability();
+      renderMediaPreviewNavigation();
     }
   }
 
@@ -5365,6 +5445,52 @@
     ui.mediaPreviewDownload.addEventListener("click", () => {
       if (state.mediaPreviewItem) void downloadMedia(state.mediaPreviewItem);
     });
+    ui.mediaPreviewDetails.addEventListener("click", () => {
+      const item = state.mediaPreviewItem;
+      if (!item) return;
+      closeMediaPreview();
+      void openMediaDetails(item);
+    });
+    ui.mediaPreviewResetZoom.addEventListener("click", resetMediaPreviewTransform);
+    ui.mediaPreviewImage.addEventListener("dblclick", () => {
+      setMediaPreviewScale(state.mediaPreviewScale > 1 ? 1 : 2.5);
+    });
+    ui.mediaPreviewImage.addEventListener("wheel", (event) => {
+      if (ui.mediaPreviewImage.hidden) return;
+      event.preventDefault();
+      setMediaPreviewScale(state.mediaPreviewScale * (event.deltaY < 0 ? 1.2 : 1 / 1.2));
+    }, { passive: false });
+    ui.mediaPreviewImage.addEventListener("pointerdown", (event) => {
+      if (state.mediaPreviewScale <= 1 || event.button !== 0) return;
+      state.mediaPreviewDrag = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        offset: { ...state.mediaPreviewOffset },
+      };
+      ui.mediaPreviewImage.setPointerCapture(event.pointerId);
+      ui.mediaPreviewImage.classList.add("dragging");
+    });
+    ui.mediaPreviewImage.addEventListener("pointermove", (event) => {
+      const drag = state.mediaPreviewDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      state.mediaPreviewOffset = {
+        x: drag.offset.x + event.clientX - drag.x,
+        y: drag.offset.y + event.clientY - drag.y,
+      };
+      renderMediaPreviewTransform();
+    });
+    const finishMediaPreviewDrag = (event) => {
+      if (state.mediaPreviewDrag?.pointerId !== event.pointerId) return;
+      if (ui.mediaPreviewImage.hasPointerCapture(event.pointerId)) {
+        ui.mediaPreviewImage.releasePointerCapture(event.pointerId);
+      }
+      state.mediaPreviewDrag = null;
+      ui.mediaPreviewImage.classList.remove("dragging");
+    };
+    ui.mediaPreviewImage.addEventListener("pointerup", finishMediaPreviewDrag);
+    ui.mediaPreviewImage.addEventListener("pointercancel", finishMediaPreviewDrag);
     ui.mediaPreviewDialog.addEventListener("close", clearMediaPreview);
     ui.mediaPreviewDialog.addEventListener("click", (event) => {
       if (event.target === ui.mediaPreviewDialog) closeMediaPreview();
@@ -5399,6 +5525,9 @@
     });
     ui.mediaDetailsDelete.addEventListener("click", () => {
       if (state.mediaDetailsItem) void deleteMedia(state.mediaDetailsItem, ui.mediaDetailsDelete);
+    });
+    window.addEventListener("resize", () => {
+      if (!ui.mediaPreviewImage.hidden && state.mediaPreviewScale > 1) renderMediaPreviewTransform();
     });
     ui.diagnosticsRefreshButton.addEventListener("click", () => refreshSession({ quiet: true }));
     ui.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);

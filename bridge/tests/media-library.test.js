@@ -55,7 +55,7 @@ function run() {
   );
   assert.deepEqual(
     mediaLibrary.itemsForDisplay(cameraOrdered, "all", "oldest", "en-US").map(({ id }) => id),
-    ["raw", "jpeg", "unknown-10", "unknown-9"],
+    ["raw", "jpeg", "unknown-9", "unknown-10"],
   );
 
   const videos = [
@@ -89,6 +89,29 @@ function run() {
   assert.equal(mediaLibrary.touch(cache, "three"), true);
   assert.deepEqual([...cache.keys()], ["four", "two", "three"]);
   assert.equal(mediaLibrary.touch(cache, "missing"), false);
+
+  assert.deepEqual(
+    mediaLibrary.imagePanBounds(2, { width: 400, height: 300 }, { width: 800, height: 400 }),
+    { x: 200, y: 50 },
+  );
+  assert.deepEqual(
+    mediaLibrary.clampImagePan(
+      { x: 500, y: -500 },
+      2,
+      { width: 400, height: 300 },
+      { width: 800, height: 400 },
+    ),
+    { x: 200, y: -50 },
+  );
+  assert.deepEqual(
+    mediaLibrary.clampImagePan(
+      { x: 20, y: 20 },
+      1,
+      { width: 400, height: 300 },
+      { width: 800, height: 400 },
+    ),
+    { x: 0, y: 0 },
+  );
 }
 
 run();

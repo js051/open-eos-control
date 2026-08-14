@@ -57,6 +57,10 @@
       if (leftTime !== null && rightTime !== null && leftTime !== rightTime) {
         return sort === "oldest" ? leftTime - rightTime : rightTime - leftTime;
       }
+      if (leftTime === null && rightTime === null) {
+        const stableNameOrder = nameOrder || String(left.id).localeCompare(String(right.id), locale, { numeric: true });
+        return sort === "oldest" ? stableNameOrder : -stableNameOrder;
+      }
       return leftEntry.index - rightEntry.index;
     }).map(({ item }) => item);
   }
@@ -100,5 +104,43 @@
     return true;
   }
 
-  return { isVideo, mediaTime, naturalName, itemsForDisplay, page, setBounded, touch };
+  function imagePanBounds(scale, viewport, image) {
+    const normalizedScale = Number(scale);
+    const viewportWidth = Number(viewport?.width);
+    const viewportHeight = Number(viewport?.height);
+    const imageWidth = Number(image?.width);
+    const imageHeight = Number(image?.height);
+    if (
+      normalizedScale <= 1 ||
+      ![normalizedScale, viewportWidth, viewportHeight, imageWidth, imageHeight]
+        .every((value) => Number.isFinite(value) && value > 0)
+    ) return { x: 0, y: 0 };
+    const fit = Math.min(viewportWidth / imageWidth, viewportHeight / imageHeight);
+    return {
+      x: Math.max(0, (imageWidth * fit * normalizedScale - viewportWidth) / 2),
+      y: Math.max(0, (imageHeight * fit * normalizedScale - viewportHeight) / 2),
+    };
+  }
+
+  function clampImagePan(proposed, scale, viewport, image) {
+    const bounds = imagePanBounds(scale, viewport, image);
+    const x = Number.isFinite(Number(proposed?.x)) ? Number(proposed.x) : 0;
+    const y = Number.isFinite(Number(proposed?.y)) ? Number(proposed.y) : 0;
+    return {
+      x: Math.min(Math.max(x, -bounds.x), bounds.x),
+      y: Math.min(Math.max(y, -bounds.y), bounds.y),
+    };
+  }
+
+  return {
+    isVideo,
+    mediaTime,
+    naturalName,
+    itemsForDisplay,
+    page,
+    setBounded,
+    touch,
+    imagePanBounds,
+    clampImagePan,
+  };
 });

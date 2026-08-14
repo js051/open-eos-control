@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import OpenEOSCore
 
@@ -91,9 +92,42 @@ private func compareMediaItems(
         return .orderedAscending
     case (.none, .some(_)):
         return .orderedDescending
-    default:
+    case (.none, .none):
+        let compared = naturalMediaName(left, right)
+        let stable = compared == .orderedSame
+            ? left.id.compare(right.id, options: [.caseInsensitive, .numeric])
+            : compared
+        return sort == .newest ? stable.reversed : stable
+    case (.some(_), .some(_)):
         return .orderedSame
     }
+}
+
+func mediaImagePanBounds(scale: CGFloat, viewport: CGSize, image: CGSize) -> CGSize {
+    guard scale > 1,
+          viewport.width > 0,
+          viewport.height > 0,
+          image.width > 0,
+          image.height > 0
+    else { return .zero }
+    let fit = min(viewport.width / image.width, viewport.height / image.height)
+    return CGSize(
+        width: max(0, (image.width * fit * scale - viewport.width) / 2),
+        height: max(0, (image.height * fit * scale - viewport.height) / 2)
+    )
+}
+
+func clampMediaImageOffset(
+    _ proposed: CGSize,
+    scale: CGFloat,
+    viewport: CGSize,
+    image: CGSize
+) -> CGSize {
+    let bounds = mediaImagePanBounds(scale: scale, viewport: viewport, image: image)
+    return CGSize(
+        width: min(max(proposed.width, -bounds.width), bounds.width),
+        height: min(max(proposed.height, -bounds.height), bounds.height)
+    )
 }
 
 private func naturalMediaName(_ left: CameraMediaItem, _ right: CameraMediaItem) -> ComparisonResult {
