@@ -613,6 +613,7 @@ async function run() {
     }));
     await page.click('.tab[data-view="media"]');
     await page.waitForSelector("#media-panel:not([hidden])");
+    assert.equal(await page.locator("#media-sort-select").inputValue(), "newest");
     await page.waitForFunction(() => document.querySelectorAll(".media-card").length === 72);
     assert.equal(await page.locator("#media-page-status").innerText(), "1-72 of 145");
     await page.click("#media-page-next");
@@ -647,9 +648,23 @@ async function run() {
     await page.selectOption("#media-sort-select", "name");
     await capturedMedia.locator("button.media-thumbnail").click();
     await page.waitForSelector("#media-preview-dialog[open] #media-preview-image:not([hidden])");
-    await page.click("#media-preview-close");
+    await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-media-viewer.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await page.screenshot({ path: path.join(RESULTS_DIR, "narrow-media-viewer.png") });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    assert.match(await page.locator("#media-preview-meta").innerText(), /\d+ of \d+/);
+    assert.equal(await page.locator("#media-preview-download").isVisible(), true);
+    assert.equal(await page.locator("#media-preview-details").isVisible(), true);
+    await page.locator("#media-preview-image").dblclick();
+    await page.waitForSelector("#media-preview-reset-zoom:not([hidden])");
+    assert.match(await page.locator("#media-preview-image").getAttribute("style"), /scale\(2\.5\)/);
+    await page.click("#media-preview-reset-zoom");
+    assert.equal(await page.locator("#media-preview-reset-zoom").isHidden(), true);
+    await page.click("#media-preview-details");
+    await page.waitForSelector("#media-details-dialog[open]");
+    assert.equal(await page.locator("#media-details-name").innerText(), "SIM_0003.JPG");
     page.once("dialog", (dialog) => dialog.accept());
-    await capturedMedia.locator('button[aria-label="Manage SIM_0003.JPG"]').click();
     await page.click("#media-details-delete");
     await waitForSimulatorState(
       simulatorOrigin,

@@ -299,10 +299,10 @@
           <label class="media-sort-control">
             <span class="sr-only" data-i18n="mediaSort">Sort media</span>
             <select id="media-sort-select" data-i18n-aria="mediaSort">
-              <option value="camera" data-i18n="mediaCameraOrder">Camera order</option>
-              <option value="newest" data-i18n="mediaNewest">Newest first</option>
+              <option value="newest" data-i18n="mediaNewest" selected>Newest first</option>
               <option value="oldest" data-i18n="mediaOldest">Oldest first</option>
               <option value="name" data-i18n="mediaName">File name</option>
+              <option value="camera" data-i18n="mediaCameraOrder">Camera order</option>
             </select>
           </label>
           <nav id="media-pagination" class="media-pagination" data-i18n-aria="mediaPages" hidden>
@@ -450,10 +450,21 @@
       <button id="media-preview-close" class="icon-button" type="button" data-i18n-aria="closeMediaPreview">
         <span class="icon" data-icon="x" aria-hidden="true"></span>
       </button>
-      <strong id="media-preview-title"></strong>
-      <span id="media-preview-kind" class="supporting"></span>
+      <div class="media-preview-heading-copy">
+        <strong id="media-preview-title"></strong>
+        <span id="media-preview-meta" class="supporting"></span>
+      </div>
+      <div class="media-preview-heading-actions">
+        <span id="media-preview-kind" class="supporting"></span>
+        <button id="media-preview-download" class="icon-button" type="button" data-i18n-aria="downloadOriginal" hidden>
+          <span class="icon" data-icon="download" aria-hidden="true"></span>
+        </button>
+        <button id="media-preview-details" class="icon-button" type="button" data-i18n-aria="openMediaDetails" hidden>
+          <span class="icon" data-icon="ellipsis-vertical" aria-hidden="true"></span>
+        </button>
+      </div>
     </div>
-    <div class="media-preview-stage">
+    <div id="media-preview-stage" class="media-preview-stage">
       <img id="media-preview-image" alt="" hidden>
       <video id="media-preview-video" controls playsinline preload="metadata" hidden></video>
       <button id="media-preview-previous" class="icon-button media-preview-navigation previous" type="button" data-i18n-aria="previousMedia">
@@ -464,9 +475,8 @@
       </button>
       <div id="media-preview-loading" class="media-preview-message" data-i18n="loadingPreview">Loading camera preview</div>
       <div id="media-preview-unavailable" class="media-preview-message" data-i18n="previewUnavailable" hidden>The camera preview could not be displayed.</div>
-      <button id="media-preview-download" class="button secondary media-preview-download" type="button" hidden>
-        <span class="icon" data-icon="download" aria-hidden="true"></span>
-        <span data-i18n="downloadOriginal">Download original</span>
+      <button id="media-preview-reset-zoom" class="icon-button media-preview-reset-zoom" type="button" data-i18n-aria="resetMediaZoom" hidden>
+        <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span>
       </button>
     </div>
   </dialog>

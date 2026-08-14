@@ -43,7 +43,7 @@ final class MediaLibraryTests: XCTestCase {
         )
     }
 
-    func testDateSortPreservesCameraOrderWhenDatesAreMissingOrEqual() {
+    func testDateSortPreservesEqualDatedPairsAndUsesNaturalFallbackWithoutDates() {
         let items = [
             media("unknown-10", "IMG_10.JPG", nil),
             media("unknown-9", "IMG_9.JPG", nil),
@@ -57,7 +57,44 @@ final class MediaLibraryTests: XCTestCase {
         )
         XCTAssertEqual(
             mediaItemsForDisplay(items, filter: .all, sort: .oldest).map(\.id),
-            ["raw", "jpeg", "unknown-10", "unknown-9"]
+            ["raw", "jpeg", "unknown-9", "unknown-10"]
+        )
+    }
+
+    func testZoomedMediaImagePanIsBoundedByFittedEdges() {
+        let viewport = CGSize(width: 1_000, height: 600)
+        let image = CGSize(width: 6_000, height: 4_000)
+
+        let bounds = mediaImagePanBounds(scale: 2, viewport: viewport, image: image)
+        XCTAssertEqual(bounds.width, 400, accuracy: 0.001)
+        XCTAssertEqual(bounds.height, 300, accuracy: 0.001)
+        let clamped = clampMediaImageOffset(
+            CGSize(width: 900, height: -800),
+            scale: 2,
+            viewport: viewport,
+            image: image
+        )
+        XCTAssertEqual(clamped.width, 400, accuracy: 0.001)
+        XCTAssertEqual(clamped.height, -300, accuracy: 0.001)
+    }
+
+    func testUnzoomedOrInvalidMediaImageCannotPan() {
+        XCTAssertEqual(
+            mediaImagePanBounds(
+                scale: 1,
+                viewport: CGSize(width: 1_000, height: 600),
+                image: CGSize(width: 6_000, height: 4_000)
+            ),
+            .zero
+        )
+        XCTAssertEqual(
+            clampMediaImageOffset(
+                CGSize(width: 500, height: -500),
+                scale: 4,
+                viewport: .zero,
+                image: CGSize(width: 10, height: 10)
+            ),
+            .zero
         )
     }
 

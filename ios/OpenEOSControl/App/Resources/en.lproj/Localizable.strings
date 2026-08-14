@@ -295,6 +295,8 @@
 "close_media_preview" = "Close media preview";
 "media_preview_content" = "Preview of %@";
 "media_preview_unavailable" = "The camera preview could not be displayed.";
+"media_viewer_position_format" = "%d of %d";
+"reset_media_zoom" = "Reset zoom";
 
 "monitoring_assists" = "Monitoring assists";
 "camera_audio_monitoring" = "Camera audio monitoring";

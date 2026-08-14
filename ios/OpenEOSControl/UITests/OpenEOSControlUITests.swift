@@ -309,6 +309,9 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForInteraction(previewMedia, timeout: 8))
         previewMedia.tap()
         XCTAssertTrue(app.buttons["close-media-preview"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["media-preview-position"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["media-preview-download-SIM_0003.PNG"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["media-preview-actions-SIM_0003.PNG"].waitForExistence(timeout: 3))
         app.buttons["close-media-preview"].tap()
 
         let mediaActions = app.buttons["media-actions-SIM_0003.PNG"]

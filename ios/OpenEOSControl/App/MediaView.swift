@@ -11,9 +11,10 @@ struct MediaView: View {
     let controlRotation: Double
     @State private var pendingDeletion: CameraMediaItem?
     @State private var metadataItemID: String?
+    @State private var pendingPreviewMetadataItemID: String?
     @State private var isFileImporterPresented = false
     @State private var mediaFilter = MediaFilter.all
-    @State private var mediaSort = MediaSort.camera
+    @State private var mediaSort = MediaSort.newest
 
     private let mediaColumns = [
         GridItem(.adaptive(minimum: 156, maximum: 240), spacing: 10),
@@ -43,10 +44,12 @@ struct MediaView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             ForEach(mediaGroups) { group in
-                                Text(group.title)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Color.cameraSecondaryText)
-                                    .padding(.top, 4)
+                                if let title = group.title {
+                                    Text(title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Color.cameraSecondaryText)
+                                        .padding(.top, 4)
+                                }
                                 LazyVGrid(columns: mediaColumns, alignment: .leading, spacing: 10) {
                                     ForEach(group.items) { item in
                                         mediaCard(item)
@@ -84,11 +87,20 @@ struct MediaView: View {
             isPresented: Binding(
                 get: { camera.mediaPreviewItem != nil },
                 set: { if !$0 { camera.closeMediaPreview() } }
-            )
+            ),
+            onDismiss: {
+                guard let pendingPreviewMetadataItemID else { return }
+                self.pendingPreviewMetadataItemID = nil
+                metadataItemID = pendingPreviewMetadataItemID
+            }
         ) {
             MediaPreviewView(
                 items: displayedMedia.filter(canPreview),
-                controlRotation: controlRotation
+                controlRotation: controlRotation,
+                onActions: { item in
+                    pendingPreviewMetadataItemID = item.id
+                    camera.closeMediaPreview()
+                }
             )
                 .environmentObject(camera)
                 .environmentObject(language)
@@ -518,6 +530,11 @@ struct MediaView: View {
     }
 
     private var mediaGroups: [MediaGroup] {
+        if mediaSort == .camera {
+            return displayedMedia.isEmpty
+                ? []
+                : [MediaGroup(id: "camera", title: nil, items: displayedMedia)]
+        }
         var groups: [MediaGroup] = []
         for item in displayedMedia {
             let title: String
@@ -540,7 +557,7 @@ struct MediaView: View {
 
 private struct MediaGroup: Identifiable {
     let id: String
-    let title: String
+    let title: String?
     var items: [CameraMediaItem]
 }
 
@@ -720,39 +737,23 @@ private struct MediaPreviewView: View {
     @EnvironmentObject private var language: AppLanguageStore
     let items: [CameraMediaItem]
     let controlRotation: Double
-    @State private var imageScale = 1.0
-    @State private var settledImageScale = 1.0
+    let onActions: (CameraMediaItem) -> Void
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let playback = camera.mediaVideoPlayback {
-                CameraVideoPreview(
-                    playback: playback,
-                    downloadAvailable: camera.supports(.mediaDownload) && !camera.isBusy(.media),
-                    onDownload: {
-                        if let item = camera.mediaPreviewItem {
-                            camera.startMediaDownload(item)
-                        }
-                    }
+                CameraVideoPreview(playback: playback)
+            } else if let item = camera.mediaPreviewItem,
+                      let data = camera.mediaPreviewData,
+                      let image = UIImage(data: data) {
+                ZoomableMediaImage(
+                    image: image,
+                    itemID: item.id,
+                    controlRotation: controlRotation
                 )
-            } else if let data = camera.mediaPreviewData, let image = UIImage(data: data) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(.vertical, 64)
-                    .scaleEffect(imageScale)
-                    .gesture(
-                        MagnifyGesture()
-                            .onChanged { imageScale = min(6, max(1, settledImageScale * $0.magnification)) }
-                            .onEnded { _ in settledImageScale = imageScale }
-                    )
-                    .onTapGesture(count: 2) {
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            imageScale = imageScale > 1 ? 1 : 2
-                            settledImageScale = imageScale
-                        }
-                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 72)
                     .accessibilityLabel(Text(language.format("media_preview_content", camera.mediaPreviewItem?.name ?? "")))
             } else if camera.mediaPreviewLoading {
                 ProgressView().tint(Color.cameraAccent).controlSize(.large)
@@ -773,14 +774,43 @@ private struct MediaPreviewView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("close-media-preview")
-                    Text(camera.mediaPreviewItem?.name ?? "")
-                        .font(.callout.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if let item = camera.mediaPreviewItem {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name)
+                                .font(.callout.weight(.semibold))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            HStack(spacing: 6) {
+                                Text(positionText(for: item))
+                                    .accessibilityIdentifier("media-preview-position")
+                                Text(metadataText(for: item))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(Color.cameraSecondaryText)
+                        }
+                    }
                     Spacer(minLength: 8)
-                    Text(camera.mediaPreviewItem?.kind.uppercased() ?? "")
-                        .font(.caption)
-                        .foregroundStyle(Color.cameraSecondaryText)
+                    if let item = camera.mediaPreviewItem {
+                        if camera.supports(.mediaDownload) {
+                            previewDownloadAction(item)
+                        }
+                        if actionsAvailable {
+                            Button {
+                                onActions(item)
+                            } label: {
+                                RotatingControl(degrees: controlRotation) {
+                                    Image(systemName: "ellipsis")
+                                        .frame(width: 48, height: 48)
+                                        .accessibilityLabel(Text(language.format("media_actions", item.name)))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(camera.isBusy(.media))
+                            .accessibilityIdentifier("media-preview-actions-\(item.id)")
+                        }
+                    }
                 }
                 .foregroundStyle(Color.white)
                 .padding(.horizontal, 8)
@@ -802,8 +832,6 @@ private struct MediaPreviewView: View {
         let destination = adjacentItem(offset: offset)
         Button {
             guard let destination else { return }
-            imageScale = 1
-            settledImageScale = 1
             Task { await camera.openMediaPreview(destination) }
         } label: {
             Image(systemName: systemName)
@@ -825,13 +853,184 @@ private struct MediaPreviewView: View {
         guard items.indices.contains(destination) else { return nil }
         return items[destination]
     }
+
+    private var actionsAvailable: Bool {
+        camera.supports(.mediaProtect) || camera.supports(.mediaRating) ||
+            camera.supports(.mediaRotate) || camera.supports(.mediaArchive) ||
+            camera.supports(.mediaDelete)
+    }
+
+    private func positionText(for item: CameraMediaItem) -> String {
+        let position = items.firstIndex { $0.id == item.id }.map { $0 + 1 } ?? 0
+        return language.format("media_viewer_position_format", position, items.count)
+    }
+
+    private func metadataText(for item: CameraMediaItem) -> String {
+        var values = [item.kind.uppercased()]
+        if let date = mediaCaptureDate(item) {
+            values.append(date.formatted(date: .abbreviated, time: .shortened))
+        }
+        if let size = item.sizeBytes {
+            values.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+        }
+        return values.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func previewDownloadAction(_ item: CameraMediaItem) -> some View {
+        if camera.downloadedFileName == item.name, let url = camera.downloadedFileURL {
+            ShareLink(item: url) {
+                RotatingControl(degrees: controlRotation) {
+                    Image(systemName: "square.and.arrow.up")
+                        .frame(width: 48, height: 48)
+                        .accessibilityLabel(Text("save_media"))
+                }
+            }
+            .accessibilityIdentifier("media-preview-share-\(item.id)")
+        } else if camera.downloadedFileName == item.name, camera.isPreview {
+            RotatingControl(degrees: controlRotation) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.cameraStatus)
+                    .frame(width: 48, height: 48)
+                    .accessibilityLabel(Text("download_complete"))
+            }
+            .accessibilityIdentifier("media-preview-download-complete-\(item.id)")
+        } else if camera.activeMediaDownloadID == item.id {
+            Button {
+                camera.cancelMediaDownload()
+            } label: {
+                RotatingControl(degrees: controlRotation) {
+                    Image(systemName: "xmark.circle.fill")
+                        .frame(width: 48, height: 48)
+                        .accessibilityLabel(Text("cancel_media_download"))
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.cameraRecording)
+            .accessibilityIdentifier("media-preview-cancel-download-\(item.id)")
+        } else {
+            Button {
+                camera.startMediaDownload(item)
+            } label: {
+                RotatingControl(degrees: controlRotation) {
+                    Image(systemName: "arrow.down.circle")
+                        .frame(width: 48, height: 48)
+                        .accessibilityLabel(Text("download_media"))
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.cameraAccent)
+            .disabled(camera.isBusy(.media))
+            .accessibilityIdentifier("media-preview-download-\(item.id)")
+        }
+    }
+}
+
+private struct ZoomableMediaImage: View {
+    @EnvironmentObject private var language: AppLanguageStore
+    let image: UIImage
+    let itemID: String
+    let controlRotation: Double
+    @State private var scale: CGFloat = 1
+    @State private var settledScale: CGFloat = 1
+    @State private var offset = CGSize.zero
+    @State private var settledOffset = CGSize.zero
+
+    var body: some View {
+        GeometryReader { proxy in
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .scaleEffect(scale)
+                .offset(offset)
+                .contentShape(Rectangle())
+                .gesture(magnificationGesture(viewport: proxy.size))
+                .simultaneousGesture(dragGesture(viewport: proxy.size))
+                .onTapGesture(count: 2) {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        if scale > 1 {
+                            resetTransform()
+                        } else {
+                            scale = 2.5
+                            settledScale = scale
+                        }
+                    }
+                }
+                .accessibilityIdentifier("media-preview-image")
+                .overlay(alignment: .bottomTrailing) {
+                    if scale > 1 {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.18)) { resetTransform() }
+                        } label: {
+                            RotatingControl(degrees: controlRotation) {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .frame(width: 48, height: 48)
+                                    .accessibilityLabel(Text(language.string("reset_media_zoom")))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 6))
+                        .accessibilityIdentifier("reset-media-zoom")
+                    }
+                }
+        }
+        .clipped()
+        .onChange(of: itemID) { _, _ in resetTransform() }
+    }
+
+    private func magnificationGesture(viewport: CGSize) -> some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                scale = min(6, max(1, settledScale * value.magnification))
+                offset = clampMediaImageOffset(
+                    settledOffset,
+                    scale: scale,
+                    viewport: viewport,
+                    image: image.size
+                )
+            }
+            .onEnded { _ in
+                settledScale = scale
+                offset = clampMediaImageOffset(
+                    offset,
+                    scale: scale,
+                    viewport: viewport,
+                    image: image.size
+                )
+                settledOffset = offset
+            }
+    }
+
+    private func dragGesture(viewport: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                guard scale > 1 else { return }
+                offset = clampMediaImageOffset(
+                    CGSize(
+                        width: settledOffset.width + value.translation.width,
+                        height: settledOffset.height + value.translation.height
+                    ),
+                    scale: scale,
+                    viewport: viewport,
+                    image: image.size
+                )
+            }
+            .onEnded { _ in settledOffset = offset }
+    }
+
+    private func resetTransform() {
+        scale = 1
+        settledScale = 1
+        offset = .zero
+        settledOffset = .zero
+    }
 }
 
 private struct CameraVideoPreview: View {
     @EnvironmentObject private var language: AppLanguageStore
     @ObservedObject var playback: CameraMediaPlayback
-    let downloadAvailable: Bool
-    let onDownload: () -> Void
 
     var body: some View {
         ZStack {
@@ -856,13 +1055,6 @@ private struct CameraVideoPreview: View {
                         Text(language.string("media_video_download_hint"))
                             .font(.caption)
                             .multilineTextAlignment(.center)
-                    }
-                    if downloadAvailable {
-                        Button(action: onDownload) {
-                            Label(language.string("download_media"), systemImage: "arrow.down.circle")
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(Color.cameraAccent)
                     }
                 }
                 .foregroundStyle(Color.cameraSecondaryText)

@@ -295,6 +295,8 @@
 "close_media_preview" = "關閉媒體預覽";
 "media_preview_content" = "%@ 的預覽";
 "media_preview_unavailable" = "無法顯示相機提供的預覽影像。";
+"media_viewer_position_format" = "第 %d 個，共 %d 個";
+"reset_media_zoom" = "重設縮放";
 
 "monitoring_assists" = "監看輔助";
 "camera_audio_monitoring" = "監聽相機音訊";
