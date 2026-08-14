@@ -1,5 +1,7 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -8,8 +10,11 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class CameraMediaStreamingTest {
     private val server = MockWebServer()
@@ -99,6 +104,48 @@ class CameraMediaStreamingTest {
         val failure = runCatching { source.open(4) }.exceptionOrNull()
 
         assertTrue(failure?.message.orEmpty().contains("invalid Content-Length"))
+    }
+
+    @Test
+    fun closeWaitsForAnOpeningStreamBeforeRunningCleanup() = runTest {
+        val openingStarted = CompletableDeferred<Unit>()
+        val allowOpenToFinish = CompletableDeferred<Unit>()
+        val handleClosed = AtomicBoolean(false)
+        val cleanupCount = AtomicInteger(0)
+        val item = CameraMediaItem("video", "CLIP_0001.MP4", "video", sizeBytes = 10)
+        val delegate = object : CameraMediaStreamSource {
+            override val item = item
+
+            override suspend fun open(position: Long): CameraMediaStreamHandle {
+                openingStarted.complete(Unit)
+                allowOpenToFinish.await()
+                return object : CameraMediaStreamHandle {
+                    override val bytesRemaining = 10L
+                    override val contentType = "video/mp4"
+                    override suspend fun read(buffer: ByteArray, offset: Int, length: Int) = -1
+                    override fun close() {
+                        handleClosed.set(true)
+                    }
+                }
+            }
+        }
+        val source = CloseAwareCameraMediaStreamSource(delegate) { cleanupCount.incrementAndGet() }
+        val opening = async { runCatching { source.open(0) } }
+        openingStarted.await()
+
+        source.close()
+
+        assertEquals(0, cleanupCount.get())
+        assertFalse(handleClosed.get())
+        allowOpenToFinish.complete(Unit)
+        val failure = opening.await().exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("closed while opening"))
+        assertTrue(handleClosed.get())
+        assertEquals(1, cleanupCount.get())
+        source.close()
+        assertEquals(1, cleanupCount.get())
     }
 
     @Test

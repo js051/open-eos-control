@@ -16,6 +16,7 @@ import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 
 class DesktopBridgeClientTest {
     private lateinit var server: MockWebServer
@@ -289,6 +290,106 @@ class DesktopBridgeClientTest {
         assertTrue(JSONObject(request.body.readUtf8()).getBoolean("enabled"))
         assertEquals(true, updated.archived)
         assertTrue(CameraFeature.MEDIA_ARCHIVE in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun mediaPlaybackReusesOneTicketForRangesAndRevokesAfterLastHandleCloses() = runTest {
+        val bytes = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7)
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        server.enqueue(
+            jsonResponse(
+                """{"url":"/v1/media-playback/ticket_123","expiresInSeconds":900}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(206)
+                .setHeader("content-type", "video/mp4")
+                .setHeader("content-range", "bytes 3-7/8")
+                .setHeader("content-length", 5)
+                .setBody(okio.Buffer().write(bytes, 3, 5)),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(206)
+                .setHeader("content-type", "video/mp4")
+                .setHeader("content-range", "bytes 5-7/8")
+                .setHeader("content-length", 3)
+                .setBody(okio.Buffer().write(bytes, 5, 3)),
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        val client = DesktopBridgeClient(server.url("/").toString(), token = "bridge-secret")
+        client.initialize()
+        val item = CameraMediaItem(
+            id = "gphoto2:video-id",
+            name = "MVI_0001.MP4",
+            kind = "video",
+            sizeBytes = bytes.size.toLong(),
+            streamAvailable = true,
+        )
+
+        val source = client.openMediaStream(item)
+        val first = source.open(3)
+        val firstBytes = ByteArray(5)
+        assertEquals(5, first.read(firstBytes, 0, firstBytes.size))
+        first.close()
+        val second = source.open(5)
+        val secondBytes = ByteArray(3)
+        assertEquals(3, second.read(secondBytes, 0, secondBytes.size))
+        source.close()
+        assertEquals(5, server.requestCount)
+        second.close()
+
+        val health = server.takeRequest()
+        val session = server.takeRequest()
+        val ticket = server.takeRequest()
+        val firstRange = server.takeRequest()
+        val secondRange = server.takeRequest()
+        val revoke = server.takeRequest(5, TimeUnit.SECONDS)
+
+        assertEquals("/health", health.path)
+        assertEquals("/v1/session", session.path)
+        assertEquals("POST", ticket.method)
+        assertEquals("/v1/session/session-1/media/gphoto2:video-id/playback", ticket.path)
+        assertEquals(0L, ticket.bodySize)
+        assertEquals("Bearer bridge-secret", ticket.getHeader("authorization"))
+        assertEquals("GET", firstRange.method)
+        assertEquals("/v1/media-playback/ticket_123", firstRange.path)
+        assertEquals("bytes=3-", firstRange.getHeader("range"))
+        assertEquals("GET", secondRange.method)
+        assertEquals("/v1/media-playback/ticket_123", secondRange.path)
+        assertEquals("bytes=5-", secondRange.getHeader("range"))
+        assertEquals("DELETE", revoke?.method)
+        assertEquals("/v1/media-playback/ticket_123", revoke?.path)
+        assertArrayEquals(byteArrayOf(3, 4, 5, 6, 7), firstBytes)
+        assertArrayEquals(byteArrayOf(5, 6, 7), secondBytes)
+    }
+
+    @Test
+    fun mediaPlaybackRejectsTicketOutsideBridgeOrigin() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        server.enqueue(
+            jsonResponse(
+                """{"url":"https://example.invalid/v1/media-playback/stolen","expiresInSeconds":900}""",
+            ),
+        )
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        val item = CameraMediaItem(
+            id = "gphoto2:video-id",
+            name = "MVI_0001.MP4",
+            kind = "video",
+            sizeBytes = 8,
+            streamAvailable = true,
+        )
+
+        val failure = runCatching { client.openMediaStream(item) }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.message.orEmpty().contains("outside its own origin"))
+        assertEquals(3, server.requestCount)
     }
 
     @Test
