@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -56,6 +58,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -686,34 +689,85 @@ private fun CameraVideoPlayer(
             }
         }
         if (mode == CameraVideoPlaybackMode.FAILED) {
-            Column(
-                Modifier.align(Alignment.Center).padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    stringResource(
-                        when (failure) {
-                            CameraVideoPlaybackFailure.CODEC -> R.string.media_video_codec_unsupported
-                            CameraVideoPlaybackFailure.STORAGE -> R.string.media_video_storage_unavailable
-                            else -> R.string.media_video_playback_failed
-                        },
-                    ),
-                    color = AppSubtleText,
-                )
-                if (downloadEnabled) {
-                    TextButton(onClick = onDownload) {
-                        Text(stringResource(R.string.download_media, item.name), color = AppAccent)
-                    }
-                }
-            }
+            CameraVideoPlaybackFailureContent(
+                item = item,
+                failure = failure ?: CameraVideoPlaybackFailure.TRANSFER,
+                downloadEnabled = downloadEnabled,
+                onRetry = {
+                    fallbackFile = null
+                    fallbackProgress = 0f
+                    failure = null
+                    mode = CameraVideoPlaybackMode.STREAM
+                },
+                onDownload = onDownload,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
     }
 }
 
 private enum class CameraVideoPlaybackMode { STREAM, CACHE, FILE, FAILED }
 
-private enum class CameraVideoPlaybackFailure { TRANSFER, CODEC, STORAGE }
+internal enum class CameraVideoPlaybackFailure {
+    TRANSFER,
+    CODEC,
+    STORAGE,
+    ;
+
+    val retryable: Boolean
+        get() = this != CODEC
+}
+
+@Composable
+internal fun CameraVideoPlaybackFailureContent(
+    item: CameraMediaItem,
+    failure: CameraVideoPlaybackFailure,
+    downloadEnabled: Boolean,
+    onRetry: () -> Unit,
+    onDownload: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            stringResource(
+                when (failure) {
+                    CameraVideoPlaybackFailure.CODEC -> R.string.media_video_codec_unsupported
+                    CameraVideoPlaybackFailure.STORAGE -> R.string.media_video_storage_unavailable
+                    CameraVideoPlaybackFailure.TRANSFER -> R.string.media_video_playback_failed
+                },
+                cameraVideoContainerLabel(item.name),
+            ),
+            color = AppSubtleText,
+            textAlign = TextAlign.Center,
+        )
+        if (failure.retryable) {
+            TextButton(onClick = onRetry, modifier = Modifier.height(48.dp)) {
+                Icon(
+                    painterResource(LucideR.drawable.lucide_ic_refresh_cw),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.retry_media_video), color = AppAccent)
+            }
+        }
+        if (downloadEnabled) {
+            TextButton(onClick = onDownload, modifier = Modifier.height(48.dp)) {
+                Icon(
+                    painterResource(LucideR.drawable.lucide_ic_download),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.download_original), color = AppAccent)
+            }
+        }
+    }
+}
 
 private fun PlaybackException.toCameraVideoPlaybackFailure(): CameraVideoPlaybackFailure =
     if (
@@ -746,4 +800,16 @@ internal fun cameraVideoMediaItem(item: CameraMediaItem): MediaItem {
         .setUri(uri)
         .setMimeType(mimeType)
         .build()
+}
+
+internal fun cameraVideoContainerLabel(filename: String): String {
+    val extension = filename.substringAfterLast('.', "").lowercase()
+    return when (extension) {
+        "mp4" -> "MP4"
+        "mov" -> "QuickTime MOV"
+        "m4v" -> "M4V"
+        "avi" -> "AVI"
+        "mkv" -> "Matroska MKV"
+        else -> extension.uppercase().ifEmpty { "VIDEO" }
+    }
 }

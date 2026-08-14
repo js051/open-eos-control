@@ -764,8 +764,19 @@ private struct MediaPreviewView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let playback = camera.mediaVideoPlayback {
-                CameraVideoPreview(playback: playback)
+            if let playback = camera.mediaVideoPlayback,
+               let item = camera.mediaPreviewItem {
+                CameraVideoPreview(
+                    playback: playback,
+                    item: item,
+                    downloadEnabled: camera.supports(.mediaDownload) && !camera.isBusy(.media),
+                    onRetry: {
+                        Task { await camera.openMediaPreview(item) }
+                    },
+                    onDownload: {
+                        camera.startMediaDownload(item)
+                    }
+                )
             } else if let item = camera.mediaPreviewItem,
                       let data = camera.mediaPreviewData,
                       let image = UIImage(data: data) {
@@ -1053,6 +1064,10 @@ private struct ZoomableMediaImage: View {
 private struct CameraVideoPreview: View {
     @EnvironmentObject private var language: AppLanguageStore
     @ObservedObject var playback: CameraMediaPlayback
+    let item: CameraMediaItem
+    let downloadEnabled: Bool
+    let onRetry: () -> Void
+    let onDownload: () -> Void
 
     var body: some View {
         ZStack {
@@ -1071,12 +1086,28 @@ private struct CameraVideoPreview: View {
                 .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
             } else if let failure = playback.failure {
                 VStack(spacing: 8) {
-                    Text(language.string(videoFailureKey(failure)))
+                    Text(videoFailureText(failure))
                         .multilineTextAlignment(.center)
                     if failure == .unsupportedFormat {
                         Text(language.string("media_video_download_hint"))
                             .font(.caption)
                             .multilineTextAlignment(.center)
+                    }
+                    if failure.retryable {
+                        Button(action: onRetry) {
+                            Label(language.string("retry_media_video"), systemImage: "arrow.clockwise")
+                                .frame(minHeight: 48)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("retry-media-video")
+                    }
+                    if downloadEnabled {
+                        Button(action: onDownload) {
+                            Label(language.string("download_original"), systemImage: "arrow.down.circle")
+                                .frame(minHeight: 48)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("download-original-video")
                     }
                 }
                 .foregroundStyle(Color.cameraSecondaryText)
@@ -1084,6 +1115,10 @@ private struct CameraVideoPreview: View {
                 .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
             }
         }
+    }
+
+    private func videoFailureText(_ failure: CameraMediaPlaybackFailure) -> String {
+        language.format(videoFailureKey(failure), cameraVideoContainerLabel(item.name))
     }
 
     private func videoFailureKey(_ failure: CameraMediaPlaybackFailure) -> String {

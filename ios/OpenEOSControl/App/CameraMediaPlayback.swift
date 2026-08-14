@@ -218,6 +218,22 @@ enum CameraMediaPlaybackFailure: Equatable {
     case incompleteRange
     case storageUnavailable
     case transport
+
+    var retryable: Bool {
+        self != .unsupportedFormat
+    }
+}
+
+func cameraVideoContainerLabel(_ filename: String) -> String {
+    let extensionName = (filename as NSString).pathExtension.lowercased()
+    switch extensionName {
+    case "mp4": return "MP4"
+    case "mov": return "QuickTime MOV"
+    case "m4v": return "M4V"
+    case "avi": return "AVI"
+    case "mkv": return "Matroska MKV"
+    default: return extensionName.isEmpty ? "VIDEO" : extensionName.uppercased()
+    }
 }
 
 enum CameraMediaPlaybackValidation {

@@ -474,7 +474,17 @@
         <span class="icon" data-icon="chevron-right" aria-hidden="true"></span>
       </button>
       <div id="media-preview-loading" class="media-preview-message" data-i18n="loadingPreview">Loading camera preview</div>
-      <div id="media-preview-unavailable" class="media-preview-message" data-i18n="previewUnavailable" hidden>The camera preview could not be displayed.</div>
+      <div id="media-preview-unavailable" class="media-preview-message" hidden>
+        <p id="media-preview-unavailable-copy" data-i18n="previewUnavailable">The camera preview could not be displayed.</p>
+        <div class="media-preview-recovery-actions">
+          <button id="media-preview-retry" class="button secondary" type="button" hidden>
+            <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span><span data-i18n="tryVideoAgain">Try video again</span>
+          </button>
+          <button id="media-preview-failure-download" class="button secondary" type="button" hidden>
+            <span class="icon" data-icon="download" aria-hidden="true"></span><span data-i18n="downloadOriginal">Download original</span>
+          </button>
+        </div>
+      </div>
       <button id="media-preview-reset-zoom" class="icon-button media-preview-reset-zoom" type="button" data-i18n-aria="resetMediaZoom" hidden>
         <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span>
       </button>
