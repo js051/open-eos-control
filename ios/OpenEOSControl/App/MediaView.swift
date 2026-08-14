@@ -174,7 +174,9 @@ struct MediaView: View {
                         Text(mediaLibrarySummary)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .accessibilityIdentifier("media-library-summary")
+                            .accessibilityIdentifier(
+                                "media-library-summary-\(camera.mediaLibraryLoadStatus.rawValue.lowercased())"
+                            )
                     }
                     .font(.caption)
                     .foregroundStyle(Color.cameraSecondaryText)

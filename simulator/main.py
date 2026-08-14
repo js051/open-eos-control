@@ -521,7 +521,7 @@ async def set_test_media_pagination(payload: dict[str, object]) -> dict[str, int
         or page_size not in range(0, 101)
         or not isinstance(page_delay_ms, int)
         or isinstance(page_delay_ms, bool)
-        or page_delay_ms not in range(0, 5_001)
+        or page_delay_ms not in range(0, 60_001)
     ):
         raise HTTPException(status_code=422, detail="Invalid media pagination test settings")
     state["canonical_media_page_size"] = page_size

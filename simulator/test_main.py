@@ -69,16 +69,26 @@ def test_canon_media_pagination_can_delay_later_pages_without_changing_default()
 
 
 def test_canon_media_pagination_rejects_invalid_test_settings() -> None:
+    maximum_delay = client.post(
+        "/ccapi/test/media-pagination",
+        json={"page_size": 1, "page_delay_ms": 60_000},
+    )
     too_large = client.post(
         "/ccapi/test/media-pagination",
         json={"page_size": 101, "page_delay_ms": 0},
+    )
+    too_delayed = client.post(
+        "/ccapi/test/media-pagination",
+        json={"page_size": 1, "page_delay_ms": 60_001},
     )
     boolean = client.post(
         "/ccapi/test/media-pagination",
         json={"page_size": True, "page_delay_ms": 0},
     )
 
+    assert maximum_delay.status_code == 200
     assert too_large.status_code == 422
+    assert too_delayed.status_code == 422
     assert boolean.status_code == 422
 
 
