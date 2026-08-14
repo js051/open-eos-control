@@ -580,6 +580,9 @@ data class CameraMediaItem(
     val ratingWritable: Boolean? = null,
     val archived: Boolean? = null,
     val streamAvailable: Boolean = false,
+    val contentType: String? = null,
+    val widthPixels: Int? = null,
+    val heightPixels: Int? = null,
 )
 
 val CameraMediaItem.isVideoMedia: Boolean

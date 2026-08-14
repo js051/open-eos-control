@@ -260,6 +260,7 @@ def test_storage_and_media_parsers_handle_r6_mark_iii_shapes() -> None:
     assert [item.name for item in media] == ["IMG_0001.JPG", "IMG_0001.CR3"]
     assert media[0].size_bytes == 6
     assert media[0].content_type == "image/jpeg"
+    assert (media[0].width_pixels, media[0].height_pixels) == (6000, 4000)
     assert media[0].capture_time == "2026-07-21T02:13:21Z"
     assert media[0].preview_available is True
     assert media[1].preview_available is False
@@ -297,12 +298,15 @@ def test_media_info_parser_reads_only_the_primary_file_section() -> None:
     assert info.file_section_available is True
     assert info.content_type == "image/jpeg"
     assert info.size_bytes == 6
+    assert (info.width_pixels, info.height_pixels) == (16, 12)
     assert info.capture_time is not None
 
     missing = parse_media_info("Information on file 'EMPTY.JPG':\nFile:\n  None available.\n")
     assert missing.file_section_available is True
     assert missing.content_type is None
     assert missing.size_bytes is None
+    assert missing.width_pixels is None
+    assert missing.height_pixels is None
     assert missing.capture_time is None
 
     unquoted = parse_media_info("File:\n  Mime type: image/jpeg\n")
@@ -353,6 +357,8 @@ def test_media_info_does_not_reuse_stale_listing_fields_when_gphoto2_reports_non
     assert refreshed.size_bytes == 0
     assert refreshed.content_type == "application/octet-stream"
     assert refreshed.capture_time is None
+    assert refreshed.width_pixels is None
+    assert refreshed.height_pixels is None
     assert refreshed.preview_available is False
 
 

@@ -330,6 +330,9 @@ internal fun MediaViewerDialog(
 ) {
     val captureTime = mediaCaptureTimeLabel(item.captureTime)
     val size = mediaByteSizeLabel(item.sizeBytes)
+    val dimensions = mediaDimensionsLabel(item)
+    val contentType = mediaContentTypeLabel(item.contentType)
+    val technicalDetails = listOfNotNull(size, dimensions, contentType).joinToString(" | ").ifBlank { null }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -347,7 +350,7 @@ internal fun MediaViewerDialog(
                 !item.isVideo && bytes != null -> ZoomableMediaImage(
                     item = item,
                     bytes = bytes,
-                    hasBottomMetadata = captureTime != null || size != null,
+                    hasBottomMetadata = captureTime != null || technicalDetails != null,
                 )
                 loading -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center).size(36.dp),
@@ -420,7 +423,7 @@ internal fun MediaViewerDialog(
                     modifier = Modifier.align(Alignment.CenterEnd),
                 )
             }
-            if (captureTime != null || size != null) {
+            if (captureTime != null || technicalDetails != null) {
                 Column(
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                         .background(Color.Black.copy(alpha = 0.76f))
@@ -430,7 +433,7 @@ internal fun MediaViewerDialog(
                     captureTime?.let {
                         Text(it, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    size?.let {
+                    technicalDetails?.let {
                         Text(it, color = Color.White.copy(alpha = 0.72f), maxLines = 1)
                     }
                 }

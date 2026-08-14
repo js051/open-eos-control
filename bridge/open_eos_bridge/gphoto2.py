@@ -762,6 +762,8 @@ class GPhotoMediaInfo:
     file_section_available: bool = False
     content_type: str | None = None
     size_bytes: int | None = None
+    width_pixels: int | None = None
+    height_pixels: int | None = None
     capture_time: str | None = None
 
 
@@ -1050,7 +1052,8 @@ def parse_media_list(output: str) -> list[MediaItem]:
     file_pattern = re.compile(
         r"^#(?P<number>\d+)\s+(?P<name>.+?)\s+"
         r"(?:(?P<access>[a-z-]{2})\s+)?(?P<size>\d+)\s+(?P<unit>[KMGT]?B)"
-        r"(?:\s+\d+x\d+)?\s+(?P<mime>\S+)(?:\s+(?P<timestamp>\d{9,}))?\s*$",
+        r"(?:\s+(?P<width>\d+)x(?P<height>\d+))?\s+"
+        r"(?P<mime>\S+)(?:\s+(?P<timestamp>\d{9,}))?\s*$",
         re.I,
     )
     for raw_line in output.splitlines():
@@ -1065,6 +1068,10 @@ def parse_media_list(output: str) -> list[MediaItem]:
         name = file_match.group("name").strip()
         content_type = file_match.group("mime")
         size = int(file_match.group("size")) * _size_multiplier(file_match.group("unit"))
+        width_pixels = int(file_match.group("width")) if file_match.group("width") else None
+        height_pixels = int(file_match.group("height")) if file_match.group("height") else None
+        width_pixels = width_pixels if width_pixels and width_pixels > 0 else None
+        height_pixels = height_pixels if height_pixels and height_pixels > 0 else None
         timestamp = file_match.group("timestamp")
         capture_time = None
         if timestamp:
@@ -1077,6 +1084,8 @@ def parse_media_list(output: str) -> list[MediaItem]:
                 size_bytes=size,
                 capture_time=capture_time,
                 content_type=content_type,
+                width_pixels=width_pixels,
+                height_pixels=height_pixels,
                 preview_available=is_previewable_media(name, content_type, size),
             )
         )
@@ -1088,6 +1097,8 @@ def parse_media_info(output: str) -> GPhotoMediaInfo:
     file_section_available = False
     content_type: str | None = None
     size_bytes: int | None = None
+    width_pixels: int | None = None
+    height_pixels: int | None = None
     capture_time: str | None = None
 
     for raw_line in output.splitlines():
@@ -1111,6 +1122,14 @@ def parse_media_info(output: str) -> GPhotoMediaInfo:
             match = re.fullmatch(r"(\d+)\s+byte\(s\)", value)
             if match:
                 size_bytes = int(match.group(1))
+        elif key == "Width":
+            match = re.fullmatch(r"([1-9]\d*)\s+pixel\(s\)", value)
+            if match:
+                width_pixels = int(match.group(1))
+        elif key == "Height":
+            match = re.fullmatch(r"([1-9]\d*)\s+pixel\(s\)", value)
+            if match:
+                height_pixels = int(match.group(1))
         elif key == "Time":
             capture_time = _parse_gphoto_local_time(value)
 
@@ -1118,6 +1137,8 @@ def parse_media_info(output: str) -> GPhotoMediaInfo:
         file_section_available=file_section_available,
         content_type=content_type,
         size_bytes=size_bytes,
+        width_pixels=width_pixels,
+        height_pixels=height_pixels,
         capture_time=capture_time,
     )
 
@@ -2243,6 +2264,8 @@ class GPhoto2Session:
                 size_bytes=size_bytes,
                 capture_time=info.capture_time,
                 content_type=content_type,
+                width_pixels=info.width_pixels,
+                height_pixels=info.height_pixels,
                 preview_available=is_previewable_media(name, content_type, size_bytes),
             )
             self._media_cache[media_id] = item

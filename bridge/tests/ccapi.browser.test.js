@@ -656,6 +656,15 @@ async function run() {
     await page.unroute(mediaListRoute);
     await page.unroute(bulkThumbnailRoute);
     await page.click("#media-refresh-button");
+    const selectedMediaInfoRoute = /\/v1\/session\/[^/]+\/media\/[^/]+\/info(?:\?.*)?$/;
+    await page.route(selectedMediaInfoRoute, async (route) => {
+      const response = await route.fetch();
+      const item = await response.json();
+      await route.fulfill({
+        response,
+        json: { ...item, contentType: "image/jpeg", widthPixels: 6000, heightPixels: 4000 },
+      });
+    });
     const capturedMedia = page.locator(".media-card").filter({ hasText: "SIM_0003.JPG" });
     await capturedMedia.waitFor({ state: "visible" });
     assert.equal(await page.locator("#media-filter-control button.active").innerText(), "All");
@@ -682,6 +691,9 @@ async function run() {
     await page.click("#media-preview-details");
     await page.waitForSelector("#media-details-dialog[open]");
     assert.equal(await page.locator("#media-details-name").innerText(), "SIM_0003.JPG");
+    await page.waitForFunction(() => document.querySelector("#media-details-summary")?.textContent?.includes("6000 x 4000"));
+    assert.match(await page.locator("#media-details-summary").innerText(), /image\/jpeg/);
+    await page.unroute(selectedMediaInfoRoute);
     page.once("dialog", (dialog) => dialog.accept());
     await page.click("#media-details-delete");
     await waitForSimulatorState(

@@ -1168,7 +1168,10 @@ public actor DesktopBridgeClient {
             protected: item.optionalBool("protected"),
             rating: rating,
             rotationDegrees: rotation,
-            archived: archived
+            archived: archived,
+            contentType: item.nonEmptyString("contentType"),
+            widthPixels: item.int("widthPixels").flatMap { $0 > 0 ? $0 : nil },
+            heightPixels: item.int("heightPixels").flatMap { $0 > 0 ? $0 : nil }
         )
     }
 

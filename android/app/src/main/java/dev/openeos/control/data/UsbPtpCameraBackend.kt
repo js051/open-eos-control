@@ -2202,6 +2202,9 @@ private fun PtpObjectInfo.toMediaItem(
     rating = rating,
     ratingWritable = ratingWritable,
     streamAvailable = streamAvailable && mediaKind(filename, objectFormat) == "video",
+    contentType = contentTypeFor(filename, mediaKind(filename, objectFormat)),
+    widthPixels = imageWidth.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt(),
+    heightPixels = imageHeight.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt(),
 )
 
 private fun CameraMediaItem.ptpHandle(): Long {

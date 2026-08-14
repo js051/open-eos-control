@@ -86,6 +86,9 @@ class DesktopBridgeClientTest {
         assertEquals("camera-r6m3", cameras.single().id)
         assertEquals("TEST-SERIAL-0001", info.serial)
         assertTrue(media.single().previewAvailable)
+        assertEquals("image/jpeg", media.single().contentType)
+        assertEquals(6000, media.single().widthPixels)
+        assertEquals(4000, media.single().heightPixels)
         assertEquals("gphoto2 2.5.33", info.engineVersion)
         assertEquals(82, initialStatus.batteryLevel)
         assertEquals(2048L, initialStatus.storageTotalBytes)
@@ -896,6 +899,8 @@ class DesktopBridgeClientTest {
                   "sizeBytes": 5,
                   "captureTime": "2026-07-21T02:13:21Z",
                   "contentType": "image/jpeg",
+                  "widthPixels": 6000,
+                  "heightPixels": 4000,
                   "previewAvailable": true
                 }
               ]

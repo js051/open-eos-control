@@ -917,6 +917,9 @@ class DesktopBridgeClient(
             rating = item.optNullableInt("rating")?.takeIf { it in 0..5 },
             rotationDegrees = item.optNullableInt("rotationDegrees")?.takeIf { it in MEDIA_ROTATIONS },
             streamAvailable = cameraMediaIsVideo(kind, name),
+            contentType = item.optNullableString("contentType"),
+            widthPixels = item.optNullableInt("widthPixels")?.takeIf { it > 0 },
+            heightPixels = item.optNullableInt("heightPixels")?.takeIf { it > 0 },
         )
     }
 

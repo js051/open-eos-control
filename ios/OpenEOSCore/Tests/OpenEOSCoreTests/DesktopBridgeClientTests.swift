@@ -522,7 +522,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         )
         await transport.enqueueJSON(
             path: "/v1/session/session_123/media",
-            body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true,"protected":null,"rating":null,"rotationDegrees":null,"archived":false}]}"#
+            body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","widthPixels":6000,"heightPixels":4000,"previewAvailable":true,"protected":null,"rating":null,"rotationDegrees":null,"archived":false}]}"#
         )
         let thumbnailJPEG = Data([0xFF, 0xD8, 0x04, 0x02, 0xFF, 0xD9])
         await transport.enqueue(
@@ -538,27 +538,27 @@ final class DesktopBridgeClientTests: XCTestCase {
         )
         await transport.enqueueJSON(
             path: "/v1/session/session_123/media/gphoto2:YWJj/info",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","previewAvailable":true,"protected":false,"rating":0,"rotationDegrees":0,"archived":false}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","widthPixels":6000,"heightPixels":4000,"previewAvailable":true,"protected":false,"rating":0,"rotationDegrees":0,"archived":false}"#
         )
         await transport.enqueueJSON(
             method: "PUT",
             path: "/v1/session/session_123/media/gphoto2:YWJj/protection",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":0,"rotationDegrees":0,"archived":false}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","widthPixels":6000,"heightPixels":4000,"previewAvailable":true,"protected":true,"rating":0,"rotationDegrees":0,"archived":false}"#
         )
         await transport.enqueueJSON(
             method: "PUT",
             path: "/v1/session/session_123/media/gphoto2:YWJj/rating",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":0,"archived":false}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","widthPixels":6000,"heightPixels":4000,"previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":0,"archived":false}"#
         )
         await transport.enqueueJSON(
             method: "PUT",
             path: "/v1/session/session_123/media/gphoto2:YWJj/rotation",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":180,"archived":false}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","widthPixels":6000,"heightPixels":4000,"previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":180,"archived":false}"#
         )
         await transport.enqueueJSON(
             method: "PUT",
             path: "/v1/session/session_123/media/gphoto2:YWJj/archive",
-            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":180,"archived":true}"#
+            body: #"{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"contentType":"image/jpeg","widthPixels":6000,"heightPixels":4000,"previewAvailable":true,"protected":true,"rating":4,"rotationDegrees":180,"archived":true}"#
         )
         await transport.enqueueDownload(
             path: "/v1/session/session_123/media/gphoto2:YWJj",
@@ -658,6 +658,9 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(mediaSnapshots, [media])
         let item = try XCTUnwrap(media.first)
         XCTAssertTrue(item.previewAvailable)
+        XCTAssertEqual(item.contentType, "image/jpeg")
+        XCTAssertEqual(item.widthPixels, 6000)
+        XCTAssertEqual(item.heightPixels, 4000)
         let thumbnail = try await client.mediaThumbnail(item)
         XCTAssertEqual(thumbnail.data, thumbnailJPEG)
         XCTAssertEqual(thumbnail.contentType, "image/jpeg")
@@ -665,6 +668,8 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(preview.data, previewJPEG)
         XCTAssertEqual(preview.contentType, "image/jpeg")
         let info = try await client.mediaInfo(item)
+        XCTAssertEqual(info.widthPixels, 6000)
+        XCTAssertEqual(info.heightPixels, 4000)
         XCTAssertEqual(info.protected, false)
         XCTAssertEqual(info.rating, 0)
         XCTAssertEqual(info.rotationDegrees, 0)

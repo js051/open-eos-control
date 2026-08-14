@@ -286,6 +286,10 @@
 "media_protected" = "已保護";
 "media_unprotected" = "未保護";
 "media_metadata_unknown" = "正在從相機讀取…";
+"media_format" = "格式";
+"media_dimensions" = "尺寸";
+"media_file_size" = "檔案大小";
+"media_captured_at" = "拍攝時間";
 "protect_media" = "保護 %@";
 "unprotect_media" = "取消保護 %@";
 "media_archive" = "封存";

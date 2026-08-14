@@ -1809,7 +1809,10 @@ public actor CCAPIClient {
                     protected: $0.bool("protect"),
                     rating: $0.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
                     rotationDegrees: $0.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil },
-                    archived: $0.bool("archive")
+                    archived: $0.bool("archive"),
+                    contentType: $0.string("content_type").nilIfEmpty,
+                    widthPixels: $0.integer("width_pixels").flatMap { $0 > 0 ? $0 : nil },
+                    heightPixels: $0.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil }
                 )
             } ?? []
             await onProgress(items)
@@ -2172,7 +2175,10 @@ public actor CCAPIClient {
             protected: protected,
             rating: rating,
             rotationDegrees: rotation,
-            archived: archived
+            archived: archived,
+            contentType: item.contentType,
+            widthPixels: item.widthPixels,
+            heightPixels: item.heightPixels
         )
     }
 

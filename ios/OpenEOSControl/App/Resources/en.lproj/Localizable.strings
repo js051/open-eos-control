@@ -286,6 +286,10 @@
 "media_protected" = "Protected";
 "media_unprotected" = "Unprotected";
 "media_metadata_unknown" = "Reading from camera…";
+"media_format" = "Format";
+"media_dimensions" = "Dimensions";
+"media_file_size" = "File size";
+"media_captured_at" = "Captured";
 "protect_media" = "Protect %@";
 "unprotect_media" = "Remove protection from %@";
 "media_archive" = "Archive";
