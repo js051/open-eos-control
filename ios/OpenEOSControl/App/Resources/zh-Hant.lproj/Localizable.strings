@@ -238,6 +238,7 @@
 "media_filter_photos" = "照片";
 "media_filter_videos" = "影片";
 "media_sort" = "媒體排序";
+"media_sort_camera" = "相機順序";
 "media_sort_newest" = "最新優先";
 "media_sort_oldest" = "最舊優先";
 "media_sort_name" = "檔案名稱";

@@ -6,7 +6,17 @@ import org.junit.Test
 
 class MediaLibraryTest {
     @Test
-    fun sortsKnownCaptureTimesBeforeUnknownAndUsesNaturalFilenameFallback() {
+    fun cameraSortPreservesTransportOrderExactly() {
+        val items = listOf(
+            media("ten", "IMG_10.JPG", "2026-08-13T10:00:00Z"),
+            media("one", "IMG_1.JPG", "2026-08-14T10:00:00Z"),
+        )
+
+        assertEquals(items, mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.CAMERA))
+    }
+
+    @Test
+    fun sortsKnownCaptureTimesBeforeUnknownAndPreservesCameraOrderWithoutDates() {
         val items = listOf(
             media("photo-9", "IMG_9.JPG"),
             media("new", "IMG_2.JPG", "2026-08-14T10:00:00Z"),
@@ -15,11 +25,28 @@ class MediaLibraryTest {
         )
 
         assertEquals(
-            listOf("new", "old", "photo-10", "photo-9"),
+            listOf("new", "old", "photo-9", "photo-10"),
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST).map { it.id },
         )
         assertEquals(
             listOf("old", "new", "photo-9", "photo-10"),
+            mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.OLDEST).map { it.id },
+        )
+    }
+
+    @Test
+    fun dateSortPreservesCameraOrderForEqualTimestamps() {
+        val items = listOf(
+            media("raw", "IMG_0002.CR3", "2026-08-14T10:00:00Z"),
+            media("jpeg", "IMG_0002.JPG", "2026-08-14T10:00:00Z"),
+        )
+
+        assertEquals(
+            listOf("raw", "jpeg"),
+            mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST).map { it.id },
+        )
+        assertEquals(
+            listOf("raw", "jpeg"),
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.OLDEST).map { it.id },
         )
     }

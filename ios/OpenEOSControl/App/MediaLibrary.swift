@@ -11,6 +11,7 @@ enum MediaFilter: String, CaseIterable, Identifiable {
 }
 
 enum MediaSort: String, CaseIterable, Identifiable {
+    case camera
     case newest
     case oldest
     case name
@@ -19,6 +20,7 @@ enum MediaSort: String, CaseIterable, Identifiable {
     var localizationKey: String { "media_sort_\(rawValue)" }
     var systemImage: String {
         switch self {
+        case .camera: "camera"
         case .newest: "calendar.badge.clock"
         case .oldest: "calendar"
         case .name: "textformat"
@@ -37,7 +39,7 @@ func mediaItemsForDisplay(
     filter: MediaFilter,
     sort: MediaSort
 ) -> [CameraMediaItem] {
-    items
+    let filtered = items
         .filter { item in
             switch filter {
             case .all: true
@@ -45,9 +47,13 @@ func mediaItemsForDisplay(
             case .videos: mediaIsVideo(item)
             }
         }
+    guard sort != .camera else { return filtered }
+    return filtered.enumerated()
         .sorted { left, right in
-            compareMediaItems(left, right, sort: sort) == .orderedAscending
+            let compared = compareMediaItems(left.element, right.element, sort: sort)
+            return compared == .orderedSame ? left.offset < right.offset : compared == .orderedAscending
         }
+        .map { $0.element }
 }
 
 func mediaCaptureDate(_ item: CameraMediaItem) -> Date? {
@@ -67,6 +73,7 @@ private func compareMediaItems(
     _ right: CameraMediaItem,
     sort: MediaSort
 ) -> ComparisonResult {
+    if sort == .camera { return .orderedSame }
     if sort == .name {
         let compared = naturalMediaName(left, right)
         return compared == .orderedSame
@@ -85,11 +92,7 @@ private func compareMediaItems(
     case (.none, .some(_)):
         return .orderedDescending
     default:
-        let compared = naturalMediaName(left, right)
-        if compared != .orderedSame {
-            return sort == .newest ? compared.reversed : compared
-        }
-        return left.id.compare(right.id, options: [.caseInsensitive, .numeric])
+        return .orderedSame
     }
 }
 

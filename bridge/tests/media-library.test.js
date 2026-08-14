@@ -24,6 +24,10 @@ function run() {
     mediaLibrary.itemsForDisplay(items, "all", "name", "en-US").map(({ id }) => id),
     ["one", "two", "ten"],
   );
+  assert.deepEqual(
+    mediaLibrary.itemsForDisplay(items, "all", "camera", "en-US").map(({ id }) => id),
+    ["ten", "two", "one"],
+  );
 
   const dated = [
     item("unknown", "IMG_99.JPG"),
@@ -37,6 +41,21 @@ function run() {
   assert.deepEqual(
     mediaLibrary.itemsForDisplay(dated, "all", "oldest", "en-US").map(({ id }) => id),
     ["old", "new", "unknown"],
+  );
+
+  const cameraOrdered = [
+    item("unknown-10", "IMG_10.JPG"),
+    item("unknown-9", "IMG_9.JPG"),
+    item("raw", "IMG_2.CR3", "2026-08-14T10:00:00Z"),
+    item("jpeg", "IMG_2.JPG", "2026-08-14T10:00:00Z"),
+  ];
+  assert.deepEqual(
+    mediaLibrary.itemsForDisplay(cameraOrdered, "all", "newest", "en-US").map(({ id }) => id),
+    ["raw", "jpeg", "unknown-10", "unknown-9"],
+  );
+  assert.deepEqual(
+    mediaLibrary.itemsForDisplay(cameraOrdered, "all", "oldest", "en-US").map(({ id }) => id),
+    ["raw", "jpeg", "unknown-10", "unknown-9"],
   );
 
   const videos = [

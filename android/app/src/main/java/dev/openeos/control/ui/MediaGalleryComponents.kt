@@ -90,6 +90,7 @@ internal fun MediaSortButton(sort: MediaSort, onSort: (MediaSort) -> Unit) {
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             listOf(
+                MediaSort.CAMERA to R.string.media_camera_order,
                 MediaSort.NEWEST to R.string.media_newest_first,
                 MediaSort.OLDEST to R.string.media_oldest_first,
                 MediaSort.NAME to R.string.media_filename,

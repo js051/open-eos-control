@@ -238,6 +238,7 @@
 "media_filter_photos" = "Photos";
 "media_filter_videos" = "Videos";
 "media_sort" = "Sort media";
+"media_sort_camera" = "Camera order";
 "media_sort_newest" = "Newest first";
 "media_sort_oldest" = "Oldest first";
 "media_sort_name" = "File name";
