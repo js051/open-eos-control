@@ -43,6 +43,7 @@ class CameraViewModelPreviewTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.previewMode)
+        assertEquals(MediaLibraryLoadStatus.COMPLETE, viewModel.uiState.value.mediaLibraryLoadStatus)
         assertEquals("1600", viewModel.uiState.value.status?.exposure?.iso)
         assertEquals(LiveViewSize.LARGE, viewModel.uiState.value.liveViewSize)
         assertEquals(LiveViewMagnification.X5, viewModel.uiState.value.liveViewMagnification)
@@ -52,6 +53,7 @@ class CameraViewModelPreviewTest {
 
         assertFalse(viewModel.uiState.value.connected)
         assertFalse(viewModel.uiState.value.previewMode)
+        assertEquals(MediaLibraryLoadStatus.NOT_LOADED, viewModel.uiState.value.mediaLibraryLoadStatus)
         assertEquals(null, viewModel.uiState.value.liveViewMagnification)
         assertTrue(viewModel.uiState.value.operatorConfirmedFeatures.isEmpty())
     }

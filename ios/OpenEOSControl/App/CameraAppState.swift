@@ -78,6 +78,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaItems: [CameraMediaItem] = []
     @Published private(set) var mediaLibraryLoading = false
     @Published private(set) var mediaLibraryLoadCancellable = false
+    @Published private(set) var mediaLibraryLoadStatus = MediaLibraryLoadStatus.notLoaded
     @Published private(set) var mediaThumbnails: [String: Data] = [:]
     @Published private(set) var loadingMediaThumbnailIDs = Set<String>()
     @Published private(set) var mediaPreviewItem: CameraMediaItem?
@@ -353,6 +354,7 @@ final class CameraAppState: ObservableObject {
         isPreview = true
         screen = .control
         mediaItems = Self.previewMedia
+        mediaLibraryLoadStatus = .complete
         resetMediaThumbnails()
         resetMediaPreview()
         removeDownloadedFile()
@@ -924,6 +926,7 @@ final class CameraAppState: ObservableObject {
         mediaLibraryGeneration = generation
         mediaLibraryLoading = true
         mediaLibraryLoadCancellable = true
+        mediaLibraryLoadStatus = .loading
         deletedMediaName = nil
         resetMediaThumbnails()
         resetMediaPreview()
@@ -933,6 +936,7 @@ final class CameraAppState: ObservableObject {
             return
         }
         guard let session else {
+            mediaLibraryLoadStatus = .failed
             finishMediaLibraryLoad(generation: generation)
             return
         }
@@ -942,7 +946,8 @@ final class CameraAppState: ObservableObject {
     }
 
     func cancelMediaLibraryLoad() {
-        invalidateMediaLibraryLoad()
+        guard mediaLibraryLoading else { return }
+        invalidateMediaLibraryLoad(status: .cancelled)
     }
 
     private func performMediaLibraryLoad(session: CameraSession, generation: UUID) async {
@@ -953,10 +958,15 @@ final class CameraAppState: ObservableObject {
             }
             guard generation == mediaLibraryGeneration, !Task.isCancelled else { return }
             mediaItems = items
+            mediaLibraryLoadStatus = .complete
             lastError = nil
         } catch is CancellationError {
+            if generation == mediaLibraryGeneration {
+                mediaLibraryLoadStatus = .cancelled
+            }
         } catch {
             guard generation == mediaLibraryGeneration else { return }
+            mediaLibraryLoadStatus = .failed
             record(error)
         }
     }
@@ -1210,7 +1220,14 @@ final class CameraAppState: ObservableObject {
                 return
             }
             guard mediaUploadToken == token else { throw CancellationError() }
-            mediaItems = try await session.listMedia()
+            mediaLibraryLoadStatus = .loading
+            do {
+                mediaItems = try await session.listMedia()
+            } catch {
+                mediaLibraryLoadStatus = .failed
+                throw error
+            }
+            mediaLibraryLoadStatus = .complete
             resetMediaThumbnails()
             resetMediaPreview()
             uploadedMediaName = result.name
@@ -1266,9 +1283,14 @@ final class CameraAppState: ObservableObject {
         sizeBytes: Int64?
     ) async {
         guard case .desktopBridge = session else { return }
+        mediaLibraryLoadStatus = .loading
         let items = await Task.detached { try? await session.listMedia() }.value
-        guard let items else { return }
+        guard let items else {
+            mediaLibraryLoadStatus = .failed
+            return
+        }
         mediaItems = items
+        mediaLibraryLoadStatus = .complete
         resetMediaThumbnails()
         resetMediaPreview()
         guard let uploaded = items.first(where: { item in
@@ -1395,6 +1417,8 @@ final class CameraAppState: ObservableObject {
             )
         }
         let monitoring = [
+            "mediaItemCount=\(mediaItems.count)",
+            "mediaLoadStatus=\(mediaLibraryLoadStatus.rawValue)",
             "lastClockSyncAt=\(lastClockSyncAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
             "monitorHistogram=\(monitorSettings.histogramVisible)",
             "monitorWaveform=\(monitorSettings.waveformVisible)",
@@ -1660,6 +1684,7 @@ final class CameraAppState: ObservableObject {
             mediaLibraryGeneration = mediaGeneration
             mediaLibraryLoading = true
             mediaLibraryLoadCancellable = false
+            mediaLibraryLoadStatus = .loading
             do {
                 resetMediaThumbnails()
                 resetMediaPreview()
@@ -1668,6 +1693,7 @@ final class CameraAppState: ObservableObject {
                 }
                 guard mediaGeneration == mediaLibraryGeneration else { return true }
                 mediaLibraryLoading = false
+                mediaLibraryLoadStatus = .complete
                 end(.mediaLibrary)
                 guard generation == eventGeneration, !Task.isCancelled else { return false }
                 mediaItems = items
@@ -1676,6 +1702,7 @@ final class CameraAppState: ObservableObject {
             } catch {
                 if mediaGeneration == mediaLibraryGeneration {
                     mediaLibraryLoading = false
+                    mediaLibraryLoadStatus = (error is CancellationError) ? .cancelled : .failed
                     end(.mediaLibrary)
                 } else {
                     return true
@@ -1788,12 +1815,13 @@ final class CameraAppState: ObservableObject {
         mediaItems = items
     }
 
-    private func invalidateMediaLibraryLoad() {
+    private func invalidateMediaLibraryLoad(status: MediaLibraryLoadStatus = .notLoaded) {
         mediaLibraryGeneration = UUID()
         mediaLibraryTask?.cancel()
         mediaLibraryTask = nil
         mediaLibraryLoading = false
         mediaLibraryLoadCancellable = false
+        mediaLibraryLoadStatus = status
         busyOperations.remove(.mediaLibrary)
     }
 

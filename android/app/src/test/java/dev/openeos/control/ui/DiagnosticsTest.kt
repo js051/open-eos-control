@@ -7,6 +7,7 @@ import dev.openeos.control.data.CameraCapabilityEvidence
 import dev.openeos.control.data.CameraDiscoveryAttempt
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraNetworkRouting
 import dev.openeos.control.data.CameraStatus
@@ -62,6 +63,25 @@ class DiagnosticsTest {
         assertTrue(report.contains("controlOrientationMode=FOLLOW_SYSTEM"))
         assertTrue(report.contains("systemAutoRotationEnabled=false"))
         assertTrue(report.contains("controlRotationDegrees=-90.0"))
+    }
+
+    @Test
+    fun diagnosticReportDistinguishesACompleteMediaTraversalBeyondFiveHundredItems() {
+        val state = CameraUiState(
+            mediaItems = List(501) { index ->
+                CameraMediaItem(
+                    id = "media-$index",
+                    name = "IMG_$index.JPG",
+                    kind = "image",
+                )
+            },
+            mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
+        )
+
+        val report = buildDiagnosticReport(state)
+
+        assertTrue(report.contains("mediaItemCount=501"))
+        assertTrue(report.contains("mediaLoadStatus=COMPLETE"))
     }
 
     @Test

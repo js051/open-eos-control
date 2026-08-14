@@ -38,6 +38,8 @@ enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MON
 
 enum class CameraOperation { CONNECT, STATUS, SETTING, DIRECTORY, CLOCK, MAINTENANCE, POWER, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
 
+enum class MediaLibraryLoadStatus { NOT_LOADED, LOADING, COMPLETE, CANCELLED, FAILED }
+
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,
     val frameBytes: Int? = null,
@@ -67,6 +69,7 @@ data class CameraUiState(
     val capabilities: CameraCapabilities? = null,
     val mediaItems: List<CameraMediaItem> = emptyList(),
     val mediaLibraryLoading: Boolean = false,
+    val mediaLibraryLoadStatus: MediaLibraryLoadStatus = MediaLibraryLoadStatus.NOT_LOADED,
     val mediaThumbnails: Map<String, Bitmap> = emptyMap(),
     val mediaThumbnailLoadingIds: Set<String> = emptySet(),
     val mediaPreviewItem: CameraMediaItem? = null,

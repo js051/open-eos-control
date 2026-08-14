@@ -264,7 +264,11 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "contentsChanged && state.mediaLoaded" in script
     assert "await refreshMedia()" in script
     assert "mediaRefreshPromise: null" in script
+    assert 'mediaLoadStatus: "NOT_LOADED"' in script
     assert "function refreshMediaWhenCurrent()" in script
+    assert 'state.mediaLoadStatus = "LOADING"' in script
+    assert 'state.mediaLoadStatus = "COMPLETE"' in script
+    assert 'state.mediaLoadStatus = "FAILED"' in script
     assert "state.refreshGeneration !== interactionGeneration" in script
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script
@@ -365,6 +369,8 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "validation: diagnostics.featureSummary(state.capabilities)" in report_source
     assert "monitoring: {" in report_source
     assert "analysisError: state.monitorAnalysisError" in report_source
+    assert "itemCount: state.media.length" in report_source
+    assert "loadStatus: state.mediaLoadStatus" in report_source
     assert "selection: state.localVideoDeviceId ? \"explicit\" : \"system-default\"" in report_source
     assert "deviceId:" not in report_source
     assert "label:" not in report_source

@@ -963,6 +963,7 @@ class CameraViewModel(
                 mediaPreviewLoading = false,
                 mediaStreamSource = null,
                 mediaLibraryLoading = true,
+                mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING,
             )
         }
         val job = viewModelScope.launch {
@@ -977,6 +978,7 @@ class CameraViewModel(
                 _uiState.update {
                     it.copy(
                         mediaItems = items,
+                        mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
                         capabilities = capabilities ?: it.capabilities,
                         lastDownloadedMediaName = null,
                         lastUploadedMediaName = null,
@@ -985,11 +987,20 @@ class CameraViewModel(
                 }
                 refreshCapabilityEvidence()
             } catch (exception: CancellationException) {
+                if (generation == mediaLibraryGeneration) {
+                    _uiState.update {
+                        it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.CANCELLED)
+                    }
+                }
                 throw exception
             } catch (exception: Exception) {
                 exception.printStackTrace()
                 _uiState.update {
-                    it.copy(error = formatException(exception), errorOperation = CameraOperation.MEDIA)
+                    it.copy(
+                        mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED,
+                        error = formatException(exception),
+                        errorOperation = CameraOperation.MEDIA,
+                    )
                 }
             } finally {
                 if (generation == mediaLibraryGeneration) {
@@ -1322,7 +1333,17 @@ class CameraViewModel(
                     }
                 }
                 val finishUpload: suspend () -> Unit = {
-                    val items = repository.listMedia()
+                    _uiState.update {
+                        it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING)
+                    }
+                    val items = try {
+                        repository.listMedia()
+                    } catch (exception: Exception) {
+                        _uiState.update {
+                            it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED)
+                        }
+                        throw exception
+                    }
                     check(
                         items.any {
                             it.id == result.item.id ||
@@ -1336,6 +1357,7 @@ class CameraViewModel(
                     _uiState.update {
                         it.copy(
                             mediaItems = items,
+                            mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
                             mediaThumbnails = emptyMap(),
                             capabilities = capabilities ?: it.capabilities,
                             lastUploadedMediaName = result.item.name,
@@ -1391,9 +1413,17 @@ class CameraViewModel(
     }
 
     private suspend fun reconcileCancelledBridgeUpload(name: String, sizeBytes: Long?) {
+        _uiState.update {
+            it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING)
+        }
         val items = withContext(NonCancellable + Dispatchers.IO) {
             runCatching { repository.listMedia() }.getOrNull()
-        } ?: return
+        } ?: run {
+            _uiState.update {
+                it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED)
+            }
+            return
+        }
         val uploaded = items.firstOrNull { item ->
             item.name.equals(name, ignoreCase = true) &&
                 (sizeBytes == null || item.sizeBytes == sizeBytes)
@@ -1402,6 +1432,7 @@ class CameraViewModel(
         _uiState.update { current ->
             current.copy(
                 mediaItems = items,
+                mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
                 mediaThumbnails = emptyMap(),
                 lastUploadedMediaName = uploaded?.name,
             )
@@ -1788,15 +1819,27 @@ class CameraViewModel(
                     val status = repository.refreshStatus()
                     val capabilities = repository.refreshCapabilities()
                     val captureMode = captureModeFrom(capabilities)
-                    val mediaItems = if ("contents" in event.changedKeys) {
+                    val mediaResult = if ("contents" in event.changedKeys) {
                         if (capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER)) {
-                            runCatching { repository.listMedia() }.getOrNull()
+                            _uiState.update { current ->
+                                if (
+                                    generation == eventPollingGeneration &&
+                                    current.connected &&
+                                    !current.previewMode
+                                ) {
+                                    current.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING)
+                                } else {
+                                    current
+                                }
+                            }
+                            runCatching { repository.listMedia() }
                         } else {
-                            emptyList()
+                            Result.success(emptyList())
                         }
                     } else {
                         null
                     }
+                    val mediaItems = mediaResult?.getOrNull()
                     if (mediaItems != null) cancelMediaThumbnailLoads()
                     val updateState: (CameraUiState) -> CameraUiState = { current ->
                         if (
@@ -1812,6 +1855,11 @@ class CameraViewModel(
                                     ?: current.liveViewMagnification?.takeIf { value ->
                                         value in capabilities.liveView.magnifications
                                     },
+                                mediaLibraryLoadStatus = when {
+                                    mediaResult?.isSuccess == true -> MediaLibraryLoadStatus.COMPLETE
+                                    mediaResult?.isFailure == true -> MediaLibraryLoadStatus.FAILED
+                                    else -> current.mediaLibraryLoadStatus
+                                },
                             )
                             if (mediaItems != null) refreshed.withEventMediaItems(mediaItems) else refreshed
                         } else {
@@ -1890,6 +1938,7 @@ class CameraViewModel(
         mediaPreviewLoading = false,
         mediaStreamSource = null,
         mediaLibraryLoading = false,
+        mediaLibraryLoadStatus = MediaLibraryLoadStatus.NOT_LOADED,
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
@@ -1981,7 +2030,12 @@ class CameraViewModel(
         mediaLibraryGeneration += 1
         mediaLibraryJob?.cancel()
         mediaLibraryJob = null
-        _uiState.update { it.copy(mediaLibraryLoading = false) }
+        _uiState.update {
+            it.copy(
+                mediaLibraryLoading = false,
+                mediaLibraryLoadStatus = MediaLibraryLoadStatus.NOT_LOADED,
+            )
+        }
     }
 
     private fun closeMediaStream() {

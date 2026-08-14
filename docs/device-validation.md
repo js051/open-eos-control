@@ -24,6 +24,8 @@ Use a current build, connect the physical camera, exercise the features under te
 
 For CCAPI firmware/discovery problems, preserve the `discoveryAttemptCount` and numbered `discoveryAttempt` lines when sharing the private report. They distinguish root-list, developer-list and identity fallback outcomes without containing the response body or values. Each line is limited to a fixed relative endpoint, result, optional HTTP status, sanitized top-level keys, protocol versions, valid operation count and truncation state; it never includes the camera origin, credentials, Authorization, exception message or raw JSON.
 
+For media-library validation, read `mediaItemCount` together with `mediaLoadStatus` on Android/iOS, or `mediaLibrary.itemCount` together with `mediaLibrary.loadStatus` on PC. Only `COMPLETE` means the current count came from a traversal that reached every container and page advertised by the camera. `LOADING`, `CANCELLED`, `FAILED`, and `NOT_LOADED` are intentionally incomplete evidence. There is no 500-item product limit.
+
 The source report must remain private. It is accepted only when it:
 
 - uses report schema 1 and identifies a non-unknown product version;

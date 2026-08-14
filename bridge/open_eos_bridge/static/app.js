@@ -1053,6 +1053,7 @@
     tapAction: "focus",
     media: [],
     mediaLoaded: false,
+    mediaLoadStatus: "NOT_LOADED",
     mediaRefreshPromise: null,
     mediaFilter: "all",
     mediaSort: "newest",
@@ -1650,6 +1651,7 @@
     state.media = [];
     state.mediaPage = 0;
     state.mediaLoaded = false;
+    state.mediaLoadStatus = "NOT_LOADED";
     state.mediaDownloadPreparing = false;
     state.mediaDownload = null;
     state.mediaUpload = null;
@@ -4144,6 +4146,7 @@
       const rawSessionId = state.session.id;
       const interactionGeneration = state.refreshGeneration;
       ui.mediaRefreshButton.disabled = true;
+      state.mediaLoadStatus = "LOADING";
       closeMediaPreview();
       try {
         const response = await api(`/v1/session/${encodeURIComponent(rawSessionId)}/media`);
@@ -4154,12 +4157,14 @@
         clearMediaThumbnails();
         state.media = response.items || [];
         state.mediaLoaded = true;
+        state.mediaLoadStatus = "COMPLETE";
         renderMedia();
         return true;
       } catch (error) {
         if (state.session?.id !== rawSessionId) return false;
         if (state.refreshGeneration !== interactionGeneration) continue;
         const normalized = captureError(error);
+        state.mediaLoadStatus = "FAILED";
         showToast(normalized.message, true);
         return false;
       }
@@ -5109,6 +5114,10 @@
           settings: state.localVideoSettings,
           error: state.localVideoError,
         },
+      },
+      mediaLibrary: {
+        itemCount: state.media.length,
+        loadStatus: state.mediaLoadStatus,
       },
       mediaTransfer: (state.mediaUpload || state.mediaDownload) ? {
         active: true,
