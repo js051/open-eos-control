@@ -26,7 +26,9 @@ final class CameraMediaPlayback: ObservableObject {
         self.playbackStream = playbackStream
         Self.removeStalePlaybackDirectories()
         resourceLoader = CameraMediaResourceLoader(item: item) { offset, length in
-            try await playbackStream.open(offset: offset, length: length)
+            CameraMediaPlaybackResource(
+                try await playbackStream.open(offset: offset, length: length)
+            )
         }
         let asset = AVURLAsset(url: resourceLoader.assetURL)
         asset.resourceLoader.setDelegate(resourceLoader, queue: resourceLoader.delegateQueue)
@@ -239,7 +241,9 @@ enum CameraMediaPlaybackValidation {
         requestedOffset: Int64
     ) -> Int64? {
         if let requestedLength, requestedLength >= 0 {
-            return requestedLength
+            guard let totalBytes else { return requestedLength }
+            guard totalBytes >= requestedOffset else { return nil }
+            return min(requestedLength, totalBytes - requestedOffset)
         }
         guard let totalBytes, totalBytes >= requestedOffset else { return nil }
         return totalBytes - requestedOffset
@@ -315,8 +319,68 @@ enum CameraMediaPlaybackValidation {
     }
 }
 
-private final class CameraMediaResourceLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
-    typealias StreamProvider = @Sendable (Int64, Int64?) async throws -> CameraMediaStreamResponse
+struct CameraMediaPlaybackResource: Sendable {
+    let statusCode: Int
+    let contentType: String?
+    let totalBytes: Int64?
+    let rangeStart: Int64
+    let chunks: AsyncThrowingStream<Data, Error>
+    private let cancelAction: @Sendable () -> Void
+
+    init(_ response: CameraMediaStreamResponse) {
+        statusCode = response.statusCode
+        contentType = response.contentType
+        totalBytes = response.totalBytes
+        rangeStart = response.rangeStart
+        chunks = response.chunks
+        cancelAction = response.cancel
+    }
+
+    init(
+        statusCode: Int,
+        contentType: String?,
+        totalBytes: Int64?,
+        rangeStart: Int64,
+        chunks: AsyncThrowingStream<Data, Error>,
+        cancel: @escaping @Sendable () -> Void = {}
+    ) {
+        self.statusCode = statusCode
+        self.contentType = contentType
+        self.totalBytes = totalBytes
+        self.rangeStart = rangeStart
+        self.chunks = chunks
+        cancelAction = cancel
+    }
+
+    func cancel() {
+        cancelAction()
+    }
+}
+
+enum CameraMediaPlaybackContentType {
+    static func identifier(responseContentType: String?, filename: String) -> String? {
+        let normalizedResponse = responseContentType?
+            .components(separatedBy: ";")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if let normalizedResponse,
+           let responseType = UTType(mimeType: normalizedResponse),
+           responseType.conforms(to: .movie) {
+            return responseType.identifier
+        }
+        let fileExtension = (filename as NSString).pathExtension.lowercased()
+        if !fileExtension.isEmpty,
+           let extensionType = UTType(filenameExtension: fileExtension),
+           extensionType.conforms(to: .movie) {
+            return extensionType.identifier
+        }
+        return nil
+    }
+}
+
+final class CameraMediaResourceLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
+    typealias StreamProvider = @Sendable (Int64, Int64?) async throws -> CameraMediaPlaybackResource
 
     let assetURL: URL
     let delegateQueue = DispatchQueue(label: "dev.openeos.control.media-resource-loader")
@@ -381,14 +445,36 @@ private final class CameraMediaResourceLoader: NSObject, AVAssetResourceLoaderDe
             guard let dataRequest, !dataRequest.requestsAllDataToEndOfResource else { return nil }
             return max(1, Int64(dataRequest.requestedLength))
         }()
-        let streamLength: Int64? = dataRequest == nil ? 1 : requestedLength
+        if let information = loadingRequest.contentInformationRequest {
+            information.contentType = CameraMediaPlaybackContentType.identifier(
+                responseContentType: nil,
+                filename: item.name
+            )
+            if let totalBytes = item.sizeBytes, totalBytes > 0 {
+                information.contentLength = totalBytes
+            }
+        }
+        if let dataRequest,
+           let totalBytes = item.sizeBytes,
+           totalBytes >= 0,
+           requestedOffset >= totalBytes {
+            dataRequest.respond(with: Data())
+            loadingRequest.finishLoading()
+            return
+        }
+        let boundedRequestedLength = requestedLength.map { length in
+            guard let totalBytes = item.sizeBytes, totalBytes >= requestedOffset else { return length }
+            return min(length, totalBytes - requestedOffset)
+        }
+        let streamLength: Int64? = dataRequest == nil ? 1 : boundedRequestedLength
         let stream = try await streamProvider(requestedOffset, streamLength)
         defer { stream.cancel() }
 
         if let information = loadingRequest.contentInformationRequest {
-            let type = stream.contentType.flatMap { UTType(mimeType: $0) }
-                ?? UTType(filenameExtension: item.name.pathExtension)
-            information.contentType = type?.identifier
+            information.contentType = CameraMediaPlaybackContentType.identifier(
+                responseContentType: stream.contentType,
+                filename: item.name
+            )
             if let totalBytes = stream.totalBytes ?? item.sizeBytes, totalBytes > 0 {
                 information.contentLength = totalBytes
             }
@@ -406,7 +492,7 @@ private final class CameraMediaResourceLoader: NSObject, AVAssetResourceLoaderDe
             throw CameraMediaPlaybackError.invalidRange
         }
         guard CameraMediaPlaybackValidation.expectedBytes(
-            requestedLength: requestedLength,
+            requestedLength: boundedRequestedLength,
             totalBytes: stream.totalBytes ?? item.sizeBytes,
             requestedOffset: requestedOffset
         ) != nil else {
@@ -414,7 +500,7 @@ private final class CameraMediaResourceLoader: NSObject, AVAssetResourceLoaderDe
         }
 
         var discardBytes = requestedOffset - stream.rangeStart
-        var remaining = requestedLength
+        var remaining = boundedRequestedLength
         var deliveredBytes: Int64 = 0
         let totalBytes = stream.totalBytes ?? item.sizeBytes
         for try await chunk in stream.chunks {
@@ -441,7 +527,7 @@ private final class CameraMediaResourceLoader: NSObject, AVAssetResourceLoaderDe
         guard discardBytes == 0,
               CameraMediaPlaybackValidation.isComplete(
                   deliveredBytes: deliveredBytes,
-                  requestedLength: requestedLength,
+                  requestedLength: boundedRequestedLength,
                   totalBytes: totalBytes,
                   requestedOffset: requestedOffset
               ) else {

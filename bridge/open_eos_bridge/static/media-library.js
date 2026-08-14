@@ -132,6 +132,12 @@
     };
   }
 
+  function videoPlaybackFailure(errorCode) {
+    const code = Number(errorCode);
+    if (code === 3 || code === 4) return "codec";
+    return "transport";
+  }
+
   return {
     isVideo,
     mediaTime,
@@ -142,5 +148,6 @@
     touch,
     imagePanBounds,
     clampImagePan,
+    videoPlaybackFailure,
   };
 });

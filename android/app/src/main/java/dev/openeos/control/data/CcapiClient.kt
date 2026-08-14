@@ -1507,15 +1507,26 @@ class CcapiClient(
         return CameraMediaPreview(item = item, bytes = bytes, contentType = contentType)
     }
 
-    fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
+    suspend fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
         require(item.isVideoMedia) { "Media streaming is available only for video items." }
         if (isRealCamera && !supportsApi("GET", "/contents")) {
             error("Camera did not advertise CCAPI media browsing.")
         }
-        val path = mediaItemPath(item)
+        val playbackItem = if (isRealCamera && item.sizeBytes?.takeIf { it > 0L } == null) {
+            try {
+                mediaInfo(item)
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                item
+            }
+        } else {
+            item
+        }
+        val path = mediaItemPath(playbackItem)
         val paths = if (isRealCamera) listOf(path, "$path?kind=main", "$path?type=main") else listOf(path)
         return OkHttpCameraMediaStreamSource(
-            item = item,
+            item = playbackItem,
             httpClient = httpClient,
             requestFactory = { position ->
                 paths.flatMap { candidate ->

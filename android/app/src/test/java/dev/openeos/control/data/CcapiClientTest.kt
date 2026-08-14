@@ -3839,6 +3839,42 @@ class CcapiClientTest {
     }
 
     @Test
+    fun mediaPlaybackResolvesMissingFileSizeBeforeCreatingStreamSource() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
+        client.initialize()
+        server.takeRequest()
+        val path = "/ccapi/ver110/contents/card1/100CANON/MVI_0001.MP4"
+        val item = CameraMediaItem(path, "MVI_0001.MP4", "video")
+        server.enqueue(
+            jsonResponse(
+                """{"filesize":9313518,"protect":"disable","rating":"off","rotate":"0"}""",
+            ),
+        )
+
+        val source = client.openMediaStream(item)
+
+        assertEquals(9_313_518L, source.item.sizeBytes)
+        assertEquals("$path?kind=info", server.takeRequest().path)
+    }
+
+    @Test
+    fun mediaPlaybackStillStreamsWhenOptionalInfoPreflightFails() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
+        client.initialize()
+        server.takeRequest()
+        val path = "/ccapi/ver110/contents/card1/100CANON/MVI_0002.MP4"
+        val item = CameraMediaItem(path, "MVI_0002.MP4", "video")
+        server.enqueue(MockResponse().setResponseCode(503).setBody("""{"message":"Busy"}"""))
+
+        val source = client.openMediaStream(item)
+
+        assertEquals(item, source.item)
+        assertEquals("$path?kind=info", server.takeRequest().path)
+    }
+
+    @Test
     fun mediaMetadataDoesNotWriteWithoutAdvertisedContentsPut() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))

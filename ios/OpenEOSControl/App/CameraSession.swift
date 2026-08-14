@@ -239,13 +239,25 @@ enum CameraSession: Sendable {
     }
 
     func beginMediaPlayback(_ item: CameraMediaItem) async throws -> CameraMediaPlaybackStream {
+        let playbackItem: CameraMediaItem
+        if item.sizeBytes?.isPositive == true {
+            playbackItem = item
+        } else {
+            do {
+                playbackItem = try await mediaInfo(item)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                playbackItem = item
+            }
+        }
         switch self {
         case let .ccapi(client):
-            return CameraMediaPlaybackStream(item: item, backend: .ccapi(client))
+            return CameraMediaPlaybackStream(item: playbackItem, backend: .ccapi(client))
         case let .desktopBridge(client):
             return CameraMediaPlaybackStream(
-                item: item,
-                backend: .desktopBridge(try await client.beginMediaPlayback(item))
+                item: playbackItem,
+                backend: .desktopBridge(try await client.beginMediaPlayback(playbackItem))
             )
         }
     }
@@ -345,7 +357,7 @@ actor CameraMediaPlaybackStream {
         case desktopBridge(DesktopBridgeMediaPlayback)
     }
 
-    private let item: CameraMediaItem
+    nonisolated let item: CameraMediaItem
     private let backend: Backend
     private var closed = false
 
@@ -377,4 +389,8 @@ actor CameraMediaPlaybackStream {
             await playback.close()
         }
     }
+}
+
+private extension Int64 {
+    var isPositive: Bool { self > 0 }
 }

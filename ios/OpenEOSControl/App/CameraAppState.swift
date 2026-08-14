@@ -1028,8 +1028,11 @@ final class CameraAppState: ObservableObject {
                     await playbackStream.close()
                     return
                 }
+                let playbackItem = playbackStream.item
+                mediaPreviewItem = playbackItem
+                applyUpdatedMedia(playbackItem)
                 mediaVideoPlayback = CameraMediaPlayback(
-                    item: item,
+                    item: playbackItem,
                     session: session,
                     playbackStream: playbackStream
                 )

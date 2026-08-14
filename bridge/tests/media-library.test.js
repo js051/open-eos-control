@@ -112,6 +112,11 @@ function run() {
     ),
     { x: 0, y: 0 },
   );
+
+  assert.equal(mediaLibrary.videoPlaybackFailure(3), "codec");
+  assert.equal(mediaLibrary.videoPlaybackFailure(4), "codec");
+  assert.equal(mediaLibrary.videoPlaybackFailure(2), "transport");
+  assert.equal(mediaLibrary.videoPlaybackFailure(null), "transport");
 }
 
 run();
