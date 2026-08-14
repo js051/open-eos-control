@@ -51,6 +51,37 @@ def test_state_endpoint_is_sanitized_and_resettable() -> None:
     assert restored.json()["focus_drive"]["count"] == 0
 
 
+def test_canon_media_pagination_can_delay_later_pages_without_changing_default() -> None:
+    default_number = client.get("/ccapi/ver100/contents?kind=number")
+    configured = client.post(
+        "/ccapi/test/media-pagination",
+        json={"page_size": 1, "page_delay_ms": 1},
+    )
+    paged_number = client.get("/ccapi/ver100/contents?kind=number")
+    first = client.get("/ccapi/ver100/contents?page=1&order=desc")
+    second = client.get("/ccapi/ver100/contents?page=2&order=desc")
+
+    assert default_number.json() == {"pagenumber": 1}
+    assert configured.json() == {"page_size": 1, "page_delay_ms": 1}
+    assert paged_number.json() == {"pagenumber": 2}
+    assert first.json()["path"] == ["/ccapi/ver100/contents/card1/100CANON/SIM_0002.PNG"]
+    assert second.json()["path"] == ["/ccapi/ver100/contents/card1/100CANON/SIM_0001.PNG"]
+
+
+def test_canon_media_pagination_rejects_invalid_test_settings() -> None:
+    too_large = client.post(
+        "/ccapi/test/media-pagination",
+        json={"page_size": 101, "page_delay_ms": 0},
+    )
+    boolean = client.post(
+        "/ccapi/test/media-pagination",
+        json={"page_size": True, "page_delay_ms": 0},
+    )
+
+    assert too_large.status_code == 422
+    assert boolean.status_code == 422
+
+
 def test_canon_recordable_information_tracks_photo_and_movie_context() -> None:
     initial = client.get("/ccapi/ver100/shooting/information/recordable")
     client.post("/ccapi/capture/still", json={"af": True})

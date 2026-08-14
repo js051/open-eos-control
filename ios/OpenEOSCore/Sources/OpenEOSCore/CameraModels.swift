@@ -701,6 +701,8 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     }
 }
 
+public typealias CameraMediaListProgressHandler = @Sendable ([CameraMediaItem]) async -> Void
+
 public struct CameraMediaDownload: Equatable, Sendable {
     public let item: CameraMediaItem
     public let fileURL: URL

@@ -1792,7 +1792,9 @@ public actor CCAPIClient {
         )
     }
 
-    public func listMedia() async throws -> [CameraMediaItem] {
+    public func listMedia(
+        onProgress: CameraMediaListProgressHandler = { _ in }
+    ) async throws -> [CameraMediaItem] {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/media")
@@ -1810,6 +1812,7 @@ public actor CCAPIClient {
                     archived: $0.bool("archive")
                 )
             } ?? []
+            await onProgress(items)
             observedFeatures.insert(.mediaBrowser)
             return items
         }
@@ -1824,20 +1827,46 @@ public actor CCAPIClient {
             let container = try normalizeCameraResource(pending[pendingIndex]).components(separatedBy: "?")[0]
             pendingIndex += 1
             guard visited.insert(container).inserted else { continue }
-            var mediaPaths: [String] = []
-            for rawPath in try await contentPaths(container: container) {
-                let path = try normalizeCameraResource(rawPath).components(separatedBy: "?")[0]
-                if Self.isMediaPath(path) {
-                    if !mediaPaths.contains(path) { mediaPaths.append(path) }
-                } else if !visited.contains(path) {
-                    pending.append(path)
+            mediaPathGroups.append([])
+            let groupIndex = mediaPathGroups.index(before: mediaPathGroups.endIndex)
+            var discoveredContainers: [String] = []
+            let rawPaths = try await contentPaths(container: container) { partialPaths in
+                try Task.checkCancellation()
+                var mediaPaths: [String] = []
+                var seenMediaPaths = Set<String>()
+                for rawPath in partialPaths {
+                    let path = try self.normalizeCameraResource(rawPath).components(separatedBy: "?")[0]
+                    if Self.isMediaPath(path), seenMediaPaths.insert(path).inserted {
+                        mediaPaths.append(path)
+                    }
+                }
+                mediaPathGroups[groupIndex] = mediaPaths
+                if !mediaPaths.isEmpty {
+                    await onProgress(self.mediaItems(from: self.mergeMediaPathGroups(mediaPathGroups)))
                 }
             }
-            if !mediaPaths.isEmpty { mediaPathGroups.append(mediaPaths) }
+            var finalMediaPaths: [String] = []
+            var seenFinalMediaPaths = Set<String>()
+            var seenDiscoveredContainers = Set<String>()
+            for rawPath in rawPaths {
+                let path = try normalizeCameraResource(rawPath).components(separatedBy: "?")[0]
+                if Self.isMediaPath(path) {
+                    if seenFinalMediaPaths.insert(path).inserted { finalMediaPaths.append(path) }
+                } else if !visited.contains(path), seenDiscoveredContainers.insert(path).inserted {
+                    discoveredContainers.append(path)
+                }
+            }
+            mediaPathGroups[groupIndex] = finalMediaPaths
+            pending.append(contentsOf: discoveredContainers)
+            if mediaPathGroups[groupIndex].isEmpty { mediaPathGroups.remove(at: groupIndex) }
         }
         let mediaPaths = mergeMediaPathGroups(mediaPathGroups)
         observedFeatures.insert(.mediaBrowser)
-        return mediaPaths.map {
+        return mediaItems(from: mediaPaths)
+    }
+
+    private func mediaItems(from mediaPaths: [String]) -> [CameraMediaItem] {
+        mediaPaths.map {
             CameraMediaItem(
                 id: $0,
                 name: ($0 as NSString).lastPathComponent,
@@ -4020,7 +4049,10 @@ public actor CCAPIClient {
         )
     }
 
-    private func contentPaths(container: String) async throws -> [String] {
+    private func contentPaths(
+        container: String,
+        onPage: ([String]) async throws -> Void = { _ in }
+    ) async throws -> [String] {
         let pageInfo = try await firstJSON(
             paths: ["\(container)?kind=number", "\(container)?type=all,kind=number"],
             required: false
@@ -4030,20 +4062,32 @@ public actor CCAPIClient {
             throw CCAPIError.invalidResponse("Camera returned a negative media page count.")
         }
         var result: [String] = []
-        if pageCount <= 0 {
-            if let value = try await firstJSON(paths: [container], required: true) {
-                result.append(contentsOf: value.array("path")?.strings ?? [])
+        var seenPaths = Set<String>()
+        func appendUnique(_ paths: [String], reversed: Bool = false) {
+            let values = reversed ? Array(paths.reversed()) : paths
+            for path in values where seenPaths.insert(path).inserted {
+                result.append(path)
             }
+        }
+        if pageCount <= 0 {
+            try Task.checkCancellation()
+            if let value = try await firstJSON(paths: [container], required: true) {
+                appendUnique(value.array("path")?.strings ?? [])
+            }
+            try await onPage(result)
         } else if mediaDescendingOrderSupported == false {
             for page in stride(from: pageCount, through: 1, by: -1) {
+                try Task.checkCancellation()
                 guard let value = try await contentPage(container: container, page: page) else { continue }
                 let paths = value.array("path")?.strings ?? []
-                result.append(contentsOf: paths.reversed())
+                appendUnique(paths, reversed: true)
+                try await onPage(result)
             }
         } else {
             guard let firstPage = try await contentPage(container: container, page: 1) else { return [] }
             if mediaDescendingOrderSupported == false {
                 for page in stride(from: pageCount, through: 1, by: -1) {
+                    try Task.checkCancellation()
                     let value: JSONDictionary
                     if page == 1 {
                         value = firstPage
@@ -4054,20 +4098,24 @@ public actor CCAPIClient {
                         value = response
                     }
                     let paths = value.array("path")?.strings ?? []
-                    result.append(contentsOf: paths.reversed())
+                    appendUnique(paths, reversed: true)
+                    try await onPage(result)
                 }
             } else {
-                result.append(contentsOf: firstPage.array("path")?.strings ?? [])
+                appendUnique(firstPage.array("path")?.strings ?? [])
+                try await onPage(result)
                 if pageCount >= 2 {
                     for page in 2...pageCount {
+                        try Task.checkCancellation()
                         if let value = try await contentPage(container: container, page: page) {
-                            result.append(contentsOf: value.array("path")?.strings ?? [])
+                            appendUnique(value.array("path")?.strings ?? [])
+                            try await onPage(result)
                         }
                     }
                 }
             }
         }
-        return result.removingDuplicates()
+        return result
     }
 
     private func contentPage(container: String, page: Int) async throws -> JSONDictionary? {

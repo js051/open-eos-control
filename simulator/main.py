@@ -233,6 +233,8 @@ def initial_state() -> dict[str, object]:
         "canonical_event_delete_count": 0,
         "canonical_event_cancel_generation": 0,
         "canonical_event_active_requests": 0,
+        "canonical_media_page_size": 0,
+        "canonical_media_page_delay_ms": 0,
         "media_metadata_update_count": 0,
         "canonical_datetime": {
             "datetime": format_datetime(datetime.now().astimezone()),
@@ -507,6 +509,24 @@ async def set_test_mode(mode: Literal["movie", "Bulb"]) -> dict[str, object]:
     state["mode"] = mode
     publish_event("shootingsettings")
     return camera_status()
+
+
+@app.post("/ccapi/test/media-pagination")
+async def set_test_media_pagination(payload: dict[str, object]) -> dict[str, int]:
+    page_size = payload.get("page_size", 0)
+    page_delay_ms = payload.get("page_delay_ms", 0)
+    if (
+        not isinstance(page_size, int)
+        or isinstance(page_size, bool)
+        or page_size not in range(0, 101)
+        or not isinstance(page_delay_ms, int)
+        or isinstance(page_delay_ms, bool)
+        or page_delay_ms not in range(0, 5_001)
+    ):
+        raise HTTPException(status_code=422, detail="Invalid media pagination test settings")
+    state["canonical_media_page_size"] = page_size
+    state["canonical_media_page_delay_ms"] = page_delay_ms
+    return {"page_size": page_size, "page_delay_ms": page_delay_ms}
 
 
 @app.post("/ccapi/test/temperature")
@@ -2463,11 +2483,26 @@ async def canon_contents(
     order: str | None = None,
 ) -> dict[str, object]:
     del order
+    page_size = int(state["canonical_media_page_size"])
+    media = list(state["media"])
     if kind == "number":
-        return {"pagenumber": 1}
-    if page not in {None, 1}:
+        page_count = 1 if page_size <= 0 else max(1, (len(media) + page_size - 1) // page_size)
+        return {"pagenumber": page_count}
+    if page_size <= 0:
+        if page not in {None, 1}:
+            return {"path": []}
+        selected = media
+    else:
+        selected_page = page or 1
+        if selected_page < 1:
+            return {"path": []}
+        if selected_page > 1 and state["canonical_media_page_delay_ms"]:
+            await asyncio.sleep(int(state["canonical_media_page_delay_ms"]) / 1_000)
+        offset = (selected_page - 1) * page_size
+        selected = media[offset : offset + page_size]
+    if not selected:
         return {"path": []}
-    return {"path": [canonical_media_path(item["id"]) for item in state["media"]]}
+    return {"path": [canonical_media_path(item["id"]) for item in selected]}
 
 
 @app.get("/ccapi/ver100/contents/card1/100CANON/{item_id}")

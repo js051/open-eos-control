@@ -4,6 +4,28 @@ import XCTest
 @testable import OpenEOSCore
 
 final class CCAPIClientTests: XCTestCase {
+    func testSimulatorMediaListPublishesItsCompleteResult() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/media",
+            body: #"{"items":[{"id":"SIM_0001.JPG","name":"SIM_0001.JPG","kind":"image"}]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+        let progress = MediaListProgressRecorder()
+
+        let items = try await client.listMedia { partialItems in
+            await progress.record(partialItems)
+        }
+
+        XCTAssertEqual(items.map(\.name), ["SIM_0001.JPG"])
+        let snapshots = await progress.values()
+        XCTAssertEqual(snapshots, [items])
+    }
+
     func testDirectCCAPIUploadIsExplicitlyUnsupported() async throws {
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera)
         do {
@@ -3400,6 +3422,71 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.last?.path, "/ccapi/ver100/contents?page=101&order=desc")
         let remainingResponses = await transport.remainingResponses()
         XCTAssertEqual(remainingResponses, 0)
+    }
+
+    func testRealMediaListPublishesEveryCompletedPage() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":3}"#)
+        for page in 1...3 {
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/contents?page=\(page)&order=desc",
+                body: "{\"path\":[\"/ccapi/ver100/contents/card1/IMG_000\(page).JPG\"]}"
+            )
+        }
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+        let progress = MediaListProgressRecorder()
+
+        let items = try await client.listMedia { partialItems in
+            await progress.record(partialItems)
+        }
+
+        let snapshots = await progress.values()
+        XCTAssertEqual(snapshots.map(\.count), [1, 2, 3])
+        XCTAssertEqual(snapshots.map { $0.last?.name }, ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG"])
+        XCTAssertEqual(items.map(\.name), ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG"])
+    }
+
+    func testRealMediaListCancellationAfterFirstPageStopsFurtherRequests() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":3}"#)
+        for page in 1...3 {
+            await transport.enqueueJSON(
+                path: "/ccapi/ver100/contents?page=\(page)&order=desc",
+                body: "{\"path\":[\"/ccapi/ver100/contents/card1/IMG_000\(page).JPG\"]}"
+            )
+        }
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let traversal = Task {
+            try await client.listMedia { _ in
+                withUnsafeCurrentTask { task in task?.cancel() }
+            }
+        }
+        do {
+            _ = try await traversal.value
+            XCTFail("Expected media traversal cancellation")
+        } catch is CancellationError {
+        }
+
+        let requests = await transport.requests()
+        XCTAssertEqual(
+            requests.map(\.path),
+            [
+                "/ccapi",
+                "/ccapi/ver100/contents?kind=number",
+                "/ccapi/ver100/contents?page=1&order=desc",
+            ]
+        )
+        let remainingResponses = await transport.remainingResponses()
+        XCTAssertEqual(remainingResponses, 2)
     }
 
     func testRealMediaListRejectsNegativePageCount() async throws {

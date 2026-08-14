@@ -26,9 +26,10 @@ struct MediaView: View {
             if camera.activeMediaUploadName != nil || camera.mediaUploadError != nil || camera.uploadedMediaName != nil {
                 uploadStatus
             }
-            if camera.isBusy(.media), camera.mediaItems.isEmpty {
+            if camera.mediaLibraryLoading, camera.mediaItems.isEmpty {
                 Spacer()
-                ProgressView().tint(Color.cameraAccent)
+                ProgressView("loading_media").tint(Color.cameraAccent)
+                    .accessibilityIdentifier("media-library-loading-empty")
                 Spacer()
             } else if camera.mediaItems.isEmpty {
                 ContentUnavailableView("no_media", systemImage: "photo.on.rectangle.angled")
@@ -63,7 +64,7 @@ struct MediaView: View {
         .safeAreaPadding(.top, 2)
         .background(Color.cameraBackground)
         .task {
-            if camera.mediaItems.isEmpty { await camera.loadMedia() }
+            if camera.mediaItems.isEmpty { camera.startMediaLibraryLoad() }
         }
         .fileImporter(
             isPresented: $isFileImporterPresented,
@@ -130,6 +131,7 @@ struct MediaView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Button {
+                camera.cancelMediaLibraryLoad()
                 camera.screen = .control
             } label: {
                 RotatingControl(degrees: controlRotation) {
@@ -153,18 +155,37 @@ struct MediaView: View {
                 }
             }
             Spacer()
+            if camera.mediaLibraryLoading, !camera.mediaItems.isEmpty {
+                RotatingControl(degrees: controlRotation) {
+                    ProgressView()
+                        .tint(Color.cameraAccent)
+                        .accessibilityLabel(Text("loading_media"))
+                }
+                .accessibilityIdentifier("media-library-loading-progressive")
+            }
             if camera.supports(.mediaUpload) {
                 uploadControl
             }
             Button {
-                Task { await camera.loadMedia() }
+                if camera.mediaLibraryLoadCancellable {
+                    camera.cancelMediaLibraryLoad()
+                } else if !camera.mediaLibraryLoading {
+                    camera.startMediaLibraryLoad()
+                }
             } label: {
                 RotatingControl(degrees: controlRotation) {
-                    Image(systemName: "arrow.clockwise").accessibilityLabel(Text("refresh_media"))
+                    Image(systemName: camera.mediaLibraryLoadCancellable ? "xmark.circle" : "arrow.clockwise")
+                        .accessibilityLabel(
+                            Text(camera.mediaLibraryLoadCancellable ? "cancel_loading_media" : "refresh_media")
+                        )
                 }
             }
             .buttonStyle(CameraIconButtonStyle())
-            .disabled(camera.isBusy(.media))
+            .disabled(
+                (camera.mediaLibraryLoading && !camera.mediaLibraryLoadCancellable) ||
+                    (!camera.mediaLibraryLoading && camera.isBusy(.media))
+            )
+            .accessibilityIdentifier(camera.mediaLibraryLoadCancellable ? "cancel-media-library-load" : "refresh-media")
         }
         .foregroundStyle(Color.cameraText)
         .padding(.horizontal, 10)
@@ -221,6 +242,7 @@ struct MediaView: View {
             }
             .buttonStyle(CameraIconButtonStyle())
             .foregroundStyle(Color.cameraAccent)
+            .disabled(camera.mediaLibraryLoading)
             .accessibilityIdentifier("upload-media-button")
         }
     }
@@ -383,7 +405,7 @@ struct MediaView: View {
                         .accessibilityLabel(Text(language.format("media_actions", item.name)))
                 }
                 .foregroundStyle(Color.cameraText)
-                .disabled(camera.isBusy(.media))
+                .disabled(camera.mediaLibraryLoading || camera.isBusy(.media))
                 .accessibilityIdentifier("media-actions-\(item.id)")
             } else if camera.supports(.mediaDelete) {
                 Button {
@@ -394,7 +416,7 @@ struct MediaView: View {
                         .accessibilityLabel(Text("delete_media"))
                 }
                 .foregroundStyle(Color.cameraRecording)
-                .disabled(camera.isBusy(.media))
+                .disabled(camera.mediaLibraryLoading || camera.isBusy(.media))
                 .accessibilityIdentifier("delete-media-\(item.id)")
             }
         }
@@ -599,7 +621,7 @@ private struct MediaMetadataView: View {
                             }
                         }
                         .pickerStyle(.segmented)
-                        .disabled(camera.isBusy(.media))
+                        .disabled(camera.mediaLibraryLoading || camera.isBusy(.media))
                     }
 
                     if camera.supports(.mediaArchive), item.archived != nil {
@@ -629,7 +651,7 @@ private struct MediaMetadataView: View {
                             Label(language.format("delete_media_named", item.name), systemImage: "trash")
                                 .frame(maxWidth: .infinity, minHeight: 48)
                         }
-                        .disabled(camera.isBusy(.media))
+                        .disabled(camera.mediaLibraryLoading || camera.isBusy(.media))
                         .accessibilityIdentifier("delete-media-\(item.id)")
                     }
                 }
@@ -677,7 +699,7 @@ private struct MediaMetadataView: View {
         }
         .buttonStyle(CameraIconButtonStyle())
         .foregroundStyle(selected ? Color.cameraAccent : Color.cameraText)
-        .disabled(camera.isBusy(.media) || !enabled)
+        .disabled(camera.mediaLibraryLoading || camera.isBusy(.media) || !enabled)
     }
 
     private func ratingButton(_ item: CameraMediaItem, rating: Int, systemName: String) -> some View {
@@ -689,7 +711,7 @@ private struct MediaMetadataView: View {
                 .accessibilityLabel(Text(language.format("set_media_rating", item.name, rating)))
         }
         .foregroundStyle((item.rating ?? 0) >= rating && rating > 0 ? Color.cameraWarning : Color.cameraSecondaryText)
-        .disabled(camera.isBusy(.media) || item.rating == rating)
+        .disabled(camera.mediaLibraryLoading || camera.isBusy(.media) || item.rating == rating)
     }
 }
 

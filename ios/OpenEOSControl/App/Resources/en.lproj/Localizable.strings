@@ -251,6 +251,8 @@
 "previous_media" = "Previous media";
 "next_media" = "Next media";
 "refresh_media" = "Refresh camera media";
+"loading_media" = "Loading camera media";
+"cancel_loading_media" = "Cancel loading camera media";
 "no_media" = "No media files were found on the camera.";
 "download_media" = "Download media";
 "cancel_media_download" = "Cancel media download";

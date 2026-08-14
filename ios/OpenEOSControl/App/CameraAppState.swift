@@ -76,6 +76,8 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var bulbStartedAt: Date?
     @Published private(set) var focusMarker: FocusMarker?
     @Published private(set) var mediaItems: [CameraMediaItem] = []
+    @Published private(set) var mediaLibraryLoading = false
+    @Published private(set) var mediaLibraryLoadCancellable = false
     @Published private(set) var mediaThumbnails: [String: Data] = [:]
     @Published private(set) var loadingMediaThumbnailIDs = Set<String>()
     @Published private(set) var mediaPreviewItem: CameraMediaItem?
@@ -109,6 +111,8 @@ final class CameraAppState: ObservableObject {
     private var mediaDownloadToken: UUID?
     private var mediaUploadTask: Task<Void, Never>?
     private var mediaUploadToken: UUID?
+    private var mediaLibraryTask: Task<Void, Never>?
+    private var mediaLibraryGeneration = UUID()
     private var rateTracker = LiveViewRateTracker()
     private var downloadedMediaID: String?
     private var unavailableMediaThumbnailIDs = Set<String>()
@@ -317,6 +321,7 @@ final class CameraAppState: ObservableObject {
             isPreview = false
             screen = .control
             mediaItems = []
+            invalidateMediaLibraryLoad()
             resetMediaThumbnails()
             resetMediaPreview()
             resetMediaDownloadState()
@@ -343,6 +348,7 @@ final class CameraAppState: ObservableObject {
         resetMediaDownloadState()
         resetMediaUploadState()
         session = nil
+        invalidateMediaLibraryLoad()
         snapshot = Self.makeOfflinePreviewSnapshot()
         isPreview = true
         screen = .control
@@ -386,6 +392,7 @@ final class CameraAppState: ObservableObject {
         resetMediaUploadState()
         let closingSession = session
         session = nil
+        invalidateMediaLibraryLoad()
         snapshot = nil
         isPreview = false
         screen = .control
@@ -911,21 +918,45 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    func loadMedia() async {
-        guard supports(.mediaBrowser), begin(.media) else { return }
-        defer { end(.media) }
+    func startMediaLibraryLoad() {
+        guard supports(.mediaBrowser), !mediaLibraryLoading, !isBusy(.media), begin(.mediaLibrary) else { return }
+        let generation = UUID()
+        mediaLibraryGeneration = generation
+        mediaLibraryLoading = true
+        mediaLibraryLoadCancellable = true
         deletedMediaName = nil
         resetMediaThumbnails()
         resetMediaPreview()
         if isPreview {
             mediaItems = Self.previewMedia
+            finishMediaLibraryLoad(generation: generation)
             return
         }
-        guard let session else { return }
+        guard let session else {
+            finishMediaLibraryLoad(generation: generation)
+            return
+        }
+        mediaLibraryTask = Task { [weak self] in
+            await self?.performMediaLibraryLoad(session: session, generation: generation)
+        }
+    }
+
+    func cancelMediaLibraryLoad() {
+        invalidateMediaLibraryLoad()
+    }
+
+    private func performMediaLibraryLoad(session: CameraSession, generation: UUID) async {
+        defer { finishMediaLibraryLoad(generation: generation) }
         do {
-            mediaItems = try await session.listMedia()
+            let items = try await session.listMedia { [weak self] partialItems in
+                await self?.applyMediaListProgress(partialItems, generation: generation)
+            }
+            guard generation == mediaLibraryGeneration, !Task.isCancelled else { return }
+            mediaItems = items
             lastError = nil
+        } catch is CancellationError {
         } catch {
+            guard generation == mediaLibraryGeneration else { return }
             record(error)
         }
     }
@@ -1013,7 +1044,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func loadMediaInfo(_ item: CameraMediaItem) async {
-        guard !isPreview, supports(.mediaBrowser), begin(.media) else { return }
+        guard !isPreview, !mediaLibraryLoading, supports(.mediaBrowser), begin(.media) else { return }
         defer { end(.media) }
         guard let session else { return }
         do {
@@ -1071,7 +1102,7 @@ final class CameraAppState: ObservableObject {
         update: (CameraSession) async throws -> CameraMediaItem,
         preview: () -> CameraMediaItem
     ) async {
-        guard supports(feature), begin(.media) else { return }
+        guard !mediaLibraryLoading, supports(feature), begin(.media) else { return }
         defer { end(.media) }
         if isPreview {
             applyUpdatedMedia(preview())
@@ -1108,7 +1139,7 @@ final class CameraAppState: ObservableObject {
 
     @discardableResult
     func startMediaUpload(_ fileURL: URL, securityScoped: Bool = false) -> Bool {
-        guard !isPreview, supports(.mediaUpload), begin(.media) else { return false }
+        guard !isPreview, !mediaLibraryLoading, supports(.mediaUpload), begin(.media) else { return false }
         let filename = fileURL.lastPathComponent
         let token = UUID()
         mediaUploadToken = token
@@ -1296,7 +1327,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func deleteMedia(_ item: CameraMediaItem) async {
-        guard supports(.mediaDelete), begin(.media) else { return }
+        guard !mediaLibraryLoading, supports(.mediaDelete), begin(.media) else { return }
         defer { end(.media) }
         if isPreview {
             applyDeletedMedia(item)
@@ -1601,22 +1632,36 @@ final class CameraAppState: ObservableObject {
     ) async throws -> Bool {
         while generation == eventGeneration, !Task.isCancelled {
             if screen != .media { return true }
-            if busyOperations.contains(.media) || bulbExposureActive {
+            if mediaLibraryLoading || busyOperations.contains(.media) || bulbExposureActive {
                 try await Task.sleep(nanoseconds: 50_000_000)
                 continue
             }
-            guard begin(.media) else { continue }
+            guard begin(.mediaLibrary) else { continue }
+            let mediaGeneration = UUID()
+            mediaLibraryGeneration = mediaGeneration
+            mediaLibraryLoading = true
+            mediaLibraryLoadCancellable = false
             do {
-                let items = try await session.listMedia()
-                end(.media)
-                guard generation == eventGeneration, !Task.isCancelled else { return false }
                 resetMediaThumbnails()
                 resetMediaPreview()
+                let items = try await session.listMedia { [weak self] partialItems in
+                    await self?.applyMediaListProgress(partialItems, generation: mediaGeneration)
+                }
+                guard mediaGeneration == mediaLibraryGeneration else { return true }
+                mediaLibraryLoading = false
+                end(.mediaLibrary)
+                guard generation == eventGeneration, !Task.isCancelled else { return false }
                 mediaItems = items
                 lastError = nil
                 return true
             } catch {
-                end(.media)
+                if mediaGeneration == mediaLibraryGeneration {
+                    mediaLibraryLoading = false
+                    end(.mediaLibrary)
+                } else {
+                    return true
+                }
+                if error is CancellationError { return true }
                 throw error
             }
         }
@@ -1717,6 +1762,28 @@ final class CameraAppState: ObservableObject {
         mediaUploadError = nil
         uploadedMediaName = nil
         busyOperations.remove(.media)
+    }
+
+    private func applyMediaListProgress(_ items: [CameraMediaItem], generation: UUID) {
+        guard generation == mediaLibraryGeneration, !Task.isCancelled else { return }
+        mediaItems = items
+    }
+
+    private func invalidateMediaLibraryLoad() {
+        mediaLibraryGeneration = UUID()
+        mediaLibraryTask?.cancel()
+        mediaLibraryTask = nil
+        mediaLibraryLoading = false
+        mediaLibraryLoadCancellable = false
+        busyOperations.remove(.mediaLibrary)
+    }
+
+    private func finishMediaLibraryLoad(generation: UUID) {
+        guard generation == mediaLibraryGeneration else { return }
+        mediaLibraryTask = nil
+        mediaLibraryLoading = false
+        mediaLibraryLoadCancellable = false
+        end(.mediaLibrary)
     }
 
     private func applyDeletedMedia(_ item: CameraMediaItem) {
