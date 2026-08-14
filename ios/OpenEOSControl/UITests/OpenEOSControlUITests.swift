@@ -238,7 +238,7 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
         let clickWhiteBalance = tapAction.buttons["Click white balance"]
         clickWhiteBalance.tap()
-        XCTAssertTrue(waitForSelection(clickWhiteBalance, timeout: 3))
+        XCTAssertTrue(waitForValue(tapAction, equalTo: "whiteBalance", timeout: 3))
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
         liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
@@ -497,9 +497,9 @@ final class OpenEOSControlUITests: XCTestCase {
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
-    private func waitForSelection(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let predicate = NSPredicate { value, _ in
-            (value as? XCUIElement)?.isSelected == true
+    private func waitForValue(_ element: XCUIElement, equalTo expectedValue: String, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate { candidate, _ in
+            (candidate as? XCUIElement)?.value as? String == expectedValue
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed

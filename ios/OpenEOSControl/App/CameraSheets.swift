@@ -823,6 +823,7 @@ private struct MoreSettingsView: View {
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("live-view-tap-action-picker")
+            .accessibilityValue(Text(camera.effectiveLiveViewTapAction?.rawValue ?? "none"))
         }
         .padding(.vertical, 14)
     }
