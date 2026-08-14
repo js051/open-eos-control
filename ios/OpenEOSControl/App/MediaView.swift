@@ -160,11 +160,24 @@ struct MediaView: View {
             .accessibilityIdentifier("media-back-button")
             RotatingControl(degrees: controlRotation) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("camera_media").font(.headline)
-                    Text(mediaLibrarySummary)
-                        .font(.caption)
-                        .foregroundStyle(Color.cameraSecondaryText)
-                        .accessibilityIdentifier("media-library-summary")
+                    Text("camera_media")
+                        .font(.headline)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        if camera.mediaLibraryLoading, !camera.mediaItems.isEmpty {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(Color.cameraAccent)
+                                .accessibilityLabel(Text("loading_media"))
+                                .accessibilityIdentifier("media-library-loading-progressive")
+                        }
+                        Text(mediaLibrarySummary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .accessibilityIdentifier("media-library-summary")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraSecondaryText)
                     if let name = camera.deletedMediaName {
                         Text(language.format("media_deleted", name))
                             .font(.caption)
@@ -173,15 +186,7 @@ struct MediaView: View {
                     }
                 }
             }
-            Spacer()
-            if camera.mediaLibraryLoading, !camera.mediaItems.isEmpty {
-                RotatingControl(degrees: controlRotation) {
-                    ProgressView()
-                        .tint(Color.cameraAccent)
-                        .accessibilityLabel(Text("loading_media"))
-                }
-                .accessibilityIdentifier("media-library-loading-progressive")
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             if camera.supports(.mediaUpload) {
                 uploadControl
             }
@@ -205,6 +210,7 @@ struct MediaView: View {
                     (!camera.mediaLibraryLoading && camera.isBusy(.media))
             )
             .accessibilityIdentifier(camera.mediaLibraryLoadCancellable ? "cancel-media-library-load" : "refresh-media")
+            .fixedSize()
         }
         .foregroundStyle(Color.cameraText)
         .padding(.horizontal, 10)
