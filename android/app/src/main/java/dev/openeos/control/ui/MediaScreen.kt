@@ -73,7 +73,8 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     state.mediaPreviewItem?.let { item ->
         val previewIndex = displayedItems.indexOfFirst { it.id == item.id }
         val viewerActionsEnabled = !state.isBusy(CameraOperation.MEDIA) && (
-            state.supports(CameraFeature.MEDIA_PROTECT) ||
+            state.supports(CameraFeature.MEDIA_BROWSER) ||
+                state.supports(CameraFeature.MEDIA_PROTECT) ||
                 state.supports(CameraFeature.MEDIA_ARCHIVE) ||
                 state.supports(CameraFeature.MEDIA_RATING) ||
                 state.supports(CameraFeature.MEDIA_ROTATE) ||
@@ -130,13 +131,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     activeMetadataItemId?.let { itemId ->
         val item = state.mediaItems.firstOrNull { it.id == itemId }
         if (item != null) {
-            val metadataSupported = state.supports(CameraFeature.MEDIA_PROTECT) ||
-                state.supports(CameraFeature.MEDIA_ARCHIVE) ||
-                (state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false) ||
-                state.supports(CameraFeature.MEDIA_ROTATE)
-            LaunchedEffect(itemId, metadataSupported) {
-                if (metadataSupported) actions.loadMediaInfo(item)
-            }
+            LaunchedEffect(itemId) { actions.loadMediaInfo(item) }
             MediaMetadataSheet(
                 item = item,
                 busy = state.isBusy(CameraOperation.MEDIA),
@@ -390,6 +385,29 @@ private fun MediaMetadataSheet(
                 overflow = TextOverflow.Ellipsis,
             )
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AppAccent)
+
+            MetadataSectionTitle(
+                title = stringResource(R.string.media_format),
+                value = mediaContentTypeLabel(item.contentType) ?: item.kind.uppercase(Locale.ROOT),
+            )
+            mediaDimensionsLabel(item)?.let { dimensions ->
+                MetadataSectionTitle(
+                    title = stringResource(R.string.media_dimensions),
+                    value = dimensions,
+                )
+            }
+            mediaByteSizeLabel(item.sizeBytes)?.let { size ->
+                MetadataSectionTitle(
+                    title = stringResource(R.string.media_file_size),
+                    value = size,
+                )
+            }
+            mediaCaptureTimeLabel(item.captureTime)?.let { capturedAt ->
+                MetadataSectionTitle(
+                    title = stringResource(R.string.media_captured_at),
+                    value = capturedAt,
+                )
+            }
 
             if (protectSupported) {
                 MetadataSectionTitle(

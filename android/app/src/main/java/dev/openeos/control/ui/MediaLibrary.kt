@@ -118,6 +118,17 @@ internal fun mediaByteSizeLabel(value: Long?): String? {
     }
 }
 
+internal fun mediaDimensionsLabel(item: CameraMediaItem): String? {
+    val width = item.widthPixels?.takeIf { it > 0 } ?: return null
+    val height = item.heightPixels?.takeIf { it > 0 } ?: return null
+    return "$width x $height"
+}
+
+internal fun mediaContentTypeLabel(value: String?): String? = value
+    ?.substringBefore(';')
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() && it != "application/octet-stream" }
+
 private fun String?.toMediaInstant(): Instant? {
     val value = this?.trim().orEmpty()
     if (value.isEmpty()) return null

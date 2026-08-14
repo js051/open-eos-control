@@ -351,6 +351,10 @@
     <string name="media_protected">已保護</string>
     <string name="media_unprotected">未保護</string>
     <string name="media_metadata_unknown">正在從相機讀取…</string>
+    <string name="media_format">格式</string>
+    <string name="media_dimensions">尺寸</string>
+    <string name="media_file_size">檔案大小</string>
+    <string name="media_captured_at">拍攝時間</string>
     <string name="protect_media">保護 %1$s</string>
     <string name="unprotect_media">取消保護 %1$s</string>
     <string name="media_archive">封存</string>

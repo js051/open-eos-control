@@ -158,6 +158,18 @@ class MediaLibraryTest {
         assertEquals("1.5 KB", mediaByteSizeLabel(1536))
         assertEquals("2.0 MB", mediaByteSizeLabel(2 * 1024L * 1024L))
         assertEquals(null, mediaByteSizeLabel(-1))
+        val item = CameraMediaItem(
+            id = "photo",
+            name = "IMG_0001.JPG",
+            kind = "image",
+            contentType = "image/jpeg; charset=binary",
+            widthPixels = 6000,
+            heightPixels = 4000,
+        )
+        assertEquals("6000 x 4000", mediaDimensionsLabel(item))
+        assertEquals("image/jpeg", mediaContentTypeLabel(item.contentType))
+        assertEquals(null, mediaDimensionsLabel(item.copy(heightPixels = 0)))
+        assertEquals(null, mediaContentTypeLabel("application/octet-stream"))
     }
 
     @Test

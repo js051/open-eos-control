@@ -56,8 +56,8 @@ freeimages=3210
 
 MEDIA = """There are no files in folder '/'.
 There are 2 files in folder '/store_00010001/DCIM/100CANON'.
-#1 IMG_0001.CR3 rd 10 KB image/x-canon-cr3 1784600000
-#2 IMG_0001.JPG rd 6 B image/jpeg 1784600001
+#1 IMG_0001.CR3 rd 10 KB 6000x4000 image/x-canon-cr3 1784600000
+#2 IMG_0001.JPG rd 6 B 6000x4000 image/jpeg 1784600001
 """
 
 MEDIA_INFO = """Information on file 'IMG_0001.JPG' (folder '/store_00010001/DCIM/100CANON'):

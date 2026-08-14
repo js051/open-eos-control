@@ -4248,10 +4248,11 @@
       copy.append(name, time);
       const size = document.createElement("span");
       size.className = "media-size";
-      size.textContent = formatBytes(item.sizeBytes);
+      size.textContent = [formatMediaDimensions(item), formatBytes(item.sizeBytes)].filter(Boolean).join(" · ");
       const actions = document.createElement("div");
       actions.className = "media-actions";
-      const actionSupported = mediaMetadataSupported() || featureSupported(FEATURES.MEDIA_DOWNLOAD) ||
+      const actionSupported = featureSupported(FEATURES.MEDIA_BROWSER) || mediaMetadataSupported() ||
+        featureSupported(FEATURES.MEDIA_DOWNLOAD) ||
         featureSupported(FEATURES.MEDIA_DELETE);
       if (actionSupported) {
         const manage = document.createElement("button");
@@ -4545,7 +4546,20 @@
   }
 
   function mediaManagementSupported() {
-    return mediaMetadataSupported() || featureSupported(FEATURES.MEDIA_DELETE);
+    return featureSupported(FEATURES.MEDIA_BROWSER) || mediaMetadataSupported() ||
+      featureSupported(FEATURES.MEDIA_DELETE);
+  }
+
+  function formatMediaDimensions(item) {
+    const width = Number(item?.widthPixels);
+    const height = Number(item?.heightPixels);
+    if (!Number.isSafeInteger(width) || width <= 0 || !Number.isSafeInteger(height) || height <= 0) return "";
+    return `${width} x ${height}`;
+  }
+
+  function formatMediaContentType(value) {
+    const contentType = String(value || "").split(";", 1)[0].trim();
+    return contentType && contentType !== "application/octet-stream" ? contentType : "";
   }
 
   function replaceMediaItem(item) {
@@ -4562,7 +4576,12 @@
     const disabled = state.mediaDetailsBusy || cameraInteractionBusy();
     ui.mediaDetailsName.textContent = item.name;
     ui.mediaDetailsKind.textContent = String(item.kind || "").toUpperCase();
-    ui.mediaDetailsSummary.textContent = [formatDate(item.captureTime), formatBytes(item.sizeBytes)]
+    ui.mediaDetailsSummary.textContent = [
+      formatDate(item.captureTime),
+      formatMediaDimensions(item),
+      formatBytes(item.sizeBytes),
+      formatMediaContentType(item.contentType),
+    ]
       .filter(Boolean).join(" · ");
     ui.mediaDetailsLoading.hidden = !state.mediaDetailsBusy;
 
@@ -4765,7 +4784,7 @@
     ui.mediaPreviewKind.textContent = String(item.kind || "").toUpperCase();
     const summary = [
       t("mediaPreviewPosition", { position: Math.max(0, index + 1), total: items.length }),
-      formatDate(item.captureTime),
+      formatMediaDimensions(item),
       formatBytes(item.sizeBytes),
     ].filter((value) => value && value !== "-");
     ui.mediaPreviewMeta.textContent = summary.join(" · ");

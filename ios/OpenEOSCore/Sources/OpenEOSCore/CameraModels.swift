@@ -675,6 +675,9 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     public let rating: Int?
     public let rotationDegrees: Int?
     public let archived: Bool?
+    public let contentType: String?
+    public let widthPixels: Int?
+    public let heightPixels: Int?
 
     public init(
         id: String,
@@ -686,7 +689,10 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         protected: Bool? = nil,
         rating: Int? = nil,
         rotationDegrees: Int? = nil,
-        archived: Bool? = nil
+        archived: Bool? = nil,
+        contentType: String? = nil,
+        widthPixels: Int? = nil,
+        heightPixels: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -698,6 +704,9 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         self.rating = rating
         self.rotationDegrees = rotationDegrees
         self.archived = archived
+        self.contentType = contentType
+        self.widthPixels = widthPixels
+        self.heightPixels = heightPixels
     }
 }
 

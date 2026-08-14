@@ -2728,6 +2728,9 @@ class CcapiClient(
             rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
             ratingWritable = true,
             streamAvailable = cameraMediaIsVideo(kind, name),
+            contentType = item.optString("content_type").takeIf { it.isNotBlank() },
+            widthPixels = item.optInt("width_pixels").takeIf { item.has("width_pixels") && it > 0 },
+            heightPixels = item.optInt("height_pixels").takeIf { item.has("height_pixels") && it > 0 },
         )
     }
 

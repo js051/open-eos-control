@@ -415,13 +415,11 @@ struct MediaView: View {
 
     @ViewBuilder
     private func mediaActions(_ item: CameraMediaItem) -> some View {
-        let metadataSupported = camera.supports(.mediaProtect) ||
-            camera.supports(.mediaRating) || camera.supports(.mediaRotate) || camera.supports(.mediaArchive)
         HStack(spacing: 2) {
             if camera.supports(.mediaDownload) {
                 downloadAction(item)
             }
-            if metadataSupported {
+            if camera.supports(.mediaBrowser) {
                 Button {
                     metadataItemID = item.id
                 } label: {
@@ -589,6 +587,12 @@ private struct MediaGroup: Identifiable {
     var items: [CameraMediaItem]
 }
 
+private func mediaDimensionsText(_ item: CameraMediaItem) -> String? {
+    guard let width = item.widthPixels, width > 0,
+          let height = item.heightPixels, height > 0 else { return nil }
+    return "\(width) x \(height)"
+}
+
 private struct MediaMetadataView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
@@ -610,6 +614,26 @@ private struct MediaMetadataView: View {
 
                     if camera.isBusy(.media) {
                         ProgressView().tint(Color.cameraAccent).frame(maxWidth: .infinity)
+                    }
+
+                    metadataHeader(
+                        language.string("media_format"),
+                        value: item.contentType ?? item.kind.uppercased()
+                    )
+                    if let dimensions = mediaDimensionsText(item) {
+                        metadataHeader(language.string("media_dimensions"), value: dimensions)
+                    }
+                    if let size = item.sizeBytes {
+                        metadataHeader(
+                            language.string("media_file_size"),
+                            value: ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+                        )
+                    }
+                    if let date = mediaCaptureDate(item) {
+                        metadataHeader(
+                            language.string("media_captured_at"),
+                            value: date.formatted(date: .abbreviated, time: .shortened)
+                        )
                     }
 
                     if camera.supports(.mediaProtect) {
@@ -894,7 +918,7 @@ private struct MediaPreviewView: View {
     }
 
     private var actionsAvailable: Bool {
-        camera.supports(.mediaProtect) || camera.supports(.mediaRating) ||
+        camera.supports(.mediaBrowser) || camera.supports(.mediaProtect) || camera.supports(.mediaRating) ||
             camera.supports(.mediaRotate) || camera.supports(.mediaArchive) ||
             camera.supports(.mediaDelete)
     }
@@ -906,9 +930,7 @@ private struct MediaPreviewView: View {
 
     private func metadataText(for item: CameraMediaItem) -> String {
         var values = [item.kind.uppercased()]
-        if let date = mediaCaptureDate(item) {
-            values.append(date.formatted(date: .abbreviated, time: .shortened))
-        }
+        if let dimensions = mediaDimensionsText(item) { values.append(dimensions) }
         if let size = item.sizeBytes {
             values.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
         }
