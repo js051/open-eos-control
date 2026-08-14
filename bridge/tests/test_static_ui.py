@@ -269,6 +269,11 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'state.mediaLoadStatus = "LOADING"' in script
     assert 'state.mediaLoadStatus = "COMPLETE"' in script
     assert 'state.mediaLoadStatus = "FAILED"' in script
+    assert "function renderMediaSummary(" in script
+    assert "ui.mediaSummary.dataset.loadStatus = state.mediaLoadStatus" in script
+    for key in {"mediaLoadingCount", "mediaFailedCount", "mediaNotLoadedCount"}:
+        declarations = re.findall(rf"^\s+{key}:\s+\"", script, flags=re.MULTILINE)
+        assert len(declarations) == 2, f"{key} must be declared in both supported languages"
     assert "state.refreshGeneration !== interactionGeneration" in script
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script

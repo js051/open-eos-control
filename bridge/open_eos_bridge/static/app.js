@@ -355,6 +355,9 @@
       mediaCount: "{count} media item(s)",
       mediaEmpty: "No media was reported by the camera",
       mediaFilteredCount: "{visible} of {total} media items",
+      mediaLoadingCount: "Loading camera media - {count} item(s) currently shown",
+      mediaFailedCount: "Media refresh failed - showing {count} previous item(s)",
+      mediaNotLoadedCount: "Media not loaded",
       mediaFilter: "Filter media",
       mediaAll: "All",
       mediaPhotos: "Photos",
@@ -735,6 +738,9 @@
       mediaCount: "共 {count} 個媒體檔案",
       mediaEmpty: "相機未回報任何媒體檔案",
       mediaFilteredCount: "顯示 {visible}／{total} 個媒體檔案",
+      mediaLoadingCount: "正在載入相機媒體 - 目前顯示 {count} 個",
+      mediaFailedCount: "媒體重新整理失敗 - 顯示先前的 {count} 個",
+      mediaNotLoadedCount: "尚未載入媒體",
       mediaFilter: "篩選媒體",
       mediaAll: "全部",
       mediaPhotos: "相片",
@@ -4147,6 +4153,7 @@
       const interactionGeneration = state.refreshGeneration;
       ui.mediaRefreshButton.disabled = true;
       state.mediaLoadStatus = "LOADING";
+      renderMediaSummary();
       closeMediaPreview();
       try {
         const response = await api(`/v1/session/${encodeURIComponent(rawSessionId)}/media`);
@@ -4165,6 +4172,7 @@
         if (state.refreshGeneration !== interactionGeneration) continue;
         const normalized = captureError(error);
         state.mediaLoadStatus = "FAILED";
+        renderMediaSummary();
         showToast(normalized.message, true);
         return false;
       }
@@ -4179,9 +4187,7 @@
     const mediaPage = mediaLibrary.page(visibleItems, state.mediaPage, MEDIA_PAGE_SIZE);
     state.mediaPage = mediaPage.pageIndex;
     mediaPage.items.forEach((item) => mediaLibrary.touch(state.mediaThumbnailUrls, item.id));
-    ui.mediaSummary.textContent = visibleItems.length === state.media.length
-      ? t("mediaCount", { count: state.media.length })
-      : t("mediaFilteredCount", { visible: visibleItems.length, total: state.media.length });
+    renderMediaSummary(visibleItems);
     ui.mediaSortSelect.value = state.mediaSort;
     ui.mediaPagination.hidden = mediaPage.pageCount <= 1;
     ui.mediaPageStatus.textContent = t("mediaPageStatus", mediaPage);
@@ -4284,6 +4290,26 @@
       state.mediaSort,
       resolvedLanguage(),
     );
+  }
+
+  function renderMediaSummary(visibleItems = displayedMedia()) {
+    if (!ui.mediaSummary) return;
+    ui.mediaSummary.dataset.loadStatus = state.mediaLoadStatus;
+    if (state.mediaLoadStatus === "LOADING") {
+      ui.mediaSummary.textContent = t("mediaLoadingCount", { count: state.media.length });
+      return;
+    }
+    if (state.mediaLoadStatus === "FAILED") {
+      ui.mediaSummary.textContent = t("mediaFailedCount", { count: state.media.length });
+      return;
+    }
+    if (state.mediaLoadStatus !== "COMPLETE") {
+      ui.mediaSummary.textContent = t("mediaNotLoadedCount");
+      return;
+    }
+    ui.mediaSummary.textContent = visibleItems.length === state.media.length
+      ? t("mediaCount", { count: state.media.length })
+      : t("mediaFilteredCount", { visible: visibleItems.length, total: state.media.length });
   }
 
   function previewableMedia() {

@@ -26,6 +26,8 @@ App 內紀錄是方便檢閱的工作階段筆記，不是遠端證明。完整�
 
 驗證媒體清單時，Android／iOS 請一起查看 `mediaItemCount` 與 `mediaLoadStatus`，PC 請查看 `mediaLibrary.itemCount` 與 `mediaLibrary.loadStatus`。只有 `COMPLETE` 代表目前數量來自已走完相機公告之全部容器與分頁的遍歷；`LOADING`、`CANCELLED`、`FAILED` 與 `NOT_LOADED` 都是刻意標示的不完整證據。產品沒有 500 筆媒體上限。
 
+Android 與 iOS 也會在媒體畫面顯示逐步收到的數量，並可取消仍在執行的相機遍歷。PC Bridge 會誠實顯示載入中或失敗後保留的舊數量，但目前 `/media` 請求是同步執行，因此不提供只會中止瀏覽器請求、卻無法停止引擎工作的假取消按鈕。
+
 原始報告應維持私密，且只有符合以下條件才會被接受：
 
 - 使用 report schema 1，並包含明確的產品版本；
