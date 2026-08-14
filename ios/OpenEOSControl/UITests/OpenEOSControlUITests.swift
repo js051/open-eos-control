@@ -236,7 +236,9 @@ final class OpenEOSControlUITests: XCTestCase {
         moreSettings.tap()
         let tapAction = app.segmentedControls["live-view-tap-action-picker"]
         XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
-        tapAction.buttons["Click white balance"].tap()
+        let clickWhiteBalance = tapAction.buttons["Click white balance"]
+        clickWhiteBalance.tap()
+        XCTAssertTrue(waitForSelection(clickWhiteBalance, timeout: 3))
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
         liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
@@ -427,7 +429,7 @@ final class OpenEOSControlUITests: XCTestCase {
         _ = try await simulatorRequest(
             path: "/ccapi/test/media-pagination",
             method: "POST",
-            jsonBody: ["page_size": 1, "page_delay_ms": 30_000]
+            jsonBody: ["page_size": 1, "page_delay_ms": 15_000]
         )
 
         let app = launch(
@@ -490,6 +492,14 @@ final class OpenEOSControlUITests: XCTestCase {
         let predicate = NSPredicate { value, _ in
             guard let element = value as? XCUIElement else { return false }
             return element.exists && element.isEnabled && element.isHittable
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func waitForSelection(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate { value, _ in
+            (value as? XCUIElement)?.isSelected == true
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
