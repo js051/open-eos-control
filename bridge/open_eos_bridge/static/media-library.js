@@ -42,7 +42,10 @@
       if (filter === "photo") return !isVideo(item);
       return true;
     });
-    return filtered.sort((left, right) => {
+    if (sort === "camera") return filtered;
+    return filtered.map((item, index) => ({ item, index })).sort((leftEntry, rightEntry) => {
+      const left = leftEntry.item;
+      const right = rightEntry.item;
       const nameOrder = naturalName(left, right, locale);
       if (sort === "name") {
         return nameOrder || String(left.id).localeCompare(String(right.id), locale, { numeric: true });
@@ -54,9 +57,8 @@
       if (leftTime !== null && rightTime !== null && leftTime !== rightTime) {
         return sort === "oldest" ? leftTime - rightTime : rightTime - leftTime;
       }
-      if (nameOrder) return sort === "oldest" ? nameOrder : -nameOrder;
-      return String(left.id).localeCompare(String(right.id), locale, { numeric: true });
-    });
+      return leftEntry.index - rightEntry.index;
+    }).map(({ item }) => item);
   }
 
   function page(items, index, size) {

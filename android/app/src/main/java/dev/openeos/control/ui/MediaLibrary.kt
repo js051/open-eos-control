@@ -13,7 +13,7 @@ import java.time.format.DateTimeParseException
 
 enum class MediaFilter { ALL, PHOTOS, VIDEOS }
 
-enum class MediaSort { NEWEST, OLDEST, NAME }
+enum class MediaSort { CAMERA, NEWEST, OLDEST, NAME }
 
 data class MediaDateGroup(
     val date: String?,
@@ -37,9 +37,12 @@ internal fun mediaItemsForDisplay(
             MediaFilter.VIDEOS -> item.isVideo
         }
     }
-    return filtered.sortedWith { left, right ->
-        compareMediaItems(left, right, sort)
-    }
+    if (sort == MediaSort.CAMERA) return filtered
+    return filtered.withIndex().sortedWith { left, right ->
+        compareMediaItems(left.value, right.value, sort)
+            .takeIf { it != 0 }
+            ?: left.index.compareTo(right.index)
+    }.map { it.value }
 }
 
 internal val CameraMediaItem.isVideo: Boolean
@@ -86,9 +89,7 @@ private fun compareMediaItems(left: CameraMediaItem, right: CameraMediaItem, sor
         val compared = leftTime.compareTo(rightTime)
         if (compared != 0) return if (sort == MediaSort.NEWEST) -compared else compared
     }
-    val nameCompared = naturalCompare(left.name, right.name)
-    if (nameCompared != 0) return if (sort == MediaSort.NEWEST) -nameCompared else nameCompared
-    return left.id.compareTo(right.id)
+    return 0
 }
 
 private fun String?.toMediaInstant(): Instant? {

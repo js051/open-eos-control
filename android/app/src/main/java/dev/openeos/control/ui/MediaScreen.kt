@@ -55,7 +55,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
     var mediaFilter by remember { mutableStateOf(MediaFilter.ALL) }
-    var mediaSort by remember { mutableStateOf(MediaSort.NEWEST) }
+    var mediaSort by remember { mutableStateOf(MediaSort.CAMERA) }
     val displayedItems = remember(state.mediaItems, mediaFilter, mediaSort) {
         mediaItemsForDisplay(state.mediaItems, mediaFilter, mediaSort)
     }

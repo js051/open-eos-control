@@ -13,7 +13,7 @@ struct MediaView: View {
     @State private var metadataItemID: String?
     @State private var isFileImporterPresented = false
     @State private var mediaFilter = MediaFilter.all
-    @State private var mediaSort = MediaSort.newest
+    @State private var mediaSort = MediaSort.camera
 
     private let mediaColumns = [
         GridItem(.adaptive(minimum: 156, maximum: 240), spacing: 10),

@@ -4,6 +4,15 @@ import XCTest
 @testable import OpenEOSControl
 
 final class MediaLibraryTests: XCTestCase {
+    func testCameraSortPreservesTransportOrderExactly() {
+        let items = [
+            media("ten", "IMG_10.JPG", "2026-08-13T10:00:00Z"),
+            media("one", "IMG_1.JPG", "2026-08-14T10:00:00Z"),
+        ]
+
+        XCTAssertEqual(mediaItemsForDisplay(items, filter: .all, sort: .camera), items)
+    }
+
     func testNameSortUsesNaturalOrderAndIgnoresCaptureDate() {
         let items = [
             media("ten", "IMG_10.JPG", "2026-08-14T10:00:00Z"),
@@ -31,6 +40,24 @@ final class MediaLibraryTests: XCTestCase {
         XCTAssertEqual(
             mediaItemsForDisplay(items, filter: .all, sort: .oldest).map(\.id),
             ["old", "new", "unknown"]
+        )
+    }
+
+    func testDateSortPreservesCameraOrderWhenDatesAreMissingOrEqual() {
+        let items = [
+            media("unknown-10", "IMG_10.JPG", nil),
+            media("unknown-9", "IMG_9.JPG", nil),
+            media("raw", "IMG_2.CR3", "2026-08-14T10:00:00Z"),
+            media("jpeg", "IMG_2.JPG", "2026-08-14T10:00:00Z"),
+        ]
+
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .newest).map(\.id),
+            ["raw", "jpeg", "unknown-10", "unknown-9"]
+        )
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .oldest).map(\.id),
+            ["raw", "jpeg", "unknown-10", "unknown-9"]
         )
     }
 
