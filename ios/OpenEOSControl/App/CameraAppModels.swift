@@ -62,6 +62,14 @@ enum CameraOperation: Hashable {
     case media
 }
 
+enum MediaLibraryLoadStatus: String {
+    case notLoaded = "NOT_LOADED"
+    case loading = "LOADING"
+    case complete = "COMPLETE"
+    case cancelled = "CANCELLED"
+    case failed = "FAILED"
+}
+
 struct FocusMarker: Equatable {
     let x: Double
     let y: Double

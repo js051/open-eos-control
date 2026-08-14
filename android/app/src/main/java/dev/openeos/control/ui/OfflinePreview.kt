@@ -172,6 +172,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             streamAvailable = true,
         ),
     ),
+    mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
     mediaThumbnails = emptyMap(),
     mediaThumbnailLoadingIds = emptySet(),
     liveViewFrameUrl = null,

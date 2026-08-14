@@ -24,6 +24,8 @@ App 內紀錄是方便檢閱的工作階段筆記，不是遠端證明。完整�
 
 遇到 CCAPI 韌體或探索問題時，分享私密報告前請保留 `discoveryAttemptCount` 與編號的 `discoveryAttempt` 行。它們能區分根清單、developer 清單與 identity fallback 的結果，但不含回應 body 或值。每一行只會包含固定的相對 endpoint、結果、可選 HTTP 狀態、已過濾的頂層鍵、協定版本、有效操作數與截短狀態；不會包含相機 origin、帳密、Authorization、例外訊息或 raw JSON。
 
+驗證媒體清單時，Android／iOS 請一起查看 `mediaItemCount` 與 `mediaLoadStatus`，PC 請查看 `mediaLibrary.itemCount` 與 `mediaLibrary.loadStatus`。只有 `COMPLETE` 代表目前數量來自已走完相機公告之全部容器與分頁的遍歷；`LOADING`、`CANCELLED`、`FAILED` 與 `NOT_LOADED` 都是刻意標示的不完整證據。產品沒有 500 筆媒體上限。
+
 原始報告應維持私密，且只有符合以下條件才會被接受：
 
 - 使用 report schema 1，並包含明確的產品版本；

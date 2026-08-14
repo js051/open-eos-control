@@ -250,6 +250,7 @@ final class CameraAppTests: XCTestCase {
         XCTAssertNil(state.activeSheet)
         XCTAssertEqual(state.screen, .control)
         XCTAssertTrue(state.mediaItems.isEmpty)
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .notLoaded)
     }
 
     func testCCAPIPresetsCarryExplicitConnectionIntent() {
@@ -581,6 +582,20 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(report.contains("monitorFrameGuide=ratio2x39"))
         XCTAssertTrue(report.contains("monitorSafeArea=true"))
         XCTAssertTrue(report.contains("monitorDesqueeze=x1_5"))
+    }
+
+    func testOfflinePreviewReportsCompleteMediaTraversal() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+
+        state.openOfflinePreview()
+        let report = await state.diagnosticReport()
+
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .complete)
+        XCTAssertTrue(report.contains("mediaItemCount=3"))
+        XCTAssertTrue(report.contains("mediaLoadStatus=COMPLETE"))
     }
 
     func testPhysicalValidationRequiresAdvertisedAndObservedEvidence() {
