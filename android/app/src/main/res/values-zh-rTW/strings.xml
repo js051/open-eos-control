@@ -369,6 +369,8 @@
     <string name="media_filter_count">%1$s %2$d</string>
     <string name="media_sort">排序媒體</string>
     <string name="media_camera_order">相機順序</string>
+    <string name="media_item_count_sort">%1$d 個項目 - %2$s</string>
+    <string name="media_sort_current">排序媒體：%1$s</string>
     <string name="media_newest_first">最新優先</string>
     <string name="media_oldest_first">最舊優先</string>
     <string name="media_filename">檔案名稱</string>
@@ -377,4 +379,6 @@
     <string name="next_media">下一個媒體</string>
     <string name="media_unknown_date">日期不明</string>
     <string name="media_raw_badge">RAW</string>
+    <string name="media_viewer_position">第 %1$d 個，共 %2$d 個</string>
+    <string name="reset_media_zoom">重設縮放</string>
 </resources>

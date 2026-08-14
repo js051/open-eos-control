@@ -55,7 +55,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
     var mediaFilter by remember { mutableStateOf(MediaFilter.ALL) }
-    var mediaSort by remember { mutableStateOf(MediaSort.CAMERA) }
+    var mediaSort by remember { mutableStateOf(MediaSort.NEWEST) }
     val displayedItems = remember(state.mediaItems, mediaFilter, mediaSort) {
         mediaItemsForDisplay(state.mediaItems, mediaFilter, mediaSort)
     }
@@ -72,11 +72,20 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
 
     state.mediaPreviewItem?.let { item ->
         val previewIndex = displayedItems.indexOfFirst { it.id == item.id }
+        val viewerActionsEnabled = !state.isBusy(CameraOperation.MEDIA) && (
+            state.supports(CameraFeature.MEDIA_PROTECT) ||
+                state.supports(CameraFeature.MEDIA_ARCHIVE) ||
+                state.supports(CameraFeature.MEDIA_RATING) ||
+                state.supports(CameraFeature.MEDIA_ROTATE) ||
+                state.supports(CameraFeature.MEDIA_DELETE)
+            )
         MediaViewerDialog(
             item = item,
             bytes = state.mediaPreviewBytes,
             streamSource = state.mediaStreamSource,
             loading = state.mediaPreviewLoading,
+            position = previewIndex + 1,
+            totalCount = displayedItems.size,
             canMovePrevious = previewIndex > 0,
             canMoveNext = previewIndex in 0 until displayedItems.lastIndex,
             onPrevious = { actions.previewAdjacentMedia(displayedItems, -1) },
@@ -85,6 +94,11 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             onDownload = {
                 pendingDownload = item
                 createDocument.launch(item.name)
+            },
+            actionsEnabled = viewerActionsEnabled,
+            onActions = {
+                actions.closeMediaPreview()
+                activeMetadataItemId = item.id
             },
             onDismiss = actions.closeMediaPreview,
         )
@@ -170,9 +184,14 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.camera_media), color = AppText, fontWeight = FontWeight.Bold)
                 Text(
-                    stringResource(R.string.media_item_count, state.mediaItems.size),
+                    stringResource(
+                        R.string.media_item_count_sort,
+                        state.mediaItems.size,
+                        stringResource(mediaSort.labelResource),
+                    ),
                     color = AppSubtleText,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (state.supports(CameraFeature.MEDIA_UPLOAD)) {

@@ -16,7 +16,7 @@ class MediaLibraryTest {
     }
 
     @Test
-    fun sortsKnownCaptureTimesBeforeUnknownAndPreservesCameraOrderWithoutDates() {
+    fun sortsKnownCaptureTimesBeforeUnknownAndUsesNaturalFallbackWithoutDates() {
         val items = listOf(
             media("photo-9", "IMG_9.JPG"),
             media("new", "IMG_2.JPG", "2026-08-14T10:00:00Z"),
@@ -25,7 +25,7 @@ class MediaLibraryTest {
         )
 
         assertEquals(
-            listOf("new", "old", "photo-9", "photo-10"),
+            listOf("new", "old", "photo-10", "photo-9"),
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST).map { it.id },
         )
         assertEquals(
@@ -134,6 +134,30 @@ class MediaLibraryTest {
             ),
             mediaGroupsForDisplay(items, MediaSort.NEWEST),
         )
+    }
+
+    @Test
+    fun cameraOrderUsesOneUnlabelledGroupWithoutReordering() {
+        val items = listOf(
+            media("new", "IMG_2.JPG", "2026-08-14T10:00:00Z"),
+            media("old", "IMG_1.JPG", "2026-08-13T10:00:00Z"),
+        )
+
+        assertEquals(
+            listOf(MediaDateGroup(date = null, items = items)),
+            mediaGroupsForDisplay(items, MediaSort.CAMERA),
+        )
+        assertEquals(emptyList<MediaDateGroup>(), mediaGroupsForDisplay(emptyList(), MediaSort.CAMERA))
+    }
+
+    @Test
+    fun viewerLabelsNormalizeLocalCaptureTimeAndBinarySize() {
+        assertEquals("2026-08-14 10:05", mediaCaptureTimeLabel("2026-08-14T10:05:59"))
+        assertEquals(null, mediaCaptureTimeLabel("not-a-date"))
+        assertEquals("0 B", mediaByteSizeLabel(0))
+        assertEquals("1.5 KB", mediaByteSizeLabel(1536))
+        assertEquals("2.0 MB", mediaByteSizeLabel(2 * 1024L * 1024L))
+        assertEquals(null, mediaByteSizeLabel(-1))
     }
 
     @Test
