@@ -427,7 +427,7 @@ final class OpenEOSControlUITests: XCTestCase {
         _ = try await simulatorRequest(
             path: "/ccapi/test/media-pagination",
             method: "POST",
-            jsonBody: ["page_size": 1, "page_delay_ms": 5_000]
+            jsonBody: ["page_size": 1, "page_delay_ms": 30_000]
         )
 
         let app = launch(
