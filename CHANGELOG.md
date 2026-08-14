@@ -4,9 +4,14 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-14
+
+- Rebuilt the Android, iOS, and PC media library for large camera cards with complete camera-advertised container/page traversal, progressive results, explicit loading completeness, cancellation, camera-order preservation, natural/date sorting, filtering, and deterministic coverage beyond 500 items.
+- Added full-screen photo viewing with bounded zoom and pan, thumbnails and display previews, plus read-only format, dimensions, file size, and capture-time details where the active transport can report them. Metadata writes and deletion remain independently capability-gated.
 - Hardened camera-resident video preview across Android, iOS, and PC. Mobile CCAPI sessions now preflight missing file sizes through the advertised media-info representation so non-seekable camera responses can fall back to an exact verified local file; Android supplies the real filename and container MIME to Media3; iOS ignores generic `application/octet-stream`, clamps tail byte ranges to the declared file length, and decodes a real H.264 fixture through the production AVFoundation resource loader. Browser errors now distinguish unsupported codecs from transport failures while preserving original download.
 - Added in-place camera-video playback recovery across Android, iOS, and PC. Transport, truncated-range, staging, and storage failures retain an explicit retry that rebuilds the platform playback source, Swift camera stream, or browser playback ticket; codec failures identify the MP4/MOV/M4V/AVI/MKV container and keep original download available without promising that a retry can add a missing decoder.
 - Kept the iOS progressive media-load indicator inside the compact summary region so upload and cancel remain visible and hittable on narrow iPhones.
+- Extended Android USB/PTP, Desktop Bridge/libgphoto2, direct CCAPI, and Simulator media contracts without inventing unavailable camera metadata; each UI exposes only operations advertised by its active backend.
 
 ## [0.2.0] - 2026-08-12
 
@@ -106,3 +111,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.1.9]: https://github.com/js051/open-eos-control/releases/tag/v0.1.9
 [0.1.10]: https://github.com/js051/open-eos-control/releases/tag/v0.1.10
 [0.2.0]: https://github.com/js051/open-eos-control/releases/tag/v0.2.0
+[0.3.0]: https://github.com/js051/open-eos-control/releases/tag/v0.3.0
