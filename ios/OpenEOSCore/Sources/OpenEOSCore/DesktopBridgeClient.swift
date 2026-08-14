@@ -72,8 +72,15 @@ public actor DesktopBridgeClient {
     private static let maximumEventBytes = 256 * 1024
     private static let maximumEventKeys = 64
     private static let maximumEventKeyCharacters = 128
+    private static let maximumPlaybackTicketBytes = 4 * 1024
+    private static let maximumPlaybackTicketLifetimeSeconds = 3_600
+    private static let maximumPlaybackURLCharacters = 2_048
+    private static let maximumPlaybackTokenCharacters = 512
     private static let pathSegmentAllowed = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+    private static let playbackTokenAllowed = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     )
 
     private let baseURL: URL
@@ -691,17 +698,54 @@ public actor DesktopBridgeClient {
         )
     }
 
+    public func beginMediaPlayback(_ item: CameraMediaItem) async throws -> DesktopBridgeMediaPlayback {
+        let endpoint = try sessionEndpoint(["media", item.id, "playback"])
+        let ticket = try await requestJSON(
+            url: endpoint,
+            method: "POST",
+            payload: nil,
+            maximumBytes: Self.maximumPlaybackTicketBytes
+        )
+        guard
+            let rawURL = ticket.nonEmptyString("url"),
+            rawURL.count <= Self.maximumPlaybackURLCharacters,
+            let lifetime = Self.strictInt(ticket["expiresInSeconds"]),
+            (1...Self.maximumPlaybackTicketLifetimeSeconds).contains(lifetime)
+        else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid media playback ticket.")
+        }
+        let playbackURL = try validatedPlaybackURL(rawURL)
+        return DesktopBridgeMediaPlayback(client: self, item: item, playbackURL: playbackURL)
+    }
+
     public func openMediaStream(
         _ item: CameraMediaItem,
+        offset: Int64,
+        length: Int64? = nil
+    ) async throws -> CameraMediaStreamResponse {
+        let playback = try await beginMediaPlayback(item)
+        do {
+            let response = try await playback.open(offset: offset, length: length)
+            return response.addingCancelAction {
+                Task { await playback.close() }
+            }
+        } catch {
+            await playback.close()
+            throw error
+        }
+    }
+
+    fileprivate func openMediaPlaybackStream(
+        _ item: CameraMediaItem,
+        playbackURL: URL,
         offset: Int64,
         length: Int64? = nil
     ) async throws -> CameraMediaStreamResponse {
         guard offset >= 0, length.map({ $0 > 0 }) ?? true else {
             throw DesktopBridgeError.invalidResponse("Media byte range must be positive.")
         }
-        let url = try sessionEndpoint(["media", item.id])
         var request = makeRequest(
-            url: url,
+            url: playbackURL,
             method: "GET",
             accept: "video/*, application/octet-stream",
             timeoutInterval: 120
@@ -710,12 +754,7 @@ public actor DesktopBridgeClient {
         let response = try await transport.openStream(request)
         guard response.statusCode == 200 || response.statusCode == 206 else {
             response.cancel()
-            throw Self.httpError(
-                statusCode: response.statusCode,
-                body: Data(),
-                method: "GET",
-                url: url
-            )
+            throw Self.playbackHTTPError(statusCode: response.statusCode)
         }
         if response.header("content-type")?.lowercased().hasPrefix("text/") == true ||
             response.header("content-type")?.lowercased().contains("json") == true {
@@ -732,6 +771,15 @@ public actor DesktopBridgeClient {
             response.cancel()
             throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid media byte range.")
         }
+    }
+
+    fileprivate func revokeMediaPlayback(_ playbackURL: URL) async {
+        let request = makeRequest(
+            url: playbackURL,
+            method: "DELETE",
+            accept: "application/json"
+        )
+        _ = try? await transport.send(request)
     }
 
     private static func mediaRangeHeader(offset: Int64, length: Int64?) -> String {
@@ -967,6 +1015,47 @@ public actor DesktopBridgeClient {
     private func sessionEndpoint(_ segments: [String], queryItems: [URLQueryItem] = []) throws -> URL {
         guard let sessionID else { throw DesktopBridgeError.notInitialized }
         return try endpoint(["v1", "session", sessionID] + segments, queryItems: queryItems)
+    }
+
+    private func validatedPlaybackURL(_ rawURL: String) throws -> URL {
+        guard
+            let resolved = URL(string: rawURL, relativeTo: baseURL)?.absoluteURL,
+            let base = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+            let candidate = URLComponents(url: resolved, resolvingAgainstBaseURL: false),
+            candidate.scheme?.lowercased() == base.scheme?.lowercased(),
+            candidate.host?.lowercased() == base.host?.lowercased(),
+            Self.effectivePort(candidate) == Self.effectivePort(base),
+            candidate.user == nil,
+            candidate.password == nil,
+            candidate.query == nil,
+            candidate.fragment == nil
+        else {
+            throw DesktopBridgeError.invalidResponse(
+                "Desktop Bridge returned a media playback URL outside its own origin."
+            )
+        }
+        let segments = candidate.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false)
+        let token = segments.count == 4 ? String(segments[3]) : ""
+        guard
+            segments.count == 4,
+            segments[0].isEmpty,
+            segments[1] == "v1",
+            segments[2] == "media-playback",
+            (1...Self.maximumPlaybackTokenCharacters).contains(token.count),
+            token.unicodeScalars.allSatisfy(Self.playbackTokenAllowed.contains)
+        else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid media playback URL.")
+        }
+        return resolved
+    }
+
+    private static func effectivePort(_ components: URLComponents) -> Int? {
+        if let port = components.port { return port }
+        switch components.scheme?.lowercased() {
+        case "http": return 80
+        case "https": return 443
+        default: return nil
+        }
     }
 
     private static func encodePathSegment(_ value: String) throws -> String {
@@ -1243,6 +1332,18 @@ public actor DesktopBridgeClient {
         )
     }
 
+    private static func playbackHTTPError(statusCode: Int) -> DesktopBridgeError {
+        .http(
+            statusCode: statusCode,
+            method: "GET",
+            url: "/v1/media-playback/[redacted]",
+            code: "HTTP_\(statusCode)",
+            message: "Desktop Bridge media playback returned HTTP \(statusCode).",
+            feature: nil,
+            engine: nil
+        )
+    }
+
     private static func httpError(
         statusCode: Int,
         body: Data,
@@ -1262,6 +1363,62 @@ public actor DesktopBridgeClient {
             feature: detail.nonEmptyString("feature"),
             engine: detail.nonEmptyString("engine")
         )
+    }
+}
+
+public actor DesktopBridgeMediaPlayback {
+    private let client: DesktopBridgeClient
+    private let item: CameraMediaItem
+    private let playbackURL: URL
+    private var activeStreams = 0
+    private var closed = false
+    private var revokeStarted = false
+
+    fileprivate init(client: DesktopBridgeClient, item: CameraMediaItem, playbackURL: URL) {
+        self.client = client
+        self.item = item
+        self.playbackURL = playbackURL
+    }
+
+    public func open(offset: Int64, length: Int64? = nil) async throws -> CameraMediaStreamResponse {
+        guard !closed else { throw CancellationError() }
+        activeStreams += 1
+        do {
+            let response = try await client.openMediaPlaybackStream(
+                item,
+                playbackURL: playbackURL,
+                offset: offset,
+                length: length
+            )
+            guard !closed else {
+                response.cancel()
+                throw CancellationError()
+            }
+            return response.addingCancelAction {
+                Task { await self.streamDidClose() }
+            }
+        } catch {
+            activeStreams -= 1
+            await revokeIfReady()
+            throw error
+        }
+    }
+
+    public func close() async {
+        closed = true
+        await revokeIfReady()
+    }
+
+    private func streamDidClose() async {
+        guard activeStreams > 0 else { return }
+        activeStreams -= 1
+        await revokeIfReady()
+    }
+
+    private func revokeIfReady() async {
+        guard closed, activeStreams == 0, !revokeStarted else { return }
+        revokeStarted = true
+        await client.revokeMediaPlayback(playbackURL)
     }
 }
 

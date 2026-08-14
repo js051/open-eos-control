@@ -12,6 +12,7 @@ final class CameraMediaPlayback: ObservableObject {
 
     private let item: CameraMediaItem
     private let session: CameraSession
+    private let playbackStream: CameraMediaPlaybackStream
     private let resourceLoader: CameraMediaResourceLoader
     private var itemCancellables = Set<AnyCancellable>()
     private var fallbackTask: Task<Void, Never>?
@@ -19,12 +20,13 @@ final class CameraMediaPlayback: ObservableObject {
     private var hasStartedFallback = false
     private var isClosed = false
 
-    init(item: CameraMediaItem, session: CameraSession) {
+    init(item: CameraMediaItem, session: CameraSession, playbackStream: CameraMediaPlaybackStream) {
         self.item = item
         self.session = session
+        self.playbackStream = playbackStream
         Self.removeStalePlaybackDirectories()
         resourceLoader = CameraMediaResourceLoader(item: item) { offset, length in
-            try await session.openMediaStream(item, offset: offset, length: length)
+            try await playbackStream.open(offset: offset, length: length)
         }
         let asset = AVURLAsset(url: resourceLoader.assetURL)
         asset.resourceLoader.setDelegate(resourceLoader, queue: resourceLoader.delegateQueue)
@@ -57,6 +59,8 @@ final class CameraMediaPlayback: ObservableObject {
         player.pause()
         player.replaceCurrentItem(with: nil)
         removeFallbackFile()
+        let playbackStream = playbackStream
+        Task { await playbackStream.close() }
     }
 
     private func observe(_ item: AVPlayerItem) {
@@ -162,6 +166,8 @@ final class CameraMediaPlayback: ObservableObject {
     private func replacePlayer(with url: URL) {
         itemCancellables.removeAll()
         resourceLoader.invalidate()
+        let playbackStream = playbackStream
+        Task { await playbackStream.close() }
         player.pause()
         player.replaceCurrentItem(with: nil)
         player = AVPlayer(url: url)
