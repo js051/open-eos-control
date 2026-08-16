@@ -25,6 +25,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -202,7 +205,11 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                             sortLabel,
                         )
                         MediaLibraryLoadStatus.COMPLETE -> stringResource(
-                            R.string.media_item_count_sort,
+                            if (state.mediaLibraryScope == MediaLibraryScope.RECENT) {
+                                R.string.media_recent_item_count_sort
+                            } else {
+                                R.string.media_item_count_sort
+                            },
                             state.mediaItems.size,
                             sortLabel,
                         )
@@ -230,6 +237,11 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
             )
         }
+
+        MediaLibraryScopeBar(
+            selected = state.mediaLibraryScope,
+            onSelected = actions.setMediaLibraryScope,
+        )
 
         MediaFilterBar(mediaFilter, state.mediaItems, onSelected = { mediaFilter = it })
 
@@ -334,6 +346,38 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 actions = actions,
                 onPreview = actions.openMediaPreview,
                 onActions = { activeMetadataItemId = it.id },
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun MediaLibraryScopeBar(
+    selected: MediaLibraryScope,
+    onSelected: (MediaLibraryScope) -> Unit,
+) {
+    val scopes = listOf(
+        MediaLibraryScope.RECENT to R.string.media_scope_recent,
+        MediaLibraryScope.ALL to R.string.media_scope_all,
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        scopes.forEachIndexed { index, (scope, label) ->
+            SegmentedButton(
+                selected = selected == scope,
+                onClick = { onSelected(scope) },
+                shape = SegmentedButtonDefaults.itemShape(index, scopes.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = AppAccent.copy(alpha = 0.14f),
+                    activeContentColor = AppAccent,
+                    activeBorderColor = AppAccent,
+                    inactiveContainerColor = AppSurface,
+                    inactiveContentColor = AppText,
+                    inactiveBorderColor = AppBorder,
+                ),
+                label = { Text(stringResource(label), maxLines = 1) },
             )
         }
     }

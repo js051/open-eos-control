@@ -216,8 +216,10 @@ class CameraRepository(
         magnification: LiveViewMagnification,
     ): LiveViewMagnificationResult = backend.setLiveViewMagnification(magnification)
 
-    suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit = {}): List<CameraMediaItem> =
-        backend.listMedia(onProgress)
+    suspend fun listMedia(
+        maximumItems: Int? = null,
+        onProgress: (List<CameraMediaItem>) -> Unit = {},
+    ): List<CameraMediaItem> = backend.listMedia(maximumItems, onProgress)
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = backend.mediaThumbnail(item)
 

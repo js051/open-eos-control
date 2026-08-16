@@ -207,6 +207,8 @@ fun buildDiagnosticReport(
         appendLine("remainingRecordingSeconds=${state.status?.remainingRecordingSeconds ?: "unknown"}")
         appendLine("recordable=${state.status?.rawRecordableJson?.ifBlank { "unknown" } ?: "unknown"}")
         appendLine("mediaItemCount=${state.mediaItems.size}")
+        appendLine("mediaLibraryScope=${state.mediaLibraryScope.name}")
+        appendLine("mediaLibraryHasMore=${state.mediaLibraryHasMore}")
         appendLine("mediaLoadStatus=${state.mediaLibraryLoadStatus.name}")
         appendLine("lensMounted=${state.status?.lens?.mounted ?: "unknown"}")
         appendLine("lensName=${state.status?.lens?.name?.ifBlank { "none" } ?: "unknown"}")

@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraMediaItem
+import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -16,7 +17,7 @@ class MediaLibraryTest {
     }
 
     @Test
-    fun sortsKnownCaptureTimesBeforeUnknownAndUsesNaturalFallbackWithoutDates() {
+    fun sortsKnownCaptureTimesBeforeUnknownAndPreservesCameraOrderWithoutDates() {
         val items = listOf(
             media("photo-9", "IMG_9.JPG"),
             media("new", "IMG_2.JPG", "2026-08-14T10:00:00Z"),
@@ -25,12 +26,30 @@ class MediaLibraryTest {
         )
 
         assertEquals(
-            listOf("new", "old", "photo-10", "photo-9"),
+            listOf("new", "old", "photo-9", "photo-10"),
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST).map { it.id },
         )
         assertEquals(
-            listOf("old", "new", "photo-9", "photo-10"),
+            listOf("old", "new", "photo-10", "photo-9"),
             mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.OLDEST).map { it.id },
+        )
+    }
+
+    @Test
+    fun timestampFreePhotoAndVideoItemsKeepDescendingCameraOrder() {
+        val items = listOf(
+            media("new-photo", "IMG_4915.JPG"),
+            media("new-video", "MVI_0013.MP4", kind = "video"),
+            media("old-photo", "IMG_4914.JPG"),
+        )
+
+        assertEquals(
+            items,
+            mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST),
+        )
+        assertEquals(
+            items.reversed(),
+            mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.OLDEST),
         )
     }
 
@@ -181,6 +200,26 @@ class MediaLibraryTest {
             touchMediaCacheEntry(cache, "two").keys.toList(),
         )
         assertEquals(cache, touchMediaCacheEntry(cache, "missing"))
+    }
+
+    @Test
+    fun recentEventItemsReplaceDuplicatesWithoutDiscardingTheLoadedLibrary() {
+        val updated = media("shared", "IMG_0100.JPG")
+        val existing = listOf(
+            media("shared", "IMG_0100.JPG", "2026-08-13T10:00:00Z"),
+            media("old", "IMG_0099.JPG"),
+        )
+
+        assertEquals(
+            listOf(media("new", "IMG_0101.JPG"), updated, existing.last()),
+            mergeRecentMedia(listOf(media("new", "IMG_0101.JPG"), updated), existing),
+        )
+    }
+
+    @Test
+    fun thumbnailRetriesOnlyTransportFailures() {
+        assertEquals(true, isRetryableMediaThumbnailFailure(IOException("timeout")))
+        assertEquals(false, isRetryableMediaThumbnailFailure(IllegalStateException("HTTP 404")))
     }
 
     private fun media(

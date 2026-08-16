@@ -1855,7 +1855,7 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.camera_media)).assertIsDisplayed()
         compose.onNodeWithText(
             resourceText(
-                R.string.media_item_count_sort,
+                R.string.media_recent_item_count_sort,
                 state.mediaItems.size,
                 resourceText(R.string.media_newest_first),
             ),
@@ -1867,6 +1867,28 @@ class CameraScreensTest {
             .performClick()
         compose.onNodeWithText(resourceText(R.string.delete_media, "R6M3_0001.CR3"))
             .assertDoesNotExist()
+    }
+
+    @Test
+    fun mediaLibraryDefaultsToRecentAndCanRequestTheEntireCard() {
+        val state = mutableStateOf(CameraUiState().withOfflinePreview().copy(uiMode = UiMode.MEDIA))
+        var requestedScope: MediaLibraryScope? = null
+        val actions = noOpActions().copy(
+            setMediaLibraryScope = { scope ->
+                requestedScope = scope
+                state.value = state.value.copy(mediaLibraryScope = scope)
+            },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state.value, actions)
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.media_scope_recent)).assertIsSelected()
+        compose.onNodeWithText(resourceText(R.string.media_scope_all)).performClick()
+        compose.runOnIdle { assertEquals(MediaLibraryScope.ALL, requestedScope) }
+        compose.onNodeWithText(resourceText(R.string.media_scope_all)).assertIsSelected()
     }
 
     @Test
