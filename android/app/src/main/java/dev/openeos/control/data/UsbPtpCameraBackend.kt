@@ -748,9 +748,15 @@ class UsbPtpCameraBackend(
         return status()
     }
 
-    override suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit): List<CameraMediaItem> {
+    override suspend fun listMedia(
+        maximumItems: Int?,
+        onProgress: (List<CameraMediaItem>) -> Unit,
+    ): List<CameraMediaItem> {
+        require(maximumItems == null || maximumItems > 0) { "Media item limit must be positive." }
         requireMediaBrowser()
-        val hostItems = hostCaptureStore?.list().orEmpty()
+        val hostItems = hostCaptureStore?.list().orEmpty().let { items ->
+            maximumItems?.let(items::take) ?: items
+        }
         if (!supportsMediaBrowser(requireDeviceInfo())) {
             if (hostItems.isNotEmpty()) observedFeatures.add(CameraFeature.MEDIA_BROWSER)
             return hostItems.also(onProgress)
@@ -761,6 +767,7 @@ class UsbPtpCameraBackend(
             .flatMap { storageId -> ptp.objectHandles(storageId) }
             .distinct()
             .reversed()
+            .let { values -> maximumItems?.let { values.take((it - hostItems.size).coerceAtLeast(0)) } ?: values }
 
         var firstFailure: Exception? = null
         mediaInfo.clear()
@@ -804,7 +811,9 @@ class UsbPtpCameraBackend(
         }
         if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null && hostItems.isEmpty()) throw firstFailure!!
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
-        return (hostItems + items).also(onProgress)
+        return (hostItems + items)
+            .let { listed -> maximumItems?.let(listed::take) ?: listed }
+            .also(onProgress)
     }
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {

@@ -40,6 +40,8 @@ enum class CameraOperation { CONNECT, STATUS, SETTING, DIRECTORY, CLOCK, MAINTEN
 
 enum class MediaLibraryLoadStatus { NOT_LOADED, LOADING, COMPLETE, CANCELLED, FAILED }
 
+enum class MediaLibraryScope { RECENT, ALL }
+
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,
     val frameBytes: Int? = null,
@@ -68,6 +70,8 @@ data class CameraUiState(
     val status: CameraStatus? = null,
     val capabilities: CameraCapabilities? = null,
     val mediaItems: List<CameraMediaItem> = emptyList(),
+    val mediaLibraryScope: MediaLibraryScope = MediaLibraryScope.RECENT,
+    val mediaLibraryHasMore: Boolean = false,
     val mediaLibraryLoading: Boolean = false,
     val mediaLibraryLoadStatus: MediaLibraryLoadStatus = MediaLibraryLoadStatus.NOT_LOADED,
     val mediaThumbnails: Map<String, Bitmap> = emptyMap(),

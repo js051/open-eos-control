@@ -40,12 +40,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 
@@ -53,6 +56,36 @@ private data class MediaUploadMetadata(
     val name: String,
     val sizeBytes: Long?,
 )
+
+private data class MediaLibraryBatch(
+    val items: List<CameraMediaItem>,
+    val hasMore: Boolean,
+)
+
+internal const val RECENT_MEDIA_ITEMS = 60
+private const val RECENT_MEDIA_REQUEST_ITEMS = RECENT_MEDIA_ITEMS + 1
+private const val MAX_CONCURRENT_MEDIA_THUMBNAILS = 2
+private val MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS = longArrayOf(250L, 750L)
+
+private fun maximumItemsFor(scope: MediaLibraryScope): Int? =
+    RECENT_MEDIA_REQUEST_ITEMS.takeIf { scope == MediaLibraryScope.RECENT }
+
+private fun List<CameraMediaItem>.toMediaLibraryBatch(scope: MediaLibraryScope): MediaLibraryBatch =
+    if (scope == MediaLibraryScope.RECENT) {
+        MediaLibraryBatch(take(RECENT_MEDIA_ITEMS), size > RECENT_MEDIA_ITEMS)
+    } else {
+        MediaLibraryBatch(this, false)
+    }
+
+internal fun mergeRecentMedia(
+    recent: List<CameraMediaItem>,
+    existing: List<CameraMediaItem>,
+): List<CameraMediaItem> {
+    val recentIds = recent.mapTo(hashSetOf(), CameraMediaItem::id)
+    return recent + existing.filterNot { it.id in recentIds }
+}
+
+internal fun isRetryableMediaThumbnailFailure(exception: Exception): Boolean = exception is IOException
 
 class CameraViewModel(
     private val repository: CameraRepository = CameraRepository(),
@@ -67,7 +100,7 @@ class CameraViewModel(
     private var mediaLibraryJob: Job? = null
     private var mediaLibraryGeneration = 0L
     private val mediaThumbnailJobs = mutableMapOf<String, Job>()
-    private val unavailableMediaThumbnailIds = mutableSetOf<String>()
+    private val mediaThumbnailSemaphore = Semaphore(MAX_CONCURRENT_MEDIA_THUMBNAILS)
     private var mediaThumbnailGeneration = 0
     private val frameTimesMillis = ArrayDeque<Long>()
     private var preferencesLoaded = false
@@ -110,6 +143,25 @@ class CameraViewModel(
             )
         }
         if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
+    }
+
+    fun setMediaLibraryScope(scope: MediaLibraryScope) {
+        val state = _uiState.value
+        if (state.mediaLibraryScope == scope) return
+        if (state.mediaLibraryLoading) invalidateMediaLibraryLoad(MediaLibraryLoadStatus.CANCELLED)
+        _uiState.update { current ->
+            val retained = if (scope == MediaLibraryScope.RECENT) {
+                current.mediaItems.take(RECENT_MEDIA_ITEMS)
+            } else {
+                current.mediaItems
+            }
+            current.withEventMediaItems(retained).copy(
+                mediaLibraryScope = scope,
+                mediaLibraryHasMore = scope == MediaLibraryScope.RECENT &&
+                    (current.mediaLibraryHasMore || current.mediaItems.size > RECENT_MEDIA_ITEMS),
+            )
+        }
+        if (state.connected && !state.previewMode) refreshMedia()
     }
 
     fun setCaptureMode(mode: CaptureMode) {
@@ -950,13 +1002,14 @@ class CameraViewModel(
     }
 
     fun refreshMedia() {
-        if (!_uiState.value.connected || _uiState.value.previewMode || _uiState.value.mediaLibraryLoading) return
+        val initialState = _uiState.value
+        if (!initialState.connected || initialState.previewMode || initialState.mediaLibraryLoading) return
+        val scope = initialState.mediaLibraryScope
         val generation = ++mediaLibraryGeneration
         cancelMediaThumbnailLoads()
         _uiState.value.mediaStreamSource?.close()
         _uiState.update {
             it.copy(
-                mediaThumbnails = emptyMap(),
                 mediaThumbnailLoadingIds = emptySet(),
                 mediaPreviewItem = null,
                 mediaPreviewBytes = null,
@@ -968,16 +1021,19 @@ class CameraViewModel(
         }
         val job = viewModelScope.launch {
             try {
-                val items = repository.listMedia { partialItems ->
+                val items = repository.listMedia(maximumItemsFor(scope)) { partialItems ->
                     if (generation == mediaLibraryGeneration) {
-                        applyMediaItems(partialItems)
+                        val batch = partialItems.toMediaLibraryBatch(scope)
+                        applyMediaItems(batch.items, batch.hasMore)
                     }
                 }
                 if (generation != mediaLibraryGeneration) return@launch
+                val batch = items.toMediaLibraryBatch(scope)
                 val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
                 _uiState.update {
                     it.copy(
-                        mediaItems = items,
+                        mediaItems = batch.items,
+                        mediaLibraryHasMore = batch.hasMore,
                         mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
                         capabilities = capabilities ?: it.capabilities,
                         lastDownloadedMediaName = null,
@@ -1032,18 +1088,14 @@ class CameraViewModel(
             state.previewMode ||
             !state.supports(CameraFeature.MEDIA_THUMBNAIL) ||
             item.id in state.mediaThumbnailLoadingIds ||
-            item.id in mediaThumbnailJobs ||
-            item.id in unavailableMediaThumbnailIds
+            item.id in mediaThumbnailJobs
         ) return
 
         val generation = mediaThumbnailGeneration
         _uiState.update { it.copy(mediaThumbnailLoadingIds = it.mediaThumbnailLoadingIds + item.id) }
         mediaThumbnailJobs[item.id] = viewModelScope.launch {
             try {
-                val thumbnail = repository.mediaThumbnail(item)
-                val bitmap = withContext(Dispatchers.Default) {
-                    BitmapFactory.decodeByteArray(thumbnail.bytes, 0, thumbnail.bytes.size)
-                } ?: error("Camera returned an undecodable thumbnail for ${item.name}.")
+                val bitmap = mediaThumbnailSemaphore.withPermit { fetchMediaThumbnailBitmap(item) }
                 if (
                     generation != mediaThumbnailGeneration ||
                     _uiState.value.mediaItems.none { current -> current.id == item.id }
@@ -1061,7 +1113,7 @@ class CameraViewModel(
             } catch (exception: CancellationException) {
                 throw exception
             } catch (_: Exception) {
-                if (generation == mediaThumbnailGeneration) unavailableMediaThumbnailIds += item.id
+                // Leaving the item retryable lets a later viewport entry recover from camera Wi-Fi timeouts.
             } finally {
                 if (generation == mediaThumbnailGeneration) {
                     mediaThumbnailJobs.remove(item.id)
@@ -1837,14 +1889,15 @@ class CameraViewModel(
                                     current
                                 }
                             }
-                            runCatching { repository.listMedia() }
+                            runCatching { repository.listMedia(RECENT_MEDIA_REQUEST_ITEMS) }
                         } else {
                             Result.success(emptyList())
                         }
                     } else {
                         null
                     }
-                    val mediaItems = mediaResult?.getOrNull()
+                    val mediaBatch = mediaResult?.getOrNull()?.toMediaLibraryBatch(MediaLibraryScope.RECENT)
+                    val mediaItems = mediaBatch?.items
                     if (mediaItems != null) cancelMediaThumbnailLoads()
                     val updateState: (CameraUiState) -> CameraUiState = { current ->
                         if (
@@ -1866,7 +1919,19 @@ class CameraViewModel(
                                     else -> current.mediaLibraryLoadStatus
                                 },
                             )
-                            if (mediaItems != null) refreshed.withEventMediaItems(mediaItems) else refreshed
+                            if (mediaItems != null) {
+                                val merged = if (current.mediaLibraryScope == MediaLibraryScope.ALL) {
+                                    mergeRecentMedia(mediaItems, current.mediaItems)
+                                } else {
+                                    mediaItems
+                                }
+                                refreshed.withEventMediaItems(merged).copy(
+                                    mediaLibraryHasMore = current.mediaLibraryScope == MediaLibraryScope.RECENT &&
+                                        mediaBatch.hasMore,
+                                )
+                            } else {
+                                refreshed
+                            }
                         } else {
                             current
                         }
@@ -1936,6 +2001,7 @@ class CameraViewModel(
         status = null,
         capabilities = null,
         mediaItems = emptyList(),
+        mediaLibraryHasMore = false,
         mediaThumbnails = emptyMap(),
         mediaThumbnailLoadingIds = emptySet(),
         mediaPreviewItem = null,
@@ -2005,8 +2071,8 @@ class CameraViewModel(
         )
     }
 
-    private fun applyMediaItems(items: List<CameraMediaItem>) = transitionMediaState { current ->
-        current.withEventMediaItems(items)
+    private fun applyMediaItems(items: List<CameraMediaItem>, hasMore: Boolean) = transitionMediaState { current ->
+        current.withEventMediaItems(items).copy(mediaLibraryHasMore = hasMore)
     }
 
     private fun applyDeletedMedia(item: CameraMediaItem) = transitionMediaState { current ->
@@ -2028,7 +2094,31 @@ class CameraViewModel(
         mediaThumbnailGeneration += 1
         mediaThumbnailJobs.values.forEach(Job::cancel)
         mediaThumbnailJobs.clear()
-        unavailableMediaThumbnailIds.clear()
+    }
+
+    private suspend fun fetchMediaThumbnailBitmap(item: CameraMediaItem): android.graphics.Bitmap {
+        var lastFailure: Exception? = null
+        repeat(MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS.size + 1) { attempt ->
+            try {
+                val thumbnail = repository.mediaThumbnail(item)
+                return withContext(Dispatchers.Default) {
+                    BitmapFactory.decodeByteArray(thumbnail.bytes, 0, thumbnail.bytes.size)
+                } ?: error("Camera returned an undecodable thumbnail for ${item.name}.")
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                lastFailure = exception
+                if (
+                    isRetryableMediaThumbnailFailure(exception) &&
+                    attempt < MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS.size
+                ) {
+                    delay(MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS[attempt])
+                } else {
+                    throw exception
+                }
+            }
+        }
+        throw checkNotNull(lastFailure)
     }
 
     private fun resetMediaLibraryLoad() {

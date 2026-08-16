@@ -102,7 +102,10 @@ interface CameraControlBackend {
     suspend fun setLiveViewMagnification(
         magnification: LiveViewMagnification,
     ): LiveViewMagnificationResult = unsupported(CameraFeature.LIVE_VIEW_MAGNIFICATION)
-    suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit = {}): List<CameraMediaItem> =
+    suspend fun listMedia(
+        maximumItems: Int? = null,
+        onProgress: (List<CameraMediaItem>) -> Unit = {},
+    ): List<CameraMediaItem> =
         unsupported(CameraFeature.MEDIA_BROWSER)
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail =
         unsupported(CameraFeature.MEDIA_THUMBNAIL)
@@ -229,8 +232,10 @@ class CcapiCameraBackend(
         magnification: LiveViewMagnification,
     ): LiveViewMagnificationResult = client.setLiveViewMagnification(magnification)
 
-    override suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit): List<CameraMediaItem> =
-        client.listMedia(onProgress)
+    override suspend fun listMedia(
+        maximumItems: Int?,
+        onProgress: (List<CameraMediaItem>) -> Unit,
+    ): List<CameraMediaItem> = client.listMedia(maximumItems, onProgress)
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
 
@@ -359,8 +364,12 @@ class DesktopBridgeCameraBackend(
         magnification: LiveViewMagnification,
     ): LiveViewMagnificationResult = client.setLiveViewMagnification(magnification)
 
-    override suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit): List<CameraMediaItem> =
-        client.listMedia().also(onProgress)
+    override suspend fun listMedia(
+        maximumItems: Int?,
+        onProgress: (List<CameraMediaItem>) -> Unit,
+    ): List<CameraMediaItem> = client.listMedia()
+        .let { items -> maximumItems?.let(items::take) ?: items }
+        .also(onProgress)
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
 

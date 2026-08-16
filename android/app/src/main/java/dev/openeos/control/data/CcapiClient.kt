@@ -1471,8 +1471,16 @@ class CcapiClient(
         return LiveViewMagnificationResult(ok = true, magnification = readback.current)
     }
 
-    suspend fun listMedia(onProgress: (List<CameraMediaItem>) -> Unit = {}): List<CameraMediaItem> {
-        val items = if (isRealCamera) listRealMedia(onProgress) else listSimulatorMedia().also(onProgress)
+    suspend fun listMedia(
+        maximumItems: Int? = null,
+        onProgress: (List<CameraMediaItem>) -> Unit = {},
+    ): List<CameraMediaItem> {
+        require(maximumItems == null || maximumItems > 0) { "Media item limit must be positive." }
+        val items = if (isRealCamera) {
+            listRealMedia(maximumItems, onProgress)
+        } else {
+            listSimulatorMedia().let { listed -> maximumItems?.let(listed::take) ?: listed }.also(onProgress)
+        }
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
         return items
     }
@@ -2734,7 +2742,10 @@ class CcapiClient(
         )
     }
 
-    private suspend fun listRealMedia(onProgress: (List<CameraMediaItem>) -> Unit): List<CameraMediaItem> {
+    private suspend fun listRealMedia(
+        maximumItems: Int?,
+        onProgress: (List<CameraMediaItem>) -> Unit,
+    ): List<CameraMediaItem> {
         val rootPath = apiPath("GET", "/contents")
         val pending = ArrayDeque<String>()
         val visited = mutableSetOf<String>()
@@ -2750,7 +2761,7 @@ class CcapiClient(
             val mediaPaths = mutableListOf<String>()
             mediaPathGroups.add(mediaPaths)
             val discoveredContainers = linkedSetOf<String>()
-            fun publish(listedPaths: List<String>) {
+            fun publish(listedPaths: List<String>): Boolean {
                 mediaPaths.clear()
                 discoveredContainers.clear()
                 listedPaths.forEach { rawPath ->
@@ -2761,7 +2772,13 @@ class CcapiClient(
                         discoveredContainers.add(path)
                     }
                 }
-                if (mediaPaths.isNotEmpty()) onProgress(mergeMediaPathGroups(mediaPathGroups).toMediaItems())
+                val merged = mergeMediaPathGroups(mediaPathGroups)
+                if (mediaPaths.isNotEmpty()) {
+                    onProgress(merged.takeMaximum(maximumItems).toMediaItems())
+                }
+                // Read enough from every sibling media container before merging them.
+                // Canon commonly separates photos and movies into different trees.
+                return maximumItems == null || mediaPaths.size < maximumItems
             }
             val listedPaths = listContentPaths(normalizedContainer, ::publish)
             if (mediaPaths != listedPaths) publish(listedPaths)
@@ -2769,7 +2786,7 @@ class CcapiClient(
             if (mediaPaths.isEmpty()) mediaPathGroups.remove(mediaPaths)
         }
 
-        return mergeMediaPathGroups(mediaPathGroups).toMediaItems()
+        return mergeMediaPathGroups(mediaPathGroups).takeMaximum(maximumItems).toMediaItems()
     }
 
     private fun List<String>.toMediaItems(): List<CameraMediaItem> = map { path ->
@@ -2785,7 +2802,7 @@ class CcapiClient(
 
     private suspend fun listContentPaths(
         containerPath: String,
-        onPage: (List<String>) -> Unit = {},
+        onPage: (List<String>) -> Boolean = { true },
     ): List<String> {
         val pageInfo = getFirstJson(
             listOf(
@@ -2805,7 +2822,7 @@ class CcapiClient(
         } else if (mediaDescendingOrderSupported == false) {
             for (page in pageCount downTo 1) {
                 paths.addAll(getContentPage(containerPath, page).contentPaths(reverse = true))
-                onPage(paths.toList())
+                if (!onPage(paths.toList())) break
             }
         } else {
             val firstResponse = getContentPage(containerPath, 1)
@@ -2813,14 +2830,15 @@ class CcapiClient(
                 for (page in pageCount downTo 1) {
                     val response = if (page == 1) firstResponse else getContentPage(containerPath, page)
                     paths.addAll(response.contentPaths(reverse = true))
-                    onPage(paths.toList())
+                    if (!onPage(paths.toList())) break
                 }
             } else {
                 paths.addAll(firstResponse.contentPaths())
-                onPage(paths.toList())
-                for (page in 2..pageCount) {
-                    paths.addAll(getContentPage(containerPath, page).contentPaths())
-                    onPage(paths.toList())
+                if (onPage(paths.toList())) {
+                    for (page in 2..pageCount) {
+                        paths.addAll(getContentPage(containerPath, page).contentPaths())
+                        if (!onPage(paths.toList())) break
+                    }
                 }
             }
         }
@@ -2862,6 +2880,9 @@ class CcapiClient(
         }
         return merged.toList()
     }
+
+    private fun <T> List<T>.takeMaximum(maximumItems: Int?): List<T> =
+        maximumItems?.let(::take) ?: this
 
     private fun normalizeCameraResource(value: String): String {
         val parsed = URI(value)

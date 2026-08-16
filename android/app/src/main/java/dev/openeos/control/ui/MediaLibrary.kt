@@ -42,7 +42,15 @@ internal fun mediaItemsForDisplay(
     return filtered.withIndex().sortedWith { left, right ->
         compareMediaItems(left.value, right.value, sort)
             .takeIf { it != 0 }
-            ?: left.index.compareTo(right.index)
+            ?: if (
+                sort == MediaSort.OLDEST &&
+                left.value.captureTime.toMediaInstant() == null &&
+                right.value.captureTime.toMediaInstant() == null
+            ) {
+                right.index.compareTo(left.index)
+            } else {
+                left.index.compareTo(right.index)
+            }
     }.map { it.value }
 }
 
@@ -93,10 +101,9 @@ private fun compareMediaItems(left: CameraMediaItem, right: CameraMediaItem, sor
         if (compared != 0) return if (sort == MediaSort.NEWEST) -compared else compared
         return 0
     }
-    val comparedName = naturalCompare(left.name, right.name)
-        .takeIf { it != 0 }
-        ?: left.id.compareTo(right.id)
-    return if (sort == MediaSort.NEWEST) -comparedName else comparedName
+    // Canon's descending contents order is better evidence than comparing unrelated
+    // IMG_/MVI_ prefixes when the listing does not include capture timestamps.
+    return 0
 }
 
 internal fun mediaCaptureTimeLabel(value: String?): String? = value.toMediaInstant()

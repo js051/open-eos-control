@@ -3385,6 +3385,43 @@ class CcapiClientTest {
     }
 
     @Test
+    fun recentMediaListStopsEarlyButSamplesPhotoAndVideoContainers() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        val photoContainer = "/ccapi/ver140/contents/card2/DCIM/100EOSR6"
+        val videoContainer = "/ccapi/ver140/contents/card2/XFVC/REEL_0001"
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse("""{"path":["$photoContainer","$videoContainer"]}"""))
+        server.enqueue(jsonResponse("""{"pagenumber":49}"""))
+        val photoPaths = (1..100).joinToString(separator = ",") { number ->
+            "\"$photoContainer/IMG_${number.toString().padStart(4, '0')}.JPG\""
+        }
+        server.enqueue(jsonResponse("""{"path":[$photoPaths]}"""))
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        val videoPaths = (1..13).joinToString(separator = ",") { number ->
+            "\"$videoContainer/MVI_${number.toString().padStart(4, '0')}.MP4\""
+        }
+        server.enqueue(jsonResponse("""{"path":[$videoPaths]}"""))
+
+        val progressCounts = mutableListOf<Int>()
+        val items = client.listMedia(maximumItems = 61) { progressCounts += it.size }
+
+        assertEquals(61, items.size)
+        assertEquals(
+            listOf("IMG_0001.JPG", "MVI_0001.MP4", "IMG_0002.JPG", "MVI_0002.MP4"),
+            items.take(4).map { it.name },
+        )
+        assertEquals(13, items.count { it.kind == "video" })
+        assertEquals(listOf(61, 61), progressCounts)
+        assertEquals(6, server.requestCount)
+        assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/contents?page=1&order=desc", server.takeRequest().path)
+        assertEquals("$photoContainer?kind=number", server.takeRequest().path)
+        assertEquals("$photoContainer?page=1&order=desc", server.takeRequest().path)
+        assertEquals("$videoContainer?kind=number", server.takeRequest().path)
+        assertEquals("$videoContainer?page=1&order=desc", server.takeRequest().path)
+    }
+
+    @Test
     fun realMediaListTraversesMoreThanOneHundredPages() = runTest {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         server.enqueue(jsonResponse("""{"pagenumber":101}"""))

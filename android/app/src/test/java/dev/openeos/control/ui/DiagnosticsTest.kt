@@ -76,12 +76,33 @@ class DiagnosticsTest {
                 )
             },
             mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
+            mediaLibraryScope = MediaLibraryScope.ALL,
         )
 
         val report = buildDiagnosticReport(state)
 
         assertTrue(report.contains("mediaItemCount=501"))
         assertTrue(report.contains("mediaLoadStatus=COMPLETE"))
+        assertTrue(report.contains("mediaLibraryScope=ALL"))
+        assertTrue(report.contains("mediaLibraryHasMore=false"))
+    }
+
+    @Test
+    fun diagnosticReportDistinguishesTheBoundedRecentMediaView() {
+        val state = CameraUiState(
+            mediaItems = List(RECENT_MEDIA_ITEMS) { index ->
+                CameraMediaItem(id = "recent-$index", name = "IMG_$index.JPG", kind = "image")
+            },
+            mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
+            mediaLibraryScope = MediaLibraryScope.RECENT,
+            mediaLibraryHasMore = true,
+        )
+
+        val report = buildDiagnosticReport(state)
+
+        assertTrue(report.contains("mediaItemCount=60"))
+        assertTrue(report.contains("mediaLibraryScope=RECENT"))
+        assertTrue(report.contains("mediaLibraryHasMore=true"))
     }
 
     @Test
