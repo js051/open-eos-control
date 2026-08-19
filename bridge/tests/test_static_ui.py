@@ -69,6 +69,9 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "rtp-audio-button",
         "exposure-strip",
         "shutter-button",
+        "latest-media-button",
+        "latest-media-thumbnail",
+        "latest-media-label",
         "bulb-indicator",
         "half-press-button",
         "focus-reticle",
@@ -266,6 +269,12 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "mediaRefreshPromise: null" in script
     assert 'mediaLoadStatus: "NOT_LOADED"' in script
     assert "function refreshMediaWhenCurrent()" in script
+    assert "const LATEST_MEDIA_LIMIT = 8" in script
+    assert "?limit=${LATEST_MEDIA_LIMIT}" in script
+    assert "function refreshLatestMedia({ previousId = null } = {})" in script
+    assert "function cancelLatestMediaRefresh()" in script
+    assert "function openLatestMedia()" in script
+    assert "void refreshLatestMedia({ previousId: previousLatestId })" in script
     assert 'mediaScope: "recent"' in script
     assert 'mediaHasMore: false' in script
     assert 'const limitQuery = mediaScope === "recent" ? "?limit=61" : ""' in script
