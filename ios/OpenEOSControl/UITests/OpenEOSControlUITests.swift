@@ -512,9 +512,8 @@ final class OpenEOSControlUITests: XCTestCase {
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
-        guard element.waitForExistence(timeout: min(timeout, 2)) else { return false }
         while Date() < deadline {
-            if element.isEnabled, element.isHittable { return true }
+            if element.exists, element.isEnabled, element.isHittable { return true }
             let scrollSurface = app.scrollViews.allElementsBoundByIndex.last {
                 $0.exists && $0.isHittable
             }
@@ -524,7 +523,7 @@ final class OpenEOSControlUITests: XCTestCase {
                 app.swipeUp()
             }
         }
-        return element.isEnabled && element.isHittable
+        return element.exists && element.isEnabled && element.isHittable
     }
 
     private func openMoreActions(in app: XCUIApplication) {

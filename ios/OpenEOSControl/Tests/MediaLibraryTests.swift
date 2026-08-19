@@ -4,6 +4,7 @@ import XCTest
 @testable import OpenEOSControl
 
 final class MediaLibraryTests: XCTestCase {
+    @MainActor
     func testLatestMediaRequestIsBoundedForQuickReview() {
         XCTAssertEqual(CameraAppState.latestMediaRequestItemCount, 8)
     }
