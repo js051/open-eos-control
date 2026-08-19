@@ -4,8 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-19
+
 - Extended the bounded recent-media flow to iOS and the PC control UI with explicit Recent/Full card controls, localized scope summaries, one-item lookahead, and scope-aware diagnostics.
 - Added `GET /v1/session/{id}/media?limit=1..1000` across the Desktop Bridge contract and Android/iOS Bridge clients. Direct CCAPI stops media-leaf pagination early while still sampling sibling photo/video containers; libgphoto2 documents that its recursive CLI listing remains complete before the HTTP response is bounded.
+- Added a cross-platform just-captured media shortcut. Android, iOS, and PC request at most eight camera-ordered items after connection and successful still capture, retry bounded propagation delays, retain the previous thumbnail until a replacement is ready, and open the existing viewer without first enumerating the full card.
+- Added cancellation and session guards, bounded Android thumbnail decoding, privacy-safe latest-media diagnostics, generated Simulator capture timestamps, and end-to-end coverage for recent preview availability and interaction.
+- Replaced repeated PR, `main`, and tag rebuilds with an exact-SHA promotion flow. Full PR CI produces tested candidates, `main` verifies the squash-merged Git tree and adds the stable-signed Android APK, and version tags publish the same provenance-checked candidate.
 
 ## [0.3.1] - 2026-08-19
 
@@ -122,3 +127,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.2.0]: https://github.com/js051/open-eos-control/releases/tag/v0.2.0
 [0.3.0]: https://github.com/js051/open-eos-control/releases/tag/v0.3.0
 [0.3.1]: https://github.com/js051/open-eos-control/releases/tag/v0.3.1
+[0.4.0]: https://github.com/js051/open-eos-control/releases/tag/v0.4.0
