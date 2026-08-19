@@ -2,6 +2,19 @@ import CoreGraphics
 import Foundation
 import OpenEOSCore
 
+enum MediaLibraryScope: String, CaseIterable, Identifiable {
+    case recent
+    case all
+
+    var id: String { rawValue }
+    var localizationKey: String { "media_scope_\(rawValue)" }
+}
+
+struct MediaLibraryBatch: Equatable {
+    let items: [CameraMediaItem]
+    let hasMore: Bool
+}
+
 enum MediaFilter: String, CaseIterable, Identifiable {
     case all
     case photos
@@ -9,6 +22,19 @@ enum MediaFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
     var localizationKey: String { "media_filter_\(rawValue)" }
+}
+
+func mediaLibraryBatch(
+    _ items: [CameraMediaItem],
+    scope: MediaLibraryScope,
+    recentItemCount: Int
+) -> MediaLibraryBatch {
+    precondition(recentItemCount > 0)
+    guard scope == .recent else { return MediaLibraryBatch(items: items, hasMore: false) }
+    return MediaLibraryBatch(
+        items: Array(items.prefix(recentItemCount)),
+        hasMore: items.count > recentItemCount
+    )
 }
 
 enum MediaSort: String, CaseIterable, Identifiable {

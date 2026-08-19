@@ -353,11 +353,16 @@
       imageQualitySmall1Normal: "Small 1/Normal",
       imageQualitySmall2: "Small 2",
       mediaCount: "{count} media item(s)",
+      mediaRecentCount: "Latest {count} media item(s)",
+      mediaRecentMoreCount: "Latest {count} media item(s) - more on card",
       mediaEmpty: "No media was reported by the camera",
       mediaFilteredCount: "{visible} of {total} media items",
       mediaLoadingCount: "Loading camera media - {count} item(s) currently shown",
       mediaFailedCount: "Media refresh failed - showing {count} previous item(s)",
       mediaNotLoadedCount: "Media not loaded",
+      mediaScope: "Media range",
+      mediaRecent: "Recent",
+      mediaFullCard: "Full card",
       mediaFilter: "Filter media",
       mediaAll: "All",
       mediaPhotos: "Photos",
@@ -739,11 +744,16 @@
       imageQualitySmall1Normal: "小型 1／一般",
       imageQualitySmall2: "小型 2",
       mediaCount: "共 {count} 個媒體檔案",
+      mediaRecentCount: "最新 {count} 個媒體檔案",
+      mediaRecentMoreCount: "最新 {count} 個媒體檔案 - 卡內尚有更多",
       mediaEmpty: "相機未回報任何媒體檔案",
       mediaFilteredCount: "顯示 {visible}／{total} 個媒體檔案",
       mediaLoadingCount: "正在載入相機媒體 - 目前顯示 {count} 個",
       mediaFailedCount: "媒體重新整理失敗 - 顯示先前的 {count} 個",
       mediaNotLoadedCount: "尚未載入媒體",
+      mediaScope: "媒體範圍",
+      mediaRecent: "最近",
+      mediaFullCard: "整張卡",
       mediaFilter: "篩選媒體",
       mediaAll: "全部",
       mediaPhotos: "相片",
@@ -1067,6 +1077,8 @@
     mediaLoaded: false,
     mediaLoadStatus: "NOT_LOADED",
     mediaRefreshPromise: null,
+    mediaScope: "recent",
+    mediaHasMore: false,
     mediaFilter: "all",
     mediaSort: "newest",
     mediaPage: 0,
@@ -1192,6 +1204,7 @@
     mediaUploadInput: byId("media-upload-input"),
     mediaSummary: byId("media-summary"),
     mediaList: byId("media-list"),
+    mediaScopeControl: byId("media-scope-control"),
     mediaFilterControl: byId("media-filter-control"),
     mediaSortSelect: byId("media-sort-select"),
     mediaPagination: byId("media-pagination"),
@@ -1664,6 +1677,7 @@
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
     state.media = [];
+    state.mediaHasMore = false;
     state.mediaPage = 0;
     state.mediaLoaded = false;
     state.mediaLoadStatus = "NOT_LOADED";
@@ -4160,25 +4174,35 @@
       if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return false;
       const rawSessionId = state.session.id;
       const interactionGeneration = state.refreshGeneration;
+      const mediaScope = state.mediaScope;
       ui.mediaRefreshButton.disabled = true;
       state.mediaLoadStatus = "LOADING";
       renderMediaSummary();
       closeMediaPreview();
       try {
-        const response = await api(`/v1/session/${encodeURIComponent(rawSessionId)}/media`);
+        const limitQuery = mediaScope === "recent" ? "?limit=61" : "";
+        const response = await api(
+          `/v1/session/${encodeURIComponent(rawSessionId)}/media${limitQuery}`,
+        );
         if (
           state.session?.id !== rawSessionId ||
-          state.refreshGeneration !== interactionGeneration
+          state.refreshGeneration !== interactionGeneration ||
+          state.mediaScope !== mediaScope
         ) continue;
         clearMediaThumbnails();
-        state.media = response.items || [];
+        const items = response.items || [];
+        state.mediaHasMore = mediaScope === "recent" && items.length > 60;
+        state.media = mediaScope === "recent" ? items.slice(0, 60) : items;
         state.mediaLoaded = true;
         state.mediaLoadStatus = "COMPLETE";
         renderMedia();
         return true;
       } catch (error) {
         if (state.session?.id !== rawSessionId) return false;
-        if (state.refreshGeneration !== interactionGeneration) continue;
+        if (
+          state.refreshGeneration !== interactionGeneration ||
+          state.mediaScope !== mediaScope
+        ) continue;
         const normalized = captureError(error);
         state.mediaLoadStatus = "FAILED";
         renderMediaSummary();
@@ -4198,6 +4222,11 @@
     mediaPage.items.forEach((item) => mediaLibrary.touch(state.mediaThumbnailUrls, item.id));
     renderMediaSummary(visibleItems);
     ui.mediaSortSelect.value = state.mediaSort;
+    ui.mediaScopeControl.querySelectorAll("[data-media-scope]").forEach((button) => {
+      const active = button.dataset.mediaScope === state.mediaScope;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
     ui.mediaPagination.hidden = mediaPage.pageCount <= 1;
     ui.mediaPageStatus.textContent = t("mediaPageStatus", mediaPage);
     ui.mediaPagePrevious.disabled = mediaPage.pageIndex === 0;
@@ -4315,6 +4344,13 @@
     }
     if (state.mediaLoadStatus !== "COMPLETE") {
       ui.mediaSummary.textContent = t("mediaNotLoadedCount");
+      return;
+    }
+    if (state.mediaScope === "recent") {
+      ui.mediaSummary.textContent = t(
+        state.mediaHasMore ? "mediaRecentMoreCount" : "mediaRecentCount",
+        { count: state.media.length },
+      );
       return;
     }
     ui.mediaSummary.textContent = visibleItems.length === state.media.length
@@ -5186,6 +5222,9 @@
       mediaLibrary: {
         itemCount: state.media.length,
         loadStatus: state.mediaLoadStatus,
+        scope: state.mediaScope,
+        hasMore: state.mediaHasMore,
+        requestLimit: state.mediaScope === "recent" ? 61 : null,
       },
       mediaTransfer: (state.mediaUpload || state.mediaDownload) ? {
         active: true,
@@ -5480,6 +5519,25 @@
       });
     });
     ui.mediaRefreshButton.addEventListener("click", refreshMedia);
+    ui.mediaScopeControl.addEventListener("click", (event) => {
+      const button = event.target.closest?.("[data-media-scope]");
+      if (!button || button.dataset.mediaScope === state.mediaScope) return;
+      const scope = button.dataset.mediaScope;
+      state.mediaScope = scope;
+      state.mediaPage = 0;
+      closeMediaPreview();
+      if (scope === "recent" && state.mediaLoadStatus === "COMPLETE") {
+        state.mediaHasMore = state.mediaHasMore || state.media.length > 60;
+        state.media = state.media.slice(0, 60);
+        renderMedia();
+      } else {
+        state.mediaLoaded = false;
+        state.mediaHasMore = false;
+        state.mediaLoadStatus = "NOT_LOADED";
+        renderMedia();
+        refreshMedia();
+      }
+    });
     ui.mediaFilterControl.addEventListener("click", (event) => {
       const button = event.target.closest?.("[data-media-filter]");
       if (!button) return;

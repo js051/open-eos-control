@@ -367,8 +367,7 @@ class DesktopBridgeCameraBackend(
     override suspend fun listMedia(
         maximumItems: Int?,
         onProgress: (List<CameraMediaItem>) -> Unit,
-    ): List<CameraMediaItem> = client.listMedia()
-        .let { items -> maximumItems?.let(items::take) ?: items }
+    ): List<CameraMediaItem> = client.listMedia(maximumItems)
         .also(onProgress)
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)

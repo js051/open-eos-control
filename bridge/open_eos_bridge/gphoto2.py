@@ -1997,8 +1997,10 @@ class GPhoto2Session:
                     self._fallback_to_capture_preview(stream_error)
                     return self._capture_preview()
 
-    def list_media(self) -> list[MediaItem]:
+    def list_media(self, maximum_items: int | None = None) -> list[MediaItem]:
         with self._lock:
+            if maximum_items is not None and maximum_items <= 0:
+                raise ValueError("maximum_items must be positive when provided")
             host_items = self._capture_store.list_items()
             if not self._camera_media_supported and not self._host_capture_supported() and not host_items:
                 raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
@@ -2006,12 +2008,16 @@ class GPhoto2Session:
             if self._camera_media_supported:
                 output = self._run(["--recurse", "--list-files"], timeout=60.0).text
                 camera_items = parse_media_list(output)
-            items = sorted(
+            all_items = sorted(
                 [*host_items, *camera_items],
                 key=lambda item: item.capture_time or "",
                 reverse=True,
             )
-            self._media_cache = {item.id: item for item in items}
+            items = all_items if maximum_items is None else all_items[:maximum_items]
+            if maximum_items is None:
+                self._media_cache = {item.id: item for item in items}
+            else:
+                self._media_cache.update({item.id: item for item in items})
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
 

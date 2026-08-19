@@ -544,12 +544,18 @@ public actor DesktopBridgeClient {
     }
 
     public func listMedia(
+        maximumItems: Int? = nil,
         onProgress: CameraMediaListProgressHandler = { _ in }
     ) async throws -> [CameraMediaItem] {
-        let body = try await getJSON(sessionEndpoint(["media"]))
+        guard maximumItems.map({ (1...1_000).contains($0) }) ?? true else {
+            throw DesktopBridgeError.invalidResponse("maximumItems must be from 1 through 1000.")
+        }
+        let queryItems = maximumItems.map { [URLQueryItem(name: "limit", value: String($0))] } ?? []
+        let body = try await getJSON(sessionEndpoint(["media"], queryItems: queryItems))
         let items = body.array("items").compactMap { ($0 as? BridgeJSON).flatMap(Self.parseMediaItem) }
-        await onProgress(items)
-        return items
+        let boundedItems = maximumItems.map { Array(items.prefix($0)) } ?? items
+        await onProgress(boundedItems)
+        return boundedItems
     }
 
     public func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {

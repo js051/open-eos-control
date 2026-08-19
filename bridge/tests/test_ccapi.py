@@ -3479,6 +3479,48 @@ def test_ccapi_media_fairly_merges_sibling_containers_round_robin() -> None:
     ]
 
 
+def test_ccapi_recent_media_stops_pages_and_samples_sibling_containers() -> None:
+    root = "/ccapi/ver100/contents"
+    photo_container = f"{root}/card1/100CANON"
+    video_container = f"{root}/card1/VIDEO"
+    routes = {
+        f"{root}?kind=number": _json_response({"pagenumber": 0}),
+        root: _json_response({"path": [photo_container, video_container]}),
+        f"{photo_container}?kind=number": _json_response({"pagenumber": 2}),
+        f"{photo_container}?page=1&order=desc": _json_response(
+            {"path": [f"{photo_container}/IMG_{number:04d}.JPG" for number in range(1, 4)]}
+        ),
+        f"{photo_container}?page=2&order=desc": _json_response(
+            {"path": [f"{photo_container}/IMG_{number:04d}.JPG" for number in range(4, 7)]}
+        ),
+        f"{video_container}?kind=number": _json_response({"pagenumber": 2}),
+        f"{video_container}?page=1&order=desc": _json_response(
+            {"path": [f"{video_container}/VIDEO_{number:04d}.MP4" for number in range(1, 4)]}
+        ),
+        f"{video_container}?page=2&order=desc": _json_response(
+            {"path": [f"{video_container}/VIDEO_{number:04d}.MP4" for number in range(4, 7)]}
+        ),
+    }
+    transport = FakeCcapiTransport(media_routes=routes)
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.168.1.2:8080")
+
+    items = session.list_media(maximum_items=3)
+
+    assert [item.name for item in items] == ["IMG_0001.JPG", "VIDEO_0001.MP4", "IMG_0002.JPG"]
+    media_requests = [request.path for request in transport.requests if request.path.startswith(root)]
+    assert f"{photo_container}?page=2&order=desc" not in media_requests
+    assert f"{video_container}?page=2&order=desc" not in media_requests
+
+
+def test_ccapi_recent_media_requires_a_positive_limit() -> None:
+    session = CcapiEngine(lambda _username, _password: FakeCcapiTransport()).open_connection(
+        "http://192.168.1.2:8080"
+    )
+
+    with pytest.raises(ValueError, match="positive"):
+        session.list_media(maximum_items=0)
+
+
 @pytest.mark.parametrize(
     ("body", "content_type", "expected_code"),
     [

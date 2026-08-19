@@ -139,6 +139,22 @@ def test_media_upload_api_streams_exact_body_and_cleans_staging_file(monkeypatch
     assert all(not path.exists() for path in created_staging_paths)
 
 
+def test_media_list_api_accepts_a_bounded_limit() -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    with TestClient(create_app(engine=GPhoto2Engine(FakeRunner()), token="test-token")) as client:
+        created = client.post("/v1/session", headers=headers, json={})
+        session_id = created.json()["id"]
+
+        bounded = client.get(f"/v1/session/{session_id}/media", params={"limit": 1}, headers=headers)
+        too_small = client.get(f"/v1/session/{session_id}/media", params={"limit": 0}, headers=headers)
+        too_large = client.get(f"/v1/session/{session_id}/media", params={"limit": 1001}, headers=headers)
+
+    assert bounded.status_code == 200
+    assert len(bounded.json()["items"]) == 1
+    assert too_small.status_code == 422
+    assert too_large.status_code == 422
+
+
 def test_authenticated_rtp_audio_endpoint_returns_bounded_pcm_and_timeout() -> None:
     session = _AudioSession()
     headers = {"Authorization": "Bearer test-token"}

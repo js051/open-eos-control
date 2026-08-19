@@ -615,7 +615,11 @@ async function run() {
         holdBulkMediaResponse = false;
         await bulkMediaResponseHeld;
       }
-      await route.fulfill({ json: { items: bulkMedia } });
+      const requestURL = new URL(route.request().url());
+      const limit = Number(requestURL.searchParams.get("limit"));
+      await route.fulfill({
+        json: { items: Number.isSafeInteger(limit) && limit > 0 ? bulkMedia.slice(0, limit) : bulkMedia },
+      });
     });
     await page.route(bulkThumbnailRoute, (route) => route.fulfill({
       status: 200,
@@ -630,6 +634,10 @@ async function run() {
     });
     releaseBulkMediaResponse();
     assert.equal(await page.locator("#media-sort-select").inputValue(), "newest");
+    await page.waitForFunction(() => document.querySelectorAll(".media-card").length === 60);
+    assert.equal(await page.locator("#media-summary").innerText(), "Latest 60 media item(s) - more on card");
+    assert.equal(await page.locator('#media-scope-control button[aria-pressed="true"]').innerText(), "Recent");
+    await page.click('#media-scope-control button[data-media-scope="all"]');
     await page.waitForFunction(() => document.querySelectorAll(".media-card").length === 72);
     assert.equal(await page.locator("#media-summary").getAttribute("data-load-status"), "COMPLETE");
     assert.equal(await page.locator("#media-summary").innerText(), "145 media item(s)");
@@ -649,6 +657,11 @@ async function run() {
     });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    assert.equal(await page.locator("#media-scope-control").isVisible(), true);
+    const narrowScopeBounds = await page.locator("#media-scope-control").boundingBox();
+    const narrowFilterBounds = await page.locator("#media-filter-control").boundingBox();
+    assert.ok(narrowScopeBounds && narrowScopeBounds.x >= 0 && narrowScopeBounds.x + narrowScopeBounds.width <= 390);
+    assert.ok(narrowFilterBounds && narrowScopeBounds.y + narrowScopeBounds.height <= narrowFilterBounds.y);
     await page.locator("#media-panel").screenshot({
       path: path.join(RESULTS_DIR, "narrow-large-media-library.png"),
     });

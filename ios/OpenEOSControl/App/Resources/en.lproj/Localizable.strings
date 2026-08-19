@@ -233,6 +233,11 @@
 "back_to_camera" = "Back to camera";
 "media_count_format" = "%d items";
 "media_filtered_count_format" = "%d of %d items";
+"media_scope" = "Media range";
+"media_scope_recent" = "Recent";
+"media_scope_all" = "Full card";
+"media_recent_count_format" = "Latest %d items";
+"media_recent_more_count_format" = "Latest %d items - more on card";
 "media_filter" = "Media filter";
 "media_filter_all" = "All";
 "media_filter_photos" = "Photos";
@@ -260,8 +265,8 @@
 "media_cancelled_count_format" = "%d items received - incomplete";
 "media_failed_count_format" = "%d items shown - refresh failed";
 "media_not_loaded_count_format" = "%d items shown - not loaded";
-"media_load_cancelled" = "Media loading was cancelled. Refresh to load the complete camera library.";
-"media_load_failed" = "The complete camera library could not be loaded. Refresh to try again.";
+"media_load_cancelled" = "Media loading was cancelled. Refresh to load the selected range.";
+"media_load_failed" = "The selected camera media range could not be loaded. Refresh to try again.";
 "no_media" = "No media files were found on the camera.";
 "download_media" = "Download media";
 "cancel_media_download" = "Cancel media download";

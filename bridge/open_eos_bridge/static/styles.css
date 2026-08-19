@@ -1157,6 +1157,10 @@ input:disabled {
   background: var(--surface);
 }
 
+.media-scope-control {
+  grid-template-columns: repeat(2, minmax(84px, 1fr));
+}
+
 .media-filter-control button {
   min-height: 40px;
   padding: 0 14px;

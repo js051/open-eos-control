@@ -660,8 +660,11 @@ def create_app(
         )
 
     @router.get("/session/{session_id}/media", response_model=MediaList)
-    def media(session_id: str) -> MediaList:
-        return MediaList(items=manager.get(session_id).list_media())
+    def media(
+        session_id: str,
+        limit: int | None = Query(default=None, ge=1, le=1000),
+    ) -> MediaList:
+        return MediaList(items=manager.get(session_id).list_media(limit))
 
     @router.post("/session/{session_id}/media", response_model=MediaItem, status_code=201)
     async def upload_media(session_id: str, request: Request, filename: str = Query(..., min_length=1)) -> MediaItem:

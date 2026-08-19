@@ -521,7 +521,7 @@ final class DesktopBridgeClientTests: XCTestCase {
             body: jpeg
         )
         await transport.enqueueJSON(
-            path: "/v1/session/session_123/media",
+            path: "/v1/session/session_123/media?limit=1",
             body: #"{"items":[{"id":"gphoto2:YWJj","name":"IMG_0001.JPG","kind":"image","sizeBytes":6,"captureTime":"2026-07-21T10:08:24+08:00","contentType":"image/jpeg","widthPixels":6000,"heightPixels":4000,"previewAvailable":true,"protected":null,"rating":null,"rotationDegrees":null,"archived":false}]}"#
         )
         let thumbnailJPEG = Data([0xFF, 0xD8, 0x04, 0x02, 0xFF, 0xD9])
@@ -651,7 +651,7 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(frame.data, jpeg)
 
         let mediaProgress = MediaListProgressRecorder()
-        let media = try await client.listMedia { items in
+        let media = try await client.listMedia(maximumItems: 1) { items in
             await mediaProgress.record(items)
         }
         let mediaSnapshots = await mediaProgress.values()
@@ -758,6 +758,25 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(clickJSON["y"] as? Double, 0.6)
         let remainingResponses = await transport.remainingResponses()
         XCTAssertEqual(remainingResponses, 0)
+    }
+
+    func testMediaListRejectsNonPositiveMaximumItems() async throws {
+        let client = try DesktopBridgeClient(
+            baseURL: "http://192.168.1.10:18181",
+            transport: MockCameraHTTPTransport()
+        )
+
+        for maximumItems in [0, -1, 1_001] {
+            do {
+                _ = try await client.listMedia(maximumItems: maximumItems)
+                XCTFail("Expected maximumItems=\(maximumItems) to be rejected")
+            } catch {
+                XCTAssertEqual(
+                    error as? DesktopBridgeError,
+                    .invalidResponse("maximumItems must be from 1 through 1000.")
+                )
+            }
+        }
     }
 
     func testEventPollingUsesBridgeLifecycleAndBoundedResponse() async throws {

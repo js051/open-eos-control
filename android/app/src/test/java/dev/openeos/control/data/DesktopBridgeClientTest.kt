@@ -71,7 +71,7 @@ class DesktopBridgeClientTest {
         val frame = client.liveViewFrame(9)
         val magnification = client.setLiveViewMagnification(LiveViewMagnification.X5)
         val focus = client.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.LARGE)
-        val media = client.listMedia()
+        val media = client.listMedia(maximumItems = 61)
         val thumbnail = client.mediaThumbnail(media.single())
         val preview = client.mediaPreview(media.single())
         val destination = ByteArrayOutputStream()
@@ -228,8 +228,24 @@ class DesktopBridgeClientTest {
         val clickWhiteBalancePayload = JSONObject(clickWhiteBalanceRequest.body.readUtf8())
         assertEquals(0.4, clickWhiteBalancePayload.getDouble("x"), 0.0001)
         assertEquals(0.6, clickWhiteBalancePayload.getDouble("y"), 0.0001)
+        val mediaRequest = requests.single {
+            it.method == "GET" && it.requestUrl?.encodedPath == "/v1/session/session-1/media"
+        }
+        assertEquals("61", mediaRequest.requestUrl?.queryParameter("limit"))
         assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath?.contains("/media/") == true })
         assertTrue(requests.any { it.method == "DELETE" && it.requestUrl?.encodedPath == "/v1/session/session-1" })
+    }
+
+    @Test
+    fun mediaListRejectsLimitsOutsideBridgeContract() = runTest {
+        val client = DesktopBridgeClient(server.url("/").toString())
+
+        listOf(0, -1, 1001).forEach { limit ->
+            val failure = runCatching { client.listMedia(maximumItems = limit) }.exceptionOrNull()
+
+            assertTrue(failure is IllegalArgumentException)
+        }
+        assertEquals(0, server.requestCount)
     }
 
     @Test

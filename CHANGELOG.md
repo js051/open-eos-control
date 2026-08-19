@@ -4,6 +4,9 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Extended the bounded recent-media flow to iOS and the PC control UI with explicit Recent/Full card controls, localized scope summaries, one-item lookahead, and scope-aware diagnostics.
+- Added `GET /v1/session/{id}/media?limit=1..1000` across the Desktop Bridge contract and Android/iOS Bridge clients. Direct CCAPI stops media-leaf pagination early while still sampling sibling photo/video containers; libgphoto2 documents that its recursive CLI listing remains complete before the HTTP response is bounded.
+
 ## [0.3.1] - 2026-08-19
 
 - Changed the Android camera-media entry point to load the newest 60 items first, with an explicit full-card option and a one-item lookahead that reports when more media is available without presenting a partial count as the card total.
