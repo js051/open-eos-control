@@ -1601,7 +1601,7 @@ final class CameraAppState: ObservableObject {
             "mediaLibraryHasMore=\(mediaLibraryHasMore)",
             "mediaLibraryRequestLimit=\(maximumMediaItems(for: mediaLibraryScope).map { String($0) } ?? "none")",
             "latestMediaRequestLimit=\(Self.latestMediaRequestItemCount)",
-            "latestMediaID=\(latestMediaItem?.id ?? "none")",
+            "latestMedia=\(latestMediaItem == nil ? "none" : "available")",
             "latestMediaThumbnail=\(latestMediaThumbnail == nil ? "none" : "available")",
             "lastClockSyncAt=\(lastClockSyncAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
             "monitorHistogram=\(monitorSettings.histogramVisible)",

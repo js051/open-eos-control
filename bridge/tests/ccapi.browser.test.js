@@ -138,7 +138,7 @@ async function run() {
       }
       const response = await route.fetch();
       const payload = await response.json();
-      payload.items = payload.items.slice(1);
+      payload.items = [];
       await route.fulfill({ response, json: payload });
     });
     await page.addInitScript(() => {

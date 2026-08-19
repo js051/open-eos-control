@@ -2829,7 +2829,12 @@
             { signal: controller.signal },
           );
           latest = latestMediaFrom(response.items);
-          if (!previousId || latest?.id !== previousId || attempt === LATEST_MEDIA_RETRY_DELAYS_MILLIS.length) break;
+          if (!previousId || (latest && latest.id !== previousId)) break;
+          if (attempt === LATEST_MEDIA_RETRY_DELAYS_MILLIS.length) {
+            state.latestMediaThumbnailLoading = false;
+            renderLatestMedia();
+            return false;
+          }
           await sleep(LATEST_MEDIA_RETRY_DELAYS_MILLIS[attempt]);
         }
         if (
@@ -2837,7 +2842,7 @@
           state.session?.id !== rawSessionId ||
           controller.signal.aborted
         ) return false;
-        publishLatestMedia(latest, generation, rawSessionId);
+        await publishLatestMedia(latest, generation, rawSessionId, controller.signal);
         return true;
       } catch (error) {
         if (!mediaTransfer.isAbortError(error) && generation === state.latestMediaGeneration) {
@@ -2857,7 +2862,7 @@
     return promise;
   }
 
-  function publishLatestMedia(item, generation, rawSessionId) {
+  async function publishLatestMedia(item, generation, rawSessionId, signal) {
     if (generation !== state.latestMediaGeneration || state.session?.id !== rawSessionId) return;
     const oldUrl = state.latestMediaThumbnailUrl;
     state.latestMediaItem = item;
@@ -2868,14 +2873,14 @@
     if (oldUrl) releaseObjectUrl(oldUrl);
     renderLatestMedia();
     if (!item || mediaIsVideo(item) || !featureSupported(FEATURES.MEDIA_THUMBNAIL)) return;
-    void loadLatestMediaThumbnail(item, generation, rawSessionId);
+    await loadLatestMediaThumbnail(item, generation, rawSessionId, signal);
   }
 
-  async function loadLatestMediaThumbnail(item, generation, rawSessionId) {
+  async function loadLatestMediaThumbnail(item, generation, rawSessionId, signal) {
     try {
       const blob = await api(
         `/v1/session/${encodeURIComponent(rawSessionId)}/media/${encodeURIComponent(item.id)}/thumbnail`,
-        { responseType: "blob" },
+        { responseType: "blob", signal },
       );
       if (!blob.type.startsWith("image/") || blob.size <= 0 || blob.size > MAX_MEDIA_THUMBNAIL_BYTES) {
         throw new ApiError("Invalid media thumbnail", { code: "INVALID_MEDIA_THUMBNAIL" });
@@ -4531,13 +4536,17 @@
   }
 
   function previewableMedia() {
-    const source = state.mediaLoaded || state.media.length
-      ? state.media
-      : state.latestMediaItem ? [state.latestMediaItem] : [];
-    return mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage())
+    const source = state.mediaLoaded || state.media.length ? state.media : [];
+    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage())
       .filter((item) => mediaIsVideo(item)
         ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
         : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
+    const latest = state.latestMediaItem;
+    const latestPreviewable = latest && (mediaIsVideo(latest)
+      ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
+      : latest.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
+    if (latestPreviewable && !items.some((item) => item.id === latest.id)) items.unshift(latest);
+    return items;
   }
 
   function mediaDateGroup(item) {
