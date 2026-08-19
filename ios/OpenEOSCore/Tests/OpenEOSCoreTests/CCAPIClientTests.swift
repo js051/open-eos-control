@@ -3459,8 +3459,10 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(items.map(\.name), ["IMG_0001.JPG", "IMG_0002.JPG"])
         let snapshots = await progress.values()
         XCTAssertEqual(snapshots.map(\.count), [2])
+        let requests = await transport.requests()
+        let requestPaths = requests.map(\.path)
         XCTAssertEqual(
-            (await transport.requests()).map(\.path),
+            requestPaths,
             [
                 "/ccapi",
                 "/ccapi/ver100/contents?kind=number",
@@ -3655,8 +3657,10 @@ final class CCAPIClientTests: XCTestCase {
 
         XCTAssertEqual(items.map(\.name), ["P2.JPG", "V2.MP4"])
         XCTAssertEqual(items.map(\.kind), ["image", "video"])
+        let requests = await transport.requests()
+        let requestPaths = requests.map(\.path)
         XCTAssertEqual(
-            (await transport.requests()).map(\.path),
+            requestPaths,
             [
                 "/ccapi",
                 "/ccapi/ver100/contents?kind=number",
