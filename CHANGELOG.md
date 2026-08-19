@@ -4,6 +4,12 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-19
+
+- Changed the Android camera-media entry point to load the newest 60 items first, with an explicit full-card option and a one-item lookahead that reports when more media is available without presenting a partial count as the card total.
+- Bounded direct CCAPI and Android USB/PTP recent-media enumeration, merged newly announced camera events into the recent view, and preserved camera order when capture timestamps are unavailable.
+- Limited Android thumbnail work to two concurrent requests, retried transient thumbnail I/O once, and added localized English/Traditional Chinese load-scope status plus redacted diagnostics.
+
 ## [0.3.0] - 2026-08-14
 
 - Rebuilt the Android, iOS, and PC media library for large camera cards with complete camera-advertised container/page traversal, progressive results, explicit loading completeness, cancellation, camera-order preservation, natural/date sorting, filtering, and deterministic coverage beyond 500 items.
@@ -112,3 +118,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.1.10]: https://github.com/js051/open-eos-control/releases/tag/v0.1.10
 [0.2.0]: https://github.com/js051/open-eos-control/releases/tag/v0.2.0
 [0.3.0]: https://github.com/js051/open-eos-control/releases/tag/v0.3.0
+[0.3.1]: https://github.com/js051/open-eos-control/releases/tag/v0.3.1
