@@ -59,6 +59,8 @@
   const CCAPI_USERNAME_KEY = "open-eos-control-ccapi-username";
   const MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024;
   const MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024;
+  const LATEST_MEDIA_LIMIT = 8;
+  const LATEST_MEDIA_RETRY_DELAYS_MILLIS = [250, 750, 1500];
   const MEDIA_PAGE_SIZE = 72;
   const MAX_MEDIA_THUMBNAIL_CACHE_ITEMS = 96;
   const LOCAL_VIDEO_RENDER_INTERVAL_MILLIS = 100;
@@ -103,6 +105,10 @@
       photo: "Photo",
       video: "Video",
       capture: "Capture",
+      latestMedia: "Latest media",
+      latestMediaEmpty: "No recent media",
+      latestMediaLoading: "Updating latest media",
+      openLatestMedia: "Open latest media",
       record: "Record",
       stopRecording: "Stop recording",
       ready: "Ready",
@@ -518,6 +524,10 @@
       photo: "拍照",
       video: "錄影",
       capture: "拍攝",
+      latestMedia: "最新媒體",
+      latestMediaEmpty: "尚無最近媒體",
+      latestMediaLoading: "正在更新最新媒體",
+      openLatestMedia: "開啟最新媒體",
       record: "開始錄影",
       stopRecording: "停止錄影",
       ready: "就緒",
@@ -1099,6 +1109,12 @@
     mediaDownloadPreparing: false,
     mediaDownload: null,
     mediaUpload: null,
+    latestMediaItem: null,
+    latestMediaThumbnailUrl: null,
+    latestMediaThumbnailLoading: false,
+    latestMediaGeneration: 0,
+    latestMediaRefreshPromise: null,
+    latestMediaController: null,
     busy: false,
     refreshGeneration: 0,
     lastError: null,
@@ -1167,6 +1183,9 @@
     videoModeButton: byId("video-mode-button"),
     shutterButton: byId("shutter-button"),
     shutterLabel: byId("shutter-label"),
+    latestMediaButton: byId("latest-media-button"),
+    latestMediaThumbnail: byId("latest-media-thumbnail"),
+    latestMediaLabel: byId("latest-media-label"),
     operationState: byId("operation-state"),
     autofocusButton: byId("autofocus-button"),
     halfPressButton: byId("half-press-button"),
@@ -1327,6 +1346,7 @@
     renderMediaPreviewNavigation();
     renderMediaDetails();
     renderMediaTransfer();
+    renderLatestMedia();
     renderDiagnostics();
   }
 
@@ -1574,6 +1594,7 @@
       ui.controlView.hidden = false;
       renderSession();
       startEventLoop();
+      void refreshLatestMedia();
       showToast(t("connected"));
     } catch (error) {
       if (state.session?.id) {
@@ -1665,6 +1686,7 @@
     cancelMediaUpload({ silent: true });
     clearScheduledMediaTransferRender();
     clearMediaThumbnails();
+    cancelLatestMediaRefresh();
     closeMediaPreview();
     closeMediaDetails();
     state.session = null;
@@ -1684,6 +1706,10 @@
     state.mediaDownloadPreparing = false;
     state.mediaDownload = null;
     state.mediaUpload = null;
+    state.latestMediaItem = null;
+    releaseObjectUrl(state.latestMediaThumbnailUrl);
+    state.latestMediaThumbnailUrl = null;
+    state.latestMediaThumbnailLoading = false;
     state.captureMode = "photo";
     state.previewInput = "CAMERA";
     state.liveSource = "AUTO";
@@ -2683,12 +2709,14 @@
         setOperationState(result);
         showToast(result);
       } else if (isPhoto) {
+        const previousLatestId = state.latestMediaItem?.id || null;
         state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/capture/still`, {
           method: "POST",
         });
         flashCapture();
         setOperationState(t("captureComplete"));
         showToast(t("captureComplete"));
+        void refreshLatestMedia({ previousId: previousLatestId });
       } else {
         const wasRecording = Boolean(state.status?.recording);
         state.status = await api(
@@ -2756,6 +2784,154 @@
     ui.captureFlash.classList.remove("active");
     void ui.captureFlash.offsetWidth;
     ui.captureFlash.classList.add("active");
+  }
+
+  function cancelLatestMediaRefresh() {
+    state.latestMediaGeneration += 1;
+    state.latestMediaController?.abort();
+    state.latestMediaController = null;
+    state.latestMediaRefreshPromise = null;
+    state.latestMediaThumbnailLoading = false;
+    renderLatestMedia();
+  }
+
+  function latestMediaFrom(items) {
+    return mediaLibrary.itemsForDisplay(
+      Array.isArray(items) ? items : [],
+      "all",
+      // The bounded camera response is already ordered by the camera. Keep that
+      // order because fresh captures may not have a timestamp yet.
+      "camera",
+      resolvedLanguage(),
+    )[0] || null;
+  }
+
+  function refreshLatestMedia({ previousId = null } = {}) {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return Promise.resolve(false);
+    cancelLatestMediaRefresh();
+    const rawSessionId = state.session.id;
+    const generation = state.latestMediaGeneration;
+    const controller = new AbortController();
+    state.latestMediaController = controller;
+    const promise = (async () => {
+      state.latestMediaThumbnailLoading = true;
+      renderLatestMedia();
+      try {
+        let latest = null;
+        for (let attempt = 0; attempt <= LATEST_MEDIA_RETRY_DELAYS_MILLIS.length; attempt += 1) {
+          if (
+            generation !== state.latestMediaGeneration ||
+            state.session?.id !== rawSessionId ||
+            controller.signal.aborted
+          ) return false;
+          const response = await api(
+            `/v1/session/${encodeURIComponent(rawSessionId)}/media?limit=${LATEST_MEDIA_LIMIT}`,
+            { signal: controller.signal },
+          );
+          latest = latestMediaFrom(response.items);
+          if (!previousId || (latest && latest.id !== previousId)) break;
+          if (attempt === LATEST_MEDIA_RETRY_DELAYS_MILLIS.length) {
+            state.latestMediaThumbnailLoading = false;
+            renderLatestMedia();
+            return false;
+          }
+          await sleep(LATEST_MEDIA_RETRY_DELAYS_MILLIS[attempt]);
+        }
+        if (
+          generation !== state.latestMediaGeneration ||
+          state.session?.id !== rawSessionId ||
+          controller.signal.aborted
+        ) return false;
+        await publishLatestMedia(latest, generation, rawSessionId, controller.signal);
+        return true;
+      } catch (error) {
+        if (!mediaTransfer.isAbortError(error) && generation === state.latestMediaGeneration) {
+          // Latest-media enrichment is best effort and must not rewrite capture success.
+          state.latestMediaThumbnailLoading = false;
+          renderLatestMedia();
+        }
+        return false;
+      } finally {
+        if (state.latestMediaController === controller) {
+          state.latestMediaController = null;
+          state.latestMediaRefreshPromise = null;
+        }
+      }
+    })();
+    state.latestMediaRefreshPromise = promise;
+    return promise;
+  }
+
+  async function publishLatestMedia(item, generation, rawSessionId, signal) {
+    if (generation !== state.latestMediaGeneration || state.session?.id !== rawSessionId) return;
+    const oldUrl = state.latestMediaThumbnailUrl;
+    state.latestMediaItem = item;
+    state.latestMediaThumbnailUrl = null;
+    state.latestMediaThumbnailLoading = Boolean(
+      item && !mediaIsVideo(item) && featureSupported(FEATURES.MEDIA_THUMBNAIL),
+    );
+    if (oldUrl) releaseObjectUrl(oldUrl);
+    renderLatestMedia();
+    if (!item || mediaIsVideo(item) || !featureSupported(FEATURES.MEDIA_THUMBNAIL)) return;
+    await loadLatestMediaThumbnail(item, generation, rawSessionId, signal);
+  }
+
+  async function loadLatestMediaThumbnail(item, generation, rawSessionId, signal) {
+    try {
+      const blob = await api(
+        `/v1/session/${encodeURIComponent(rawSessionId)}/media/${encodeURIComponent(item.id)}/thumbnail`,
+        { responseType: "blob", signal },
+      );
+      if (!blob.type.startsWith("image/") || blob.size <= 0 || blob.size > MAX_MEDIA_THUMBNAIL_BYTES) {
+        throw new ApiError("Invalid media thumbnail", { code: "INVALID_MEDIA_THUMBNAIL" });
+      }
+      if (
+        generation !== state.latestMediaGeneration ||
+        state.session?.id !== rawSessionId ||
+        state.latestMediaItem?.id !== item.id
+      ) return;
+      state.latestMediaThumbnailUrl = URL.createObjectURL(blob);
+    } catch (_) {
+      // Keep the media icon when a camera cannot provide a thumbnail.
+    } finally {
+      if (
+        generation === state.latestMediaGeneration &&
+        state.session?.id === rawSessionId &&
+        state.latestMediaItem?.id === item.id
+      ) {
+        state.latestMediaThumbnailLoading = false;
+        renderLatestMedia();
+      }
+    }
+  }
+
+  function renderLatestMedia() {
+    const button = ui.latestMediaButton;
+    if (!button) return;
+    const supported = Boolean(state.session) && featureSupported(FEATURES.MEDIA_BROWSER);
+    button.hidden = !supported;
+    button.disabled = !state.latestMediaItem;
+    button.setAttribute("aria-label", state.latestMediaItem ? t("openLatestMedia") : t("latestMediaEmpty"));
+    ui.latestMediaLabel.textContent = state.latestMediaThumbnailLoading
+      ? t("latestMediaLoading")
+      : state.latestMediaItem?.name || t("latestMediaEmpty");
+    ui.latestMediaThumbnail.replaceChildren();
+    if (state.latestMediaThumbnailUrl) {
+      const image = document.createElement("img");
+      image.src = state.latestMediaThumbnailUrl;
+      image.alt = state.latestMediaItem?.name || t("latestMedia");
+      ui.latestMediaThumbnail.append(image);
+    } else {
+      const icon = document.createElement("span");
+      icon.className = "icon";
+      icon.dataset.icon = mediaIsVideo(state.latestMediaItem) ? "video" : "images";
+      ui.latestMediaThumbnail.append(icon);
+    }
+    window.OpenEosIcons?.render(ui.latestMediaThumbnail);
+  }
+
+  function openLatestMedia() {
+    if (state.latestMediaItem) void openMediaPreview(state.latestMediaItem);
   }
 
   function liveCapabilities() {
@@ -4133,6 +4309,7 @@
     ui.mediaUploadButton.disabled = !connected || interactionBusy || !featureSupported(FEATURES.MEDIA_UPLOAD);
     ui.mediaRefreshButton.disabled = !connected || interactionBusy;
     renderMediaTransfer();
+    renderLatestMedia();
     renderMediaDetails();
   }
 
@@ -4359,9 +4536,17 @@
   }
 
   function previewableMedia() {
-    return displayedMedia().filter((item) => mediaIsVideo(item)
+    const source = state.mediaLoaded || state.media.length ? state.media : [];
+    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage())
+      .filter((item) => mediaIsVideo(item)
+        ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
+        : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
+    const latest = state.latestMediaItem;
+    const latestPreviewable = latest && (mediaIsVideo(latest)
       ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
-      : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
+      : latest.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
+    if (latestPreviewable && !items.some((item) => item.id === latest.id)) items.unshift(latest);
+    return items;
   }
 
   function mediaDateGroup(item) {
@@ -5449,6 +5634,7 @@
     ui.photoModeButton.addEventListener("click", () => selectCaptureMode("photo"));
     ui.videoModeButton.addEventListener("click", () => selectCaptureMode("video"));
     ui.shutterButton.addEventListener("click", operateShutter);
+    ui.latestMediaButton.addEventListener("click", openLatestMedia);
     ui.autofocusButton.addEventListener("click", autofocus);
     ui.halfPressButton.addEventListener("click", halfPressShutter);
     ui.liveToggleButton.addEventListener("click", toggleLiveView);

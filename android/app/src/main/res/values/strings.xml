@@ -311,6 +311,8 @@
     <string name="offline_preview">Offline UI preview</string>
     <string name="offline_preview_hint">Explore controls without sending commands to a camera</string>
     <string name="camera_media">Camera media</string>
+    <string name="open_latest_media">Open latest camera media</string>
+    <string name="open_latest_media_named">Open latest camera media: %1$s</string>
     <string name="back_to_camera">Back to camera</string>
     <string name="media_item_count">%1$d items</string>
     <string name="media_item_count_sort">%1$d items - %2$s</string>
@@ -346,6 +348,7 @@
     <string name="media_viewer_position">%1$d of %2$d</string>
     <string name="reset_media_zoom">Reset zoom</string>
     <string name="media_preview_unavailable">The camera preview could not be displayed.</string>
+    <string name="offline_media_preview_placeholder">Offline preview</string>
     <string name="media_video_playback_failed">This %1$s camera video could not be played. Check the camera connection and try again.</string>
     <string name="media_video_preparing_local">Preparing a local playback copy… %1$d%%</string>
     <string name="media_video_codec_unsupported">This device cannot decode the %1$s camera video. R6 Mark III 10-bit or 4:2:2 recordings may require compatible editing software.</string>

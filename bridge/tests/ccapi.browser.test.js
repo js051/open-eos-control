@@ -113,9 +113,33 @@ async function run() {
     });
     const page = await context.newPage();
     const pageErrors = [];
+    const boundedMediaRequests = [];
+    let retryLatestMedia = false;
+    let retryLatestMediaRequests = 0;
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("console", (message) => {
       if (message.type() === "error") pageErrors.push(message.text());
+    });
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "GET" && url.pathname.endsWith("/media")) {
+        boundedMediaRequests.push(url.searchParams.get("limit"));
+      }
+    });
+    await page.route(/\/media\?limit=8$/, async (route) => {
+      if (!retryLatestMedia) {
+        await route.continue();
+        return;
+      }
+      retryLatestMediaRequests += 1;
+      if (retryLatestMediaRequests !== 1) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      const payload = await response.json();
+      payload.items = [];
+      await route.fulfill({ response, json: payload });
     });
     await page.addInitScript(() => {
       const revokeObjectUrl = URL.revokeObjectURL.bind(URL);
@@ -138,6 +162,12 @@ async function run() {
     await page.waitForSelector("#control-view:not([hidden])");
     assert.match(await page.locator("#camera-name").innerText(), /R6 Mark III/);
     await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2418 shots"));
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#latest-media-button");
+      return button && !button.hidden && button.querySelector("#latest-media-label")?.textContent === "SIM_0002.PNG";
+    });
+    assert.ok(boundedMediaRequests.includes("8"), `expected bounded media request, got ${boundedMediaRequests}`);
+    assert.equal(boundedMediaRequests.includes(null), false, "connect shortcut must not enumerate the full card");
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.canonical.event_poll_count >= 1 && state.canonical.event_active_requests === 1,
@@ -222,7 +252,37 @@ async function run() {
       (state) => state.capture_count === 1 && state.media_ids.includes("SIM_0003.JPG"),
       "still capture and camera media creation",
     );
-    await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2417 shots"));
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#latest-media-button");
+      return button?.querySelector("#latest-media-label")?.textContent === "SIM_0003.JPG" && !button.disabled;
+    });
+    await page.click("#latest-media-button");
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector("#media-preview-dialog");
+      return dialog?.open && document.querySelector("#media-preview-title")?.textContent === "SIM_0003.JPG";
+    });
+    await page.click("#media-preview-close");
+
+    retryLatestMedia = true;
+    await page.route(/\/thumbnail$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/plain",
+      body: "not-an-image",
+    }));
+    await page.click("#shutter-button");
+    await waitForSimulatorState(
+      simulatorOrigin,
+      (state) => state.capture_count === 2 && state.media_ids.includes("SIM_0004.JPG"),
+      "second still capture with thumbnail enrichment unavailable",
+    );
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#latest-media-button");
+      return button?.querySelector("#latest-media-label")?.textContent === "SIM_0004.JPG" && !button.disabled;
+    });
+    assert.ok(retryLatestMediaRequests >= 2, "capture review should retry until the camera reports a new item");
+    assert.equal(await page.locator("#operation-state").innerText(), "Photo captured");
+    await page.unroute(/\/thumbnail$/);
+    await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2416 shots"));
 
     await page.click("#live-toggle-button");
     await waitForSimulatorState(
@@ -569,7 +629,7 @@ async function run() {
       (state) => state.still_card_selection === "card2" && state.card_selection_update_count === 2,
       "Canon still-image card selection",
     );
-    await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2417 shots"));
+    await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2416 shots"));
 
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
     await waitForSimulatorState(simulatorOrigin, (state) => state.mode === "Bulb", "Canon Bulb mode write");
@@ -577,7 +637,7 @@ async function run() {
       const shutter = document.querySelector("#shutter-button");
       return shutter?.classList.contains("bulb") && !shutter.disabled;
     });
-    assert.equal((await readSimulatorState(simulatorOrigin)).capture_count, 1);
+    assert.equal((await readSimulatorState(simulatorOrigin)).capture_count, 2);
     await page.click("#shutter-button");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -718,7 +778,7 @@ async function run() {
       .canonical.event_delivery_count;
     const externalCapture = await fetch(`${simulatorOrigin}/ccapi/capture/still`, { method: "POST" });
     assert.equal(externalCapture.ok, true);
-    await page.locator(".media-card").filter({ hasText: "SIM_0004.PNG" }).waitFor({ state: "visible" });
+    await page.locator(".media-card").filter({ hasText: "SIM_0005.PNG" }).waitFor({ state: "visible" });
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.canonical.event_delivery_count > deliveredBeforeExternalCapture,

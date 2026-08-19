@@ -65,6 +65,8 @@
 "step_large" = "Large";
 "focus_drive_live_view_required" = "Enable Live View auto refresh before driving focus.";
 "more_settings" = "More settings";
+"open_latest_media" = "Open latest media";
+"open_latest_media_named" = "Open latest media %@";
 "live_view_tap_action" = "Live View tap action";
 "tap_action_focus" = "Tap focus";
 "tap_action_white_balance" = "Click white balance";

@@ -1,5 +1,6 @@
 import OpenEOSCore
 import SwiftUI
+import UIKit
 
 struct CameraControlView: View {
     @EnvironmentObject private var camera: CameraAppState
@@ -349,22 +350,14 @@ private struct ExposureButton: View {
 
 private struct CaptureBar: View {
     @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
     let controlRotation: Double
     var compact = false
 
     var body: some View {
         VStack(spacing: 3) {
             HStack(spacing: 12) {
-                Button {
-                    camera.activeSheet = .more
-                } label: {
-                    RotatingControl(degrees: controlRotation) {
-                        Image(systemName: "slider.horizontal.3")
-                            .accessibilityLabel(Text("more_settings"))
-                    }
-                }
-                .buttonStyle(CameraIconButtonStyle())
-                .accessibilityIdentifier("more-settings-button")
+                latestMediaButton
 
                 Spacer(minLength: 0)
 
@@ -397,6 +390,57 @@ private struct CaptureBar: View {
                     .padding(.bottom, 6)
             }
         }
+    }
+
+    @ViewBuilder
+    private var latestMediaButton: some View {
+        if camera.supports(.mediaBrowser) {
+            Button {
+                Task { await camera.openLatestMedia() }
+            } label: {
+                RotatingControl(degrees: controlRotation) {
+                    ZStack {
+                        if let data = camera.latestMediaThumbnail,
+                           let image = UIImage(data: data) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            Image(systemName: "photo.on.rectangle")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(Color.cameraSecondaryText)
+                        }
+                        if camera.latestMediaThumbnailLoading {
+                            ProgressView()
+                                .tint(Color.cameraText)
+                                .background(.black.opacity(0.35), in: Circle())
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+                    .background(Color.cameraSurfaceRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5)
+                            .stroke(Color.cameraText.opacity(0.25), lineWidth: 1)
+                    }
+                    .accessibilityLabel(Text(latestMediaAccessibilityLabel))
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(!camera.canOpenLatestMedia || camera.isBusy(.media))
+            .accessibilityIdentifier("latest-media-button")
+        } else {
+            Color.clear
+                .frame(width: 48, height: 48)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var latestMediaAccessibilityLabel: String {
+        guard let item = camera.latestMediaItem else {
+            return language.string("open_latest_media")
+        }
+        return language.format("open_latest_media_named", item.name)
     }
 
     private var captureSupported: Bool {

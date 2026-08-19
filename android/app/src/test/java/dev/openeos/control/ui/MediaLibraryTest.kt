@@ -2,10 +2,66 @@ package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraMediaItem
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class MediaLibraryTest {
+    @Test
+    fun captureReviewSelectsNewestKnownCaptureTime() {
+        val items = listOf(
+            media("old", "IMG_0001.JPG", "2026-08-13T10:00:00Z"),
+            media("new", "IMG_0002.JPG", "2026-08-14T10:00:00Z"),
+        )
+
+        assertEquals("new", selectCaptureReviewItem(items)?.id)
+    }
+
+    @Test
+    fun captureReviewPreservesCameraOrderWhenCaptureTimesAreUnavailable() {
+        val items = listOf(
+            media("camera-newest", "IMG_4915.JPG"),
+            media("camera-older", "IMG_4914.JPG"),
+        )
+
+        assertEquals("camera-newest", selectCaptureReviewItem(items)?.id)
+        assertEquals(null, selectCaptureReviewItem(emptyList()))
+    }
+
+    @Test
+    fun captureReviewRetriesUntilTheCameraPublishesANewItem() = runTest {
+        val old = media("old", "IMG_0001.JPG")
+        val new = media("new", "IMG_0002.JPG")
+        var calls = 0
+
+        val selected = awaitCaptureReviewItem("old", longArrayOf(0, 0)) {
+            calls += 1
+            if (calls < 3) listOf(old) else listOf(new, old)
+        }
+
+        assertEquals("new", selected?.id)
+        assertEquals(3, calls)
+    }
+
+    @Test
+    fun captureReviewDoesNotSwallowCoroutineCancellation() {
+        assertThrows(CancellationException::class.java) {
+            runTest {
+                awaitCaptureReviewItem(null, longArrayOf(0)) { throw CancellationException("stop") }
+            }
+        }
+    }
+
+    @Test
+    fun mediaThumbnailDecodeSampleBoundsTheLongestEdge() {
+        assertEquals(1, mediaThumbnailSampleSize(320, 240))
+        assertEquals(8, mediaThumbnailSampleSize(4_000, 3_000))
+        assertEquals(32, mediaThumbnailSampleSize(8_000, 12_000))
+        assertEquals(1, mediaThumbnailSampleSize(0, 12_000))
+    }
+
     @Test
     fun cameraSortPreservesTransportOrderExactly() {
         val items = listOf(

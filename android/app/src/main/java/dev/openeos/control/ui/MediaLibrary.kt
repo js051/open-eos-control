@@ -54,6 +54,9 @@ internal fun mediaItemsForDisplay(
     }.map { it.value }
 }
 
+internal fun selectCaptureReviewItem(items: List<CameraMediaItem>): CameraMediaItem? =
+    mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST).firstOrNull()
+
 internal val CameraMediaItem.isVideo: Boolean
     get() = isVideoMedia
 

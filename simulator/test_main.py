@@ -204,6 +204,7 @@ def test_capture_adds_a_downloadable_media_item() -> None:
     assert capture.status_code == 200
     assert capture.json()["capture_count"] == 1
     assert added["name"] == "SIM_0003.PNG"
+    assert added["capture_time"] is not None
     assert added["size_bytes"] > 0
     assert download.status_code == 200
     assert download.headers["content-type"] == "image/png"
@@ -697,6 +698,7 @@ def test_canonical_ccapi_controls_and_media_mutate_backend_state() -> None:
     assert media_info.json()["rating"] == "4"
     assert media_info.json()["rotate"] == "90"
     assert media_info.json()["archive"] == "enable"
+    assert media_info.json()["lastmodifieddate"] is not None
     assert preview.headers["content-type"].startswith("image/jpeg")
     assert preview.content.startswith(b"\xff\xd8") and preview.content.endswith(b"\xff\xd9")
     assert deleted.status_code == 204

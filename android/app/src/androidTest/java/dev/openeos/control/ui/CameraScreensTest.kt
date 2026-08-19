@@ -276,8 +276,8 @@ class CameraScreensTest {
             .onNodeWithTag("live-view-magnification")
             .fetchSemanticsNode()
             .boundsInRoot
-        val settingsBounds = compose
-            .onNodeWithContentDescription(resourceText(R.string.more_settings))
+        val captureReviewBounds = compose
+            .onNodeWithTag("capture-review-button")
             .fetchSemanticsNode()
             .boundsInRoot
 
@@ -286,13 +286,66 @@ class CameraScreensTest {
             tapActionBounds.overlaps(emptyStateBounds),
         )
         assertFalse(
-            "Tap action $tapActionBounds overlaps settings $settingsBounds",
-            tapActionBounds.overlaps(settingsBounds),
+            "Tap action $tapActionBounds overlaps capture review $captureReviewBounds",
+            tapActionBounds.overlaps(captureReviewBounds),
         )
         assertFalse(
             "Magnification $magnificationBounds overlaps empty state $emptyStateBounds",
             magnificationBounds.overlaps(emptyStateBounds),
         )
+    }
+
+    @Test
+    fun captureReviewShortcutOpensLatestMediaAndSettingsRemainInActionMenu() {
+        var captureReviewOpened = false
+        var selectedPicker: SettingPicker? = null
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    CameraUiState().withOfflinePreview(),
+                    noOpActions().copy(
+                        openCaptureReview = { captureReviewOpened = true },
+                        openPicker = { selectedPicker = it },
+                    ),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("capture-review-button").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertTrue(captureReviewOpened) }
+
+        openMoreSettings()
+        compose.runOnIdle { assertEquals(SettingPicker.MORE, selectedPicker) }
+    }
+
+    @Test
+    fun captureReviewShortcutIsDisabledUntilLatestMediaArrives() {
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(
+                    CameraUiState().withOfflinePreview().copy(captureReviewItem = null),
+                    noOpActions(),
+                )
+            }
+        }
+
+        compose.onNodeWithTag("capture-review-button").assertIsDisplayed().assertIsNotEnabled()
+    }
+
+    @Test
+    fun offlineCaptureReviewViewerUsesAnExplicitPlaceholderInsteadOfCameraFailure() {
+        val state = CameraUiState().withOfflinePreview()
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(
+                    state.copy(mediaPreviewItem = state.captureReviewItem),
+                    noOpActions(),
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.offline_media_preview_placeholder)).assertIsDisplayed()
+        compose.onAllNodesWithText(resourceText(R.string.media_preview_unavailable)).assertCountEquals(0)
     }
 
     @Test
@@ -1129,7 +1182,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("advanced-setting-shootingmode")
             .performScrollTo()
             .assertIsDisplayed()
@@ -1258,7 +1311,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onAllNodesWithTag("advanced-setting-soundrecording").assertCountEquals(0)
         compose.onAllNodesWithTag("advanced-setting-soundrecordinglevel").assertCountEquals(0)
         compose.onAllNodesWithTag("advanced-setting-windfilter").assertCountEquals(0)
@@ -1267,7 +1320,7 @@ class CameraScreensTest {
             picker.value = null
             state.value = state.value.copy(captureMode = CaptureMode.VIDEO)
         }
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("advanced-setting-soundrecording")
             .performScrollTo()
             .assertIsDisplayed()
@@ -1301,7 +1354,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("advanced-setting-beep").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.setting_beep)).assertIsDisplayed()
         compose.onNodeWithTag("advanced-setting-value-beep-disabletouch")
@@ -1321,7 +1374,7 @@ class CameraScreensTest {
             picker.value = null
             state.value = state.value.copy(captureMode = CaptureMode.VIDEO)
         }
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("advanced-setting-beep").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("advanced-setting-displayoff").performScrollTo().assertIsDisplayed()
     }
@@ -1340,7 +1393,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("advanced-setting-focusbracketing")
             .performScrollTo()
             .assertIsDisplayed()
@@ -1362,7 +1415,7 @@ class CameraScreensTest {
             picker.value = null
             state.value = state.value.copy(captureMode = CaptureMode.VIDEO)
         }
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         for (key in listOf(
             "focusbracketing",
             "focusbracketingnumberofshots",
@@ -1389,7 +1442,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("advanced-setting-moviequality")
             .performScrollTo()
             .assertIsDisplayed()
@@ -1409,7 +1462,7 @@ class CameraScreensTest {
             picker.value = null
             state.value = state.value.copy(captureMode = CaptureMode.PHOTO)
         }
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         for (key in listOf("moviequality", "highframerate", "moviecropping", "movieformat")) {
             compose.onAllNodesWithTag("advanced-setting-$key").assertCountEquals(0)
         }
@@ -1433,7 +1486,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithText(resourceText(R.string.manual_focus_drive)).assertIsDisplayed()
         compose.onNodeWithContentDescription(
             resourceText(R.string.focus_drive_step, resourceText(R.string.focus_farther), 3),
@@ -1461,7 +1514,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithContentDescription(resourceText(R.string.half_press_shutter_action))
             .performScrollTo()
             .assertIsDisplayed()
@@ -1732,7 +1785,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onAllNodesWithContentDescription(resourceText(R.string.half_press_shutter_action))
             .assertCountEquals(0)
     }
@@ -1755,7 +1808,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodesWithText(resourceText(R.string.live_view_tap_action))
                 .fetchSemanticsNodes()
@@ -1815,7 +1868,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("tap-action-white-balance")
             .performScrollTo()
             .assertIsDisplayed()
@@ -1839,7 +1892,7 @@ class CameraScreensTest {
             }
         }
 
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onAllNodesWithTag("tap-action-white-balance").assertCountEquals(0)
     }
 
@@ -3108,7 +3161,7 @@ class CameraScreensTest {
 
     private fun assertPrimaryCameraControlsVisible() {
         compose.onNodeWithContentDescription(resourceText(R.string.capture_photo)).assertIsDisplayed()
-        compose.onNodeWithContentDescription(resourceText(R.string.more_settings)).assertIsDisplayed()
+        compose.onNodeWithTag("camera-action-menu-button").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.fps_control_description, 6))
             .assertIsDisplayed()
         compose.onNodeWithTag("exposure-control-ISO").assertIsDisplayed()
@@ -3152,6 +3205,11 @@ class CameraScreensTest {
         TestStorage().openOutputFile(name).buffered().use { output ->
             assertTrue("Failed to encode visual snapshot $name", bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
         }
+    }
+
+    private fun openMoreSettings() {
+        compose.onNodeWithTag("camera-action-menu-button").performClick()
+        compose.onNodeWithTag("camera-action-settings").performClick()
     }
 
     private fun noOpActions() = CameraActions(

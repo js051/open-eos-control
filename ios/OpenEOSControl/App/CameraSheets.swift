@@ -58,6 +58,13 @@ private struct CameraActionsView: View {
                     }
                     .accessibilityIdentifier("monitoring-menu-button")
 
+                    Button {
+                        camera.activeSheet = .more
+                    } label: {
+                        Label("more_settings", systemImage: "slider.horizontal.3")
+                    }
+                    .accessibilityIdentifier("more-settings-menu-button")
+
                     if camera.supports(.shutterHalfPress) {
                         Button {
                             dismiss()

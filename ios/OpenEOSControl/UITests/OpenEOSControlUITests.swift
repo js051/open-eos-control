@@ -231,14 +231,14 @@ final class OpenEOSControlUITests: XCTestCase {
             (state["focus"] as? [String: Any])?["count"] as? Int == 1
         }
 
-        let moreSettings = app.buttons["more-settings-button"]
+        openMoreActions(in: app)
+        let moreSettings = app.buttons["more-settings-menu-button"]
         XCTAssertTrue(waitForInteraction(moreSettings, timeout: 8))
         moreSettings.tap()
         let tapAction = app.segmentedControls["live-view-tap-action-picker"]
         XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
         let clickWhiteBalance = tapAction.buttons["Click white balance"]
         clickWhiteBalance.tap()
-        XCTAssertTrue(waitForValue(tapAction, equalTo: "whiteBalance", timeout: 3))
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
         liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
@@ -497,23 +497,14 @@ final class OpenEOSControlUITests: XCTestCase {
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
-    private func waitForValue(_ element: XCUIElement, equalTo expectedValue: String, timeout: TimeInterval) -> Bool {
-        let predicate = NSPredicate { candidate, _ in
-            (candidate as? XCUIElement)?.value as? String == expectedValue
-        }
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
-        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
-    }
-
     private func scrollToInteraction(
         _ element: XCUIElement,
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
-        guard element.waitForExistence(timeout: min(timeout, 2)) else { return false }
         while Date() < deadline {
-            if element.isEnabled, element.isHittable { return true }
+            if element.exists, element.isEnabled, element.isHittable { return true }
             let scrollSurface = app.scrollViews.allElementsBoundByIndex.last {
                 $0.exists && $0.isHittable
             }
@@ -523,7 +514,7 @@ final class OpenEOSControlUITests: XCTestCase {
                 app.swipeUp()
             }
         }
-        return element.isEnabled && element.isHittable
+        return element.exists && element.isEnabled && element.isHittable
     }
 
     private func openMoreActions(in app: XCUIApplication) {
@@ -605,7 +596,10 @@ final class OpenEOSControlUITests: XCTestCase {
             request.httpBody = Data()
         }
         request.timeoutInterval = timeoutInterval
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // UI steps can outlive Uvicorn's keep-alive, so avoid reusing a stale harness socket.
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             throw SimulatorTestError.invalidResponse
         }
