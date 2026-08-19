@@ -2318,8 +2318,10 @@ class CcapiSession:
             engine=self.engine_name,
         )
 
-    def list_media(self) -> list[MediaItem]:
+    def list_media(self, maximum_items: int | None = None) -> list[MediaItem]:
         with self._lock:
+            if maximum_items is not None and maximum_items <= 0:
+                raise ValueError("maximum_items must be positive when provided")
             self._ensure_initialized()
             if not self._supports("GET", "/contents"):
                 raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
@@ -2333,7 +2335,7 @@ class CcapiSession:
                     continue
                 visited.add(container)
                 media_paths: list[str] = []
-                for raw_path in self._content_paths(container):
+                for raw_path in self._content_paths(container, maximum_items):
                     path = self._normalize_resource(raw_path).split("?", 1)[0]
                     if _is_media_path(path):
                         if path not in media_paths:
@@ -2343,6 +2345,8 @@ class CcapiSession:
                 if media_paths:
                     media_path_groups.append(media_paths)
             media_paths = _merge_media_path_groups(media_path_groups)
+            if maximum_items is not None:
+                media_paths = media_paths[:maximum_items]
             items = [
                 MediaItem(
                     id=_media_id(path),
@@ -2353,7 +2357,10 @@ class CcapiSession:
                 )
                 for path in media_paths
             ]
-            self._media_cache = {item.id: item for item in items}
+            if maximum_items is None:
+                self._media_cache = {item.id: item for item in items}
+            else:
+                self._media_cache.update({item.id: item for item in items})
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
 
@@ -2749,7 +2756,7 @@ class CcapiSession:
             )
         self._request_ok(operation.method, operation.path, payload)
 
-    def _content_paths(self, container: str) -> list[str]:
+    def _content_paths(self, container: str, maximum_media_paths: int | None = None) -> list[str]:
         page_info = self._first_json([f"{container}?kind=number", f"{container}?type=all,kind=number"])
         page_count = _integer_value(page_info, "pagenumber") or 0
         if page_count < 0:
@@ -2764,7 +2771,12 @@ class CcapiSession:
         if page_count <= 0:
             value = self._first_json([container], required=True)
             if isinstance(value, dict):
-                self._add_content_paths(paths, value, reverse=False, max_paths=None)
+                self._add_content_paths(
+                    paths,
+                    value,
+                    reverse=False,
+                    max_media_paths=maximum_media_paths,
+                )
             return list(paths)
 
         first_value = self._content_page(container, 1)
@@ -2772,15 +2784,35 @@ class CcapiSession:
             pages = range(page_count, 0, -1)
             for page in pages:
                 value = first_value if page == 1 else self._content_page(container, page)
-                self._add_content_paths(paths, value, reverse=True, max_paths=None)
+                self._add_content_paths(
+                    paths,
+                    value,
+                    reverse=True,
+                    max_media_paths=maximum_media_paths,
+                )
+                if (
+                    maximum_media_paths is not None
+                    and self._media_path_count(paths) >= maximum_media_paths
+                ):
+                    break
         else:
-            self._add_content_paths(paths, first_value, reverse=False, max_paths=None)
+            self._add_content_paths(
+                paths,
+                first_value,
+                reverse=False,
+                max_media_paths=maximum_media_paths,
+            )
             for page in range(2, page_count + 1):
+                if (
+                    maximum_media_paths is not None
+                    and self._media_path_count(paths) >= maximum_media_paths
+                ):
+                    break
                 self._add_content_paths(
                     paths,
                     self._content_page(container, page),
                     reverse=False,
-                    max_paths=None,
+                    max_media_paths=maximum_media_paths,
                 )
         return list(paths)
 
@@ -2804,7 +2836,7 @@ class CcapiSession:
         value: object,
         *,
         reverse: bool,
-        max_paths: int | None,
+        max_media_paths: int | None,
     ) -> None:
         if not isinstance(value, dict):
             return
@@ -2815,8 +2847,15 @@ class CcapiSession:
         for item in values:
             if isinstance(item, str) and item:
                 paths.setdefault(item, None)
-                if max_paths is not None and len(paths) >= max_paths:
+                if (
+                    max_media_paths is not None
+                    and CcapiSession._media_path_count(paths) >= max_media_paths
+                ):
                     break
+
+    @staticmethod
+    def _media_path_count(paths: dict[str, None]) -> int:
+        return sum(1 for path in paths if _is_media_path(path.split("?", 1)[0]))
 
     def _load_settings(self, force: bool = False) -> dict[str, object]:
         if self._settings_cache is not None and not force:

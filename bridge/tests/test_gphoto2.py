@@ -282,6 +282,25 @@ def test_media_parser_does_not_truncate_more_than_five_hundred_items() -> None:
     assert items[-1].name == "IMG_0001.JPG"
 
 
+def test_gphoto_recent_media_bounds_response_but_uses_one_recursive_listing() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+    before = sum("--recurse" in command and "--list-files" in command for command in runner.commands)
+
+    items = session.list_media(maximum_items=1)
+
+    after = sum("--recurse" in command and "--list-files" in command for command in runner.commands)
+    assert len(items) == 1
+    assert after - before == 1
+
+
+def test_gphoto_recent_media_requires_a_positive_limit() -> None:
+    session = GPhoto2Engine(FakeRunner()).open()
+
+    with pytest.raises(ValueError, match="positive"):
+        session.list_media(maximum_items=0)
+
+
 def test_local_media_store_does_not_truncate_more_than_five_hundred_items(tmp_path: Path) -> None:
     for index in range(1, 502):
         (tmp_path / f"IMG_{index:04}.JPG").write_bytes(b"x")

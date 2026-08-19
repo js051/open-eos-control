@@ -3,6 +3,9 @@ import OpenEOSCore
 
 @MainActor
 final class CameraAppState: ObservableObject {
+    private static let recentMediaItemCount = 60
+    private static let recentMediaRequestCount = recentMediaItemCount + 1
+
     static var defaultCameraURL: String {
         #if DEBUG
         if let override = ProcessInfo.processInfo.environment["OEC_HTTP_PRESET_URL"]?
@@ -79,6 +82,8 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaLibraryLoading = false
     @Published private(set) var mediaLibraryLoadCancellable = false
     @Published private(set) var mediaLibraryLoadStatus = MediaLibraryLoadStatus.notLoaded
+    @Published private(set) var mediaLibraryScope = MediaLibraryScope.recent
+    @Published private(set) var mediaLibraryHasMore = false
     @Published private(set) var mediaThumbnails: [String: Data] = [:]
     @Published private(set) var loadingMediaThumbnailIDs = Set<String>()
     @Published private(set) var mediaPreviewItem: CameraMediaItem?
@@ -322,6 +327,7 @@ final class CameraAppState: ObservableObject {
             isPreview = false
             screen = .control
             mediaItems = []
+            mediaLibraryHasMore = false
             invalidateMediaLibraryLoad()
             resetMediaThumbnails()
             resetMediaPreview()
@@ -354,6 +360,7 @@ final class CameraAppState: ObservableObject {
         isPreview = true
         screen = .control
         mediaItems = Self.previewMedia
+        mediaLibraryHasMore = false
         mediaLibraryLoadStatus = .complete
         resetMediaThumbnails()
         resetMediaPreview()
@@ -402,6 +409,7 @@ final class CameraAppState: ObservableObject {
         password = ""
         bridgeToken = ""
         mediaItems = []
+        mediaLibraryHasMore = false
         resetMediaThumbnails()
         resetMediaPreview()
         removeDownloadedFile()
@@ -922,6 +930,7 @@ final class CameraAppState: ObservableObject {
 
     func startMediaLibraryLoad() {
         guard supports(.mediaBrowser), !mediaLibraryLoading, !isBusy(.media), begin(.mediaLibrary) else { return }
+        let scope = mediaLibraryScope
         let generation = UUID()
         mediaLibraryGeneration = generation
         mediaLibraryLoading = true
@@ -932,6 +941,7 @@ final class CameraAppState: ObservableObject {
         resetMediaPreview()
         if isPreview {
             mediaItems = Self.previewMedia
+            mediaLibraryHasMore = false
             finishMediaLibraryLoad(generation: generation)
             return
         }
@@ -941,8 +951,34 @@ final class CameraAppState: ObservableObject {
             return
         }
         mediaLibraryTask = Task { [weak self] in
-            await self?.performMediaLibraryLoad(session: session, generation: generation)
+            await self?.performMediaLibraryLoad(session: session, scope: scope, generation: generation)
         }
+    }
+
+    func setMediaLibraryScope(_ scope: MediaLibraryScope) {
+        guard scope != mediaLibraryScope else { return }
+        let previousItems = mediaItems
+        let canReuseCompleteLibrary = scope == .recent && mediaLibraryLoadStatus == .complete
+        if mediaLibraryLoading { invalidateMediaLibraryLoad() }
+        mediaLibraryScope = scope
+        resetMediaThumbnails()
+        resetMediaPreview()
+
+        if isPreview {
+            mediaItems = Self.previewMedia
+            mediaLibraryHasMore = false
+            mediaLibraryLoadStatus = .complete
+            return
+        }
+        if canReuseCompleteLibrary {
+            applyMediaBatch(previousItems, scope: scope)
+            mediaLibraryLoadStatus = .complete
+            return
+        }
+
+        mediaLibraryHasMore = false
+        mediaLibraryLoadStatus = .notLoaded
+        if connected, supports(.mediaBrowser) { startMediaLibraryLoad() }
     }
 
     func cancelMediaLibraryLoad() {
@@ -950,14 +986,18 @@ final class CameraAppState: ObservableObject {
         invalidateMediaLibraryLoad(status: .cancelled)
     }
 
-    private func performMediaLibraryLoad(session: CameraSession, generation: UUID) async {
+    private func performMediaLibraryLoad(
+        session: CameraSession,
+        scope: MediaLibraryScope,
+        generation: UUID
+    ) async {
         defer { finishMediaLibraryLoad(generation: generation) }
         do {
-            let items = try await session.listMedia { [weak self] partialItems in
-                await self?.applyMediaListProgress(partialItems, generation: generation)
+            let items = try await session.listMedia(maximumItems: maximumMediaItems(for: scope)) { [weak self] partialItems in
+                await self?.applyMediaListProgress(partialItems, scope: scope, generation: generation)
             }
             guard generation == mediaLibraryGeneration, !Task.isCancelled else { return }
-            mediaItems = items
+            applyMediaBatch(items, scope: scope)
             mediaLibraryLoadStatus = .complete
             lastError = nil
         } catch is CancellationError {
@@ -1227,8 +1267,10 @@ final class CameraAppState: ObservableObject {
             }
             guard mediaUploadToken == token else { throw CancellationError() }
             mediaLibraryLoadStatus = .loading
+            let scope = mediaLibraryScope
             do {
-                mediaItems = try await session.listMedia()
+                let items = try await session.listMedia(maximumItems: maximumMediaItems(for: scope))
+                applyMediaBatch(items, scope: scope)
             } catch {
                 mediaLibraryLoadStatus = .failed
                 throw error
@@ -1291,12 +1333,16 @@ final class CameraAppState: ObservableObject {
     ) async {
         guard case .desktopBridge = session else { return }
         mediaLibraryLoadStatus = .loading
-        let items = await Task.detached { try? await session.listMedia() }.value
+        let scope = mediaLibraryScope
+        let maximumItems = maximumMediaItems(for: scope)
+        let items = await Task.detached {
+            try? await session.listMedia(maximumItems: maximumItems)
+        }.value
         guard let items else {
             mediaLibraryLoadStatus = .failed
             return
         }
-        mediaItems = items
+        applyMediaBatch(items, scope: scope)
         mediaLibraryLoadStatus = .complete
         resetMediaThumbnails()
         resetMediaPreview()
@@ -1426,6 +1472,9 @@ final class CameraAppState: ObservableObject {
         let monitoring = [
             "mediaItemCount=\(mediaItems.count)",
             "mediaLoadStatus=\(mediaLibraryLoadStatus.rawValue)",
+            "mediaLibraryScope=\(mediaLibraryScope.rawValue)",
+            "mediaLibraryHasMore=\(mediaLibraryHasMore)",
+            "mediaLibraryRequestLimit=\(maximumMediaItems(for: mediaLibraryScope).map { String($0) } ?? "none")",
             "lastClockSyncAt=\(lastClockSyncAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
             "monitorHistogram=\(monitorSettings.histogramVisible)",
             "monitorWaveform=\(monitorSettings.waveformVisible)",
@@ -1688,6 +1737,7 @@ final class CameraAppState: ObservableObject {
             }
             guard begin(.mediaLibrary) else { continue }
             let mediaGeneration = UUID()
+            let scope = mediaLibraryScope
             mediaLibraryGeneration = mediaGeneration
             mediaLibraryLoading = true
             mediaLibraryLoadCancellable = false
@@ -1695,15 +1745,19 @@ final class CameraAppState: ObservableObject {
             do {
                 resetMediaThumbnails()
                 resetMediaPreview()
-                let items = try await session.listMedia { [weak self] partialItems in
-                    await self?.applyMediaListProgress(partialItems, generation: mediaGeneration)
+                let items = try await session.listMedia(maximumItems: maximumMediaItems(for: scope)) { [weak self] partialItems in
+                    await self?.applyMediaListProgress(
+                        partialItems,
+                        scope: scope,
+                        generation: mediaGeneration
+                    )
                 }
                 guard mediaGeneration == mediaLibraryGeneration else { return true }
                 mediaLibraryLoading = false
                 mediaLibraryLoadStatus = .complete
                 end(.mediaLibrary)
                 guard generation == eventGeneration, !Task.isCancelled else { return false }
-                mediaItems = items
+                applyMediaBatch(items, scope: scope)
                 lastError = nil
                 return true
             } catch {
@@ -1817,9 +1871,27 @@ final class CameraAppState: ObservableObject {
         busyOperations.remove(.media)
     }
 
-    private func applyMediaListProgress(_ items: [CameraMediaItem], generation: UUID) {
+    private func maximumMediaItems(for scope: MediaLibraryScope) -> Int? {
+        scope == .recent ? Self.recentMediaRequestCount : nil
+    }
+
+    private func applyMediaBatch(_ items: [CameraMediaItem], scope: MediaLibraryScope) {
+        let batch = mediaLibraryBatch(
+            items,
+            scope: scope,
+            recentItemCount: Self.recentMediaItemCount
+        )
+        mediaItems = batch.items
+        mediaLibraryHasMore = batch.hasMore
+    }
+
+    private func applyMediaListProgress(
+        _ items: [CameraMediaItem],
+        scope: MediaLibraryScope,
+        generation: UUID
+    ) {
         guard generation == mediaLibraryGeneration, !Task.isCancelled else { return }
-        mediaItems = items
+        applyMediaBatch(items, scope: scope)
     }
 
     private func invalidateMediaLibraryLoad(status: MediaLibraryLoadStatus = .notLoaded) {
@@ -1829,6 +1901,7 @@ final class CameraAppState: ObservableObject {
         mediaLibraryLoading = false
         mediaLibraryLoadCancellable = false
         mediaLibraryLoadStatus = status
+        if status == .notLoaded { mediaLibraryHasMore = false }
         busyOperations.remove(.mediaLibrary)
     }
 

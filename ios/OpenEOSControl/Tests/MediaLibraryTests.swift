@@ -4,6 +4,26 @@ import XCTest
 @testable import OpenEOSControl
 
 final class MediaLibraryTests: XCTestCase {
+    func testRecentMediaBatchKeepsSixtyItemsAndReportsMore() {
+        let items = (1...61).map { media("\($0)", "IMG_\($0).JPG", nil) }
+
+        let batch = mediaLibraryBatch(items, scope: .recent, recentItemCount: 60)
+
+        XCTAssertEqual(batch.items.count, 60)
+        XCTAssertEqual(batch.items.first?.id, "1")
+        XCTAssertEqual(batch.items.last?.id, "60")
+        XCTAssertTrue(batch.hasMore)
+    }
+
+    func testFullCardMediaBatchDoesNotTruncate() {
+        let items = (1...61).map { media("\($0)", "IMG_\($0).JPG", nil) }
+
+        let batch = mediaLibraryBatch(items, scope: .all, recentItemCount: 60)
+
+        XCTAssertEqual(batch.items, items)
+        XCTAssertFalse(batch.hasMore)
+    }
+
     func testCameraSortPreservesTransportOrderExactly() {
         let items = [
             media("ten", "IMG_10.JPG", "2026-08-13T10:00:00Z"),

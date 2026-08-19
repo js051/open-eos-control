@@ -220,28 +220,44 @@ struct MediaView: View {
     }
 
     private var mediaToolbar: some View {
-        HStack(spacing: 10) {
-            Picker(language.string("media_filter"), selection: $mediaFilter) {
-                ForEach(MediaFilter.allCases) { filter in
-                    Text(language.string(filter.localizationKey)).tag(filter)
+        VStack(spacing: 8) {
+            Picker(
+                language.string("media_scope"),
+                selection: Binding(
+                    get: { camera.mediaLibraryScope },
+                    set: { camera.setMediaLibraryScope($0) }
+                )
+            ) {
+                ForEach(MediaLibraryScope.allCases) { scope in
+                    Text(language.string(scope.localizationKey)).tag(scope)
                 }
             }
             .pickerStyle(.segmented)
-            .accessibilityIdentifier("media-filter")
+            .accessibilityIdentifier("media-scope")
 
-            Menu {
-                Picker(language.string("media_sort"), selection: $mediaSort) {
-                    ForEach(MediaSort.allCases) { sort in
-                        Label(language.string(sort.localizationKey), systemImage: sort.systemImage).tag(sort)
+            HStack(spacing: 10) {
+                Picker(language.string("media_filter"), selection: $mediaFilter) {
+                    ForEach(MediaFilter.allCases) { filter in
+                        Text(language.string(filter.localizationKey)).tag(filter)
                     }
                 }
-            } label: {
-                Image(systemName: "arrow.up.arrow.down")
-                    .frame(width: 48, height: 48)
-                    .accessibilityLabel(Text("media_sort"))
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("media-filter")
+
+                Menu {
+                    Picker(language.string("media_sort"), selection: $mediaSort) {
+                        ForEach(MediaSort.allCases) { sort in
+                            Label(language.string(sort.localizationKey), systemImage: sort.systemImage).tag(sort)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .frame(width: 48, height: 48)
+                        .accessibilityLabel(Text("media_sort"))
+                }
+                .foregroundStyle(Color.cameraText)
+                .accessibilityIdentifier("media-sort")
             }
-            .foregroundStyle(Color.cameraText)
-            .accessibilityIdentifier("media-sort")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -549,7 +565,16 @@ struct MediaView: View {
         case .loading:
             language.format("media_loading_count_format", camera.mediaItems.count)
         case .complete:
-            language.format("media_filtered_count_format", displayedMedia.count, camera.mediaItems.count)
+            if camera.mediaLibraryScope == .recent {
+                language.format(
+                    camera.mediaLibraryHasMore
+                        ? "media_recent_more_count_format"
+                        : "media_recent_count_format",
+                    camera.mediaItems.count
+                )
+            } else {
+                language.format("media_filtered_count_format", displayedMedia.count, camera.mediaItems.count)
+            }
         case .cancelled:
             language.format("media_cancelled_count_format", camera.mediaItems.count)
         case .failed:

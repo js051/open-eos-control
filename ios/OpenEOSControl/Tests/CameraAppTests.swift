@@ -714,8 +714,12 @@ final class CameraAppTests: XCTestCase {
         let report = await state.diagnosticReport()
 
         XCTAssertEqual(state.mediaLibraryLoadStatus, .complete)
+        XCTAssertEqual(state.mediaLibraryScope, .recent)
+        XCTAssertFalse(state.mediaLibraryHasMore)
         XCTAssertTrue(report.contains("mediaItemCount=3"))
         XCTAssertTrue(report.contains("mediaLoadStatus=COMPLETE"))
+        XCTAssertTrue(report.contains("mediaLibraryScope=recent"))
+        XCTAssertTrue(report.contains("mediaLibraryRequestLimit=61"))
     }
 
     func testPhysicalValidationRequiresAdvertisedAndObservedEvidence() {

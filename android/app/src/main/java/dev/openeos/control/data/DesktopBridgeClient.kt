@@ -567,8 +567,14 @@ class DesktopBridgeClient(
         }
     }
 
-    suspend fun listMedia(): List<CameraMediaItem> {
-        val items = getJson(sessionEndpoint("media")).optJSONArray("items").objects().mapNotNull(::parseMediaItem)
+    suspend fun listMedia(maximumItems: Int? = null): List<CameraMediaItem> {
+        require(maximumItems == null || maximumItems in 1..1000) {
+            "maximumItems must be from 1 through 1000 when provided."
+        }
+        val endpoint = sessionEndpoint("media").newBuilder().apply {
+            maximumItems?.let { addQueryParameter("limit", it.toString()) }
+        }.build()
+        val items = getJson(endpoint).optJSONArray("items").objects().mapNotNull(::parseMediaItem)
         observedFeatures.add(CameraFeature.MEDIA_BROWSER)
         return items
     }

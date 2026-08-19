@@ -266,12 +266,23 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "mediaRefreshPromise: null" in script
     assert 'mediaLoadStatus: "NOT_LOADED"' in script
     assert "function refreshMediaWhenCurrent()" in script
+    assert 'mediaScope: "recent"' in script
+    assert 'mediaHasMore: false' in script
+    assert 'const limitQuery = mediaScope === "recent" ? "?limit=61" : ""' in script
+    assert 'querySelectorAll("[data-media-scope]")' in script
+    assert 'id="media-scope-control"' in html
     assert 'state.mediaLoadStatus = "LOADING"' in script
     assert 'state.mediaLoadStatus = "COMPLETE"' in script
     assert 'state.mediaLoadStatus = "FAILED"' in script
     assert "function renderMediaSummary(" in script
     assert "ui.mediaSummary.dataset.loadStatus = state.mediaLoadStatus" in script
-    for key in {"mediaLoadingCount", "mediaFailedCount", "mediaNotLoadedCount"}:
+    for key in {
+        "mediaLoadingCount",
+        "mediaFailedCount",
+        "mediaNotLoadedCount",
+        "mediaRecentCount",
+        "mediaRecentMoreCount",
+    }:
         declarations = re.findall(rf"^\s+{key}:\s+\"", script, flags=re.MULTILINE)
         assert len(declarations) == 2, f"{key} must be declared in both supported languages"
     assert "state.refreshGeneration !== interactionGeneration" in script

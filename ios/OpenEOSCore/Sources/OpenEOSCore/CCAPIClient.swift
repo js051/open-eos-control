@@ -1793,12 +1793,16 @@ public actor CCAPIClient {
     }
 
     public func listMedia(
+        maximumItems: Int? = nil,
         onProgress: CameraMediaListProgressHandler = { _ in }
     ) async throws -> [CameraMediaItem] {
+        guard maximumItems.map({ $0 > 0 }) ?? true else {
+            throw CCAPIError.invalidResponse("maximumItems must be greater than zero.")
+        }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/media")
-            let items = value.array("items")?.objects.map {
+            let allItems = value.array("items")?.objects.map {
                 CameraMediaItem(
                     id: $0.string("id"),
                     name: $0.string("name"),
@@ -1815,6 +1819,7 @@ public actor CCAPIClient {
                     heightPixels: $0.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil }
                 )
             } ?? []
+            let items = maximumItems.map { Array(allItems.prefix($0)) } ?? allItems
             await onProgress(items)
             observedFeatures.insert(.mediaBrowser)
             return items
@@ -1833,7 +1838,7 @@ public actor CCAPIClient {
             mediaPathGroups.append([])
             let groupIndex = mediaPathGroups.index(before: mediaPathGroups.endIndex)
             var discoveredContainers: [String] = []
-            let rawPaths = try await contentPaths(container: container) { partialPaths in
+            let rawPaths = try await contentPaths(container: container, maximumItems: maximumItems) { partialPaths in
                 try Task.checkCancellation()
                 var mediaPaths: [String] = []
                 var seenMediaPaths = Set<String>()
@@ -1845,7 +1850,9 @@ public actor CCAPIClient {
                 }
                 mediaPathGroups[groupIndex] = mediaPaths
                 if !mediaPaths.isEmpty {
-                    await onProgress(self.mediaItems(from: self.mergeMediaPathGroups(mediaPathGroups)))
+                    let merged = self.mergeMediaPathGroups(mediaPathGroups)
+                    let bounded = maximumItems.map { Array(merged.prefix($0)) } ?? merged
+                    await onProgress(self.mediaItems(from: bounded))
                 }
             }
             var finalMediaPaths: [String] = []
@@ -1863,7 +1870,8 @@ public actor CCAPIClient {
             pending.append(contentsOf: discoveredContainers)
             if mediaPathGroups[groupIndex].isEmpty { mediaPathGroups.remove(at: groupIndex) }
         }
-        let mediaPaths = mergeMediaPathGroups(mediaPathGroups)
+        let mergedMediaPaths = mergeMediaPathGroups(mediaPathGroups)
+        let mediaPaths = maximumItems.map { Array(mergedMediaPaths.prefix($0)) } ?? mergedMediaPaths
         observedFeatures.insert(.mediaBrowser)
         return mediaItems(from: mediaPaths)
     }
@@ -4057,6 +4065,7 @@ public actor CCAPIClient {
 
     private func contentPaths(
         container: String,
+        maximumItems: Int? = nil,
         onPage: ([String]) async throws -> Void = { _ in }
     ) async throws -> [String] {
         let pageInfo = try await firstJSON(
@@ -4069,25 +4078,38 @@ public actor CCAPIClient {
         }
         var result: [String] = []
         var seenPaths = Set<String>()
+        var sawNonMediaPath = false
         func appendUnique(_ paths: [String], reversed: Bool = false) {
             let values = reversed ? Array(paths.reversed()) : paths
             for path in values where seenPaths.insert(path).inserted {
+                if !Self.isMediaPath(path) { sawNonMediaPath = true }
                 result.append(path)
             }
+        }
+        func reachedMediaLimit() -> Bool {
+            guard let maximumItems, !sawNonMediaPath else { return false }
+            return result.reduce(into: 0) { count, path in
+                if Self.isMediaPath(path) { count += 1 }
+            } >= maximumItems
+        }
+        func boundedResult() -> [String] {
+            guard let maximumItems, !sawNonMediaPath else { return result }
+            return result.filter(Self.isMediaPath).prefix(maximumItems).map { $0 }
         }
         if pageCount <= 0 {
             try Task.checkCancellation()
             if let value = try await firstJSON(paths: [container], required: true) {
                 appendUnique(value.array("path")?.strings ?? [])
             }
-            try await onPage(result)
+            try await onPage(boundedResult())
         } else if mediaDescendingOrderSupported == false {
             for page in stride(from: pageCount, through: 1, by: -1) {
                 try Task.checkCancellation()
                 guard let value = try await contentPage(container: container, page: page) else { continue }
                 let paths = value.array("path")?.strings ?? []
                 appendUnique(paths, reversed: true)
-                try await onPage(result)
+                try await onPage(boundedResult())
+                if reachedMediaLimit() { return boundedResult() }
             }
         } else {
             guard let firstPage = try await contentPage(container: container, page: 1) else { return [] }
@@ -4105,23 +4127,26 @@ public actor CCAPIClient {
                     }
                     let paths = value.array("path")?.strings ?? []
                     appendUnique(paths, reversed: true)
-                    try await onPage(result)
+                    try await onPage(boundedResult())
+                    if reachedMediaLimit() { return boundedResult() }
                 }
             } else {
                 appendUnique(firstPage.array("path")?.strings ?? [])
-                try await onPage(result)
+                try await onPage(boundedResult())
+                if reachedMediaLimit() { return boundedResult() }
                 if pageCount >= 2 {
                     for page in 2...pageCount {
                         try Task.checkCancellation()
                         if let value = try await contentPage(container: container, page: page) {
                             appendUnique(value.array("path")?.strings ?? [])
-                            try await onPage(result)
+                            try await onPage(boundedResult())
+                            if reachedMediaLimit() { return boundedResult() }
                         }
                     }
                 }
             }
         }
-        return result
+        return boundedResult()
     }
 
     private func contentPage(container: String, page: Int) async throws -> JSONDictionary? {

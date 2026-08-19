@@ -26,6 +26,48 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(snapshots, [items])
     }
 
+    func testSimulatorMediaListHonorsMaximumItems() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi/media",
+            body: #"{"items":[{"id":"SIM_0001.JPG","name":"SIM_0001.JPG","kind":"image"},{"id":"SIM_0002.JPG","name":"SIM_0002.JPG","kind":"image"},{"id":"SIM_0003.JPG","name":"SIM_0003.JPG","kind":"image"}]}"#
+        )
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: transport
+        )
+        let progress = MediaListProgressRecorder()
+
+        let items = try await client.listMedia(maximumItems: 2) { partialItems in
+            await progress.record(partialItems)
+        }
+
+        XCTAssertEqual(items.map(\.name), ["SIM_0001.JPG", "SIM_0002.JPG"])
+        let snapshots = await progress.values()
+        XCTAssertEqual(snapshots.map(\.count), [2])
+    }
+
+    func testMediaListRejectsNonPositiveMaximumItems() async throws {
+        let client = try CCAPIClient(
+            baseURL: "http://127.0.0.1:18080",
+            mode: .simulator,
+            transport: MockCameraHTTPTransport()
+        )
+
+        for maximumItems in [0, -1] {
+            do {
+                _ = try await client.listMedia(maximumItems: maximumItems)
+                XCTFail("Expected maximumItems=\(maximumItems) to be rejected")
+            } catch {
+                XCTAssertEqual(
+                    error as? CCAPIError,
+                    .invalidResponse("maximumItems must be greater than zero.")
+                )
+            }
+        }
+    }
+
     func testDirectCCAPIUploadIsExplicitlyUnsupported() async throws {
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera)
         do {
@@ -3396,6 +3438,37 @@ final class CCAPIClientTests: XCTestCase {
         )
     }
 
+    func testRealMediaListStopsPagingAfterMaximumItemsAndBoundsProgress() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":3}"#)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents?page=1&order=desc",
+            body: #"{"path":["/ccapi/ver100/contents/card1/IMG_0001.JPG","/ccapi/ver100/contents/card1/IMG_0002.JPG"]}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+        let progress = MediaListProgressRecorder()
+
+        let items = try await client.listMedia(maximumItems: 2) { partialItems in
+            await progress.record(partialItems)
+        }
+
+        XCTAssertEqual(items.map(\.name), ["IMG_0001.JPG", "IMG_0002.JPG"])
+        let snapshots = await progress.values()
+        XCTAssertEqual(snapshots.map(\.count), [2])
+        XCTAssertEqual(
+            (await transport.requests()).map(\.path),
+            [
+                "/ccapi",
+                "/ccapi/ver100/contents?kind=number",
+                "/ccapi/ver100/contents?page=1&order=desc",
+            ]
+        )
+    }
+
     func testRealMediaListTraversesMoreThanOneHundredPages() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
@@ -3547,6 +3620,53 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(items.map(\.kind), ["image", "video", "image", "video", "image"])
         let remainingResponses = await transport.remainingResponses()
         XCTAssertEqual(remainingResponses, 0)
+    }
+
+    func testBoundedRealMediaListKeepsPhotoAndVideoSiblingsFair() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(
+            path: "/ccapi",
+            body: #"{"ver100":[{"path":"/contents","get":true}]}"#
+        )
+        await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"pagenumber":1}"#)
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents?page=1&order=desc",
+            body: #"{"path":["/ccapi/ver100/contents/card1/photos","/ccapi/ver100/contents/card1/videos"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/photos?kind=number",
+            body: #"{"pagenumber":2}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/photos?page=1&order=desc",
+            body: #"{"path":["/ccapi/ver100/contents/card1/photos/P2.JPG","/ccapi/ver100/contents/card1/photos/P1.JPG"]}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/videos?kind=number",
+            body: #"{"pagenumber":1}"#
+        )
+        await transport.enqueueJSON(
+            path: "/ccapi/ver100/contents/card1/videos?page=1&order=desc",
+            body: #"{"path":["/ccapi/ver100/contents/card1/videos/V2.MP4","/ccapi/ver100/contents/card1/videos/V1.MP4"]}"#
+        )
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+
+        let items = try await client.listMedia(maximumItems: 2)
+
+        XCTAssertEqual(items.map(\.name), ["P2.JPG", "V2.MP4"])
+        XCTAssertEqual(items.map(\.kind), ["image", "video"])
+        XCTAssertEqual(
+            (await transport.requests()).map(\.path),
+            [
+                "/ccapi",
+                "/ccapi/ver100/contents?kind=number",
+                "/ccapi/ver100/contents?page=1&order=desc",
+                "/ccapi/ver100/contents/card1/photos?kind=number",
+                "/ccapi/ver100/contents/card1/photos?page=1&order=desc",
+                "/ccapi/ver100/contents/card1/videos?kind=number",
+                "/ccapi/ver100/contents/card1/videos?page=1&order=desc",
+            ]
+        )
     }
 
     func testMediaMetadataRequiresAdvertisedContentsPut() async throws {
