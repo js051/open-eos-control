@@ -181,6 +181,73 @@ fun LiveViewFpsButton(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CaptureReviewButton(
+    state: CameraUiState,
+    actions: CameraActions,
+    modifier: Modifier = Modifier,
+) {
+    if (!state.supports(CameraFeature.MEDIA_BROWSER)) {
+        Box(modifier.size(64.dp))
+        return
+    }
+    val item = state.captureReviewItem
+    val enabled = item != null
+    val description = item?.let { stringResource(R.string.open_latest_media_named, it.name) }
+        ?: stringResource(R.string.open_latest_media)
+    TooltipBox(
+        positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        CameraRotatingSlot(
+            modifier = modifier
+                .size(64.dp)
+                .testTag("capture-review-button")
+                .clickable(enabled = enabled, onClick = actions.openCaptureReview)
+                .semantics {
+                    contentDescription = description
+                    role = Role.Button
+                },
+        ) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(6.dp),
+                color = if (enabled) AppSurface else AppSurface.copy(alpha = 0.72f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder),
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    val thumbnail = state.captureReviewThumbnail
+                    if (thumbnail != null) {
+                        Image(
+                            bitmap = thumbnail.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Icon(
+                            painterResource(LucideR.drawable.lucide_ic_images),
+                            contentDescription = null,
+                            tint = AppAccent,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    if (state.captureReviewLoading) {
+                        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.38f)))
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                            color = AppText,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ModeSegment(
     firstLabel: String,
@@ -365,7 +432,7 @@ internal fun CameraActionMenuPanel(
     val mediaAvailable = state.supports(CameraFeature.MEDIA_BROWSER)
     CameraReadableSlot(
         width = 328.dp,
-        height = if (mediaAvailable) 296.dp else 240.dp,
+        height = if (mediaAvailable) 352.dp else 296.dp,
         modifier = Modifier.testTag("camera-action-menu-rotation"),
         animateRotation = false,
     ) {
@@ -409,6 +476,14 @@ internal fun CameraActionMenuPanel(
                         onDismissRequest()
                         actions.setUiMode(UiMode.MEDIA)
                     }
+                }
+                CameraActionMenuItem(
+                    icon = LucideR.drawable.lucide_ic_settings,
+                    label = stringResource(R.string.more_settings),
+                    testTag = "camera-action-settings",
+                ) {
+                    onDismissRequest()
+                    actions.openPicker(SettingPicker.MORE)
                 }
                 CameraActionMenuItem(
                     icon = LucideR.drawable.lucide_ic_languages,

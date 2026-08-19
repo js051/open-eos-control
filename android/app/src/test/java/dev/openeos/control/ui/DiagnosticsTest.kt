@@ -84,6 +84,8 @@ class DiagnosticsTest {
         assertTrue(report.contains("mediaItemCount=501"))
         assertTrue(report.contains("mediaLoadStatus=COMPLETE"))
         assertTrue(report.contains("mediaLibraryScope=ALL"))
+        assertTrue(report.contains("latestMediaRequestLimit=8"))
+        assertTrue(report.contains("latestMedia=none"))
         assertTrue(report.contains("mediaLibraryHasMore=false"))
     }
 

@@ -159,6 +159,20 @@ class CameraViewModelPreviewTest {
     }
 
     @Test
+    fun offlineCaptureReviewOpensTheLatestMediaWithoutCameraIo() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+        val latest = viewModel.uiState.value.captureReviewItem
+
+        viewModel.openCaptureReview()
+        advanceUntilIdle()
+
+        assertEquals(UiMode.MEDIA, viewModel.uiState.value.uiMode)
+        assertEquals(latest?.id, viewModel.uiState.value.mediaPreviewItem?.id)
+        assertFalse(viewModel.uiState.value.mediaPreviewLoading)
+    }
+
+    @Test
     fun previewMediaMetadataActionsUpdateOnlyTheLocalItem() = runTest(dispatcher) {
         val viewModel = CameraViewModel()
         viewModel.enterOfflinePreview()

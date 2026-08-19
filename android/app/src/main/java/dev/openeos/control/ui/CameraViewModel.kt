@@ -64,8 +64,11 @@ private data class MediaLibraryBatch(
 
 internal const val RECENT_MEDIA_ITEMS = 60
 private const val RECENT_MEDIA_REQUEST_ITEMS = RECENT_MEDIA_ITEMS + 1
+internal const val CAPTURE_REVIEW_REQUEST_ITEMS = 8
 private const val MAX_CONCURRENT_MEDIA_THUMBNAILS = 2
+private const val MEDIA_THUMBNAIL_MAX_EDGE = 512
 private val MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS = longArrayOf(250L, 750L)
+private val CAPTURE_REVIEW_RETRY_DELAYS_MILLIS = longArrayOf(250L, 750L, 1_500L)
 
 private fun maximumItemsFor(scope: MediaLibraryScope): Int? =
     RECENT_MEDIA_REQUEST_ITEMS.takeIf { scope == MediaLibraryScope.RECENT }
@@ -87,6 +90,37 @@ internal fun mergeRecentMedia(
 
 internal fun isRetryableMediaThumbnailFailure(exception: Exception): Boolean = exception is IOException
 
+internal suspend fun awaitCaptureReviewItem(
+    expectedPreviousId: String?,
+    retryDelaysMillis: LongArray,
+    loadRecentMedia: suspend () -> List<CameraMediaItem>,
+): CameraMediaItem? {
+    for (attempt in 0..retryDelaysMillis.size) {
+        val candidate = try {
+            selectCaptureReviewItem(loadRecentMedia())
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            null
+        }
+        if (candidate != null && (expectedPreviousId == null || candidate.id != expectedPreviousId)) {
+            return candidate
+        }
+        if (attempt < retryDelaysMillis.size) delay(retryDelaysMillis[attempt])
+    }
+    return null
+}
+
+internal fun mediaThumbnailSampleSize(width: Int, height: Int, maximumEdge: Int = MEDIA_THUMBNAIL_MAX_EDGE): Int {
+    if (width <= 0 || height <= 0 || maximumEdge <= 0) return 1
+    var sample = 1
+    while (width / sample > maximumEdge || height / sample > maximumEdge) {
+        if (sample > Int.MAX_VALUE / 2) return sample
+        sample *= 2
+    }
+    return sample
+}
+
 class CameraViewModel(
     private val repository: CameraRepository = CameraRepository(),
 ) : ViewModel() {
@@ -99,6 +133,8 @@ class CameraViewModel(
     private var mediaUploadJob: Job? = null
     private var mediaLibraryJob: Job? = null
     private var mediaLibraryGeneration = 0L
+    private var captureReviewJob: Job? = null
+    private var captureReviewGeneration = 0L
     private val mediaThumbnailJobs = mutableMapOf<String, Job>()
     private val mediaThumbnailSemaphore = Semaphore(MAX_CONCURRENT_MEDIA_THUMBNAILS)
     private var mediaThumbnailGeneration = 0
@@ -346,6 +382,7 @@ class CameraViewModel(
     fun enterOfflinePreview() {
         stopLiveViewLoop()
         stopEventPollingLoop()
+        cancelCaptureReview()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -373,6 +410,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         detachNativeLiveViewListener()
         resetMediaLibraryLoad()
+        cancelCaptureReview()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -396,6 +434,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         detachNativeLiveViewListener()
         resetMediaLibraryLoad()
+        cancelCaptureReview()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -435,6 +474,7 @@ class CameraViewModel(
         stopLiveViewLoop()
         detachNativeLiveViewListener()
         resetMediaLibraryLoad()
+        cancelCaptureReview()
         cancelMediaThumbnailLoads()
         resetFrameMetrics()
         lastPhotoShootingMode = null
@@ -498,6 +538,7 @@ class CameraViewModel(
                 startLiveViewLoopIfNeeded()
             }
         }
+        refreshCaptureReview()
         startEventPollingIfSupported()
     }
 
@@ -517,6 +558,7 @@ class CameraViewModel(
         stopEventPollingLoop()
         detachNativeLiveViewListener()
         resetMediaLibraryLoad()
+        cancelCaptureReview()
         closeMediaStream()
         cancelMediaDownload()
         val uploadJob = mediaUploadJob
@@ -868,9 +910,12 @@ class CameraViewModel(
             showCaptureSuccess()
             return@runCamera
         }
+        val previousReviewId = _uiState.value.captureReviewItem?.id
+            ?: selectCaptureReviewItem(_uiState.value.mediaItems)?.id
         val status = repository.captureStill()
         _uiState.update { it.copy(status = status) }
         showCaptureSuccess()
+        refreshCaptureReview(expectedPreviousId = previousReviewId)
         refreshLiveViewFrameInternal(reportErrors = false)
         startLiveViewLoopIfNeeded()
     }
@@ -1070,6 +1115,14 @@ class CameraViewModel(
         }
     }
 
+    fun openCaptureReview() {
+        val state = _uiState.value
+        if (!state.supports(CameraFeature.MEDIA_BROWSER)) return
+        val item = state.captureReviewItem ?: return
+        setUiMode(UiMode.MEDIA)
+        if (item.previewAvailable || item.isVideo) openMediaPreview(item)
+    }
+
     fun cancelMediaLibraryLoad() {
         if (!_uiState.value.mediaLibraryLoading) return
         invalidateMediaLibraryLoad(MediaLibraryLoadStatus.CANCELLED)
@@ -1128,8 +1181,19 @@ class CameraViewModel(
     fun openMediaPreview(item: CameraMediaItem) {
         val state = _uiState.value
         val isVideo = item.isVideo
+        if (state.previewMode) {
+            state.mediaStreamSource?.close()
+            _uiState.update {
+                it.copy(
+                    mediaPreviewItem = item,
+                    mediaPreviewBytes = null,
+                    mediaPreviewLoading = false,
+                    mediaStreamSource = null,
+                )
+            }
+            return
+        }
         if (
-            state.previewMode ||
             state.isBusy(CameraOperation.MEDIA) ||
             if (isVideo) !item.streamAvailable
             else !state.supports(CameraFeature.MEDIA_PREVIEW) || !item.previewAvailable
@@ -1501,11 +1565,13 @@ class CameraViewModel(
         if (state.isBusy(CameraOperation.MEDIA) || !state.supports(CameraFeature.MEDIA_DELETE)) return
         if (state.previewMode) {
             applyDeletedMedia(item)
+            refreshCaptureReview(_uiState.value.mediaItems)
             return
         }
         runCamera(CameraOperation.MEDIA) {
             repository.deleteMedia(item)
             applyDeletedMedia(item)
+            refreshCaptureReview()
         }
     }
 
@@ -1936,7 +2002,12 @@ class CameraViewModel(
                             current
                         }
                     }
-                    if (mediaItems != null) transitionMediaState(updateState) else _uiState.update(updateState)
+                    if (mediaItems != null) {
+                        transitionMediaState(updateState)
+                        refreshCaptureReview(mediaItems)
+                    } else {
+                        _uiState.update(updateState)
+                    }
                 } catch (exception: CancellationException) {
                     throw exception
                 } catch (_: Exception) {
@@ -1977,6 +2048,7 @@ class CameraViewModel(
         stopEventPollingLoop()
         detachNativeLiveViewListener()
         resetMediaLibraryLoad()
+        cancelCaptureReview()
         closeMediaStream()
         cancelMediaDownload()
         val uploadJob = mediaUploadJob
@@ -2010,6 +2082,9 @@ class CameraViewModel(
         mediaStreamSource = null,
         mediaLibraryLoading = false,
         mediaLibraryLoadStatus = MediaLibraryLoadStatus.NOT_LOADED,
+        captureReviewItem = null,
+        captureReviewThumbnail = null,
+        captureReviewLoading = false,
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
@@ -2039,6 +2114,7 @@ class CameraViewModel(
 
     private fun CameraUiState.withDeletedMedia(item: CameraMediaItem): CameraUiState {
         val deletesOpenPreview = mediaPreviewItem?.id == item.id
+        val deletesCaptureReview = captureReviewItem?.id == item.id
         return copy(
             mediaItems = mediaItems.filterNot { it.id == item.id },
             mediaThumbnails = mediaThumbnails - item.id,
@@ -2047,6 +2123,9 @@ class CameraViewModel(
             mediaPreviewBytes = mediaPreviewBytes.takeUnless { deletesOpenPreview },
             mediaPreviewLoading = mediaPreviewLoading && !deletesOpenPreview,
             mediaStreamSource = mediaStreamSource.takeUnless { deletesOpenPreview },
+            captureReviewItem = captureReviewItem.takeUnless { deletesCaptureReview },
+            captureReviewThumbnail = captureReviewThumbnail.takeUnless { deletesCaptureReview },
+            captureReviewLoading = captureReviewLoading && !deletesCaptureReview,
             lastDownloadedMediaName = lastDownloadedMediaName.takeUnless { it == item.name },
             lastDeletedMediaName = item.name,
         )
@@ -2055,6 +2134,7 @@ class CameraViewModel(
     private fun CameraUiState.withUpdatedMedia(item: CameraMediaItem): CameraUiState = copy(
         mediaItems = mediaItems.map { current -> if (current.id == item.id) item else current },
         mediaPreviewItem = mediaPreviewItem?.let { current -> if (current.id == item.id) item else current },
+        captureReviewItem = captureReviewItem?.let { current -> if (current.id == item.id) item else current },
     )
 
     internal fun CameraUiState.withEventMediaItems(items: List<CameraMediaItem>): CameraUiState {
@@ -2096,13 +2176,108 @@ class CameraViewModel(
         mediaThumbnailJobs.clear()
     }
 
+    private fun refreshCaptureReview(expectedPreviousId: String? = null) {
+        val state = _uiState.value
+        if (!state.connected || state.previewMode || !state.supports(CameraFeature.MEDIA_BROWSER)) return
+        val generation = beginCaptureReviewLoad()
+        captureReviewJob = viewModelScope.launch {
+            val selected = awaitCaptureReviewItem(
+                expectedPreviousId = expectedPreviousId,
+                retryDelaysMillis = CAPTURE_REVIEW_RETRY_DELAYS_MILLIS,
+            ) {
+                repository.listMedia(CAPTURE_REVIEW_REQUEST_ITEMS)
+            }
+            if (generation != captureReviewGeneration) return@launch
+            if (selected == null) {
+                _uiState.update { it.copy(captureReviewLoading = false) }
+                return@launch
+            }
+            publishCaptureReview(selected, generation)
+        }.also { job ->
+            job.invokeOnCompletion {
+                if (captureReviewJob === job) captureReviewJob = null
+            }
+        }
+    }
+
+    private fun refreshCaptureReview(items: List<CameraMediaItem>) {
+        if (captureReviewJob?.isActive == true) return
+        val selected = selectCaptureReviewItem(items) ?: run {
+            cancelCaptureReview()
+            _uiState.update {
+                it.copy(captureReviewItem = null, captureReviewThumbnail = null, captureReviewLoading = false)
+            }
+            return
+        }
+        val generation = beginCaptureReviewLoad()
+        captureReviewJob = viewModelScope.launch { publishCaptureReview(selected, generation) }.also { job ->
+            job.invokeOnCompletion {
+                if (captureReviewJob === job) captureReviewJob = null
+            }
+        }
+    }
+
+    private fun beginCaptureReviewLoad(): Long {
+        captureReviewGeneration += 1
+        captureReviewJob?.cancel()
+        captureReviewJob = null
+        _uiState.update { it.copy(captureReviewLoading = true) }
+        return captureReviewGeneration
+    }
+
+    private suspend fun publishCaptureReview(item: CameraMediaItem, generation: Long) {
+        if (generation != captureReviewGeneration) return
+        val existing = _uiState.value
+        val canLoadThumbnail = existing.supports(CameraFeature.MEDIA_THUMBNAIL)
+        _uiState.update {
+            it.copy(
+                captureReviewItem = item,
+                captureReviewThumbnail = it.captureReviewThumbnail.takeIf { _ -> it.captureReviewItem?.id == item.id },
+                captureReviewLoading = canLoadThumbnail,
+            )
+        }
+        if (!canLoadThumbnail) return
+        val thumbnail = try {
+            fetchMediaThumbnailBitmap(item)
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            null
+        }
+        if (generation != captureReviewGeneration) return
+        _uiState.update {
+            if (it.captureReviewItem?.id == item.id) {
+                it.copy(captureReviewThumbnail = thumbnail, captureReviewLoading = false)
+            } else {
+                it
+            }
+        }
+    }
+
+    private fun cancelCaptureReview() {
+        captureReviewGeneration += 1
+        captureReviewJob?.cancel()
+        captureReviewJob = null
+        _uiState.update { it.copy(captureReviewLoading = false) }
+    }
+
     private suspend fun fetchMediaThumbnailBitmap(item: CameraMediaItem): android.graphics.Bitmap {
         var lastFailure: Exception? = null
         repeat(MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS.size + 1) { attempt ->
             try {
                 val thumbnail = repository.mediaThumbnail(item)
                 return withContext(Dispatchers.Default) {
-                    BitmapFactory.decodeByteArray(thumbnail.bytes, 0, thumbnail.bytes.size)
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(thumbnail.bytes, 0, thumbnail.bytes.size, bounds)
+                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+                    BitmapFactory.decodeByteArray(
+                        thumbnail.bytes,
+                        0,
+                        thumbnail.bytes.size,
+                        BitmapFactory.Options().apply {
+                            inSampleSize = mediaThumbnailSampleSize(bounds.outWidth, bounds.outHeight)
+                        },
+                    )
                 } ?: error("Camera returned an undecodable thumbnail for ${item.name}.")
             } catch (exception: CancellationException) {
                 throw exception

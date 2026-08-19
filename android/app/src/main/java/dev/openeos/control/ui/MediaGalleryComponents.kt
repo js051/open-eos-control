@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -316,6 +317,7 @@ internal fun MediaViewerDialog(
     bytes: ByteArray?,
     streamSource: CameraMediaStreamSource?,
     loading: Boolean,
+    offlinePlaceholder: Boolean = false,
     position: Int,
     totalCount: Int,
     canMovePrevious: Boolean,
@@ -357,6 +359,24 @@ internal fun MediaViewerDialog(
                     color = AppAccent,
                     strokeWidth = 3.dp,
                 )
+                offlinePlaceholder -> Column(
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        painterResource(LucideR.drawable.lucide_ic_image),
+                        contentDescription = null,
+                        tint = AppAccent,
+                        modifier = Modifier.size(48.dp),
+                    )
+                    Text(
+                        stringResource(R.string.offline_media_preview_placeholder),
+                        color = AppSubtleText,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.widthIn(max = 240.dp),
+                    )
+                }
                 else -> Text(
                     stringResource(R.string.media_preview_unavailable),
                     color = AppSubtleText,

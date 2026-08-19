@@ -88,6 +88,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             bytes = state.mediaPreviewBytes,
             streamSource = state.mediaStreamSource,
             loading = state.mediaPreviewLoading,
+            offlinePlaceholder = state.previewMode,
             position = previewIndex + 1,
             totalCount = displayedItems.size,
             canMovePrevious = previewIndex > 0,

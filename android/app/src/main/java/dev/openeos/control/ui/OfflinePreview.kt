@@ -176,6 +176,12 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
         ),
     ),
     mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
+    captureReviewItem = CameraMediaItem(
+        "preview-002", "R6M3_0001.JPG", "image", 8_912_384,
+        "2026-07-21T10:08:24+08:00", true, protected = false, archived = true,
+        rating = 4, rotationDegrees = 0,
+        contentType = "image/jpeg", widthPixels = 6000, heightPixels = 4000,
+    ),
     mediaThumbnails = emptyMap(),
     mediaThumbnailLoadingIds = emptySet(),
     liveViewFrameUrl = null,

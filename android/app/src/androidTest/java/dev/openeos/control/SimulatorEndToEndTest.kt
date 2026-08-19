@@ -65,6 +65,12 @@ class SimulatorEndToEndTest {
 
         compose.onNodeWithContentDescription(text(R.string.capture_photo)).performClick()
         waitForSimulatorState { state -> state.getInt("capture_count") == 1 }
+        val latestCaptureDescription = text(R.string.open_latest_media_named, "SIM_0003.PNG")
+        waitForContentDescription(latestCaptureDescription, timeoutMillis = 15_000)
+        compose.onNodeWithContentDescription(latestCaptureDescription).performClick()
+        waitForText("SIM_0003.PNG")
+        compose.onNodeWithContentDescription(text(R.string.close_media_preview)).performClick()
+        compose.onNodeWithContentDescription(text(R.string.back_to_camera)).performClick()
 
         compose.onNodeWithTag("live-view-frame").performTouchInput { click() }
         waitForSimulatorState { state -> state.getJSONObject("focus").getInt("count") == 1 }
@@ -78,7 +84,7 @@ class SimulatorEndToEndTest {
                 state.getJSONObject("exposure").getString("white_balance") == "click"
         }
 
-        compose.onNodeWithContentDescription(text(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("autofocus").performScrollTo().performClick()
         waitForSimulatorState { state ->
             state.getInt("half_press_count") == 1 &&
@@ -108,7 +114,7 @@ class SimulatorEndToEndTest {
         waitForSimulatorState { state ->
             state.getString("movie_mode") == "on" && state.getInt("movie_mode_update_count") == 1
         }
-        compose.onNodeWithContentDescription(text(R.string.more_settings)).performClick()
+        openMoreSettings()
         compose.onNodeWithTag("file-naming").performScrollTo().performClick()
         compose.onNodeWithTag("movie-index").performTextReplacement("B_")
         compose.onNodeWithTag("movie-index-apply").performClick()
@@ -247,6 +253,12 @@ class SimulatorEndToEndTest {
                 compose.onNodeWithTag(tag).assertIsEnabled()
             }.isSuccess
         }
+    }
+
+    private fun openMoreSettings() {
+        compose.onNodeWithTag("camera-action-menu-button").performClick()
+        waitForNode("camera-action-settings")
+        compose.onNodeWithTag("camera-action-settings").performClick()
     }
 
     private fun waitForEnabledContentDescription(value: String, timeoutMillis: Long = 15_000) {

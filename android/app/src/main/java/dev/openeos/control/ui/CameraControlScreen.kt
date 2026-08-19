@@ -239,7 +239,7 @@ private fun CaptureBar(state: CameraUiState, actions: CameraActions) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            ToolIconButton(LucideR.drawable.lucide_ic_settings, stringResource(R.string.more_settings), { actions.openPicker(SettingPicker.MORE) })
+            CaptureReviewButton(state, actions)
             CaptureButton(state, actions)
             LiveViewFpsButton(state, { actions.openPicker(SettingPicker.LIVE_VIEW) })
         }
