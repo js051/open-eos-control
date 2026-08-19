@@ -4,6 +4,42 @@ import XCTest
 @testable import OpenEOSControl
 
 final class MediaLibraryTests: XCTestCase {
+    func testLatestMediaRequestIsBoundedForQuickReview() {
+        XCTAssertEqual(CameraAppState.latestMediaRequestItemCount, 8)
+    }
+
+    func testLatestMediaItemUsesNewestKnownCaptureDate() {
+        let items = [
+            media("old", "IMG_1.JPG", "2026-08-14T10:00:00Z"),
+            media("new", "IMG_2.JPG", "2026-08-15T10:00:00Z"),
+            media("unknown", "IMG_3.JPG", nil),
+        ]
+
+        XCTAssertEqual(selectLatestMediaItem(items)?.id, "new")
+    }
+
+    func testLatestMediaItemPreservesCameraOrderWhenDatesAreUnavailable() {
+        let items = [
+            media("first", "IMG_10.JPG", nil),
+            media("second", "IMG_2.JPG", nil),
+        ]
+
+        XCTAssertEqual(selectLatestMediaItem(items)?.id, "first")
+    }
+
+    func testCaptureReviewSelectionRequiresAChangedID() {
+        let items = [media("old", "IMG_1.JPG", "2026-08-15T10:00:00Z")]
+
+        XCTAssertNil(selectLatestMediaItem(afterCaptureFrom: items, previousID: "old"))
+        XCTAssertEqual(
+            selectLatestMediaItem(afterCaptureFrom: [
+                media("old", "IMG_1.JPG", "2026-08-15T10:00:00Z"),
+                media("new", "IMG_2.JPG", "2026-08-15T10:01:00Z"),
+            ], previousID: "old")?.id,
+            "new"
+        )
+    }
+
     func testRecentMediaBatchKeepsSixtyItemsAndReportsMore() {
         let items = (1...61).map { media("\($0)", "IMG_\($0).JPG", nil) }
 

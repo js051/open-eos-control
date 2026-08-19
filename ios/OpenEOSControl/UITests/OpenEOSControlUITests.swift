@@ -231,7 +231,8 @@ final class OpenEOSControlUITests: XCTestCase {
             (state["focus"] as? [String: Any])?["count"] as? Int == 1
         }
 
-        let moreSettings = app.buttons["more-settings-button"]
+        openMoreActions(in: app)
+        let moreSettings = app.buttons["more-settings-menu-button"]
         XCTAssertTrue(waitForInteraction(moreSettings, timeout: 8))
         moreSettings.tap()
         let tapAction = app.segmentedControls["live-view-tap-action-picker"]

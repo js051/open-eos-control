@@ -838,6 +838,19 @@ final class CameraAppTests: XCTestCase {
         XCTAssertFalse(state.isBusy(.power))
     }
 
+    func testOfflineCaptureDoesNotReportAFalseMediaRefreshFailure() async {
+        let suite = "OpenEOSControlTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        state.openOfflinePreview()
+
+        await state.captureStill()
+
+        XCTAssertTrue(state.shutterFlash)
+        XCTAssertNil(state.lastError)
+    }
+
     func testOfflinePreviewCannotExecuteSensorCleaning() async {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

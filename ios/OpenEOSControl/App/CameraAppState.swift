@@ -3,6 +3,8 @@ import OpenEOSCore
 
 @MainActor
 final class CameraAppState: ObservableObject {
+    static let latestMediaRequestItemCount = 8
+    private static let latestMediaRetryDelays: [UInt64] = [250_000_000, 750_000_000, 1_500_000_000]
     private static let recentMediaItemCount = 60
     private static let recentMediaRequestCount = recentMediaItemCount + 1
 
@@ -79,6 +81,9 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var bulbStartedAt: Date?
     @Published private(set) var focusMarker: FocusMarker?
     @Published private(set) var mediaItems: [CameraMediaItem] = []
+    @Published private(set) var latestMediaItem: CameraMediaItem?
+    @Published private(set) var latestMediaThumbnail: Data?
+    @Published private(set) var latestMediaThumbnailLoading = false
     @Published private(set) var mediaLibraryLoading = false
     @Published private(set) var mediaLibraryLoadCancellable = false
     @Published private(set) var mediaLibraryLoadStatus = MediaLibraryLoadStatus.notLoaded
@@ -119,6 +124,8 @@ final class CameraAppState: ObservableObject {
     private var mediaUploadToken: UUID?
     private var mediaLibraryTask: Task<Void, Never>?
     private var mediaLibraryGeneration = UUID()
+    private var latestMediaTask: Task<Void, Never>?
+    private var latestMediaGeneration = UUID()
     private var rateTracker = LiveViewRateTracker()
     private var downloadedMediaID: String?
     private var unavailableMediaThumbnailIDs = Set<String>()
@@ -127,6 +134,11 @@ final class CameraAppState: ObservableObject {
     let rtpController: IOSCcapiRTPController
 
     var connected: Bool { snapshot?.status.connected == true }
+    var canOpenLatestMedia: Bool {
+        guard let item = latestMediaItem, !isPreview else { return false }
+        if mediaIsVideo(item) { return supports(.mediaDownload) }
+        return item.previewAvailable && supports(.mediaPreview)
+    }
     var recording: Bool { snapshot?.status.recording == true }
     var bulbExposureActive: Bool { snapshot?.status.bulbExposureActive == true }
     var bulbMode: Bool {
@@ -329,6 +341,7 @@ final class CameraAppState: ObservableObject {
             mediaItems = []
             mediaLibraryHasMore = false
             invalidateMediaLibraryLoad()
+            invalidateLatestMedia()
             resetMediaThumbnails()
             resetMediaPreview()
             resetMediaDownloadState()
@@ -340,6 +353,7 @@ final class CameraAppState: ObservableObject {
             lastError = nil
             clampLiveViewRequest()
             beginEventLoop(session: newSession)
+            startLatestMediaRefresh(session: newSession)
             if newSnapshot.capabilities.matrix.supports(.liveView), autoRefresh {
                 await startLiveView()
             }
@@ -356,10 +370,13 @@ final class CameraAppState: ObservableObject {
         resetMediaUploadState()
         session = nil
         invalidateMediaLibraryLoad()
+        invalidateLatestMedia()
         snapshot = Self.makeOfflinePreviewSnapshot()
         isPreview = true
         screen = .control
         mediaItems = Self.previewMedia
+        latestMediaItem = nil
+        latestMediaThumbnail = nil
         mediaLibraryHasMore = false
         mediaLibraryLoadStatus = .complete
         resetMediaThumbnails()
@@ -402,6 +419,7 @@ final class CameraAppState: ObservableObject {
         let closingSession = session
         session = nil
         invalidateMediaLibraryLoad()
+        invalidateLatestMedia()
         snapshot = nil
         isPreview = false
         screen = .control
@@ -409,6 +427,8 @@ final class CameraAppState: ObservableObject {
         password = ""
         bridgeToken = ""
         mediaItems = []
+        latestMediaItem = nil
+        latestMediaThumbnail = nil
         mediaLibraryHasMore = false
         resetMediaThumbnails()
         resetMediaPreview()
@@ -579,13 +599,24 @@ final class CameraAppState: ObservableObject {
             return
         }
         guard let session else { return }
+        let previousLatestID = latestMediaItem?.id ?? selectLatestMediaItem(mediaItems)?.id
         do {
             updateStatus(try await session.captureStill())
             showShutterFlash()
             lastError = nil
+            startLatestMediaRefresh(session: session, previousID: previousLatestID, waitForNewID: true)
         } catch {
             record(error)
         }
+    }
+
+    func openLatestMedia() async {
+        guard let item = latestMediaItem, canOpenLatestMedia else { return }
+        if !mediaItems.contains(where: { $0.id == item.id }) {
+            mediaItems.insert(item, at: 0)
+        }
+        screen = .media
+        await openMediaPreview(item)
     }
 
     func syncCameraClock() async {
@@ -925,6 +956,100 @@ final class CameraAppState: ObservableObject {
             lastError = nil
         } catch {
             record(error)
+        }
+    }
+
+    private func startLatestMediaRefresh(
+        session: CameraSession,
+        previousID: String? = nil,
+        waitForNewID: Bool = false
+    ) {
+        guard !isPreview, supports(.mediaBrowser) else { return }
+        invalidateLatestMedia(clearItem: false)
+        let generation = UUID()
+        latestMediaGeneration = generation
+        latestMediaThumbnailLoading = false
+        latestMediaTask = Task { [weak self] in
+            await self?.loadLatestMedia(
+                session: session,
+                previousID: previousID,
+                waitForNewID: waitForNewID,
+                generation: generation
+            )
+        }
+    }
+
+    private func loadLatestMedia(
+        session: CameraSession,
+        previousID: String?,
+        waitForNewID: Bool,
+        generation: UUID
+    ) async {
+        defer {
+            if generation == latestMediaGeneration {
+                latestMediaTask = nil
+                latestMediaThumbnailLoading = false
+            }
+        }
+        let attempts = waitForNewID ? Self.latestMediaRetryDelays.count + 1 : 1
+        for attempt in 0..<attempts {
+            guard generation == latestMediaGeneration, !Task.isCancelled else { return }
+            do {
+                let items = try await session.listMedia(maximumItems: Self.latestMediaRequestItemCount)
+                guard generation == latestMediaGeneration, !Task.isCancelled else { return }
+                if let item = waitForNewID
+                    ? selectLatestMediaItem(afterCaptureFrom: items, previousID: previousID)
+                    : selectLatestMediaItem(items) {
+                    await publishLatestMedia(item, session: session, generation: generation)
+                    return
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                // Media propagation is best effort and must not turn a successful shutter into an error.
+            }
+
+            guard attempt + 1 < attempts else { return }
+            do {
+                try await Task.sleep(nanoseconds: Self.latestMediaRetryDelays[attempt])
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func publishLatestMedia(
+        _ item: CameraMediaItem,
+        session: CameraSession,
+        generation: UUID
+    ) async {
+        guard generation == latestMediaGeneration, !Task.isCancelled else { return }
+        latestMediaItem = item
+        latestMediaThumbnail = nil
+        latestMediaThumbnailLoading = supports(.mediaThumbnail)
+        guard supports(.mediaThumbnail) else { return }
+        do {
+            let thumbnail = try await session.mediaThumbnail(item)
+            guard generation == latestMediaGeneration, !Task.isCancelled else { return }
+            latestMediaThumbnail = thumbnail.data.isEmpty ? nil : thumbnail.data
+        } catch is CancellationError {
+            return
+        } catch {
+            // A thumbnail is optional; the latest item remains available to the viewer.
+        }
+        if generation == latestMediaGeneration {
+            latestMediaThumbnailLoading = false
+        }
+    }
+
+    private func invalidateLatestMedia(clearItem: Bool = true) {
+        latestMediaGeneration = UUID()
+        latestMediaTask?.cancel()
+        latestMediaTask = nil
+        latestMediaThumbnailLoading = false
+        if clearItem {
+            latestMediaItem = nil
+            latestMediaThumbnail = nil
         }
     }
 
@@ -1475,6 +1600,9 @@ final class CameraAppState: ObservableObject {
             "mediaLibraryScope=\(mediaLibraryScope.rawValue)",
             "mediaLibraryHasMore=\(mediaLibraryHasMore)",
             "mediaLibraryRequestLimit=\(maximumMediaItems(for: mediaLibraryScope).map { String($0) } ?? "none")",
+            "latestMediaRequestLimit=\(Self.latestMediaRequestItemCount)",
+            "latestMediaID=\(latestMediaItem?.id ?? "none")",
+            "latestMediaThumbnail=\(latestMediaThumbnail == nil ? "none" : "available")",
             "lastClockSyncAt=\(lastClockSyncAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
             "monitorHistogram=\(monitorSettings.histogramVisible)",
             "monitorWaveform=\(monitorSettings.waveformVisible)",
@@ -1679,8 +1807,14 @@ final class CameraAppState: ObservableObject {
                     ) else { break }
                     snapshot = refreshed
                     clampLiveViewRequest()
-                    if screen == .media,
-                       pendingKeys.contains(where: { $0.lowercased().contains("content") }) {
+                    let contentChanged = pendingKeys.contains { key in
+                        let normalized = key.lowercased()
+                        return normalized.contains("content") || normalized.contains("media")
+                    }
+                    if contentChanged, latestMediaTask == nil {
+                        startLatestMediaRefresh(session: session)
+                    }
+                    if screen == .media, contentChanged {
                         guard try await refreshMediaAfterEvent(
                             session: session,
                             generation: generation
@@ -1922,12 +2056,17 @@ final class CameraAppState: ObservableObject {
         mediaThumbnails = mediaThumbnailCache.values
         loadingMediaThumbnailIDs.remove(item.id)
         unavailableMediaThumbnailIDs.remove(item.id)
+        if latestMediaItem?.id == item.id {
+            latestMediaItem = nil
+            latestMediaThumbnail = nil
+        }
         if mediaPreviewItem?.id == item.id { resetMediaPreview() }
         deletedMediaName = item.name
     }
 
     private func applyUpdatedMedia(_ item: CameraMediaItem) {
         mediaItems = mediaItems.map { $0.id == item.id ? item : $0 }
+        if latestMediaItem?.id == item.id { latestMediaItem = item }
         if mediaPreviewItem?.id == item.id { mediaPreviewItem = item }
     }
 

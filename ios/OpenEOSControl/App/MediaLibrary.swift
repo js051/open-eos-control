@@ -15,6 +15,27 @@ struct MediaLibraryBatch: Equatable {
     let hasMore: Bool
 }
 
+func selectLatestMediaItem(_ items: [CameraMediaItem]) -> CameraMediaItem? {
+    guard !items.isEmpty else { return nil }
+    return items.max { left, right in
+        switch (mediaCaptureDate(left), mediaCaptureDate(right)) {
+        case let (.some(leftDate), .some(rightDate)):
+            return leftDate < rightDate
+        case (.some, .none):
+            return false
+        case (.none, .some):
+            return true
+        case (.none, .none):
+            return false
+        }
+    }
+}
+
+func selectLatestMediaItem(afterCaptureFrom items: [CameraMediaItem], previousID: String?) -> CameraMediaItem? {
+    guard let item = selectLatestMediaItem(items), item.id != previousID else { return nil }
+    return item
+}
+
 enum MediaFilter: String, CaseIterable, Identifiable {
     case all
     case photos
