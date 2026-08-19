@@ -128,9 +128,9 @@ The debug APK is written to:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions runs unit tests, the debug build, and the Compose instrumentation suite on a Pixel 5 API 34 emulator for pushes to `main` and pull requests.
+GitHub Actions runs the complete Android, iOS, Desktop Bridge, Windows, and Simulator matrix on pull requests. Superseded runs for the same pull request are cancelled, and the single `ci-complete` check is the authoritative PR-ready result.
 
-Development releases are built entirely by GitHub Actions. A `vX.Y.Z` tag must match every platform version and point to a commit already on `main`; after secret scanning and Android, Desktop Bridge, Windows standalone, Simulator, and iOS validation pass, the release workflow publishes the Android debug APK, a directly executable Windows x64 Desktop Bridge, the cross-platform Bridge wheel/source distribution, release notes, and SHA-256 checksums as a GitHub prerelease.
+Development releases are built entirely by GitHub Actions without repeating the same full matrix on PR, `main`, and tag. Successful PR jobs produce immutable Bridge and Windows candidates. `Main acceptance` verifies that the squash-merged Git tree exactly matches that successful PR, adds the stable-signed Android APK, records `BUILD-PROVENANCE.json`, and uploads one commit-addressed candidate. A matching `vX.Y.Z` tag can publish only that accepted candidate, release notes, and SHA-256 checksums as a GitHub prerelease. See [the development workflow](docs/development-workflow.md) for the state model and release procedure.
 
 The iOS app is compiled and tested on an iPhone Simulator, but the release does not include an installable IPA. Physical-device distribution requires an Apple Developer team, a distribution certificate, and a matching provisioning profile; none of those signing credentials are stored in this public repository.
 

@@ -128,9 +128,9 @@ debug APK 會輸出到：
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions 會在 push 到 `main` 與 pull request 時跑 unit test、debug build，以及 Pixel 5 API 34 模擬器上的 Compose 儀器測試。
+GitHub Actions 會在 pull request 跑完整 Android、iOS、Desktop Bridge、Windows 與 Simulator 矩陣；同一 PR 被新提交取代的舊 run 會自動取消，唯一的 `ci-complete` check 才代表 PR 已可合併。
 
-開發版完全由 GitHub Actions 線上建置。`vX.Y.Z` tag 必須符合所有平台的版本，且指向已存在於 `main` 的 commit；完整歷史機密掃描及 Android、Desktop Bridge、Windows standalone、Simulator、iOS 驗證全部通過後，release workflow 才會把 Android debug APK、可直接執行的 Windows x64 Desktop Bridge、跨平台 Bridge wheel／source distribution、release notes 與 SHA-256 校驗檔發布為 GitHub prerelease。
+開發版完全由 GitHub Actions 線上建置，但不再於 PR、`main` 與 tag 三階段重跑同一套完整矩陣。PR 通過後會產生不可變的 Bridge 與 Windows 候選包；`Main acceptance` 先確認 squash merge 的 Git tree 與該成功 PR 完全相同，再加入固定開發簽章的 Android APK、寫入 `BUILD-PROVENANCE.json`，並上傳以 commit 定址的單一候選包。相符的 `vX.Y.Z` tag 只能發布這份已接受候選包、release notes 與 SHA-256 校驗檔。狀態定義與發版步驟請見[開發流程](docs/development-workflow.md)。
 
 iOS App 會在 iPhone Simulator 完成編譯與測試，但 Release 不會附上可安裝的 IPA。實體裝置發行需要 Apple Developer Team、distribution certificate 與相符的 provisioning profile；這些簽章憑證都不會存放在公開 repository。
 

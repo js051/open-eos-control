@@ -2,9 +2,10 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+
+concurrency:
+  group: ci-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -43,6 +44,11 @@ jobs:
       - name: Test physical-camera evidence verifier
         run: python3 -m unittest discover -s scripts/validation/tests -p "test_*.py"
 
+      - name: Test CI and release workflow helpers
+        run: |
+          python3 -m unittest discover -s scripts/ci/tests -p "test_*.py"
+          python3 -m unittest discover -s scripts/release/tests -p "test_*.py"
+
       - name: Validate GitHub Actions workflows
         run: bash scripts/ci/run-actionlint.sh
 
@@ -72,28 +78,10 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest
 
-      - name: Prepare main Android signing keystore
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
-        env:
-          SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEVELOPMENT_KEYSTORE_BASE64 }}
-          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_DEVELOPMENT_STORE_PASSWORD }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_DEVELOPMENT_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          test -n "$SIGNING_KEYSTORE_BASE64"
-          test -n "$SIGNING_STORE_PASSWORD"
-          test -n "$SIGNING_KEY_PASSWORD"
-          printf '%s' "$SIGNING_KEYSTORE_BASE64" \
-            | base64 --decode > "$RUNNER_TEMP/open-eos-control-development-v1.p12"
-          chmod 600 "$RUNNER_TEMP/open-eos-control-development-v1.p12"
-
       - name: Build pull-request debug APK
-        if: github.event_name == 'pull_request'
         run: ./gradlew :app:assembleDebug
 
       - name: Smoke-test pull-request APK signer verification
-        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
@@ -102,30 +90,6 @@ jobs:
           actual="$(bash "$verifier" "$apk")"
           printf '%s\n' "$actual" > "$RUNNER_TEMP/pull-request-certificate-sha256.txt"
           bash "$verifier" "$apk" "$RUNNER_TEMP/pull-request-certificate-sha256.txt"
-
-      - name: Build stable-signed main debug APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          OEC_ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/open-eos-control-development-v1.p12
-          OEC_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_DEVELOPMENT_STORE_PASSWORD }}
-          OEC_ANDROID_SIGNING_KEY_ALIAS: open-eos-control-development-v1
-          OEC_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_DEVELOPMENT_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleDebug
-
-      - name: Verify main Android signer
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
-        run: bash ../scripts/release/verify-android-apk-signing.sh app/build/outputs/apk/debug/app-debug.apk signing/development-certificate-sha256.txt
-
-      - name: Upload main Android debug APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: open-eos-control-android-${{ github.sha }}
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
 
   android-ui:
     needs: secret-scan
@@ -334,7 +298,7 @@ jobs:
 
       - name: Install bridge and test dependencies
         run: |
-          python -m pip install -e ".[dev]"
+          python -m pip install build==1.5.0 -e ".[dev]"
           npm ci
           npx playwright install --with-deps chromium
 
@@ -357,6 +321,19 @@ jobs:
 
       - name: Test desktop bridge contract
         run: pytest -q -p no:cacheprovider
+
+      - name: Build Desktop Bridge release candidate
+        run: python -m build --outdir ../dist
+
+      - name: Upload Desktop Bridge release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-desktop-bridge
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload desktop browser screenshots
         if: always()
@@ -400,6 +377,15 @@ jobs:
           }
           python scripts/verify_standalone.py $artifact.FullName
           & $artifact.FullName --version
+
+      - name: Upload Windows standalone release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-desktop-windows
+          path: dist/open-eos-control-bridge-windows-x64-*.exe
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
 
   ios-core:
     needs: secret-scan
@@ -525,3 +511,33 @@ jobs:
             ${{ runner.temp }}/ios-camera-simulator.log
           if-no-files-found: ignore
           retention-days: 7
+
+  ci-complete:
+    if: always()
+    needs:
+      - secret-scan
+      - test
+      - android-ui
+      - android-ui-api36
+      - simulator
+      - desktop-bridge
+      - desktop-windows-bundle
+      - ios-core
+      - ios-app
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require every CI job to pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ needs.secret-scan.result }}" = success
+          test "${{ needs.test.result }}" = success
+          test "${{ needs.android-ui.result }}" = success
+          test "${{ needs.android-ui-api36.result }}" = success
+          test "${{ needs.simulator.result }}" = success
+          test "${{ needs.desktop-bridge.result }}" = success
+          test "${{ needs.desktop-windows-bundle.result }}" = success
+          test "${{ needs.ios-core.result }}" = success
+          test "${{ needs.ios-app.result }}" = success
+          echo "PR CI complete for $GITHUB_SHA"
