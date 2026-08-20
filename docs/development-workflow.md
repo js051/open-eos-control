@@ -4,7 +4,7 @@
 
 ## 繁體中文
 
-這套流程把「寫完程式」、「通過完整驗證」、「進入 main」與「真的發布」分成機器可判定的狀態。完整測試仍保留在 PR，但相同 Git tree 不會在 `main` 與 tag 再各跑一次。
+這套流程把「寫完程式」、「通過對應驗證」、「進入 main」與「真的發布」分成機器可判定的狀態。PR 會依變更路徑執行相關平台矩陣；workflow 或版本本身改變時仍跑完整矩陣。相同 Git tree 不會在 `main` 與 tag 再各跑一次。
 
 ### 狀態定義
 
@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | Implemented | worktree 內已有實作與對應測試 | PR 已可合併 |
 | PR ready | exact PR head 的 `ci-complete` 成功 | 已進入 `main` |
-| Main accepted | `Main acceptance / main-accepted` 成功並產生 `release-candidate-<commit>` | 已建立 Release |
+| Main accepted | `Main acceptance / main-accepted` 已驗證 squash merge 與成功 PR 的 tree；只有版本變更 merge 另產生 `release-candidate-<commit>` | 已建立 Release |
 | Released | `Release development preview / release-published` 成功，且 GitHub Release 資產存在 | 已完成實體相機驗證 |
 
 模擬器、mock server、HTTP fixture、AVD 與 iPhone Simulator 都屬於可重現自動驗證，不能取代實體 EOS 相機／手機／USB 路徑的驗證紀錄。
@@ -49,17 +49,19 @@
 
 - `.github/workflows/android.yml` 只由 pull request 觸發。
 - 同一 PR 推入新 commit 時，舊 run 會取消，避免同時測試已過時的 SHA。
-- 完整矩陣包含秘密掃描、版本與 workflow helper、Android unit/UI API 34/UI API 36、Simulator、Desktop Bridge、Windows standalone、Swift Core 與 iOS App/UI。
-- Desktop Bridge wheel/source distribution 與 Windows executable 由已通過其測試的同一 job 建立，並保存為該 run 的 immutable candidate artifacts。
-- `ci-complete` 依賴所有必需 job；只有它成功才能稱為 PR ready。
+- `dorny/paths-filter` 以固定 commit SHA 執行變更分類。所有 PR 都跑秘密掃描、版本一致性、device-evidence／CI／release helper 測試與 actionlint；只有受影響的平台才啟動 Android unit/UI API 34/UI API 36、Simulator、Desktop Bridge、Windows standalone、Swift Core 或 iOS App/UI。
+- `simulator/**` 會同步觸發依賴 fake camera 的 Android、PC 與 iOS 整合測試；`.github/workflows/**` 會觸發完整矩陣，避免 workflow 自己未被驗證。
+- 版本 PR 會改到各平台版本宣告，因此自然觸發完整矩陣。Desktop Bridge wheel/source distribution 與 Windows executable 由已通過其測試的同一 job 建立，保存為該 run 的 immutable candidate artifacts。
+- `ci-complete` 是唯一 GitHub required check。它逐項驗證受影響 job 必須成功、未受影響 job 必須是 `skipped`；只有它成功才能稱為 PR ready。
 
 ### Main 接受階段
 
 - `.github/workflows/main.yml` 不重跑完整矩陣。
 - provenance verifier 透過 GitHub API 找出 squash merge 所屬 PR，fetch 該 PR head，並比較兩者 Git tree SHA。
 - verifier 接著要求 exact PR head 最新的 `CI` workflow run 已完成且成功；不同 tree、失敗 run、進行中 run 或 direct push 都會拒絕。
-- workflow 從該成功 run 下載 immutable Bridge／Windows candidates，只另外建置需要 repository secrets 的固定簽章 Android APK。
-- 四個檔案的名稱、大小與 SHA-256 會寫入 `BUILD-PROVENANCE.json`，再一起上傳為 `release-candidate-<main commit>`。
+- workflow 以 TOML parser 比較 merge 前後的產品版本。一般 feature、fix、docs 或 maintenance merge 在 provenance 通過後即完成，不建置或保存無法發版的重複候選包。
+- 只有版本確實改變時，workflow 才從成功 PR run 下載 immutable Bridge／Windows candidates，另建置需要 repository secrets 的固定簽章 Android APK。
+- 版本 merge 的四個檔案名稱、大小與 SHA-256 會寫入 `BUILD-PROVENANCE.json`，再一起上傳為 `release-candidate-<main commit>`。
 
 ### 發版階段
 
@@ -78,10 +80,11 @@ Candidate artifacts 保留 14 天，因此版本 PR 合併後應在此期限內�
 - CI 顯示 queued 或正常進行時只追蹤狀態；先定位具體失敗 step 才重跑。
 - 每個 PR 在模板列出 Evidence、Validation、Device Status 與 Non-Goals，未完成的相鄰能力留給後續 PR。
 - 使用現有 Gradle、SwiftPM、pytest、npm、GitHub Actions artifacts 與小型 Python verifier；不維護另一套平行建置系統。
+- GitHub `main` ruleset 只要求 `ci-complete`，不直接要求可能被路徑分類刻意 skip 的平台 job。Repo 僅允許 squash merge，合併後自動刪除遠端分支；若設定與本文件漂移，應先修正設定再宣稱流程生效。
 
 ## English
 
-This workflow gives machine-verifiable meanings to implemented, fully validated, accepted on `main`, and actually released. The complete matrix remains on pull requests, while the same Git tree is promoted instead of retested on both `main` and a tag.
+This workflow gives machine-verifiable meanings to implemented, appropriately validated, accepted on `main`, and actually released. Pull requests run the platform matrix selected by changed paths; workflow and version changes still run the complete matrix. The same Git tree is promoted instead of retested on both `main` and a tag.
 
 ### State Model
 
@@ -89,7 +92,7 @@ This workflow gives machine-verifiable meanings to implemented, fully validated,
 | --- | --- | --- |
 | Implemented | The worktree contains the implementation and focused tests | The PR is mergeable |
 | PR ready | `ci-complete` succeeded for the exact PR head | The change is on `main` |
-| Main accepted | `Main acceptance / main-accepted` succeeded and produced `release-candidate-<commit>` | A GitHub Release exists |
+| Main accepted | `Main acceptance / main-accepted` verified the squash-merged tree against its successful PR; only version-changing merges also produce `release-candidate-<commit>` | A GitHub Release exists |
 | Released | `Release development preview / release-published` succeeded and release assets exist | Physical-camera validation is complete |
 
 Simulator, mock-server, HTTP-fixture, AVD, and iPhone Simulator results are deterministic automated evidence. They never replace a recorded physical EOS camera, phone, or USB validation.
@@ -124,9 +127,9 @@ A release requires all of the following:
 
 ### Promotion Path
 
-- Pull requests run the complete security, Android, iOS, Bridge, Windows, and Simulator matrix. New commits cancel stale runs for the same PR. Tested Bridge and Windows jobs upload immutable candidate artifacts, and `ci-complete` is the single PR-ready gate.
-- `Main acceptance` finds the merged PR through the GitHub API, fetches its head, compares Git tree SHAs, and requires the latest exact-head PR workflow to have succeeded. It reuses those candidate artifacts and only builds the stable-signed Android APK that requires repository secrets.
-- The accepted bundle records every filename, size, and SHA-256 in `BUILD-PROVENANCE.json` and is uploaded as `release-candidate-<main commit>`.
+- Every pull request runs security, version consistency, evidence/helper tests, and actionlint. A commit-pinned `dorny/paths-filter` selects only affected Android, iOS, Bridge, Windows, and Simulator jobs; simulator changes also run every fake-camera consumer, while workflow changes run the complete matrix. New commits cancel stale runs. `ci-complete` is the only required check and verifies both required successes and intentional skips.
+- `Main acceptance` finds the merged PR through the GitHub API, fetches its head, compares Git tree SHAs, and requires the latest exact-head PR workflow to have succeeded. Non-version merges stop after this provenance check and do not generate disposable release bundles.
+- When the declared product version changed, `Main acceptance` reuses the tested Bridge and Windows artifacts, builds only the stable-signed Android APK that needs repository secrets, records every filename, size, and SHA-256 in `BUILD-PROVENANCE.json`, and uploads `release-candidate-<main commit>`.
 - A version tag must match all code and documentation declarations, point to an accepted `main` commit, and reuse that exact candidate. The release job verifies provenance hashes, adds `SHA256SUMS.txt`, and publishes the prerelease without rerunning the product test matrix.
 
 ### Release Checklist
@@ -138,3 +141,5 @@ A release requires all of the following:
 5. Report the version as released only after `release-published` succeeds and the expected GitHub Release assets are visible.
 
 Inspect existing worktrees, branches, PRs, and Actions runs before starting or rerunning work. Keep evidence, explicit non-goals, and physical-device status in every PR so follow-up exploration remains active without inflating the current completion claim.
+
+The GitHub `main` ruleset requires only `ci-complete`, never individual platform jobs that path classification may intentionally skip. The repository permits squash merge only and automatically deletes merged remote branches. Treat drift between those GitHub settings and this document as a workflow defect to correct before claiming the process is active.

@@ -18,7 +18,7 @@
 - Do not describe work as complete merely because code was written or a local test passed.
 - `implemented` means the requested code and focused automated tests exist in the task worktree.
 - `PR ready` means the branch is pushed and the `ci-complete` check has passed for its exact head SHA.
-- `main accepted` means the `Main acceptance / main-accepted` check has verified the squash-merged tree against the successful PR run and uploaded `release-candidate-<commit>`.
+- `main accepted` means the `Main acceptance / main-accepted` check has verified the squash-merged tree against the successful PR run. A merge that changes the declared product version must additionally upload `release-candidate-<commit>`; ordinary accepted merges intentionally do not create release artifacts.
 - `released` means `Release development preview / release-published` passed and the GitHub Release contains the expected downloadable assets and checksums.
 - Automated simulator or protocol-fixture evidence must never be reported as physical-camera validation. Use the device-evidence verifier and name the actual camera, transport, app build, and tested operations when physical validation exists.
 - Before rerunning or replacing a CI run, inspect its current job and step state. Do not rerun a queued or normally progressing workflow just because it is slow.

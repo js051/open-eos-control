@@ -38,7 +38,26 @@ jobs:
             --base main \
             --output "$GITHUB_OUTPUT"
 
+      - name: Determine whether this merge changes the product version
+        id: release-scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_version="$(python3 scripts/release/verify-version.py)"
+          previous_version="$(
+            git show "$GITHUB_SHA^:bridge/pyproject.toml" \
+              | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])'
+          )"
+          if [[ "$current_version" == "$previous_version" ]]; then
+            echo "candidate_required=false" >> "$GITHUB_OUTPUT"
+            echo "Accepted non-version merge at $GITHUB_SHA; no release candidate is required."
+          else
+            echo "candidate_required=true" >> "$GITHUB_OUTPUT"
+            echo "Accepted version change $previous_version -> $current_version."
+          fi
+
       - name: Download tested release candidates
+        if: steps.release-scope.outputs.candidate_required == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-candidate-*
@@ -49,19 +68,23 @@ jobs:
           run-id: ${{ steps.provenance.outputs.workflow_run_id }}
 
       - name: Set up JDK
+        if: steps.release-scope.outputs.candidate_required == 'true'
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle
+        if: steps.release-scope.outputs.candidate_required == 'true'
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - name: Prepare Gradle wrapper
+        if: steps.release-scope.outputs.candidate_required == 'true'
         working-directory: android
         run: chmod +x gradlew
 
       - name: Prepare stable Android signing keystore
+        if: steps.release-scope.outputs.candidate_required == 'true'
         shell: bash
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEVELOPMENT_KEYSTORE_BASE64 }}
@@ -77,6 +100,7 @@ jobs:
           chmod 600 "$RUNNER_TEMP/open-eos-control-development-v1.p12"
 
       - name: Build stable-signed Android debug APK
+        if: steps.release-scope.outputs.candidate_required == 'true'
         working-directory: android
         env:
           OEC_ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/open-eos-control-development-v1.p12
@@ -86,15 +110,18 @@ jobs:
         run: ./gradlew :app:assembleDebug
 
       - name: Verify stable Android signer
+        if: steps.release-scope.outputs.candidate_required == 'true'
         shell: bash
         run: bash scripts/release/verify-android-apk-signing.sh android/app/build/outputs/apk/debug/app-debug.apk android/signing/development-certificate-sha256.txt
 
       - name: Read product version
+        if: steps.release-scope.outputs.candidate_required == 'true'
         id: version
         shell: bash
         run: echo "version=$(python3 scripts/release/verify-version.py)" >> "$GITHUB_OUTPUT"
 
       - name: Assemble immutable release candidate
+        if: steps.release-scope.outputs.candidate_required == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -114,6 +141,7 @@ jobs:
             --commit "$GITHUB_SHA"
 
       - name: Upload promoted release candidate
+        if: steps.release-scope.outputs.candidate_required == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-candidate-${{ github.sha }}

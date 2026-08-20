@@ -9,16 +9,49 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   secret-scan:
     runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.changes.outputs.android }}
+      simulator: ${{ steps.changes.outputs.simulator }}
+      desktop: ${{ steps.changes.outputs.desktop }}
+      ios_core: ${{ steps.changes.outputs.ios_core }}
+      ios_app: ${{ steps.changes.outputs.ios_app }}
 
     steps:
       - name: Checkout full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Classify affected product surfaces
+        id: changes
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            android:
+              - 'android/**'
+              - 'simulator/**'
+              - 'scripts/release/verify-android-apk-signing.sh'
+              - '.github/workflows/**'
+            simulator:
+              - 'simulator/**'
+              - '.github/workflows/**'
+            desktop:
+              - 'bridge/**'
+              - 'simulator/**'
+              - 'scripts/windows-gphoto2-doctor.ps1'
+              - '.github/workflows/**'
+            ios_core:
+              - 'ios/OpenEOSCore/**'
+              - '.github/workflows/**'
+            ios_app:
+              - 'ios/**'
+              - 'simulator/**'
+              - '.github/workflows/**'
 
       - name: Scan repository history for secrets
         shell: bash
@@ -54,6 +87,7 @@ jobs:
 
   test:
     needs: secret-scan
+    if: needs.secret-scan.outputs.android == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -93,6 +127,7 @@ jobs:
 
   android-ui:
     needs: secret-scan
+    if: needs.secret-scan.outputs.android == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -169,6 +204,7 @@ jobs:
 
   android-ui-api36:
     needs: secret-scan
+    if: needs.secret-scan.outputs.android == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -245,6 +281,7 @@ jobs:
 
   simulator:
     needs: secret-scan
+    if: needs.secret-scan.outputs.simulator == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -275,6 +312,7 @@ jobs:
 
   desktop-bridge:
     needs: secret-scan
+    if: needs.secret-scan.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -346,6 +384,7 @@ jobs:
 
   desktop-windows-bundle:
     needs: secret-scan
+    if: needs.secret-scan.outputs.desktop == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     defaults:
@@ -389,6 +428,7 @@ jobs:
 
   ios-core:
     needs: secret-scan
+    if: needs.secret-scan.outputs.ios_core == 'true'
     runs-on: macos-15
     defaults:
       run:
@@ -406,6 +446,7 @@ jobs:
 
   ios-app:
     needs: secret-scan
+    if: needs.secret-scan.outputs.ios_app == 'true'
     runs-on: macos-15
     defaults:
       run:
@@ -531,13 +572,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          require_job() {
+            local expected="$1"
+            local actual="$2"
+            local name="$3"
+            if [[ "$expected" == "true" ]]; then
+              if [[ "$actual" != "success" ]]; then
+                echo "$name must succeed for this change set; actual result: $actual" >&2
+                exit 1
+              fi
+            elif [[ "$actual" != "skipped" ]]; then
+              echo "$name must be skipped when its product surface is unchanged; actual result: $actual" >&2
+              exit 1
+            fi
+          }
+
           test "${{ needs.secret-scan.result }}" = success
-          test "${{ needs.test.result }}" = success
-          test "${{ needs.android-ui.result }}" = success
-          test "${{ needs.android-ui-api36.result }}" = success
-          test "${{ needs.simulator.result }}" = success
-          test "${{ needs.desktop-bridge.result }}" = success
-          test "${{ needs.desktop-windows-bundle.result }}" = success
-          test "${{ needs.ios-core.result }}" = success
-          test "${{ needs.ios-app.result }}" = success
+          require_job "${{ needs.secret-scan.outputs.android }}" "${{ needs.test.result }}" test
+          require_job "${{ needs.secret-scan.outputs.android }}" "${{ needs.android-ui.result }}" android-ui
+          require_job "${{ needs.secret-scan.outputs.android }}" "${{ needs.android-ui-api36.result }}" android-ui-api36
+          require_job "${{ needs.secret-scan.outputs.simulator }}" "${{ needs.simulator.result }}" simulator
+          require_job "${{ needs.secret-scan.outputs.desktop }}" "${{ needs.desktop-bridge.result }}" desktop-bridge
+          require_job "${{ needs.secret-scan.outputs.desktop }}" "${{ needs.desktop-windows-bundle.result }}" desktop-windows-bundle
+          require_job "${{ needs.secret-scan.outputs.ios_core }}" "${{ needs.ios-core.result }}" ios-core
+          require_job "${{ needs.secret-scan.outputs.ios_app }}" "${{ needs.ios-app.result }}" ios-app
           echo "PR CI complete for $GITHUB_SHA"
