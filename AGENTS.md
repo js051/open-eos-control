@@ -22,6 +22,7 @@
 - `released` means `Release development preview / release-published` passed and the GitHub Release contains the expected downloadable assets and checksums.
 - Automated simulator or protocol-fixture evidence must never be reported as physical-camera validation. Use the device-evidence verifier and name the actual camera, transport, app build, and tested operations when physical validation exists.
 - Before rerunning or replacing a CI run, inspect its current job and step state. Do not rerun a queued or normally progressing workflow just because it is slow.
+- Treat GitHub settings as part of the delivery system. A workflow, required-check, merge-policy, or third-party action-pin change is incomplete until the live ruleset, branch protection, merge methods, and Actions allowlist have been inspected and synchronized without broad wildcard permissions.
 
 # Decision Integrity
 

@@ -50,6 +50,7 @@
 - `.github/workflows/android.yml` 只由 pull request 觸發。
 - 同一 PR 推入新 commit 時，舊 run 會取消，避免同時測試已過時的 SHA。
 - `dorny/paths-filter` 以固定 commit SHA 執行變更分類。所有 PR 都跑秘密掃描、版本一致性、device-evidence／CI／release helper 測試與 actionlint；只有受影響的平台才啟動 Android unit/UI API 34/UI API 36、Simulator、Desktop Bridge、Windows standalone、Swift Core 或 iOS App/UI。
+- Repo 的 GitHub Actions allowlist 必須包含相同的 `dorny/paths-filter@<commit>`；更新 workflow 中的 SHA 時要在同一項工作同步更新 allowlist，且不得改成 owner-wide 萬用規則。
 - `simulator/**` 會同步觸發依賴 fake camera 的 Android、PC 與 iOS 整合測試；`.github/workflows/**` 會觸發完整矩陣，避免 workflow 自己未被驗證。
 - 版本 PR 會改到各平台版本宣告，因此自然觸發完整矩陣。Desktop Bridge wheel/source distribution 與 Windows executable 由已通過其測試的同一 job 建立，保存為該 run 的 immutable candidate artifacts。
 - `ci-complete` 是唯一 GitHub required check。它逐項驗證受影響 job 必須成功、未受影響 job 必須是 `skipped`；只有它成功才能稱為 PR ready。
@@ -128,6 +129,7 @@ A release requires all of the following:
 ### Promotion Path
 
 - Every pull request runs security, version consistency, evidence/helper tests, and actionlint. A commit-pinned `dorny/paths-filter` selects only affected Android, iOS, Bridge, Windows, and Simulator jobs; simulator changes also run every fake-camera consumer, while workflow changes run the complete matrix. New commits cancel stale runs. `ci-complete` is the only required check and verifies both required successes and intentional skips.
+- The repository Actions allowlist must contain that exact `dorny/paths-filter@<commit>`. Any workflow pin update must update the allowlist in the same task and must not broaden it to an owner-wide wildcard.
 - `Main acceptance` finds the merged PR through the GitHub API, fetches its head, compares Git tree SHAs, and requires the latest exact-head PR workflow to have succeeded. Non-version merges stop after this provenance check and do not generate disposable release bundles.
 - When the declared product version changed, `Main acceptance` reuses the tested Bridge and Windows artifacts, builds only the stable-signed Android APK that needs repository secrets, records every filename, size, and SHA-256 in `BUILD-PROVENANCE.json`, and uploads `release-candidate-<main commit>`.
 - A version tag must match all code and documentation declarations, point to an accepted `main` commit, and reuse that exact candidate. The release job verifies provenance hashes, adds `SHA256SUMS.txt`, and publishes the prerelease without rerunning the product test matrix.
