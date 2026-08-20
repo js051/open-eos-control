@@ -13,9 +13,15 @@
 | Implemented | worktree 內已有實作與對應測試 | PR 已可合併 |
 | PR ready | exact PR head 的 `ci-complete` 成功 | 已進入 `main` |
 | Main accepted | `Main acceptance / main-accepted` 已驗證 squash merge 與成功 PR 的 tree；只有版本變更 merge 另產生 `release-candidate-<commit>` | 已建立 Release |
-| Released | `Release development preview / release-published` 成功，且 GitHub Release 資產存在 | 已完成實體相機驗證 |
+| Preview released | `Release development preview / release-published` 成功，且 GitHub prerelease 資產存在 | 已完成實體相機驗證或已達穩定版 |
 
 模擬器、mock server、HTTP fixture、AVD 與 iPhone Simulator 都屬於可重現自動驗證，不能取代實體 EOS 相機／手機／USB 路徑的驗證紀錄。
+
+### 發布通道
+
+- 目前唯一啟用的發布通道是 **Development Preview**。GitHub 上既有版本與目前 workflow 都是 prerelease；版本號升為 patch 或 minor 仍然只是下一個 Preview，不代表穩定版。
+- Preview 可以在部分真機驗證仍待完成時發布，前提是預定測試範圍沒有未解 P0/P1、限制與證據寫得準確，且不宣稱尚未證實的相機／傳輸相容性。缺少真機證據限制的是宣稱，不會單獨否決 Preview。
+- Stable 目前沒有啟用的門檻或發布路徑。不得沿用 Preview workflow 後移除 prerelease 標記，也不得因版本號、完成度觀感或 CI 綠燈稱為 Stable。未來要開啟 Stable，必須由維護者另行核准驗收範圍、實體裝置矩陣、簽章與升級政策，並以獨立變更落實。
 
 ### 決策原則
 
@@ -71,7 +77,7 @@
 3. 等待 `ci-complete`，squash merge，接著等待 exact main commit 的 `main-accepted`。
 4. 只在該 accepted commit 建立 annotated `vX.Y.Z` tag。
 5. Release workflow 驗證 tag、main ancestry 與 successful main run，下載 exact commit candidate，再次核對 provenance hashes 後發布。
-6. 只有 `release-published` 成功且 GitHub Release 顯示 APK、Windows executable、wheel、source archive、`BUILD-PROVENANCE.json` 與 `SHA256SUMS.txt` 時，才回報 Released。
+6. 只有 `release-published` 成功且 GitHub prerelease 顯示 APK、Windows executable、wheel、source archive、`BUILD-PROVENANCE.json` 與 `SHA256SUMS.txt` 時，才回報 Preview released。
 
 Candidate artifacts 保留 14 天，因此版本 PR 合併後應在此期限內建立 tag。失敗或過期時必須重新經過 PR／main promotion，不可手動替換 Release 檔案。
 
@@ -94,9 +100,15 @@ This workflow gives machine-verifiable meanings to implemented, appropriately va
 | Implemented | The worktree contains the implementation and focused tests | The PR is mergeable |
 | PR ready | `ci-complete` succeeded for the exact PR head | The change is on `main` |
 | Main accepted | `Main acceptance / main-accepted` verified the squash-merged tree against its successful PR; only version-changing merges also produce `release-candidate-<commit>` | A GitHub Release exists |
-| Released | `Release development preview / release-published` succeeded and release assets exist | Physical-camera validation is complete |
+| Preview released | `Release development preview / release-published` succeeded and GitHub prerelease assets exist | Physical-camera validation is complete or the product is stable |
 
 Simulator, mock-server, HTTP-fixture, AVD, and iPhone Simulator results are deterministic automated evidence. They never replace a recorded physical EOS camera, phone, or USB validation.
+
+### Release Channels
+
+- **Development Preview** is the only active distribution channel. Existing GitHub versions and the current workflow are prereleases; choosing a patch or minor version still creates the next Preview and does not promote the product to stable.
+- A Preview may be published while some physical-device validation remains pending when the intended test scope has no unresolved P0/P1 issue, limitations and evidence are accurate, and no unverified camera or transport compatibility is claimed. Missing physical evidence limits claims; it is not by itself a Preview blocker.
+- Stable has no active acceptance criteria or publication path. Do not reuse the Preview workflow without the prerelease flag, and do not infer stability from a version number, perceived completeness, or green CI. Enabling Stable requires separately maintainer-approved device coverage, signing and upgrade policy, acceptance criteria, and automation changes.
 
 ### Decision Integrity
 
@@ -140,7 +152,7 @@ A release requires all of the following:
 2. Run `python scripts/release/verify-version.py --tag vX.Y.Z`.
 3. Wait for `ci-complete`, squash merge, and wait for `main-accepted` on the resulting commit.
 4. Create an annotated tag on that exact commit within the candidate's 14-day retention window.
-5. Report the version as released only after `release-published` succeeds and the expected GitHub Release assets are visible.
+5. Report the version as Preview released only after `release-published` succeeds and the expected GitHub prerelease assets are visible.
 
 Inspect existing worktrees, branches, PRs, and Actions runs before starting or rerunning work. Keep evidence, explicit non-goals, and physical-device status in every PR so follow-up exploration remains active without inflating the current completion claim.
 

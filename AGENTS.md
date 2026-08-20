@@ -19,7 +19,8 @@
 - `implemented` means the requested code and focused automated tests exist in the task worktree.
 - `PR ready` means the branch is pushed and the `ci-complete` check has passed for its exact head SHA.
 - `main accepted` means the `Main acceptance / main-accepted` check has verified the squash-merged tree against the successful PR run. A merge that changes the declared product version must additionally upload `release-candidate-<commit>`; ordinary accepted merges intentionally do not create release artifacts.
-- `released` means `Release development preview / release-published` passed and the GitHub Release contains the expected downloadable assets and checksums.
+- `preview released` means `Release development preview / release-published` passed and the GitHub prerelease contains the expected downloadable assets and checksums.
+- `stable released` is not an active state in this repository. The current workflow must never clear the GitHub prerelease flag or describe a build as stable; a stable channel requires separately approved acceptance criteria and automation.
 - Automated simulator or protocol-fixture evidence must never be reported as physical-camera validation. Use the device-evidence verifier and name the actual camera, transport, app build, and tested operations when physical validation exists.
 - Before rerunning or replacing a CI run, inspect its current job and step state. Do not rerun a queued or normally progressing workflow just because it is slow.
 - Treat GitHub settings as part of the delivery system. A workflow, required-check, merge-policy, or third-party action-pin change is incomplete until the live ruleset, branch protection, merge methods, and Actions allowlist have been inspected and synchronized without broad wildcard permissions.
@@ -28,12 +29,14 @@
 
 - Treat user proposals, questions, and preferred answers as product input, not as evidence that a technical conclusion is true.
 - State the evidence-based recommendation before changing version, merge, release, validation, or completion status. A follow-up such as `要進版了?`, `不用進版?`, or `是不是該發版?` requests a fresh assessment; it does not supply the answer.
-- The user controls product priority, scope, pause/stop decisions, and whether a ready build is wanted now. Conversation cannot override failed checks, missing physical-device evidence, Semantic Versioning classification, or the delivery-state definitions above.
+- The user controls product priority, scope, pause/stop decisions, and whether a ready build is wanted now. Conversation cannot override failed checks, convert missing physical-device evidence into validation, permit unsupported device claims, change Semantic Versioning classification, or alter the delivery-state definitions above.
 - When challenged, re-check the repository, exact CI SHA, release assets, and device evidence. Change the recommendation only when the evidence or explicit product constraint changed, and name that change instead of mirroring the latest wording.
 - Never weaken a blocker to agree with an expected outcome. If an explicitly requested release is not ready, fix the blocker when feasible or report that the release is being held and why.
 
 # Release Decisions
 
+- The only active distribution channel is `Development Preview`. Semantic Versioning selects the next preview version; a patch or minor bump does not promote the product to stable.
+- Pending physical-device validation does not by itself block a Development Preview. It blocks only unsupported compatibility or reliability claims, which must remain explicitly pending in release notes. It may be considered a stable-release blocker once stable criteria are separately defined.
 - Merging to `main` and publishing a version are separate decisions. A coherent, verified PR may enter `main` without immediately creating a release.
 - Every PR must record a Release Assessment: latest release baseline, proposed impact (`none`, `patch`, `minor`, or `breaking`), user-visible or distribution reason, unresolved blockers, and physical-device status.
 - Use `none` for documentation, tests, CI, internal refactors, and maintenance that do not change a distributable product, unless the change repairs release integrity, security, or broken installation metadata that users need immediately.
