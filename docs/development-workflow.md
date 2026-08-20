@@ -17,6 +17,34 @@
 
 模擬器、mock server、HTTP fixture、AVD 與 iPhone Simulator 都屬於可重現自動驗證，不能取代實體 EOS 相機／手機／USB 路徑的驗證紀錄。
 
+### 決策原則
+
+產品優先順序由維護者決定，技術狀態則由可重現證據決定。對話中的「要進版了嗎」、「不用發版嗎」或預期答案，只會觸發重新稽核，不會直接改變結論。重新稽核必須先確認最新 tag、相對變更、未解決問題、exact-SHA CI、`main-accepted`、候選資產與實體裝置證據，再提出建議。
+
+如果新證據改變結論，應明確說出改變的是哪一項證據。如果證據沒有改變，不應為了附和最新一句話而反轉建議。維護者可以要求暫停、改變產品優先順序，或要求立即取得一個已準備好的 build；但不能以對話略過失敗測試、缺少資產、版本不一致、未驗證的實機宣稱或下列發版門檻。
+
+### 進入 Main 與發版判定
+
+合併與發版是兩個獨立決定：
+
+| 決定 | 應執行的時機 | 不足以單獨成立的理由 |
+| --- | --- | --- |
+| 合併至 `main` | PR 範圍完整、non-goals 清楚、對應測試存在、沒有該範圍的 P0/P1 blocker，且 exact head 的 `ci-complete` 成功 | 程式已寫完、focused test 單獨通過、使用者期待已完成 |
+| 不發版 (`none`) | 只有文件、測試、CI、內部重構或維護，且沒有使用者需要立即取得的安裝／安全／發版修復 | `main` 有新 commit、CI 綠燈、距離上次發版有一段時間 |
+| Patch | 修正既有功能、效能、安全、安裝或封裝，且保持向後相容 | 修改檔案很多、問題看起來重要 |
+| Minor | 形成一組可說明、可下載測試的新使用者功能；`1.0.0` 前不相容的產品或協定契約變更也至少升 minor | 單一內部 API、新增未接 backend 的 UI、只有 simulator 假功能 |
+| Major | `1.0.0` 後有明確不相容的公開契約或使用流程變更 | 視覺改版、一般重構 |
+
+每個 PR 必須在 `Release Assessment` 記錄：最新 release baseline、建議影響等級、使用者／測試者可獲得的價值、未解 blocker 與實體裝置狀態。問句不是 release approval；即使維護者明確要求立即發版，也要先完成這份稽核。門檻全部通過時不需要等待固定日曆；門檻未通過時則應修正或明確 hold，不得先 tag 再補證據。
+
+發版前至少必須同時成立：
+
+- 自最新 tag 起有值得散布的使用者或測試者價值，或有必須立即送達的安全／安裝／發版完整性修復。
+- 發版變更範圍沒有未解 P0/P1；其他 roadmap 缺口可以存在，但 release notes 必須準確列為限制，不能宣稱完成。
+- 版本依上述規則分類，所有程式、README、CHANGELOG 與 release notes 完全一致。
+- 版本 PR exact head 的 `ci-complete` 成功，squash merge 後 exact main commit 的 `main-accepted` 成功。
+- immutable candidate 的預期資產與 checksum 齊全。涉及真機相容性的宣稱另需對應 device evidence；沒有實機證據時必須維持「自動驗證／待實機驗證」措辭。
+
 ### PR 階段
 
 - `.github/workflows/android.yml` 只由 pull request 觸發。
@@ -65,6 +93,34 @@ This workflow gives machine-verifiable meanings to implemented, fully validated,
 | Released | `Release development preview / release-published` succeeded and release assets exist | Physical-camera validation is complete |
 
 Simulator, mock-server, HTTP-fixture, AVD, and iPhone Simulator results are deterministic automated evidence. They never replace a recorded physical EOS camera, phone, or USB validation.
+
+### Decision Integrity
+
+The maintainer controls product priority; reproducible evidence controls technical status. Conversational prompts such as "should this be versioned now?" or "why not release?" trigger a fresh audit rather than supplying the conclusion. That audit checks the latest tag, release delta, unresolved findings, exact-SHA CI, `main-accepted`, candidate assets, and physical-device evidence before recommending an action.
+
+If new evidence changes the recommendation, identify the evidence that changed. If the evidence did not change, do not reverse the recommendation merely to mirror the latest wording. The maintainer may pause work, redirect product priority, or request an immediately available ready build. Conversation cannot waive failed tests, missing assets, version drift, unsupported physical-device claims, or the release gates below.
+
+### Main And Release Decisions
+
+Merging and publishing are independent decisions:
+
+| Decision | Use it when | Not sufficient by itself |
+| --- | --- | --- |
+| Merge to `main` | The PR scope is complete, non-goals are explicit, relevant tests exist, no in-scope P0/P1 remains, and `ci-complete` passed for the exact head | Code was written, one focused test passed, or completion is expected |
+| No release (`none`) | The delta is documentation, tests, CI, internal refactoring, or maintenance with no installation, security, or release-integrity fix users need immediately | `main` has a new commit, CI is green, or time passed |
+| Patch | Backward-compatible correction to existing behavior, performance, security, packaging, or installation | Many files changed or the issue feels important |
+| Minor | A coherent new user-visible capability is ready for distribution; before `1.0.0`, incompatible product or protocol-contract changes also require at least a minor bump | An internal API changed, a UI is disconnected from its backend, or only a simulator implements it |
+| Major | After `1.0.0`, a public contract or workflow changes incompatibly | A visual redesign or ordinary refactor |
+
+Every PR records a `Release Assessment`: latest release baseline, proposed impact, user/tester value, unresolved blockers, and physical-device status. A question is not release approval. Even an explicit request to release now first runs this audit. When every gate passes, no arbitrary calendar delay is required; when a gate fails, fix it or explicitly hold the release instead of tagging first and adding evidence later.
+
+A release requires all of the following:
+
+- The delta since the latest tag has distributable user/tester value, or an urgent security, installation, or release-integrity fix.
+- No unresolved P0/P1 exists in the release scope. Other roadmap gaps may remain only when release notes accurately preserve them as limitations.
+- The version classification follows the table and every code, README, CHANGELOG, and release-note declaration agrees.
+- `ci-complete` passed for the exact version-PR head and `main-accepted` passed for the exact squash-merged commit.
+- The immutable candidate contains all expected assets and checksums. Claims about physical-camera compatibility additionally require matching device evidence; otherwise wording must remain automated-only and pending physical validation.
 
 ### Promotion Path
 
