@@ -6,9 +6,12 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +33,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,12 +64,16 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
@@ -88,6 +97,10 @@ import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaStreamSource
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min
@@ -175,13 +188,84 @@ internal fun MediaGalleryGrid(
     sort: MediaSort,
     state: CameraUiState,
     actions: CameraActions,
+    selectedIds: Set<String>,
     onPreview: (CameraMediaItem) -> Unit,
     onActions: (CameraMediaItem) -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onSelectionDragStart: (String) -> Unit,
+    onSelectionDrag: (String) -> Unit,
+    onSelectionDragEnd: () -> Unit,
 ) {
     val groups = remember(items, sort) { mediaGroupsForDisplay(items, sort) }
+    val itemIds = remember(items) { items.mapTo(hashSetOf(), CameraMediaItem::id) }
+    val gridState = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    val edgeThreshold = with(LocalDensity.current) { 64.dp.toPx() }
+    val scrollStep = with(LocalDensity.current) { 44.dp.toPx() }
+    var autoScrollJob by remember { mutableStateOf<Job?>(null) }
+    var autoScrollDirection by remember { mutableFloatStateOf(0f) }
+    var latestDragPosition by remember { mutableStateOf<Offset?>(null) }
+
+    fun itemIdAt(position: Offset): String? = gridState.layoutInfo.visibleItemsInfo
+        .firstOrNull { info ->
+            position.x >= info.offset.x &&
+                position.x < info.offset.x + info.size.width &&
+                position.y >= info.offset.y &&
+                position.y < info.offset.y + info.size.height
+        }
+        ?.key
+        ?.toString()
+        ?.takeIf(itemIds::contains)
+
+    fun updateAutoScroll(scrollDelta: Float) {
+        if (scrollDelta == autoScrollDirection) return
+        autoScrollJob?.cancel()
+        autoScrollDirection = scrollDelta
+        if (scrollDelta == 0f) {
+            autoScrollJob = null
+            return
+        }
+        autoScrollJob = scope.launch {
+            while (isActive) {
+                gridState.scrollBy(scrollDelta)
+                latestDragPosition?.let { position -> itemIdAt(position)?.let(onSelectionDrag) }
+                delay(48L)
+            }
+        }
+    }
+
+    fun finishSelectionDrag() {
+        latestDragPosition = null
+        updateAutoScroll(0f)
+        onSelectionDragEnd()
+    }
+
     LazyVerticalGrid(
         columns = GridCells.Adaptive(116.dp),
-        modifier = Modifier.fillMaxSize(),
+        state = gridState,
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(items) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { position ->
+                        latestDragPosition = position
+                        itemIdAt(position)?.let(onSelectionDragStart)
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        latestDragPosition = change.position
+                        itemIdAt(change.position)?.let(onSelectionDrag)
+                        val scrollDelta = when {
+                            change.position.y < edgeThreshold -> -scrollStep
+                            change.position.y > size.height - edgeThreshold -> scrollStep
+                            else -> 0f
+                        }
+                        updateAutoScroll(scrollDelta)
+                    },
+                    onDragEnd = ::finishSelectionDrag,
+                    onDragCancel = ::finishSelectionDrag,
+                )
+            },
         contentPadding = PaddingValues(start = 2.dp, top = 2.dp, end = 2.dp, bottom = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -217,8 +301,12 @@ internal fun MediaGalleryGrid(
                     loading = item.id in state.mediaThumbnailLoadingIds,
                     previewEnabled = previewEnabled,
                     actionsEnabled = !state.isBusy(CameraOperation.MEDIA),
+                    selectionActive = selectedIds.isNotEmpty(),
+                    selected = item.id in selectedIds,
                     onPreview = { onPreview(item) },
                     onActions = { onActions(item) },
+                    onToggleSelection = { onToggleSelection(item.id) },
+                    onBeginSelection = { onSelectionDragStart(item.id) },
                 )
             }
         }
@@ -232,22 +320,40 @@ private fun MediaGalleryTile(
     loading: Boolean,
     previewEnabled: Boolean,
     actionsEnabled: Boolean,
+    selectionActive: Boolean,
+    selected: Boolean,
     onPreview: () -> Unit,
     onActions: () -> Unit,
+    onToggleSelection: () -> Unit,
+    onBeginSelection: () -> Unit,
 ) {
     val previewDescription = stringResource(R.string.preview_media, item.name)
+    val selectionDescription = stringResource(R.string.select_media_item, item.name)
+    val selectionState = stringResource(
+        if (selected) R.string.media_item_selected else R.string.media_item_not_selected,
+    )
     Box(
         Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .clip(RoundedCornerShape(2.dp))
             .background(AppSurfaceHigh)
+            .then(if (selected) Modifier.border(3.dp, AppAccent, RoundedCornerShape(2.dp)) else Modifier)
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (selectionActive || !previewEnabled) selectionDescription else previewDescription
+                this.selected = selected
+                stateDescription = selectionState
+                onLongClick(label = selectionDescription) {
+                    onBeginSelection()
+                    true
+                }
+            }
             .then(
-                if (previewEnabled) {
-                    Modifier.semantics { contentDescription = previewDescription }.clickable(
-                        role = Role.Button,
-                        onClickLabel = previewDescription,
-                        onClick = onPreview,
+                if (selectionActive || previewEnabled) {
+                    Modifier.clickable(
+                        role = if (selectionActive) Role.Checkbox else Role.Button,
+                        onClickLabel = if (selectionActive) selectionDescription else previewDescription,
+                        onClick = if (selectionActive) onToggleSelection else onPreview,
                     )
                 } else Modifier
             ),
@@ -299,14 +405,32 @@ private fun MediaGalleryTile(
                     .padding(horizontal = 7.dp, vertical = 4.dp),
             )
         }
-        Box(Modifier.align(Alignment.TopEnd).padding(2.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f))) {
-            ToolIconButton(
-                LucideR.drawable.lucide_ic_ellipsis_vertical,
-                stringResource(R.string.media_actions, item.name),
-                onActions,
-                enabled = actionsEnabled,
-                tint = Color.White,
-            )
+        if (selectionActive) {
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(8.dp).size(28.dp).clip(CircleShape)
+                    .background(if (selected) AppAccent else Color.Black.copy(alpha = 0.62f))
+                    .border(2.dp, Color.White, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Icon(
+                        painterResource(LucideR.drawable.lucide_ic_check),
+                        contentDescription = null,
+                        tint = Color.Black,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        } else {
+            Box(Modifier.align(Alignment.TopEnd).padding(2.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f))) {
+                ToolIconButton(
+                    LucideR.drawable.lucide_ic_ellipsis_vertical,
+                    stringResource(R.string.media_actions, item.name),
+                    onActions,
+                    enabled = actionsEnabled,
+                    tint = Color.White,
+                )
+            }
         }
     }
 }

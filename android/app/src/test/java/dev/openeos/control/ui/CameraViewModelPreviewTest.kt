@@ -191,4 +191,29 @@ class CameraViewModelPreviewTest {
         assertTrue(viewModel.uiState.value.previewMode)
         assertFalse(CameraOperation.MEDIA in viewModel.uiState.value.pendingOperations)
     }
+
+    @Test
+    fun previewMediaBatchActionsUpdateAndDeleteEverySelectedItem() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+        val selected = viewModel.uiState.value.mediaItems.take(2)
+
+        viewModel.setMediaProtectionBatch(selected, false)
+        advanceUntilIdle()
+
+        assertTrue(
+            viewModel.uiState.value.mediaItems
+                .filter { current -> selected.any { it.id == current.id } }
+                .all { it.protected == false },
+        )
+        assertEquals(2, viewModel.uiState.value.lastMediaBatchResult?.succeededItems)
+        assertEquals(MediaBatchOperation.UNPROTECT, viewModel.uiState.value.lastMediaBatchResult?.operation)
+
+        viewModel.deleteMediaBatch(selected)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.mediaItems.none { current -> selected.any { it.id == current.id } })
+        assertEquals(2, viewModel.uiState.value.lastMediaBatchResult?.succeededItems)
+        assertEquals(MediaBatchOperation.DELETE, viewModel.uiState.value.lastMediaBatchResult?.operation)
+    }
 }

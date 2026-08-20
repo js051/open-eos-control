@@ -399,4 +399,26 @@
     <string name="media_raw_badge">RAW</string>
     <string name="media_viewer_position">第 %1$d 個，共 %2$d 個</string>
     <string name="reset_media_zoom">重設縮放</string>
+    <string name="select_media_item">選取 %1$s</string>
+    <string name="media_item_selected">已選取</string>
+    <string name="media_item_not_selected">未選取</string>
+    <string name="exit_media_selection">離開媒體選取模式</string>
+    <string name="media_selected_count">已選取 %1$d 個</string>
+    <string name="select_all_media">選取目前顯示的全部媒體</string>
+    <string name="clear_media_selection">清除媒體選取</string>
+    <string name="download_selected_media">下載選取的 %1$d 個項目</string>
+    <string name="edit_selected_media">編輯選取的 %1$d 個項目</string>
+    <string name="delete_selected_media">刪除選取的 %1$d 個項目</string>
+    <string name="delete_selected_media_title">永久刪除 %1$d 個項目？</string>
+    <string name="delete_selected_media_confirmation">確定要從相機儲存卡永久刪除選取的 %1$d 個項目嗎？相機拒絕刪除的項目會保持選取。此操作無法復原。</string>
+    <string name="protect_selected_media">全部保護</string>
+    <string name="unprotect_selected_media">全部取消保護</string>
+    <string name="archive_selected_media">全部封存</string>
+    <string name="unarchive_selected_media">全部取消封存</string>
+    <string name="clear_selected_media_rating">清除選取項目的評分</string>
+    <string name="set_selected_media_rating">將選取項目設為 %1$d 星</string>
+    <string name="media_batch_progress">第 %1$d 個，共 %2$d 個：%3$s</string>
+    <string name="media_batch_complete">已完成 %1$d／%2$d 個項目。</string>
+    <string name="media_batch_partial">已完成 %1$d／%2$d 個項目；%3$d 個失敗，可保持選取後重試。</string>
+    <string name="media_batch_failed_items">失敗項目：%1$s</string>
 </resources>

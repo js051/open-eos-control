@@ -42,6 +42,25 @@ enum class MediaLibraryLoadStatus { NOT_LOADED, LOADING, COMPLETE, CANCELLED, FA
 
 enum class MediaLibraryScope { RECENT, ALL }
 
+enum class MediaBatchOperation { DOWNLOAD, PROTECT, UNPROTECT, ARCHIVE, UNARCHIVE, RATE, ROTATE, DELETE }
+
+data class MediaBatchProgress(
+    val operation: MediaBatchOperation,
+    val completedItems: Int,
+    val totalItems: Int,
+    val currentItemName: String,
+)
+
+data class MediaBatchResult(
+    val operation: MediaBatchOperation,
+    val totalItems: Int,
+    val succeededItems: Int,
+    val failedItemNames: List<String>,
+) {
+    val failedItems: Int
+        get() = failedItemNames.size
+}
+
 data class LiveViewDiagnostics(
     val observedFps: Double = 0.0,
     val frameBytes: Int? = null,
@@ -90,6 +109,8 @@ data class CameraUiState(
     val mediaUploadProgress: CameraMediaTransferProgress? = null,
     val lastUploadedMediaName: String? = null,
     val lastDeletedMediaName: String? = null,
+    val mediaBatchProgress: MediaBatchProgress? = null,
+    val lastMediaBatchResult: MediaBatchResult? = null,
     val liveViewFrameUrl: String? = null,
     val liveViewBitmap: Bitmap? = null,
     val nativeLiveViewSession: NativeLiveViewSession? = null,

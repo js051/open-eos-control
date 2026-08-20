@@ -259,6 +259,58 @@ class MediaLibraryTest {
     }
 
     @Test
+    fun selectionDragAddsAContiguousRangeAndRestoresItemsWhenDraggedBack() {
+        val items = (1..5).map { media("item-$it", "IMG_000$it.JPG") }
+        val (started, drag) = beginMediaSelectionDrag(items, setOf("item-5"), "item-2")
+
+        assertEquals(setOf("item-2", "item-5"), started)
+        assertEquals(
+            setOf("item-2", "item-3", "item-4", "item-5"),
+            applyMediaSelectionDrag(items, requireNotNull(drag), 3),
+        )
+        assertEquals(
+            setOf("item-2", "item-3", "item-5"),
+            applyMediaSelectionDrag(items, drag, 2),
+        )
+    }
+
+    @Test
+    fun selectionDragCanRemoveARangeWithoutClearingTheBaselineOutsideIt() {
+        val items = (1..5).map { media("item-$it", "IMG_000$it.JPG") }
+        val selected = items.mapTo(linkedSetOf(), CameraMediaItem::id)
+        val (started, drag) = beginMediaSelectionDrag(items, selected, "item-4")
+
+        assertEquals(selected - "item-4", started)
+        assertEquals(
+            setOf("item-1", "item-5"),
+            applyMediaSelectionDrag(items, requireNotNull(drag), 1),
+        )
+        assertEquals(selected, toggleMediaSelection(selected - "item-3", "item-3"))
+    }
+
+    @Test
+    fun mediaBatchContinuesAfterAnItemFailureAndReportsTheExactResult() = runTest {
+        val items = listOf(
+            media("one", "IMG_0001.JPG"),
+            media("two", "IMG_0002.JPG"),
+            media("three", "IMG_0003.JPG"),
+        )
+        val attempted = mutableListOf<String>()
+        val progress = mutableListOf<MediaBatchProgress>()
+
+        val result = executeMediaBatch(items, MediaBatchOperation.DELETE, progress::add) { item ->
+            attempted += item.id
+            if (item.id == "two") error("camera rejected item")
+        }
+
+        assertEquals(listOf("one", "two", "three"), attempted)
+        assertEquals(listOf(0, 1, 2), progress.map(MediaBatchProgress::completedItems))
+        assertEquals(2, result.succeededItems)
+        assertEquals(3, result.totalItems)
+        assertEquals(listOf("IMG_0002.JPG"), result.failedItemNames)
+    }
+
+    @Test
     fun recentEventItemsReplaceDuplicatesWithoutDiscardingTheLoadedLibrary() {
         val updated = media("shared", "IMG_0100.JPG")
         val existing = listOf(

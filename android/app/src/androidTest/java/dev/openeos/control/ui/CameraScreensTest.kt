@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -29,10 +30,12 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -41,6 +44,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.annotation.StringRes
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsCompat
@@ -2197,6 +2201,146 @@ class CameraScreensTest {
         ).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.delete)).performClick()
         compose.runOnIdle { assertEquals("R6M3_0001.CR3", deletedName) }
+    }
+
+    @Test
+    fun mediaLongPressEntersSelectionAndTapsToggleAdditionalItems() {
+        val items = listOf(
+            CameraMediaItem("one", "IMG_0001.JPG", "image", previewAvailable = true),
+            CameraMediaItem("two", "IMG_0002.JPG", "image", previewAvailable = true),
+            CameraMediaItem("three", "IMG_0003.JPG", "image", previewAvailable = true),
+        )
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA, mediaItems = items)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, items[0].name))
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithText(resourceText(R.string.media_selected_count, 1)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, items[1].name))
+            .performClick()
+        compose.onNodeWithText(resourceText(R.string.media_selected_count, 2)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, items[0].name))
+            .performClick()
+        compose.onNodeWithText(resourceText(R.string.media_selected_count, 1)).assertIsDisplayed()
+    }
+
+    @Test
+    fun mediaLongPressDragSelectsEveryTileCrossedByTheGesture() {
+        val items = (1..3).map { index ->
+            CameraMediaItem("item-$index", "IMG_000$index.JPG", "image")
+        }
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA, mediaItems = items)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, items[0].name))
+            .performTouchInput {
+                down(center)
+                advanceEventTime(750)
+                moveTo(Offset(center.x + width * 2f, center.y))
+                advanceEventTime(100)
+                up()
+            }
+
+        compose.onNodeWithText(resourceText(R.string.media_selected_count, 3)).assertIsDisplayed()
+    }
+
+    @Test
+    fun selectedMediaDeleteRequiresOneConfirmationAndDispatchesTheBatch() {
+        val items = listOf(
+            CameraMediaItem("one", "IMG_0001.JPG", "image", previewAvailable = true),
+            CameraMediaItem("two", "IMG_0002.JPG", "image", previewAvailable = true),
+        )
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA, mediaItems = items)
+        var deleted = emptyList<CameraMediaItem>()
+        val actions = noOpActions().copy(deleteMediaBatch = { deleted = it })
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, actions) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, items[0].name))
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, items[1].name))
+            .performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 2)).performClick()
+        compose.runOnIdle { assertEquals(emptyList<CameraMediaItem>(), deleted) }
+        compose.onNodeWithText(resourceText(R.string.delete_selected_media_confirmation, 2)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.delete)).performClick()
+        compose.runOnIdle { assertEquals(items, deleted) }
+    }
+
+    @Test
+    fun selectedMediaMetadataActionDispatchesTheCompleteSelection() {
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA)
+        val selected = state.mediaItems.take(2)
+        var protectedItems = emptyList<CameraMediaItem>()
+        var protection: Boolean? = null
+        val actions = noOpActions().copy(
+            setMediaProtectionBatch = { items, enabled ->
+                protectedItems = items
+                protection = enabled
+            },
+        )
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, actions) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, selected[0].name))
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, selected[1].name))
+            .performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.edit_selected_media, 2)).performClick()
+        compose.onNodeWithText(resourceText(R.string.protect_selected_media)).performClick()
+
+        compose.runOnIdle {
+            assertEquals(selected, protectedItems)
+            assertEquals(true, protection)
+        }
+    }
+
+    @Test
+    fun mediaSelectionActionsRemainReachableInTraditionalChineseAtLargeText() {
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA)
+        val first = state.mediaItems.first()
+        assertTrue(state.supports(CameraFeature.MEDIA_PROTECT))
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.3f)) {
+                    DeviceConfigurationOverride(
+                        DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
+                    ) {
+                        MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) }
+                    }
+                }
+            }
+        }
+
+        compose.onNodeWithContentDescription("選取 ${first.name}")
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithText("已選取 1 個").assertIsDisplayed()
+        compose.onNodeWithContentDescription("選取目前顯示的全部媒體").assertIsDisplayed()
+        compose.onNodeWithContentDescription("下載選取的 1 個項目").assertIsDisplayed()
+        compose.onNodeWithContentDescription("刪除選取的 1 個項目").assertIsDisplayed()
+        compose.onNodeWithContentDescription("編輯選取的 1 個項目").performClick()
+        compose.onNodeWithTag("media-batch-metadata-sheet").assertIsDisplayed()
+        compose.onNodeWithText(
+            resourceText(R.string.protect_selected_media),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
+        compose.onNodeWithText(
+            resourceText(R.string.unprotect_selected_media),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
     }
 
     @Test
