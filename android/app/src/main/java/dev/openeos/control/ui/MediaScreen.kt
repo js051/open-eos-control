@@ -1,5 +1,6 @@
 package dev.openeos.control.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -55,12 +56,31 @@ import java.util.Locale
 @Composable
 fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     var pendingDownload by remember { mutableStateOf<CameraMediaItem?>(null) }
+    var pendingBatchDownload by remember { mutableStateOf<List<CameraMediaItem>?>(null) }
     var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
+    var pendingBatchDelete by remember { mutableStateOf<List<CameraMediaItem>?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
+    var batchMetadataVisible by remember { mutableStateOf(false) }
     var mediaFilter by remember { mutableStateOf(MediaFilter.ALL) }
     var mediaSort by remember { mutableStateOf(MediaSort.NEWEST) }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var selectionDrag by remember { mutableStateOf<MediaSelectionDrag?>(null) }
     val displayedItems = remember(state.mediaItems, mediaFilter, mediaSort) {
         mediaItemsForDisplay(state.mediaItems, mediaFilter, mediaSort)
+    }
+    val selectedItems = remember(state.mediaItems, selectedIds) {
+        state.mediaItems.filter { it.id in selectedIds }
+    }
+    val allDisplayedSelected = displayedItems.isNotEmpty() && displayedItems.all { it.id in selectedIds }
+
+    BackHandler(enabled = selectedIds.isNotEmpty()) {
+        selectedIds = emptySet()
+        selectionDrag = null
+        batchMetadataVisible = false
+    }
+    LaunchedEffect(state.mediaItems) {
+        val availableIds = state.mediaItems.mapTo(hashSetOf(), CameraMediaItem::id)
+        selectedIds = selectedIds.intersect(availableIds)
     }
     val createDocument = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -71,6 +91,11 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     }
     val openUploadDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { source ->
         if (source != null) actions.uploadMedia(source)
+    }
+    val openDownloadFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { folder ->
+        val items = pendingBatchDownload
+        pendingBatchDownload = null
+        if (folder != null && !items.isNullOrEmpty()) actions.downloadMediaBatch(items, folder)
     }
 
     state.mediaPreviewItem?.let { item ->
@@ -132,6 +157,46 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         )
     }
 
+    pendingBatchDelete?.let { items ->
+        AlertDialog(
+            onDismissRequest = { pendingBatchDelete = null },
+            title = { Text(stringResource(R.string.delete_selected_media_title, items.size)) },
+            text = { Text(stringResource(R.string.delete_selected_media_confirmation, items.size)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingBatchDelete = null
+                        actions.deleteMediaBatch(items)
+                    },
+                ) {
+                    Text(stringResource(R.string.delete), color = AppRecord)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingBatchDelete = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    if (batchMetadataVisible && selectedItems.isNotEmpty()) {
+        MediaBatchMetadataSheet(
+            itemCount = selectedItems.size,
+            busy = state.isBusy(CameraOperation.MEDIA),
+            protectSupported = state.supports(CameraFeature.MEDIA_PROTECT),
+            archiveSupported = state.supports(CameraFeature.MEDIA_ARCHIVE),
+            ratingSupported = state.supports(CameraFeature.MEDIA_RATING) &&
+                selectedItems.any { it.ratingWritable != false },
+            rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
+            onDismiss = { batchMetadataVisible = false },
+            onProtect = { actions.setMediaProtectionBatch(selectedItems, it) },
+            onArchive = { actions.setMediaArchivedBatch(selectedItems, it) },
+            onRate = { actions.setMediaRatingBatch(selectedItems, it) },
+            onRotate = { actions.setMediaRotationBatch(selectedItems, it) },
+        )
+    }
+
     activeMetadataItemId?.let { itemId ->
         val item = state.mediaItems.firstOrNull { it.id == itemId }
         if (item != null) {
@@ -175,68 +240,97 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToolIconButton(
-                LucideR.drawable.lucide_ic_arrow_left,
-                stringResource(R.string.back_to_camera),
-                { actions.setUiMode(UiMode.CONTROL) },
-            )
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.camera_media), color = AppText, fontWeight = FontWeight.Bold)
-                val sortLabel = stringResource(mediaSort.labelResource)
-                Text(
-                    when (state.mediaLibraryLoadStatus) {
-                        MediaLibraryLoadStatus.LOADING -> stringResource(
-                            R.string.media_loading_count_sort,
-                            state.mediaItems.size,
-                            sortLabel,
-                        )
-                        MediaLibraryLoadStatus.CANCELLED -> stringResource(
-                            R.string.media_cancelled_count_sort,
-                            state.mediaItems.size,
-                            sortLabel,
-                        )
-                        MediaLibraryLoadStatus.FAILED -> stringResource(
-                            R.string.media_failed_count_sort,
-                            state.mediaItems.size,
-                            sortLabel,
-                        )
-                        MediaLibraryLoadStatus.NOT_LOADED -> stringResource(
-                            R.string.media_not_loaded_count_sort,
-                            state.mediaItems.size,
-                            sortLabel,
-                        )
-                        MediaLibraryLoadStatus.COMPLETE -> stringResource(
-                            if (state.mediaLibraryScope == MediaLibraryScope.RECENT) {
-                                R.string.media_recent_item_count_sort
-                            } else {
-                                R.string.media_item_count_sort
-                            },
-                            state.mediaItems.size,
-                            sortLabel,
-                        )
+            if (selectedIds.isNotEmpty()) {
+                MediaSelectionTopBar(
+                    selectedCount = selectedItems.size,
+                    allDisplayedSelected = allDisplayedSelected,
+                    busy = state.isBusy(CameraOperation.MEDIA),
+                    downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+                    metadataSupported =
+                    state.supports(CameraFeature.MEDIA_PROTECT) ||
+                        state.supports(CameraFeature.MEDIA_ARCHIVE) ||
+                        state.supports(CameraFeature.MEDIA_RATING) ||
+                        state.supports(CameraFeature.MEDIA_ROTATE),
+                    deleteSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DELETE),
+                    onExit = { selectedIds = emptySet() },
+                    onToggleSelectAll = {
+                        selectedIds = if (allDisplayedSelected) {
+                            emptySet()
+                        } else {
+                            displayedItems.mapTo(hashSetOf(), CameraMediaItem::id)
+                        }
                     },
-                    color = AppSubtleText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    onDownload = {
+                        pendingBatchDownload = selectedItems
+                        openDownloadFolder.launch(null)
+                    },
+                    onEdit = { batchMetadataVisible = true },
+                    onDelete = { pendingBatchDelete = selectedItems },
                 )
-            }
-            if (state.supports(CameraFeature.MEDIA_UPLOAD)) {
+            } else {
                 ToolIconButton(
-                    LucideR.drawable.lucide_ic_upload,
-                    stringResource(R.string.upload_media),
-                    { openUploadDocument.launch(arrayOf("image/*", "video/*", "application/octet-stream")) },
+                    LucideR.drawable.lucide_ic_arrow_left,
+                    stringResource(R.string.back_to_camera),
+                    { actions.setUiMode(UiMode.CONTROL) },
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.camera_media), color = AppText, fontWeight = FontWeight.Bold)
+                    val sortLabel = stringResource(mediaSort.labelResource)
+                    Text(
+                        when (state.mediaLibraryLoadStatus) {
+                            MediaLibraryLoadStatus.LOADING -> stringResource(
+                                R.string.media_loading_count_sort,
+                                state.mediaItems.size,
+                                sortLabel,
+                            )
+                            MediaLibraryLoadStatus.CANCELLED -> stringResource(
+                                R.string.media_cancelled_count_sort,
+                                state.mediaItems.size,
+                                sortLabel,
+                            )
+                            MediaLibraryLoadStatus.FAILED -> stringResource(
+                                R.string.media_failed_count_sort,
+                                state.mediaItems.size,
+                                sortLabel,
+                            )
+                            MediaLibraryLoadStatus.NOT_LOADED -> stringResource(
+                                R.string.media_not_loaded_count_sort,
+                                state.mediaItems.size,
+                                sortLabel,
+                            )
+                            MediaLibraryLoadStatus.COMPLETE -> stringResource(
+                                if (state.mediaLibraryScope == MediaLibraryScope.RECENT) {
+                                    R.string.media_recent_item_count_sort
+                                } else {
+                                    R.string.media_item_count_sort
+                                },
+                                state.mediaItems.size,
+                                sortLabel,
+                            )
+                        },
+                        color = AppSubtleText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (state.supports(CameraFeature.MEDIA_UPLOAD)) {
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_upload,
+                        stringResource(R.string.upload_media),
+                        { openUploadDocument.launch(arrayOf("image/*", "video/*", "application/octet-stream")) },
+                        enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
+                    )
+                }
+                MediaSortButton(mediaSort, onSort = { mediaSort = it })
+                ToolIconButton(
+                    if (state.mediaLibraryLoading) LucideR.drawable.lucide_ic_x else LucideR.drawable.lucide_ic_refresh_cw,
+                    stringResource(
+                        if (state.mediaLibraryLoading) R.string.cancel_loading_media else R.string.refresh_media,
+                    ),
+                    if (state.mediaLibraryLoading) actions.cancelMediaLibraryLoad else actions.refreshMedia,
                     enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
                 )
             }
-            MediaSortButton(mediaSort, onSort = { mediaSort = it })
-            ToolIconButton(
-                if (state.mediaLibraryLoading) LucideR.drawable.lucide_ic_x else LucideR.drawable.lucide_ic_refresh_cw,
-                stringResource(
-                    if (state.mediaLibraryLoading) R.string.cancel_loading_media else R.string.refresh_media,
-                ),
-                if (state.mediaLibraryLoading) actions.cancelMediaLibraryLoad else actions.refreshMedia,
-                enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
-            )
         }
 
         MediaLibraryScopeBar(
@@ -332,6 +426,46 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             )
         }
 
+        state.mediaBatchProgress?.let { progress ->
+            Text(
+                stringResource(
+                    R.string.media_batch_progress,
+                    progress.completedItems + 1,
+                    progress.totalItems,
+                    progress.currentItemName,
+                ),
+                color = AppSubtleText,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        state.lastMediaBatchResult?.let { result ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(
+                    stringResource(
+                        if (result.failedItems == 0) R.string.media_batch_complete else R.string.media_batch_partial,
+                        result.succeededItems,
+                        result.totalItems,
+                        result.failedItems,
+                    ),
+                    color = if (result.failedItems == 0) AppSuccess else AppWarning,
+                )
+                if (result.failedItemNames.isNotEmpty()) {
+                    Text(
+                        stringResource(
+                            R.string.media_batch_failed_items,
+                            result.failedItemNames.take(3).joinToString(", "),
+                        ),
+                        color = AppSubtleText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
         when {
             !state.supports(CameraFeature.MEDIA_BROWSER) -> MediaMessage(R.string.media_not_supported)
             state.mediaItems.isEmpty() && state.mediaLibraryLoadStatus == MediaLibraryLoadStatus.CANCELLED ->
@@ -345,8 +479,22 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 sort = mediaSort,
                 state = state,
                 actions = actions,
+                selectedIds = selectedIds,
                 onPreview = actions.openMediaPreview,
                 onActions = { activeMetadataItemId = it.id },
+                onToggleSelection = { itemId -> selectedIds = toggleMediaSelection(selectedIds, itemId) },
+                onSelectionDragStart = { itemId ->
+                    val (updated, drag) = beginMediaSelectionDrag(displayedItems, selectedIds, itemId)
+                    selectedIds = updated
+                    selectionDrag = drag
+                },
+                onSelectionDrag = { itemId ->
+                    selectionDrag?.let { drag ->
+                        val index = displayedItems.indexOfFirst { it.id == itemId }
+                        if (index >= 0) selectedIds = applyMediaSelectionDrag(displayedItems, drag, index)
+                    }
+                },
+                onSelectionDragEnd = { selectionDrag = null },
             )
         }
     }

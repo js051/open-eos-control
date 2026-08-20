@@ -21,6 +21,47 @@ data class MediaDateGroup(
     val items: List<CameraMediaItem>,
 )
 
+data class MediaSelectionDrag(
+    val anchorIndex: Int,
+    val baseline: Set<String>,
+    val selecting: Boolean,
+)
+
+internal fun beginMediaSelectionDrag(
+    items: List<CameraMediaItem>,
+    selectedIds: Set<String>,
+    itemId: String,
+): Pair<Set<String>, MediaSelectionDrag?> {
+    val anchorIndex = items.indexOfFirst { it.id == itemId }
+    if (anchorIndex < 0) return selectedIds to null
+    val drag = MediaSelectionDrag(
+        anchorIndex = anchorIndex,
+        baseline = selectedIds,
+        selecting = itemId !in selectedIds,
+    )
+    return applyMediaSelectionDrag(items, drag, anchorIndex) to drag
+}
+
+internal fun applyMediaSelectionDrag(
+    items: List<CameraMediaItem>,
+    drag: MediaSelectionDrag,
+    currentIndex: Int,
+): Set<String> {
+    if (items.isEmpty() || currentIndex !in items.indices || drag.anchorIndex !in items.indices) {
+        return drag.baseline
+    }
+    val range = if (drag.anchorIndex <= currentIndex) {
+        drag.anchorIndex..currentIndex
+    } else {
+        currentIndex..drag.anchorIndex
+    }
+    val rangeIds = range.mapTo(hashSetOf()) { items[it].id }
+    return if (drag.selecting) drag.baseline + rangeIds else drag.baseline - rangeIds
+}
+
+internal fun toggleMediaSelection(selectedIds: Set<String>, itemId: String): Set<String> =
+    if (itemId in selectedIds) selectedIds - itemId else selectedIds + itemId
+
 internal fun <Value : Any> touchMediaCacheEntry(values: Map<String, Value>, id: String): Map<String, Value> {
     val value = values[id] ?: return values
     return values.filterKeys { it != id } + (id to value)

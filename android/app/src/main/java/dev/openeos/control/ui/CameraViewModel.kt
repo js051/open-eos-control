@@ -1,9 +1,11 @@
 package dev.openeos.control.ui
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -49,6 +51,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.URLConnection
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 
@@ -79,6 +82,62 @@ private fun List<CameraMediaItem>.toMediaLibraryBatch(scope: MediaLibraryScope):
     } else {
         MediaLibraryBatch(this, false)
     }
+
+internal suspend fun executeMediaBatch(
+    items: List<CameraMediaItem>,
+    operation: MediaBatchOperation,
+    onProgress: (MediaBatchProgress) -> Unit = {},
+    action: suspend (CameraMediaItem) -> Unit,
+): MediaBatchResult {
+    val uniqueItems = items.distinctBy(CameraMediaItem::id)
+    val failures = mutableListOf<String>()
+    var succeeded = 0
+    uniqueItems.forEachIndexed { index, item ->
+        onProgress(
+            MediaBatchProgress(
+                operation = operation,
+                completedItems = index,
+                totalItems = uniqueItems.size,
+                currentItemName = item.name,
+            ),
+        )
+        try {
+            action(item)
+            succeeded += 1
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            exception.printStackTrace()
+            failures += item.name
+        }
+    }
+    return MediaBatchResult(
+        operation = operation,
+        totalItems = uniqueItems.size,
+        succeededItems = succeeded,
+        failedItemNames = failures,
+    )
+}
+
+private fun createMediaDocument(
+    resolver: ContentResolver,
+    destinationTree: Uri,
+    item: CameraMediaItem,
+): Uri {
+    val parent = DocumentsContract.buildDocumentUriUsingTree(
+        destinationTree,
+        DocumentsContract.getTreeDocumentId(destinationTree),
+    )
+    val filename = item.name.substringAfterLast('/').ifBlank { "camera-media" }
+    val contentType = item.contentType
+        ?.substringBefore(';')
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: URLConnection.guessContentTypeFromName(filename)
+        ?: "application/octet-stream"
+    return DocumentsContract.createDocument(resolver, parent, contentType, filename)
+        ?: error("Android could not create $filename in the selected folder.")
+}
 
 internal fun mergeRecentMedia(
     recent: List<CameraMediaItem>,
@@ -1084,6 +1143,7 @@ class CameraViewModel(
                         lastDownloadedMediaName = null,
                         lastUploadedMediaName = null,
                         lastDeletedMediaName = null,
+                        lastMediaBatchResult = null,
                     )
                 }
                 refreshCapabilityEvidence()
@@ -1293,6 +1353,46 @@ class CameraViewModel(
         ) { repository.setMediaRotation(item, degrees) }
     }
 
+    fun setMediaProtectionBatch(items: List<CameraMediaItem>, enabled: Boolean) = updateMediaMetadataBatch(
+        items = items,
+        feature = CameraFeature.MEDIA_PROTECT,
+        operation = if (enabled) MediaBatchOperation.PROTECT else MediaBatchOperation.UNPROTECT,
+        previewUpdate = { it.copy(protected = enabled) },
+    ) { item -> repository.setMediaProtection(item, enabled) }
+
+    fun setMediaArchivedBatch(items: List<CameraMediaItem>, enabled: Boolean) = updateMediaMetadataBatch(
+        items = items,
+        feature = CameraFeature.MEDIA_ARCHIVE,
+        operation = if (enabled) MediaBatchOperation.ARCHIVE else MediaBatchOperation.UNARCHIVE,
+        previewUpdate = { it.copy(archived = enabled) },
+    ) { item -> repository.setMediaArchived(item, enabled) }
+
+    fun setMediaRatingBatch(items: List<CameraMediaItem>, rating: Int) {
+        if (rating !in 0..5) return
+        updateMediaMetadataBatch(
+            items = items,
+            feature = CameraFeature.MEDIA_RATING,
+            operation = MediaBatchOperation.RATE,
+            previewUpdate = {
+                check(it.ratingWritable != false) { "${it.name} does not allow rating changes." }
+                it.copy(rating = rating)
+            },
+        ) { item ->
+            check(item.ratingWritable != false) { "${item.name} does not allow rating changes." }
+            repository.setMediaRating(item, rating)
+        }
+    }
+
+    fun setMediaRotationBatch(items: List<CameraMediaItem>, degrees: Int) {
+        if (degrees !in setOf(0, 90, 180, 270)) return
+        updateMediaMetadataBatch(
+            items = items,
+            feature = CameraFeature.MEDIA_ROTATE,
+            operation = MediaBatchOperation.ROTATE,
+            previewUpdate = { it.copy(rotationDegrees = degrees) },
+        ) { item -> repository.setMediaRotation(item, degrees) }
+    }
+
     private fun updateMediaMetadata(
         item: CameraMediaItem,
         feature: CameraFeature,
@@ -1314,6 +1414,37 @@ class CameraViewModel(
         }
     }
 
+    private fun updateMediaMetadataBatch(
+        items: List<CameraMediaItem>,
+        feature: CameraFeature,
+        operation: MediaBatchOperation,
+        previewUpdate: (CameraMediaItem) -> CameraMediaItem,
+        update: suspend (CameraMediaItem) -> CameraMediaItem,
+    ) {
+        val state = _uiState.value
+        val selectedItems = items.distinctBy(CameraMediaItem::id)
+        if (selectedItems.isEmpty() || state.isBusy(CameraOperation.MEDIA) || !state.supports(feature)) return
+        _uiState.update { it.copy(lastMediaBatchResult = null) }
+        runCamera(CameraOperation.MEDIA) {
+            val result = executeMediaBatch(
+                items = selectedItems,
+                operation = operation,
+                onProgress = { progress ->
+                    _uiState.update { current -> current.copy(mediaBatchProgress = progress) }
+                },
+            ) { item ->
+                val updated = if (state.previewMode) previewUpdate(item) else update(item)
+                _uiState.update { current -> current.withUpdatedMedia(updated) }
+            }
+            _uiState.update {
+                it.copy(
+                    mediaBatchProgress = null,
+                    lastMediaBatchResult = result,
+                )
+            }
+        }
+    }
+
     fun downloadMedia(context: Context, item: CameraMediaItem, destination: Uri) {
         if (
             _uiState.value.previewMode ||
@@ -1326,6 +1457,7 @@ class CameraViewModel(
                 activeMediaDownloadName = item.name,
                 mediaDownloadProgress = CameraMediaTransferProgress(0L, item.sizeBytes),
                 lastDownloadedMediaName = null,
+                lastMediaBatchResult = null,
             )
         }
         val job = launchCameraOperation(CameraOperation.MEDIA) {
@@ -1348,6 +1480,72 @@ class CameraViewModel(
             } finally {
                 _uiState.update {
                     it.copy(activeMediaDownloadName = null, mediaDownloadProgress = null)
+                }
+            }
+        }
+        mediaDownloadJob = job
+        job?.invokeOnCompletion {
+            if (mediaDownloadJob === job) mediaDownloadJob = null
+        }
+    }
+
+    fun downloadMediaBatch(context: Context, items: List<CameraMediaItem>, destinationTree: Uri) {
+        val state = _uiState.value
+        val selectedItems = items.distinctBy(CameraMediaItem::id)
+        if (
+            selectedItems.isEmpty() ||
+            state.previewMode ||
+            state.isBusy(CameraOperation.MEDIA) ||
+            !state.supports(CameraFeature.MEDIA_DOWNLOAD) ||
+            mediaDownloadJob != null
+        ) return
+        val resolver = context.applicationContext.contentResolver
+        _uiState.update { it.copy(lastDownloadedMediaName = null, lastMediaBatchResult = null) }
+        val job = launchCameraOperation(CameraOperation.MEDIA) {
+            try {
+                val result = executeMediaBatch(
+                    items = selectedItems,
+                    operation = MediaBatchOperation.DOWNLOAD,
+                    onProgress = { progress ->
+                        _uiState.update {
+                            it.copy(
+                                mediaBatchProgress = progress,
+                                activeMediaDownloadName = progress.currentItemName,
+                                mediaDownloadProgress = CameraMediaTransferProgress(
+                                    0L,
+                                    selectedItems.firstOrNull { item -> item.name == progress.currentItemName }?.sizeBytes,
+                                ),
+                            )
+                        }
+                    },
+                ) { item ->
+                    var destination: Uri? = null
+                    try {
+                        withContext(Dispatchers.IO) {
+                            destination = createMediaDocument(resolver, destinationTree, item)
+                            val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
+                                ?: error("Android could not open the selected download destination.")
+                            BufferedOutputStream(rawOutput).use { output ->
+                                repository.downloadMedia(item, output) { progress ->
+                                    _uiState.update { current -> current.copy(mediaDownloadProgress = progress) }
+                                }
+                            }
+                        }
+                    } catch (exception: Exception) {
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            destination?.let { runCatching { resolver.delete(it, null, null) } }
+                        }
+                        throw exception
+                    }
+                }
+                _uiState.update { it.copy(lastMediaBatchResult = result) }
+            } finally {
+                _uiState.update {
+                    it.copy(
+                        mediaBatchProgress = null,
+                        activeMediaDownloadName = null,
+                        mediaDownloadProgress = null,
+                    )
                 }
             }
         }
@@ -1563,6 +1761,7 @@ class CameraViewModel(
     fun deleteMedia(item: CameraMediaItem) {
         val state = _uiState.value
         if (state.isBusy(CameraOperation.MEDIA) || !state.supports(CameraFeature.MEDIA_DELETE)) return
+        _uiState.update { it.copy(lastMediaBatchResult = null) }
         if (state.previewMode) {
             applyDeletedMedia(item)
             refreshCaptureReview(_uiState.value.mediaItems)
@@ -1572,6 +1771,39 @@ class CameraViewModel(
             repository.deleteMedia(item)
             applyDeletedMedia(item)
             refreshCaptureReview()
+        }
+    }
+
+    fun deleteMediaBatch(items: List<CameraMediaItem>) {
+        val state = _uiState.value
+        val selectedItems = items.distinctBy(CameraMediaItem::id)
+        if (
+            selectedItems.isEmpty() ||
+            state.isBusy(CameraOperation.MEDIA) ||
+            !state.supports(CameraFeature.MEDIA_DELETE)
+        ) return
+        _uiState.update { it.copy(lastMediaBatchResult = null) }
+        runCamera(CameraOperation.MEDIA) {
+            val result = executeMediaBatch(
+                items = selectedItems,
+                operation = MediaBatchOperation.DELETE,
+                onProgress = { progress ->
+                    _uiState.update { current -> current.copy(mediaBatchProgress = progress) }
+                },
+            ) { item ->
+                if (!state.previewMode) repository.deleteMedia(item)
+                applyDeletedMedia(item)
+            }
+            if (result.succeededItems > 0) {
+                if (state.previewMode) refreshCaptureReview(_uiState.value.mediaItems) else refreshCaptureReview()
+            }
+            _uiState.update {
+                it.copy(
+                    mediaBatchProgress = null,
+                    lastMediaBatchResult = result,
+                    lastDeletedMediaName = null,
+                )
+            }
         }
     }
 
@@ -2092,6 +2324,8 @@ class CameraViewModel(
         mediaUploadProgress = null,
         lastUploadedMediaName = null,
         lastDeletedMediaName = null,
+        mediaBatchProgress = null,
+        lastMediaBatchResult = null,
         liveViewFrameUrl = null,
         liveViewBitmap = null,
         nativeLiveViewSession = null,
