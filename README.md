@@ -156,6 +156,12 @@ open OpenEOSControl.xcodeproj
 
 GitHub Actions builds an unsigned Simulator app bundle, verifies icon/localization/network/orientation metadata, runs the app unit tests, and exercises eight iPhone Simulator UI workflows. The Simulator-preset network workflow drives the production SwiftUI -> `CameraAppState` -> `OpenEOSCore` path through decoded Live View, exposure, capture, focus, recording, Bulb, media preview/delete, and disconnect. A separate HTTP-preset workflow explicitly selects the Canon client contract and requires `/ccapi` discovery, versioned JPEG Live View, Canon 1.1 long polling, camera-side ISO and still-capture synchronization without manual refresh, and GET/DELETE cleanup. Event refreshes cannot overwrite a newer interactive operation and wait for active media work before re-reading. The workflow intentionally sets `CODE_SIGNING_ALLOWED=NO`, so this build cannot be installed on a physical iPhone and is not published as an IPA. Deterministic Simulator evidence does not replace an on-device iPhone and EOS R6 Mark III validation record. See [docs/ios-ccapi.md](docs/ios-ccapi.md) for details.
 
+## Camera Import Contract
+
+`contracts/camera-import/v1` defines the versioned boundary for handing camera media to a catalog or editing application. Open EOS Control retains ownership of CCAPI/PTP/Bridge sessions, capability discovery, camera media representations, resumable transfers, and transport integrity evidence. A consumer such as Open Negative owns staging, full content hashing, atomic catalog commits, RAW/JPEG development, sidecars, export, and long-term library management.
+
+The release pipeline packages a JSON Schema/fixture ZIP and a pure Kotlin contract JAR for the next development preview. Both use their own contract artifact version and are included in release provenance and checksums. The contract rejects transport locators and private identities, treats grouping as a hint, permits exact duplicate decisions only from a trusted full strong checksum or a consumer-computed full SHA-256, and never allows an import receipt to authorize camera-media deletion. See the [contract README](contracts/camera-import/v1/README.md).
+
 ## Desktop Bridge
 
 The public Bridge also reports a fail-closed `edsdk` engine backed only by a versioned SDK-neutral Python provider contract. No working provider or Canon SDK material is bundled, so real EDSDK control remains research; see [the EDSDK provider boundary](docs/edsdk-provider.md).

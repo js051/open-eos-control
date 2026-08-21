@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "OpenEOSControl"
 include(":app")
+include(":camera-import-contract")

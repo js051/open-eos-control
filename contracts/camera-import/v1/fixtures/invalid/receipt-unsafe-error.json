@@ -1,0 +1,15 @@
+{
+  "contract_version": "1.0",
+  "import_id": "import-demo-0002",
+  "provider_id": "dev.openeos.control",
+  "session_id": "session-demo-0001",
+  "media_id": "media-demo-raw-0002",
+  "outcome": "FAILED",
+  "asset_id": null,
+  "blob_sha256": null,
+  "byte_length": null,
+  "capture_group_id": null,
+  "preserved_representation_ids": [],
+  "safe_error_code": "IOException with implementation detail",
+  "completed_at": "2026-08-21T12:37:00+08:00"
+}

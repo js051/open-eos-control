@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/js051/open-eos-control/contracts/camera-import/v1/transfer-event.schema.json",
+  "title": "CameraImportTransferEventV1",
+  "$comment": "Draft 2020-12 cannot compare sibling numeric fields. Producers and consumers must also enforce bytes_transferred <= total_bytes and completed equality through the packaged semantic rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "provider_id",
+    "session_id",
+    "transfer_id",
+    "media_id",
+    "representation",
+    "state",
+    "bytes_transferred",
+    "total_bytes",
+    "source_revision",
+    "source_checksum",
+    "can_resume",
+    "can_cancel",
+    "cancel_requested",
+    "attempt",
+    "safe_error_code",
+    "retryable",
+    "updated_at",
+    "received_byte_length",
+    "transport_checksum_verified",
+    "sanitized_evidence_id"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "provider_id": { "$ref": "#/$defs/opaqueId" },
+    "session_id": { "$ref": "#/$defs/opaqueId" },
+    "transfer_id": { "$ref": "#/$defs/opaqueId" },
+    "media_id": { "$ref": "#/$defs/opaqueId" },
+    "representation": { "$ref": "#/$defs/representation" },
+    "state": {
+      "enum": ["QUEUED", "RUNNING", "PAUSED", "CANCEL_PENDING", "CANCELLED", "FAILED", "COMPLETED"]
+    },
+    "bytes_transferred": { "type": "integer", "minimum": 0 },
+    "total_bytes": { "type": ["integer", "null"], "minimum": 1 },
+    "source_revision": { "oneOf": [{ "$ref": "#/$defs/opaqueId" }, { "type": "null" }] },
+    "source_checksum": { "oneOf": [{ "$ref": "#/$defs/sourceChecksum" }, { "type": "null" }] },
+    "can_resume": { "type": "boolean" },
+    "can_cancel": { "type": "boolean" },
+    "cancel_requested": { "type": "boolean" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "safe_error_code": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+    "retryable": { "type": "boolean" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "received_byte_length": { "type": ["integer", "null"], "minimum": 0 },
+    "transport_checksum_verified": { "type": ["boolean", "null"] },
+    "sanitized_evidence_id": { "oneOf": [{ "$ref": "#/$defs/opaqueId" }, { "type": "null" }] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "COMPLETED" } }, "required": ["state"] },
+      "then": {
+        "properties": {
+          "received_byte_length": { "type": "integer", "minimum": 0 },
+          "transport_checksum_verified": { "type": "boolean" },
+          "sanitized_evidence_id": { "$ref": "#/$defs/opaqueId" },
+          "safe_error_code": { "type": "null" }
+        }
+      },
+      "else": {
+        "properties": {
+          "received_byte_length": { "type": "null" },
+          "transport_checksum_verified": { "type": "null" },
+          "sanitized_evidence_id": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "state": { "const": "FAILED" } }, "required": ["state"] },
+      "then": { "properties": { "safe_error_code": { "type": "string" } }, "required": ["safe_error_code"] },
+      "else": { "properties": { "safe_error_code": { "type": "null" } } }
+    },
+    {
+      "if": {
+        "properties": { "state": { "enum": ["CANCEL_PENDING", "CANCELLED"] } },
+        "required": ["state"]
+      },
+      "then": { "properties": { "cancel_requested": { "const": true } } }
+    }
+  ],
+  "$defs": {
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+    },
+    "representation": {
+      "enum": ["THUMBNAIL", "PREVIEW", "ORIGINAL", "METADATA", "SIDECAR"]
+    },
+    "sourceChecksum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value", "scope"],
+      "properties": {
+        "algorithm": { "enum": ["SHA-256", "SHA-512", "MD5"] },
+        "value": { "type": "string", "pattern": "^[0-9a-fA-F]+$" },
+        "scope": { "enum": ["FULL_ORIGINAL", "FULL_REPRESENTATION", "TRANSPORT_PAYLOAD"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "algorithm": { "const": "SHA-256" } }, "required": ["algorithm"] },
+          "then": { "properties": { "value": { "minLength": 64, "maxLength": 64 } } }
+        },
+        {
+          "if": { "properties": { "algorithm": { "const": "SHA-512" } }, "required": ["algorithm"] },
+          "then": { "properties": { "value": { "minLength": 128, "maxLength": 128 } } }
+        },
+        {
+          "if": { "properties": { "algorithm": { "const": "MD5" } }, "required": ["algorithm"] },
+          "then": { "properties": { "value": { "minLength": 32, "maxLength": 32 } } }
+        }
+      ]
+    }
+  }
+}

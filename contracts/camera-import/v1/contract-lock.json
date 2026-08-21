@@ -1,0 +1,112 @@
+{
+  "artifact_version": "1.0.0",
+  "contract_id": "dev.openeos.camera-import",
+  "files": {
+    "README.md": {
+      "sha256": "a1d7936680043200619bc2bf8e7e45bd9091887f260b25cf96a9478b7c472dd8",
+      "size": 3000
+    },
+    "README.zh-TW.md": {
+      "sha256": "7af5c71d0b92068fee7cdc6c04aec377837aaeda4ceb07416c12bcf152904477",
+      "size": 2714
+    },
+    "VERSION": {
+      "sha256": "59854984853104df5c353e2f681a15fc7924742f9a2e468c29af248dce45ce03",
+      "size": 6
+    },
+    "compatibility.json": {
+      "sha256": "b159ebe683c243ca2be9a63fc423617cf594cde917ef206537fb932d3cbc5a60",
+      "size": 496
+    },
+    "fixtures/invalid/media-leaks-locator.json": {
+      "sha256": "b1536bdf8731e5b9e626ff02db541290048efba2d3a07268cddb1decb5abb6a8",
+      "size": 809
+    },
+    "fixtures/invalid/media-numeric-identity.json": {
+      "sha256": "3c20009d471ed4cbe1aa6696ea26a3752cec18201e11c4952473090bc5bf16d2",
+      "size": 779
+    },
+    "fixtures/invalid/media-provider-too-old.json": {
+      "sha256": "997c12a569e9f63e5c84c323f880995888c9290972f3524bd8188ffe9274733d",
+      "size": 782
+    },
+    "fixtures/invalid/receipt-delete-authorization.json": {
+      "sha256": "b4a21db401856c5f550e6727b51c466ac21f96fd4b92b36f4481c766a2323eb2",
+      "size": 552
+    },
+    "fixtures/invalid/receipt-unsafe-error.json": {
+      "sha256": "35bb0284233caadf9e846acc18ec0fbdf5d443e65a904a1cef6ebf42e98caf4e",
+      "size": 446
+    },
+    "fixtures/invalid/representation-request-resizes-original.json": {
+      "sha256": "96a764f1fb5d9b5b2b8bf389de7815381321db05974ddc2fe8f721311832dec4",
+      "size": 256
+    },
+    "fixtures/invalid/transfer-byte-overflow.json": {
+      "sha256": "58ff0258490638da476c3a4f15134eeada766bf02d7afb44dc4749349a655711",
+      "size": 629
+    },
+    "fixtures/invalid/transfer-completed-length-mismatch.json": {
+      "sha256": "abf1ef36bbff8c918a5facc6ac9d875b8ae98a6a96c097771a17eb9238ee5e9d",
+      "size": 649
+    },
+    "fixtures/invalid/transfer-completed-without-evidence.json": {
+      "sha256": "4e343cfb1f4cefe9dc7eb00aec9c47dd584e984acf22b16a5539008fa3fec450",
+      "size": 634
+    },
+    "fixtures/valid/media-full-raw.json": {
+      "sha256": "585320ca6a00028bbc6bf8000965e55b2a413851fb22aa76778dad3d7d2c729f",
+      "size": 1039
+    },
+    "fixtures/valid/media-minimal.json": {
+      "sha256": "f460339ae7f2c80c048c9d44cefeec7d479330fe6ec0a34abf5a9d401602120e",
+      "size": 767
+    },
+    "fixtures/valid/receipt-failed.json": {
+      "sha256": "2e4b58365dd35eb2c42e5a04fd178294cd57a1d32cf2faeca8cbe183cfae3417",
+      "size": 422
+    },
+    "fixtures/valid/receipt-imported.json": {
+      "sha256": "07e296e494fef755c346de49345df9591b791ddd9d02e8586ee3b102a2640b94",
+      "size": 539
+    },
+    "fixtures/valid/representation-request-original.json": {
+      "sha256": "f65682d91fe4cab6fa3d17020d7b1100806c47d72092977b1b57494f9188d66a",
+      "size": 201
+    },
+    "fixtures/valid/representation-request-preview.json": {
+      "sha256": "77c2904733dc404598b0fea27220e058ba3ab5eda1859d19d5b2c700d4c18ff8",
+      "size": 255
+    },
+    "fixtures/valid/transfer-completed.json": {
+      "sha256": "2fea298ff04361389722a7c64591df627d5e57820f03b9381aee265da5752da6",
+      "size": 819
+    },
+    "fixtures/valid/transfer-queued.json": {
+      "sha256": "5fb5d34aafb8b4a65bd2ff53477bec30430149236a7bd30703a227e8bcb819c1",
+      "size": 647
+    },
+    "import-receipt.schema.json": {
+      "sha256": "2c9636cb5b030e3a60942cb8464bebefb86b4a2f889e87858b54f68e6cd9dcc0",
+      "size": 2780
+    },
+    "media-descriptor.schema.json": {
+      "sha256": "ad34174972a7de48f5b179f461b42221246a59bbae286b958296d9aa1a0cac2c",
+      "size": 4526
+    },
+    "representation-request.schema.json": {
+      "sha256": "441bddc9db977370dc47d3b65ecc053c91003c90ef76d77259da8ad5ca0474cb",
+      "size": 1588
+    },
+    "semantic-rules.json": {
+      "sha256": "6670bc75a06c74cf13b665227c58c6bac57d916c5f7789077f30cc26728ed955",
+      "size": 2582
+    },
+    "transfer-event.schema.json": {
+      "sha256": "bb0ccb5f35ebba0b6d5b35faf35c9d26374fd3a2d1a67ec0dccddfb2fdb06248",
+      "size": 4787
+    }
+  },
+  "schema": 1,
+  "wire_version": "1.0"
+}

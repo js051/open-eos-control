@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "contract_id": "dev.openeos.camera-import",
+  "artifact_version": "1.0.0",
+  "wire_version": "1.0",
+  "producer": {
+    "provider_id": "dev.openeos.control",
+    "minimum_provider_version": "0.5.0"
+  },
+  "consumer_policy": {
+    "supported_major": 1,
+    "minimum_minor": 0,
+    "maximum_minor": 0,
+    "unknown_major": "REJECT",
+    "unknown_minor": "REJECT",
+    "missing_required_field": "REJECT",
+    "unknown_field": "REJECT",
+    "semantic_validation": "REQUIRED"
+  }
+}

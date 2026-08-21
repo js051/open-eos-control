@@ -1,0 +1,23 @@
+{
+  "contract_version": "1.0",
+  "provider_id": "dev.openeos.control",
+  "session_id": "session-demo-0001",
+  "transfer_id": "transfer-demo-0001",
+  "media_id": "media-demo-raw-0001",
+  "representation": "ORIGINAL",
+  "state": "RUNNING",
+  "bytes_transferred": 101,
+  "total_bytes": 100,
+  "source_revision": null,
+  "source_checksum": null,
+  "can_resume": true,
+  "can_cancel": true,
+  "cancel_requested": false,
+  "attempt": 1,
+  "safe_error_code": null,
+  "retryable": true,
+  "updated_at": "2026-08-21T12:36:30+08:00",
+  "received_byte_length": null,
+  "transport_checksum_verified": null,
+  "sanitized_evidence_id": null
+}
