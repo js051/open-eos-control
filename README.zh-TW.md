@@ -4,7 +4,7 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-目前的開發預覽版為 [v0.5.0](docs/releases/v0.5.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
+目前的開發預覽版為 [v0.6.0](docs/releases/v0.6.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
 
 這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已有標準 USB/PTP backend 與依能力開放的 Canon EOS 控制。Android 與 iOS 現在都能透過同一套 camera contract 使用可執行的 Desktop Bridge，控制以 USB 接在電腦上的相機。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI／Desktop Bridge client 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
 
@@ -67,6 +67,7 @@ LUT 匯入刻意只支援有界的 3D `.cube` 子集：2 到 64 階、Red-fast �
 - CCAPI、Android USB/PTP、Desktop Bridge、PC 與 iOS 共用依能力開放的 Bulb 長曝光：只有相機公告 Bulb 模式與完整按壓／釋放路徑時，中央快門才切換成可計時的開始／停止控制；曝光期間暫停主動 JPEG 輪詢，失敗可重試釋放，結束工作階段也會盡力釋放快門
 - Android、iOS 與 PC 的媒體瀏覽預設使用有界的「最近」範圍：請求最新 61 筆、顯示 60 筆，並清楚標示卡內是否尚有更多；使用者選擇「整張卡」後，才完整讀取相機公告的所有媒體分頁，且不設固定筆數、分頁數或目錄深度截斷。走訪過程會驗證同源資源、公平取樣照片／影片分流目錄、偵測目錄循環、拒絕異常分頁數；行動版仍可取消。受限的直接 CCAPI 請求會提早停止媒體 leaf 分頁，libgphoto2 則仍須完成單次遞迴 CLI 列舉後再回傳有界結果。行動版採延遲載入且最多保留 96 張縮圖的 LRU 快取；PC 每頁只呈現 72 筆並最多保留 96 個可釋放的縮圖 URL，因此大容量記憶卡不會把所有結果同時變成畫面節點或解碼影像。相片／RAW 可全螢幕縮放預覽，Android、iOS 與 PC 影片則使用可取消的位元組範圍串流播放，不會先把整支影片載入記憶體。PC 瀏覽器、Android 與 iOS Desktop Bridge 播放會為每支開啟的影片建立一個隨機、15 分鐘有效的 capability URL，讓重複 seek 共用同一份暫存檔；URL 綁定單一 session／媒體，兩個原生 client 都會驗證同源，診斷不會輸出，最後一個串流關閉後撤銷，session 結束時也必定失效。Android USB/PTP 與 Desktop Bridge JPEG／PNG 預覽仍依能力開放且上限 32 MiB。串流下載與檔案選擇器上傳提供進度／取消，刪除必須確認，Canon CCAPI 檔案保護、封存、評分與顯示旋轉都需精確回讀。Android 直接 USB 上傳必須同時有標準 PTP `SendObjectInfo`／`SendObject`、可寫記憶卡、相機公告的相符格式、精確位元組數與 ObjectInfo 回讀；Desktop Bridge 則必須有 libgphoto2 runtime File Upload 證據並重新核對檔名與大小。Android、iOS 與 PC 在能力不足時都隱藏上傳，直接 CCAPI 也不會收到推測出的上傳請求。Android 直接 USB 另在相機公告 `SetObjectProtection` 時支援標準 PTP 記憶卡檔案保護，且必須精確回讀 ObjectInfo。標準 MTP `Rating (0xDC8A)` 只有在相機公告四個 object-property 操作、該物件格式回傳可寫的 `UINT16` 描述符並明確允許 `0／20／40／60／80／100`，且實際記憶卡物件讀值成功後才會出現；UI 五星對應這六個 wire 值，非整星值保留為未知，每次寫入後都必須從同一 handle 精確回讀。未知狀態與 App 私有的手機端拍攝檔案不顯示不支援的操作。USB 封存／顯示旋轉與 libgphoto2 單筆媒體 metadata 寫入仍不提供；已驗證協定的相機擁有者／作者／著作權／暱稱屬於機身設定，不是媒體項目修改。
 - 即使相機不支援修改單筆 metadata，唯讀媒體詳細資訊仍可開啟。Android USB/PTP 與 Desktop Bridge 會保留已知 MIME 類型、精確檔案大小與原始像素尺寸，不推測相機未提供的值。
+- 可把單一相機素材或 Android 媒體多選結果交接至相容的 Serein 接收端。Open EOS Control 會完整暫存並計算每個原檔的雜湊，只授予暫時、唯讀的 `content://` 存取，並只接受工作階段相符且通過驗證的回執；相機媒體不會因此被刪除或修改。
 
 預設直連相機 URL：
 
@@ -158,9 +159,9 @@ GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系
 
 ## Camera Import 契約
 
-`contracts/camera-import/v1` 定義把相機媒體交給相簿或編修 App 的版本化邊界。Open EOS Control 保有 CCAPI／PTP／Bridge session、能力偵測、相機媒體 representations、可恢復傳輸與 transport 完整性證據；Open Negative 等消費端則負責 staging、完整內容雜湊、Catalog 原子提交、RAW／JPG 顯影、sidecar、匯出與長期相簿管理。
+`contracts/camera-import/v1` 定義把相機媒體交給相簿或編修 App 的版本化邊界。Open EOS Control 保有 CCAPI／PTP／Bridge session、能力偵測、相機媒體 representations、可恢復傳輸與 transport 完整性證據；Serein 等消費端則負責 staging、完整內容雜湊、Catalog 原子提交、RAW／JPG 顯影、sidecar、匯出與長期相簿管理。Android 可用暫時唯讀授權把單一素材或多選結果交給已安裝的相容接收端，且必須驗證回傳的整批回執後才會顯示成功。
 
-Release 流水線會從下一個 Development Preview 開始附帶 JSON Schema／fixtures ZIP 與純 Kotlin contract JAR，使用獨立的契約 artifact 版號，並納入 Release provenance 與 checksum。契約會拒絕 transport locator 與私人識別資料；群組資訊只能當提示；精確重複只接受可信的完整強雜湊，或消費端完整收完後計算的 SHA-256；匯入 receipt 永遠不授權刪除相機媒體。詳見 [繁中契約說明](contracts/camera-import/v1/README.zh-TW.md)。
+從 v0.6.0 Development Preview 起，Release 會附帶 JSON Schema／fixtures ZIP 與純 Kotlin contract JAR，使用獨立的契約 artifact 版號，並納入 Release provenance 與 checksum。契約會拒絕 transport locator 與私人識別資料；群組資訊只能當提示；精確重複只接受可信的完整強雜湊，或消費端完整收完後計算的 SHA-256；匯入 receipt 永遠不授權刪除相機媒體。詳見 [繁中契約說明](contracts/camera-import/v1/README.zh-TW.md)。
 
 ## Desktop Bridge
 

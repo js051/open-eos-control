@@ -4,8 +4,11 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
-- Added Android handoff from a single camera item or a multi-selection to Open Negative through explicit, temporary read-only `content://` grants. Open EOS Control stages and hashes complete originals, accepts only exact-session receipt batches, and verifies imported byte lengths and SHA-256 values without modifying camera media.
+## [0.6.0] - 2026-08-21
+
+- Added Android handoff from a single camera item or a multi-selection to Serein through explicit, temporary read-only `content://` grants. Open EOS Control stages and hashes complete originals, accepts only exact-session receipt batches, and verifies imported byte lengths and SHA-256 values without modifying camera media.
 - Extended Camera Import Contract artifact `1.1.0` with strict Android handoff and receipt-batch schemas, bilingual integration rules, portable valid/invalid fixtures, and a JVM 17 Kotlin codec shared with the receiving app.
+- Fixed CCAPI event synchronization so camera-side recording transitions update the Android UI without requiring a manual refresh.
 
 ## [0.5.0] - 2026-08-21
 
@@ -139,3 +142,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.3.1]: https://github.com/js051/open-eos-control/releases/tag/v0.3.1
 [0.4.0]: https://github.com/js051/open-eos-control/releases/tag/v0.4.0
 [0.5.0]: https://github.com/js051/open-eos-control/releases/tag/v0.5.0
+[0.6.0]: https://github.com/js051/open-eos-control/releases/tag/v0.6.0
