@@ -26,6 +26,24 @@ sourceSets {
     }
 }
 
+val normalizedLicenseFile = layout.buildDirectory.file("generated/reproducible-resources/LICENSE.txt")
+val normalizeLicenseForJar by tasks.registering {
+    val sourceLicense = rootProject.file("../LICENSE")
+    inputs.file(sourceLicense)
+    outputs.file(normalizedLicenseFile)
+
+    doLast {
+        val output = normalizedLicenseFile.get().asFile
+        output.parentFile.mkdirs()
+        output.writeText(
+            sourceLicense.readText(Charsets.UTF_8)
+                .replace("\r\n", "\n")
+                .replace('\r', '\n'),
+            Charsets.UTF_8,
+        )
+    }
+}
+
 dependencies {
     compileOnly("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
@@ -37,6 +55,7 @@ tasks.test {
 }
 
 tasks.jar {
+    dependsOn(normalizeLicenseForJar)
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true
     manifest {
@@ -46,8 +65,7 @@ tasks.jar {
             "Camera-Import-Wire-Version" to "1.0",
         )
     }
-    from(rootProject.file("../LICENSE")) {
+    from(normalizedLicenseFile) {
         into("META-INF")
-        rename { "LICENSE.txt" }
     }
 }
