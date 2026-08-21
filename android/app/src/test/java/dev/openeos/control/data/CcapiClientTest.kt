@@ -1145,6 +1145,71 @@ class CcapiClientTest {
     }
 
     @Test
+    fun version100EventPollingAppliesExternalRecordingAction() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"ver100":[{"path":"/event/polling","get":true,"delete":true}]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"recbutton":{"action":"start"}}"""))
+
+        client.initialize()
+        val event = client.pollEvent()
+
+        assertEquals(setOf("recbutton"), event.changedKeys)
+        assertTrue(client.recordingStateForTest() == true)
+    }
+
+    @Test
+    fun version110EventPollingAppliesExternalRecordingStatus() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/event/polling","get":true,"delete":true}]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"recbutton":{"status":"start"}}"""))
+        server.enqueue(jsonResponse("""{"recbutton":{"status":"stop"}}"""))
+
+        client.initialize()
+        client.pollEvent()
+        assertTrue(client.recordingStateForTest() == true)
+
+        client.pollEvent()
+        assertTrue(client.recordingStateForTest() == false)
+    }
+
+    @Test
+    fun malformedRecordingEventDoesNotReplaceKnownState() = runTest {
+        client = CcapiClient(
+            baseUrl = server.url("/").toString(),
+            treatAsSimulator = false,
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"ver110":[{"path":"/event/polling","get":true,"delete":true}]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"recbutton":{"status":"start"}}"""))
+        server.enqueue(jsonResponse("""{"recbutton":{"status":"paused"}}"""))
+        server.enqueue(jsonResponse("""{"recbutton":{"status":false}}"""))
+
+        client.initialize()
+        client.pollEvent()
+        client.pollEvent()
+        client.pollEvent()
+
+        assertTrue(client.recordingStateForTest() == true)
+    }
+
+    @Test
     fun realEventPollingIsNotAdvertisedForIncompleteLifecycle() = runTest {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -4188,6 +4253,12 @@ class CcapiClientTest {
             set(this@forceRealCamera, prefixes)
         }
     }
+
+    private fun CcapiClient.recordingStateForTest(): Boolean? =
+        javaClass.getDeclaredField("isRecording").run {
+            isAccessible = true
+            get(this@recordingStateForTest) as? Boolean
+        }
 
     private class CountingOutputStream : OutputStream() {
         var bytesWritten = 0L

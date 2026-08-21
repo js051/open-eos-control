@@ -812,6 +812,7 @@ class CcapiClient(
                     .header("Cache-Control", "no-cache")
                     .build(),
             )
+            applyRecordingEvent(json)
             CameraEvent(changedKeys = json.safeTopLevelKeys())
         } else {
             val url = "$baseUrl/ccapi/events".toHttpUrl().newBuilder()
@@ -832,6 +833,20 @@ class CcapiClient(
         }
         observedFeatures.add(CameraFeature.EVENT_POLLING)
         return event
+    }
+
+    private fun applyRecordingEvent(event: JSONObject) {
+        val recbutton = event.optJSONObject("recbutton") ?: return
+        val state = when {
+            recbutton.has("action") && !recbutton.isNull("action") -> recbutton.opt("action") as? String
+            recbutton.has("status") && !recbutton.isNull("status") -> recbutton.opt("status") as? String
+            else -> null
+        }
+        isRecording = when (state) {
+            "start" -> true
+            "stop" -> false
+            else -> return
+        }
     }
 
     suspend fun stopEventPolling() {
