@@ -1,0 +1,32 @@
+{
+  "contract_version": "1.0",
+  "provider_id": "dev.openeos.control",
+  "provider_version": "0.5.0",
+  "session_id": "session-demo-0001",
+  "media_id": "media-demo-raw-0001",
+  "capture_correlation_id": "capture-demo-0001",
+  "captured_at": "2026-08-21T12:34:56+08:00",
+  "filename": "DEMO0001.CR3",
+  "media_kind": "RAW",
+  "mime_type": "image/x-canon-cr3",
+  "byte_length": 48234496,
+  "source_checksum": {
+    "algorithm": "SHA-256",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scope": "FULL_ORIGINAL"
+  },
+  "source_revision": "revision-demo-0001",
+  "camera_id": "camera-session-0001",
+  "camera_model": "Canon EOS R6 Mark III",
+  "storage_id": "storage-session-card1",
+  "storage_label": "Card 1",
+  "width": 6000,
+  "height": 4000,
+  "orientation": 1,
+  "capture_group_hint": "capture-demo-0001",
+  "companion_role": "RAW",
+  "available_representations": ["THUMBNAIL", "PREVIEW", "ORIGINAL", "METADATA"],
+  "range_supported": true,
+  "resume_supported": true,
+  "cancel_supported": true
+}

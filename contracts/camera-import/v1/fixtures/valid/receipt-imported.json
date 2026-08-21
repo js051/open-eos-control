@@ -1,0 +1,15 @@
+{
+  "contract_version": "1.0",
+  "import_id": "import-demo-0001",
+  "provider_id": "dev.openeos.control",
+  "session_id": "session-demo-0001",
+  "media_id": "media-demo-raw-0001",
+  "outcome": "IMPORTED",
+  "asset_id": "asset-demo-0001",
+  "blob_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "byte_length": 48234496,
+  "capture_group_id": "group-demo-0001",
+  "preserved_representation_ids": ["representation-original-demo-0001"],
+  "safe_error_code": null,
+  "completed_at": "2026-08-21T12:36:31+08:00"
+}

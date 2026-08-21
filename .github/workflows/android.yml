@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       android: ${{ steps.changes.outputs.android }}
+      android_ui: ${{ steps.changes.outputs.android_ui }}
+      camera_import_contract: ${{ steps.changes.outputs.camera_import_contract }}
       simulator: ${{ steps.changes.outputs.simulator }}
       desktop: ${{ steps.changes.outputs.desktop }}
       ios_core: ${{ steps.changes.outputs.ios_core }}
@@ -34,8 +36,36 @@ jobs:
           filters: |
             android:
               - 'android/**'
+              - '!android/camera-import-contract/**'
               - 'simulator/**'
               - 'scripts/release/verify-android-apk-signing.sh'
+              - '.github/workflows/**'
+            android_ui:
+              - 'android/app/src/main/**'
+              - 'android/app/src/androidTest/**'
+              - 'android/app/src/debug/**'
+              - 'android/app/build.gradle.kts'
+              - 'android/build.gradle.kts'
+              - 'android/settings.gradle.kts'
+              - 'android/gradle/**'
+              - 'android/gradle.properties'
+              - 'android/gradlew'
+              - 'android/gradlew.bat'
+              - 'simulator/**'
+              - '.github/workflows/**'
+            camera_import_contract:
+              - 'contracts/camera-import/**'
+              - 'scripts/contracts/**'
+              - 'android/camera-import-contract/**'
+              - 'android/app/build.gradle.kts'
+              - 'android/build.gradle.kts'
+              - 'android/settings.gradle.kts'
+              - 'android/gradle/**'
+              - 'android/gradle.properties'
+              - 'android/gradlew'
+              - 'android/gradlew.bat'
+              - 'scripts/release/release_candidate.py'
+              - 'scripts/release/tests/test_release_candidate.py'
               - '.github/workflows/**'
             simulator:
               - 'simulator/**'
@@ -82,8 +112,27 @@ jobs:
           python3 -m unittest discover -s scripts/ci/tests -p "test_*.py"
           python3 -m unittest discover -s scripts/release/tests -p "test_*.py"
 
+      - name: Validate and package Camera Import contract
+        if: steps.changes.outputs.camera_import_contract == 'true'
+        run: |
+          python3 -m pip install --disable-pip-version-check --requirement scripts/contracts/requirements.txt
+          python3 -m unittest discover -s scripts/contracts/tests -p "test_*.py"
+          python3 scripts/contracts/camera_import.py validate
+          python3 scripts/contracts/camera_import.py build --output-dir dist
+
       - name: Validate GitHub Actions workflows
         run: bash scripts/ci/run-actionlint.sh
+
+      - name: Upload Camera Import schema release candidate
+        if: steps.changes.outputs.camera_import_contract == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-camera-import-contract
+          path: dist/open-eos-camera-import-contract-*.zip
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: true
 
   test:
     needs: secret-scan
@@ -125,9 +174,46 @@ jobs:
           printf '%s\n' "$actual" > "$RUNNER_TEMP/pull-request-certificate-sha256.txt"
           bash "$verifier" "$apk" "$RUNNER_TEMP/pull-request-certificate-sha256.txt"
 
+  camera-import-contract:
+    needs: secret-scan
+    if: needs.secret-scan.outputs.camera_import_contract == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Test and build Camera Import Kotlin contract
+        run: ./gradlew :camera-import-contract:test :camera-import-contract:jar
+
+      - name: Upload Camera Import Kotlin release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-camera-import-kotlin
+          path: android/camera-import-contract/build/libs/open-eos-camera-import-contract-kotlin-*.jar
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: true
+
   android-ui:
     needs: secret-scan
-    if: needs.secret-scan.outputs.android == 'true'
+    if: needs.secret-scan.outputs.android_ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -201,10 +287,11 @@ jobs:
             ${{ runner.temp }}/android-camera-simulator.log
           if-no-files-found: ignore
           retention-days: 7
+          overwrite: true
 
   android-ui-api36:
     needs: secret-scan
-    if: needs.secret-scan.outputs.android == 'true'
+    if: needs.secret-scan.outputs.android_ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -278,6 +365,7 @@ jobs:
             ${{ runner.temp }}/android-camera-simulator-api36.log
           if-no-files-found: ignore
           retention-days: 7
+          overwrite: true
 
   simulator:
     needs: secret-scan
@@ -372,6 +460,7 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
           retention-days: 14
+          overwrite: true
 
       - name: Upload desktop browser screenshots
         if: always()
@@ -381,6 +470,7 @@ jobs:
           path: bridge/test-results
           if-no-files-found: ignore
           retention-days: 7
+          overwrite: true
 
   desktop-windows-bundle:
     needs: secret-scan
@@ -425,6 +515,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+          overwrite: true
 
   ios-core:
     needs: secret-scan
@@ -552,12 +643,14 @@ jobs:
             ${{ runner.temp }}/ios-camera-simulator.log
           if-no-files-found: ignore
           retention-days: 7
+          overwrite: true
 
   ci-complete:
     if: always()
     needs:
       - secret-scan
       - test
+      - camera-import-contract
       - android-ui
       - android-ui-api36
       - simulator
@@ -590,8 +683,9 @@ jobs:
 
           test "${{ needs.secret-scan.result }}" = success
           require_job "${{ needs.secret-scan.outputs.android }}" "${{ needs.test.result }}" test
-          require_job "${{ needs.secret-scan.outputs.android }}" "${{ needs.android-ui.result }}" android-ui
-          require_job "${{ needs.secret-scan.outputs.android }}" "${{ needs.android-ui-api36.result }}" android-ui-api36
+          require_job "${{ needs.secret-scan.outputs.camera_import_contract }}" "${{ needs.camera-import-contract.result }}" camera-import-contract
+          require_job "${{ needs.secret-scan.outputs.android_ui }}" "${{ needs.android-ui.result }}" android-ui
+          require_job "${{ needs.secret-scan.outputs.android_ui }}" "${{ needs.android-ui-api36.result }}" android-ui-api36
           require_job "${{ needs.secret-scan.outputs.simulator }}" "${{ needs.simulator.result }}" simulator
           require_job "${{ needs.secret-scan.outputs.desktop }}" "${{ needs.desktop-bridge.result }}" desktop-bridge
           require_job "${{ needs.secret-scan.outputs.desktop }}" "${{ needs.desktop-windows-bundle.result }}" desktop-windows-bundle

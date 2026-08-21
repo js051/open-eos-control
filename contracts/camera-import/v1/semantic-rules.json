@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "contract_id": "dev.openeos.camera-import",
+  "wire_version": "1.0",
+  "rules": [
+    {
+      "id": "identity.provider_generated",
+      "documents": ["media", "representation_request", "transfer", "receipt"],
+      "requirement": "Opaque identifiers begin with a letter, contain only the allowlisted characters, and are generated without embedding serials, paths, endpoints, credentials, email addresses, or IP addresses."
+    },
+    {
+      "id": "provider.minimum_version",
+      "documents": ["media"],
+      "requirement": "Provider dev.openeos.control must use semantic version 0.5.0 or newer."
+    },
+    {
+      "id": "media.resume_requires_range",
+      "documents": ["media"],
+      "requirement": "resume_supported implies range_supported."
+    },
+    {
+      "id": "representation.visual_target_only",
+      "documents": ["representation_request"],
+      "requirement": "target_size is allowed only for THUMBNAIL and PREVIEW."
+    },
+    {
+      "id": "transfer.bytes_within_total",
+      "documents": ["transfer"],
+      "requirement": "When total_bytes is known, bytes_transferred is less than or equal to total_bytes."
+    },
+    {
+      "id": "transfer.completed_lengths_match",
+      "documents": ["transfer"],
+      "requirement": "For COMPLETED, received_byte_length equals bytes_transferred and equals total_bytes when total_bytes is known."
+    },
+    {
+      "id": "transfer.terminal_evidence",
+      "documents": ["transfer"],
+      "requirement": "Only COMPLETED contains received_byte_length, transport_checksum_verified, and sanitized_evidence_id; only FAILED contains safe_error_code."
+    },
+    {
+      "id": "transfer.cancel_pending_is_not_cancelled",
+      "documents": ["transfer"],
+      "requirement": "CANCEL_PENDING and CANCELLED require cancel_requested; CANCEL_PENDING must not be presented as terminal cancellation."
+    },
+    {
+      "id": "receipt.committed_evidence",
+      "documents": ["receipt"],
+      "requirement": "Only IMPORTED and DUPLICATE contain committed asset evidence and preserved representation IDs; only FAILED contains safe_error_code."
+    },
+    {
+      "id": "receipt.no_source_mutation_authority",
+      "documents": ["receipt"],
+      "requirement": "A receipt never authorizes deletion or mutation of camera media."
+    },
+    {
+      "id": "duplicate.full_strong_hash_only",
+      "documents": ["media", "receipt"],
+      "requirement": "Exact duplicate decisions require SHA-256 or SHA-512 over FULL_ORIGINAL, or a full SHA-256 computed by the consumer after receiving all bytes."
+    }
+  ]
+}

@@ -156,6 +156,12 @@ open OpenEOSControl.xcodeproj
 
 GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 跑過八個 UI 流程。Simulator preset 的網路流程會從正式 SwiftUI -> `CameraAppState` -> `OpenEOSCore` 路徑驗證已解碼 Live View、曝光、拍照、對焦、錄影、Bulb、媒體預覽／刪除與斷線；另一條 HTTP preset 流程會明確選擇 Canon client contract，要求完成 `/ccapi` discovery、版本化 JPEG Live View、Canon 1.1 long polling、免手動 Refresh 的機身端 ISO／拍照媒體同步，以及 GET／DELETE 清理。事件刷新不會覆蓋較新的互動操作，遇到媒體工作進行中也會等待後重新讀取。workflow 明確使用 `CODE_SIGNING_ALLOWED=NO`，因此這個 build 無法安裝到實體 iPhone，也不會作為 IPA 發布；可重現的 Simulator 證據仍不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄。細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
 
+## Camera Import 契約
+
+`contracts/camera-import/v1` 定義把相機媒體交給相簿或編修 App 的版本化邊界。Open EOS Control 保有 CCAPI／PTP／Bridge session、能力偵測、相機媒體 representations、可恢復傳輸與 transport 完整性證據；Open Negative 等消費端則負責 staging、完整內容雜湊、Catalog 原子提交、RAW／JPG 顯影、sidecar、匯出與長期相簿管理。
+
+Release 流水線會從下一個 Development Preview 開始附帶 JSON Schema／fixtures ZIP 與純 Kotlin contract JAR，使用獨立的契約 artifact 版號，並納入 Release provenance 與 checksum。契約會拒絕 transport locator 與私人識別資料；群組資訊只能當提示；精確重複只接受可信的完整強雜湊，或消費端完整收完後計算的 SHA-256；匯入 receipt 永遠不授權刪除相機媒體。詳見 [繁中契約說明](contracts/camera-import/v1/README.zh-TW.md)。
+
 ## Desktop Bridge
 
 公開版 Bridge 現在會列出 fail-closed 的 `edsdk` engine，但它只有具版本的 SDK-neutral Python provider 契約。Release 不包含可運作的 provider、Canon SDK binary、header、文件、常數或 ABI 宣告，因此真正 EDSDK 控制仍屬研究；設計與授權界線見 [EDSDK provider 文件](docs/edsdk-provider.md)。

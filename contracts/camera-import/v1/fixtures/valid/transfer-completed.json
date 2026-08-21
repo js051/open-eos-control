@@ -1,0 +1,27 @@
+{
+  "contract_version": "1.0",
+  "provider_id": "dev.openeos.control",
+  "session_id": "session-demo-0001",
+  "transfer_id": "transfer-demo-0001",
+  "media_id": "media-demo-raw-0001",
+  "representation": "ORIGINAL",
+  "state": "COMPLETED",
+  "bytes_transferred": 48234496,
+  "total_bytes": 48234496,
+  "source_revision": "revision-demo-0001",
+  "source_checksum": {
+    "algorithm": "SHA-256",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scope": "FULL_ORIGINAL"
+  },
+  "can_resume": false,
+  "can_cancel": false,
+  "cancel_requested": false,
+  "attempt": 2,
+  "safe_error_code": null,
+  "retryable": false,
+  "updated_at": "2026-08-21T12:36:30+08:00",
+  "received_byte_length": 48234496,
+  "transport_checksum_verified": true,
+  "sanitized_evidence_id": "evidence-demo-0001"
+}

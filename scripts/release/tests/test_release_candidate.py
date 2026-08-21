@@ -17,6 +17,11 @@ HEAD = "b" * 40
 
 
 class ReleaseCandidateTests(unittest.TestCase):
+    def test_expected_assets_include_versioned_camera_import_contract(self) -> None:
+        names = expected_asset_names(VERSION)
+        self.assertIn("open-eos-camera-import-contract-1.0.0.zip", names)
+        self.assertIn("open-eos-camera-import-contract-kotlin-1.0.0.jar", names)
+
     def create_assets(self, directory: Path) -> None:
         for index, name in enumerate(expected_asset_names(VERSION)):
             (directory / name).write_bytes(f"asset-{index}".encode())

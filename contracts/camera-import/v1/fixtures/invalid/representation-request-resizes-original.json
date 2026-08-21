@@ -1,0 +1,11 @@
+{
+  "contract_version": "1.0",
+  "provider_id": "dev.openeos.control",
+  "session_id": "session-demo-0001",
+  "media_id": "media-demo-raw-0001",
+  "representation": "ORIGINAL",
+  "target_size": {
+    "maximum_width": 2048,
+    "maximum_height": 2048
+  }
+}

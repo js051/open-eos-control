@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/js051/open-eos-control/contracts/camera-import/v1/representation-request.schema.json",
+  "title": "CameraImportRepresentationRequestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "provider_id",
+    "session_id",
+    "media_id",
+    "representation",
+    "target_size"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "provider_id": { "$ref": "#/$defs/opaqueId" },
+    "session_id": { "$ref": "#/$defs/opaqueId" },
+    "media_id": { "$ref": "#/$defs/opaqueId" },
+    "representation": {
+      "enum": ["THUMBNAIL", "PREVIEW", "ORIGINAL", "METADATA", "SIDECAR"]
+    },
+    "target_size": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maximum_width", "maximum_height"],
+          "properties": {
+            "maximum_width": { "type": "integer", "minimum": 1, "maximum": 16384 },
+            "maximum_height": { "type": "integer", "minimum": 1, "maximum": 16384 }
+          }
+        },
+        { "type": "null" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "representation": { "enum": ["ORIGINAL", "METADATA", "SIDECAR"] } },
+        "required": ["representation"]
+      },
+      "then": { "properties": { "target_size": { "type": "null" } } }
+    }
+  ],
+  "$defs": {
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+    }
+  }
+}

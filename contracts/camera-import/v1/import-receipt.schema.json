@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/js051/open-eos-control/contracts/camera-import/v1/import-receipt.schema.json",
+  "title": "CameraImportReceiptV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "import_id",
+    "provider_id",
+    "session_id",
+    "media_id",
+    "outcome",
+    "asset_id",
+    "blob_sha256",
+    "byte_length",
+    "capture_group_id",
+    "preserved_representation_ids",
+    "safe_error_code",
+    "completed_at"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "import_id": { "$ref": "#/$defs/opaqueId" },
+    "provider_id": { "$ref": "#/$defs/opaqueId" },
+    "session_id": { "$ref": "#/$defs/opaqueId" },
+    "media_id": { "$ref": "#/$defs/opaqueId" },
+    "outcome": { "enum": ["IMPORTED", "DUPLICATE", "FAILED", "CANCELLED"] },
+    "asset_id": { "oneOf": [{ "$ref": "#/$defs/opaqueId" }, { "type": "null" }] },
+    "blob_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-fA-F]{64}$" },
+    "byte_length": { "type": ["integer", "null"], "minimum": 1 },
+    "capture_group_id": { "oneOf": [{ "$ref": "#/$defs/opaqueId" }, { "type": "null" }] },
+    "preserved_representation_ids": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/opaqueId" },
+      "uniqueItems": true
+    },
+    "safe_error_code": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+    "completed_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "outcome": { "enum": ["IMPORTED", "DUPLICATE"] } },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "asset_id": { "$ref": "#/$defs/opaqueId" },
+          "blob_sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+          "byte_length": { "type": "integer", "minimum": 1 },
+          "preserved_representation_ids": { "minItems": 1 },
+          "safe_error_code": { "type": "null" }
+        }
+      },
+      "else": {
+        "properties": {
+          "asset_id": { "type": "null" },
+          "blob_sha256": { "type": "null" },
+          "byte_length": { "type": "null" },
+          "capture_group_id": { "type": "null" },
+          "preserved_representation_ids": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "FAILED" } }, "required": ["outcome"] },
+      "then": { "properties": { "safe_error_code": { "type": "string" } }, "required": ["safe_error_code"] },
+      "else": { "properties": { "safe_error_code": { "type": "null" } } }
+    }
+  ],
+  "$defs": {
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+    }
+  }
+}

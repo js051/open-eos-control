@@ -13,6 +13,7 @@ SCHEMA_VERSION = 1
 PROVENANCE_NAME = "BUILD-PROVENANCE.json"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+CONTRACT_VERSION_FILE = Path(__file__).resolve().parents[2] / "contracts" / "camera-import" / "v1" / "VERSION"
 
 
 class CandidateError(RuntimeError):
@@ -22,11 +23,19 @@ class CandidateError(RuntimeError):
 def expected_asset_names(version: str) -> tuple[str, ...]:
     if VERSION_PATTERN.fullmatch(version) is None:
         raise CandidateError(f"Invalid release version: {version!r}")
+    try:
+        contract_version = CONTRACT_VERSION_FILE.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise CandidateError(f"Unable to read Camera Import contract version: {error}") from error
+    if VERSION_PATTERN.fullmatch(contract_version) is None:
+        raise CandidateError(f"Invalid Camera Import contract version: {contract_version!r}")
     return (
         f"open-eos-control-android-{version}-debug.apk",
         f"open-eos-control-bridge-windows-x64-{version}.exe",
         f"open_eos_control_bridge-{version}-py3-none-any.whl",
         f"open_eos_control_bridge-{version}.tar.gz",
+        f"open-eos-camera-import-contract-{contract_version}.zip",
+        f"open-eos-camera-import-contract-kotlin-{contract_version}.jar",
     )
 
 
