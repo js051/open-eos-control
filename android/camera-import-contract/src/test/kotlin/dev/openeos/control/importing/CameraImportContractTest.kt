@@ -40,6 +40,55 @@ class CameraImportContractTest {
     }
 
     @Test
+    fun androidHandoffRoundTripsStrictDescriptorsAndContentHandles() {
+        val manifest = CameraImportJsonCodecV1.decodeAndroidHandoffManifest(
+            resourceText("fixtures/valid/handoff-originals.json"),
+        )
+        val roundTripped = CameraImportJsonCodecV1.decodeAndroidHandoffManifest(
+            CameraImportJsonCodecV1.encodeAndroidHandoffManifest(manifest),
+        )
+
+        assertEquals(manifest, roundTripped)
+        assertEquals(CameraImportRepresentation.ORIGINAL, manifest.items.single().representations.single().representation)
+    }
+
+    @Test
+    fun androidHandoffRejectsUnsafeUrisAndMismatchedSessions() {
+        assertThrows(IllegalArgumentException::class.java) {
+            CameraImportJsonCodecV1.decodeAndroidHandoffManifest(
+                resourceText("fixtures/invalid/handoff-file-uri.json"),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CameraImportJsonCodecV1.decodeAndroidHandoffManifest(
+                resourceText("fixtures/invalid/handoff-userinfo-uri.json"),
+            )
+        }
+        val manifest = CameraImportJsonCodecV1.decodeAndroidHandoffManifest(
+            resourceText("fixtures/valid/handoff-originals.json"),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            manifest.copy(sessionId = "session-different-0002")
+        }
+    }
+
+    @Test
+    fun receiptBatchRoundTripsAndRejectsCrossSessionReceipts() {
+        val batch = CameraImportJsonCodecV1.decodeReceiptBatch(
+            resourceText("fixtures/valid/receipt-batch-imported.json"),
+        )
+        assertEquals(
+            batch,
+            CameraImportJsonCodecV1.decodeReceiptBatch(CameraImportJsonCodecV1.encodeReceiptBatch(batch)),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            CameraImportJsonCodecV1.decodeReceiptBatch(
+                resourceText("fixtures/invalid/receipt-batch-session-mismatch.json"),
+            )
+        }
+    }
+
+    @Test
     fun strictDecoderRejectsUnknownReceiptAuthority() {
         assertThrows(IllegalArgumentException::class.java) {
             CameraImportJsonCodecV1.decodeReceipt(

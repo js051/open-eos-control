@@ -209,6 +209,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 ratingSupported = state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false,
                 rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
                 downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+                sereinSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
                 deleteSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DELETE),
                 onDismiss = { activeMetadataItemId = null },
                 onProtect = { actions.setMediaProtection(item, it) },
@@ -219,6 +220,10 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                     activeMetadataItemId = null
                     pendingDownload = item
                     createDocument.launch(item.name)
+                },
+                onOpenInSerein = {
+                    activeMetadataItemId = null
+                    actions.openInSerein(listOf(item))
                 },
                 onDelete = {
                     activeMetadataItemId = null
@@ -246,6 +251,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                     allDisplayedSelected = allDisplayedSelected,
                     busy = state.isBusy(CameraOperation.MEDIA),
                     downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+                    sereinSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
                     metadataSupported =
                     state.supports(CameraFeature.MEDIA_PROTECT) ||
                         state.supports(CameraFeature.MEDIA_ARCHIVE) ||
@@ -260,6 +266,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                             displayedItems.mapTo(hashSetOf(), CameraMediaItem::id)
                         }
                     },
+                    onOpenInSerein = { actions.openInSerein(selectedItems) },
                     onDownload = {
                         pendingBatchDownload = selectedItems
                         openDownloadFolder.launch(null)
@@ -361,7 +368,14 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        stringResource(R.string.downloading_media, name),
+                        stringResource(
+                            if (state.cameraImportPreparing) {
+                                R.string.preparing_media_for_serein
+                            } else {
+                                R.string.downloading_media
+                            },
+                            name,
+                        ),
                         color = AppText,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -466,6 +480,19 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             }
         }
 
+        state.lastCameraImportReceiptSummary?.let { summary ->
+            Text(
+                stringResource(
+                    R.string.serein_import_result,
+                    summary.completed,
+                    summary.failed,
+                    summary.cancelled,
+                ),
+                color = if (summary.failed == 0) AppSuccess else AppWarning,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         when {
             !state.supports(CameraFeature.MEDIA_BROWSER) -> MediaMessage(R.string.media_not_supported)
             state.mediaItems.isEmpty() && state.mediaLibraryLoadStatus == MediaLibraryLoadStatus.CANCELLED ->
@@ -549,6 +576,7 @@ private fun MediaMetadataSheet(
     ratingSupported: Boolean,
     rotationSupported: Boolean,
     downloadSupported: Boolean,
+    sereinSupported: Boolean,
     deleteSupported: Boolean,
     onDismiss: () -> Unit,
     onProtect: (Boolean) -> Unit,
@@ -556,6 +584,7 @@ private fun MediaMetadataSheet(
     onRate: (Int) -> Unit,
     onRotate: (Int) -> Unit,
     onDownload: () -> Unit,
+    onOpenInSerein: () -> Unit,
     onDelete: () -> Unit,
 ) {
     ModalBottomSheet(
@@ -723,6 +752,27 @@ private fun MediaMetadataSheet(
                     )
                     Spacer(Modifier.size(8.dp))
                     Text(stringResource(R.string.download_media, item.name), color = AppText)
+                }
+            }
+
+            if (sereinSupported) {
+                val openDescription = stringResource(R.string.open_media_in_serein, item.name)
+                HorizontalDivider(color = AppSurfaceHigh)
+                TextButton(
+                    onClick = onOpenInSerein,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().height(48.dp).semantics {
+                        contentDescription = openDescription
+                    },
+                ) {
+                    Icon(
+                        painterResource(LucideR.drawable.lucide_ic_palette),
+                        contentDescription = null,
+                        tint = AppAccent,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(stringResource(R.string.edit_in_serein), color = AppAccent)
                 }
             }
 

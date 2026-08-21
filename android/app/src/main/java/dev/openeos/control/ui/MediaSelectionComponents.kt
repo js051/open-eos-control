@@ -36,10 +36,12 @@ internal fun RowScope.MediaSelectionTopBar(
     allDisplayedSelected: Boolean,
     busy: Boolean,
     downloadSupported: Boolean,
+    sereinSupported: Boolean,
     metadataSupported: Boolean,
     deleteSupported: Boolean,
     onExit: () -> Unit,
     onToggleSelectAll: () -> Unit,
+    onOpenInSerein: () -> Unit,
     onDownload: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -65,6 +67,15 @@ internal fun RowScope.MediaSelectionTopBar(
         onToggleSelectAll,
         enabled = !busy,
     )
+    if (sereinSupported) {
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_palette,
+            stringResource(R.string.open_selected_in_serein, selectedCount),
+            onOpenInSerein,
+            enabled = !busy,
+            tint = AppAccent,
+        )
+    }
     if (downloadSupported) {
         ToolIconButton(
             LucideR.drawable.lucide_ic_download,

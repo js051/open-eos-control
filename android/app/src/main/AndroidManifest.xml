@@ -6,6 +6,10 @@
         android:name="android.hardware.usb.host"
         android:required="false" />
 
+    <queries>
+        <package android:name="dev.photo.workflow" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -23,6 +27,15 @@
                 android:name="autoStoreLocales"
                 android:value="true" />
         </service>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.camera_import"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/camera_import_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"

@@ -11,8 +11,10 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_DIR = ROOT / "contracts" / "camera-import" / "v1"
@@ -22,6 +24,8 @@ WIRE_VERSION = "1.0"
 OPEN_EOS_PROVIDER_ID = "dev.openeos.control"
 MINIMUM_OPEN_EOS_PROVIDER_VERSION = (0, 5, 0)
 SCHEMA_BY_PREFIX = {
+    "handoff-": "android-handoff-manifest.schema.json",
+    "receipt-batch-": "import-receipt-batch.schema.json",
     "media-": "media-descriptor.schema.json",
     "representation-request-": "representation-request.schema.json",
     "transfer-": "transfer-event.schema.json",
@@ -184,11 +188,58 @@ def require_safe_semantics(payload: dict[str, Any], fixture: Path) -> None:
     if isinstance(error_code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{2,63}", error_code) is None:
         raise ContractError(f"{fixture}: safe_error_code contains unsafe detail.")
 
+    if "items" in payload:
+        descriptors = []
+        for item in payload["items"]:
+            descriptor = item["descriptor"]
+            require_safe_semantics(descriptor, fixture)
+            descriptors.append(descriptor)
+            advertised = set(descriptor["available_representations"])
+            handles = [handle["representation"] for handle in item["representations"]]
+            if len(handles) != len(set(handles)) or not set(handles).issubset(advertised):
+                raise ContractError(f"{fixture}: handoff representations must be unique and advertised.")
+            for handle in item["representations"]:
+                try:
+                    uri = urlsplit(handle["content_uri"])
+                except ValueError as error:
+                    raise ContractError(f"{fixture}: handoff content URI is malformed.") from error
+                if (
+                    uri.scheme.lower() != "content"
+                    or not uri.netloc
+                    or not uri.path
+                    or uri.username is not None
+                    or uri.fragment
+                ):
+                    raise ContractError(f"{fixture}: handoff requires a provider-owned content URI.")
+        if len({descriptor["media_id"] for descriptor in descriptors}) != len(descriptors):
+            raise ContractError(f"{fixture}: handoff media IDs must be unique.")
+        for descriptor in descriptors:
+            for field in ("contract_version", "provider_id", "provider_version", "session_id"):
+                if descriptor[field] != payload[field]:
+                    raise ContractError(f"{fixture}: handoff {field} does not match its descriptor.")
+
+    if "receipts" in payload:
+        receipts = payload["receipts"]
+        for receipt in receipts:
+            require_safe_semantics(receipt, fixture)
+            for field in ("contract_version", "provider_id", "session_id"):
+                if receipt[field] != payload[field]:
+                    raise ContractError(f"{fixture}: receipt batch {field} does not match its receipt.")
+        if len({receipt["media_id"] for receipt in receipts}) != len(receipts):
+            raise ContractError(f"{fixture}: receipt batch media IDs must be unique.")
+
 
 def load_validators(contract_dir: Path = CONTRACT_DIR) -> dict[str, Draft202012Validator]:
+    schemas = {
+        schema_name: load_json(contract_dir / schema_name)
+        for schema_name in set(SCHEMA_BY_PREFIX.values())
+    }
+    registry = Registry().with_resources(
+        (schema["$id"], Resource.from_contents(schema))
+        for schema in schemas.values()
+    )
     validators: dict[str, Draft202012Validator] = {}
-    for schema_name in SCHEMA_BY_PREFIX.values():
-        schema = load_json(contract_dir / schema_name)
+    for schema_name, schema in schemas.items():
         try:
             Draft202012Validator.check_schema(schema)
         except Exception as error:
@@ -197,7 +248,11 @@ def load_validators(contract_dir: Path = CONTRACT_DIR) -> dict[str, Draft202012V
         required = set(schema.get("required", []))
         if properties != required:
             raise ContractError(f"{schema_name} must require its complete top-level shape.")
-        validators[schema_name] = Draft202012Validator(schema, format_checker=FORMAT_CHECKER)
+        validators[schema_name] = Draft202012Validator(
+            schema,
+            registry=registry,
+            format_checker=FORMAT_CHECKER,
+        )
     return validators
 
 
@@ -237,6 +292,10 @@ def validate_contract(contract_dir: Path = CONTRACT_DIR) -> None:
         "receipt.committed_evidence",
         "receipt.no_source_mutation_authority",
         "duplicate.full_strong_hash_only",
+        "handoff.session_consistency",
+        "handoff.read_only_content_uri",
+        "handoff.representation_advertised",
+        "receipt.batch_consistency",
     }
     actual_rule_ids = {rule.get("id") for rule in semantic_rules.get("rules", [])}
     if actual_rule_ids != expected_rule_ids:

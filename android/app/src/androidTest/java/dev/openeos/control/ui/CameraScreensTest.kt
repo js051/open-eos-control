@@ -2306,6 +2306,28 @@ class CameraScreensTest {
     }
 
     @Test
+    fun selectedMediaCanBeHandedToSereinWithoutChangingCameraMedia() {
+        val preview = CameraUiState().withOfflinePreview()
+        val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA)
+        val selected = state.mediaItems.take(2)
+        var handedOff = emptyList<CameraMediaItem>()
+        val actions = noOpActions().copy(openInSerein = { handedOff = it })
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, actions) }
+        }
+
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, selected[0].name))
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, selected[1].name))
+            .performClick()
+        compose.onNodeWithContentDescription(
+            resourceText(R.string.open_selected_in_serein, selected.size),
+        ).performClick()
+
+        compose.runOnIdle { assertEquals(selected, handedOff) }
+    }
+
+    @Test
     fun mediaSelectionActionsRemainReachableInTraditionalChineseAtLargeText() {
         val preview = CameraUiState().withOfflinePreview()
         val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA)

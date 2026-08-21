@@ -42,7 +42,7 @@ enum class MediaLibraryLoadStatus { NOT_LOADED, LOADING, COMPLETE, CANCELLED, FA
 
 enum class MediaLibraryScope { RECENT, ALL }
 
-enum class MediaBatchOperation { DOWNLOAD, PROTECT, UNPROTECT, ARCHIVE, UNARCHIVE, RATE, ROTATE, DELETE }
+enum class MediaBatchOperation { DOWNLOAD, OPEN_NEGATIVE, PROTECT, UNPROTECT, ARCHIVE, UNARCHIVE, RATE, ROTATE, DELETE }
 
 data class MediaBatchProgress(
     val operation: MediaBatchOperation,
@@ -111,6 +111,9 @@ data class CameraUiState(
     val lastDeletedMediaName: String? = null,
     val mediaBatchProgress: MediaBatchProgress? = null,
     val lastMediaBatchResult: MediaBatchResult? = null,
+    val cameraImportPreparing: Boolean = false,
+    val pendingCameraImportHandoff: CameraImportHandoffSession? = null,
+    val lastCameraImportReceiptSummary: CameraImportReceiptSummary? = null,
     val liveViewFrameUrl: String? = null,
     val liveViewBitmap: Bitmap? = null,
     val nativeLiveViewSession: NativeLiveViewSession? = null,

@@ -1,7 +1,10 @@
 package dev.openeos.control.ui
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -42,6 +45,21 @@ fun OpenEosControlApp(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val sereinLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        viewModel.handleSereinResult(context, result.resultCode, result.data)
+    }
+    LaunchedEffect(state.pendingCameraImportHandoff) {
+        val session = state.pendingCameraImportHandoff ?: return@LaunchedEffect
+        try {
+            sereinLauncher.launch(SereinImportIntents.create(session))
+        } catch (_: ActivityNotFoundException) {
+            viewModel.handleSereinLaunchFailure(context, session.sessionId)
+        } catch (_: SecurityException) {
+            viewModel.handleSereinLaunchFailure(context, session.sessionId)
+        }
+    }
     val animatedControlRotation by animateFloatAsState(
         targetValue = controlRotationDegrees,
         animationSpec = if (animateControlRotation) tween(durationMillis = 180) else snap(),
@@ -134,6 +152,7 @@ fun OpenEosControlApp(
         setMediaRotationBatch = viewModel::setMediaRotationBatch,
         downloadMedia = { item, destination -> viewModel.downloadMedia(context, item, destination) },
         downloadMediaBatch = { items, destination -> viewModel.downloadMediaBatch(context, items, destination) },
+        openInSerein = { items -> viewModel.openInSerein(context, items) },
         uploadMedia = { source -> viewModel.uploadMedia(context, source) },
         deleteMedia = viewModel::deleteMedia,
         deleteMediaBatch = viewModel::deleteMediaBatch,
@@ -293,6 +312,7 @@ data class CameraActions(
     val setMediaRotationBatch: (List<CameraMediaItem>, Int) -> Unit = { _, _ -> },
     val downloadMedia: (CameraMediaItem, Uri) -> Unit,
     val downloadMediaBatch: (List<CameraMediaItem>, Uri) -> Unit = { _, _ -> },
+    val openInSerein: (List<CameraMediaItem>) -> Unit = {},
     val uploadMedia: (Uri) -> Unit = {},
     val deleteMedia: (CameraMediaItem) -> Unit,
     val deleteMediaBatch: (List<CameraMediaItem>) -> Unit = {},
