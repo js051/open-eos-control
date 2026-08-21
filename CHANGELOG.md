@@ -4,6 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-21
+
+- Added Google Photos-style Android camera-media selection: long press enters selection, continuous drag selects or clears ranges, edge holding auto-scrolls, and stable media IDs preserve the selection across filtering and sorting.
+- Added capability-gated Android batch download, protection, archive, rating, display rotation, and confirmed deletion. Operations run sequentially against the active camera transport, report item progress and partial failures, and never turn a rejected camera operation into success.
+- Added English and Traditional Chinese selection UI, accessibility semantics, enlarged-text coverage, reducer/ViewModel tests, and real touch-drag Compose tests on Android API 34 and API 36.
+- Clarified that Development Preview is the only active release channel. Pending physical-device evidence limits compatibility claims but does not by itself block a prerelease.
+
 ## [0.4.0] - 2026-08-19
 
 - Extended the bounded recent-media flow to iOS and the PC control UI with explicit Recent/Full card controls, localized scope summaries, one-item lookahead, and scope-aware diagnostics.
@@ -128,3 +135,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.3.0]: https://github.com/js051/open-eos-control/releases/tag/v0.3.0
 [0.3.1]: https://github.com/js051/open-eos-control/releases/tag/v0.3.1
 [0.4.0]: https://github.com/js051/open-eos-control/releases/tag/v0.4.0
+[0.5.0]: https://github.com/js051/open-eos-control/releases/tag/v0.5.0
