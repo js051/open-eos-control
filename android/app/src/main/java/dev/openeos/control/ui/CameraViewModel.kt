@@ -1583,7 +1583,9 @@ class CameraViewModel(
         val camera = state.info ?: return
         val providerVersion = appContext.installedVersionName()
         val storage = CameraImportHandoffStorage(appContext)
-        state.pendingCameraImportHandoff?.let { storage.cleanup(it.sessionId) }
+        state.pendingCameraImportHandoff?.let { staleSession ->
+            viewModelScope.launch(Dispatchers.IO) { storage.cleanup(staleSession.sessionId) }
+        }
         _uiState.update {
             it.copy(
                 cameraImportPreparing = true,
