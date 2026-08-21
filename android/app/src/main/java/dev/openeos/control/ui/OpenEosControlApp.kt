@@ -45,19 +45,19 @@ fun OpenEosControlApp(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val openNegativeLauncher = rememberLauncherForActivityResult(
+    val sereinLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
-        viewModel.handleOpenNegativeResult(context, result.resultCode, result.data)
+        viewModel.handleSereinResult(context, result.resultCode, result.data)
     }
     LaunchedEffect(state.pendingCameraImportHandoff) {
         val session = state.pendingCameraImportHandoff ?: return@LaunchedEffect
         try {
-            openNegativeLauncher.launch(OpenNegativeImportIntents.create(session))
+            sereinLauncher.launch(SereinImportIntents.create(session))
         } catch (_: ActivityNotFoundException) {
-            viewModel.handleOpenNegativeLaunchFailure(context, session.sessionId)
+            viewModel.handleSereinLaunchFailure(context, session.sessionId)
         } catch (_: SecurityException) {
-            viewModel.handleOpenNegativeLaunchFailure(context, session.sessionId)
+            viewModel.handleSereinLaunchFailure(context, session.sessionId)
         }
     }
     val animatedControlRotation by animateFloatAsState(
@@ -152,7 +152,7 @@ fun OpenEosControlApp(
         setMediaRotationBatch = viewModel::setMediaRotationBatch,
         downloadMedia = { item, destination -> viewModel.downloadMedia(context, item, destination) },
         downloadMediaBatch = { items, destination -> viewModel.downloadMediaBatch(context, items, destination) },
-        openInOpenNegative = { items -> viewModel.openInOpenNegative(context, items) },
+        openInSerein = { items -> viewModel.openInSerein(context, items) },
         uploadMedia = { source -> viewModel.uploadMedia(context, source) },
         deleteMedia = viewModel::deleteMedia,
         deleteMediaBatch = viewModel::deleteMediaBatch,
@@ -312,7 +312,7 @@ data class CameraActions(
     val setMediaRotationBatch: (List<CameraMediaItem>, Int) -> Unit = { _, _ -> },
     val downloadMedia: (CameraMediaItem, Uri) -> Unit,
     val downloadMediaBatch: (List<CameraMediaItem>, Uri) -> Unit = { _, _ -> },
-    val openInOpenNegative: (List<CameraMediaItem>) -> Unit = {},
+    val openInSerein: (List<CameraMediaItem>) -> Unit = {},
     val uploadMedia: (Uri) -> Unit = {},
     val deleteMedia: (CameraMediaItem) -> Unit,
     val deleteMediaBatch: (List<CameraMediaItem>) -> Unit = {},

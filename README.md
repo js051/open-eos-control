@@ -158,7 +158,7 @@ GitHub Actions builds an unsigned Simulator app bundle, verifies icon/localizati
 
 ## Camera Import Contract
 
-`contracts/camera-import/v1` defines the versioned boundary for handing camera media to a catalog or editing application. Open EOS Control retains ownership of CCAPI/PTP/Bridge sessions, capability discovery, camera media representations, resumable transfers, and transport integrity evidence. A consumer such as Open Negative owns staging, full content hashing, atomic catalog commits, RAW/JPEG development, sidecars, export, and long-term library management.
+`contracts/camera-import/v1` defines the versioned boundary for handing camera media to a catalog or editing application. Open EOS Control retains ownership of CCAPI/PTP/Bridge sessions, capability discovery, camera media representations, resumable transfers, and transport integrity evidence. A consumer such as Serein owns staging, full content hashing, atomic catalog commits, RAW/JPEG development, sidecars, export, and long-term library management.
 
 The release pipeline packages a JSON Schema/fixture ZIP and a pure Kotlin contract JAR for the next development preview. Both use their own contract artifact version and are included in release provenance and checksums. The contract rejects transport locators and private identities, treats grouping as a hint, permits exact duplicate decisions only from a trusted full strong checksum or a consumer-computed full SHA-256, and never allows an import receipt to authorize camera-media deletion. See the [contract README](contracts/camera-import/v1/README.md).
 

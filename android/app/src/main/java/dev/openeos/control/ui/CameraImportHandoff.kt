@@ -63,25 +63,28 @@ data class CameraImportReceiptSummary(
         get() = imported + duplicates
 }
 
-internal object OpenNegativeImportIntents {
+internal object SereinImportIntents {
     fun isAvailable(context: Context, targetPackage: String = CameraImportAndroidIntentV1.OPEN_NEGATIVE_PACKAGE): Boolean =
-        probe(targetPackage).resolveActivity(context.packageManager) != null
+        availabilityProbe(targetPackage).resolveActivity(context.packageManager) != null
+
+    internal fun availabilityProbe(
+        targetPackage: String = CameraImportAndroidIntentV1.OPEN_NEGATIVE_PACKAGE,
+    ): Intent = probe(targetPackage, Uri.parse(CAMERA_IMPORT_AVAILABILITY_URI))
 
     fun create(
         session: CameraImportHandoffSession,
         targetPackage: String = CameraImportAndroidIntentV1.OPEN_NEGATIVE_PACKAGE,
-    ): Intent = probe(targetPackage).apply {
-        setDataAndType(session.manifestUri, CameraImportAndroidIntentV1.MIME_TYPE)
+    ): Intent = probe(targetPackage, session.manifestUri).apply {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         clipData = ClipData.newRawUri("Open EOS Camera Import", session.manifestUri).apply {
             session.representationUris.forEach { addItem(ClipData.Item(it)) }
         }
     }
 
-    private fun probe(targetPackage: String): Intent = Intent(CameraImportAndroidIntentV1.ACTION)
+    private fun probe(targetPackage: String, dataUri: Uri): Intent = Intent(CameraImportAndroidIntentV1.ACTION)
         .setPackage(targetPackage)
         .addCategory(Intent.CATEGORY_DEFAULT)
-        .setType(CameraImportAndroidIntentV1.MIME_TYPE)
+        .setDataAndType(dataUri, CameraImportAndroidIntentV1.MIME_TYPE)
 }
 
 internal class CameraImportHandoffStorage(private val context: Context) {
@@ -290,7 +293,7 @@ internal fun readCameraImportReceiptBatch(
     receiptUri: Uri,
     expectedSession: CameraImportHandoffSession,
 ): CameraImportReceiptSummary {
-    require(receiptUri.scheme == "content") { "Open Negative returned a non-content receipt URI." }
+    require(receiptUri.scheme == "content") { "Serein returned a non-content receipt URI." }
     val bytes = context.contentResolver.openInputStream(receiptUri)?.use { input ->
         val output = java.io.ByteArrayOutputStream()
         val buffer = ByteArray(16 * 1024)
@@ -298,25 +301,25 @@ internal fun readCameraImportReceiptBatch(
             val count = input.read(buffer)
             if (count < 0) break
             output.write(buffer, 0, count)
-            require(output.size() <= MAX_RECEIPT_BYTES) { "Open Negative receipt is too large." }
+            require(output.size() <= MAX_RECEIPT_BYTES) { "Serein receipt is too large." }
         }
         output.toByteArray()
-    } ?: error("Android could not open the Open Negative receipt.")
+    } ?: error("Android could not open the Serein receipt.")
     val batch: CameraImportReceiptBatchV1 = CameraImportJsonCodecV1.decodeReceiptBatch(bytes.toString(Charsets.UTF_8))
-    require(batch.sessionId == expectedSession.sessionId) { "Open Negative returned a receipt for another session." }
+    require(batch.sessionId == expectedSession.sessionId) { "Serein returned a receipt for another session." }
     require(batch.receipts.mapTo(hashSetOf()) { it.mediaId } == expectedSession.mediaIds) {
-        "Open Negative receipt does not cover every selected item."
+        "Serein receipt does not cover every selected item."
     }
     batch.receipts.forEach { receipt ->
         if (receipt.outcome in setOf(CameraImportOutcome.IMPORTED, CameraImportOutcome.DUPLICATE)) {
             val expected = requireNotNull(expectedSession.expectedOriginals[receipt.mediaId]) {
-                "Open Negative returned evidence for an unknown original."
+                "Serein returned evidence for an unknown original."
             }
             require(receipt.byteLength == expected.byteLength) {
-                "Open Negative receipt length does not match the staged original."
+                "Serein receipt length does not match the staged original."
             }
             require(receipt.blobSha256.equals(expected.sha256, ignoreCase = true)) {
-                "Open Negative receipt checksum does not match the staged original."
+                "Serein receipt checksum does not match the staged original."
             }
         }
     }
@@ -413,3 +416,4 @@ private fun ByteArray.toHex(): String = joinToString("") { byte ->
 }
 
 private const val MAX_RECEIPT_BYTES = 5 * 1024 * 1024
+private const val CAMERA_IMPORT_AVAILABILITY_URI = "content://dev.openeos.control.camera_import/probe"

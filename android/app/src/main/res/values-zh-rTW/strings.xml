@@ -421,12 +421,12 @@
     <string name="media_batch_complete">已完成 %1$d／%2$d 個項目。</string>
     <string name="media_batch_partial">已完成 %1$d／%2$d 個項目；%3$d 個失敗，可保持選取後重試。</string>
     <string name="media_batch_failed_items">失敗項目：%1$s</string>
-    <string name="edit_in_open_negative">在 Open Negative 編輯</string>
-    <string name="open_media_in_open_negative">在 Open Negative 編輯 %1$s</string>
-    <string name="open_selected_in_open_negative">在 Open Negative 編輯選取的 %1$d 個項目</string>
-    <string name="preparing_media_for_open_negative">正在為 Open Negative 準備 %1$s</string>
-    <string name="open_negative_not_installed">尚未安裝 Open Negative，或目前版本還不能接收 Camera Import V1。</string>
-    <string name="open_negative_launch_failed">無法開啟 Open Negative；相機媒體沒有被修改。</string>
-    <string name="open_negative_receipt_missing">Open Negative 未回傳可驗證的匯入回執；相機原檔保持不變。</string>
-    <string name="open_negative_import_result">Open Negative 已保存 %1$d 個項目；%2$d 個失敗，%3$d 個取消。</string>
+    <string name="edit_in_serein">在 Serein 編輯</string>
+    <string name="open_media_in_serein">在 Serein 編輯 %1$s</string>
+    <string name="open_selected_in_serein">在 Serein 編輯選取的 %1$d 個項目</string>
+    <string name="preparing_media_for_serein">正在為 Serein 準備 %1$s</string>
+    <string name="serein_not_installed">尚未安裝 Serein，或目前版本還不能接收 Camera Import V1。</string>
+    <string name="serein_launch_failed">無法開啟 Serein；相機媒體沒有被修改。</string>
+    <string name="serein_receipt_missing">Serein 未回傳可驗證的匯入回執；相機原檔保持不變。</string>
+    <string name="serein_import_result">Serein 已保存 %1$d 個項目；%2$d 個失敗，%3$d 個取消。</string>
 </resources>

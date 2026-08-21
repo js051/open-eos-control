@@ -658,12 +658,12 @@
     <string name="temperature_shutter_unavailable">Shutter unavailable due to camera temperature</string>
     <string name="temperature_movie_recording_restricted">Movie recording restricted due to camera temperature</string>
     <string name="temperature_still_quality_warning">Still image quality may be reduced</string>
-    <string name="edit_in_open_negative">Edit in Open Negative</string>
-    <string name="open_media_in_open_negative">Edit %1$s in Open Negative</string>
-    <string name="open_selected_in_open_negative">Edit %1$d selected items in Open Negative</string>
-    <string name="preparing_media_for_open_negative">Preparing %1$s for Open Negative</string>
-    <string name="open_negative_not_installed">Open Negative is not installed or cannot accept Camera Import V1 yet.</string>
-    <string name="open_negative_launch_failed">Open Negative could not be opened. No camera media was changed.</string>
-    <string name="open_negative_receipt_missing">Open Negative did not return a verified import receipt. The camera originals remain unchanged.</string>
-    <string name="open_negative_import_result">Open Negative preserved %1$d item(s); %2$d failed and %3$d were cancelled.</string>
+    <string name="edit_in_serein">Edit in Serein</string>
+    <string name="open_media_in_serein">Edit %1$s in Serein</string>
+    <string name="open_selected_in_serein">Edit %1$d selected items in Serein</string>
+    <string name="preparing_media_for_serein">Preparing %1$s for Serein</string>
+    <string name="serein_not_installed">Serein is not installed or cannot accept Camera Import V1 yet.</string>
+    <string name="serein_launch_failed">Serein could not be opened. No camera media was changed.</string>
+    <string name="serein_receipt_missing">Serein did not return a verified import receipt. The camera originals remain unchanged.</string>
+    <string name="serein_import_result">Serein preserved %1$d item(s); %2$d failed and %3$d were cancelled.</string>
 </resources>

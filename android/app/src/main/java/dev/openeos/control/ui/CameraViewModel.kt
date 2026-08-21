@@ -1560,7 +1560,7 @@ class CameraViewModel(
         }
     }
 
-    fun openInOpenNegative(context: Context, items: List<CameraMediaItem>) {
+    fun openInSerein(context: Context, items: List<CameraMediaItem>) {
         val state = _uiState.value
         val selectedItems = items.distinctBy(CameraMediaItem::id)
         if (
@@ -1571,10 +1571,10 @@ class CameraViewModel(
             mediaDownloadJob != null
         ) return
         val appContext = context.applicationContext
-        if (!OpenNegativeImportIntents.isAvailable(appContext)) {
+        if (!SereinImportIntents.isAvailable(appContext)) {
             _uiState.update {
                 it.copy(
-                    error = appContext.getString(dev.openeos.control.R.string.open_negative_not_installed),
+                    error = appContext.getString(dev.openeos.control.R.string.serein_not_installed),
                     errorOperation = CameraOperation.MEDIA,
                 )
             }
@@ -1641,7 +1641,7 @@ class CameraViewModel(
         }
     }
 
-    fun handleOpenNegativeResult(context: Context, resultCode: Int, data: Intent?) {
+    fun handleSereinResult(context: Context, resultCode: Int, data: Intent?) {
         val session = _uiState.value.pendingCameraImportHandoff ?: return
         val appContext = context.applicationContext
         _uiState.update { it.copy(pendingCameraImportHandoff = null) }
@@ -1654,7 +1654,7 @@ class CameraViewModel(
             cleanupCameraImportSession(appContext, session.sessionId)
             _uiState.update {
                 it.copy(
-                    error = appContext.getString(dev.openeos.control.R.string.open_negative_receipt_missing),
+                    error = appContext.getString(dev.openeos.control.R.string.serein_receipt_missing),
                     errorOperation = CameraOperation.MEDIA,
                 )
             }
@@ -1664,7 +1664,7 @@ class CameraViewModel(
             try {
                 val resultType = data.type ?: appContext.contentResolver.getType(receiptUri)
                 require(resultType == dev.openeos.control.importing.CameraImportAndroidIntentV1.RECEIPT_MIME_TYPE) {
-                    "Open Negative returned an unsupported receipt type."
+                    "Serein returned an unsupported receipt type."
                 }
                 val summary = withContext(Dispatchers.IO) {
                     readCameraImportReceiptBatch(appContext, receiptUri, session)
@@ -1678,14 +1678,14 @@ class CameraViewModel(
         }
     }
 
-    fun handleOpenNegativeLaunchFailure(context: Context, sessionId: String) {
+    fun handleSereinLaunchFailure(context: Context, sessionId: String) {
         val pending = _uiState.value.pendingCameraImportHandoff ?: return
         if (pending.sessionId != sessionId) return
         cleanupCameraImportSession(context.applicationContext, sessionId)
         _uiState.update {
             it.copy(
                 pendingCameraImportHandoff = null,
-                error = context.getString(dev.openeos.control.R.string.open_negative_launch_failed),
+                error = context.getString(dev.openeos.control.R.string.serein_launch_failed),
                 errorOperation = CameraOperation.MEDIA,
             )
         }

@@ -96,7 +96,7 @@ class CameraImportHandoffInstrumentedTest {
                 storage.cleanup(secondSession.sessionId)
             }
 
-            val intent = OpenNegativeImportIntents.create(session)
+            val intent = SereinImportIntents.create(session)
             assertEquals(CameraImportAndroidIntentV1.ACTION, intent.action)
             assertEquals(CameraImportAndroidIntentV1.OPEN_NEGATIVE_PACKAGE, intent.`package`)
             assertEquals(CameraImportAndroidIntentV1.MIME_TYPE, intent.type)
@@ -104,6 +104,12 @@ class CameraImportHandoffInstrumentedTest {
             assertEquals(2, intent.clipData?.itemCount)
             assertTrue(intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
             assertFalse(intent.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0)
+
+            val availabilityProbe = SereinImportIntents.availabilityProbe()
+            assertEquals(CameraImportAndroidIntentV1.ACTION, availabilityProbe.action)
+            assertEquals(CameraImportAndroidIntentV1.OPEN_NEGATIVE_PACKAGE, availabilityProbe.`package`)
+            assertEquals(CameraImportAndroidIntentV1.MIME_TYPE, availabilityProbe.type)
+            assertEquals("content", availabilityProbe.data?.scheme)
         } finally {
             storage.cleanup(session.sessionId)
         }
