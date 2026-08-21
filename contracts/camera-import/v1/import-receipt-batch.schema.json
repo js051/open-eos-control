@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/js051/open-eos-control/contracts/camera-import/v1/import-receipt-batch.schema.json",
+  "title": "CameraImportReceiptBatchV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handoff_version",
+    "contract_version",
+    "provider_id",
+    "session_id",
+    "receipts"
+  ],
+  "properties": {
+    "handoff_version": { "const": "1.0" },
+    "contract_version": { "const": "1.0" },
+    "provider_id": { "$ref": "media-descriptor.schema.json#/$defs/opaqueId" },
+    "session_id": { "$ref": "media-descriptor.schema.json#/$defs/opaqueId" },
+    "receipts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": { "$ref": "import-receipt.schema.json" }
+    }
+  }
+}

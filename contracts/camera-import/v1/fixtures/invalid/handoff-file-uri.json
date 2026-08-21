@@ -1,0 +1,45 @@
+{
+  "handoff_version": "1.0",
+  "contract_version": "1.0",
+  "provider_id": "dev.openeos.control",
+  "provider_version": "0.5.0",
+  "session_id": "session-demo-handoff-0001",
+  "items": [
+    {
+      "descriptor": {
+        "contract_version": "1.0",
+        "provider_id": "dev.openeos.control",
+        "provider_version": "0.5.0",
+        "session_id": "session-demo-handoff-0001",
+        "media_id": "media-demo-jpeg-0001",
+        "capture_correlation_id": null,
+        "captured_at": null,
+        "filename": "DEMO0001.JPG",
+        "media_kind": "JPEG",
+        "mime_type": "image/jpeg",
+        "byte_length": 4096,
+        "source_checksum": null,
+        "source_revision": null,
+        "camera_id": "camera-session-0001",
+        "camera_model": "Canon EOS R6 Mark III",
+        "storage_id": "storage-session-card1",
+        "storage_label": null,
+        "width": null,
+        "height": null,
+        "orientation": null,
+        "capture_group_hint": null,
+        "companion_role": "JPEG",
+        "available_representations": ["ORIGINAL"],
+        "range_supported": true,
+        "resume_supported": false,
+        "cancel_supported": false
+      },
+      "representations": [
+        {
+          "representation": "ORIGINAL",
+          "content_uri": "file:///private/DEMO0001.JPG"
+        }
+      ]
+    }
+  ]
+}

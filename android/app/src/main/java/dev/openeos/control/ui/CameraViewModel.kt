@@ -1,7 +1,9 @@
 package dev.openeos.control.ui
 
+import android.app.Activity
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.SystemClock
@@ -206,6 +208,9 @@ class CameraViewModel(
         if (!networkRoutingConfigured) {
             repository.configureAndroidNetworkRouting(context.applicationContext)
             networkRoutingConfigured = true
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { CameraImportHandoffStorage(context.applicationContext).cleanupExpiredSessions() }
         }
         if (preferencesLoaded) return
         preferencesLoaded = true
@@ -1555,6 +1560,141 @@ class CameraViewModel(
         }
     }
 
+    fun openInOpenNegative(context: Context, items: List<CameraMediaItem>) {
+        val state = _uiState.value
+        val selectedItems = items.distinctBy(CameraMediaItem::id)
+        if (
+            selectedItems.isEmpty() ||
+            state.previewMode ||
+            state.isBusy(CameraOperation.MEDIA) ||
+            !state.supports(CameraFeature.MEDIA_DOWNLOAD) ||
+            mediaDownloadJob != null
+        ) return
+        val appContext = context.applicationContext
+        if (!OpenNegativeImportIntents.isAvailable(appContext)) {
+            _uiState.update {
+                it.copy(
+                    error = appContext.getString(dev.openeos.control.R.string.open_negative_not_installed),
+                    errorOperation = CameraOperation.MEDIA,
+                )
+            }
+            return
+        }
+        val camera = state.info ?: return
+        val providerVersion = appContext.installedVersionName()
+        val storage = CameraImportHandoffStorage(appContext)
+        state.pendingCameraImportHandoff?.let { storage.cleanup(it.sessionId) }
+        _uiState.update {
+            it.copy(
+                cameraImportPreparing = true,
+                pendingCameraImportHandoff = null,
+                lastCameraImportReceiptSummary = null,
+                lastMediaBatchResult = null,
+            )
+        }
+        val job = launchCameraOperation(CameraOperation.MEDIA) {
+            try {
+                val session = storage.prepare(
+                    items = selectedItems,
+                    camera = camera,
+                    providerVersion = providerVersion,
+                    onItem = { index, total, name ->
+                        _uiState.update {
+                            it.copy(
+                                mediaBatchProgress = MediaBatchProgress(
+                                    operation = MediaBatchOperation.OPEN_NEGATIVE,
+                                    completedItems = index,
+                                    totalItems = total,
+                                    currentItemName = name,
+                                ),
+                                activeMediaDownloadName = name,
+                                mediaDownloadProgress = CameraMediaTransferProgress(
+                                    bytesTransferred = 0L,
+                                    totalBytes = selectedItems[index].sizeBytes,
+                                ),
+                            )
+                        }
+                    },
+                    onProgress = { progress ->
+                        _uiState.update { current -> current.copy(mediaDownloadProgress = progress) }
+                    },
+                ) { item, output, onProgress ->
+                    repository.downloadMedia(item, output, onProgress)
+                }
+                _uiState.update { it.copy(pendingCameraImportHandoff = session) }
+            } finally {
+                _uiState.update {
+                    it.copy(
+                        cameraImportPreparing = false,
+                        mediaBatchProgress = null,
+                        activeMediaDownloadName = null,
+                        mediaDownloadProgress = null,
+                    )
+                }
+            }
+        }
+        mediaDownloadJob = job
+        job?.invokeOnCompletion {
+            if (mediaDownloadJob === job) mediaDownloadJob = null
+        }
+    }
+
+    fun handleOpenNegativeResult(context: Context, resultCode: Int, data: Intent?) {
+        val session = _uiState.value.pendingCameraImportHandoff ?: return
+        val appContext = context.applicationContext
+        _uiState.update { it.copy(pendingCameraImportHandoff = null) }
+        if (resultCode != Activity.RESULT_OK) {
+            cleanupCameraImportSession(appContext, session.sessionId)
+            return
+        }
+        val receiptUri = data?.data
+        if (receiptUri == null) {
+            cleanupCameraImportSession(appContext, session.sessionId)
+            _uiState.update {
+                it.copy(
+                    error = appContext.getString(dev.openeos.control.R.string.open_negative_receipt_missing),
+                    errorOperation = CameraOperation.MEDIA,
+                )
+            }
+            return
+        }
+        runCamera(CameraOperation.MEDIA) {
+            try {
+                val resultType = data.type ?: appContext.contentResolver.getType(receiptUri)
+                require(resultType == dev.openeos.control.importing.CameraImportAndroidIntentV1.RECEIPT_MIME_TYPE) {
+                    "Open Negative returned an unsupported receipt type."
+                }
+                val summary = withContext(Dispatchers.IO) {
+                    readCameraImportReceiptBatch(appContext, receiptUri, session)
+                }
+                _uiState.update { it.copy(lastCameraImportReceiptSummary = summary) }
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    CameraImportHandoffStorage(appContext).cleanup(session.sessionId)
+                }
+            }
+        }
+    }
+
+    fun handleOpenNegativeLaunchFailure(context: Context, sessionId: String) {
+        val pending = _uiState.value.pendingCameraImportHandoff ?: return
+        if (pending.sessionId != sessionId) return
+        cleanupCameraImportSession(context.applicationContext, sessionId)
+        _uiState.update {
+            it.copy(
+                pendingCameraImportHandoff = null,
+                error = context.getString(dev.openeos.control.R.string.open_negative_launch_failed),
+                errorOperation = CameraOperation.MEDIA,
+            )
+        }
+    }
+
+    private fun cleanupCameraImportSession(context: Context, sessionId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            CameraImportHandoffStorage(context.applicationContext).cleanup(sessionId)
+        }
+    }
+
     fun cancelMediaDownload() {
         mediaDownloadJob?.cancel()
     }
@@ -2326,6 +2466,9 @@ class CameraViewModel(
         lastDeletedMediaName = null,
         mediaBatchProgress = null,
         lastMediaBatchResult = null,
+        cameraImportPreparing = false,
+        pendingCameraImportHandoff = null,
+        lastCameraImportReceiptSummary = null,
         liveViewFrameUrl = null,
         liveViewBitmap = null,
         nativeLiveViewSession = null,
@@ -2643,3 +2786,9 @@ class CameraViewModel(
         )
     }
 }
+
+@Suppress("DEPRECATION")
+private fun Context.installedVersionName(): String =
+    packageManager.getPackageInfo(packageName, 0).versionName
+        ?.takeIf(String::isNotBlank)
+        ?: error("Android package version is unavailable.")

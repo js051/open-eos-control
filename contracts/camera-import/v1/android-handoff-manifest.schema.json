@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/js051/open-eos-control/contracts/camera-import/v1/android-handoff-manifest.schema.json",
+  "title": "CameraImportAndroidHandoffManifestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handoff_version",
+    "contract_version",
+    "provider_id",
+    "provider_version",
+    "session_id",
+    "items"
+  ],
+  "properties": {
+    "handoff_version": { "const": "1.0" },
+    "contract_version": { "const": "1.0" },
+    "provider_id": { "$ref": "media-descriptor.schema.json#/$defs/opaqueId" },
+    "provider_version": { "$ref": "media-descriptor.schema.json#/$defs/semanticVersion" },
+    "session_id": { "$ref": "media-descriptor.schema.json#/$defs/opaqueId" },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["descriptor", "representations"],
+        "properties": {
+          "descriptor": { "$ref": "media-descriptor.schema.json" },
+          "representations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["representation", "content_uri"],
+              "properties": {
+                "representation": { "$ref": "media-descriptor.schema.json#/$defs/representation" },
+                "content_uri": {
+                  "type": "string",
+                  "minLength": 12,
+                  "maxLength": 2048,
+                  "pattern": "^content://[^/?#]+/[^?#]+(?:\\?[^#]*)?$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

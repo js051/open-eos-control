@@ -4,6 +4,9 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Added Android handoff from a single camera item or a multi-selection to Open Negative through explicit, temporary read-only `content://` grants. Open EOS Control stages and hashes complete originals, accepts only exact-session receipt batches, and verifies imported byte lengths and SHA-256 values without modifying camera media.
+- Extended Camera Import Contract artifact `1.1.0` with strict Android handoff and receipt-batch schemas, bilingual integration rules, portable valid/invalid fixtures, and a JVM 17 Kotlin codec shared with the receiving app.
+
 ## [0.5.0] - 2026-08-21
 
 - Added Google Photos-style Android camera-media selection: long press enters selection, continuous drag selects or clears ranges, edge holding auto-scrolls, and stable media IDs preserve the selection across filtering and sorting.

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "contract_id": "dev.openeos.camera-import",
-  "artifact_version": "1.0.0",
+  "artifact_version": "1.1.0",
   "wire_version": "1.0",
   "producer": {
     "provider_id": "dev.openeos.control",

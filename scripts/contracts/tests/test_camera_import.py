@@ -49,6 +49,17 @@ class CameraImportContractTests(unittest.TestCase):
         self.assertNotIn("delete_camera_media", schema["properties"])
         self.assertFalse(schema["additionalProperties"])
 
+    def test_android_handoff_exposes_only_read_only_content_handles(self) -> None:
+        schema = json.loads(
+            (CONTRACT_DIR / "android-handoff-manifest.schema.json").read_text(encoding="utf-8")
+        )
+        handle = schema["properties"]["items"]["items"]["properties"]["representations"]["items"]
+        self.assertEqual(
+            "^content://[^/?#]+/[^?#]+(?:\\?[^#]*)?$",
+            handle["properties"]["content_uri"]["pattern"],
+        )
+        self.assertNotIn("delete_camera_media", json.dumps(schema))
+
 
 if __name__ == "__main__":
     unittest.main()

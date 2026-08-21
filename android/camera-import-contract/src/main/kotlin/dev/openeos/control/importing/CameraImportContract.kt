@@ -1,11 +1,21 @@
 package dev.openeos.control.importing
 
+import java.net.URI
 import java.time.OffsetDateTime
 
 const val CAMERA_IMPORT_CONTRACT_VERSION = "1.0"
-const val CAMERA_IMPORT_CONTRACT_ARTIFACT_VERSION = "1.0.0"
+const val CAMERA_IMPORT_CONTRACT_ARTIFACT_VERSION = "1.1.0"
+const val CAMERA_IMPORT_ANDROID_HANDOFF_VERSION = "1.0"
+const val CAMERA_IMPORT_MAX_BATCH_ITEMS = 10_000
 const val OPEN_EOS_CAMERA_IMPORT_PROVIDER_ID = "dev.openeos.control"
 const val MINIMUM_OPEN_EOS_CAMERA_IMPORT_PROVIDER_VERSION = "0.5.0"
+
+object CameraImportAndroidIntentV1 {
+    const val ACTION = "dev.photo.workflow.action.IMPORT_CAMERA_MEDIA"
+    const val MIME_TYPE = "application/vnd.openeos.camera-import.v1+json"
+    const val RECEIPT_MIME_TYPE = "application/vnd.openeos.camera-import-receipt.v1+json"
+    const val OPEN_NEGATIVE_PACKAGE = "dev.photo.workflow"
+}
 
 enum class CameraImportMediaKind {
     RAW,
@@ -136,14 +146,7 @@ data class CameraImportMediaDescriptorV1(
     init {
         require(contractVersion == CAMERA_IMPORT_CONTRACT_VERSION) { "Unsupported Camera Import contract version." }
         requireSafeOpaqueId(providerId, "providerId")
-        require(providerVersion.matches(SEMANTIC_VERSION)) { "providerVersion must be semantic versioning." }
-        if (providerId == OPEN_EOS_CAMERA_IMPORT_PROVIDER_ID) {
-            val current = semanticVersionCore(providerVersion)
-            val minimum = semanticVersionCore(MINIMUM_OPEN_EOS_CAMERA_IMPORT_PROVIDER_VERSION)
-            require(current > minimum || current == minimum && '-' !in providerVersion.substringBefore('+')) {
-                "Open EOS providerVersion must be 0.5.0 or newer."
-            }
-        }
+        requireProviderVersion(providerId, providerVersion)
         requireSafeOpaqueId(sessionId, "sessionId")
         requireSafeOpaqueId(mediaId, "mediaId")
         captureCorrelationId?.let { requireSafeOpaqueId(it, "captureCorrelationId") }
@@ -167,6 +170,61 @@ data class CameraImportMediaDescriptorV1(
             "availableRepresentations must be unique."
         }
         require(!resumeSupported || rangeSupported) { "resumeSupported requires rangeSupported." }
+    }
+}
+
+data class CameraImportPlatformRepresentationV1(
+    val representation: CameraImportRepresentation,
+    val contentUri: String,
+) {
+    init {
+        requireReadOnlyContentUri(contentUri)
+    }
+}
+
+data class CameraImportAndroidHandoffItemV1(
+    val descriptor: CameraImportMediaDescriptorV1,
+    val representations: List<CameraImportPlatformRepresentationV1>,
+) {
+    init {
+        require(representations.isNotEmpty()) { "A handoff item requires a representation handle." }
+        require(representations.map { it.representation }.distinct().size == representations.size) {
+            "Handoff representation handles must be unique."
+        }
+        require(representations.all { it.representation in descriptor.availableRepresentations }) {
+            "Handoff representation handles must be advertised by the descriptor."
+        }
+    }
+}
+
+data class CameraImportAndroidHandoffManifestV1(
+    val handoffVersion: String,
+    val contractVersion: String,
+    val providerId: String,
+    val providerVersion: String,
+    val sessionId: String,
+    val items: List<CameraImportAndroidHandoffItemV1>,
+) {
+    init {
+        require(handoffVersion == CAMERA_IMPORT_ANDROID_HANDOFF_VERSION) {
+            "Unsupported Camera Import Android handoff version."
+        }
+        require(contractVersion == CAMERA_IMPORT_CONTRACT_VERSION) { "Unsupported Camera Import contract version." }
+        requireSafeOpaqueId(providerId, "providerId")
+        requireProviderVersion(providerId, providerVersion)
+        requireSafeOpaqueId(sessionId, "sessionId")
+        require(items.isNotEmpty() && items.size <= CAMERA_IMPORT_MAX_BATCH_ITEMS) {
+            "A handoff requires between 1 and $CAMERA_IMPORT_MAX_BATCH_ITEMS items."
+        }
+        require(items.map { it.descriptor.mediaId }.distinct().size == items.size) {
+            "Handoff media IDs must be unique."
+        }
+        require(items.all { item ->
+            item.descriptor.contractVersion == contractVersion &&
+                item.descriptor.providerId == providerId &&
+                item.descriptor.providerVersion == providerVersion &&
+                item.descriptor.sessionId == sessionId
+        }) { "Handoff descriptors must match their envelope." }
     }
 }
 
@@ -309,6 +367,34 @@ data class CameraImportReceiptV1(
     }
 }
 
+data class CameraImportReceiptBatchV1(
+    val handoffVersion: String,
+    val contractVersion: String,
+    val providerId: String,
+    val sessionId: String,
+    val receipts: List<CameraImportReceiptV1>,
+) {
+    init {
+        require(handoffVersion == CAMERA_IMPORT_ANDROID_HANDOFF_VERSION) {
+            "Unsupported Camera Import receipt handoff version."
+        }
+        require(contractVersion == CAMERA_IMPORT_CONTRACT_VERSION) { "Unsupported Camera Import contract version." }
+        requireSafeOpaqueId(providerId, "providerId")
+        requireSafeOpaqueId(sessionId, "sessionId")
+        require(receipts.isNotEmpty() && receipts.size <= CAMERA_IMPORT_MAX_BATCH_ITEMS) {
+            "A receipt batch requires between 1 and $CAMERA_IMPORT_MAX_BATCH_ITEMS receipts."
+        }
+        require(receipts.map { it.mediaId }.distinct().size == receipts.size) {
+            "Receipt media IDs must be unique."
+        }
+        require(receipts.all { receipt ->
+            receipt.contractVersion == contractVersion &&
+                receipt.providerId == providerId &&
+                receipt.sessionId == sessionId
+        }) { "Receipts must match their batch envelope." }
+    }
+}
+
 private val SEMANTIC_VERSION = Regex("^([0-9]+)\\.([0-9]+)\\.([0-9]+)(?:[-+][0-9A-Za-z.-]+)?$")
 private val MIME_TYPE = Regex("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$")
 private val SAFE_ERROR_CODE = Regex("^[A-Z][A-Z0-9_]{2,63}$")
@@ -319,6 +405,32 @@ private val IPV4 = Regex("(?:^|[^0-9])(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?:$|[^0-9])
 private fun requireSafeOpaqueId(value: String, field: String) {
     require(SAFE_OPAQUE_ID.matches(value)) { "$field must be a sanitized opaque identifier." }
     require("://" !in value && !IPV4.containsMatchIn(value)) { "$field must not contain an endpoint or IP address." }
+}
+
+private fun requireProviderVersion(providerId: String, providerVersion: String) {
+    require(providerVersion.matches(SEMANTIC_VERSION)) { "providerVersion must be semantic versioning." }
+    if (providerId == OPEN_EOS_CAMERA_IMPORT_PROVIDER_ID) {
+        val current = semanticVersionCore(providerVersion)
+        val minimum = semanticVersionCore(MINIMUM_OPEN_EOS_CAMERA_IMPORT_PROVIDER_VERSION)
+        require(current > minimum || current == minimum && '-' !in providerVersion.substringBefore('+')) {
+            "Open EOS providerVersion must be 0.5.0 or newer."
+        }
+    }
+}
+
+private fun requireReadOnlyContentUri(value: String) {
+    require(value.length <= 2_048) { "contentUri is too long." }
+    val uri = runCatching { URI(value) }.getOrElse {
+        throw IllegalArgumentException("contentUri is invalid.", it)
+    }
+    require(
+        uri.scheme.equals("content", ignoreCase = true) &&
+            !uri.authority.isNullOrBlank() &&
+            !uri.path.isNullOrBlank() &&
+            uri.userInfo == null &&
+            '@' !in uri.rawAuthority.orEmpty() &&
+            uri.fragment == null
+    ) { "Only provider-owned content URIs are accepted." }
 }
 
 private fun requireOffsetDateTime(value: String) {

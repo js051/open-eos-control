@@ -1,0 +1,23 @@
+{
+  "handoff_version": "1.0",
+  "contract_version": "1.0",
+  "provider_id": "dev.openeos.control",
+  "session_id": "session-demo-handoff-0001",
+  "receipts": [
+    {
+      "contract_version": "1.0",
+      "import_id": "import-demo-0001",
+      "provider_id": "dev.openeos.control",
+      "session_id": "session-different-0002",
+      "media_id": "media-demo-jpeg-0001",
+      "outcome": "CANCELLED",
+      "asset_id": null,
+      "blob_sha256": null,
+      "byte_length": null,
+      "capture_group_id": null,
+      "preserved_representation_ids": [],
+      "safe_error_code": null,
+      "completed_at": "2026-08-21T12:35:12+08:00"
+    }
+  ]
+}

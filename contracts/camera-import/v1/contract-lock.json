@@ -1,22 +1,34 @@
 {
-  "artifact_version": "1.0.0",
+  "artifact_version": "1.1.0",
   "contract_id": "dev.openeos.camera-import",
   "files": {
     "README.md": {
-      "sha256": "a1d7936680043200619bc2bf8e7e45bd9091887f260b25cf96a9478b7c472dd8",
-      "size": 3000
+      "sha256": "b492a40c434797ca8b039cd99015a14aa31f348b4332b6d5ec3ed9835c07d43a",
+      "size": 4247
     },
     "README.zh-TW.md": {
-      "sha256": "7af5c71d0b92068fee7cdc6c04aec377837aaeda4ceb07416c12bcf152904477",
-      "size": 2714
+      "sha256": "b6aa92c21c4d79049e8b8ff8cd6f495b21825537924b226eea5d5a9e0780061b",
+      "size": 3938
     },
     "VERSION": {
-      "sha256": "59854984853104df5c353e2f681a15fc7924742f9a2e468c29af248dce45ce03",
+      "sha256": "1575e1af4a95f12f70b4ee6a6adce8160953d93ea17dc2611b90883ccc3ad3b8",
       "size": 6
     },
+    "android-handoff-manifest.schema.json": {
+      "sha256": "0ad1269970cafa07330ef421f16277ab99d49129793e0c4c4229d04da5c2878f",
+      "size": 1772
+    },
     "compatibility.json": {
-      "sha256": "b159ebe683c243ca2be9a63fc423617cf594cde917ef206537fb932d3cbc5a60",
+      "sha256": "495966b71cd7633341f1025857a20b3699573907f9a7ff8d06941d61baa4b816",
       "size": 496
+    },
+    "fixtures/invalid/handoff-file-uri.json": {
+      "sha256": "c5d7e160b64e1d6fee746598bc92bb6537a132649e39b6f8f56fe5fded226264",
+      "size": 1336
+    },
+    "fixtures/invalid/handoff-userinfo-uri.json": {
+      "sha256": "ffdde9ad8c39f1ed02bddbede450e3bcf59979cf76fb640896a1c4df4c69f671",
+      "size": 1396
     },
     "fixtures/invalid/media-leaks-locator.json": {
       "sha256": "b1536bdf8731e5b9e626ff02db541290048efba2d3a07268cddb1decb5abb6a8",
@@ -29,6 +41,10 @@
     "fixtures/invalid/media-provider-too-old.json": {
       "sha256": "997c12a569e9f63e5c84c323f880995888c9290972f3524bd8188ffe9274733d",
       "size": 782
+    },
+    "fixtures/invalid/receipt-batch-session-mismatch.json": {
+      "sha256": "78103280340ef7a84d7b0e0d77d945e9a43c597db215a853cb1e47ca42acdfee",
+      "size": 645
     },
     "fixtures/invalid/receipt-delete-authorization.json": {
       "sha256": "b4a21db401856c5f550e6727b51c466ac21f96fd4b92b36f4481c766a2323eb2",
@@ -54,6 +70,10 @@
       "sha256": "4e343cfb1f4cefe9dc7eb00aec9c47dd584e984acf22b16a5539008fa3fec450",
       "size": 634
     },
+    "fixtures/valid/handoff-originals.json": {
+      "sha256": "9159bdb53dfe1ed37651403a9ef627dc441562482de0c4404fef12a999a371bc",
+      "size": 1629
+    },
     "fixtures/valid/media-full-raw.json": {
       "sha256": "585320ca6a00028bbc6bf8000965e55b2a413851fb22aa76778dad3d7d2c729f",
       "size": 1039
@@ -61,6 +81,10 @@
     "fixtures/valid/media-minimal.json": {
       "sha256": "f460339ae7f2c80c048c9d44cefeec7d479330fe6ec0a34abf5a9d401602120e",
       "size": 767
+    },
+    "fixtures/valid/receipt-batch-imported.json": {
+      "sha256": "a2f4634659276ce825eaf1668abe5bd9be26b8f116e0d0ee1f42ec5d6ab1e482",
+      "size": 760
     },
     "fixtures/valid/receipt-failed.json": {
       "sha256": "2e4b58365dd35eb2c42e5a04fd178294cd57a1d32cf2faeca8cbe183cfae3417",
@@ -86,6 +110,10 @@
       "sha256": "5fb5d34aafb8b4a65bd2ff53477bec30430149236a7bd30703a227e8bcb819c1",
       "size": 647
     },
+    "import-receipt-batch.schema.json": {
+      "sha256": "7b2c35829c41158fd8f1f4eed686c5d24b10dd8787e6036d91c6c1d7003985f7",
+      "size": 808
+    },
     "import-receipt.schema.json": {
       "sha256": "2c9636cb5b030e3a60942cb8464bebefb86b4a2f889e87858b54f68e6cd9dcc0",
       "size": 2780
@@ -99,8 +127,8 @@
       "size": 1588
     },
     "semantic-rules.json": {
-      "sha256": "6670bc75a06c74cf13b665227c58c6bac57d916c5f7789077f30cc26728ed955",
-      "size": 2582
+      "sha256": "cb745b0dcf4be9a761688330ae476dd6cee58098a6ebcb55cbbc88933b27f159",
+      "size": 3666
     },
     "transfer-event.schema.json": {
       "sha256": "bb0ccb5f35ebba0b6d5b35faf35c9d26374fd3a2d1a67ec0dccddfb2fdb06248",

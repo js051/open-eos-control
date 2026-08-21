@@ -3,6 +3,8 @@
     <application>
         <activity
             android:name="androidx.activity.ComponentActivity"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="portrait"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
     </application>
 </manifest>

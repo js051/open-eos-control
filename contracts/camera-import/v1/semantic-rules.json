@@ -57,6 +57,26 @@
       "id": "duplicate.full_strong_hash_only",
       "documents": ["media", "receipt"],
       "requirement": "Exact duplicate decisions require SHA-256 or SHA-512 over FULL_ORIGINAL, or a full SHA-256 computed by the consumer after receiving all bytes."
+    },
+    {
+      "id": "handoff.session_consistency",
+      "documents": ["android_handoff"],
+      "requirement": "Every descriptor in a handoff has the same contract, provider, provider version, and session identity as its envelope; media IDs are unique within that handoff."
+    },
+    {
+      "id": "handoff.read_only_content_uri",
+      "documents": ["android_handoff"],
+      "requirement": "Android representation handles use content URIs with temporary read-only grants; file URIs and broad storage grants are forbidden, and handles are never persisted as domain identity."
+    },
+    {
+      "id": "handoff.representation_advertised",
+      "documents": ["android_handoff"],
+      "requirement": "Every platform representation handle is unique per item and must be present in that descriptor's available_representations."
+    },
+    {
+      "id": "receipt.batch_consistency",
+      "documents": ["receipt_batch"],
+      "requirement": "Every receipt in a batch has the same contract, provider, and session identity as its envelope; media IDs are unique within that batch."
     }
   ]
 }

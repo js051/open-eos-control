@@ -4,6 +4,39 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CameraImportJsonCodecV1 {
+    fun encodeMediaDescriptor(value: CameraImportMediaDescriptorV1): String = value.toJson().toString()
+
+    fun encodeReceipt(value: CameraImportReceiptV1): String = value.toJson().toString()
+
+    fun encodeAndroidHandoffManifest(value: CameraImportAndroidHandoffManifestV1): String = JSONObject()
+        .put("handoff_version", value.handoffVersion)
+        .put("contract_version", value.contractVersion)
+        .put("provider_id", value.providerId)
+        .put("provider_version", value.providerVersion)
+        .put("session_id", value.sessionId)
+        .put("items", JSONArray().apply {
+            value.items.forEach { item ->
+                put(JSONObject()
+                    .put("descriptor", item.descriptor.toJson())
+                    .put("representations", JSONArray().apply {
+                        item.representations.forEach { handle ->
+                            put(JSONObject()
+                                .put("representation", handle.representation.name)
+                                .put("content_uri", handle.contentUri))
+                        }
+                    }))
+            }
+        })
+        .toString()
+
+    fun encodeReceiptBatch(value: CameraImportReceiptBatchV1): String = JSONObject()
+        .put("handoff_version", value.handoffVersion)
+        .put("contract_version", value.contractVersion)
+        .put("provider_id", value.providerId)
+        .put("session_id", value.sessionId)
+        .put("receipts", JSONArray().apply { value.receipts.forEach { put(it.toJson()) } })
+        .toString()
+
     fun decodeMediaDescriptor(value: String): CameraImportMediaDescriptorV1 {
         val json = JSONObject(value).requireExactKeys(MEDIA_DESCRIPTOR_KEYS)
         return CameraImportMediaDescriptorV1(
@@ -33,6 +66,42 @@ object CameraImportJsonCodecV1 {
             rangeSupported = json.requiredBoolean("range_supported"),
             resumeSupported = json.requiredBoolean("resume_supported"),
             cancelSupported = json.requiredBoolean("cancel_supported"),
+        )
+    }
+
+    fun decodeAndroidHandoffManifest(value: String): CameraImportAndroidHandoffManifestV1 {
+        val json = JSONObject(value).requireExactKeys(ANDROID_HANDOFF_KEYS)
+        val items = json.getJSONArray("items").objects().map { item ->
+            item.requireExactKeys(ANDROID_HANDOFF_ITEM_KEYS)
+            CameraImportAndroidHandoffItemV1(
+                descriptor = decodeMediaDescriptor(item.getJSONObject("descriptor").toString()),
+                representations = item.getJSONArray("representations").objects().map { handle ->
+                    handle.requireExactKeys(PLATFORM_REPRESENTATION_KEYS)
+                    CameraImportPlatformRepresentationV1(
+                        representation = CameraImportRepresentation.valueOf(handle.getString("representation")),
+                        contentUri = handle.getString("content_uri"),
+                    )
+                },
+            )
+        }
+        return CameraImportAndroidHandoffManifestV1(
+            handoffVersion = json.getString("handoff_version"),
+            contractVersion = json.getString("contract_version"),
+            providerId = json.getString("provider_id"),
+            providerVersion = json.getString("provider_version"),
+            sessionId = json.getString("session_id"),
+            items = items,
+        )
+    }
+
+    fun decodeReceiptBatch(value: String): CameraImportReceiptBatchV1 {
+        val json = JSONObject(value).requireExactKeys(RECEIPT_BATCH_KEYS)
+        return CameraImportReceiptBatchV1(
+            handoffVersion = json.getString("handoff_version"),
+            contractVersion = json.getString("contract_version"),
+            providerId = json.getString("provider_id"),
+            sessionId = json.getString("session_id"),
+            receipts = json.getJSONArray("receipts").objects().map { decodeReceipt(it.toString()) },
         )
     }
 
@@ -153,7 +222,81 @@ object CameraImportJsonCodecV1 {
 
     private fun JSONArray.stringList(): List<String> = (0 until length()).map(::getString)
 
+    private fun JSONArray.objects(): List<JSONObject> = (0 until length()).map(::getJSONObject)
+
+    private fun CameraImportMediaDescriptorV1.toJson(): JSONObject = JSONObject()
+        .put("contract_version", contractVersion)
+        .put("provider_id", providerId)
+        .put("provider_version", providerVersion)
+        .put("session_id", sessionId)
+        .put("media_id", mediaId)
+        .putNullable("capture_correlation_id", captureCorrelationId)
+        .putNullable("captured_at", capturedAt)
+        .put("filename", filename)
+        .put("media_kind", mediaKind.name)
+        .putNullable("mime_type", mimeType)
+        .putNullable("byte_length", byteLength)
+        .putNullable("source_checksum", sourceChecksum?.toJson())
+        .putNullable("source_revision", sourceRevision)
+        .put("camera_id", cameraId)
+        .put("camera_model", cameraModel)
+        .put("storage_id", storageId)
+        .putNullable("storage_label", storageLabel)
+        .putNullable("width", width)
+        .putNullable("height", height)
+        .putNullable("orientation", orientation)
+        .putNullable("capture_group_hint", captureGroupHint)
+        .putNullable("companion_role", companionRole?.name)
+        .put("available_representations", JSONArray().apply {
+            availableRepresentations.forEach { put(it.name) }
+        })
+        .put("range_supported", rangeSupported)
+        .put("resume_supported", resumeSupported)
+        .put("cancel_supported", cancelSupported)
+
+    private fun CameraImportReceiptV1.toJson(): JSONObject = JSONObject()
+        .put("contract_version", contractVersion)
+        .put("import_id", importId)
+        .put("provider_id", providerId)
+        .put("session_id", sessionId)
+        .put("media_id", mediaId)
+        .put("outcome", outcome.name)
+        .putNullable("asset_id", assetId)
+        .putNullable("blob_sha256", blobSha256)
+        .putNullable("byte_length", byteLength)
+        .putNullable("capture_group_id", captureGroupId)
+        .put("preserved_representation_ids", JSONArray().apply {
+            preservedRepresentationIds.forEach { put(it) }
+        })
+        .putNullable("safe_error_code", safeErrorCode)
+        .put("completed_at", completedAt)
+
+    private fun CameraImportSourceChecksumV1.toJson(): JSONObject = JSONObject()
+        .put("algorithm", algorithm.name.replace('_', '-'))
+        .put("value", value)
+        .put("scope", scope.name)
+
+    private fun JSONObject.putNullable(key: String, value: Any?): JSONObject =
+        put(key, value ?: JSONObject.NULL)
+
     private val CHECKSUM_KEYS = setOf("algorithm", "value", "scope")
+    private val PLATFORM_REPRESENTATION_KEYS = setOf("representation", "content_uri")
+    private val ANDROID_HANDOFF_ITEM_KEYS = setOf("descriptor", "representations")
+    private val ANDROID_HANDOFF_KEYS = setOf(
+        "handoff_version",
+        "contract_version",
+        "provider_id",
+        "provider_version",
+        "session_id",
+        "items",
+    )
+    private val RECEIPT_BATCH_KEYS = setOf(
+        "handoff_version",
+        "contract_version",
+        "provider_id",
+        "session_id",
+        "receipts",
+    )
     private val TARGET_SIZE_KEYS = setOf("maximum_width", "maximum_height")
     private val REPRESENTATION_REQUEST_KEYS = setOf(
         "contract_version",
