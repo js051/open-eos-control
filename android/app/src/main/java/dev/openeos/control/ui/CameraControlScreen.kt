@@ -529,23 +529,52 @@ private fun ExposureSettingsSheet(state: CameraUiState, actions: CameraActions) 
     CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
     ) {
-        ExposurePickerTabs(state, picker, actions)
-        key(picker) {
-            ExposureDial(title, valueKey, values, current, state.isBusy(CameraOperation.SETTING), onSelect)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .testTag("exposure-settings-content"),
+        ) {
+            ExposurePickerTabs(
+                state = state,
+                selected = picker,
+                isApplying = state.isBusy(CameraOperation.SETTING),
+                actions = actions,
+            )
+            key(picker) {
+                ExposureDial(title, valueKey, values, current, state.isBusy(CameraOperation.SETTING), onSelect)
+            }
         }
     }
 }
 
 @Composable
-private fun ExposurePickerTabs(state: CameraUiState, selected: SettingPicker, actions: CameraActions) {
+private fun ExposurePickerTabs(
+    state: CameraUiState,
+    selected: SettingPicker,
+    isApplying: Boolean,
+    actions: CameraActions,
+) {
     Row(
-        Modifier.fillMaxWidth().height(52.dp).padding(start = 8.dp, end = 4.dp),
+        Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .padding(start = 8.dp, end = 4.dp)
+            .testTag("exposure-picker-tabs"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ExposurePickerTab(stringResource(R.string.iso), SettingPicker.ISO, selected, state.capabilities?.iso?.isNotEmpty() == true, actions)
         ExposurePickerTab(stringResource(R.string.shutter), SettingPicker.SHUTTER, selected, state.capabilities?.shutter?.isNotEmpty() == true, actions)
         ExposurePickerTab(stringResource(R.string.aperture), SettingPicker.APERTURE, selected, state.capabilities?.aperture?.isNotEmpty() == true, actions)
         ExposurePickerTab(stringResource(R.string.white_balance), SettingPicker.WHITE_BALANCE, selected, state.capabilities?.whiteBalance?.isNotEmpty() == true, actions)
+        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+            if (isApplying) {
+                CircularProgressIndicator(
+                    Modifier.size(20.dp).testTag("exposure-applying"),
+                    color = AppAccent,
+                    strokeWidth = 2.dp,
+                )
+            }
+        }
         ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), actions.closePicker)
     }
 }
@@ -622,20 +651,22 @@ private fun ExposureDial(
             }
     }
 
-    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 52.dp)) {
-        Row(
-            Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(bottom = 52.dp),
+    ) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxWidth()
+                .height(120.dp)
+                .testTag("exposure-value-track"),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(title, color = AppMutedText)
-                Text(localizedCameraValue(valueKey, values[selectedIndex]), color = AppText, fontWeight = FontWeight.Bold)
-            }
-            if (isApplying) CircularProgressIndicator(Modifier.size(24.dp), color = AppAccent, strokeWidth = 2.dp)
-        }
-        BoxWithConstraints(Modifier.fillMaxWidth().height(104.dp)) {
-            val itemWidth = 112.dp
+            val visibleSlotCount = if (maxWidth >= 600.dp) 5 else 3
+            val itemWidth = maxWidth / visibleSlotCount.toFloat()
             val edgePadding = ((maxWidth - itemWidth) / 2).coerceAtLeast(0.dp)
+            val selectionWidth = (itemWidth - 12.dp).coerceAtLeast(80.dp)
             LazyRow(
                 modifier = Modifier.selectableGroup(),
                 state = listState,
@@ -648,7 +679,7 @@ private fun ExposureDial(
                     Box(
                         Modifier
                             .width(itemWidth)
-                            .height(88.dp)
+                            .height(104.dp)
                             .testTag("exposure-option-$index")
                             .selectable(
                                 selected = selected,
@@ -666,6 +697,7 @@ private fun ExposureDial(
                             localizedCameraValue(valueKey, values[index]),
                             color = if (selected) AppText else AppMutedText,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = if (selected) 18.sp else 16.sp,
                             maxLines = 2,
                             textAlign = TextAlign.Center,
                             overflow = TextOverflow.Ellipsis,
@@ -676,9 +708,10 @@ private fun ExposureDial(
             Box(
                 Modifier
                     .align(Alignment.Center)
-                    .width(itemWidth)
-                    .height(56.dp)
-                    .border(2.dp, AppAccent, RoundedCornerShape(6.dp)),
+                    .width(selectionWidth)
+                    .height(64.dp)
+                    .border(2.dp, AppAccent, RoundedCornerShape(6.dp))
+                    .testTag("exposure-selection-frame"),
             )
         }
     }
