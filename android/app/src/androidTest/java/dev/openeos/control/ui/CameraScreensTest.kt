@@ -2953,6 +2953,56 @@ class CameraScreensTest {
     }
 
     @Test
+    fun portraitExposurePickerKeepsTabsAndCompleteValuesInSeparateRows() {
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                    DeviceConfigurationOverride(
+                        DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
+                    ) {
+                        MaterialTheme {
+                            CameraControlScreen(
+                                connectedState().copy(activeSettingPicker = SettingPicker.ISO),
+                                noOpActions(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        val tabs = compose.onNodeWithTag("exposure-picker-tabs").fetchSemanticsNode().boundsInRoot
+        val track = compose.onNodeWithTag("exposure-value-track").fetchSemanticsNode().boundsInRoot
+        val previous = compose.onNodeWithTag("exposure-option-2").fetchSemanticsNode().boundsInRoot
+        val selected = compose.onNodeWithTag("exposure-option-3").fetchSemanticsNode().boundsInRoot
+        val next = compose.onNodeWithTag("exposure-option-4").fetchSemanticsNode().boundsInRoot
+        val frame = compose.onNodeWithTag("exposure-selection-frame").fetchSemanticsNode().boundsInRoot
+
+        saveVisualSnapshot(stem = "exposure-picker-portrait-zh-TW-150pct")
+        assertTrue("Exposure tabs $tabs must stay above the value track $track", tabs.bottom <= track.top + 1f)
+        assertTrue(
+            "The previous value must be fully visible at the left edge: $previous, $track",
+            previous.left >= track.left - 1f && previous.right <= track.right + 1f,
+        )
+        assertTrue(
+            "The next value must be fully visible at the right edge: $next, $track",
+            next.left >= track.left - 1f && next.right <= track.right + 1f,
+        )
+        assertTrue(
+            "A phone value track should contain exactly three complete slots: $selected, $track",
+            kotlin.math.abs(selected.width * 3f - track.width) < 3f,
+        )
+        assertTrue(
+            "The selection frame must remain inside the selected value: $frame, $selected",
+            frame.left >= selected.left && frame.top >= selected.top &&
+                frame.right <= selected.right && frame.bottom <= selected.bottom,
+        )
+    }
+
+    @Test
     fun exposureDialLocksDuringWriteAndReturnsToConfirmedValueAfterFailure() {
         val state = mutableStateOf(connectedState().copy(activeSettingPicker = SettingPicker.ISO))
         var selectedIso: String? = null
@@ -2971,6 +3021,7 @@ class CameraScreensTest {
             assertEquals("1600", selectedIso)
             state.value = state.value.copy(pendingOperations = setOf(CameraOperation.SETTING))
         }
+        compose.onNodeWithTag("exposure-applying").assertIsDisplayed()
         compose.onNodeWithTag("exposure-option-4").assertIsSelected().assertIsNotEnabled()
 
         compose.runOnIdle { state.value = state.value.copy(pendingOperations = emptySet()) }
