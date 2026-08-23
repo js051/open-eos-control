@@ -1086,11 +1086,18 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             .background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            state.previewMode -> BoxWithConstraints(
-                modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
-                contentAlignment = Alignment.Center,
-            ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .cameraPreviewViewport(state)
+                .testTag("live-view-viewport"),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                state.previewMode -> BoxWithConstraints(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
                 val quarterTurn = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
                 val readableSize = offlinePreviewReadableSize(
                     availableWidth = maxWidth,
@@ -1146,10 +1153,10 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     loadedFrameBitmap = (result.result.drawable as? BitmapDrawable)?.bitmap
                 },
             )
-            else -> Box(
-                modifier = Modifier.fillMaxSize().cameraPreviewViewport(state),
-                contentAlignment = Alignment.Center,
-            ) {
+                else -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
                 CameraReadableSlot(
                     width = 288.dp,
                     height = 72.dp,
@@ -1166,35 +1173,51 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     )
                 }
             }
-        }
+            }
 
-        Box(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(canTap, tapAction, sourceAspectRatio) {
-                    detectTapGestures { offset ->
-                        if (canTap) {
-                            mapLiveViewTap(
-                                tapX = offset.x,
-                                tapY = offset.y,
-                                containerWidth = size.width.toFloat(),
-                                containerHeight = size.height.toFloat(),
-                                sourceAspectRatio = displayAspectRatio,
-                            )?.let { point ->
-                                when (tapAction) {
-                                    LiveViewTapAction.FOCUS -> actions.tapFocus(point.x, point.y)
-                                    LiveViewTapAction.WHITE_BALANCE -> actions.clickWhiteBalance(point.x, point.y)
-                                    null -> Unit
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(canTap, tapAction, sourceAspectRatio) {
+                        detectTapGestures { offset ->
+                            if (canTap) {
+                                mapLiveViewTap(
+                                    tapX = offset.x,
+                                    tapY = offset.y,
+                                    containerWidth = size.width.toFloat(),
+                                    containerHeight = size.height.toFloat(),
+                                    sourceAspectRatio = displayAspectRatio,
+                                )?.let { point ->
+                                    when (tapAction) {
+                                        LiveViewTapAction.FOCUS -> actions.tapFocus(point.x, point.y)
+                                        LiveViewTapAction.WHITE_BALANCE -> actions.clickWhiteBalance(point.x, point.y)
+                                        null -> Unit
+                                    }
                                 }
                             }
                         }
                     }
-                }
-        )
+            )
 
-        if (state.status?.recording == true) RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
-        if (state.bulbExposureActive) {
-            BulbExposureIndicator(state.bulbStartedAtMillis, Modifier.align(Alignment.CenterStart).padding(12.dp))
+            if (state.status?.recording == true) {
+                RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
+            }
+            if (state.bulbExposureActive) {
+                BulbExposureIndicator(state.bulbStartedAtMillis, Modifier.align(Alignment.CenterStart).padding(12.dp))
+            }
+            monitorOverlay?.let { MonitoringPixelOverlay(it, displayAspectRatio) }
+            MonitorGuidesOverlay(state.monitorSettings, displayAspectRatio)
+            if (state.showGrid) GridOverlay(displayAspectRatio)
+            if (state.monitorSettings.histogramVisible) {
+                monitorAnalysis?.let { HistogramOverlay(it.histogram, hudVisible = false) }
+            }
+            if (state.monitorSettings.waveformVisible) {
+                monitorAnalysis?.waveform?.let { WaveformOverlay(it, hudVisible = false) }
+            }
+            FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
+            if (state.captureFeedback == CaptureFeedback.SUCCESS) {
+                Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
+            }
         }
         if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
             val bottomPadding = liveViewOverlayBottomPadding(state)
@@ -1284,17 +1307,6 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 }
             }
         }
-        monitorOverlay?.let { MonitoringPixelOverlay(it, displayAspectRatio) }
-        MonitorGuidesOverlay(state.monitorSettings, displayAspectRatio)
-        if (state.showGrid) GridOverlay(displayAspectRatio)
-        if (state.monitorSettings.histogramVisible) {
-            monitorAnalysis?.let { HistogramOverlay(it.histogram, state.hudVisible) }
-        }
-        if (state.monitorSettings.waveformVisible) {
-            monitorAnalysis?.waveform?.let { WaveformOverlay(it, state.hudVisible) }
-        }
-        FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
-        if (state.captureFeedback == CaptureFeedback.SUCCESS) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
     }
 }
 
