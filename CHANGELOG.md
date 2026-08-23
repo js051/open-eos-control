@@ -4,6 +4,11 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-24
+
+- Fixed Android capability loss after a transient shooting-settings refresh by retaining the last valid response and recovering ISO, Tv, Av, and WB only from camera-advertised read/write endpoints.
+- Corrected Android Live View placement so the decoded frame, tap coordinates, monitoring overlays, focus feedback, and capture flash share the viewport between the fixed header and capture controls.
+
 ## [0.6.1] - 2026-08-24
 
 - Fixed the Android exposure picker so ISO, shutter, aperture, and white-balance tabs no longer overlap the current value. Phone layouts now show three complete values, tablet layouts show five, and the camera-write progress indicator no longer shifts the tabs.
