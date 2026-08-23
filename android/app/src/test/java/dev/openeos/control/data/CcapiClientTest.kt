@@ -1725,6 +1725,68 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realCapabilitiesUseAdvertisedPrimarySettingEndpointsWhenAggregateReadFails() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(
+            jsonResponse(
+                """
+                {
+                  "ver100": [
+                    {"path":"/shooting/settings","get":true},
+                    {"path":"/shooting/settings/iso","get":true,"put":true},
+                    {"path":"/shooting/settings/tv","get":true,"put":true},
+                    {"path":"/shooting/settings/av","get":true,"put":true},
+                    {"path":"/shooting/settings/wb","get":true,"put":true}
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        server.enqueue(MockResponse().setResponseCode(503).setBody("camera busy"))
+        server.enqueue(jsonResponse("""{"value":"25600","ability":["100","25600"]}"""))
+        server.enqueue(jsonResponse("""{"value":"1/125","ability":["1/100","1/125"]}"""))
+        server.enqueue(jsonResponse("""{"value":"f4.0","ability":["f4.0","f5.6"]}"""))
+        server.enqueue(jsonResponse("""{"value":"colortemp","ability":["auto","colortemp"]}"""))
+
+        client.initialize()
+        val capabilities = client.capabilities()
+
+        assertEquals(listOf("100", "25600"), capabilities.iso)
+        assertEquals(listOf("1/100", "1/125"), capabilities.shutter)
+        assertEquals(listOf("f4.0", "f5.6"), capabilities.aperture)
+        assertEquals(listOf("auto", "colortemp"), capabilities.whiteBalance)
+        assertTrue(capabilities.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
+        assertTrue(capabilities.matrix.supports(CameraFeature.WHITE_BALANCE_CONTROL))
+        assertTrue(listOf("iso", "tv", "av", "wb").all(capabilities.evidence.writableSettings::contains))
+        assertEquals("/ccapi", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings/iso", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings/tv", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings/av", server.takeRequest().path)
+        assertEquals("/ccapi/ver100/shooting/settings/wb", server.takeRequest().path)
+    }
+
+    @Test
+    fun realCapabilitiesKeepLastValidSettingsAcrossTransientAggregateFailure() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse(DISCOVERY_JSON))
+        server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
+        server.enqueue(MockResponse().setResponseCode(503).setBody("camera busy"))
+
+        client.initialize()
+        val initial = client.capabilities()
+        val refreshed = client.capabilities()
+
+        assertEquals(initial.iso, refreshed.iso)
+        assertEquals(initial.shutter, refreshed.shutter)
+        assertEquals(initial.aperture, refreshed.aperture)
+        assertEquals(initial.whiteBalance, refreshed.whiteBalance)
+        assertTrue(refreshed.matrix.supports(CameraFeature.EXPOSURE_CONTROL))
+        assertTrue(refreshed.matrix.supports(CameraFeature.WHITE_BALANCE_CONTROL))
+        assertTrue(listOf("iso", "tv", "av", "wb").all(refreshed.evidence.writableSettings::contains))
+    }
+
+    @Test
     fun realFocusDriveUsesAdvertisedPostAndCanonValue() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(

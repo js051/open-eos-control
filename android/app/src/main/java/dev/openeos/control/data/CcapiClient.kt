@@ -162,6 +162,7 @@ class CcapiClient(
     private val structuredSettingPathsByKey = mutableMapOf<String, String>()
     private val structuredSettingValuesByKey = mutableMapOf<String, Set<String>>()
     private val structuredSettingCurrentValues = mutableMapOf<String, JSONObject>()
+    private val shootingSettingResponseCache = mutableMapOf<String, JSONObject>()
     private var cameraSleepWritePath: String? = null
     private var fileNamingState: CameraFileNaming? = null
     private var fileNamingLoaded = false
@@ -3078,13 +3079,7 @@ class CcapiClient(
             versionedPaths("/shooting/settings")
         }
         paths.forEach { path ->
-            val settings = try {
-                getJson(path)
-            } catch (exception: CancellationException) {
-                throw exception
-            } catch (_: Exception) {
-                null
-            } ?: return@forEach
+            val settings = getCachedShootingSettingJson(path) ?: return@forEach
 
             val prefix = path.removeSuffix("/shooting/settings")
             val keys = settings.keys()
@@ -3153,6 +3148,19 @@ class CcapiClient(
                 if (!merged.has(key)) {
                     merged.put(key, settings.get(key))
                 }
+            }
+        }
+
+        PRIMARY_SETTING_ENDPOINTS.forEach { (key, pathSuffix) ->
+            if (settingValuesByKey[key].orEmpty().size >= 2) return@forEach
+            readWriteSettingOperations(pathSuffix)?.let { (read, write) ->
+                val setting = getCachedShootingSettingJson(read.path)
+                    ?.toValidatedStringAbilitySetting(allowedValues = null)
+                    ?: return@let
+                val values = setting.getJSONArray("ability").toStringList().toSet()
+                settingPathsByKey[key] = write.path
+                settingValuesByKey[key] = values
+                merged.put(key, setting)
             }
         }
 
@@ -3365,6 +3373,16 @@ class CcapiClient(
 
         settingsLoaded = true
         return if (merged.length() > 0) merged else null
+    }
+
+    private suspend fun getCachedShootingSettingJson(path: String): JSONObject? = try {
+        getJson(path).also { response ->
+            shootingSettingResponseCache[path] = JSONObject(response.toString())
+        }
+    } catch (exception: CancellationException) {
+        throw exception
+    } catch (_: Exception) {
+        shootingSettingResponseCache[path]?.let { cached -> JSONObject(cached.toString()) }
     }
 
     private suspend fun loadFileNaming(force: Boolean = false): CameraFileNaming? {
@@ -4406,6 +4424,13 @@ private val PRIMARY_SETTING_KEYS = setOf(
     "whitebalance",
     "white_balance",
     "wb",
+)
+
+private val PRIMARY_SETTING_ENDPOINTS = linkedMapOf(
+    "iso" to "/shooting/settings/iso",
+    "tv" to "/shooting/settings/tv",
+    "av" to "/shooting/settings/av",
+    "wb" to "/shooting/settings/wb",
 )
 
 private fun String.toSettingLabel(): String =

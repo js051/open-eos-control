@@ -9,7 +9,7 @@ This record captures physical-camera evidence reported from the Android app. Ide
 
 - Camera: Canon EOS R6 Mark III
 - Firmware: `1.1.0`, read directly from the camera on 2026-08-12
-- Clients: physical Android phone for the original diagnostics; production Android APK on a Pixel 6 Pro API 34 AVD routed through the host for the 2026-08-12 installed-App pass
+- Clients: physical Android phone for the original diagnostics; production Android APK on a Pixel 6 Pro API 34 AVD routed through the host for the 2026-08-12 installed-App pass; physical HTC U24 Pro for the 2026-08-24 camera-wake and viewport pass
 - Transport: direct camera Wi-Fi and CCAPI HTTP
 - Camera origin: `http://192.168.1.2:8080`
 - API discovery: `/ccapi`, with `ver100` selected by the client
@@ -20,9 +20,9 @@ This record captures physical-camera evidence reported from the Android app. Ide
 | --- | --- | --- |
 | Discovery and identity | Passed | Camera model and API profile returned; serial was present but is redacted from this record |
 | Battery | Passed | Camera returned LP-E6P, `quality=good`, `level=full` |
-| Exposure and writable settings | Passed through the integrated PC engine; installed Android recheck pending | 28 advertised choice settings were changed to an adjacent advertised value, read back, restored, and read back again; all 28 passed and all 28 original values were restored |
+| Exposure and writable settings | Android read/ability passed; writes passed through the integrated PC engine | A physical HTC U24 Pro production-path session after camera wake returned the current ISO/Tv/Av/WB values and 31/55/16/13 advertised choices. Separately, 28 advertised choice settings were changed, read back and restored through the integrated PC engine. |
 | JPEG Live View | Passed | Requested 15 FPS, rolling observed 15.1 FPS, JPEG content type, 66,086-byte recorded frame |
-| Multipart JPEG Live View | Passed in the installed Android App through AVD-to-camera routing; physical-phone repeat pending | The latest developer list advertises a same-version general POST plus multipart GET/DELETE without general DELETE. The installed App selected multipart, returned current JPEG frames, reported 6.0 observed FPS, restarted cleanly, and completed disconnect cleanup. |
+| Multipart JPEG Live View | Passed on a physical Android phone | The latest developer list advertises a same-version general POST plus multipart GET/DELETE without general DELETE. The Android App selected multipart and decoded current JPEG frames on a physical HTC U24 Pro; the earlier installed-App pass also reported 6.0 observed FPS, restarted cleanly and completed disconnect cleanup. |
 | RTP H.264 Live View | Advertised; camera rejected start in the 2026-08-11 recheck | Direct `POST rtp` returned HTTP 503 `Mode not supported` in both tested movie-mode states. AUTO then reached multipart. This does not prove RTP is universally unavailable; Android still reports bounded UDP/access-unit/keyframe evidence when camera start succeeds. |
 | Live View size compatibility fallback | Passed through the integrated PC engine and installed Android App | `SMALL` and `MEDIUM` produced complete JPEGs through multipart and polling. Firmware 1.1.0 advertised `LARGE` but rejected its start payload with HTTP 400. The installed App downgraded without surfacing an error, removed `LARGE` for that session, then switched between `SMALL` and `MEDIUM` while maintaining 6.0 observed FPS. |
 | CCAPI event polling and body-dial synchronization | Protocol lifecycle passed through the integrated PC engine; client refresh UI recheck pending | The first long poll returned bounded change keys. A subsequent long poll remained pending, advertised DELETE stopped it successfully, and the request completed with an empty event. A reversible beep change was restored exactly. |
@@ -186,10 +186,20 @@ The released `0.2.0` APK was verified against its published SHA-256 and pinned s
 - Five orientation-policy instrumentation tests passed on the physical phone using a debug/test pair built from Android sources identical to `v0.2.0`. They verified that enabling system auto-rotation rotates only opted-in controls, disabling it stops the orientation listener and resets control rotation, stale/legacy App preferences cannot override the system setting, Quick Settings changes apply without waiting for focus to return, and launching the fixed camera layout preserves an existing rotation lock. The original `accelerometer_rotation=0` and `user_rotation=0` values were restored, the test package was removed, and the hash-verified released `0.2.0` APK was reinstalled.
 - The camera route used Wi-Fi and remained reachable. In the final network snapshot the phone's mobile-data setting was enabled, but Android exposed no cellular network agent, selected the unvalidated camera Wi-Fi as the system default, and could not reach a public Internet probe. Wi-Fi/cellular coexistence therefore remains unconfirmed for this carrier/device state rather than being reported as an App failure or a passing result.
 
+## 2026-08-24 Camera-Wake And Viewport Pass
+
+A local debug build from the Android session-resilience branch was installed beside the published Preview on a physical HTC U24 Pro and connected directly to the R6 Mark III over camera Wi-Fi after the body had been woken from automatic sleep. The temporary package used a separate application ID, and no camera identifier, phone identifier, network handle, SSID, media filename or frame was retained in Git.
+
+- Canon's developer list returned four protocol versions and 246 validated advertised operations. Production `CcapiClient` initialization then returned ISO `25600`, Tv `1/125`, Av `f4.0` and WB `colortemp`, with 31, 55, 16 and 13 advertised choices respectively.
+- The Android capability matrix retained `EXPOSURE_CONTROL`, `WHITE_BALANCE_CONTROL` and `ADVANCED_SETTINGS`. Read-only GET probes confirmed both aggregate shooting-settings resources and the individual advertised ISO/Tv/Av/WB resources returned valid HTTP 200 payloads on the current firmware.
+- AUTO Live View selected multipart and decoded a current JPEG frame. The corrected Compose viewport placed the frame between the fixed camera header and exposure/capture controls; frame gestures, focus feedback, monitoring guides and the capture flash use that same coordinate space. A 360 x 800 instrumentation assertion independently bounds the viewport and decoded frame.
+- This pass proves successful connection after the camera was manually woken. It does not yet prove automatic reconnect while an existing session crosses a complete sleep/wake cycle.
+- No setting write, capture, recording, focus, Click WB, media download/mutation, clock synchronization, sensor cleaning, sleep or power command was sent.
+
 ## Next Physical Pass
 
 1. Repeat the phone network pass when Android exposes an active, validated cellular network agent: press Debug Refresh, confirm `cameraRoute=WIFI_BOUND`, `systemDefaultTransport=CELLULAR`, `systemDefaultValidated=true`, and `wifiCellularCoexistence=true`, then open a public HTTPS page in another App without disconnecting the camera.
-2. Complete the remaining physical-phone Android paths: event-driven exposure refresh, exact effective size after `LARGE` fallback, bounded download, reconnect/stale-event isolation, and a redacted copied diagnostic report. Require matching `observedFeatures` before marking those rows passed.
+2. Complete the remaining physical-phone Android paths: event-driven exposure refresh, exact effective size after `LARGE` fallback, bounded download, full sleep/wake reconnect and stale-event isolation, and a redacted copied diagnostic report. Require matching `observedFeatures` before marking those rows passed.
 3. On iPhone/iPad, repeat the direct CCAPI Live View, event, focus, and media read-only pass after the macOS package/App CI is green. RTP remains a separate test because this camera currently rejects start before UDP delivery.
 4. Test still capture, recording, Click WB, metadata writes, clock synchronization, directory/file naming changes, sensor cleaning and sleep only in an explicitly approved state-changing pass with suitable media and restore procedures.
 5. Connect over USB-C/OTG and complete the checklist in [Android USB/PTP](../android-usb-ptp.md).

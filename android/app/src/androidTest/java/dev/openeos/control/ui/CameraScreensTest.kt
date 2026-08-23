@@ -457,6 +457,48 @@ class CameraScreensTest {
     }
 
     @Test
+    fun decodedLiveViewUsesTheSpaceBetweenHeaderAndExposureControls() {
+        val frame = Bitmap.createBitmap(3, 2, Bitmap.Config.ARGB_8888)
+        compose.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
+            ) {
+                MaterialTheme {
+                    CameraControlScreen(
+                        connectedState().copy(liveViewBitmap = frame),
+                        noOpActions(),
+                    )
+                }
+            }
+        }
+
+        val viewport = compose
+            .onNodeWithTag("live-view-viewport", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val decodedFrame = compose
+            .onNodeWithTag("live-view-decoded-frame", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val header = compose
+            .onNodeWithTag("camera-overlay-header")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val exposure = compose
+            .onNodeWithTag("exposure-control-ISO")
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertTrue("Live View viewport $viewport must start below header $header", viewport.top >= header.bottom)
+        assertTrue("Live View viewport $viewport must end above exposure controls $exposure", viewport.bottom <= exposure.top)
+        assertTrue(
+            "Decoded frame $decodedFrame must stay inside Live View viewport $viewport",
+            decodedFrame.left >= viewport.left && decodedFrame.top >= viewport.top &&
+                decodedFrame.right <= viewport.right && decodedFrame.bottom <= viewport.bottom,
+        )
+    }
+
+    @Test
     fun quarterTurnUsesAReadableCameraStateWithoutDroppingCopy() {
         compose.setContent {
             DeviceConfigurationOverride(
