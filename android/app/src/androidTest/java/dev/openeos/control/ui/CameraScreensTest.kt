@@ -2804,6 +2804,18 @@ class CameraScreensTest {
     }
 
     @Test
+    fun socketTimeoutErrorShowsReadableLocalizedCopyInsteadOfExceptionChain() {
+        val raw = "SocketTimeoutException: timeout\nCaused by: SocketException: socket closed"
+        val expected = resourceText(R.string.camera_error_timeout)
+        compose.setContent {
+            MaterialTheme { ErrorBanner(raw, onDismiss = {}) }
+        }
+
+        compose.onNodeWithText(expected).assertIsDisplayed()
+        compose.onNodeWithText(raw).assertDoesNotExist()
+    }
+
+    @Test
     fun recordingDisablesCaptureModeSelector() {
         val base = connectedState()
         val state = base.copy(

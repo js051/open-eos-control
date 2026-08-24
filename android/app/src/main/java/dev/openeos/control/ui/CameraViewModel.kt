@@ -74,6 +74,7 @@ private const val MAX_CONCURRENT_MEDIA_THUMBNAILS = 2
 private const val MEDIA_THUMBNAIL_MAX_EDGE = 512
 private val MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS = longArrayOf(250L, 750L)
 private val CAPTURE_REVIEW_RETRY_DELAYS_MILLIS = longArrayOf(250L, 750L, 1_500L)
+internal val MEDIA_READ_RETRY_DELAYS_MILLIS = longArrayOf(300L, 900L)
 
 private fun maximumItemsFor(scope: MediaLibraryScope): Int? =
     RECENT_MEDIA_REQUEST_ITEMS.takeIf { scope == MediaLibraryScope.RECENT }
@@ -119,6 +120,23 @@ internal suspend fun executeMediaBatch(
         succeededItems = succeeded,
         failedItemNames = failures,
     )
+}
+
+internal suspend fun <Result> retryMediaRead(
+    retryDelaysMillis: LongArray = MEDIA_READ_RETRY_DELAYS_MILLIS,
+    action: suspend () -> Result,
+): Result {
+    for (attempt in 0..retryDelaysMillis.size) {
+        try {
+            return action()
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: IOException) {
+            if (attempt >= retryDelaysMillis.size) throw exception
+            delay(retryDelaysMillis[attempt])
+        }
+    }
+    error("Media read retry exhausted without a result.")
 }
 
 private fun createMediaDocument(
@@ -1524,23 +1542,25 @@ class CameraViewModel(
                         }
                     },
                 ) { item ->
-                    var destination: Uri? = null
-                    try {
-                        withContext(Dispatchers.IO) {
-                            destination = createMediaDocument(resolver, destinationTree, item)
-                            val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
-                                ?: error("Android could not open the selected download destination.")
-                            BufferedOutputStream(rawOutput).use { output ->
-                                repository.downloadMedia(item, output) { progress ->
-                                    _uiState.update { current -> current.copy(mediaDownloadProgress = progress) }
+                    retryMediaRead {
+                        var destination: Uri? = null
+                        try {
+                            withContext(Dispatchers.IO) {
+                                destination = createMediaDocument(resolver, destinationTree, item)
+                                val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
+                                    ?: error("Android could not open the selected download destination.")
+                                BufferedOutputStream(rawOutput).use { output ->
+                                    repository.downloadMedia(item, output) { progress ->
+                                        _uiState.update { current -> current.copy(mediaDownloadProgress = progress) }
+                                    }
                                 }
                             }
+                        } catch (exception: Exception) {
+                            withContext(NonCancellable + Dispatchers.IO) {
+                                destination?.let { runCatching { resolver.delete(it, null, null) } }
+                            }
+                            throw exception
                         }
-                    } catch (exception: Exception) {
-                        withContext(NonCancellable + Dispatchers.IO) {
-                            destination?.let { runCatching { resolver.delete(it, null, null) } }
-                        }
-                        throw exception
                     }
                 }
                 _uiState.update { it.copy(lastMediaBatchResult = result) }
