@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okio.Buffer
@@ -3512,7 +3513,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun recentMediaListStopsEarlyButSamplesPhotoAndVideoContainers() = runTest {
+    fun recentMediaListUsesInfoDatesAcrossPhotoAndVideoContainers() = runTest {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val photoContainer = "/ccapi/ver140/contents/card2/DCIM/100EOSR6"
         val videoContainer = "/ccapi/ver140/contents/card2/XFVC/REEL_0001"
@@ -3524,28 +3525,43 @@ class CcapiClientTest {
         }
         server.enqueue(jsonResponse("""{"path":[$photoPaths]}"""))
         server.enqueue(jsonResponse("""{"pagenumber":1}"""))
-        val videoPaths = (1..13).joinToString(separator = ",") { number ->
+        val videoPaths = (1..3).joinToString(separator = ",") { number ->
             "\"$videoContainer/MVI_${number.toString().padStart(4, '0')}.MP4\""
         }
         server.enqueue(jsonResponse("""{"path":[$videoPaths]}"""))
+        listOf(
+            "2026-08-10T10:00:00+08:00",
+            "2026-08-10T09:00:00+08:00",
+            "2026-08-10T08:00:00+08:00",
+            "2026-08-10T07:00:00+08:00",
+            "2026-08-10T06:00:00+08:00",
+            "2026-08-10T09:30:00+08:00",
+            "2026-01-01T10:00:00+08:00",
+            "2025-12-01T10:00:00+08:00",
+        ).forEach { captureTime ->
+            server.enqueue(jsonResponse("""{"lastmodifieddate":"$captureTime"}"""))
+        }
 
         val progressCounts = mutableListOf<Int>()
-        val items = client.listMedia(maximumItems = 61) { progressCounts += it.size }
+        val items = client.listMedia(maximumItems = 5) { progressCounts += it.size }
 
-        assertEquals(61, items.size)
+        assertEquals(5, items.size)
         assertEquals(
-            listOf("IMG_0001.JPG", "MVI_0001.MP4", "IMG_0002.JPG", "MVI_0002.MP4"),
-            items.take(4).map { it.name },
+            listOf("IMG_0001.JPG", "MVI_0001.MP4", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0004.JPG"),
+            items.map { it.name },
         )
-        assertEquals(13, items.count { it.kind == "video" })
-        assertEquals(listOf(61, 61), progressCounts)
-        assertEquals(6, server.requestCount)
+        assertEquals(1, items.count { it.kind == "video" })
+        assertEquals(listOf(5), progressCounts)
+        assertEquals(14, server.requestCount)
         assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
         assertEquals("/ccapi/ver140/contents?page=1&order=desc", server.takeRequest().path)
         assertEquals("$photoContainer?kind=number", server.takeRequest().path)
         assertEquals("$photoContainer?page=1&order=desc", server.takeRequest().path)
         assertEquals("$videoContainer?kind=number", server.takeRequest().path)
         assertEquals("$videoContainer?page=1&order=desc", server.takeRequest().path)
+        assertEquals("$photoContainer/IMG_0001.JPG?kind=info", server.takeRequest().path)
+        repeat(4) { server.takeRequest() }
+        assertEquals("$videoContainer/MVI_0001.MP4?kind=info", server.takeRequest().path)
     }
 
     @Test
@@ -4074,6 +4090,19 @@ class CcapiClientTest {
         assertEquals(0L, progress.first().bytesTransferred)
         assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
         assertEquals(bytes.size.toLong(), progress.last().totalBytes)
+    }
+
+    @Test
+    fun mediaDownloadPreservesTransportFailureForSafeOuterRetry() = runTest {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        val item = CameraMediaItem("timeout.jpg", "timeout.jpg", "image")
+
+        val failure = runCatching {
+            client.downloadMedia(item, ByteArrayOutputStream())
+        }.exceptionOrNull()
+
+        assertTrue(failure is IOException)
+        assertTrue(failure?.cause is IOException)
     }
 
     @Test

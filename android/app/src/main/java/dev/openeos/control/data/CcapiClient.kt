@@ -21,12 +21,15 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.URI
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -110,6 +113,11 @@ private data class StrictNullableLong(
     val value: Long?,
 )
 
+private data class MediaOrderingInfo(
+    val captureTime: String?,
+    val sizeBytes: Long?,
+)
+
 private class CcapiHttpException(
     val statusCode: Int,
     message: String,
@@ -184,6 +192,10 @@ class CcapiClient(
     private var multipartLiveViewSession: CcapiMultipartLiveViewSession? = null
     private var simulatorEventSequence = 0L
     private var mediaDescendingOrderSupported: Boolean? = null
+    private val mediaOrderingInfoCache = object : LinkedHashMap<String, MediaOrderingInfo>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MediaOrderingInfo>?): Boolean =
+            size > MAX_MEDIA_ORDERING_CACHE_ITEMS
+    }
 
     var nativeLiveViewSession: NativeLiveViewSession? = null
         private set
@@ -2789,7 +2801,7 @@ class CcapiClient(
                     }
                 }
                 val merged = mergeMediaPathGroups(mediaPathGroups)
-                if (mediaPaths.isNotEmpty()) {
+                if (maximumItems == null && mediaPaths.isNotEmpty()) {
                     onProgress(merged.takeMaximum(maximumItems).toMediaItems())
                 }
                 // Read enough from every sibling media container before merging them.
@@ -2802,8 +2814,76 @@ class CcapiClient(
             if (mediaPaths.isEmpty()) mediaPathGroups.remove(mediaPaths)
         }
 
-        return mergeMediaPathGroups(mediaPathGroups).takeMaximum(maximumItems).toMediaItems()
+        if (maximumItems == null) {
+            return mergeMediaPathGroups(mediaPathGroups).toMediaItems()
+        }
+
+        val candidates = recentMediaCandidatePaths(mediaPathGroups, maximumItems).toMediaItems()
+        val ordered = orderRecentMediaCandidates(hydrateRecentMediaCandidates(candidates))
+            .take(maximumItems)
+        onProgress(ordered)
+        return ordered
     }
+
+    private fun recentMediaCandidatePaths(groups: List<List<String>>, maximumItems: Int): List<String> {
+        val pathsByVideoKind = linkedMapOf<Boolean, MutableList<String>>()
+        groups.forEach { group ->
+            group.forEach { path ->
+                val paths = pathsByVideoKind.getOrPut(path.mediaKind() == "video") { mutableListOf() }
+                if (paths.size < maximumItems) paths += path
+            }
+        }
+        return pathsByVideoKind.values.flatten()
+    }
+
+    private suspend fun hydrateRecentMediaCandidates(items: List<CameraMediaItem>): List<CameraMediaItem> {
+        val hydrated = ArrayList<CameraMediaItem>(items.size)
+        var consecutiveFailures = 0
+        items.forEachIndexed { index, item ->
+            currentCoroutineContext().ensureActive()
+            val cached = synchronized(mediaOrderingInfoCache) { mediaOrderingInfoCache[item.id] }
+            if (cached != null) {
+                hydrated += item.copy(captureTime = cached.captureTime, sizeBytes = cached.sizeBytes)
+                consecutiveFailures = 0
+                return@forEachIndexed
+            }
+            try {
+                val info = mediaInfo(item)
+                synchronized(mediaOrderingInfoCache) {
+                    mediaOrderingInfoCache[item.id] = MediaOrderingInfo(info.captureTime, info.sizeBytes)
+                }
+                hydrated += info
+                consecutiveFailures = 0
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: IOException) {
+                hydrated += item
+                hydrated += items.drop(index + 1)
+                return hydrated
+            } catch (_: Exception) {
+                hydrated += item
+                consecutiveFailures += 1
+                if (consecutiveFailures >= MAX_CONSECUTIVE_MEDIA_INFO_FAILURES) {
+                    hydrated += items.drop(index + 1)
+                    return hydrated
+                }
+            }
+        }
+        return hydrated
+    }
+
+    private fun orderRecentMediaCandidates(items: List<CameraMediaItem>): List<CameraMediaItem> =
+        items.withIndex().sortedWith { left, right ->
+            val leftTime = left.value.captureTime.toMediaOrderingInstant()
+            val rightTime = right.value.captureTime.toMediaOrderingInstant()
+            when {
+                leftTime != null && rightTime != null ->
+                    rightTime.compareTo(leftTime).takeIf { it != 0 } ?: left.index.compareTo(right.index)
+                leftTime != null -> -1
+                rightTime != null -> 1
+                else -> left.index.compareTo(right.index)
+            }
+        }.map { it.value }
 
     private fun List<String>.toMediaItems(): List<CameraMediaItem> = map { path ->
             val kind = path.mediaKind()
@@ -2897,6 +2977,15 @@ class CcapiClient(
         return merged.toList()
     }
 
+    private fun String?.toMediaOrderingInstant(): Instant? {
+        val value = this?.trim().orEmpty()
+        if (value.isEmpty()) return null
+        return runCatching { Instant.parse(value) }.getOrNull()
+            ?: runCatching { OffsetDateTime.parse(value).toInstant() }.getOrNull()
+            ?: runCatching { ZonedDateTime.parse(value).toInstant() }.getOrNull()
+            ?: runCatching { ZonedDateTime.parse(value, CANON_DATETIME_FORMATTER).toInstant() }.getOrNull()
+    }
+
     private fun <T> List<T>.takeMaximum(maximumItems: Int?): List<T> =
         maximumItems?.let(::take) ?: this
 
@@ -2936,6 +3025,7 @@ class CcapiClient(
     ): CameraMediaDownloadResult =
         withContext(Dispatchers.IO) {
             val errors = mutableListOf<String>()
+            var lastTransportFailure: Exception? = null
             for (path in paths) {
                 currentCoroutineContext().ensureActive()
                 val request = Request.Builder().url("$baseUrl$path").get().build()
@@ -2955,6 +3045,7 @@ class CcapiClient(
                         throw exception
                     } catch (exception: Exception) {
                         currentCoroutineContext().ensureActive()
+                        lastTransportFailure = exception
                         errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
                         continue
                     }
@@ -3019,10 +3110,10 @@ class CcapiClient(
                     cancellationWatcher.cancel()
                 }
             }
-            error(
-                "Media download failed for '${item.name}'. Tried:\n" +
-                    errors.joinToString(separator = "\n") { "  - $it" },
-            )
+            val message = "Media download failed for '${item.name}'. Tried:\n" +
+                errors.joinToString(separator = "\n") { "  - $it" }
+            lastTransportFailure?.let { throw IOException(message, it) }
+            error(message)
         }
 
     private suspend fun getFirstJson(paths: List<String>): JSONObject? {
@@ -3895,6 +3986,8 @@ class CcapiClient(
         const val HALF_PRESS_DURATION_MILLIS = 350L
         const val MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
         const val MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
+        const val MAX_MEDIA_ORDERING_CACHE_ITEMS = 256
+        const val MAX_CONSECUTIVE_MEDIA_INFO_FAILURES = 3
         const val MEDIA_TRANSFER_BUFFER_BYTES = 64 * 1024
         const val MEDIA_PROGRESS_INTERVAL_BYTES = 512 * 1024L
         const val MAX_MEDIA_UPLOAD_BYTES = UINT32_MAX

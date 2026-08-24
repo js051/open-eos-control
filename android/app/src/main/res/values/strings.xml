@@ -395,6 +395,8 @@
     <string name="media_batch_complete">Completed %1$d of %2$d items.</string>
     <string name="media_batch_partial">Completed %1$d of %2$d items; %3$d failed and can be retried.</string>
     <string name="media_batch_failed_items">Failed: %1$s</string>
+    <string name="camera_error_timeout">The camera did not respond in time. Keep it awake and retry.</string>
+    <string name="camera_error_connection_interrupted">The camera connection was interrupted. Reconnect and retry.</string>
     <string name="media_protection">Protection</string>
     <string name="media_protected">Protected</string>
     <string name="media_unprotected">Unprotected</string>

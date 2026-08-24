@@ -1,7 +1,9 @@
 package dev.openeos.control.ui
 
+import dev.openeos.control.R
 import dev.openeos.control.data.CameraMediaItem
 import java.io.IOException
+import java.net.SocketTimeoutException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -308,6 +310,44 @@ class MediaLibraryTest {
         assertEquals(2, result.succeededItems)
         assertEquals(3, result.totalItems)
         assertEquals(listOf("IMG_0002.JPG"), result.failedItemNames)
+    }
+
+    @Test
+    fun mediaReadRetriesTransportTimeoutsButNotApplicationFailures() = runTest {
+        var attempts = 0
+        val result = retryMediaRead(longArrayOf(0L, 0L)) {
+            attempts += 1
+            if (attempts < 3) throw SocketTimeoutException("timeout")
+            "complete"
+        }
+
+        assertEquals("complete", result)
+        assertEquals(3, attempts)
+
+        attempts = 0
+        val failure = runCatching {
+            retryMediaRead(longArrayOf(0L, 0L)) {
+                attempts += 1
+                error("camera rejected request")
+            }
+        }.exceptionOrNull()
+        assertEquals(IllegalStateException::class.java, failure?.javaClass)
+        assertEquals(1, attempts)
+    }
+
+    @Test
+    fun normalUiReplacesRawSocketErrorsWithLocalizedMessages() {
+        assertEquals(
+            R.string.camera_error_timeout,
+            userFacingCameraErrorResource(
+                "SocketTimeoutException: timeout\nCaused by: SocketException: socket closed",
+            ),
+        )
+        assertEquals(
+            R.string.camera_error_connection_interrupted,
+            userFacingCameraErrorResource("SocketException: connection reset"),
+        )
+        assertEquals(null, userFacingCameraErrorResource("Camera returned HTTP 400"))
     }
 
     @Test

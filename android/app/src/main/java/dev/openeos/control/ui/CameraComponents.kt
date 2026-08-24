@@ -1884,6 +1884,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
 @Composable
 fun ErrorBanner(error: String?, onDismiss: () -> Unit) {
     if (error == null) return
+    val displayError = userFacingCameraErrorResource(error)?.let { stringResource(it) } ?: error
     CameraReadableSlot(
         width = 328.dp,
         height = 112.dp,
@@ -1901,7 +1902,7 @@ fun ErrorBanner(error: String?, onDismiss: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                error,
+                displayError,
                 color = AppText,
                 modifier = Modifier.weight(1f),
                 maxLines = 3,
@@ -1910,4 +1911,15 @@ fun ErrorBanner(error: String?, onDismiss: () -> Unit) {
             ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), onDismiss)
         }
     }
+}
+
+internal fun userFacingCameraErrorResource(error: String): Int? = when {
+    error.contains("SocketTimeoutException", ignoreCase = true) ||
+        (error.contains("socket", ignoreCase = true) && error.contains("timeout", ignoreCase = true)) ->
+        R.string.camera_error_timeout
+    error.contains("SocketException", ignoreCase = true) ||
+        error.contains("ConnectException", ignoreCase = true) ||
+        error.contains("NoRouteToHostException", ignoreCase = true) ->
+        R.string.camera_error_connection_interrupted
+    else -> null
 }

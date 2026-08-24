@@ -190,13 +190,18 @@ internal class CameraImportHandoffStorage(private val context: Context) {
         val stagedName = if (safeExtension.isEmpty()) mediaId else "$mediaId.$safeExtension"
         val destination = File(sessionDirectory, stagedName)
         val temporary = File(sessionDirectory, "$stagedName.partial")
-        val digest = MessageDigest.getInstance("SHA-256")
-        val result = FileOutputStream(temporary).use { rawOutput ->
-            val output = BufferedOutputStream(DigestOutputStream(rawOutput, digest))
-            val completed = download(item, output, onProgress)
-            output.flush()
-            rawOutput.fd.sync()
-            completed
+        var checksumBytes: ByteArray? = null
+        val result = retryMediaRead {
+            temporary.delete()
+            val digest = MessageDigest.getInstance("SHA-256")
+            FileOutputStream(temporary).use { rawOutput ->
+                val output = BufferedOutputStream(DigestOutputStream(rawOutput, digest))
+                val completed = download(item, output, onProgress)
+                output.flush()
+                rawOutput.fd.sync()
+                checksumBytes = digest.digest()
+                completed
+            }
         }
         check(result.bytesTransferred == temporary.length()) {
             "Camera transfer length did not match the staged file for ${item.name}."
@@ -208,7 +213,7 @@ internal class CameraImportHandoffStorage(private val context: Context) {
         val contentUri = contentUri(destination)
         val checksum = CameraImportSourceChecksumV1(
             algorithm = CameraImportChecksumAlgorithm.SHA_256,
-            value = digest.digest().toHex(),
+            value = requireNotNull(checksumBytes).toHex(),
             scope = CameraImportChecksumScope.FULL_ORIGINAL,
         )
         val descriptor = item.toImportDescriptor(
