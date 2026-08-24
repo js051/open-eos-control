@@ -4,6 +4,11 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-24
+
+- Fixed Android recent-media ordering across separate photo and video containers by using bounded Canon media-info timestamps when available, while retaining deterministic camera order when dates are unavailable.
+- Added limited retries for transient Android camera read transfers with a fresh destination for each attempt, and replaced raw socket exception banners with localized timeout and reconnection guidance.
+
 ## [0.6.2] - 2026-08-24
 
 - Fixed Android capability loss after a transient shooting-settings refresh by retaining the last valid response and recovering ISO, Tv, Av, and WB only from camera-advertised read/write endpoints.
