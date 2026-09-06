@@ -976,7 +976,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         state.supports(CameraFeature.CLICK_WHITE_BALANCE) -> LiveViewTapAction.WHITE_BALANCE
         else -> null
     }
-    val canTap = when (tapAction) {
+    val canTap = state.liveViewAutoRefresh && !state.isBusy(CameraOperation.LIVE_VIEW) && when (tapAction) {
         LiveViewTapAction.FOCUS -> !state.isBusy(CameraOperation.FOCUS)
         LiveViewTapAction.WHITE_BALANCE -> !state.isBusy(CameraOperation.SETTING)
         null -> false
@@ -1113,6 +1113,12 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     OfflinePreviewCopy(quarterTurn)
                 }
             }
+            !state.liveViewAutoRefresh -> Text(
+                stringResource(R.string.live_view_paused),
+                color = AppMutedText,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(24.dp).testTag("live-view-paused"),
+            )
             state.nativeLiveViewSession != null -> NativeRtpLiveView(
                 session = state.nativeLiveViewSession,
                 modifier = Modifier.fitLiveViewContent(displayAspectRatio),
@@ -1550,22 +1556,6 @@ private fun GridOverlay(sourceAspectRatio: Float) {
             drawLine(color, Offset(x, content.top), Offset(x, content.top + content.height), stroke)
             drawLine(color, Offset(content.left, y), Offset(content.left + content.width, y), stroke)
         }
-    }
-}
-
-@Composable
-private fun FocusIndicator(point: FocusPoint?, feedback: FocusFeedback?, sourceAspectRatio: Float) {
-    if (point == null) return
-    val color = when (feedback) {
-        FocusFeedback.SUCCESS -> AppSuccess
-        FocusFeedback.FAILURE -> AppRecord
-        else -> AppAccent
-    }
-    Canvas(Modifier.fillMaxSize()) {
-        val display = mapFocusPointToDisplay(point, size.width, size.height, sourceAspectRatio)
-        drawCircle(color, 28.dp.toPx(), Offset(display.x, display.y), style = Stroke(if (feedback == FocusFeedback.FOCUSING) 3.dp.toPx() else 2.dp.toPx()))
-        drawLine(color, Offset(display.x - 36.dp.toPx(), display.y), Offset(display.x - 18.dp.toPx(), display.y), 2.dp.toPx())
-        drawLine(color, Offset(display.x + 18.dp.toPx(), display.y), Offset(display.x + 36.dp.toPx(), display.y), 2.dp.toPx())
     }
 }
 

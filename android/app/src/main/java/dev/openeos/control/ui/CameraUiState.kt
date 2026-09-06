@@ -71,7 +71,7 @@ data class LiveViewDiagnostics(
 
 enum class CaptureFeedback { SUCCESS }
 
-enum class FocusFeedback { FOCUSING, SUCCESS, FAILURE }
+enum class FocusFeedback { FOCUSING, ACCEPTED, SUCCESS, FAILURE }
 
 data class CameraUiState(
     val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
@@ -171,8 +171,13 @@ data class CameraUiState(
         get() = status?.temperature?.movieRecordingAllowed != false
 
     fun isBusy(operation: CameraOperation): Boolean =
-        operation in pendingOperations || (bulbExposureActive && operation != CameraOperation.CAPTURE)
+        operation in pendingOperations || (bulbExposureActive && operation != CameraOperation.CAPTURE) ||
+            (CameraOperation.LIVE_VIEW in pendingOperations && operation in LIVE_VIEW_INTERLOCK_OPERATIONS)
 }
+
+internal val LIVE_VIEW_INTERLOCK_OPERATIONS = setOf(
+    CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING, CameraOperation.MAINTENANCE,
+)
 
 data class FocusPoint(
     val x: Double,

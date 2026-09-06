@@ -1,4 +1,11 @@
 <resources>
+    <string name="focus_command_pending">Sending focus command</string>
+    <string name="focus_command_accepted">Focus command accepted; focus not confirmed</string>
+    <string name="focus_action_completed">Selected action completed</string>
+    <string name="focus_command_failed">Focus command failed</string>
+    <string name="remote_live_view">Remote Live View</string>
+    <string name="stop_remote_live_view">Stop remote Live View</string>
+    <string name="live_view_paused">Live View paused</string>
     <string name="app_name">Open EOS Control</string>
     <string name="connect_title">Connect your EOS</string>
     <string name="connect_subtitle">Connect directly, through a desktop bridge, or over USB.</string>
@@ -429,7 +436,7 @@
     <string name="manual_focus_drive">Manual focus drive</string>
     <string name="manual_focus_drive_hint">Move lens focus in one of three relative step sizes.</string>
     <string name="live_view_tap_action">Live View tap action</string>
-    <string name="tap_action_focus">Tap focus</string>
+    <string name="tap_action_focus">Select AF point</string>
     <string name="tap_action_white_balance">Click white balance</string>
     <string name="focus_nearer">Near</string>
     <string name="focus_farther">Far</string>

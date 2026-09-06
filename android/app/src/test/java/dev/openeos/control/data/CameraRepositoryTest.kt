@@ -31,6 +31,45 @@ class CameraRepositoryTest {
     }
 
     @Test
+    fun connectionCanLeaveLiveViewOffAndResumeWithoutReconnecting() = runTest {
+        server.enqueue(jsonResponse(INFO_JSON))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        val session = repository.connect(server.url("/").toString(), startLiveView = false)
+
+        assertNull(session.liveViewFrameUrl)
+        assertEquals(false, repository.isLiveViewRunning())
+        repository.setLiveViewEnabled(false)
+        assertEquals(3, server.requestCount)
+
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        repository.setLiveViewEnabled(true)
+        repository.setLiveViewEnabled(true)
+        assertTrue(repository.isLiveViewRunning())
+        assertEquals(4, server.requestCount)
+
+        repository.setLiveViewEnabled(false)
+        assertEquals(false, repository.isLiveViewRunning())
+        server.enqueue(jsonResponse(STATUS_JSON))
+        assertEquals("800", repository.refreshStatus().exposure.iso)
+        assertEquals(5, server.requestCount)
+    }
+
+    @Test
+    fun disconnectClearsLiveViewOwnership() = runTest {
+        server.enqueue(jsonResponse(INFO_JSON))
+        server.enqueue(jsonResponse(STATUS_JSON))
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        repository.connect(server.url("/").toString())
+        assertTrue(repository.isLiveViewRunning())
+
+        repository.disconnect()
+
+        assertEquals(false, repository.isLiveViewRunning())
+        assertTrue(runCatching { repository.setLiveViewEnabled(true) }.isFailure)
+    }
+
+    @Test
     fun connectLoadsCameraSessionAndInitialLiveViewFrame() = runTest {
         server.enqueue(jsonResponse(INFO_JSON))
         server.enqueue(jsonResponse(STATUS_JSON))

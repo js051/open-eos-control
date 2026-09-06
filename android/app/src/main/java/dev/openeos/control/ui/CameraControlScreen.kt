@@ -738,7 +738,7 @@ private fun LiveViewSettingsSheet(state: CameraUiState, actions: CameraActions) 
             ) {
                 SettingsSheetTitle(stringResource(R.string.live_view_settings), actions.closePicker)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.auto_refresh), color = AppText, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.remote_live_view), color = AppText, modifier = Modifier.weight(1f))
                     Switch(state.liveViewAutoRefresh, actions.setAutoRefresh)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

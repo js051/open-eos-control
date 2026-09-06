@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import dev.openeos.control.R
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.data.CameraNetworkRouting
+import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.SystemNetworkTransport
 import dev.openeos.control.data.UsbDiagnosticState
@@ -65,7 +66,13 @@ fun DebugScreen(
             Text(stringResource(R.string.debug), color = AppText, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             ToolIconButton(LucideR.drawable.lucide_ic_languages, stringResource(R.string.language), { actions.openPicker(SettingPicker.LANGUAGE) })
             ToolIconButton(LucideR.drawable.lucide_ic_refresh_cw, stringResource(R.string.refresh), actions.refresh, enabled = !state.isBusy(CameraOperation.STATUS))
-            ToolIconButton(LucideR.drawable.lucide_ic_rotate_ccw, stringResource(R.string.restart_live_view), actions.restartLiveView, enabled = !state.isBusy(CameraOperation.LIVE_VIEW))
+            ToolIconButton(
+                LucideR.drawable.lucide_ic_rotate_ccw,
+                stringResource(if (state.liveViewAutoRefresh) R.string.restart_live_view else R.string.stop_remote_live_view),
+                actions.restartLiveView,
+                enabled = state.supports(CameraFeature.LIVE_VIEW) && !state.isBusy(CameraOperation.LIVE_VIEW) &&
+                    (state.liveViewAutoRefresh || state.errorOperation == CameraOperation.LIVE_VIEW),
+            )
             ToolIconButton(LucideR.drawable.lucide_ic_usb, stringResource(R.string.usb_scan), actions.refreshUsb, enabled = !state.isBusy(CameraOperation.USB))
         }
         Column(
