@@ -4,6 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-06
+
+- Added a Photo-mode shutter autofocus switch for Android direct CCAPI, gated by advertised native shutter operations. It defaults on, resets for each connection, and sends the selected boolean through the production capture path.
+- Turning shutter autofocus off shows a localized, accessible shutter indicator without changing camera AF modes or claiming focus lock. Video/Bulb and unsupported transports retain their existing behavior; busy, recording, and held-AF states prevent conflicting changes.
+- Manual shutter cleanup still requests release with `af=false`, including failed presses. Temperature checks and held-AF stop interlocks remain in effect.
+- Validated protocol/state behavior, full UI-to-HTTP capture, and focused layouts with Android unit tests, HTC mock-camera tests, and API 34/36 CI. Real R6 Mark III optical/capture behavior and the reported camera-body defocus remain pending. PC/iOS are version-aligned only; Camera Import artifact 1.1.0/wire 1.0 is unchanged.
+
 ## [0.8.0] - 2026-09-06
 
 - Added capability-gated press-and-hold AF-ON for Android direct CCAPI, using the camera-advertised AF start/stop endpoint without changing camera AF modes or assuming half-press support implies held AF support.
