@@ -277,6 +277,60 @@ class CameraScreensTest {
         compose.runOnIdle { assertEquals(1, retries); assertEquals(1, starts) }
     }
 
+    @Test fun focusReleaseRecoveryRemainsVisibleWithoutHeldCapabilityAcrossViewports() {
+        val base = connectedState()
+        val bitmap = Bitmap.createBitmap(16, 12, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.DKGRAY) }
+        val state = mutableStateOf(base.copy(autofocusHoldState = AutofocusHoldState.RELEASE_FAILED,
+            liveViewBitmap = bitmap, pendingOperations = setOf(CameraOperation.FOCUS),
+            capabilities = base.capabilities!!.copy(heldAutofocusSupported = false,
+                matrix = CapabilityMatrix(supported = base.capabilities.matrix.supported + CameraFeature.STILL_CAPTURE + CameraFeature.LIVE_VIEW))))
+        val size = mutableStateOf(DpSize(360.dp, 800.dp))
+        val rotation = mutableFloatStateOf(0f)
+        val locale = mutableStateOf(LocaleList("en"))
+        var starts = 0
+        var retries = 0
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(WindowInsetsCompat.Builder().build())) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
+                    DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                        DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(locale.value)) {
+                            CompositionLocalProvider(LocalCameraControlTargetRotation provides rotation.floatValue,
+                                LocalCameraControlRotation provides rotation.floatValue) {
+                                MaterialTheme { CameraControlScreen(state.value, noOpActions().copy(
+                                    startHeldAutofocus = { starts++ }, autofocus = { starts++ },
+                                    retryHeldAutofocusStop = { retries++ })) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (language in listOf("en", "zh-TW")) {
+            for ((name, viewport) in listOf("portrait" to DpSize(360.dp, 800.dp),
+                "landscape" to DpSize(800.dp, 360.dp), "tablet" to DpSize(800.dp, 1280.dp))) {
+                for (angle in listOf(0f, 90f, 180f, 270f)) {
+                    compose.runOnIdle { size.value = viewport; locale.value = LocaleList(language); rotation.floatValue = angle }
+                    val button = compose.onNodeWithTag("held-autofocus").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+                    val bounds = button.fetchSemanticsNode().boundsInRoot
+                    val header = compose.onNodeWithTag("camera-overlay-header").fetchSemanticsNode().boundsInRoot
+                    val exposure = compose.onNodeWithTag("exposure-control-ISO").fetchSemanticsNode().boundsInRoot
+                    assertTrue(bounds.top >= header.bottom)
+                    assertTrue(bounds.bottom <= exposure.top)
+                    button.performClick()
+                }
+                val screenshot = compose.onNodeWithTag("camera-control-root").captureToImage().asAndroidBitmap()
+                java.io.File(compose.activity.cacheDir, "focus-release-$language-$name.png").outputStream().use {
+                    assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
+        }
+        compose.runOnIdle { assertEquals(0, starts); assertEquals(24, retries)
+            state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.RELEASING) }
+        compose.onNodeWithTag("held-autofocus").assertIsDisplayed().assertIsNotEnabled()
+        compose.runOnIdle { state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.IDLE, pendingOperations = emptySet()) }
+        compose.onNodeWithTag("held-autofocus").assertDoesNotExist()
+    }
+
     @Test fun heldAfRequiresExplicitCapabilityAndDoesNotOverlapZoomAcrossViewports() {
         compose.runOnIdle { compose.activity.enableEdgeToEdge() }
         val base = connectedState()

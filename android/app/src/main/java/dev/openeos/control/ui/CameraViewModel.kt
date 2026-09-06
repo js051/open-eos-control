@@ -1217,7 +1217,9 @@ class CameraViewModel(
                 clearFocusFeedbackAfter(FocusFeedback.FAILURE)
             },
         ) {
+            val connection = _uiState.value.info
             val status = repository.autofocus()
+            if (_uiState.value.info !== connection) return@runCamera
             _uiState.update { it.copy(status = status, focusFeedback = FocusFeedback.ACCEPTED) }
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
             refreshLiveViewFrameInternal(reportErrors = false)
@@ -1242,7 +1244,9 @@ class CameraViewModel(
                 clearFocusFeedbackAfter(FocusFeedback.FAILURE)
             },
         ) {
+            val connection = _uiState.value.info
             val status = repository.halfPressShutter()
+            if (_uiState.value.info !== connection) return@runCamera
             _uiState.update { it.copy(status = status, focusFeedback = FocusFeedback.ACCEPTED) }
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
             refreshLiveViewFrameInternal(reportErrors = false)
@@ -2280,6 +2284,7 @@ class CameraViewModel(
         block: suspend () -> Unit,
     ): Job? {
         if (_uiState.value.isBusy(operation)) return null
+        val connection = _uiState.value.info
         _uiState.update {
             it.copy(
                 pendingOperations = it.pendingOperations + operation,
@@ -2296,17 +2301,24 @@ class CameraViewModel(
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
+                if (operation == CameraOperation.FOCUS && _uiState.value.info !== connection) return@launch
                 exception.printStackTrace()
                 onError(exception)
                 _uiState.update {
                     it.copy(
                         error = formatException(exception),
                         errorOperation = operation,
+                        autofocusHoldState = if (operation == CameraOperation.FOCUS && exception is AutofocusReleaseException) {
+                            AutofocusHoldState.RELEASE_FAILED
+                        } else it.autofocusHoldState,
                     )
                 }
             } finally {
-                _uiState.update {
-                    it.copy(pendingOperations = it.pendingOperations - operation)
+                if (operation != CameraOperation.FOCUS || _uiState.value.info === connection) {
+                    _uiState.update {
+                        if (operation == CameraOperation.FOCUS && it.autofocusHoldState == AutofocusHoldState.RELEASE_FAILED) it
+                        else it.copy(pendingOperations = it.pendingOperations - operation)
+                    }
                 }
                 afterFinally()
                 if (operation in LIVE_VIEW_INTERLOCK_OPERATIONS) queueLiveViewReconciliation()

@@ -12,6 +12,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraUiStateTest {
+    @Test fun boundedFocusBlocksConflictingCommandsButNotReadOnlyStatus() {
+        val state = CameraUiState().withOfflinePreview().copy(pendingOperations = setOf(CameraOperation.FOCUS))
+        for (operation in HELD_AF_INTERLOCK_OPERATIONS) {
+            assertTrue(state.isBusy(operation))
+            assertTrue(state.copy(pendingOperations = setOf(operation)).isBusy(CameraOperation.FOCUS))
+        }
+        assertFalse(state.isBusy(CameraOperation.STATUS))
+        assertFalse(state.canChangeShutterAutofocus())
+        assertFalse(captureModeSwitchEnabled(state))
+    }
+
     @Test fun shutterAutofocusRequiresPhotoCapabilityAndIdleState() {
         val ready = CameraUiState().withOfflinePreview()
         assertTrue(ready.shutterAutofocus)

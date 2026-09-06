@@ -63,7 +63,12 @@ internal fun CameraAutofocusButton(state: CameraUiState, actions: CameraActions,
     DisposableEffect(Unit) { onDispose { currentActions.stopHeldAutofocus() } }
     LaunchedEffect(windowFocused) { if (!windowFocused) currentActions.stopHeldAutofocus() }
 
-    val description = stringResource(if (retry) R.string.retry_af_stop else R.string.hold_af_on)
+    val releaseOnly = retry || state.capabilities?.heldAutofocusSupported != true
+    val description = stringResource(when {
+        retry -> R.string.retry_af_stop
+        releaseOnly -> R.string.af_hold_releasing
+        else -> R.string.hold_af_on
+    })
     val phase = stringResource(when (state.autofocusHoldState) {
         AutofocusHoldState.IDLE -> R.string.af_hold_idle
         AutofocusHoldState.STARTING -> R.string.af_hold_starting
@@ -72,6 +77,7 @@ internal fun CameraAutofocusButton(state: CameraUiState, actions: CameraActions,
         AutofocusHoldState.RELEASE_FAILED -> R.string.af_hold_release_failed
     })
     val active = state.autofocusHoldState != AutofocusHoldState.IDLE
+    val canStop = state.autofocusHoldState in setOf(AutofocusHoldState.STARTING, AutofocusHoldState.HOLDING)
     val tint = if (retry) AppWarning else if (active || canStart) AppAccent else AppMutedText
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -108,12 +114,12 @@ internal fun CameraAutofocusButton(state: CameraUiState, actions: CameraActions,
                         contentDescription = description
                         stateDescription = phase
                         role = Role.Button
-                        if (!canStart && !retry && !active) disabled()
+                        if (!canStart && !retry && !canStop) disabled()
                         onClick(label = description) {
                             when {
                                 retry -> currentActions.retryHeldAutofocusStop()
                                 canStart -> currentActions.autofocus()
-                                active -> currentActions.stopHeldAutofocus()
+                                canStop -> currentActions.stopHeldAutofocus()
                                 else -> return@onClick false
                             }
                             true
@@ -125,7 +131,7 @@ internal fun CameraAutofocusButton(state: CameraUiState, actions: CameraActions,
                             if (it.type == KeyEventType.KeyUp) {
                                 if (canRetry) currentActions.retryHeldAutofocusStop()
                                 else if (canStart) currentActions.autofocus()
-                                else currentActions.stopHeldAutofocus()
+                                else if (canStop) currentActions.stopHeldAutofocus()
                             }
                             true
                         }
@@ -133,9 +139,9 @@ internal fun CameraAutofocusButton(state: CameraUiState, actions: CameraActions,
                     .focusable(),
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Icon(painterResource(if (retry) LucideR.drawable.lucide_ic_square else LucideR.drawable.lucide_ic_focus),
+                    Icon(painterResource(if (releaseOnly) LucideR.drawable.lucide_ic_square else LucideR.drawable.lucide_ic_focus),
                         contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-                    Text(stringResource(R.string.af_on_label), color = tint, fontSize = 10.sp, maxLines = 1)
+                    if (!releaseOnly) Text(stringResource(R.string.af_on_label), color = tint, fontSize = 10.sp, maxLines = 1)
                 }
             }
         }
