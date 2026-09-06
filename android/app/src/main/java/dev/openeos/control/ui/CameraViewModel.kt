@@ -212,6 +212,8 @@ class CameraViewModel(
     private var appInForeground = true
     private var liveViewGeneration = 0L
     private var focusFeedbackJob: Job? = null
+    private var focusInfoJob: Job? = null
+    private var focusInfoGeneration = 0L
     private var eventPollingJob: Job? = null
     private var eventPollingGeneration = 0L
     private var mediaDownloadJob: Job? = null
@@ -255,6 +257,7 @@ class CameraViewModel(
     }
 
     fun setUiMode(mode: UiMode) {
+        if (mode == UiMode.MEDIA) invalidateCameraFocusInfo()
         if (mode != UiMode.MEDIA) _uiState.value.mediaStreamSource?.close()
         _uiState.update {
             it.copy(
@@ -468,6 +471,7 @@ class CameraViewModel(
     }
 
     fun enterOfflinePreview() {
+        stopCameraFocusInfoLoop()
         stopLiveViewLoop()
         stopEventPollingLoop()
         cancelCaptureReview()
@@ -633,6 +637,7 @@ class CameraViewModel(
         }
         refreshCaptureReview()
         startEventPollingIfSupported()
+        startCameraFocusInfoLoop()
     }
 
     fun rememberConnection(context: Context) {
@@ -647,6 +652,7 @@ class CameraViewModel(
     }
 
     fun disconnect() {
+        stopCameraFocusInfoLoop()
         liveViewGeneration += 1
         stopLiveViewLoop()
         stopEventPollingLoop()
@@ -716,6 +722,7 @@ class CameraViewModel(
     }
 
     private fun queueLiveViewReconciliation(restart: Boolean = false) {
+        invalidateCameraFocusInfo()
         if (!appInForeground || !_uiState.value.liveViewAutoRefresh) {
             liveViewGeneration += 1
             stopLiveViewLoop()
@@ -1102,6 +1109,7 @@ class CameraViewModel(
 
     fun autofocus() {
         if (_uiState.value.isBusy(CameraOperation.FOCUS) || _uiState.value.isBusy(CameraOperation.LIVE_VIEW)) return
+        invalidateCameraFocusInfo()
         focusFeedbackJob?.cancel()
         _uiState.update { it.copy(focusFeedback = FocusFeedback.FOCUSING) }
         if (_uiState.value.previewMode) {
@@ -1126,6 +1134,7 @@ class CameraViewModel(
 
     fun halfPressShutter() {
         if (_uiState.value.isBusy(CameraOperation.FOCUS) || _uiState.value.isBusy(CameraOperation.LIVE_VIEW)) return
+        invalidateCameraFocusInfo()
         focusFeedbackJob?.cancel()
         _uiState.update { it.copy(focusFeedback = FocusFeedback.FOCUSING) }
         if (_uiState.value.previewMode) {
@@ -1150,6 +1159,7 @@ class CameraViewModel(
 
     fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep) {
         if (_uiState.value.isBusy(CameraOperation.FOCUS) || _uiState.value.isBusy(CameraOperation.LIVE_VIEW)) return
+        invalidateCameraFocusInfo()
         focusFeedbackJob?.cancel()
         _uiState.update { it.copy(focusFeedback = FocusFeedback.FOCUSING) }
         if (_uiState.value.previewMode) {
@@ -2036,6 +2046,7 @@ class CameraViewModel(
 
     fun tapFocus(x: Double, y: Double) {
         if (_uiState.value.isBusy(CameraOperation.FOCUS) || _uiState.value.isBusy(CameraOperation.LIVE_VIEW)) return
+        invalidateCameraFocusInfo()
         focusFeedbackJob?.cancel()
         _uiState.update {
             it.copy(
@@ -2223,6 +2234,56 @@ class CameraViewModel(
                 )
             } else {
                 current
+            }
+        }
+    }
+
+    private fun invalidateCameraFocusInfo() {
+        focusInfoGeneration += 1
+        _uiState.update { it.copy(cameraFocusInfo = null, cameraFocusInfoAtMillis = null, cameraFocusInfoError = false) }
+    }
+
+    private fun stopCameraFocusInfoLoop() {
+        focusInfoJob?.cancel()
+        focusInfoJob = null
+        invalidateCameraFocusInfo()
+    }
+
+    private fun canReadCameraFocusInfo(state: CameraUiState): Boolean =
+        state.connected && !state.previewMode && appInForeground && state.uiMode != UiMode.MEDIA &&
+            state.liveViewAutoRefresh && state.liveViewTemperatureAllowed && repository.isLiveViewRunning() &&
+            !state.isBusy(CameraOperation.LIVE_VIEW) && CameraOperation.CAPTURE !in state.pendingOperations &&
+            state.capabilities?.liveView?.focusInfoSupported == true
+
+    private fun startCameraFocusInfoLoop() {
+        stopCameraFocusInfoLoop()
+        val connection = _uiState.value.info
+        if (_uiState.value.capabilities?.liveView?.focusInfoSupported != true) return
+        focusInfoJob = viewModelScope.launch {
+            while (isActive && _uiState.value.connected && !_uiState.value.previewMode && _uiState.value.info === connection) {
+                val generation = focusInfoGeneration
+                var retryDelay = 250L
+                if (canReadCameraFocusInfo(_uiState.value)) {
+                    try {
+                        val info = repository.fetchLiveViewFocusInfo()
+                        if (info == null) retryDelay = 2_000L
+                        if (generation == focusInfoGeneration && canReadCameraFocusInfo(_uiState.value) && _uiState.value.info === connection) {
+                            _uiState.update {
+                                it.copy(cameraFocusInfo = info, cameraFocusInfoAtMillis = info?.let { System.currentTimeMillis() }, cameraFocusInfoError = false)
+                            }
+                        }
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (_: Exception) {
+                        retryDelay = 1_000L
+                        if (generation == focusInfoGeneration && _uiState.value.info === connection) {
+                            _uiState.update { it.copy(cameraFocusInfo = null, cameraFocusInfoAtMillis = null, cameraFocusInfoError = true) }
+                        }
+                    }
+                } else if (_uiState.value.cameraFocusInfo != null) {
+                    invalidateCameraFocusInfo()
+                }
+                delay(retryDelay)
             }
         }
     }
@@ -2515,6 +2576,7 @@ class CameraViewModel(
     }
 
     override fun onCleared() {
+        stopCameraFocusInfoLoop()
         stopLiveViewLoop()
         stopEventPollingLoop()
         detachNativeLiveViewListener()

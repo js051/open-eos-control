@@ -1263,7 +1263,10 @@ class CcapiClientTest {
             .writeUtf8("--canon\nContent-Type: image/jpeg\nContent-Length: ${jpeg.size}\n\n")
             .write(jpeg)
             .writeUtf8("\n--canon--\n")
-        server.enqueue(jsonResponse(DISCOVERY_MULTIPART_JSON))
+        val discovery = JSONObject(DISCOVERY_MULTIPART_JSON).apply {
+            getJSONArray("ver110").put(JSONObject("""{"path":"/shooting/liveview/flipdetail","get":true}"""))
+        }
+        server.enqueue(jsonResponse(discovery.toString()))
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
         server.enqueue(
             MockResponse()
@@ -1271,6 +1274,7 @@ class CcapiClientTest {
                 .setHeader("content-type", "multipart/x-mixed-replace;boundary=canon")
                 .setChunkedBody(multipart, 3),
         )
+        server.enqueue(MockResponse().setBody(Buffer().write(focusInfoPacket(focusInfoJson()))))
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
 
@@ -1293,20 +1297,25 @@ class CcapiClientTest {
         )
         assertTrue(CameraFeature.LIVE_VIEW_MULTIPART in client.observedFeatureSnapshot())
 
+        assertTrue(capabilities.liveView.focusInfoSupported)
+        assertEquals(CameraFocusStatus.FOCUSED, client.liveViewFocusInfo()!!.frames.single().status)
+        assertEquals(LiveViewSource.CCAPI_MULTIPART, client.currentLiveViewSource())
+
         client.stopLiveView()
 
-        val requests = List(5) { server.takeRequest() }
+        val requests = List(6) { server.takeRequest() }
         assertEquals(
             listOf(
                 "/ccapi",
                 "/ccapi/ver110/shooting/liveview",
                 "/ccapi/ver110/shooting/liveview/multipart",
+                "/ccapi/ver110/shooting/liveview/flipdetail?kind=info",
                 "/ccapi/ver110/shooting/liveview/multipart",
                 "/ccapi/ver110/shooting/liveview",
             ),
             requests.map { it.path },
         )
-        assertEquals(listOf("GET", "POST", "GET", "DELETE", "DELETE"), requests.map { it.method })
+        assertEquals(listOf("GET", "POST", "GET", "GET", "DELETE", "DELETE"), requests.map { it.method })
     }
 
     @Test
@@ -1423,9 +1432,13 @@ class CcapiClientTest {
                 FakeNativeLiveViewSession(description, destinationAddress).also { nativeSession = it }
             },
         )
-        server.enqueue(jsonResponse(DISCOVERY_RTP_JSON))
+        val discovery = JSONObject(DISCOVERY_RTP_JSON).apply {
+            getJSONArray("ver110").put(JSONObject("""{"path":"/shooting/liveview/flipdetail","get":true}"""))
+        }
+        server.enqueue(jsonResponse(discovery.toString()))
         server.enqueue(MockResponse().setHeader("content-type", "text/plain").setBody(CANON_RTP_SDP))
         server.enqueue(jsonResponse("{}"))
+        server.enqueue(MockResponse().setBody(Buffer().write(focusInfoPacket(focusInfoJson(0x34)))))
         server.enqueue(jsonResponse("{}"))
 
         client.initialize()
@@ -1448,6 +1461,12 @@ class CcapiClientTest {
         assertEquals("POST", start.method)
         assertEquals("start", startBody.getString("action"))
         assertEquals("192.168.11.5", startBody.getString("ipaddress"))
+
+        assertTrue(capabilities.liveView.focusInfoSupported)
+        assertEquals(CameraFocusStatus.FOCUSING, client.liveViewFocusInfo()!!.frames.single().status)
+        assertEquals("/ccapi/ver110/shooting/liveview/flipdetail?kind=info", server.takeRequest().path)
+        assertEquals(nativeSession, client.nativeLiveViewSession)
+        assertFalse(nativeSession.closed)
 
         client.stopLiveView()
 

@@ -327,6 +327,7 @@ data class LiveViewCapabilities(
     val maxFps: Int = 30,
     val magnifications: List<LiveViewMagnification> = emptyList(),
     val currentMagnification: LiveViewMagnification? = null,
+    val focusInfoSupported: Boolean = false,
 ) {
     companion object {
         fun ccapiNetwork(): LiveViewCapabilities = LiveViewCapabilities(

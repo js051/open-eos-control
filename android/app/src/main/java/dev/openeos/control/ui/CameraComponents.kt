@@ -1220,7 +1220,18 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             if (state.monitorSettings.waveformVisible) {
                 monitorAnalysis?.waveform?.let { WaveformOverlay(it, hudVisible = false) }
             }
-            FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
+            val hasFocusImage = !state.previewMode && state.liveViewAutoRefresh &&
+                (bitmap != null || (state.liveViewFrameUrl != null && loadedFrameBitmap != null) ||
+                    (state.nativeLiveViewSession != null && state.liveViewDiagnostics.lastFrameAtMillis != null))
+            if (hasFocusImage) {
+                CameraReportedFocusOverlay(state.cameraFocusInfo, state.cameraFocusInfoAtMillis, displayAspectRatio)
+            }
+            if (!hasFocusImage || state.cameraFocusInfo?.frames.isNullOrEmpty() ||
+                state.cameraFocusInfo?.let { !focusInfoMatchesImage(it, displayAspectRatio) } == true ||
+                state.focusFeedback != FocusFeedback.ACCEPTED
+            ) {
+                FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
+            }
             if (state.captureFeedback == CaptureFeedback.SUCCESS) {
                 Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.72f)))
             }

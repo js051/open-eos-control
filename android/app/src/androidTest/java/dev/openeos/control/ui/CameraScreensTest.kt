@@ -106,6 +106,25 @@ class CameraScreensTest {
     }
 
     @Test
+    fun cameraFocusTelemetryDoesNotOverlayOfflinePausedOrMissingImages() {
+        val info = dev.openeos.control.data.CameraFocusInfo(
+            listOf(dev.openeos.control.data.CameraFocusFrame(0.25f, 0.25f, 0.75f, 0.75f,
+                dev.openeos.control.data.CameraFocusStatus.FOCUSED, dev.openeos.control.data.CameraFocusFrameKind.FACE)),
+            1, 4f / 3f,
+        )
+        val bitmap = Bitmap.createBitmap(16, 12, Bitmap.Config.ARGB_8888)
+        val state = mutableStateOf(CameraUiState(cameraFocusInfo = info, cameraFocusInfoAtMillis = System.currentTimeMillis(), liveViewAspectRatio = 4f / 3f))
+        compose.setContent { MaterialTheme { LiveViewFrame(state.value, noOpActions(), Modifier.fillMaxSize()) } }
+        compose.onNodeWithTag("camera-focus-frames").assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(liveViewBitmap = bitmap, previewMode = true) }
+        compose.onNodeWithTag("camera-focus-frames").assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(previewMode = false, liveViewAutoRefresh = false) }
+        compose.onNodeWithTag("camera-focus-frames").assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(liveViewAutoRefresh = true, cameraFocusInfoAtMillis = System.currentTimeMillis()) }
+        compose.onNodeWithTag("camera-focus-frames").assertIsDisplayed()
+    }
+
+    @Test
     fun focusIndicatorUsesOpenCornersAndDoesNotSignalUnconfirmedSuccess() {
         compose.setContent {
             Box(Modifier.fillMaxSize()) {

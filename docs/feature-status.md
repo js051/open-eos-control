@@ -17,6 +17,8 @@ This is the canonical completeness ledger for Open EOS Control. A UI control, in
 
 Scoped Android follow-up (2026-09-06): [focus feedback and remote-view lifecycle investigation](validation/android-focus-session-2026-09-06.zh-TW.md). Remote-view stop/resume and neutral focus-command acknowledgement have executable paths and targeted tests. The reported body-side manual-focus problem remains unconfirmed; neither command acceptance nor the new four-corner marker is optical-focus evidence. PC/iOS parity is not claimed for this follow-up.
 
+Scoped Android AF telemetry follow-up (2026-09-06): [camera-reported AF frames and state](validation/android-af-frame-feedback-2026-09-06.zh-TW.md). Advertised `flipdetail?kind=info` supplies selected 1x AF rectangles and status, independently of command acknowledgement. Frames expire after one second without fresh metadata and are hidden for unverified geometry. Automated protocol/rendering evidence is separate from pending R6 Mark III optical-focus and sustained-load validation; PC/iOS parity is not claimed.
+
 | Capability | Code status | EOS R6 Mark III | Acceptance evidence |
 | --- | --- | --- | --- |
 | Discovery and API versions | Implemented | Device validation passed; refreshed capability report required | Android, iOS, and PC contract tests cover same-origin Canon `url` and relative `path` entries plus Canon's exact `No list of APIs` response and `/ccapi/ver100/topurlfordev` fallback. Cross-origin/unsafe entries are ignored, failed developer-list requests do not invent capabilities, and each client records a bounded structural trace for root, developer-list and identity attempts; [sanitized physical-camera record](validation/eos-r6-mark-iii-android-ccapi.md) |

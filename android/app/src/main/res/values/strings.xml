@@ -1,4 +1,11 @@
 <resources>
+    <string name="camera_focus_status">Camera AF status</string>
+    <string name="camera_focus_confirmed">Camera reports focus acquired</string>
+    <string name="camera_focus_failed">Camera reports focus not acquired</string>
+    <string name="camera_focus_tracking">Camera Servo AF in progress</string>
+    <string name="camera_focus_standby">Camera AF standby</string>
+    <string name="camera_focus_servo_off">Camera Movie Servo AF off</string>
+    <string name="camera_focus_unknown">Camera AF status unavailable</string>
     <string name="focus_command_pending">Sending focus command</string>
     <string name="focus_command_accepted">Focus command accepted; focus not confirmed</string>
     <string name="focus_action_completed">Selected action completed</string>

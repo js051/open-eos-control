@@ -137,6 +137,7 @@ interface CameraControlBackend {
     suspend fun deleteMedia(item: CameraMediaItem) = unsupported<Unit>(CameraFeature.MEDIA_DELETE)
     fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame
+    suspend fun liveViewFocusInfo(): CameraFocusInfo? = null
 }
 
 class CcapiCameraBackend(
@@ -187,6 +188,8 @@ class CcapiCameraBackend(
     override suspend fun startLiveView(request: LiveViewRequest) = client.startLiveView(request)
 
     override suspend fun stopLiveView() = client.stopLiveView()
+
+    override suspend fun liveViewFocusInfo(): CameraFocusInfo? = client.liveViewFocusInfo()
 
     override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus =
         client.setExposure(iso = iso, shutter = shutter, aperture = aperture)

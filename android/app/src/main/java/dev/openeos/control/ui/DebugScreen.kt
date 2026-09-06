@@ -298,6 +298,13 @@ fun DebugScreen(
                 )
             }
             DebugSection(stringResource(R.string.live_view)) {
+                DebugValue(
+                    stringResource(R.string.camera_focus_status),
+                    state.cameraFocusInfo?.frames?.map { stringResource(cameraFocusStatusResource(it.status)) }
+                        ?.distinct()?.joinToString(", ")?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.camera_focus_unknown),
+                    warning = state.cameraFocusInfoError,
+                )
                 val live = state.liveViewDiagnostics
                 DebugValue(stringResource(R.string.requested_fps), state.liveViewFrameRateFps.toString())
                 DebugValue(stringResource(R.string.observed_fps), String.format(Locale.US, "%.1f", live.observedFps))
