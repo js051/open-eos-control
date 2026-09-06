@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="camera_focus_status">相機 AF 狀態</string>
+    <string name="camera_focus_confirmed">相機回報已合焦</string>
+    <string name="camera_focus_failed">相機回報未合焦</string>
+    <string name="camera_focus_tracking">相機 Servo AF 進行中</string>
+    <string name="camera_focus_standby">相機 AF 待命</string>
+    <string name="camera_focus_servo_off">相機短片 Servo AF 已關閉</string>
+    <string name="camera_focus_unknown">相機 AF 狀態無法取得</string>
     <string name="focus_command_pending">正在傳送對焦指令</string>
     <string name="focus_command_accepted">對焦指令已接受；尚未確認合焦</string>
     <string name="focus_action_completed">所選操作已完成</string>

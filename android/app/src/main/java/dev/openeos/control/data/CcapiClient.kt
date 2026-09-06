@@ -155,6 +155,9 @@ class CcapiClient(
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .build()
     private val activeEventCall = AtomicReference<Call?>(null)
+    private val focusInfoHttpClient = this.httpClient.newBuilder()
+        .callTimeout(1, TimeUnit.SECONDS)
+        .build()
 
     var isRealCamera = false
         private set
@@ -2018,6 +2021,31 @@ class CcapiClient(
         )
     }
 
+    suspend fun liveViewFocusInfo(): CameraFocusInfo? {
+        if (!isRealCamera || activeLiveViewSource == null) return null
+        val operation = detailedLiveViewOperation() ?: return null
+        return withContext(Dispatchers.IO) {
+            val request = Request.Builder().url("$baseUrl${operation.path}?kind=info")
+                .header("Accept", "application/octet-stream").header("Cache-Control", "no-cache").get().build()
+            val call = focusInfoHttpClient.newCall(request)
+            val cancelCall = AtomicBoolean(true)
+            val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
+                try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
+            }
+            try {
+                call.execute().use { response ->
+                    check(response.isSuccessful) { "Canon focus information returned HTTP ${response.code}." }
+                    val payload = response.body?.byteStream()?.readBoundedBytes(MAX_FOCUS_INFO_BYTES)
+                        ?: error("Canon focus information returned an empty body.")
+                    parseCcapiFocusInfoPacket(payload)
+                }
+            } finally {
+                cancelCall.set(false)
+                watcher.cancel()
+            }
+        }
+    }
+
     private fun liveViewFrameUrls(cacheKey: Long, request: LiveViewRequest): List<String> =
         if (isRealCamera) {
             when (request.source) {
@@ -2436,6 +2464,7 @@ class CcapiClient(
             defaultSource = sources.firstOrNull() ?: LiveViewSource.AUTO,
             magnifications = liveViewMagnificationSetting?.abilities.orEmpty(),
             currentMagnification = liveViewMagnificationSetting?.current,
+            focusInfoSupported = sources.isNotEmpty() && detailedLiveViewOperation() != null,
         )
     }
 

@@ -221,6 +221,11 @@ fun buildDiagnosticReport(
             "transportDetails=${state.status?.rawTransportJson?.ifBlank { "unknown" }?.let { redactDiagnosticText(it, state) } ?: "unknown"}"
         )
         appendLine("requestedFps=${state.liveViewFrameRateFps}")
+        appendLine("focusInfoSupported=${state.capabilities?.liveView?.focusInfoSupported == true}")
+        appendLine("focusInfoReadError=${state.cameraFocusInfoError}")
+        appendLine("focusFrameCount=${state.cameraFocusInfo?.frames?.size ?: 0}")
+        appendLine("focusStates=${state.cameraFocusInfo?.frames?.map { it.status.name }?.distinct()?.joinToString(",")?.ifBlank { "none" } ?: "unknown"}")
+        appendLine("focusInfoAtMillis=${state.cameraFocusInfoAtMillis ?: "none"}")
         appendLine("liveViewSource=${state.liveViewSource.name}")
         appendLine("monitorHistogram=${state.monitorSettings.histogramVisible}")
         appendLine("monitorWaveform=${state.monitorSettings.waveformVisible}")

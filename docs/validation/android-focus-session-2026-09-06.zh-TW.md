@@ -40,6 +40,6 @@ Canon Camera Control API Reference 1.3 的 4.8.8（AF）、4.11.10（AF Frame Po
 ## 仍需完成
 
 1. 同一場景、鏡頭與設定比較：未連 App、連線且取景關閉、取景開啟、使用 App 對焦後的機身半按與成片結果。
-2. 依 Canon incidental AF frame metadata 提供真正的合焦、未合焦及 Servo 進行中狀態，而非只確認指令送達。
+2. AF metadata 已由 [後續 Android 框線與狀態實作](android-af-frame-feedback-2026-09-06.zh-TW.md) 接通；實機座標、各 AF 模式與持續負載驗收仍待完成，不重複列為尚未實作。
 3. 具取消／背景釋放語意的按住 AF／Servo 操作。現有 AF 指令仍是有限時間 start／stop，不宣稱等同機身持續 AF-ON。
 4. 核對 AF 點選擇、主體追蹤與機身操控之間的實際關係後，再擴充拍攝操作；不以按鈕數量代表完成度。

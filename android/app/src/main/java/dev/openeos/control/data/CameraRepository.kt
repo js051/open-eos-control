@@ -310,6 +310,9 @@ class CameraRepository(
 
     suspend fun fetchLiveViewFrame(): LiveViewFrame = backend.liveViewFrame(++frameVersion, liveViewRequest)
 
+    suspend fun fetchLiveViewFocusInfo(): CameraFocusInfo? =
+        if (active && liveViewRunning) backend.liveViewFocusInfo() else null
+
     companion object {
         const val DEFAULT_CAMERA_BASE_URL = "http://192.168.1.2:8080"
         const val DEFAULT_CAMERA_HTTPS_URL = "https://192.168.1.2:443"

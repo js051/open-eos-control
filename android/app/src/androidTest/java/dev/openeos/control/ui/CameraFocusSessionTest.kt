@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import dev.openeos.control.data.CameraRepository
+import dev.openeos.control.data.CameraFocusStatus
 import dev.openeos.control.data.LiveViewSize
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -20,10 +21,12 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class CameraFocusSessionTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
@@ -36,6 +39,10 @@ class CameraFocusSessionTest {
     private val blockNextStart = AtomicBoolean(false)
     private val startEntered = CountDownLatch(1)
     private val releaseStart = CountDownLatch(1)
+    private val focusStatus = AtomicInteger(0x20)
+    private val focusReads = AtomicInteger(0)
+    private val failFocusRead = AtomicBoolean(false)
+    private val delayFocusRead = AtomicBoolean(false)
 
     @Before
     fun setUp() {
@@ -68,6 +75,17 @@ class CameraFocusSessionTest {
                     path.endsWith("/deviceinformation") -> json("""{"productname":"Canon EOS R6 Mark III","serialnumber":"TEST-SERIAL-0001"}""")
                     path.endsWith("/devicestatus/battery") -> json("""{"level":"90"}""")
                     path.endsWith("/shooting/settings") -> json("{}")
+                    path.endsWith("/shooting/liveview/flipdetail") -> {
+                        assertEquals("info", request.requestUrl!!.queryParameter("kind"))
+                        focusReads.incrementAndGet()
+                        if (failFocusRead.get()) return MockResponse().setResponseCode(503)
+                        val payload = """{"liveviewdata":{"image":{"positionx":0,"positiony":0,"positionwidth":1200,"positionheight":900},
+                            "zoom":{"magnification":1},"afframe":[{"select":1,"status":${focusStatus.get()},"x":300,"y":225,"width":300,"height":225}]}}""".toByteArray()
+                        val packet = ByteBuffer.allocate(payload.size + 9).putShort(0xFF00.toShort()).put(1)
+                            .putInt(payload.size).put(payload).putShort(0xFFFF.toShort()).array()
+                        MockResponse().setHeader("Content-Type", "application/octet-stream").setBody(Buffer().write(packet))
+                            .apply { if (delayFocusRead.get()) setBodyDelay(800, TimeUnit.MILLISECONDS) }
+                    }
                     path.endsWith("/shooting/liveview/flip") -> MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(jpeg))
                     else -> MockResponse().setResponseCode(404)
                 }
@@ -159,6 +177,64 @@ class CameraFocusSessionTest {
         assertEquals(FocusFeedback.ACCEPTED, viewModel.uiState.value.focusFeedback)
     }
 
+    @Test
+    fun reportsCameraStatesWithoutSendingAnAfCommand() {
+        for ((raw, expected) in listOf(0x21 to CameraFocusStatus.FOCUSED, 0x32 to CameraFocusStatus.UNFOCUSED, 0x34 to CameraFocusStatus.FOCUSING)) {
+            focusStatus.set(raw)
+            compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfo?.frames?.singleOrNull()?.status == expected }
+        }
+        assertTrue(afWrites.isEmpty())
+        assertNull(viewModel.uiState.value.focusFeedback)
+    }
+
+    @Test
+    fun metadataFailureClearsFramesWithoutFailingLiveViewAndRecovers() {
+        compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfo != null }
+        failFocusRead.set(true)
+        compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfoError }
+        assertNull(viewModel.uiState.value.cameraFocusInfo)
+        assertNull(viewModel.uiState.value.error)
+        assertTrue(repository.isLiveViewRunning())
+        assertTrue(viewModel.uiState.value.liveViewBitmap != null)
+        failFocusRead.set(false)
+        compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfo != null && !viewModel.uiState.value.cameraFocusInfoError }
+    }
+
+    @Test
+    fun stopRejectsAnInflightFocusResponseAndStopsFurtherPolling() {
+        delayFocusRead.set(true)
+        val previous = focusReads.get()
+        compose.waitUntil(8_000) { focusReads.get() > previous }
+        compose.runOnIdle { viewModel.setLiveViewAutoRefresh(false) }
+        awaitStopped()
+        val stoppedReads = focusReads.get()
+        Thread.sleep(1_200)
+        assertNull(viewModel.uiState.value.cameraFocusInfo)
+        assertNull(viewModel.uiState.value.cameraFocusInfoAtMillis)
+        assertEquals(stoppedReads, focusReads.get())
+        delayFocusRead.set(false)
+        compose.runOnIdle { viewModel.setLiveViewAutoRefresh(true) }
+        compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfo != null }
+    }
+
+    @Test
+    fun mediaAndBackgroundPauseMetadataThenResume() {
+        compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfo != null }
+        compose.runOnIdle { viewModel.setUiMode(UiMode.MEDIA) }
+        Thread.sleep(400)
+        val mediaReads = focusReads.get()
+        Thread.sleep(600)
+        assertEquals(mediaReads, focusReads.get())
+        assertNull(viewModel.uiState.value.cameraFocusInfo)
+        compose.runOnIdle { viewModel.setUiMode(UiMode.CONTROL) }
+        compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfo != null }
+        compose.runOnIdle { viewModel.setAppForeground(false) }
+        awaitStopped()
+        assertNull(viewModel.uiState.value.cameraFocusInfo)
+        compose.runOnIdle { viewModel.setAppForeground(true) }
+        compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfo != null }
+    }
+
     private fun awaitFrame() = compose.waitUntil(8_000) {
         viewModel.uiState.value.liveViewBitmap != null && !viewModel.uiState.value.busy
     }
@@ -176,6 +252,7 @@ class CameraFocusSessionTest {
             {"path":"/shooting/settings","get":true},
             {"path":"/shooting/liveview","post":true},
             {"path":"/shooting/liveview/flip","get":true},
+            {"path":"/shooting/liveview/flipdetail","get":true},
             {"path":"/shooting/control/af","post":true}
         ]}"""
     }
