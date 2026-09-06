@@ -17,6 +17,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.DeviceConfigurationOverride
@@ -89,6 +91,99 @@ import org.junit.Assert.assertTrue
 
 class CameraScreensTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun shutterAfSettingIsAccessibleAndDisabledDuringOperations() {
+        val state = mutableStateOf(CameraUiState().withOfflinePreview().copy(activeSettingPicker = SettingPicker.MORE))
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.value, noOpActions().copy(
+                    setShutterAutofocus = { state.value = state.value.copy(shutterAutofocus = it) },
+                ))
+            }
+        }
+        val toggle = compose.onNodeWithTag("shutter-autofocus-setting")
+        toggle.assertHeightIsAtLeast(48.dp).assertIsOn().performClick().assertIsOff()
+        compose.runOnIdle { state.value = state.value.copy(pendingOperations = setOf(CameraOperation.CAPTURE)) }
+        toggle.assertIsNotEnabled().assertIsOff()
+        compose.runOnIdle { state.value = state.value.copy(pendingOperations = emptySet(), autofocusHoldState = AutofocusHoldState.RELEASE_FAILED) }
+        toggle.assertIsNotEnabled()
+    }
+
+    @Test fun shutterAfSettingIsHiddenForVideoBulbAndUnsupportedCamera() {
+        val base = CameraUiState().withOfflinePreview().copy(activeSettingPicker = SettingPicker.MORE)
+        val state = mutableStateOf(base)
+        compose.setContent { MaterialTheme { CameraControlScreen(state.value, noOpActions()) } }
+        compose.onNodeWithTag("shutter-autofocus-setting").assertExists()
+        for (hidden in listOf(
+            base.copy(captureMode = CaptureMode.VIDEO),
+            base.copy(capabilities = base.capabilities!!.copy(advancedSettings = emptyList()), status = base.status!!.copy(mode = "Bulb")),
+            base.copy(capabilities = base.capabilities.copy(shutterAutofocusSupported = false)),
+            base.copy(capabilities = base.capabilities.copy(matrix = CapabilityMatrix(supported = emptySet()))),
+        )) {
+            compose.runOnIdle { state.value = hidden }
+            compose.onNodeWithTag("shutter-autofocus-setting").assertDoesNotExist()
+        }
+    }
+
+    @Test fun shutterAfLayoutFitsLargeTextAndRotatedPhoneAndTablet() {
+        compose.activityRule.scenario.onActivity {
+            it.enableEdgeToEdge()
+            androidx.core.view.WindowCompat.getInsetsController(it.window, it.window.decorView)
+                .hide(WindowInsetsCompat.Type.systemBars())
+        }
+        val size = mutableStateOf(DpSize(360.dp, 800.dp))
+        val rotation = mutableFloatStateOf(0f)
+        val language = mutableStateOf("en")
+        val fixtureInsets = mutableStateOf(WindowInsetsCompat.Builder().build())
+        val state = mutableStateOf(CameraUiState().withOfflinePreview().copy(shutterAutofocus = false))
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(fixtureInsets.value)) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
+                    val density = LocalDensity.current
+                    val cutout = with(density) { 32.dp.roundToPx() }
+                    SideEffect {
+                        fixtureInsets.value = WindowInsetsCompat.Builder()
+                            .setInsets(WindowInsetsCompat.Type.displayCutout(),
+                                if (size.value.width > size.value.height) Insets.of(cutout, 0, 0, 0) else Insets.of(0, cutout, 0, 0))
+                            .build()
+                    }
+                    DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                        DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(LocaleList(language.value))) {
+                            CompositionLocalProvider(LocalCameraControlRotation provides rotation.floatValue,
+                                LocalCameraControlTargetRotation provides rotation.floatValue) {
+                                MaterialTheme(colorScheme = OpenEosColorScheme) { CameraControlScreen(state.value, noOpActions()) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        fun snapshot(stem: String) {
+            val image = compose.onNodeWithTag("camera-control-root").captureToImage().asAndroidBitmap()
+            java.io.File(compose.activity.cacheDir, "$stem.png").outputStream().use {
+                assertTrue(image.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
+        for ((index, viewport) in listOf(DpSize(360.dp, 800.dp), DpSize(800.dp, 360.dp), DpSize(800.dp, 1280.dp)).withIndex()) {
+            compose.runOnIdle { size.value = viewport; language.value = if (index == 0) "en" else "zh-TW" }
+            for (degrees in listOf(0f, 90f, 180f, -90f)) {
+                compose.runOnIdle { rotation.floatValue = degrees }
+                val button = compose.onNodeWithTag("capture-button", useUnmergedTree = true)
+                button.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+                val indicator = compose.onNodeWithTag("shutter-af-off-indicator", useUnmergedTree = true)
+                indicator.assertIsDisplayed()
+                val outer = button.fetchSemanticsNode().boundsInRoot
+                val inner = indicator.fetchSemanticsNode().boundsInRoot
+                assertTrue("AF indicator must fit inside shutter", inner.left >= outer.left && inner.top >= outer.top &&
+                    inner.right <= outer.right && inner.bottom <= outer.bottom)
+            }
+            snapshot("shutter-af-off-$index")
+            compose.runOnIdle { state.value = state.value.copy(activeSettingPicker = SettingPicker.MORE) }
+            compose.onNodeWithTag("shutter-autofocus-setting").assertIsDisplayed().assertIsOff()
+            snapshot("shutter-af-sheet-$index")
+            compose.runOnIdle { state.value = state.value.copy(activeSettingPicker = null) }
+        }
+    }
 
     @Test fun heldAfGestureSurvivesRecompositionAndReleasesOnUpOrCancel() {
         val base = connectedState()

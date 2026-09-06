@@ -12,6 +12,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraUiStateTest {
+    @Test fun shutterAutofocusRequiresPhotoCapabilityAndIdleState() {
+        val ready = CameraUiState().withOfflinePreview()
+        assertTrue(ready.shutterAutofocus)
+        assertTrue(ready.showShutterAutofocus())
+        assertTrue(ready.canChangeShutterAutofocus())
+        assertFalse(CameraUiState().showShutterAutofocus())
+        assertFalse(ready.copy(captureMode = CaptureMode.VIDEO).showShutterAutofocus())
+        assertFalse(ready.copy(capabilities = ready.capabilities!!.copy(shutterAutofocusSupported = false)).showShutterAutofocus())
+        assertFalse(ready.copy(capabilities = ready.capabilities.copy(advancedSettings = emptyList()),
+            status = ready.status!!.copy(mode = "Bulb")).showShutterAutofocus())
+        assertFalse(ready.copy(status = ready.status!!.copy(recording = true)).canChangeShutterAutofocus())
+        for (operation in CameraOperation.entries) {
+            assertFalse(ready.copy(pendingOperations = setOf(operation)).canChangeShutterAutofocus())
+        }
+        for (hold in AutofocusHoldState.entries.filter { it != AutofocusHoldState.IDLE }) {
+            assertFalse(ready.copy(autofocusHoldState = hold).canChangeShutterAutofocus())
+        }
+        assertTrue(ready.copy(shutterAutofocus = false).withOfflinePreview().shutterAutofocus)
+    }
+
     @Test
     fun operationBusyStateOnlyBlocksMatchingControl() {
         val state = CameraUiState(pendingOperations = setOf(CameraOperation.SETTING))

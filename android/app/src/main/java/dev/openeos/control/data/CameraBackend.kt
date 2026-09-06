@@ -91,6 +91,10 @@ interface CameraControlBackend {
     suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus =
         unsupported(CameraFeature.CLICK_WHITE_BALANCE)
     suspend fun captureStill(): CameraStatus = unsupported(CameraFeature.STILL_CAPTURE)
+    suspend fun captureStill(autofocus: Boolean): CameraStatus {
+        check(autofocus) { "This backend does not support capture without autofocus." }
+        return captureStill()
+    }
     suspend fun startBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
     suspend fun stopBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
     suspend fun autofocus(): CameraStatus = unsupported(CameraFeature.AUTOFOCUS)
@@ -229,6 +233,8 @@ class CcapiCameraBackend(
     override suspend fun autofocus(): CameraStatus = client.autofocus()
 
     override suspend fun holdAutofocus(whileHeld: suspend () -> Unit) = client.holdAutofocus(whileHeld)
+
+    override suspend fun captureStill(autofocus: Boolean): CameraStatus = client.captureStill(autofocus)
 
     override suspend fun retryAutofocusStop() = client.retryAutofocusStop()
 

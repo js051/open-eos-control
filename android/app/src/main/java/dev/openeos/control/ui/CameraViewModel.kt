@@ -1072,6 +1072,10 @@ class CameraViewModel(
         repository.toggleRecording(_uiState.value.status?.recording)
     }
 
+    fun setShutterAutofocus(enabled: Boolean) {
+        if (_uiState.value.canChangeShutterAutofocus()) _uiState.update { it.copy(shutterAutofocus = enabled) }
+    }
+
     fun captureStill() = runCamera(CameraOperation.CAPTURE) {
         if (_uiState.value.previewMode) {
             showCaptureSuccess()
@@ -1079,7 +1083,7 @@ class CameraViewModel(
         }
         val previousReviewId = _uiState.value.captureReviewItem?.id
             ?: selectCaptureReviewItem(_uiState.value.mediaItems)?.id
-        val status = repository.captureStill()
+        val status = repository.captureStill(autofocus = _uiState.value.shutterAutofocus)
         _uiState.update { it.copy(status = status) }
         showCaptureSuccess()
         refreshCaptureReview(expectedPreviousId = previousReviewId)
@@ -2693,6 +2697,7 @@ class CameraViewModel(
         error: String?,
     ): CameraUiState = copy(
         autofocusHoldState = AutofocusHoldState.IDLE,
+        shutterAutofocus = true,
         pendingOperations = pendingOperations - CameraOperation.FOCUS,
         baseUrl = baseUrl,
         previewMode = false,

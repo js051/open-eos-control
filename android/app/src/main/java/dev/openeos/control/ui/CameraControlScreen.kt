@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -1308,6 +1309,20 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 SettingsSheetTitle(stringResource(R.string.more_settings), actions.closePicker)
+                if (state.showShutterAutofocus()) {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                            .testTag("shutter-autofocus-setting")
+                            .toggleable(value = state.shutterAutofocus, enabled = state.canChangeShutterAutofocus(),
+                                role = Role.Switch, onValueChange = actions.setShutterAutofocus),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Text(stringResource(R.string.shutter_autofocus), color = AppText, modifier = Modifier.weight(1f))
+                        Switch(checked = state.shutterAutofocus, onCheckedChange = null,
+                            enabled = state.canChangeShutterAutofocus())
+                    }
+                }
                 if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
                     LiveViewTapActionControls(state, actions)
                 }
