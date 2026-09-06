@@ -34,7 +34,8 @@ Canon Camera Control API Reference 1.3 的 4.8.8（AF）、4.11.10（AF Frame Po
 - 對焦、半按、焦距驅動及 AF 點命令成功只顯示中性的 ACCEPTED；沒有實際合焦證據時不亮綠色。失敗仍顯示錯誤，模擬器 `ok=false` 也不當成成功。
 - 單元測試涵蓋可關閉取景的連線、停止／恢復、停止失敗與重試、框線幾何及連續點按計時。HTC instrumentation 使用本機 MockWebServer，涵蓋前背景、明確關閉、啟動中取消、停止失敗重試與 AF start／stop 回饋；這些是自動測試，不是實體相機 AF 驗收。
 - 框線 pixel test 確認正常繪出青色、沒有錯誤的綠色成功訊號且不大面積遮擋。幾何涵蓋 360×800、800×360、1280×800 及極小 viewport。
-- 本地最終檢查：477 項 Android 單元測試、`lintDebug`、`assembleDebug` 與 `assembleDebugAndroidTest` 通過；HTC 上 5 項協定 fixture 測試及 1 項框線 pixel test 通過。測試 APK 使用 `.debug` application ID，不是已發布的可升級 Preview。
+- 本地最終檢查：477 項 Android 單元測試、`lintDebug`、`assembleDebug` 與 `assembleDebugAndroidTest` 通過；HTC 上 5 項協定 fixture 測試、1 項框線 pixel test 及 1 項 Bulb 釋放回歸測試通過。測試 APK 使用 `.debug` application ID，不是已發布的可升級 Preview。
+- 首輪 CI 在完整 Simulator E2E 抓到新增互斥檢查錯擋 Bulb stop；已用 HTC 離線測試重現並移除重複阻擋，保留 `isBusy(CAPTURE)` 的取景切換保護與 Bulb 釋放例外。沒有略過失敗測試或放寬逾時。
 
 ## 仍需完成
 

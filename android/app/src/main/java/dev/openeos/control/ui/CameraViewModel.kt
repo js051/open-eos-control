@@ -2175,7 +2175,6 @@ class CameraViewModel(
         block: suspend () -> Unit,
     ): Job? {
         if (_uiState.value.isBusy(operation)) return null
-        if (operation in LIVE_VIEW_INTERLOCK_OPERATIONS && _uiState.value.isBusy(CameraOperation.LIVE_VIEW)) return null
         _uiState.update {
             it.copy(
                 pendingOperations = it.pendingOperations + operation,

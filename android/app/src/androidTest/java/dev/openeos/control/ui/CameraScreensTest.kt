@@ -85,6 +85,27 @@ class CameraScreensTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
+    fun liveViewInterlockStillAllowsActiveBulbExposureToBeReleased() {
+        lateinit var viewModel: CameraViewModel
+        compose.runOnIdle {
+            viewModel = CameraViewModel()
+            viewModel.enterOfflinePreview()
+            viewModel.setCameraSetting("shootingmode", "Bulb")
+        }
+        compose.waitUntil(5_000) { viewModel.uiState.value.bulbMode && !viewModel.uiState.value.busy }
+        compose.runOnIdle { viewModel.toggleBulbExposure() }
+        compose.waitUntil(5_000) {
+            viewModel.uiState.value.bulbExposureActive && !viewModel.uiState.value.isBusy(CameraOperation.CAPTURE)
+        }
+        compose.runOnIdle {
+            viewModel.setLiveViewAutoRefresh(false)
+            viewModel.toggleBulbExposure()
+        }
+        compose.waitUntil(5_000) { !viewModel.uiState.value.bulbExposureActive }
+        compose.runOnIdle { viewModel.disconnect() }
+    }
+
+    @Test
     fun focusIndicatorUsesOpenCornersAndDoesNotSignalUnconfirmedSuccess() {
         compose.setContent {
             Box(Modifier.fillMaxSize()) {
