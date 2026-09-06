@@ -4,6 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-06
+
+- Added Android camera-reported selected AF frames and focus states through advertised Canon `flipdetail?kind=info`, with sparse corner rendering, crop-aware geometry, one-second expiry, bounded reads, and lifecycle-safe cancellation/invalidation.
+- Fixed Android remote Live View so disabling it or leaving the foreground stops the camera-side stream, resumes only when requested, and preserves safe capture/Bulb cleanup and visible stop failures.
+- Replaced unconfirmed green focus-command success with neutral acknowledgement. Actual camera-reported focus, command acceptance, and optical sharpness validation remain distinct.
+- Product behavior changes are Android-only. PC/iOS versions are aligned for distribution; camera-side manual-shooting defocus, AF geometry/modes, and sustained metadata load still require physical validation.
+
 ## [0.6.3] - 2026-08-24
 
 - Fixed Android recent-media ordering across separate photo and video containers by using bounded Canon media-info timestamps when available, while retaining deterministic camera order when dates are unavailable.
