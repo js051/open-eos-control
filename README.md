@@ -4,9 +4,9 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It targets Canon EOS R6 Mark III first and is structured around PC, iOS, and Android clients that share the same camera-control concepts.
 
-The current development preview is [v0.7.0](docs/releases/v0.7.0.md). It is intended for testing and contributor feedback, not production camera workflows.
+The current development preview is [v0.8.0](docs/releases/v0.8.0.md). It is intended for testing and contributor feedback, not production camera workflows.
 
-This preview adds Android camera-reported AF frames and corrects remote Live View stop/resume behavior. PC and iOS are version-aligned only; these Android changes are not implemented on those clients. Camera-side manual-focus reliability remains under investigation.
+This preview adds press-and-hold AF-ON to Android direct CCAPI, with release/cancellation cleanup and stop-only recovery after a failed stop. PC and iOS are version-aligned only; held AF is not added to those clients or Android USB/Bridge. Physical AF behavior and the reported camera-body half-press defocus remain unconfirmed; no camera AF-mode settings are changed.
 
 The project is not CCAPI-only. CCAPI over Wi-Fi is the most validated backend. Android also has a standards-based USB/PTP backend and capability-gated Canon EOS controls. Android and iOS can both use the executable Desktop Bridge to control a camera connected to a PC by USB through the same camera contract. The Canon USB paths are grounded in pinned libgphoto2 behavior and covered by deterministic tests, but still require a recorded physical R6 Mark III validation. The PC bridge provides a tested API and responsive control UI through either open-source `gphoto2` USB or native HTTP CCAPI. Native Swift CCAPI and Desktop Bridge clients plus an iOS 17 SwiftUI app are implemented with English/Traditional Chinese UI and iPhone Simulator coverage; physical iPhone and camera validation remains.
 

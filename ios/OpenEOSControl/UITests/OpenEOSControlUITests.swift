@@ -238,7 +238,20 @@ final class OpenEOSControlUITests: XCTestCase {
         let tapAction = app.segmentedControls["live-view-tap-action-picker"]
         XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
         let clickWhiteBalance = tapAction.buttons["Click white balance"]
+        guard waitForInteraction(clickWhiteBalance, timeout: 5) else {
+            XCTFail("The white-balance segment did not become interactive.\n\(app.debugDescription)")
+            return
+        }
         clickWhiteBalance.tap()
+        let selected = XCTNSPredicateExpectation(
+            predicate: NSPredicate { candidate, _ in (candidate as? XCUIElement)?.isSelected == true },
+            object: clickWhiteBalance
+        )
+        guard XCTWaiter().wait(for: [selected], timeout: 5) == .completed else {
+            addScreenshot(name: "click-white-balance-selection-failed")
+            XCTFail("The white-balance segment did not select.\n\(app.debugDescription)")
+            return
+        }
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
         liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
@@ -552,15 +565,21 @@ final class OpenEOSControlUITests: XCTestCase {
 
     private func waitForSimulatorState(
         timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line,
         predicate: ([String: Any]) -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
+        var lastState: [String: Any]?
         repeat {
-            if let state = try? await simulatorRequest(path: "/ccapi/test/state"), predicate(state) {
-                return
+            if let state = try? await simulatorRequest(path: "/ccapi/test/state") {
+                lastState = state
+                if predicate(state) { return }
             }
             try await Task.sleep(nanoseconds: 250_000_000)
         } while Date() < deadline
+        // This endpoint belongs only to the synthetic loopback test fixture.
+        XCTFail("Simulator state did not match: \(String(describing: lastState))", file: file, line: line)
         throw SimulatorTestError.timeout
     }
 
