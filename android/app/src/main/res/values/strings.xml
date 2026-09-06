@@ -1,4 +1,12 @@
 <resources>
+    <string name="af_on_label">AF-ON</string>
+    <string name="hold_af_on">Hold autofocus (up to 30 s); release to stop</string>
+    <string name="retry_af_stop">Retry stopping autofocus</string>
+    <string name="af_hold_idle">Ready</string>
+    <string name="af_hold_starting">Starting autofocus</string>
+    <string name="af_hold_active">AF command active; focus is not confirmed</string>
+    <string name="af_hold_releasing">Stopping autofocus</string>
+    <string name="af_hold_release_failed">Autofocus stop was not confirmed. Retry stop or disconnect the camera.</string>
     <string name="camera_focus_status">Camera AF status</string>
     <string name="camera_focus_confirmed">Camera reports focus acquired</string>
     <string name="camera_focus_failed">Camera reports focus not acquired</string>

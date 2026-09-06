@@ -12,6 +12,7 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraCapabilities
+import dev.openeos.control.data.AutofocusReleaseException
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraMediaItem
@@ -32,6 +33,9 @@ import dev.openeos.control.data.NativeLiveViewAudioStatus
 import dev.openeos.control.data.NativeLiveViewSession
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -212,6 +216,8 @@ class CameraViewModel(
     private var appInForeground = true
     private var liveViewGeneration = 0L
     private var focusFeedbackJob: Job? = null
+    private var heldAutofocusJob: Job? = null
+    private var heldAutofocusRelease: CompletableDeferred<Unit>? = null
     private var focusInfoJob: Job? = null
     private var focusInfoGeneration = 0L
     private var eventPollingJob: Job? = null
@@ -257,6 +263,7 @@ class CameraViewModel(
     }
 
     fun setUiMode(mode: UiMode) {
+        if (mode != UiMode.CONTROL) stopHeldAutofocus()
         if (mode == UiMode.MEDIA) invalidateCameraFocusInfo()
         if (mode != UiMode.MEDIA) _uiState.value.mediaStreamSource?.close()
         _uiState.update {
@@ -306,7 +313,10 @@ class CameraViewModel(
         }
     }
 
-    fun setHudVisible(visible: Boolean) = _uiState.update { it.copy(hudVisible = visible) }
+    fun setHudVisible(visible: Boolean) {
+        if (!visible) stopHeldAutofocus()
+        _uiState.update { it.copy(hudVisible = visible) }
+    }
 
     fun setGridVisible(visible: Boolean) = _uiState.update { it.copy(showGrid = visible) }
 
@@ -382,7 +392,10 @@ class CameraViewModel(
         _uiState.update { it.copy(monitorSettings = it.monitorSettings.update()) }
     }
 
-    fun openSettingPicker(picker: SettingPicker) = _uiState.update { it.copy(activeSettingPicker = picker) }
+    fun openSettingPicker(picker: SettingPicker) {
+        stopHeldAutofocus()
+        _uiState.update { it.copy(activeSettingPicker = picker) }
+    }
 
     fun closeSettingPicker() = _uiState.update { it.copy(activeSettingPicker = null) }
 
@@ -471,6 +484,7 @@ class CameraViewModel(
     }
 
     fun enterOfflinePreview() {
+        stopHeldAutofocus()
         stopCameraFocusInfoLoop()
         stopLiveViewLoop()
         stopEventPollingLoop()
@@ -652,6 +666,8 @@ class CameraViewModel(
     }
 
     fun disconnect() {
+        stopHeldAutofocus()
+        val focusJob = heldAutofocusJob
         stopCameraFocusInfoLoop()
         liveViewGeneration += 1
         stopLiveViewLoop()
@@ -674,6 +690,7 @@ class CameraViewModel(
         viewModelScope.launch {
             try {
                 uploadJob?.join()
+                focusJob?.join()
                 repository.disconnect()
             } catch (e: Exception) {
                 // ignore
@@ -709,12 +726,14 @@ class CameraViewModel(
     }
 
     fun setLiveViewAutoRefresh(enabled: Boolean) {
+        if (!enabled) stopHeldAutofocus()
         _uiState.update { it.copy(liveViewAutoRefresh = enabled) }
         if (_uiState.value.previewMode) return
         queueLiveViewReconciliation()
     }
 
     fun setAppForeground(foreground: Boolean) {
+        if (!foreground) stopHeldAutofocus()
         if (appInForeground == foreground) return
         appInForeground = foreground
         if (!foreground) setRtpAudioEnabled(false)
@@ -1107,6 +1126,76 @@ class CameraViewModel(
         }
     }
 
+    fun startHeldAutofocus() {
+        val state = _uiState.value
+        if (!appInForeground || !state.canStartHeldAutofocus() || heldAutofocusJob?.isActive == true) return
+        val release = CompletableDeferred<Unit>()
+        heldAutofocusRelease = release
+        invalidateCameraFocusInfo()
+        focusFeedbackJob?.cancel()
+        launchHeldAutofocus(AutofocusHoldState.STARTING) {
+            if (!release.isCompleted) repository.holdAutofocus {
+                if (_uiState.value.info === state.info) _uiState.update {
+                    it.copy(autofocusHoldState = if (release.isCompleted) AutofocusHoldState.RELEASING else AutofocusHoldState.HOLDING)
+                }
+                try {
+                    // A lost gesture must not create an unbounded remote AF command.
+                    withTimeoutOrNull(30_000) { release.await() }
+                } finally {
+                    if (_uiState.value.info === state.info) {
+                        _uiState.update { it.copy(autofocusHoldState = AutofocusHoldState.RELEASING) }
+                    }
+                }
+            }
+        }
+    }
+
+    fun stopHeldAutofocus() {
+        heldAutofocusRelease?.complete(Unit)
+        _uiState.update {
+            if (it.autofocusHoldState in setOf(AutofocusHoldState.STARTING, AutofocusHoldState.HOLDING)) {
+                it.copy(autofocusHoldState = AutofocusHoldState.RELEASING)
+            } else it
+        }
+    }
+
+    fun retryHeldAutofocusStop() {
+        if (!_uiState.value.connected || _uiState.value.autofocusHoldState != AutofocusHoldState.RELEASE_FAILED ||
+            heldAutofocusJob?.isActive == true) return
+        launchHeldAutofocus(AutofocusHoldState.RELEASING) { repository.retryAutofocusStop() }
+    }
+
+    private fun launchHeldAutofocus(phase: AutofocusHoldState, block: suspend () -> Unit) {
+        val connection = _uiState.value.info
+        _uiState.update {
+            it.copy(autofocusHoldState = phase, pendingOperations = it.pendingOperations + CameraOperation.FOCUS,
+                error = null, errorOperation = null, focusFeedback = null)
+        }
+        heldAutofocusJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            var releaseFailed = false
+            try {
+                block()
+                if (_uiState.value.info === connection) refreshCapabilityEvidence()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                releaseFailed = exception is AutofocusReleaseException
+                if (_uiState.value.info === connection) {
+                    _uiState.update { it.copy(error = formatException(exception), errorOperation = CameraOperation.FOCUS) }
+                }
+            } finally {
+                heldAutofocusRelease = null
+                if (_uiState.value.info === connection) {
+                    _uiState.update {
+                        it.copy(autofocusHoldState = if (releaseFailed) AutofocusHoldState.RELEASE_FAILED else AutofocusHoldState.IDLE,
+                            pendingOperations = if (releaseFailed) it.pendingOperations else it.pendingOperations - CameraOperation.FOCUS)
+                    }
+                    if (!releaseFailed) queueLiveViewReconciliation()
+                }
+            }
+        }.also(Job::start)
+    }
+
     fun autofocus() {
         if (_uiState.value.isBusy(CameraOperation.FOCUS) || _uiState.value.isBusy(CameraOperation.LIVE_VIEW)) return
         invalidateCameraFocusInfo()
@@ -1184,6 +1273,7 @@ class CameraViewModel(
 
     fun setLiveViewMagnification(magnification: LiveViewMagnification) {
         val state = _uiState.value
+        if (state.autofocusHoldState != AutofocusHoldState.IDLE) return
         if (
             state.captureMode != CaptureMode.PHOTO ||
             !state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION) ||
@@ -2576,6 +2666,8 @@ class CameraViewModel(
     }
 
     override fun onCleared() {
+        stopHeldAutofocus()
+        val focusJob = heldAutofocusJob
         stopCameraFocusInfoLoop()
         stopLiveViewLoop()
         stopEventPollingLoop()
@@ -2590,6 +2682,7 @@ class CameraViewModel(
         cancelMediaThumbnailLoads()
         viewModelScope.launch(NonCancellable + Dispatchers.IO) {
             uploadJob?.join()
+            focusJob?.join()
             repository.disconnect()
         }
         super.onCleared()
@@ -2599,6 +2692,8 @@ class CameraViewModel(
         baseUrl: String,
         error: String?,
     ): CameraUiState = copy(
+        autofocusHoldState = AutofocusHoldState.IDLE,
+        pendingOperations = pendingOperations - CameraOperation.FOCUS,
         baseUrl = baseUrl,
         previewMode = false,
         transport = null,

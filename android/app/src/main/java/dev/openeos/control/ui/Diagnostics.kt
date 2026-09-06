@@ -223,6 +223,8 @@ fun buildDiagnosticReport(
         appendLine("requestedFps=${state.liveViewFrameRateFps}")
         appendLine("focusInfoSupported=${state.capabilities?.liveView?.focusInfoSupported == true}")
         appendLine("focusInfoReadError=${state.cameraFocusInfoError}")
+        appendLine("heldAutofocusSupported=${state.capabilities?.heldAutofocusSupported == true}")
+        appendLine("heldAutofocusState=${state.autofocusHoldState.name}")
         appendLine("focusFrameCount=${state.cameraFocusInfo?.frames?.size ?: 0}")
         appendLine("focusStates=${state.cameraFocusInfo?.frames?.map { it.status.name }?.distinct()?.joinToString(",")?.ifBlank { "none" } ?: "unknown"}")
         appendLine("focusInfoAtMillis=${state.cameraFocusInfoAtMillis ?: "none"}")

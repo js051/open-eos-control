@@ -94,6 +94,8 @@ interface CameraControlBackend {
     suspend fun startBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
     suspend fun stopBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
     suspend fun autofocus(): CameraStatus = unsupported(CameraFeature.AUTOFOCUS)
+    suspend fun holdAutofocus(whileHeld: suspend () -> Unit): Unit = unsupported(CameraFeature.AUTOFOCUS)
+    suspend fun retryAutofocusStop(): Unit = unsupported(CameraFeature.AUTOFOCUS)
     suspend fun halfPressShutter(): CameraStatus = unsupported(CameraFeature.SHUTTER_HALF_PRESS)
     suspend fun driveFocus(
         direction: FocusDriveDirection,
@@ -225,6 +227,10 @@ class CcapiCameraBackend(
     override suspend fun stopBulbExposure(): CameraStatus = client.stopBulbExposure()
 
     override suspend fun autofocus(): CameraStatus = client.autofocus()
+
+    override suspend fun holdAutofocus(whileHeld: suspend () -> Unit) = client.holdAutofocus(whileHeld)
+
+    override suspend fun retryAutofocusStop() = client.retryAutofocusStop()
 
     override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
 

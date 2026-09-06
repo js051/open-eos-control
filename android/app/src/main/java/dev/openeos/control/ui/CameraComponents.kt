@@ -1272,11 +1272,18 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             )
         }
         val targetMagnification = state.nextLiveViewMagnification()
+        if (state.connected && state.capabilities?.heldAutofocusSupported == true &&
+            ((state.uiMode == UiMode.CONTROL && state.hudVisible && state.activeSettingPicker == null) ||
+                state.autofocusHoldState == AutofocusHoldState.RELEASE_FAILED)) {
+            val zoomWidth = if (state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION) && targetMagnification != null) 56.dp else 0.dp
+            CameraAutofocusButton(state, actions, Modifier.align(Alignment.BottomEnd).zIndex(1f)
+                .padding(end = 12.dp + zoomWidth, bottom = liveViewOverlayBottomPadding(state)))
+        }
         if (state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION) && targetMagnification != null) {
             val bottomPadding = liveViewOverlayBottomPadding(state)
             val target = targetMagnification
             val description = stringResource(R.string.live_view_magnify_to, target.value)
-            val enabled = !state.isBusy(CameraOperation.LIVE_VIEW)
+            val enabled = !state.isBusy(CameraOperation.LIVE_VIEW) && state.autofocusHoldState == AutofocusHoldState.IDLE
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -1915,6 +1922,7 @@ fun ErrorBanner(error: String?, onDismiss: () -> Unit) {
 }
 
 internal fun userFacingCameraErrorResource(error: String): Int? = when {
+    error.contains("AutofocusReleaseException") -> R.string.af_hold_release_failed
     error.contains("SocketTimeoutException", ignoreCase = true) ||
         (error.contains("socket", ignoreCase = true) && error.contains("timeout", ignoreCase = true)) ->
         R.string.camera_error_timeout

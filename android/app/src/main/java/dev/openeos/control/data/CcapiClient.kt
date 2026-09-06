@@ -167,6 +167,7 @@ class CcapiClient(
     private var apiVersionPrefixes = listOf("/ccapi/ver100")
     private var isRecording: Boolean? = null
     private var bulbExposureActive = false
+    private val heldAutofocus = HeldAutofocusSession()
     private var latestTemperatureStatus: CameraTemperatureStatus? = null
     private val settingPathsByKey = mutableMapOf<String, String>()
     private val settingValuesByKey = mutableMapOf<String, Set<String>>()
@@ -208,6 +209,7 @@ class CcapiClient(
     fun currentLiveViewSource(): LiveViewSource? = activeLiveViewSource
 
     suspend fun close() {
+        runCatching { heldAutofocus.retryStop() }
         runCatching { stopEventPolling() }
         if (bulbExposureActive) {
             runCatching { stopBulbExposure() }
@@ -794,6 +796,7 @@ class CcapiClient(
                 matrix = CapabilityMatrix.ccapiNetwork(supportedFeatures),
                 liveView = liveViewCapabilities,
                 evidence = capabilityEvidence(),
+                heldAutofocusSupported = autofocusOperation() != null,
             )
         } else {
             getJson("/ccapi/capabilities").toCameraCapabilities().copy(
@@ -1325,6 +1328,22 @@ class CcapiClient(
         observedFeatures.add(CameraFeature.BULB_EXPOSURE)
         return status()
     }
+
+    suspend fun holdAutofocus(whileHeld: suspend () -> Unit) {
+        check(isRealCamera) { "Held autofocus requires advertised Canon AF start/stop control." }
+        val operation = autofocusOperation()
+            ?: error("Camera did not advertise AF start/stop control.")
+        heldAutofocus.hold(
+            start = {
+                commandOk("/shooting/control/af", JSONObject().put("action", "start"), operation)
+                observedFeatures.add(CameraFeature.AUTOFOCUS)
+            },
+            stop = { commandOk("/shooting/control/af", JSONObject().put("action", "stop"), operation) },
+            whileHeld = whileHeld,
+        )
+    }
+
+    suspend fun retryAutofocusStop() = heldAutofocus.retryStop()
 
     suspend fun autofocus(): CameraStatus {
         if (isRealCamera) {

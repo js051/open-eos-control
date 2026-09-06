@@ -154,6 +154,7 @@ class CameraRepository(
     private suspend fun disconnectLocked() {
         if (!active) return
         try {
+            runCatching { backend.retryAutofocusStop() }
             try {
                 backend.stopLiveView()
             } catch (_: Exception) {
@@ -218,6 +219,16 @@ class CameraRepository(
     suspend fun stopBulbExposure(): CameraStatus = backend.stopBulbExposure()
 
     suspend fun autofocus(): CameraStatus = backend.autofocus()
+
+    suspend fun holdAutofocus(whileHeld: suspend () -> Unit) = connectionMutex.withLock {
+        check(active) { "Camera is disconnected." }
+        backend.holdAutofocus(whileHeld)
+    }
+
+    suspend fun retryAutofocusStop() = connectionMutex.withLock {
+        check(active) { "Camera is disconnected." }
+        backend.retryAutofocusStop()
+    }
 
     suspend fun halfPressShutter(): CameraStatus = backend.halfPressShutter()
 

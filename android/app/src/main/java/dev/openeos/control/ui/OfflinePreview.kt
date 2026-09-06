@@ -15,6 +15,8 @@ import dev.openeos.control.data.LiveViewCapabilities
 import dev.openeos.control.data.LiveViewMagnification
 
 internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
+    autofocusHoldState = AutofocusHoldState.IDLE,
+    pendingOperations = pendingOperations - CameraOperation.FOCUS,
     previewMode = true,
     transport = null,
     info = CameraInfo(

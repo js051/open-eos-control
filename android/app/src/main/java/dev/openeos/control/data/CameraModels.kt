@@ -469,6 +469,7 @@ data class CameraCapabilities(
     val liveView: LiveViewCapabilities = LiveViewCapabilities(),
     val profile: CameraProfile = CameraProfile.genericEos(),
     val evidence: CameraCapabilityEvidence = CameraCapabilityEvidence(),
+    val heldAutofocusSupported: Boolean = false,
 )
 
 data class CameraSettingControl(
