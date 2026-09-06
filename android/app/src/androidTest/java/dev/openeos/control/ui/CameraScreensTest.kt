@@ -4,9 +4,13 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.compose.material3.MaterialTheme
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
@@ -37,6 +41,8 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.CompositionLocalProvider
@@ -83,6 +89,163 @@ import org.junit.Assert.assertTrue
 
 class CameraScreensTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun heldAfGestureSurvivesRecompositionAndReleasesOnUpOrCancel() {
+        val base = connectedState()
+        val state = mutableStateOf(base.copy(capabilities = base.capabilities!!.copy(heldAutofocusSupported = true)))
+        var starts = 0
+        var stops = 0
+        var timed = 0
+        val actions = noOpActions().copy(
+            startHeldAutofocus = { starts++; state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.HOLDING) },
+            stopHeldAutofocus = { stops++; state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.IDLE) },
+            autofocus = { timed++ },
+        )
+        compose.setContent { MaterialTheme { CameraAutofocusButton(state.value, actions) } }
+        compose.waitUntil(5_000) { compose.activity.hasWindowFocus() }
+        compose.runOnIdle {
+            assertEquals(0, starts)
+            assertEquals(AutofocusHoldState.IDLE, state.value.autofocusHoldState)
+            // Initial unfocused composition may request an idle cleanup before any gesture.
+            stops = 0
+        }
+        val button = compose.onNodeWithTag("held-autofocus")
+        button.assertHeightIsAtLeast(48.dp).performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.runOnIdle { assertEquals(1, starts); assertEquals(0, stops) }
+        button.performTouchInput { up() }
+        compose.runOnIdle { assertEquals(1, stops); assertEquals(0, timed) }
+        button.performTouchInput { down(center) }
+        button.performTouchInput { cancel() }
+        compose.runOnIdle { assertEquals(2, starts); assertEquals(2, stops) }
+        button.performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.runOnIdle { assertEquals(1, timed); assertEquals(2, starts) }
+    }
+
+    @Test fun heldAfWindowFocusLossReleasesWithoutRestartingOnReturn() {
+        val base = connectedState()
+        val state = mutableStateOf(base.copy(capabilities = base.capabilities!!.copy(heldAutofocusSupported = true)))
+        val focused = mutableStateOf(false)
+        var starts = 0
+        var stops = 0
+        val actions = noOpActions().copy(
+            startHeldAutofocus = { starts++; state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.HOLDING) },
+            stopHeldAutofocus = { stops++; state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.IDLE) },
+        )
+        compose.setContent {
+            val platformWindow = LocalWindowInfo.current
+            val window = remember(platformWindow) {
+                object : WindowInfo by platformWindow {
+                    override val isWindowFocused: Boolean get() = focused.value
+                }
+            }
+            CompositionLocalProvider(LocalWindowInfo provides window) {
+                MaterialTheme { CameraAutofocusButton(state.value, actions) }
+            }
+        }
+        compose.runOnIdle { assertEquals(1, stops); assertEquals(0, starts); focused.value = true }
+        val button = compose.onNodeWithTag("held-autofocus")
+        button.performTouchInput { down(center) }
+        compose.runOnIdle { assertEquals(1, starts); assertEquals(1, stops); focused.value = false }
+        compose.runOnIdle {
+            assertEquals(2, stops)
+            assertEquals(AutofocusHoldState.IDLE, state.value.autofocusHoldState)
+            focused.value = true
+        }
+        compose.runOnIdle { assertEquals(1, starts); assertEquals(2, stops) }
+        button.performTouchInput { up() }
+        compose.runOnIdle { assertEquals(1, starts) }
+    }
+
+    @Test fun heldAfDisposalReleasesAndFailedStopOnlyRetries() {
+        val base = connectedState()
+        val state = mutableStateOf(base.copy(capabilities = base.capabilities!!.copy(heldAutofocusSupported = true)))
+        val shown = mutableStateOf(true)
+        var stops = 0
+        var retries = 0
+        var starts = 0
+        val actions = noOpActions().copy(startHeldAutofocus = { starts++ }, stopHeldAutofocus = { stops++ },
+            retryHeldAutofocusStop = { retries++ })
+        compose.setContent { if (shown.value) MaterialTheme { CameraAutofocusButton(state.value, actions) } }
+        compose.onNodeWithTag("held-autofocus").performTouchInput { down(center) }
+        compose.runOnIdle { shown.value = false }
+        compose.runOnIdle { assertTrue(stops >= 1); assertEquals(1, starts) }
+        compose.runOnIdle { state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.RELEASE_FAILED); shown.value = true }
+        compose.onNodeWithTag("held-autofocus").performTouchInput { up() }
+        compose.onNodeWithContentDescription(resourceText(R.string.retry_af_stop)).performClick()
+        compose.runOnIdle { assertEquals(1, retries); assertEquals(1, starts) }
+    }
+
+    @Test fun heldAfRequiresExplicitCapabilityAndDoesNotOverlapZoomAcrossViewports() {
+        compose.runOnIdle { compose.activity.enableEdgeToEdge() }
+        val base = connectedState()
+        val state = mutableStateOf(base)
+        val size = mutableStateOf(DpSize(360.dp, 800.dp))
+        val rotation = mutableFloatStateOf(0f)
+        val systemBarsVisible = mutableStateOf(false)
+        val fixtureInsets = mutableStateOf(WindowInsetsCompat.Builder().build())
+        compose.setContent {
+            // Keep the Android View boundary outside density/configuration overrides.
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(fixtureInsets.value)) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
+                    // ForcedSize changes density; host insets no longer describe this viewport.
+                    val density = LocalDensity.current
+                    val cutout = with(density) { 32.dp.roundToPx() }
+                    val insets = WindowInsetsCompat.Builder()
+                        .setInsets(WindowInsetsCompat.Type.displayCutout(),
+                            if (size.value.width > size.value.height) Insets.of(cutout, 0, 0, 0)
+                            else Insets.of(0, cutout, 0, 0))
+                        .setInsets(WindowInsetsCompat.Type.systemBars(),
+                            if (systemBarsVisible.value) with(density) { Insets.of(0, 32.dp.roundToPx(), 0, 48.dp.roundToPx()) }
+                            else Insets.NONE)
+                        .build()
+                    SideEffect { fixtureInsets.value = insets }
+                    DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                        DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(LocaleList("zh-TW"))) {
+                            CompositionLocalProvider(LocalCameraControlTargetRotation provides rotation.floatValue,
+                                LocalCameraControlRotation provides rotation.floatValue) {
+                                MaterialTheme { CameraControlScreen(state.value, noOpActions()) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        compose.onNodeWithTag("held-autofocus").assertDoesNotExist()
+        compose.runOnIdle {
+            val bitmap = Bitmap.createBitmap(16, 12, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.DKGRAY) }
+            state.value = base.copy(liveViewBitmap = bitmap, capabilities = base.capabilities!!.copy(heldAutofocusSupported = true,
+                matrix = CapabilityMatrix(supported = base.capabilities.matrix.supported + CameraFeature.LIVE_VIEW_MAGNIFICATION + CameraFeature.STILL_CAPTURE),
+                liveView = base.capabilities.liveView.copy(magnifications = listOf(LiveViewMagnification.X1, LiveViewMagnification.X5))))
+        }
+        for ((name, viewport) in listOf("portrait" to DpSize(360.dp, 800.dp), "landscape" to DpSize(800.dp, 360.dp),
+            "tablet" to DpSize(800.dp, 1280.dp), "portrait-bars" to DpSize(360.dp, 800.dp))) {
+            for (angle in listOf(0f, 90f, 180f, 270f)) {
+                compose.runOnIdle { size.value = viewport; rotation.floatValue = angle; systemBarsVisible.value = name == "portrait-bars" }
+                val root = compose.onNodeWithTag("camera-control-root").fetchSemanticsNode()
+                val focus = compose.onNodeWithTag("held-autofocus").fetchSemanticsNode()
+                println("held-af viewport=$name angle=$angle root=${root.boundsInRoot} density=${root.layoutInfo.density} af=${focus.boundsInRoot}")
+                with(root.layoutInfo.density) {
+                    assertEquals("Viewport width for $name", viewport.width.toPx(), root.boundsInRoot.width, 1f)
+                    assertEquals("Viewport height for $name", viewport.height.toPx(), root.boundsInRoot.height, 1f)
+                }
+                val af = compose.onNodeWithTag("held-autofocus").assertIsDisplayed().assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+                val zoom = compose.onNodeWithTag("live-view-magnification").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                assertFalse("AF and zoom touch targets must not overlap", af.overlaps(zoom))
+                val header = compose.onNodeWithTag("camera-overlay-header").fetchSemanticsNode().boundsInRoot
+                val exposure = compose.onNodeWithTag("exposure-control-ISO").fetchSemanticsNode().boundsInRoot
+                val safe = fixtureInsets.value.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                assertTrue("Header respects left inset", header.left >= root.boundsInRoot.left + safe.left)
+                assertTrue("Header respects top inset", header.top >= root.boundsInRoot.top + safe.top)
+                assertTrue("AF stays below header", af.top >= header.bottom)
+                assertTrue("AF stays above exposure strip", af.bottom <= exposure.top)
+            }
+            val screenshot = compose.onNodeWithTag("camera-control-root").captureToImage().asAndroidBitmap()
+            java.io.File(compose.activity.cacheDir, "held-af-$name.png").outputStream().use {
+                assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
+    }
 
     @Test
     fun liveViewInterlockStillAllowsActiveBulbExposureToBeReleased() {

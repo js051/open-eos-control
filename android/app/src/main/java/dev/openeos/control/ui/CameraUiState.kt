@@ -73,7 +73,10 @@ enum class CaptureFeedback { SUCCESS }
 
 enum class FocusFeedback { FOCUSING, ACCEPTED, SUCCESS, FAILURE }
 
+enum class AutofocusHoldState { IDLE, STARTING, HOLDING, RELEASING, RELEASE_FAILED }
+
 data class CameraUiState(
+    val autofocusHoldState: AutofocusHoldState = AutofocusHoldState.IDLE,
     val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
     val ccapiSimulatorMode: Boolean? = null,
@@ -175,8 +178,20 @@ data class CameraUiState(
 
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations || (bulbExposureActive && operation != CameraOperation.CAPTURE) ||
+            (autofocusHoldState != AutofocusHoldState.IDLE && operation in HELD_AF_INTERLOCK_OPERATIONS) ||
             (CameraOperation.LIVE_VIEW in pendingOperations && operation in LIVE_VIEW_INTERLOCK_OPERATIONS)
 }
+
+internal val HELD_AF_INTERLOCK_OPERATIONS = setOf(
+    CameraOperation.CONNECT,
+    CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING, CameraOperation.SETTING,
+    CameraOperation.MAINTENANCE, CameraOperation.POWER,
+)
+
+internal fun CameraUiState.canStartHeldAutofocus(): Boolean = connected && !previewMode &&
+    capabilities?.heldAutofocusSupported == true && uiMode == UiMode.CONTROL && hudVisible &&
+    activeSettingPicker == null && autofocusHoldState == AutofocusHoldState.IDLE &&
+    !isBusy(CameraOperation.LIVE_VIEW) && HELD_AF_INTERLOCK_OPERATIONS.none { isBusy(it) }
 
 internal val LIVE_VIEW_INTERLOCK_OPERATIONS = setOf(
     CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING, CameraOperation.MAINTENANCE,
@@ -199,6 +214,7 @@ internal fun CameraUiState.nextLiveViewMagnification(): LiveViewMagnification? {
 }
 
 internal fun captureModeSwitchEnabled(state: CameraUiState): Boolean =
+    state.autofocusHoldState == AutofocusHoldState.IDLE &&
     state.status?.recording != true &&
         !state.bulbExposureActive &&
         CameraOperation.SETTING !in state.pendingOperations &&

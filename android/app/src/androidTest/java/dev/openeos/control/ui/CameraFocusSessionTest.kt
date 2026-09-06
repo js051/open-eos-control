@@ -2,6 +2,7 @@ package dev.openeos.control.ui
 
 import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.ViewModelStore
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraFocusStatus
@@ -35,6 +36,11 @@ class CameraFocusSessionTest {
     private lateinit var viewModel: CameraViewModel
     private val viewWrites = CopyOnWriteArrayList<String>()
     private val afWrites = CopyOnWriteArrayList<String>()
+    private val cameraWrites = CopyOnWriteArrayList<String>()
+    private val failAfStop = AtomicBoolean(false)
+    private val blockAfStart = AtomicBoolean(false)
+    private val afStartEntered = CountDownLatch(1)
+    private val releaseAfStart = CountDownLatch(1)
     private val failNextStop = AtomicBoolean(false)
     private val blockNextStart = AtomicBoolean(false)
     private val startEntered = CountDownLatch(1)
@@ -56,6 +62,7 @@ class CameraFocusSessionTest {
                 if (request.method == "POST" && path.endsWith("/shooting/liveview")) {
                     val size = JSONObject(request.body.readUtf8()).getString("liveviewsize")
                     viewWrites += size
+                    cameraWrites += "view:$size"
                     if (size == "off" && failNextStop.compareAndSet(true, false)) {
                         return MockResponse().setResponseCode(503).setBody("camera busy")
                     }
@@ -66,7 +73,14 @@ class CameraFocusSessionTest {
                     return json("{}")
                 }
                 if (request.method == "POST" && path.endsWith("/shooting/control/af")) {
-                    afWrites += JSONObject(request.body.readUtf8()).getString("action")
+                    val action = JSONObject(request.body.readUtf8()).getString("action")
+                    afWrites += action
+                    cameraWrites += "af:$action"
+                    if (action == "start" && blockAfStart.compareAndSet(true, false)) {
+                        afStartEntered.countDown()
+                        check(releaseAfStart.await(8, TimeUnit.SECONDS))
+                    }
+                    if (action == "stop" && failAfStop.get()) return MockResponse().setResponseCode(503)
                     return json("{}")
                 }
                 if (request.method != "GET") return MockResponse().setResponseCode(405)
@@ -104,10 +118,122 @@ class CameraFocusSessionTest {
 
     @After
     fun tearDown() {
+        releaseAfStart.countDown()
+        failAfStop.set(false)
         releaseStart.countDown()
         if (::viewModel.isInitialized) compose.runOnIdle { viewModel.disconnect() }
         compose.waitUntil(8_000) { !repository.isLiveViewRunning() }
         server.shutdown()
+    }
+
+    @Test
+    fun heldAfStopsOnReleaseAndDoesNotUseTheOldTimedPulse() {
+        compose.runOnIdle { viewModel.startHeldAutofocus() }
+        compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.HOLDING }
+        Thread.sleep(700)
+        assertEquals(listOf("start"), afWrites.toList())
+        assertNull(viewModel.uiState.value.focusFeedback)
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CAPTURE))
+        compose.runOnIdle { viewModel.stopHeldAutofocus() }
+        awaitAfIdle()
+        assertEquals(listOf("start", "stop"), afWrites.toList())
+        assertTrue(viewModel.uiState.value.connected)
+    }
+
+    @Test
+    fun heldAfReleaseDuringStartDoesNotLeaveCameraActive() {
+        blockAfStart.set(true)
+        compose.runOnIdle { viewModel.startHeldAutofocus() }
+        assertTrue(afStartEntered.await(8, TimeUnit.SECONDS))
+        compose.runOnIdle { viewModel.stopHeldAutofocus() }
+        assertEquals(AutofocusHoldState.RELEASING, viewModel.uiState.value.autofocusHoldState)
+        releaseAfStart.countDown()
+        awaitAfIdle()
+        assertEquals(listOf("start", "stop"), afWrites.toList())
+    }
+
+    @Test
+    fun backgroundReleasesAfBeforeStoppingViewAndDoesNotRestartAfOnResume() {
+        compose.runOnIdle { viewModel.startHeldAutofocus() }
+        compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.HOLDING }
+        compose.runOnIdle { viewModel.setAppForeground(false) }
+        awaitStopped()
+        assertTrue(cameraWrites.indexOf("af:stop") < cameraWrites.indexOf("view:off"))
+        compose.runOnIdle { viewModel.setAppForeground(true) }
+        awaitFrame()
+        assertEquals(listOf("start", "stop"), afWrites.toList())
+    }
+
+    @Test
+    fun failedAfStopBlocksNewCommandsUntilStopOnlyRetrySucceeds() {
+        failAfStop.set(true)
+        compose.runOnIdle { viewModel.startHeldAutofocus() }
+        compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.HOLDING }
+        compose.runOnIdle { viewModel.stopHeldAutofocus() }
+        compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.RELEASE_FAILED }
+        assertEquals(CameraOperation.FOCUS, viewModel.uiState.value.errorOperation)
+        compose.runOnIdle {
+            viewModel.startHeldAutofocus()
+            viewModel.autofocus()
+            viewModel.captureStill()
+            viewModel.setLiveViewAutoRefresh(false)
+        }
+        assertTrue(repository.isLiveViewRunning())
+        assertEquals(listOf("start", "stop"), afWrites.toList())
+        failAfStop.set(false)
+        compose.runOnIdle { viewModel.retryHeldAutofocusStop() }
+        awaitStopped()
+        assertEquals(listOf("start", "stop", "stop"), afWrites.toList())
+        assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun leavingControlOrOpeningSettingsReleasesTheHeldCommand() {
+        for (leave in listOf<() -> Unit>(
+            { viewModel.openSettingPicker(SettingPicker.ISO) },
+            { viewModel.setHudVisible(false) },
+            { viewModel.setUiMode(UiMode.DEBUG) },
+        )) {
+            compose.runOnIdle { viewModel.startHeldAutofocus() }
+            compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.HOLDING }
+            compose.runOnIdle(leave)
+            awaitAfIdle()
+            compose.runOnIdle {
+                viewModel.closeSettingPicker()
+                viewModel.setHudVisible(true)
+                viewModel.setUiMode(UiMode.CONTROL)
+            }
+        }
+        assertEquals(listOf("start", "stop", "start", "stop", "start", "stop"), afWrites.toList())
+    }
+
+    @Test
+    fun clearingViewModelReleasesHeldAfBeforeRepositoryClose() {
+        val store = ViewModelStore()
+        compose.runOnIdle { store.put("camera", viewModel); viewModel.startHeldAutofocus() }
+        compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.HOLDING }
+        compose.runOnIdle { store.clear() }
+        compose.waitUntil(8_000) { !repository.isLiveViewRunning() }
+        assertEquals(listOf("start", "stop"), afWrites.toList())
+        assertTrue(cameraWrites.indexOf("af:stop") < cameraWrites.indexOf("view:off"))
+    }
+
+    @Test
+    fun disconnectDuringStartReleasesBeforeClosingAndCannotRestoreOldUiState() {
+        blockAfStart.set(true)
+        compose.runOnIdle { viewModel.startHeldAutofocus() }
+        assertTrue(afStartEntered.await(8, TimeUnit.SECONDS))
+        compose.runOnIdle { viewModel.disconnect() }
+        releaseAfStart.countDown()
+        awaitStopped()
+        assertFalse(viewModel.uiState.value.connected)
+        assertEquals(AutofocusHoldState.IDLE, viewModel.uiState.value.autofocusHoldState)
+        assertEquals(listOf("start", "stop"), afWrites.toList())
+        assertTrue(cameraWrites.indexOf("af:stop") < cameraWrites.indexOf("view:off"))
+    }
+
+    private fun awaitAfIdle() = compose.waitUntil(8_000) {
+        viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.IDLE && !viewModel.uiState.value.busy
     }
 
     @Test
