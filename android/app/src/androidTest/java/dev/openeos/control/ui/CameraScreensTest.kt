@@ -101,14 +101,20 @@ class CameraScreensTest {
             stopHeldAutofocus = { stops++; state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.IDLE) },
             autofocus = { timed++ },
         )
-        compose.setContent { MaterialTheme { CameraAutofocusButton(state.value, actions) } }
-        compose.waitUntil(5_000) { compose.activity.hasWindowFocus() }
-        compose.runOnIdle {
-            assertEquals(0, starts)
-            assertEquals(AutofocusHoldState.IDLE, state.value.autofocusHoldState)
-            // Initial unfocused composition may request an idle cleanup before any gesture.
-            stops = 0
+        compose.setContent {
+            val platformWindow = LocalWindowInfo.current
+            val window = remember(platformWindow) {
+                // Pointer/recomposition behavior is independent of emulator window transitions.
+                // Focus-loss safety is exercised separately below.
+                object : WindowInfo by platformWindow {
+                    override val isWindowFocused = true
+                }
+            }
+            CompositionLocalProvider(LocalWindowInfo provides window) {
+                MaterialTheme { CameraAutofocusButton(state.value, actions) }
+            }
         }
+        compose.runOnIdle { assertEquals(0, starts); assertEquals(0, stops) }
         val button = compose.onNodeWithTag("held-autofocus")
         button.assertHeightIsAtLeast(48.dp).performTouchInput { down(center) }
         compose.mainClock.advanceTimeBy(1_000)
