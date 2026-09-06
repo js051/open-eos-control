@@ -85,6 +85,35 @@ class CameraScreensTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
+    fun focusIndicatorUsesOpenCornersAndDoesNotSignalUnconfirmedSuccess() {
+        compose.setContent {
+            Box(Modifier.fillMaxSize()) {
+                FocusIndicator(FocusPoint(0.5, 0.5), FocusFeedback.ACCEPTED, 3f / 2f)
+            }
+        }
+        compose.onNodeWithContentDescription(resourceText(R.string.focus_command_accepted)).assertIsDisplayed()
+        val frame = compose.onNodeWithTag("focus-indicator").captureToImage().asAndroidBitmap()
+        var cyanPixels = 0
+        var greenPixels = 0
+        for (y in 0 until frame.height) {
+            for (x in 0 until frame.width) {
+                val pixel = frame.getPixel(x, y)
+                val red = android.graphics.Color.red(pixel)
+                val green = android.graphics.Color.green(pixel)
+                val blue = android.graphics.Color.blue(pixel)
+                if (green > red + 50 && blue > red + 50) cyanPixels++
+                if (green > red + 50 && green > blue + 50) greenPixels++
+            }
+        }
+        assertTrue("Visible cyan focus corners", cyanPixels > 20)
+        assertEquals("No unconfirmed green success", 0, greenPixels)
+        assertTrue("Focus marker must remain sparse", cyanPixels < frame.width * frame.height / 50)
+        java.io.File(compose.activity.cacheDir, "focus-corners-accepted.png").outputStream().use {
+            assertTrue(frame.compress(Bitmap.CompressFormat.PNG, 100, it))
+        }
+    }
+
+    @Test
     fun disconnectedStateShowsDedicatedConnectionScreen() {
         compose.setContent { MaterialTheme { ConnectionScreen(CameraUiState(), noOpActions()) } }
         compose.onNodeWithText(resourceText(R.string.connect_title)).assertIsDisplayed()
@@ -908,7 +937,7 @@ class CameraScreensTest {
             kotlin.math.abs(rotatedViewportBounds.width - panelBounds.width) < 2f &&
                 kotlin.math.abs(rotatedViewportBounds.height - panelBounds.height) < 2f,
         )
-        compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.remote_live_view)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.composition_grid)).assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performClick()
         compose.runOnIdle { assertEquals(null, picker.value) }
@@ -941,7 +970,7 @@ class CameraScreensTest {
         )
         compose.onNodeWithTag("settings-content-rotation").fetchSemanticsNode()
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
-        compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.remote_live_view)).assertIsDisplayed()
     }
 
     @Test
@@ -973,7 +1002,7 @@ class CameraScreensTest {
 
         compose.runOnIdle { controlRotation.floatValue = 0f }
         compose.onNodeWithText(resourceText(R.string.live_view_settings)).assertIsDisplayed()
-        compose.onNodeWithText(resourceText(R.string.auto_refresh)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.remote_live_view)).assertIsDisplayed()
         val naturalTitle = compose
             .onNodeWithText(resourceText(R.string.live_view_settings))
             .fetchSemanticsNode()
@@ -1118,7 +1147,7 @@ class CameraScreensTest {
                 settingsPanel.right <= settingsRoot.right &&
                 settingsPanel.bottom <= settingsRoot.bottom,
         )
-        compose.onNodeWithText("自動更新").assertIsDisplayed()
+        compose.onNodeWithText("遠端即時取景").assertIsDisplayed()
     }
 
     @Test

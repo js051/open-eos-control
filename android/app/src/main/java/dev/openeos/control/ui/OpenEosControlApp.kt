@@ -66,9 +66,8 @@ fun OpenEosControlApp(
         label = "camera-control-rotation",
     )
     LaunchedEffect(viewModel) { viewModel.initialize(context) }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
-        viewModel.setRtpAudioEnabled(false)
-    }
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { viewModel.setAppForeground(true) }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.setAppForeground(false) }
 
     val actions = CameraActions(
         setConnectionTarget = viewModel::setConnectionTarget,

@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -29,6 +30,31 @@ class CameraViewModelPreviewTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun liveViewTransitionDisablesOnlyConflictingCameraOperations() {
+        val state = CameraUiState(pendingOperations = setOf(CameraOperation.LIVE_VIEW))
+        assertTrue(state.isBusy(CameraOperation.FOCUS))
+        assertTrue(state.isBusy(CameraOperation.CAPTURE))
+        assertTrue(state.isBusy(CameraOperation.RECORDING))
+        assertFalse(state.isBusy(CameraOperation.STATUS))
+        assertFalse(state.isBusy(CameraOperation.MEDIA))
+    }
+
+    @Test
+    fun focusCommandDoesNotPretendToConfirmOpticalFocusAndNewTapKeepsItsOwnTimer() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+        viewModel.tapFocus(0.2, 0.3)
+        assertEquals(FocusFeedback.ACCEPTED, viewModel.uiState.value.focusFeedback)
+        advanceTimeBy(800)
+        viewModel.tapFocus(0.7, 0.8)
+        advanceTimeBy(500)
+        assertEquals(FocusPoint(0.7, 0.8), viewModel.uiState.value.focusPoint)
+        assertEquals(FocusFeedback.ACCEPTED, viewModel.uiState.value.focusFeedback)
+        advanceUntilIdle()
+        assertEquals(null, viewModel.uiState.value.focusPoint)
     }
 
     @Test

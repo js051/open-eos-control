@@ -71,3 +71,23 @@ internal fun mapFocusPointToDisplay(
         y = content.top + focusPoint.y.coerceIn(0.0, 1.0).toFloat() * content.height,
     )
 }
+
+internal fun focusIndicatorBounds(
+    point: FocusPoint,
+    containerWidth: Float,
+    containerHeight: Float,
+    sourceAspectRatio: Float,
+    requestedEdge: Float,
+): LiveViewRect {
+    val content = fittedLiveViewRect(containerWidth, containerHeight, sourceAspectRatio)
+    val edge = requestedEdge.coerceAtLeast(0f).coerceAtMost(minOf(content.width, content.height) * 0.8f)
+    val center = mapFocusPointToDisplay(point, containerWidth, containerHeight, sourceAspectRatio)
+    // Inset strokes at the image edges without changing the coordinate sent to the camera.
+    val margin = edge * 0.05f
+    return LiveViewRect(
+        left = (center.x - edge / 2f).coerceIn(content.left + margin, content.left + content.width - edge - margin),
+        top = (center.y - edge / 2f).coerceIn(content.top + margin, content.top + content.height - edge - margin),
+        width = edge,
+        height = edge,
+    )
+}

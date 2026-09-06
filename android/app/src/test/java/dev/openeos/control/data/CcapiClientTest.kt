@@ -844,6 +844,26 @@ class CcapiClientTest {
     }
 
     @Test
+    fun jpegStopFailureIsReportedAndCanBeRetriedWithoutLosingOwnership() = runTest {
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setResponseCode(204))
+        client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_JPEG_POLLING))
+        server.takeRequest()
+        server.enqueue(MockResponse().setResponseCode(503).setBody("camera busy"))
+
+        assertTrue(runCatching { client.stopLiveView() }.isFailure)
+        assertEquals(LiveViewSource.CCAPI_JPEG_POLLING, client.currentLiveViewSource())
+        assertEquals("DELETE", server.takeRequest().method)
+
+        server.enqueue(MockResponse().setResponseCode(204))
+        client.stopLiveView()
+        assertEquals("DELETE", server.takeRequest().method)
+        assertNull(client.currentLiveViewSource())
+        client.stopLiveView()
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
     fun startLiveViewPostsCanonDisplayAndSize() = runTest {
         client.forceRealCamera()
         server.enqueue(MockResponse().setResponseCode(204))

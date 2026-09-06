@@ -1892,7 +1892,7 @@ class CcapiClient(
                 LiveViewSource.CCAPI_MULTIPART -> stopMultipartLiveView()
                 LiveViewSource.CCAPI_JPEG_POLLING -> {
                     activeJpegLiveViewOperations?.let { operations ->
-                        runCatching { stopCcapiLiveView(operations.stopLiveView, operations.stopMethod) }
+                        stopCcapiLiveView(operations.stopLiveView, operations.stopMethod)
                     }
                 }
 

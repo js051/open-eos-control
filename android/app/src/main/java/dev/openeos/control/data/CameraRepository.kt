@@ -16,12 +16,15 @@ class CameraRepository(
     private var frameVersion = 0L
     private var liveViewRequest = LiveViewRequest()
     private var active = false
+    private var liveViewRunning = false
     private var activeInfo: CameraInfo? = null
     private val connectionMutex = Mutex()
 
     fun isRealCamera(): Boolean = backend.prefersBitmapLiveViewFrames
 
     fun nativeLiveViewSession(): NativeLiveViewSession? = backend.nativeLiveViewSession
+
+    fun isLiveViewRunning(): Boolean = liveViewRunning
 
     fun configureAndroidNetworkRouting(context: Context) {
         check(!active) { "Camera network routing cannot change while connected." }
@@ -38,6 +41,7 @@ class CameraRepository(
         password: String = "",
         simulatorMode: Boolean? = null,
         request: LiveViewRequest = liveViewRequest,
+        startLiveView: Boolean = true,
     ): CameraSession = connect(
         connection = CameraConnection.CcapiNetwork(
             baseUrl = baseUrl,
@@ -46,6 +50,7 @@ class CameraRepository(
             simulatorMode = simulatorMode,
         ),
         request = request,
+        startLiveView = startLiveView,
     )
 
     suspend fun connectUsb(
@@ -53,6 +58,7 @@ class CameraRepository(
         vendorId: Int,
         productId: Int,
         request: LiveViewRequest = liveViewRequest,
+        startLiveView: Boolean = true,
     ): CameraSession = connect(
         connection = CameraConnection.AndroidUsbPtp(
             deviceName = deviceName,
@@ -60,6 +66,7 @@ class CameraRepository(
             productId = productId,
         ),
         request = request,
+        startLiveView = startLiveView,
     )
 
     suspend fun discoverBridgeCameras(
@@ -75,6 +82,7 @@ class CameraRepository(
         cameraId: String? = null,
         cameraEngine: String? = null,
         request: LiveViewRequest = liveViewRequest,
+        startLiveView: Boolean = true,
     ): CameraSession = connect(
         connection = CameraConnection.DesktopBridge(
             baseUrl = baseUrl,
@@ -83,17 +91,20 @@ class CameraRepository(
             cameraEngine = cameraEngine,
         ),
         request = request,
+        startLiveView = startLiveView,
     )
 
     private suspend fun connect(
         connection: CameraConnection,
         request: LiveViewRequest,
+        startLiveView: Boolean,
     ): CameraSession = connectionMutex.withLock {
         if (active) disconnectLocked()
         try {
             backend = backendFactory.create(connection)
             backend.initialize()
             active = true
+            liveViewRunning = false
             frameVersion = 0L
             val info = backend.info()
             activeInfo = info
@@ -102,9 +113,10 @@ class CameraRepository(
             liveViewRequest = request.clampTo(capabilities.liveView)
             var liveViewFrameUrl: String? = null
             var liveViewStartError: String? = null
-            if (capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
+            if (startLiveView && capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
                 try {
                     backend.startLiveView(liveViewRequest)
+                    liveViewRunning = true
                     if (!backend.prefersBitmapLiveViewFrames) {
                         liveViewFrameUrl = nextLiveViewFrameUrl()
                     }
@@ -129,6 +141,7 @@ class CameraRepository(
         } catch (exception: Exception) {
             runCatching { backend.close() }
             active = false
+            liveViewRunning = false
             activeInfo = null
             throw exception
         }
@@ -151,6 +164,7 @@ class CameraRepository(
             // ignore failure to stop live view
         } finally {
             active = false
+            liveViewRunning = false
             activeInfo = null
         }
     }
@@ -257,12 +271,23 @@ class CameraRepository(
 
     suspend fun deleteMedia(item: CameraMediaItem) = backend.deleteMedia(item)
 
-    suspend fun restartLiveView(): LiveViewRequest {
-        backend.stopLiveView()
-        backend.startLiveView(liveViewRequest)
-        liveViewRequest = liveViewRequest.clampTo(backend.capabilities().liveView)
-        return liveViewRequest
-    }
+    suspend fun restartLiveView(): LiveViewRequest = setLiveViewEnabled(true, restart = true)
+
+    suspend fun setLiveViewEnabled(enabled: Boolean, restart: Boolean = false): LiveViewRequest =
+        connectionMutex.withLock {
+            check(active) { "Camera is not connected." }
+            if (liveViewRunning && (!enabled || restart)) {
+                // Retain ownership on failure so a later stop/disconnect can retry cleanup.
+                backend.stopLiveView()
+                liveViewRunning = false
+            }
+            if (enabled && !liveViewRunning) {
+                backend.startLiveView(liveViewRequest)
+                liveViewRunning = true
+                liveViewRequest = liveViewRequest.clampTo(backend.capabilities().liveView)
+            }
+            liveViewRequest
+        }
 
     fun updateLiveViewRequest(
         fps: Int? = null,

@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="focus_command_pending">正在傳送對焦指令</string>
+    <string name="focus_command_accepted">對焦指令已接受；尚未確認合焦</string>
+    <string name="focus_action_completed">所選操作已完成</string>
+    <string name="focus_command_failed">對焦指令失敗</string>
+    <string name="remote_live_view">遠端即時取景</string>
+    <string name="stop_remote_live_view">停止遠端即時取景</string>
+    <string name="live_view_paused">即時取景已暫停</string>
     <string name="setting_owner_name">擁有者名稱</string>
     <string name="setting_artist">作者</string>
     <string name="setting_copyright">著作權資訊</string>
@@ -66,7 +73,7 @@
     <string name="half_press_shutter">半按快門</string><string name="half_press_shutter_hint">以定時半按執行測光與對焦，之後一定釋放快門。</string><string name="half_press_shutter_action">執行快門半按</string><string name="half_press">半按</string>
     <string name="manual_focus_drive">手動對焦步進</string><string name="manual_focus_drive_hint">以三種相對步幅移動鏡頭焦點。</string><string name="focus_nearer">近端</string><string name="focus_farther">遠端</string><string name="focus_drive_step">向%1$s對焦，第 %2$d 級</string>
     <string name="live_view_tap_action">Live View 點按動作</string>
-    <string name="tap_action_focus">點按對焦</string>
+    <string name="tap_action_focus">選擇 AF 點</string>
     <string name="tap_action_white_balance">點選白平衡</string>
     <string name="downloading_media">正在下載 %1$s</string>
     <string name="cancel_media_download">取消下載</string>
