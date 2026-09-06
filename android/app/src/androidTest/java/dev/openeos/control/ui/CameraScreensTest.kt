@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
@@ -40,6 +42,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.CompositionLocalProvider
@@ -99,6 +102,13 @@ class CameraScreensTest {
             autofocus = { timed++ },
         )
         compose.setContent { MaterialTheme { CameraAutofocusButton(state.value, actions) } }
+        compose.waitUntil(5_000) { compose.activity.hasWindowFocus() }
+        compose.runOnIdle {
+            assertEquals(0, starts)
+            assertEquals(AutofocusHoldState.IDLE, state.value.autofocusHoldState)
+            // Initial unfocused composition may request an idle cleanup before any gesture.
+            stops = 0
+        }
         val button = compose.onNodeWithTag("held-autofocus")
         button.assertHeightIsAtLeast(48.dp).performTouchInput { down(center) }
         compose.mainClock.advanceTimeBy(1_000)
@@ -110,6 +120,41 @@ class CameraScreensTest {
         compose.runOnIdle { assertEquals(2, starts); assertEquals(2, stops) }
         button.performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.runOnIdle { assertEquals(1, timed); assertEquals(2, starts) }
+    }
+
+    @Test fun heldAfWindowFocusLossReleasesWithoutRestartingOnReturn() {
+        val base = connectedState()
+        val state = mutableStateOf(base.copy(capabilities = base.capabilities!!.copy(heldAutofocusSupported = true)))
+        val focused = mutableStateOf(false)
+        var starts = 0
+        var stops = 0
+        val actions = noOpActions().copy(
+            startHeldAutofocus = { starts++; state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.HOLDING) },
+            stopHeldAutofocus = { stops++; state.value = state.value.copy(autofocusHoldState = AutofocusHoldState.IDLE) },
+        )
+        compose.setContent {
+            val platformWindow = LocalWindowInfo.current
+            val window = remember(platformWindow) {
+                object : WindowInfo by platformWindow {
+                    override val isWindowFocused: Boolean get() = focused.value
+                }
+            }
+            CompositionLocalProvider(LocalWindowInfo provides window) {
+                MaterialTheme { CameraAutofocusButton(state.value, actions) }
+            }
+        }
+        compose.runOnIdle { assertEquals(1, stops); assertEquals(0, starts); focused.value = true }
+        val button = compose.onNodeWithTag("held-autofocus")
+        button.performTouchInput { down(center) }
+        compose.runOnIdle { assertEquals(1, starts); assertEquals(1, stops); focused.value = false }
+        compose.runOnIdle {
+            assertEquals(2, stops)
+            assertEquals(AutofocusHoldState.IDLE, state.value.autofocusHoldState)
+            focused.value = true
+        }
+        compose.runOnIdle { assertEquals(1, starts); assertEquals(2, stops) }
+        button.performTouchInput { up() }
+        compose.runOnIdle { assertEquals(1, starts) }
     }
 
     @Test fun heldAfDisposalReleasesAndFailedStopOnlyRetries() {
