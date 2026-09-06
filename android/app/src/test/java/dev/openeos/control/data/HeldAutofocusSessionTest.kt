@@ -10,6 +10,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HeldAutofocusSessionTest {
+    @Test fun cancelledFocusRetainsARejectedReleaseForRetry() = runTest {
+        val session = HeldAutofocusSession()
+        val started = CompletableDeferred<Unit>()
+        val result = CompletableDeferred<Throwable?>()
+        var stops = 0
+        val job = launch {
+            result.complete(runCatching {
+                session.hold({}, { if (++stops == 1) throw IOException("lost release") }) {
+                    started.complete(Unit)
+                    awaitCancellation()
+                }
+            }.exceptionOrNull())
+        }
+        started.await()
+        job.cancelAndJoin()
+        assertTrue(result.await() is AutofocusReleaseException)
+        session.retryStop()
+        assertEquals(2, stops)
+    }
+
     @Test fun releaseRunsAfterCancellation() = runTest {
         val session = HeldAutofocusSession()
         val started = CompletableDeferred<Unit>()

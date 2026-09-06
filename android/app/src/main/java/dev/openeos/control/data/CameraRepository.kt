@@ -218,7 +218,10 @@ class CameraRepository(
 
     suspend fun stopBulbExposure(): CameraStatus = backend.stopBulbExposure()
 
-    suspend fun autofocus(): CameraStatus = backend.autofocus()
+    suspend fun autofocus(): CameraStatus = connectionMutex.withLock {
+        check(active) { "Camera is disconnected." }
+        backend.autofocus()
+    }
 
     suspend fun holdAutofocus(whileHeld: suspend () -> Unit) = connectionMutex.withLock {
         check(active) { "Camera is disconnected." }
@@ -230,7 +233,10 @@ class CameraRepository(
         backend.retryAutofocusStop()
     }
 
-    suspend fun halfPressShutter(): CameraStatus = backend.halfPressShutter()
+    suspend fun halfPressShutter(): CameraStatus = connectionMutex.withLock {
+        check(active) { "Camera is disconnected." }
+        backend.halfPressShutter()
+    }
 
     suspend fun driveFocus(
         direction: FocusDriveDirection,

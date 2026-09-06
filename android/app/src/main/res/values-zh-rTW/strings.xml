@@ -5,12 +5,12 @@
     <string name="shutter_af_off">AF 關</string>
     <string name="af_on_label">AF-ON</string>
     <string name="hold_af_on">按住自動對焦（最多 30 秒），放開停止</string>
-    <string name="retry_af_stop">重試停止自動對焦</string>
+    <string name="retry_af_stop">重試釋放對焦控制</string>
     <string name="af_hold_idle">就緒</string>
     <string name="af_hold_starting">正在啟動自動對焦</string>
     <string name="af_hold_active">對焦命令執行中，尚未確認合焦</string>
-    <string name="af_hold_releasing">正在停止自動對焦</string>
-    <string name="af_hold_release_failed">未確認自動對焦已停止。請重試停止，或中斷相機連線。</string>
+    <string name="af_hold_releasing">正在釋放對焦控制</string>
+    <string name="af_hold_release_failed">未確認對焦控制已釋放。請重試釋放，或中斷連線後確認機身狀態。</string>
     <string name="camera_focus_status">相機 AF 狀態</string>
     <string name="camera_focus_confirmed">相機回報已合焦</string>
     <string name="camera_focus_failed">相機回報未合焦</string>

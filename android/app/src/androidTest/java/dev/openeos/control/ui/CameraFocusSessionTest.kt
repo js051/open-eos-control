@@ -7,9 +7,13 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraFocusStatus
@@ -43,6 +47,9 @@ class CameraFocusSessionTest {
     private lateinit var viewModel: CameraViewModel
     private val viewWrites = CopyOnWriteArrayList<String>()
     private val afWrites = CopyOnWriteArrayList<String>()
+    private val manualWrites = CopyOnWriteArrayList<String>()
+    private val advertiseNativeAf = AtomicBoolean(true)
+    private val failManualRelease = AtomicBoolean(false)
     private val cameraWrites = CopyOnWriteArrayList<String>()
     private val captureAf = CopyOnWriteArrayList<Boolean>()
     private val failNextCapture = AtomicBoolean(false)
@@ -68,6 +75,13 @@ class CameraFocusSessionTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath
+                if (request.method == "POST" && path.endsWith("/shooting/control/shutterbutton/manual")) {
+                    val body = JSONObject(request.body.readUtf8())
+                    val action = body.getString("action")
+                    assertEquals(action != "release", body.getBoolean("af"))
+                    manualWrites += action
+                    return MockResponse().setResponseCode(if (action == "release" && failManualRelease.get()) 503 else 204)
+                }
                 if (request.method == "POST" && path.endsWith("/shooting/control/shutterbutton")) {
                     captureAf += JSONObject(request.body.readUtf8()).getBoolean("af")
                     return MockResponse().setResponseCode(if (failNextCapture.getAndSet(false)) 503 else 204)
@@ -98,7 +112,14 @@ class CameraFocusSessionTest {
                 }
                 if (request.method != "GET") return MockResponse().setResponseCode(405)
                 return when {
-                    path == "/ccapi" -> json(DISCOVERY)
+                    path == "/ccapi" -> {
+                        val discovery = JSONObject(DISCOVERY)
+                        val operations = discovery.getJSONArray("ver100")
+                        if (!advertiseNativeAf.get()) for (index in operations.length() - 1 downTo 0) {
+                            if (operations.getJSONObject(index).getString("path") == "/shooting/control/af") operations.remove(index)
+                        }
+                        json(discovery.toString())
+                    }
                     path.endsWith("/deviceinformation") -> json("""{"productname":"Canon EOS R6 Mark III","serialnumber":"TEST-SERIAL-0001"}""")
                     path.endsWith("/devicestatus/battery") -> json("""{"level":"90"}""")
                     path.endsWith("/shooting/settings") -> json("{}")
@@ -134,10 +155,77 @@ class CameraFocusSessionTest {
     fun tearDown() {
         releaseAfStart.countDown()
         failAfStop.set(false)
+        failManualRelease.set(false)
         releaseStart.countDown()
         if (::viewModel.isInitialized) compose.runOnIdle { viewModel.disconnect() }
         compose.waitUntil(8_000) { !repository.isLiveViewRunning() }
         server.shutdown()
+    }
+
+    @Test
+    fun boundedAfFailureRetainsStopOnlyRecoveryThroughTheProductionUi() {
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { OpenEosControlApp(viewModel) } }
+        failAfStop.set(true)
+        compose.onNodeWithTag("held-autofocus").performClick()
+        compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.RELEASE_FAILED }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo)).assertIsNotEnabled()
+        compose.runOnIdle { viewModel.captureStill(); viewModel.halfPressShutter(); viewModel.autofocus() }
+        assertTrue(captureAf.isEmpty())
+        assertTrue(manualWrites.isEmpty())
+        assertEquals(listOf("start", "stop"), afWrites.toList())
+        failAfStop.set(false)
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.retry_af_stop)).assertIsDisplayed().performClick()
+        awaitAfIdle()
+        assertEquals(listOf("start", "stop", "stop"), afWrites.toList())
+        assertNull(viewModel.uiState.value.error)
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo)).assertIsEnabled().performClick()
+        compose.waitUntil(8_000) { captureAf.size == 1 && !viewModel.uiState.value.busy }
+    }
+
+    @Test
+    fun halfPressOnlyCameraOffersReleaseRecoveryWithoutHeldAfCapability() {
+        compose.runOnIdle { viewModel.disconnect() }
+        awaitStopped()
+        advertiseNativeAf.set(false)
+        compose.runOnIdle { viewModel.connect() }
+        awaitFrame()
+        assertFalse(viewModel.uiState.value.capabilities!!.heldAutofocusSupported)
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { OpenEosControlApp(viewModel) } }
+        compose.onNodeWithTag("held-autofocus").assertDoesNotExist()
+        compose.onNodeWithTag("camera-action-menu-button").performClick()
+        compose.onNodeWithTag("camera-action-settings").performClick()
+        failManualRelease.set(true)
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.half_press_shutter_action))
+            .performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.RELEASE_FAILED }
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitUntil(8_000) { viewModel.uiState.value.activeSettingPicker == null }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo)).assertIsNotEnabled()
+        failManualRelease.set(false)
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.retry_af_stop)).assertIsDisplayed().performClick()
+        awaitAfIdle()
+        assertEquals(listOf("half_press", "release", "release"), manualWrites.toList())
+        assertTrue(afWrites.isEmpty())
+        assertNull(viewModel.uiState.value.error)
+        compose.onNodeWithTag("held-autofocus").assertDoesNotExist()
+    }
+
+    @Test
+    fun boundedAfBlocksShutterWhileStartingAndDisconnectDiscardsItsLateFailure() {
+        blockAfStart.set(true)
+        failAfStop.set(true)
+        compose.runOnIdle { viewModel.autofocus() }
+        assertTrue(afStartEntered.await(5, TimeUnit.SECONDS))
+        compose.runOnIdle { viewModel.captureStill(); viewModel.halfPressShutter(); viewModel.startHeldAutofocus() }
+        assertTrue(captureAf.isEmpty())
+        assertTrue(manualWrites.isEmpty())
+        compose.runOnIdle { viewModel.disconnect(); viewModel.connect() }
+        releaseAfStart.countDown()
+        awaitFrame()
+        assertEquals(AutofocusHoldState.IDLE, viewModel.uiState.value.autofocusHoldState)
+        assertNull(viewModel.uiState.value.error)
+        assertEquals(1, afWrites.count { it == "start" })
+        assertTrue(afWrites.count { it == "stop" } >= 2)
     }
 
     @Test
@@ -441,6 +529,7 @@ class CameraFocusSessionTest {
             {"path":"/shooting/liveview/flip","get":true},
             {"path":"/shooting/liveview/flipdetail","get":true},
             {"path":"/shooting/control/af","post":true},
+            {"path":"/shooting/control/shutterbutton/manual","post":true},
             {"path":"/shooting/control/shutterbutton","post":true}
         ]}"""
     }

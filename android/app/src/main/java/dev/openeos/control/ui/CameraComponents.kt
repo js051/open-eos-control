@@ -1272,9 +1272,9 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             )
         }
         val targetMagnification = state.nextLiveViewMagnification()
-        if (state.connected && state.capabilities?.heldAutofocusSupported == true &&
-            ((state.uiMode == UiMode.CONTROL && state.hudVisible && state.activeSettingPicker == null) ||
-                state.autofocusHoldState == AutofocusHoldState.RELEASE_FAILED)) {
+        if (state.connected &&
+            ((state.capabilities?.heldAutofocusSupported == true && state.uiMode == UiMode.CONTROL && state.hudVisible && state.activeSettingPicker == null) ||
+                state.autofocusHoldState != AutofocusHoldState.IDLE)) {
             val zoomWidth = if (state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION) && targetMagnification != null) 56.dp else 0.dp
             CameraAutofocusButton(state, actions, Modifier.align(Alignment.BottomEnd).zIndex(1f)
                 .padding(end = 12.dp + zoomWidth, bottom = liveViewOverlayBottomPadding(state)))

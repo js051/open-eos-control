@@ -1357,7 +1357,7 @@ class CcapiClient(
                 error("Camera did not advertise autofocus or manual shutter control.")
             }
             if (operation != null || !enforceAdvertisedOperations) {
-                withGuaranteedRelease(
+                withRecoverableFocusRelease(
                     press = {
                         commandOk(
                             pathSuffix = "/shooting/control/af",
@@ -1375,7 +1375,7 @@ class CcapiClient(
                     afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
                 )
             } else {
-                withGuaranteedRelease(
+                withRecoverableFocusRelease(
                     press = {
                         commandOk(
                             pathSuffix = "/shooting/control/shutterbutton/manual",
@@ -1394,7 +1394,7 @@ class CcapiClient(
                 )
             }
         } else {
-            withGuaranteedRelease(
+            withRecoverableFocusRelease(
                 press = { postJson("/ccapi/shutter/half-press", JSONObject()) },
                 release = { postJson("/ccapi/shutter/release", JSONObject()) },
                 afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
@@ -1410,7 +1410,7 @@ class CcapiClient(
             if (enforceAdvertisedOperations && operation == null) {
                 error("Camera did not advertise manual shutter control.")
             }
-            withGuaranteedRelease(
+            withRecoverableFocusRelease(
                 press = {
                     commandOk(
                         pathSuffix = "/shooting/control/shutterbutton/manual",
@@ -1428,7 +1428,7 @@ class CcapiClient(
                 afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
             )
         } else {
-            withGuaranteedRelease(
+            withRecoverableFocusRelease(
                 press = { postJson("/ccapi/shutter/half-press", JSONObject()) },
                 release = { postJson("/ccapi/shutter/release", JSONObject()) },
                 afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
@@ -2764,6 +2764,12 @@ class CcapiClient(
         }
         requestOk(request)
     }
+
+    private suspend fun withRecoverableFocusRelease(
+        press: suspend () -> Unit,
+        release: suspend () -> Unit,
+        afterPress: suspend () -> Unit,
+    ) = heldAutofocus.hold(start = press, stop = release, whileHeld = afterPress)
 
     private suspend fun withGuaranteedRelease(
         press: suspend () -> Unit,

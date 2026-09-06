@@ -6,7 +6,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal class AutofocusReleaseException(cause: Throwable) :
-    IllegalStateException("Autofocus stop was not confirmed. Retry stopping autofocus.", cause)
+    IllegalStateException("Focus control release was not confirmed. Retry releasing focus control.", cause)
 
 internal class HeldAutofocusSession {
     private val mutex = Mutex()

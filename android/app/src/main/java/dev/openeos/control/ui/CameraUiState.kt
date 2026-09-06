@@ -179,6 +179,8 @@ data class CameraUiState(
 
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations || (bulbExposureActive && operation != CameraOperation.CAPTURE) ||
+            (CameraOperation.FOCUS in pendingOperations && operation in HELD_AF_INTERLOCK_OPERATIONS) ||
+            (operation == CameraOperation.FOCUS && HELD_AF_INTERLOCK_OPERATIONS.any { it in pendingOperations }) ||
             (autofocusHoldState != AutofocusHoldState.IDLE && operation in HELD_AF_INTERLOCK_OPERATIONS) ||
             (CameraOperation.LIVE_VIEW in pendingOperations && operation in LIVE_VIEW_INTERLOCK_OPERATIONS)
 }
@@ -222,6 +224,7 @@ internal fun CameraUiState.nextLiveViewMagnification(): LiveViewMagnification? {
 
 internal fun captureModeSwitchEnabled(state: CameraUiState): Boolean =
     state.autofocusHoldState == AutofocusHoldState.IDLE &&
+    CameraOperation.FOCUS !in state.pendingOperations &&
     state.status?.recording != true &&
         !state.bulbExposureActive &&
         CameraOperation.SETTING !in state.pendingOperations &&
