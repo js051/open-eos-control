@@ -4,9 +4,9 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-目前的開發預覽版為 [v0.9.1](docs/releases/v0.9.1.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
+目前的開發預覽版為 [v0.9.2](docs/releases/v0.9.2.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
 
-本修補版讓 Android CCAPI 的短按 AF 與 manual 半按在釋放失敗後保留恢復狀態、阻擋衝突命令，即使相機不支援按住 AF，也能只重試原始停止命令。既有快門自動對焦開關與按住 AF-ON 安全行為保留。PC 與 iOS 只對齊版本，不宣稱 USB／Bridge 具有相同恢復能力；實機合焦行為與機身半按容易失焦的原因仍待確認。
+本修補版修正 Android 拍攝資訊在旋轉與大字體下的裁切，保留固定控制位置、完整數字與可存取的白平衡完整名稱。既有 AF 釋放恢復與相機命令不變。PC 與 iOS 只對齊版本，未同步本輪 Android UI 修正；實機合焦行為與機身半按容易失焦的原因仍待確認。
 
 這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已有標準 USB/PTP backend 與依能力開放的 Canon EOS 控制。Android 與 iOS 現在都能透過同一套 camera contract 使用可執行的 Desktop Bridge，控制以 USB 接在電腦上的相機。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI／Desktop Bridge client 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
 
