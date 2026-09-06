@@ -1857,22 +1857,25 @@ class CameraScreensTest {
             driveFocus = { direction, step -> requestedFocusDrive = direction to step },
         )
         compose.setContent {
-            MaterialTheme(colorScheme = OpenEosColorScheme) {
-                CameraControlScreen(
-                    CameraUiState().withOfflinePreview().copy(activeSettingPicker = picker.value),
-                    actions,
-                )
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 640.dp))) {
+                MaterialTheme(colorScheme = OpenEosColorScheme) {
+                    CameraControlScreen(
+                        CameraUiState().withOfflinePreview().copy(activeSettingPicker = picker.value),
+                        actions,
+                    )
+                }
             }
         }
 
         openMoreSettings()
-        compose.onNodeWithText(resourceText(R.string.manual_focus_drive)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.manual_focus_drive)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithContentDescription(
             resourceText(R.string.focus_drive_step, resourceText(R.string.focus_farther), 3),
         ).performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle {
             assertEquals(FocusDriveDirection.FAR to FocusDriveStep.LARGE, requestedFocusDrive)
         }
+        compose.onNodeWithTag("shutter-autofocus-setting").performScrollTo().assertIsDisplayed().assertIsOn()
     }
 
     @Test
@@ -2569,6 +2572,8 @@ class CameraScreensTest {
         compose.onNodeWithContentDescription(resourceText(R.string.media_actions, "R6M3_0001.CR3"))
             .performClick()
         compose.onNodeWithText(resourceText(R.string.delete_media, "R6M3_0001.CR3"))
+            .performScrollTo()
+            .assertIsDisplayed()
             .performClick()
         compose.runOnIdle { assertEquals(null, deletedName) }
         compose.onNodeWithText(
@@ -3806,7 +3811,11 @@ class CameraScreensTest {
     }
 
     private fun writeVisualSnapshot(name: String, bitmap: Bitmap) {
-        TestStorage().openOutputFile(name).buffered().use { output ->
+        val localOutput = androidx.test.platform.app.InstrumentationRegistry.getArguments()
+            .getString("oecLocalScreenshots") == "true"
+        val stream = if (localOutput) java.io.File(compose.activity.cacheDir, name).outputStream()
+            else TestStorage().openOutputFile(name)
+        stream.buffered().use { output ->
             assertTrue("Failed to encode visual snapshot $name", bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
         }
     }
