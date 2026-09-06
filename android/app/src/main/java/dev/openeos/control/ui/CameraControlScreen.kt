@@ -436,15 +436,17 @@ private fun CaptureModeOption(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text(
-                    label,
+                CameraHudText(
+                    value = label,
                     color = when {
                         !enabled -> AppMutedText
                         selected -> selectedColor
                         else -> AppSubtleText
                     },
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-                    maxLines = 1,
+                    maxFontSize = 14.sp,
+                    minFontSize = 9.sp,
+                    modifier = Modifier.testTag("capture-mode-label-${mode.name}"),
                 )
                 Box(
                     Modifier

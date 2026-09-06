@@ -20,6 +20,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
@@ -53,6 +54,11 @@ import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.annotation.StringRes
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsCompat
@@ -91,6 +97,197 @@ import org.junit.Assert.assertTrue
 
 class CameraScreensTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun cameraHudTextFitsAfterRotationLocaleAndFontChanges() {
+        val bitmap = Bitmap.createBitmap(16, 12, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(android.graphics.Color.DKGRAY)
+        }
+        val base = CameraUiState().withOfflinePreview().copy(previewMode = false, liveViewBitmap = bitmap)
+        val readyState = base.copy(status = base.status!!.copy(
+            recordableShots = null, storageFreeImages = null, storageFreeBytes = null,
+        ))
+        val states = listOf(
+            readyState,
+            base.copy(liveViewFrameRateFps = 30, shutterAutofocus = false,
+                status = base.status.copy(batteryLevel = 100, recordableShots = 99_999,
+                    exposure = ExposureState("102400", "1/8000", "22", "awb white"))),
+            base.copy(captureMode = CaptureMode.VIDEO, liveViewFrameRateFps = 30,
+                status = base.status.copy(recording = true, remainingRecordingSeconds = 7_200)),
+            base.copy(bulbStartedAtMillis = android.os.SystemClock.elapsedRealtime(),
+                status = base.status.copy(mode = "Bulb", bulbExposureActive = true)),
+            base.copy(capabilities = base.capabilities!!.copy(heldAutofocusSupported = true),
+                status = base.status.copy(exposure = base.status.exposure.copy(whiteBalance = "fluorescent"))),
+        )
+        val state = mutableStateOf(readyState)
+        val size = mutableStateOf(DpSize(360.dp, 800.dp))
+        val rotation = mutableFloatStateOf(90f)
+        val locale = mutableStateOf(LocaleList("en"))
+        val fontScale = mutableFloatStateOf(1.5f)
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(WindowInsetsCompat.Builder().build())) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
+                    DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(fontScale.floatValue)) {
+                        DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(locale.value)) {
+                            CompositionLocalProvider(LocalCameraControlTargetRotation provides rotation.floatValue,
+                                LocalCameraControlRotation provides rotation.floatValue) {
+                                MaterialTheme(colorScheme = OpenEosColorScheme) {
+                                    CameraControlScreen(state.value, noOpActions())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val failures = mutableListOf<String>()
+        val stableTags = listOf("camera-model-status", "battery-status", "storage-status", "fps-control",
+            "capture-mode-PHOTO", "capture-mode-VIDEO", "exposure-control-ISO", "exposure-control-SHUTTER",
+            "exposure-control-APERTURE", "exposure-control-WHITE_BALANCE")
+        val stableBounds = mutableMapOf<Pair<String, String>, androidx.compose.ui.geometry.Rect>()
+        for (language in listOf("en", "zh-TW")) {
+            for ((name, viewport) in listOf("portrait" to DpSize(360.dp, 800.dp),
+                "landscape" to DpSize(800.dp, 360.dp), "tablet" to DpSize(800.dp, 1280.dp))) {
+                for (scale in listOf(1.5f, 2f, 1f)) {
+                    for (angle in listOf(90f, 180f, 270f, 0f)) {
+                        compose.runOnIdle {
+                            size.value = viewport; locale.value = LocaleList(language)
+                            fontScale.floatValue = scale; rotation.floatValue = angle
+                        }
+                        for ((case, displayedState) in states.withIndex()) {
+                            compose.runOnIdle { state.value = displayedState }
+                            compose.waitForIdle()
+                            stableTags.forEach { tag ->
+                                val bounds = compose.onNodeWithTag(tag).assertIsDisplayed()
+                                    .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+                                    .fetchSemanticsNode().boundsInRoot
+                                val previous = stableBounds.getOrPut(name to tag) { bounds }
+                                assertEquals("Stable $tag at $language/$name/$scale/$angle/$case", previous, bounds)
+                            }
+                            compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
+                                useUnmergedTree = true).fetchSemanticsNodes().forEach { node ->
+                                val results = mutableListOf<TextLayoutResult>()
+                                node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+                                results.forEach { result ->
+                                    if (result.hasVisualOverflow || (0 until result.lineCount).any(result::isLineEllipsized)) {
+                                        failures += "$language/$name/$scale/$angle/$case: ${result.layoutInput.text} ${result.layoutInput.style.fontSize} ${result.size}"
+                                    }
+                                    Regex("[0-9][0-9,:./%]*").findAll(result.layoutInput.text.text).forEach { number ->
+                                        if (result.getLineForOffset(number.range.first) != result.getLineForOffset(number.range.last)) {
+                                            failures += "$language/$name/$scale/$angle/$case: number split across lines: ${number.value}"
+                                        }
+                                    }
+                                    val quarterTurn = cameraRotationSwapsDimensions(angle)
+                                    val width = if (quarterTurn) result.size.height else result.size.width
+                                    val height = if (quarterTurn) result.size.width else result.size.height
+                                    val visible = node.boundsInRoot
+                                    if (visible.width + 1f < width || visible.height + 1f < height) {
+                                        failures += "$language/$name/$scale/$angle/$case: parent clips ${result.layoutInput.text}, visible=$visible expected=${width}x$height"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                for (case in listOf(0, 1, 2)) {
+                    compose.runOnIdle { rotation.floatValue = 90f; fontScale.floatValue = 2f; state.value = states[case] }
+                    val screenshot = compose.onNodeWithTag("camera-control-root").captureToImage().asAndroidBitmap()
+                    java.io.File(compose.activity.cacheDir, "hud-text-$language-$name-$case.png").outputStream().use {
+                        assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                }
+            }
+        }
+        assertTrue("${failures.size} clipped HUD labels:\n${failures.take(30).joinToString("\n")}", failures.isEmpty())
+    }
+
+    @Test fun compactHudKeepsFullWhiteBalanceAndStorageDetailsAccessible() {
+        val base = CameraUiState().withOfflinePreview()
+        val state = mutableStateOf(base.copy(
+            capabilities = base.capabilities!!.copy(whiteBalance = base.capabilities.whiteBalance + "awb white"),
+            status = base.status!!.copy(exposure = base.status.exposure.copy(whiteBalance = "awb white")),
+        ))
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp))) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+                    CompositionLocalProvider(LocalCameraControlRotation provides 90f, LocalCameraControlTargetRotation provides 90f) {
+                        MaterialTheme(colorScheme = OpenEosColorScheme) {
+                            CameraControlScreen(state.value, noOpActions().copy(
+                                openPicker = { state.value = state.value.copy(activeSettingPicker = it) },
+                                closePicker = { state.value = state.value.copy(activeSettingPicker = null) },
+                                setCaptureMode = { state.value = state.value.copy(captureMode = it) },
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+        compose.onNodeWithText(resourceText(R.string.camera_value_awb_white_compact)).assertIsDisplayed()
+        compose.onNodeWithContentDescription("${resourceText(R.string.white_balance)}: ${resourceText(R.string.camera_value_awb_white)}")
+            .performClick()
+        compose.onAllNodesWithText(resourceText(R.string.camera_value_awb_white)).fetchSemanticsNodes().let {
+            assertTrue("The picker retains the complete white balance label", it.isNotEmpty())
+        }
+        compose.runOnIdle { state.value = state.value.copy(activeSettingPicker = null) }
+        compose.onNodeWithTag("storage-status").performClick()
+        compose.onNodeWithTag("camera-status-dialog-rotation", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("camera-status-storage-detail", useUnmergedTree = true).performScrollTo()
+        compose.onNode(hasText("2,418", substring = true) and
+            hasAnyAncestor(hasTestTag("camera-status-dialog-rotation")), useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.dismiss)).performScrollTo().performClick()
+        compose.onNodeWithTag("capture-mode-VIDEO").performClick().assertIsSelected()
+        compose.onNodeWithTag("capture-mode-PHOTO").performClick().assertIsSelected()
+        compose.onNodeWithTag("fps-control").performClick()
+        compose.runOnIdle { assertEquals(SettingPicker.LIVE_VIEW, state.value.activeSettingPicker) }
+    }
+
+    @Test fun allKnownWhiteBalanceHudLabelsFitAtLargeFontWithFullDescriptions() {
+        val base = CameraUiState().withOfflinePreview()
+        val state = mutableStateOf(base)
+        val locale = mutableStateOf(LocaleList("en"))
+        val rotation = mutableFloatStateOf(0f)
+        var expectedDescription = ""
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp))) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+                    DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(locale.value)) {
+                        CompositionLocalProvider(LocalCameraControlRotation provides rotation.floatValue,
+                            LocalCameraControlTargetRotation provides rotation.floatValue) {
+                            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                                val description = "${androidx.compose.ui.res.stringResource(R.string.white_balance)}: " +
+                                    localizedCameraValue("whitebalance", state.value.status!!.exposure.whiteBalance)
+                                SideEffect { expectedDescription = description }
+                                ExposureStrip(state.value, noOpActions())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val values = listOf("auto", "daylight", "shade", "shadow", "cloudy", "tungsten", "fluorescent",
+            "flash", "manual", "manual 2", "manual 3", "manual 4", "manual 5", "one push auto",
+            "color temperature", "custom wb 1", "custom wb 2", "custom wb 3", "custom wb 4", "custom wb 5", "awb white")
+        for (language in listOf("en", "zh-TW")) {
+            for (angle in listOf(0f, 90f, 180f, 270f)) {
+                for (raw in values) {
+                    compose.runOnIdle {
+                        locale.value = LocaleList(language); rotation.floatValue = angle
+                        state.value = base.copy(status = base.status!!.copy(exposure = base.status.exposure.copy(whiteBalance = raw)))
+                    }
+                    val nodes = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
+                        useUnmergedTree = true).fetchSemanticsNodes()
+                    assertTrue(nodes.isNotEmpty())
+                    compose.onNodeWithContentDescription(expectedDescription).assertIsDisplayed()
+                    for (node in nodes) {
+                        val results = mutableListOf<TextLayoutResult>()
+                        node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+                        assertTrue("$language/$angle/$raw clipped", results.all { result ->
+                            !result.hasVisualOverflow && (0 until result.lineCount).none(result::isLineEllipsized)
+                        })
+                    }
+                }
+            }
+        }
+    }
 
     @Test fun shutterAfSettingIsAccessibleAndDisabledDuringOperations() {
         val state = mutableStateOf(CameraUiState().withOfflinePreview().copy(activeSettingPicker = SettingPicker.MORE))

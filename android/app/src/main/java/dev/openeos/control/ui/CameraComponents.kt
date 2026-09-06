@@ -170,11 +170,12 @@ fun LiveViewFpsButton(
                     Modifier.size(24.dp),
                     tint = AppAccent,
                 )
-                Text(
-                    stringResource(R.string.fps_compact, state.liveViewFrameRateFps),
+                CameraHudText(
+                    value = stringResource(R.string.fps_compact, state.liveViewFrameRateFps),
                     color = AppText,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
+                    maxFontSize = 14.sp,
+                    minFontSize = 9.sp,
                 )
             }
         }
@@ -608,7 +609,7 @@ private fun CameraStatusIndicator(
     modifier: Modifier = Modifier,
 ) {
     CameraRotatingSquareSlot(
-        size = 52.dp,
+        size = 58.dp,
         modifier = modifier
             .testTag(testTag)
             .clickable(onClick = onClick)
@@ -643,46 +644,6 @@ private fun CameraStatusIndicatorContent(
             minFontSize = 8.sp,
         )
     }
-}
-
-@Composable
-private fun CameraHudText(
-    value: String,
-    color: Color,
-    fontWeight: FontWeight,
-    modifier: Modifier = Modifier,
-    textAlign: TextAlign? = null,
-    maxFontSize: TextUnit = 11.sp,
-    minFontSize: TextUnit = 7.sp,
-    maxLines: Int = 1,
-    softWrap: Boolean = false,
-) {
-    val configuration = LocalConfiguration.current
-    val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
-    var fontSize by remember(
-        value,
-        maxFontSize,
-        minFontSize,
-        configuration.fontScale,
-        rotationQuadrant,
-    ) { mutableStateOf(maxFontSize) }
-    Text(
-        text = value,
-        color = color,
-        fontSize = fontSize,
-        lineHeight = fontSize * 1.15f,
-        fontWeight = fontWeight,
-        maxLines = maxLines,
-        softWrap = softWrap,
-        overflow = TextOverflow.Clip,
-        textAlign = textAlign,
-        modifier = modifier,
-        onTextLayout = { result ->
-            if ((result.didOverflowWidth || result.didOverflowHeight) && fontSize > minFontSize) {
-                fontSize = (fontSize.value - 0.5f).coerceAtLeast(minFontSize.value).sp
-            }
-        },
-    )
 }
 
 @Composable
@@ -931,7 +892,7 @@ private fun cameraStorageHudValue(status: CameraStatus?, captureMode: CaptureMod
             exactCameraCount(status.recordableShots, locale)
         status?.storageFreeImages != null -> exactCameraCount(status.storageFreeImages, locale)
         status?.storageFreeBytes != null -> Formatter.formatShortFileSize(context, status.storageFreeBytes)
-        status?.mediaAvailable == true -> stringResource(R.string.storage_ready)
+        status?.mediaAvailable == true -> stringResource(R.string.storage_ready_compact)
         else -> "-"
     }
 }
@@ -1306,27 +1267,32 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                                 role = Role.Button
                             },
                     ) {
-                        Icon(
-                            painterResource(
-                                if (target != LiveViewMagnification.X1) {
-                                    LucideR.drawable.lucide_ic_zoom_in
-                                } else {
-                                    LucideR.drawable.lucide_ic_zoom_out
-                                }
-                            ),
-                            contentDescription = null,
-                            tint = if (enabled) AppAccent else AppMutedText,
-                            modifier = Modifier.size(24.dp),
-                        )
-                        Text(
-                            text = "${target.value}\u00d7",
-                            color = if (enabled) AppText else AppMutedText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(end = 3.dp, bottom = 2.dp),
-                        )
+                        Column(
+                            Modifier.fillMaxSize().padding(2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(
+                                painterResource(
+                                    if (target != LiveViewMagnification.X1) {
+                                        LucideR.drawable.lucide_ic_zoom_in
+                                    } else {
+                                        LucideR.drawable.lucide_ic_zoom_out
+                                    },
+                                ),
+                                contentDescription = null,
+                                tint = if (enabled) AppAccent else AppMutedText,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            CameraHudText(
+                                value = "${target.value}\u00d7",
+                                color = if (enabled) AppText else AppMutedText,
+                                maxFontSize = 11.sp,
+                                minFontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.testTag("live-view-magnification-value"),
+                            )
+                        }
                     }
                 }
             }
@@ -1588,22 +1554,7 @@ private fun RecordingIndicator(modifier: Modifier = Modifier) {
         }
     }
     val elapsed = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
-    CameraRotatingSlot(modifier.size(104.dp)) {
-        Row(
-            Modifier.background(Color(0xB8000000), RoundedCornerShape(4.dp))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(Modifier.size(8.dp).background(AppRecord, CircleShape))
-            Text(
-                stringResource(R.string.recording_time, elapsed),
-                color = AppText,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-        }
-    }
+    CaptureElapsedIndicator(stringResource(R.string.recording_time, elapsed), AppRecord, modifier, 104.dp)
 }
 
 @Composable
@@ -1617,21 +1568,23 @@ private fun BulbExposureIndicator(startedAtMillis: Long?, modifier: Modifier = M
         }
     }
     val elapsed = "%02d:%02d".format(elapsedSeconds / 60, elapsedSeconds % 60)
-    CameraRotatingSlot(modifier.size(116.dp)) {
-        Row(
-            Modifier.background(Color(0xB8000000), RoundedCornerShape(4.dp))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(Modifier.size(8.dp).background(AppWarning, CircleShape))
-            Text(
-                stringResource(R.string.bulb_exposure_time, elapsed),
-                color = AppText,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-        }
+    CaptureElapsedIndicator(stringResource(R.string.bulb_exposure_time, elapsed), AppWarning, modifier, 116.dp)
+}
+
+@Composable
+private fun CaptureElapsedIndicator(message: String, color: Color, modifier: Modifier, size: Dp) {
+    CameraRotatingSlot(modifier.size(size).testTag("capture-elapsed-indicator")
+        .semantics { contentDescription = message }) {
+        CameraHudText(
+            value = message,
+            color = color,
+            fontWeight = FontWeight.Bold,
+            maxFontSize = 14.sp,
+            minFontSize = 8.sp,
+            maxLines = 2,
+            softWrap = true,
+            modifier = Modifier.background(Color(0xB8000000), RoundedCornerShape(4.dp)).padding(2.dp),
+        )
     }
 }
 
@@ -1774,11 +1727,14 @@ private fun CameraFittedCopy(
 fun ExposureStrip(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
     val exposure = state.status?.exposure
     val available = !state.isBusy(CameraOperation.SETTING)
+    val whiteBalance = localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-")
+    val compactWhiteBalance = localizedHudWhiteBalance(exposure?.whiteBalance ?: "-")
     Row(modifier.fillMaxWidth().height(84.dp), verticalAlignment = Alignment.CenterVertically) {
         ExposureCell(SettingPicker.ISO, stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
         ExposureCell(SettingPicker.SHUTTER, stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
         ExposureCell(SettingPicker.APERTURE, stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
-        ExposureCell(SettingPicker.WHITE_BALANCE, stringResource(R.string.white_balance), localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-"), available && state.capabilities?.whiteBalance?.isNotEmpty() == true) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+        ExposureCell(SettingPicker.WHITE_BALANCE, stringResource(R.string.white_balance), compactWhiteBalance, available && state.capabilities?.whiteBalance?.isNotEmpty() == true,
+            valueDescription = whiteBalance) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
     }
 }
 
@@ -1788,6 +1744,7 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
     label: String,
     value: String,
     enabled: Boolean,
+    valueDescription: String = value,
     onClick: () -> Unit,
 ) {
     Box(
@@ -1796,13 +1753,14 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
             .fillMaxSize()
             .testTag("exposure-control-${picker.name}")
             .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = "$label: $valueDescription" }
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
         CameraRotatingSquareSlot(size = 72.dp) {
             Column(
                 Modifier
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .testTag("exposure-content-${picker.name}"),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -1811,16 +1769,18 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
                     color = AppMutedText,
                     fontWeight = FontWeight.Normal,
                     maxFontSize = 14.sp,
-                    minFontSize = 10.sp,
-                    modifier = Modifier.testTag("exposure-label-${picker.name}"),
+                    minFontSize = 9.sp,
+                    modifier = Modifier.weight(0.32f).fillMaxWidth().testTag("exposure-label-${picker.name}"),
                 )
                 CameraHudText(
                     value = value,
                     color = if (enabled) AppText else AppMutedText,
                     fontWeight = FontWeight.SemiBold,
                     maxFontSize = 17.sp,
-                    minFontSize = 11.sp,
-                    modifier = Modifier.testTag("exposure-value-${picker.name}"),
+                    minFontSize = 10.sp,
+                    maxLines = if (picker == SettingPicker.WHITE_BALANCE) 2 else 1,
+                    softWrap = picker == SettingPicker.WHITE_BALANCE,
+                    modifier = Modifier.weight(0.68f).fillMaxWidth().testTag("exposure-value-${picker.name}"),
                 )
             }
         }
@@ -1891,6 +1851,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
                     CameraRotatingSquareSlot(size = 50.dp) {
                         CameraHudText(value = stringResource(R.string.shutter_af_off), color = AppBackground,
                             fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,
+                            maxLines = 2, softWrap = true,
                             modifier = Modifier.testTag("shutter-af-off-indicator"))
                     }
                 }

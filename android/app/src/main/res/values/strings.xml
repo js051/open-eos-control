@@ -198,6 +198,13 @@
     <string name="dismiss">Dismiss</string>
     <string name="battery_percent">%1$d%%</string>
     <string name="storage_ready">Card ready</string>
+    <string name="storage_ready_compact">Ready</string>
+    <string name="camera_value_awb_white_compact">AWB W</string>
+    <string name="camera_value_fluorescent_compact">Fluor.</string>
+    <string name="camera_value_custom_wb_short">Custom</string>
+    <string name="camera_value_custom_wb_compact">Custom %1$d</string>
+    <string name="camera_value_one_push_compact">One-push</string>
+    <string name="camera_value_kelvin_compact">Kelvin</string>
     <string name="storage_unknown">Card unknown</string>
     <plurals name="storage_shots_remaining">
         <item quantity="one">%1$,d shot</item>

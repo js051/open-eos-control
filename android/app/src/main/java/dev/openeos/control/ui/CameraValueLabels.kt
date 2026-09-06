@@ -23,6 +23,23 @@ internal fun localizedCameraValue(settingKey: String?, rawValue: String): String
     return stringResource(resource)
 }
 
+@Composable
+internal fun localizedHudWhiteBalance(rawValue: String): String {
+    val resource = cameraValueLabelResource("whitebalance", rawValue)
+    val customSlot = listOf(R.string.camera_value_custom_wb_1, R.string.camera_value_custom_wb_2,
+        R.string.camera_value_custom_wb_3, R.string.camera_value_custom_wb_4,
+        R.string.camera_value_custom_wb_5).indexOf(resource)
+    if (customSlot >= 0) return stringResource(R.string.camera_value_custom_wb_compact, customSlot + 1)
+    return when (resource) {
+        R.string.camera_value_awb_white -> stringResource(R.string.camera_value_awb_white_compact)
+        R.string.camera_value_fluorescent -> stringResource(R.string.camera_value_fluorescent_compact)
+        R.string.camera_value_custom_white_balance -> stringResource(R.string.camera_value_custom_wb_short)
+        R.string.camera_value_one_push_auto -> stringResource(R.string.camera_value_one_push_compact)
+        R.string.camera_value_color_temperature -> stringResource(R.string.camera_value_kelvin_compact)
+        else -> localizedCameraValue("whitebalance", rawValue)
+    }
+}
+
 internal fun movieQualityDisplayValue(
     rawValue: String,
     lightLabel: String = "Light",

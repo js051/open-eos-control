@@ -141,7 +141,9 @@ internal fun CameraAutofocusButton(state: CameraUiState, actions: CameraActions,
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Icon(painterResource(if (releaseOnly) LucideR.drawable.lucide_ic_square else LucideR.drawable.lucide_ic_focus),
                         contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-                    if (!releaseOnly) Text(stringResource(R.string.af_on_label), color = tint, fontSize = 10.sp, maxLines = 1)
+                    if (!releaseOnly) CameraHudText(stringResource(R.string.af_on_label), color = tint,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        maxFontSize = 10.sp, minFontSize = 9.sp)
                 }
             }
         }
