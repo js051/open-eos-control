@@ -4,9 +4,11 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.compose.material3.MaterialTheme
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
@@ -37,6 +39,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.CompositionLocalProvider
@@ -129,17 +132,35 @@ class CameraScreensTest {
     }
 
     @Test fun heldAfRequiresExplicitCapabilityAndDoesNotOverlapZoomAcrossViewports() {
+        compose.runOnIdle { compose.activity.enableEdgeToEdge() }
         val base = connectedState()
         val state = mutableStateOf(base)
         val size = mutableStateOf(DpSize(360.dp, 800.dp))
         val rotation = mutableFloatStateOf(0f)
+        val systemBarsVisible = mutableStateOf(false)
+        val fixtureInsets = mutableStateOf(WindowInsetsCompat.Builder().build())
         compose.setContent {
-            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
-                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
-                    DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(LocaleList("zh-TW"))) {
-                        CompositionLocalProvider(LocalCameraControlTargetRotation provides rotation.floatValue,
-                            LocalCameraControlRotation provides rotation.floatValue) {
-                            MaterialTheme { CameraControlScreen(state.value, noOpActions()) }
+            // Keep the Android View boundary outside density/configuration overrides.
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(fixtureInsets.value)) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
+                    // ForcedSize changes density; host insets no longer describe this viewport.
+                    val density = LocalDensity.current
+                    val cutout = with(density) { 32.dp.roundToPx() }
+                    val insets = WindowInsetsCompat.Builder()
+                        .setInsets(WindowInsetsCompat.Type.displayCutout(),
+                            if (size.value.width > size.value.height) Insets.of(cutout, 0, 0, 0)
+                            else Insets.of(0, cutout, 0, 0))
+                        .setInsets(WindowInsetsCompat.Type.systemBars(),
+                            if (systemBarsVisible.value) with(density) { Insets.of(0, 32.dp.roundToPx(), 0, 48.dp.roundToPx()) }
+                            else Insets.NONE)
+                        .build()
+                    SideEffect { fixtureInsets.value = insets }
+                    DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) {
+                        DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(LocaleList("zh-TW"))) {
+                            CompositionLocalProvider(LocalCameraControlTargetRotation provides rotation.floatValue,
+                                LocalCameraControlRotation provides rotation.floatValue) {
+                                MaterialTheme { CameraControlScreen(state.value, noOpActions()) }
+                            }
                         }
                     }
                 }
@@ -152,18 +173,29 @@ class CameraScreensTest {
                 matrix = CapabilityMatrix(supported = base.capabilities.matrix.supported + CameraFeature.LIVE_VIEW_MAGNIFICATION + CameraFeature.STILL_CAPTURE),
                 liveView = base.capabilities.liveView.copy(magnifications = listOf(LiveViewMagnification.X1, LiveViewMagnification.X5))))
         }
-        for ((name, viewport) in listOf("portrait" to DpSize(360.dp, 800.dp), "landscape" to DpSize(800.dp, 360.dp), "tablet" to DpSize(800.dp, 1280.dp))) {
+        for ((name, viewport) in listOf("portrait" to DpSize(360.dp, 800.dp), "landscape" to DpSize(800.dp, 360.dp),
+            "tablet" to DpSize(800.dp, 1280.dp), "portrait-bars" to DpSize(360.dp, 800.dp))) {
             for (angle in listOf(0f, 90f, 180f, 270f)) {
-                compose.runOnIdle { size.value = viewport; rotation.floatValue = angle }
+                compose.runOnIdle { size.value = viewport; rotation.floatValue = angle; systemBarsVisible.value = name == "portrait-bars" }
+                val root = compose.onNodeWithTag("camera-control-root").fetchSemanticsNode()
+                val focus = compose.onNodeWithTag("held-autofocus").fetchSemanticsNode()
+                println("held-af viewport=$name angle=$angle root=${root.boundsInRoot} density=${root.layoutInfo.density} af=${focus.boundsInRoot}")
+                with(root.layoutInfo.density) {
+                    assertEquals("Viewport width for $name", viewport.width.toPx(), root.boundsInRoot.width, 1f)
+                    assertEquals("Viewport height for $name", viewport.height.toPx(), root.boundsInRoot.height, 1f)
+                }
                 val af = compose.onNodeWithTag("held-autofocus").assertIsDisplayed().assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
                 val zoom = compose.onNodeWithTag("live-view-magnification").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
                 assertFalse("AF and zoom touch targets must not overlap", af.overlaps(zoom))
                 val header = compose.onNodeWithTag("camera-overlay-header").fetchSemanticsNode().boundsInRoot
                 val exposure = compose.onNodeWithTag("exposure-control-ISO").fetchSemanticsNode().boundsInRoot
+                val safe = fixtureInsets.value.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                assertTrue("Header respects left inset", header.left >= root.boundsInRoot.left + safe.left)
+                assertTrue("Header respects top inset", header.top >= root.boundsInRoot.top + safe.top)
                 assertTrue("AF stays below header", af.top >= header.bottom)
                 assertTrue("AF stays above exposure strip", af.bottom <= exposure.top)
             }
-            val screenshot = compose.onRoot().captureToImage().asAndroidBitmap()
+            val screenshot = compose.onNodeWithTag("camera-control-root").captureToImage().asAndroidBitmap()
             java.io.File(compose.activity.cacheDir, "held-af-$name.png").outputStream().use {
                 assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it))
             }

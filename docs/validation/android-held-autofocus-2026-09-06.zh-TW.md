@@ -30,6 +30,14 @@
 - 使用獨立 `dev.openeos.control.debug` 測試 APK，未覆蓋既有 Preview，未操作其他專案的 emulator。局部測試 APK 不等於正式發布版本。
 - 本輪沒有向實體相機發送 AF、快門、拍攝設定或其他操作命令。操作者尚無法比較機身半按結果，「連 App 後容易失焦」的原因仍未確認。
 
+### Android 16 CI 排版測試修正
+
+首輪 PR CI `34024132348` 的 API 34 通過，API 36 的 137 項測試僅新增的跨尺寸排版測試失敗。HTC 開啟測試 Activity 的 edge-to-edge 後可重現，並非模擬器開機失敗。
+
+`ForcedSize` 會調整測試密度，但不會將實機直向的安全區域自動轉成模擬橫向配置。測試改為明定沉浸取景的 32 dp 螢幕缺口，另測直向系統列顯示時的 32 dp 頂部及 48 dp 導航區域。依據 [AndroidX 測試 API](https://developer.android.com/reference/kotlin/androidx/compose/ui/test/DeviceConfigurationOverride.Companion) 與其實作，`WindowInsets` 的 Android View 邊界放在密度與字體覆寫之外，避免子 View 恢復宿主密度。
+
+仍檢查 360×800、800×360、800×1280、1.5 倍字體、繁中及四個旋轉角度。新增實際像素／密度與預期 viewport 大小一致的斷言；保留 48 dp、可見性、頂部／曝光列／放大按鈕不重疊斷言。HTC 的上述三項 AF UI 測試及既有 safe-drawing 測試再次通過。此調整只修正測試環境，未修改 App 的安全區域邏輯，且不代表橫向非沉浸小視窗已全面驗收。
+
 ## Release Assessment
 
 基線為已發布的 `v0.7.0` Development Preview。本輪是新增使用者可操作能力，版本影響為 `minor`，不是 stable；功能 PR 不更改版號或自行建立 tag。待真機按住／放開、不同機身 AF 模式與程序強殺情境另行驗收，不宣稱 Camera Connect 功能等價。
