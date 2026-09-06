@@ -212,7 +212,7 @@ class CameraRepository(
 
     suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus = backend.clickWhiteBalance(x, y)
 
-    suspend fun captureStill(): CameraStatus = backend.captureStill()
+    suspend fun captureStill(autofocus: Boolean = true): CameraStatus = backend.captureStill(autofocus)
 
     suspend fun startBulbExposure(): CameraStatus = backend.startBulbExposure()
 

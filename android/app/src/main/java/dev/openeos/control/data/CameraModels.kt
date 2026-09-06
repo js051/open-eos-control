@@ -470,6 +470,7 @@ data class CameraCapabilities(
     val profile: CameraProfile = CameraProfile.genericEos(),
     val evidence: CameraCapabilityEvidence = CameraCapabilityEvidence(),
     val heldAutofocusSupported: Boolean = false,
+    val shutterAutofocusSupported: Boolean = false,
 )
 
 data class CameraSettingControl(

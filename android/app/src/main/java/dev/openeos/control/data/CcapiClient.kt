@@ -797,6 +797,7 @@ class CcapiClient(
                 liveView = liveViewCapabilities,
                 evidence = capabilityEvidence(),
                 heldAutofocusSupported = autofocusOperation() != null,
+                shutterAutofocusSupported = directShutterOperation() != null || manualShutterOperation() != null,
             )
         } else {
             getJson("/ccapi/capabilities").toCameraCapabilities().copy(
@@ -1224,7 +1225,10 @@ class CcapiClient(
         return status()
     }
 
-    suspend fun captureStill(): CameraStatus {
+    suspend fun captureStill(autofocus: Boolean = true): CameraStatus {
+        check(autofocus || (isRealCamera && (directShutterOperation() != null || manualShutterOperation() != null))) {
+            "Camera did not advertise capture without autofocus."
+        }
         refreshTemperatureStatusForRestrictedCommand()
         requireStillCaptureAllowed()
         if (isRealCamera) {
@@ -1236,7 +1240,7 @@ class CcapiClient(
             if (directOperation != null || manualOperation == null) {
                 commandOk(
                     pathSuffix = "/shooting/control/shutterbutton",
-                    payload = JSONObject().put("af", true),
+                    payload = JSONObject().put("af", autofocus),
                     operation = directOperation,
                 )
             } else {
@@ -1244,7 +1248,7 @@ class CcapiClient(
                     press = {
                         commandOk(
                             pathSuffix = "/shooting/control/shutterbutton/manual",
-                            payload = JSONObject().put("af", true).put("action", "full_press"),
+                            payload = JSONObject().put("af", autofocus).put("action", "full_press"),
                             operation = manualOperation,
                         )
                     },
@@ -1258,7 +1262,7 @@ class CcapiClient(
                 )
             }
         } else {
-            postJson("/ccapi/capture/still", JSONObject().put("af", true))
+            postJson("/ccapi/capture/still", JSONObject().put("af", autofocus))
         }
         observedFeatures.add(CameraFeature.STILL_CAPTURE)
         return status()

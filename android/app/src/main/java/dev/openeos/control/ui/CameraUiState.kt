@@ -77,6 +77,7 @@ enum class AutofocusHoldState { IDLE, STARTING, HOLDING, RELEASING, RELEASE_FAIL
 
 data class CameraUiState(
     val autofocusHoldState: AutofocusHoldState = AutofocusHoldState.IDLE,
+    val shutterAutofocus: Boolean = true,
     val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
     val ccapiSimulatorMode: Boolean? = null,
@@ -187,6 +188,12 @@ internal val HELD_AF_INTERLOCK_OPERATIONS = setOf(
     CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING, CameraOperation.SETTING,
     CameraOperation.MAINTENANCE, CameraOperation.POWER,
 )
+
+internal fun CameraUiState.showShutterAutofocus(): Boolean = connected && captureMode == CaptureMode.PHOTO &&
+    !bulbMode && supports(CameraFeature.STILL_CAPTURE) && capabilities?.shutterAutofocusSupported == true
+
+internal fun CameraUiState.canChangeShutterAutofocus(): Boolean = showShutterAutofocus() &&
+    !busy && !isBusy(CameraOperation.CAPTURE) && status?.recording != true
 
 internal fun CameraUiState.canStartHeldAutofocus(): Boolean = connected && !previewMode &&
     capabilities?.heldAutofocusSupported == true && uiMode == UiMode.CONTROL && hudVisible &&

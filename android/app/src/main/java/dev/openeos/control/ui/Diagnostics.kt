@@ -225,6 +225,8 @@ fun buildDiagnosticReport(
         appendLine("focusInfoReadError=${state.cameraFocusInfoError}")
         appendLine("heldAutofocusSupported=${state.capabilities?.heldAutofocusSupported == true}")
         appendLine("heldAutofocusState=${state.autofocusHoldState.name}")
+        appendLine("shutterAutofocusSelectable=${state.capabilities?.shutterAutofocusSupported == true}")
+        appendLine("shutterAutofocusRequested=${state.shutterAutofocus}")
         appendLine("focusFrameCount=${state.cameraFocusInfo?.frames?.size ?: 0}")
         appendLine("focusStates=${state.cameraFocusInfo?.frames?.map { it.status.name }?.distinct()?.joinToString(",")?.ifBlank { "none" } ?: "unknown"}")
         appendLine("focusInfoAtMillis=${state.cameraFocusInfoAtMillis ?: "none"}")

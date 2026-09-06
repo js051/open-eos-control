@@ -4,6 +4,13 @@ import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.ViewModelStore
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
+import dev.openeos.control.R
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraFocusStatus
 import dev.openeos.control.data.LiveViewSize
@@ -37,6 +44,8 @@ class CameraFocusSessionTest {
     private val viewWrites = CopyOnWriteArrayList<String>()
     private val afWrites = CopyOnWriteArrayList<String>()
     private val cameraWrites = CopyOnWriteArrayList<String>()
+    private val captureAf = CopyOnWriteArrayList<Boolean>()
+    private val failNextCapture = AtomicBoolean(false)
     private val failAfStop = AtomicBoolean(false)
     private val blockAfStart = AtomicBoolean(false)
     private val afStartEntered = CountDownLatch(1)
@@ -59,6 +68,10 @@ class CameraFocusSessionTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath
+                if (request.method == "POST" && path.endsWith("/shooting/control/shutterbutton")) {
+                    captureAf += JSONObject(request.body.readUtf8()).getBoolean("af")
+                    return MockResponse().setResponseCode(if (failNextCapture.getAndSet(false)) 503 else 204)
+                }
                 if (request.method == "POST" && path.endsWith("/shooting/liveview")) {
                     val size = JSONObject(request.body.readUtf8()).getString("liveviewsize")
                     viewWrites += size
@@ -109,6 +122,7 @@ class CameraFocusSessionTest {
         val baseUrl = server.url("/").toString()
         compose.runOnIdle {
             viewModel = CameraViewModel(repository)
+            viewModel.initialize(compose.activity)
             viewModel.useDirectCameraPreset()
             viewModel.setBaseUrl(baseUrl)
             viewModel.connect()
@@ -124,6 +138,53 @@ class CameraFocusSessionTest {
         if (::viewModel.isInitialized) compose.runOnIdle { viewModel.disconnect() }
         compose.waitUntil(8_000) { !repository.isLiveViewRunning() }
         server.shutdown()
+    }
+
+    @Test
+    fun shutterAfSettingTravelsFromProductionUiToHttpAndResetsOnReconnect() {
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { OpenEosControlApp(viewModel) } }
+        compose.onNodeWithTag("camera-action-menu-button").performClick()
+        compose.onNodeWithTag("camera-action-settings").performClick()
+        compose.onNodeWithTag("shutter-autofocus-setting").assertIsOn().performClick().assertIsOff()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.dismiss)).performClick()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_without_autofocus)).performClick()
+        compose.waitUntil(8_000) { captureAf.size == 1 && !viewModel.uiState.value.busy }
+        assertEquals(listOf(false), captureAf.toList())
+        assertNull(viewModel.uiState.value.error)
+        assertTrue(afWrites.isEmpty())
+        compose.runOnIdle { viewModel.disconnect() }
+        awaitStopped()
+        assertTrue(viewModel.uiState.value.shutterAutofocus)
+        compose.runOnIdle { viewModel.connect() }
+        awaitFrame()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo)).performClick()
+        compose.waitUntil(8_000) { captureAf.size == 2 && !viewModel.uiState.value.busy }
+        assertEquals(listOf(false, true), captureAf.toList())
+    }
+
+    @Test
+    fun shutterAfCannotChangeWhileHeldOrCapturingAndFailedCaptureIsNotSuccess() {
+        compose.runOnIdle { viewModel.startHeldAutofocus() }
+        compose.waitUntil(8_000) { viewModel.uiState.value.autofocusHoldState == AutofocusHoldState.HOLDING }
+        compose.runOnIdle { viewModel.setShutterAutofocus(false); viewModel.captureStill() }
+        assertTrue(viewModel.uiState.value.shutterAutofocus)
+        assertTrue(captureAf.isEmpty())
+        compose.runOnIdle { viewModel.stopHeldAutofocus() }
+        awaitAfIdle()
+        failNextCapture.set(true)
+        compose.runOnIdle {
+            viewModel.setShutterAutofocus(false)
+            viewModel.captureStill()
+            viewModel.setShutterAutofocus(true)
+        }
+        compose.waitUntil(8_000) { viewModel.uiState.value.error != null && !viewModel.uiState.value.busy }
+        assertFalse(viewModel.uiState.value.shutterAutofocus)
+        assertEquals(listOf(false), captureAf.toList())
+        assertNull(viewModel.uiState.value.captureFeedback)
+        assertEquals(CameraOperation.CAPTURE, viewModel.uiState.value.errorOperation)
+        val report = buildDiagnosticReport(viewModel.uiState.value)
+        assertTrue(report.contains("shutterAutofocusSelectable=true"))
+        assertTrue(report.contains("shutterAutofocusRequested=false"))
     }
 
     @Test
@@ -379,7 +440,8 @@ class CameraFocusSessionTest {
             {"path":"/shooting/liveview","post":true},
             {"path":"/shooting/liveview/flip","get":true},
             {"path":"/shooting/liveview/flipdetail","get":true},
-            {"path":"/shooting/control/af","post":true}
+            {"path":"/shooting/control/af","post":true},
+            {"path":"/shooting/control/shutterbutton","post":true}
         ]}"""
     }
 }

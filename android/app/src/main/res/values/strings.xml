@@ -1,4 +1,7 @@
 <resources>
+    <string name="shutter_autofocus">Shutter autofocus</string>
+    <string name="capture_without_autofocus">Capture photo without autofocus</string>
+    <string name="shutter_af_off">AF OFF</string>
     <string name="af_on_label">AF-ON</string>
     <string name="hold_af_on">Hold autofocus (up to 30 s); release to stop</string>
     <string name="retry_af_stop">Retry stopping autofocus</string>

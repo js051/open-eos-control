@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="shutter_autofocus">快門自動對焦</string>
+    <string name="capture_without_autofocus">拍照，不啟動自動對焦</string>
+    <string name="shutter_af_off">AF 關</string>
     <string name="af_on_label">AF-ON</string>
     <string name="hold_af_on">按住自動對焦（最多 30 秒），放開停止</string>
     <string name="retry_af_stop">重試停止自動對焦</string>

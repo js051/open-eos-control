@@ -1843,6 +1843,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     val description = when {
         bulbActive -> stringResource(R.string.stop_bulb_exposure)
         bulb -> stringResource(R.string.start_bulb_exposure)
+        photo && !state.shutterAutofocus -> stringResource(R.string.capture_without_autofocus)
         photo -> stringResource(R.string.capture_photo)
         recordingActive -> stringResource(R.string.stop_recording)
         else -> stringResource(R.string.start_recording)
@@ -1883,8 +1884,17 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
                 Modifier.size(if (photo) 58.dp else 52.dp).background(
                     color,
                     if (bulbActive || recordingActive) RoundedCornerShape(8.dp) else CircleShape,
-                )
-            )
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (photo && !bulb && !state.shutterAutofocus) {
+                    CameraRotatingSquareSlot(size = 50.dp) {
+                        CameraHudText(value = stringResource(R.string.shutter_af_off), color = AppBackground,
+                            fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,
+                            modifier = Modifier.testTag("shutter-af-off-indicator"))
+                    }
+                }
+            }
         }
     }
 }
