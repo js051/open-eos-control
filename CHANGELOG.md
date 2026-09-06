@@ -4,6 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-06
+
+- Fixed Android CCAPI short AF and manual half-press cleanup so a failed release remains retryable using the original stop/release operation, never another start. Failed manual releases retain `af=false`.
+- Retained the focus interlock until release acknowledgement, blocked conflicting commands in both directions, and prevented late focus results from corrupting a replacement connection.
+- Added an accessible stop-only recovery control even when the camera lacks held AF support, with English/Traditional Chinese descriptions and tested fixed-size touch targets.
+- Validated with 507 Android unit tests, lint/builds, 132 unique HTC mock-camera UI/protocol tests, and API 34/36 CI. Physical R6 Mark III defocus remains pending; existing rotated large-font HUD clipping is not resolved by this patch. PC/iOS are version-aligned only; USB/Bridge recovery parity and new manual full-press/Bulb recovery are not claimed. Camera Import artifact 1.1.0/wire 1.0 remains unchanged.
+
 ## [0.9.0] - 2026-09-06
 
 - Added a Photo-mode shutter autofocus switch for Android direct CCAPI, gated by advertised native shutter operations. It defaults on, resets for each connection, and sends the selected boolean through the production capture path.
