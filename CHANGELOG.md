@@ -4,6 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-07
+
+- Fixed rotated and large-font Android shooting labels through consistent pre-layout text measurement, retaining fixed touch slots and complete Photo/Video labels.
+- Added compact English/Traditional Chinese white-balance and card-ready labels while preserving full accessible details. Exposure, remaining-shot counts, and duration values no longer split numeric tokens across lines.
+- Separated magnification icons and values and fitted FPS, AF, and REC/Bulb labels without changing camera commands, system rotation policy, or AF release recovery.
+- Validated 360 shooting-screen configurations and 168 white-balance cases, 507 local Android unit tests, lint/builds, 135 unique HTC offline/mock-camera UI/protocol tests, and feature API 34/36 CI. Physical R6 Mark III defocus remains pending; this is not whole-App or PC/iOS layout acceptance. PC/iOS are version-aligned only, and Camera Import artifact 1.1.0/wire 1.0 remains unchanged.
+
 ## [0.9.1] - 2026-09-06
 
 - Fixed Android CCAPI short AF and manual half-press cleanup so a failed release remains retryable using the original stop/release operation, never another start. Failed manual releases retain `af=false`.
