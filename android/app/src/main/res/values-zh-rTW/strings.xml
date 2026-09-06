@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="storage_ready_compact">就緒</string>
+    <string name="camera_value_awb_white_compact">AWB 白</string>
+    <string name="camera_value_fluorescent_compact">螢光燈</string>
+    <string name="camera_value_custom_wb_short">自訂</string>
+    <string name="camera_value_custom_wb_compact">自訂 %1$d</string>
+    <string name="camera_value_one_push_compact">單次</string>
+    <string name="camera_value_kelvin_compact">色溫</string>
     <string name="shutter_autofocus">快門自動對焦</string>
     <string name="capture_without_autofocus">拍照，不啟動自動對焦</string>
     <string name="shutter_af_off">AF 關</string>
