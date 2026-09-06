@@ -4,6 +4,13 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-06
+
+- Added capability-gated press-and-hold AF-ON for Android direct CCAPI, using the camera-advertised AF start/stop endpoint without changing camera AF modes or assuming half-press support implies held AF support.
+- Release, cancellation, window focus loss, leaving controls, backgrounding, and disconnect request AF stop. Failed stops retain a stop-only retry and block new conflicting commands; the app-side hold watchdog is not a camera-side lease or a guarantee after process death/network loss.
+- Added lifecycle, gesture, accessibility, and density-aware safe-area tests across Android API 34/36. Camera command acknowledgement remains distinct from camera-reported focus and actual photograph sharpness.
+- This feature is Android direct-CCAPI only. Release AF-ON before using the App shutter; simultaneous held AF/capture, PC/iOS/USB/Bridge parity, physical R6 Mark III validation, and the reported body-side defocus comparison remain pending.
+
 ## [0.7.0] - 2026-09-06
 
 - Added Android camera-reported selected AF frames and focus states through advertised Canon `flipdetail?kind=info`, with sparse corner rendering, crop-aware geometry, one-second expiry, bounded reads, and lifecycle-safe cancellation/invalidation.
