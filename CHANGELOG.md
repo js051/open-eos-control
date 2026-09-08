@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-08
+
 - Android: save recognized photo/video originals directly into a camera-model Pictures folder, matching the observed Camera Connect destination. Pending writes, length verification, cleanup and non-overwriting names protect downloads; unsupported RAW formats and explicit exports retain SAF.
 - Android: publish recent metadata in batches of eight, retain known dates when opening the full card, cancel off-screen thumbnails and suspend competing album requests during downloads. Large same-date groups no longer repeatedly copy the accumulated list.
 - Android-only scope. Physical R6 Mark III large-card/transfer validation and PC/iOS parity remain pending; Camera Import contract is unchanged.

@@ -4,7 +4,7 @@ English | [Traditional Chinese](README.zh-TW.md)
 
 Open EOS Control is an unofficial, open-source Canon EOS control project. It targets Canon EOS R6 Mark III first and is structured around PC, iOS, and Android clients that share the same camera-control concepts.
 
-The current development preview is [v0.9.2](docs/releases/v0.9.2.md). It is intended for testing and contributor feedback, not production camera workflows.
+The current development preview is [v0.10.0](docs/releases/v0.10.0.md). It is intended for testing and contributor feedback, not production camera workflows.
 
 This patch fixes rotated and large-font shooting labels on Android, preserving fixed control positions, complete numeric values, and accessible full white-balance details. Existing AF release recovery and camera commands are unchanged. PC and iOS are version-aligned only, not synchronized with this Android UI change. Physical AF behavior and the reported camera-body half-press defocus remain unconfirmed.
 
@@ -96,7 +96,7 @@ For a physical Android device with the local simulator, run the simulator on the
 http://<computer-lan-ip>:18080
 ```
 
-Android gallery downloads on the development branch use `Pictures/<camera model>/` for system-recognized images/videos on Android 10+, matching the observed Camera Connect destination. Original bytes and embedded metadata are preserved. Unsupported formats (including CR3 on some phones) and Android 8/9 use the system file picker; **Save to another folder** remains available. RAW display in third-party photo apps is not guaranteed. See [scope and evidence](docs/validation/android-gallery-downloads-2026-09-08.zh-TW.md).
+Android gallery downloads use `Pictures/<camera model>/` for system-recognized images/videos on Android 10+, matching the observed Camera Connect destination. Original bytes and embedded metadata are preserved. Unsupported formats (including CR3 on some phones) and Android 8/9 use the system file picker; **Save to another folder** remains available. RAW display in third-party photo apps is not guaranteed. See [scope and evidence](docs/validation/android-gallery-downloads-2026-09-08.zh-TW.md).
 
 ## Build And Test
 
