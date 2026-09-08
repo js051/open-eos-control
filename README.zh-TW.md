@@ -4,7 +4,7 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-目前的開發預覽版為 [v0.9.2](docs/releases/v0.9.2.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
+目前的開發預覽版為 [v0.10.0](docs/releases/v0.10.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
 
 本修補版修正 Android 拍攝資訊在旋轉與大字體下的裁切，保留固定控制位置、完整數字與可存取的白平衡完整名稱。既有 AF 釋放恢復與相機命令不變。PC 與 iOS 只對齊版本，未同步本輪 Android UI 修正；實機合焦行為與機身半按容易失焦的原因仍待確認。
 
@@ -96,7 +96,7 @@ http://10.0.2.2:18080
 http://<computer-lan-ip>:18080
 ```
 
-開發分支的 Android 相簿下載，在 Android 10 以上會將系統認識的圖片／影片直接存到 `Pictures/<相機型號>/`，對齊已確認的 Camera Connect 位置，保留原始位元組與內嵌 metadata。不支援的格式（包含部分手機上的 CR3）及 Android 8/9 使用系統檔案選擇器；仍提供「另存至其他資料夾」。不保證第三方相簿可顯示所有 RAW。[範圍與證據](docs/validation/android-gallery-downloads-2026-09-08.zh-TW.md)。
+Android 相簿下載在 Android 10 以上會將系統認識的圖片／影片直接存到 `Pictures/<相機型號>/`，對齊已確認的 Camera Connect 位置，保留原始位元組與內嵌 metadata。不支援的格式（包含部分手機上的 CR3）及 Android 8/9 使用系統檔案選擇器；仍提供「另存至其他資料夾」。不保證第三方相簿可顯示所有 RAW。[範圍與證據](docs/validation/android-gallery-downloads-2026-09-08.zh-TW.md)。
 
 ## 建置與測試
 
