@@ -96,6 +96,8 @@ For a physical Android device with the local simulator, run the simulator on the
 http://<computer-lan-ip>:18080
 ```
 
+Android gallery downloads on the development branch use `Pictures/<camera model>/` for system-recognized images/videos on Android 10+, matching the observed Camera Connect destination. Original bytes and embedded metadata are preserved. Unsupported formats (including CR3 on some phones) and Android 8/9 use the system file picker; **Save to another folder** remains available. RAW display in third-party photo apps is not guaranteed. See [scope and evidence](docs/validation/android-gallery-downloads-2026-09-08.zh-TW.md).
+
 ## Build And Test
 
 This repo includes `android/local.properties.example`. A local `android/local.properties` can point at your SDK path, but it is intentionally ignored by git.

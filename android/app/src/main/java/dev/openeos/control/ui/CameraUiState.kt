@@ -109,6 +109,7 @@ data class CameraUiState(
     val activeMediaDownloadName: String? = null,
     val mediaDownloadProgress: CameraMediaTransferProgress? = null,
     val lastDownloadedMediaName: String? = null,
+    val lastDownloadLocation: String? = null,
     val activeMediaUploadName: String? = null,
     val mediaUploadProgress: CameraMediaTransferProgress? = null,
     val lastUploadedMediaName: String? = null,

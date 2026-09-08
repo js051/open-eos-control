@@ -80,13 +80,15 @@ internal fun mediaItemsForDisplay(
         }
     }
     if (sort == MediaSort.CAMERA) return filtered
+    // Parse each timestamp once, not on every comparison in a large card sort.
+    val times = filtered.associate { it.id to it.captureTime.toMediaInstant() }
     return filtered.withIndex().sortedWith { left, right ->
-        compareMediaItems(left.value, right.value, sort)
+        compareMediaItems(left.value, right.value, sort, times[left.value.id], times[right.value.id])
             .takeIf { it != 0 }
             ?: if (
                 sort == MediaSort.OLDEST &&
-                left.value.captureTime.toMediaInstant() == null &&
-                right.value.captureTime.toMediaInstant() == null
+                times[left.value.id] == null &&
+                times[right.value.id] == null
             ) {
                 right.index.compareTo(left.index)
             } else {
@@ -105,6 +107,7 @@ internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort
     if (items.isEmpty()) return emptyList()
     if (sort == MediaSort.CAMERA) return listOf(MediaDateGroup(date = null, items = items))
     val groups = mutableListOf<MediaDateGroup>()
+    var groupItems = mutableListOf<CameraMediaItem>()
     items.forEach { item ->
         val heading = if (sort == MediaSort.NAME) {
             item.name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "#"
@@ -112,10 +115,10 @@ internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort
             item.mediaDate
         }
         if (groups.isNotEmpty() && groups.last().date == heading) {
-            val last = groups.removeAt(groups.lastIndex)
-            groups += last.copy(items = last.items + item)
+            groupItems += item
         } else {
-            groups += MediaDateGroup(date = heading, items = listOf(item))
+            groupItems = mutableListOf(item)
+            groups += MediaDateGroup(date = heading, items = groupItems)
         }
     }
     return groups
@@ -131,13 +134,17 @@ private val CameraMediaItem.mediaDate: String?
         }
     }
 
-private fun compareMediaItems(left: CameraMediaItem, right: CameraMediaItem, sort: MediaSort): Int {
+private fun compareMediaItems(
+    left: CameraMediaItem,
+    right: CameraMediaItem,
+    sort: MediaSort,
+    leftTime: Instant?,
+    rightTime: Instant?,
+): Int {
     if (sort == MediaSort.NAME) {
         return naturalCompare(left.name, right.name).takeIf { it != 0 }
             ?: left.id.compareTo(right.id)
     }
-    val leftTime = left.captureTime.toMediaInstant()
-    val rightTime = right.captureTime.toMediaInstant()
     if (leftTime != null || rightTime != null) {
         if (leftTime == null) return 1
         if (rightTime == null) return -1
@@ -180,7 +187,7 @@ internal fun mediaContentTypeLabel(value: String?): String? = value
     ?.trim()
     ?.takeIf { it.isNotEmpty() && it != "application/octet-stream" }
 
-private fun String?.toMediaInstant(): Instant? {
+internal fun String?.toMediaInstant(): Instant? {
     val value = this?.trim().orEmpty()
     if (value.isEmpty()) return null
     return parseDate { Instant.parse(value) }

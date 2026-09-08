@@ -117,6 +117,8 @@ internal fun MediaBatchMetadataSheet(
     onArchive: (Boolean) -> Unit,
     onRate: (Int) -> Unit,
     onRotate: (Int) -> Unit,
+    downloadSupported: Boolean = false,
+    onSaveToFolder: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -137,6 +139,14 @@ internal fun MediaBatchMetadataSheet(
                 fontWeight = FontWeight.Bold,
             )
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AppAccent)
+
+            if (downloadSupported) {
+                TextButton(onClick = onSaveToFolder, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Icon(painterResource(LucideR.drawable.lucide_ic_folder), null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text(stringResource(R.string.media_save_to_folder))
+                }
+            }
 
             if (protectSupported) {
                 Text(stringResource(R.string.media_protection), color = AppText, fontWeight = FontWeight.SemiBold)

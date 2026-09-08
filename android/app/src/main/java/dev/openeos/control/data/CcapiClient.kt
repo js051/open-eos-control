@@ -2877,7 +2877,9 @@ class CcapiClient(
         }
 
         val candidates = recentMediaCandidatePaths(mediaPathGroups, maximumItems).toMediaItems()
-        val ordered = orderRecentMediaCandidates(hydrateRecentMediaCandidates(candidates))
+        val ordered = orderRecentMediaCandidates(hydrateRecentMediaCandidates(candidates) { hydrated ->
+            onProgress(orderRecentMediaCandidates(hydrated).take(maximumItems))
+        })
             .take(maximumItems)
         onProgress(ordered)
         return ordered
@@ -2894,11 +2896,15 @@ class CcapiClient(
         return pathsByVideoKind.values.flatten()
     }
 
-    private suspend fun hydrateRecentMediaCandidates(items: List<CameraMediaItem>): List<CameraMediaItem> {
+    private suspend fun hydrateRecentMediaCandidates(
+        items: List<CameraMediaItem>,
+        onProgress: (List<CameraMediaItem>) -> Unit,
+    ): List<CameraMediaItem> {
         val hydrated = ArrayList<CameraMediaItem>(items.size)
         var consecutiveFailures = 0
         items.forEachIndexed { index, item ->
             currentCoroutineContext().ensureActive()
+            if (index > 0 && index % 8 == 0) onProgress(hydrated.toList())
             val cached = synchronized(mediaOrderingInfoCache) { mediaOrderingInfoCache[item.id] }
             if (cached != null) {
                 hydrated += item.copy(captureTime = cached.captureTime, sizeBytes = cached.sizeBytes)
@@ -2945,10 +2951,13 @@ class CcapiClient(
 
     private fun List<String>.toMediaItems(): List<CameraMediaItem> = map { path ->
             val kind = path.mediaKind()
+            val cached = synchronized(mediaOrderingInfoCache) { mediaOrderingInfoCache[path] }
             CameraMediaItem(
                 id = path,
                 name = path.substringAfterLast('/'),
                 kind = kind,
+                captureTime = cached?.captureTime,
+                sizeBytes = cached?.sizeBytes,
                 previewAvailable = path.isCcapiDisplayPreviewPath(),
                 streamAvailable = kind == "video",
             )

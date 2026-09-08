@@ -12,6 +12,15 @@ import org.junit.Test
 
 class MediaLibraryTest {
     @Test
+    fun largeUnknownDateGroupPreservesEveryItemWithoutDuplicatingGroups() {
+        val items = (1..20_000).map { media("$it", "IMG_$it.JPG") }
+        val groups = mediaGroupsForDisplay(items, MediaSort.NEWEST)
+        assertEquals(1, groups.size)
+        assertEquals(items, groups.single().items)
+        assertEquals(null, groups.single().date)
+    }
+
+    @Test
     fun captureReviewSelectsNewestKnownCaptureTime() {
         val items = listOf(
             media("old", "IMG_0001.JPG", "2026-08-13T10:00:00Z"),

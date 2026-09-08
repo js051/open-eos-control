@@ -98,6 +98,18 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         if (folder != null && !items.isNullOrEmpty()) actions.downloadMediaBatch(items, folder)
     }
 
+    fun download(items: List<CameraMediaItem>) {
+        if (items.all(::canSaveMediaToGallery)) {
+            actions.saveMediaToPhone(items)
+        } else if (items.size == 1) {
+            pendingDownload = items.single()
+            createDocument.launch(items.single().name)
+        } else {
+            pendingBatchDownload = items
+            openDownloadFolder.launch(null)
+        }
+    }
+
     state.mediaPreviewItem?.let { item ->
         val previewIndex = displayedItems.indexOfFirst { it.id == item.id }
         val viewerActionsEnabled = !state.isBusy(CameraOperation.MEDIA) && (
@@ -122,8 +134,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             onNext = { actions.previewAdjacentMedia(displayedItems, 1) },
             downloadEnabled = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
             onDownload = {
-                pendingDownload = item
-                createDocument.launch(item.name)
+                download(listOf(item))
             },
             actionsEnabled = viewerActionsEnabled,
             onActions = {
@@ -194,6 +205,12 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             onArchive = { actions.setMediaArchivedBatch(selectedItems, it) },
             onRate = { actions.setMediaRatingBatch(selectedItems, it) },
             onRotate = { actions.setMediaRotationBatch(selectedItems, it) },
+            downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+            onSaveToFolder = {
+                batchMetadataVisible = false
+                pendingBatchDownload = selectedItems
+                openDownloadFolder.launch(null)
+            },
         )
     }
 
@@ -217,6 +234,10 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 onRate = { actions.setMediaRating(item, it) },
                 onRotate = { actions.setMediaRotation(item, it) },
                 onDownload = {
+                    activeMetadataItemId = null
+                    download(listOf(item))
+                },
+                onSaveToFolder = {
                     activeMetadataItemId = null
                     pendingDownload = item
                     createDocument.launch(item.name)
@@ -253,7 +274,8 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                     downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
                     sereinSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
                     metadataSupported =
-                    state.supports(CameraFeature.MEDIA_PROTECT) ||
+                    state.supports(CameraFeature.MEDIA_DOWNLOAD) ||
+                        state.supports(CameraFeature.MEDIA_PROTECT) ||
                         state.supports(CameraFeature.MEDIA_ARCHIVE) ||
                         state.supports(CameraFeature.MEDIA_RATING) ||
                         state.supports(CameraFeature.MEDIA_ROTATE),
@@ -268,8 +290,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                     },
                     onOpenInSerein = { actions.openInSerein(selectedItems) },
                     onDownload = {
-                        pendingBatchDownload = selectedItems
-                        openDownloadFolder.launch(null)
+                        download(selectedItems)
                     },
                     onEdit = { batchMetadataVisible = true },
                     onDelete = { pendingBatchDelete = selectedItems },
@@ -419,6 +440,14 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         state.lastDownloadedMediaName?.let { name ->
             Text(
                 stringResource(R.string.media_downloaded, name),
+                color = AppSuccess,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
+        state.lastDownloadLocation?.let { location ->
+            Text(
+                stringResource(R.string.media_saved_location, location),
                 color = AppSuccess,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )
@@ -584,6 +613,7 @@ private fun MediaMetadataSheet(
     onRate: (Int) -> Unit,
     onRotate: (Int) -> Unit,
     onDownload: () -> Unit,
+    onSaveToFolder: () -> Unit,
     onOpenInSerein: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -752,6 +782,11 @@ private fun MediaMetadataSheet(
                     )
                     Spacer(Modifier.size(8.dp))
                     Text(stringResource(R.string.download_media, item.name), color = AppText)
+                }
+                TextButton(onClick = onSaveToFolder, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Icon(painterResource(LucideR.drawable.lucide_ic_folder), null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text(stringResource(R.string.media_save_to_folder))
                 }
             }
 

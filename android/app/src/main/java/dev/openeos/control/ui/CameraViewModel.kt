@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.SystemClock
+import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
@@ -1303,7 +1304,9 @@ class CameraViewModel(
 
     fun refreshMedia() {
         val initialState = _uiState.value
-        if (!initialState.connected || initialState.previewMode || initialState.mediaLibraryLoading) return
+        if (!initialState.connected || initialState.previewMode || initialState.mediaLibraryLoading ||
+            initialState.isBusy(CameraOperation.MEDIA)
+        ) return
         val scope = initialState.mediaLibraryScope
         val generation = ++mediaLibraryGeneration
         cancelMediaThumbnailLoads()
@@ -1330,6 +1333,7 @@ class CameraViewModel(
                 if (generation != mediaLibraryGeneration) return@launch
                 val batch = items.toMediaLibraryBatch(scope)
                 val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
+                if (generation != mediaLibraryGeneration) return@launch
                 _uiState.update {
                     it.copy(
                         mediaItems = batch.items,
@@ -1337,6 +1341,7 @@ class CameraViewModel(
                         mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
                         capabilities = capabilities ?: it.capabilities,
                         lastDownloadedMediaName = null,
+                        lastDownloadLocation = null,
                         lastUploadedMediaName = null,
                         lastDeletedMediaName = null,
                         lastMediaBatchResult = null,
@@ -1353,6 +1358,7 @@ class CameraViewModel(
             } catch (exception: Exception) {
                 exception.printStackTrace()
                 _uiState.update {
+                    if (generation != mediaLibraryGeneration) return@update it
                     it.copy(
                         mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED,
                         error = formatException(exception),
@@ -1402,7 +1408,7 @@ class CameraViewModel(
 
         val generation = mediaThumbnailGeneration
         _uiState.update { it.copy(mediaThumbnailLoadingIds = it.mediaThumbnailLoadingIds + item.id) }
-        mediaThumbnailJobs[item.id] = viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val bitmap = mediaThumbnailSemaphore.withPermit { fetchMediaThumbnailBitmap(item) }
                 if (
@@ -1424,7 +1430,7 @@ class CameraViewModel(
             } catch (_: Exception) {
                 // Leaving the item retryable lets a later viewport entry recover from camera Wi-Fi timeouts.
             } finally {
-                if (generation == mediaThumbnailGeneration) {
+                if (generation == mediaThumbnailGeneration && mediaThumbnailJobs[item.id] === coroutineContext[Job]) {
                     mediaThumbnailJobs.remove(item.id)
                     _uiState.update { current ->
                         current.copy(mediaThumbnailLoadingIds = current.mediaThumbnailLoadingIds - item.id)
@@ -1432,6 +1438,13 @@ class CameraViewModel(
                 }
             }
         }
+        mediaThumbnailJobs[item.id] = job
+        job.start()
+    }
+
+    fun cancelMediaThumbnail(item: CameraMediaItem) {
+        mediaThumbnailJobs.remove(item.id)?.cancel()
+        _uiState.update { it.copy(mediaThumbnailLoadingIds = it.mediaThumbnailLoadingIds - item.id) }
     }
 
     fun openMediaPreview(item: CameraMediaItem) {
@@ -1653,6 +1666,7 @@ class CameraViewModel(
                 activeMediaDownloadName = item.name,
                 mediaDownloadProgress = CameraMediaTransferProgress(0L, item.sizeBytes),
                 lastDownloadedMediaName = null,
+                lastDownloadLocation = null,
                 lastMediaBatchResult = null,
             )
         }
@@ -1685,7 +1699,7 @@ class CameraViewModel(
         }
     }
 
-    fun downloadMediaBatch(context: Context, items: List<CameraMediaItem>, destinationTree: Uri) {
+    fun downloadMediaBatch(context: Context, items: List<CameraMediaItem>, destinationTree: Uri? = null) {
         val state = _uiState.value
         val selectedItems = items.distinctBy(CameraMediaItem::id)
         if (
@@ -1693,10 +1707,12 @@ class CameraViewModel(
             state.previewMode ||
             state.isBusy(CameraOperation.MEDIA) ||
             !state.supports(CameraFeature.MEDIA_DOWNLOAD) ||
+            (destinationTree == null && !selectedItems.all(::canSaveMediaToGallery)) ||
             mediaDownloadJob != null
         ) return
         val resolver = context.applicationContext.contentResolver
-        _uiState.update { it.copy(lastDownloadedMediaName = null, lastMediaBatchResult = null) }
+        _uiState.update { it.copy(lastDownloadedMediaName = null, lastMediaBatchResult = null, lastDownloadLocation = null) }
+        cancelMediaLibraryLoad()
         val job = launchCameraOperation(CameraOperation.MEDIA) {
             try {
                 val result = executeMediaBatch(
@@ -1716,10 +1732,19 @@ class CameraViewModel(
                     },
                 ) { item ->
                     retryMediaRead {
+                        if (destinationTree == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            CameraMediaGalleryStore(resolver).save(state.info?.model, item) { output ->
+                                repository.downloadMedia(item, output) { progress ->
+                                    _uiState.update { current -> current.copy(mediaDownloadProgress = progress) }
+                                }
+                            }
+                            _uiState.update { it.copy(lastDownloadLocation = cameraGalleryPath(state.info?.model)) }
+                            return@retryMediaRead
+                        }
                         var destination: Uri? = null
                         try {
                             withContext(Dispatchers.IO) {
-                                destination = createMediaDocument(resolver, destinationTree, item)
+                                destination = createMediaDocument(resolver, requireNotNull(destinationTree), item)
                                 val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
                                     ?: error("Android could not open the selected download destination.")
                                 BufferedOutputStream(rawOutput).use { output ->
@@ -2733,6 +2758,7 @@ class CameraViewModel(
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
+        lastDownloadLocation = null,
         activeMediaUploadName = null,
         mediaUploadProgress = null,
         lastUploadedMediaName = null,

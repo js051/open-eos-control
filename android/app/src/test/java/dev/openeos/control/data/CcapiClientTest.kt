@@ -4132,6 +4132,38 @@ class CcapiClientTest {
     }
 
     @Test
+    fun recentMediaPublishesFirstEightBeforeReadingRemainingInfoAndReusesDatesOnFullCard() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        val paths = (1..20).map { "/ccapi/ver140/contents/card1/IMG_${it.toString().padStart(4, '0')}.JPG" }
+        val listing = """{"path":[${paths.joinToString(",") { "\"$it\"" }}]}"""
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse(listing))
+        repeat(20) { index ->
+            server.enqueue(jsonResponse("""{"lastmodifieddate":"2026-08-${(20 - index).toString().padStart(2, '0')}T10:00:00Z","filesize":1234}"""))
+        }
+        val batches = mutableListOf<Pair<Int, Int>>()
+        val recent = client.listMedia(20) { batches += it.size to server.requestCount }
+        assertEquals(listOf(8 to 10, 16 to 18, 20 to 22), batches)
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse(listing))
+        val full = client.listMedia()
+        assertEquals(recent.map { it.captureTime }, full.map { it.captureTime })
+        assertEquals(24, server.requestCount)
+    }
+
+    @Test
+    fun cancellingAfterFirstRecentBatchStopsRemainingMetadataRequests() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        val paths = (1..20).joinToString(",") { "\"/ccapi/ver140/contents/card1/IMG_$it.JPG\"" }
+        server.enqueue(jsonResponse("""{"path":[$paths]}"""))
+        repeat(8) { server.enqueue(jsonResponse("""{"lastmodifieddate":"2026-08-10T10:00:00Z"}""")) }
+        val error = runCatching { client.listMedia(20) { throw CancellationException("stop") } }.exceptionOrNull()
+        assertTrue(error is CancellationException)
+        assertEquals(10, server.requestCount)
+    }
+
+    @Test
     fun mediaDownloadPreservesTransportFailureForSafeOuterRetry() = runTest {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
         val item = CameraMediaItem("timeout.jpg", "timeout.jpg", "image")
