@@ -1,4 +1,6 @@
 <resources>
+    <string name="media_saved_location">Saved to %1$s</string>
+    <string name="media_save_to_folder">Save to another folder</string>
     <string name="shutter_autofocus">Shutter autofocus</string>
     <string name="capture_without_autofocus">Capture photo without autofocus</string>
     <string name="shutter_af_off">AF OFF</string>

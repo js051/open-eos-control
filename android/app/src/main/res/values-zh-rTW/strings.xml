@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="media_saved_location">已儲存至 %1$s</string>
+    <string name="media_save_to_folder">另存至其他資料夾</string>
     <string name="storage_ready_compact">就緒</string>
     <string name="camera_value_awb_white_compact">AWB 白</string>
     <string name="camera_value_fluorescent_compact">螢光燈</string>

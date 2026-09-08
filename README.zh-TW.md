@@ -96,6 +96,8 @@ http://10.0.2.2:18080
 http://<computer-lan-ip>:18080
 ```
 
+開發分支的 Android 相簿下載，在 Android 10 以上會將系統認識的圖片／影片直接存到 `Pictures/<相機型號>/`，對齊已確認的 Camera Connect 位置，保留原始位元組與內嵌 metadata。不支援的格式（包含部分手機上的 CR3）及 Android 8/9 使用系統檔案選擇器；仍提供「另存至其他資料夾」。不保證第三方相簿可顯示所有 RAW。[範圍與證據](docs/validation/android-gallery-downloads-2026-09-08.zh-TW.md)。
+
 ## 建置與測試
 
 repo 內有 `android/local.properties.example`。你可以在本機建立 `android/local.properties` 指到 Android SDK 路徑；這個檔案已經被 git ignore。
