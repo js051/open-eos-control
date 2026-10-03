@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.ViewModelStore
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -250,6 +251,35 @@ class CameraFocusSessionTest {
         assertTrue(viewModel.uiState.value.shutterAutofocus)
         compose.runOnIdle { viewModel.connect() }
         awaitFrame()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo)).performClick()
+        compose.waitUntil(8_000) { captureAf.size == 2 && !viewModel.uiState.value.busy }
+        assertEquals(listOf(false, true), captureAf.toList())
+    }
+
+    /** Diagnostic counterpart: only the screen composition is absent during the same reconnect. */
+    @Test
+    fun reconnectReadinessWithoutScreenRecompositionKeepsTheSameShutterContract() {
+        val showApp = mutableStateOf(true)
+        compose.setContent {
+            if (showApp.value) MaterialTheme(colorScheme = OpenEosColorScheme) { OpenEosControlApp(viewModel) }
+        }
+        compose.onNodeWithTag("camera-action-menu-button").performClick()
+        compose.onNodeWithTag("camera-action-settings").performClick()
+        compose.onNodeWithTag("shutter-autofocus-setting").assertIsOn().performClick().assertIsOff()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.dismiss)).performClick()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_without_autofocus)).performClick()
+        compose.waitUntil(8_000) { captureAf.size == 1 && !viewModel.uiState.value.busy }
+        assertEquals(listOf(false), captureAf.toList())
+        assertNull(viewModel.uiState.value.error)
+        assertTrue(afWrites.isEmpty())
+        compose.runOnIdle { showApp.value = false }
+        compose.waitForIdle()
+        compose.runOnIdle { viewModel.disconnect() }
+        awaitStopped()
+        assertTrue(viewModel.uiState.value.shutterAutofocus)
+        compose.runOnIdle { viewModel.connect() }
+        awaitFrame()
+        compose.runOnIdle { showApp.value = true }
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo)).performClick()
         compose.waitUntil(8_000) { captureAf.size == 2 && !viewModel.uiState.value.busy }
         assertEquals(listOf(false, true), captureAf.toList())
@@ -537,6 +567,17 @@ class CameraFocusSessionTest {
                 appendLine("captureAf=${captureAf.toList()}; focusReads=${focusReads.get()}")
                 appendLine("recentRequestTrace (elapsedRealtime ms):")
                 requestTrace.takeLast(128).forEach { appendLine(it) }
+                appendLine("Relevant thread stacks at timeout:")
+                Thread.getAllStackTraces().entries
+                    .filter { (thread, _) ->
+                        thread.name == "main" || thread.name.startsWith("DefaultDispatcher-worker") ||
+                            thread.name.startsWith("OkHttp") || thread.name.startsWith("MockWebServer")
+                    }
+                    .sortedBy { it.key.name }
+                    .forEach { (thread, stack) ->
+                        appendLine("${thread.name} (${thread.state})")
+                        stack.forEach { appendLine("  at $it") }
+                    }
             }
             exception.addSuppressed(AssertionError(diagnostics))
             runCatching {
