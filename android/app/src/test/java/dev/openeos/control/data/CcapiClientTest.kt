@@ -925,12 +925,29 @@ class CcapiClientTest {
     fun startLiveViewDoesNotHideServerFailuresBehindParameterFallback() = runTest {
         client.forceRealCamera()
         server.enqueue(MockResponse().setResponseCode(503).setBody("camera busy"))
+        // A failed start still owns its compensating stop; acknowledge that cleanup explicitly.
+        server.enqueue(MockResponse().setResponseCode(204))
 
         val failure = runCatching { client.startLiveView() }.exceptionOrNull()
 
         assertTrue(failure is IllegalStateException)
+        assertFalse(failure is CcapiLiveViewReleaseException)
         assertTrue(failure?.message.orEmpty().contains("HTTP 503"))
-        assertEquals(1, server.requestCount)
+        assertTrue(failure?.message.orEmpty().contains("camera busy"))
+        assertFalse(client.liveViewStopRequired)
+        assertEquals(2, server.requestCount)
+        val start = server.takeRequest()
+        val stop = server.takeRequest()
+        assertEquals("POST", start.method)
+        assertEquals("/ccapi/ver100/shooting/liveview", start.path)
+        val startBody = JSONObject(start.body.readUtf8())
+        assertEquals(2, startBody.length())
+        assertEquals("on", startBody.getString("cameradisplay"))
+        assertEquals("medium", startBody.getString("liveviewsize"))
+        assertEquals("DELETE", stop.method)
+        assertEquals(start.path, stop.path)
+        assertEquals("", stop.body.readUtf8())
+        assertNull("HTTP 503 must not trigger parameter fallback or another start", server.takeRequest(100, TimeUnit.MILLISECONDS))
     }
 
     @Test
