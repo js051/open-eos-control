@@ -4,6 +4,14 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android: keep the selected media-library scope unchanged while a media operation is active, so a recent result cannot be mislabeled as a completed full-card listing. Scope controls become available again after the operation finishes.
+- Android: cancel and join unfinished card traversal before single-file and batch downloads, including event-triggered refreshes; cancelling media work now cancels its active JSON, thumbnail, and display HTTP reads.
+- Android: isolate in-flight operations from replacement camera sessions and discard stale status reads after a newer command, without replaying camera writes.
+- Android direct CCAPI: prevent automatic HTTP replay of camera mutations after ambiguous failures. Retain unconfirmed full-press/Bulb releases and provide a stop-only retry with a persistent exposure warning; disconnect preserves an independent warning about the previous camera.
+- Android direct CCAPI: retain Live View stop ownership before starting, preserve failed stops, and bound/cancel stalled multipart opening requests rather than hiding cleanup failures behind transport fallback.
+- Android: reject empty or truncated originals against known media/header lengths for CCAPI and Desktop Bridge, and clarify that CCAPI setup differs from Camera Connect smartphone pairing.
+- These changes are locally verified Development Preview work. Physical-camera behavior, optical focus, other camera models' storage paths, PC/iOS parity, and exact-head CI remain separate validation requirements.
+
 ## [0.10.0] - 2026-09-08
 
 - Android: save recognized photo/video originals directly into a camera-model Pictures folder, matching the observed Camera Connect destination. Pending writes, length verification, cleanup and non-overwriting names protect downloads; unsupported RAW formats and explicit exports retain SAF.
