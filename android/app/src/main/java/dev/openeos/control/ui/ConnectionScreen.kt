@@ -134,6 +134,9 @@ private fun CcapiConnectionControls(
         value = state.baseUrl,
         onValueChange = actions.setBaseUrl,
         label = { Text(stringResource(R.string.camera_url)) },
+        supportingText = if (state.ccapiSimulatorMode == true) null else {
+            { Text(stringResource(R.string.ccapi_setup_hint), color = AppSubtleText) }
+        },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )

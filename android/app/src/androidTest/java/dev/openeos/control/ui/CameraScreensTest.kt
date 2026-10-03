@@ -672,7 +672,17 @@ class CameraScreensTest {
     fun disconnectedStateShowsDedicatedConnectionScreen() {
         compose.setContent { MaterialTheme { ConnectionScreen(CameraUiState(), noOpActions()) } }
         compose.onNodeWithText(resourceText(R.string.connect_title)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.ccapi_setup_hint)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.preview_interface)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.connect)).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun simulatorConnectionDoesNotSuggestPhysicalCameraPairing() {
+        compose.setContent {
+            MaterialTheme { ConnectionScreen(CameraUiState(ccapiSimulatorMode = true), noOpActions()) }
+        }
+        compose.onNodeWithText(resourceText(R.string.ccapi_setup_hint)).assertDoesNotExist()
         compose.onNodeWithText(resourceText(R.string.connect)).performScrollTo().assertIsDisplayed()
     }
 

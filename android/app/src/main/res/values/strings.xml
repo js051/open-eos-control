@@ -41,6 +41,7 @@
     <string name="preset_https">HTTPS</string>
     <string name="preset_simulator">Simulator</string>
     <string name="camera_url">Camera URL</string>
+    <string name="ccapi_setup_hint">Enable Camera Control API on a supported camera, join its network, then enter the URL it shows. Camera Connect smartphone pairing uses a different mode.</string>
     <string name="authentication">Authentication</string>
     <string name="username">Username</string>
     <string name="password">Password</string>
