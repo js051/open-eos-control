@@ -1,10 +1,15 @@
 package dev.openeos.control.data
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.OutputStream
 import java.io.InputStream
+import kotlin.coroutines.coroutineContext
 
 class CameraRepository(
     backendFactory: CameraBackendFactory = CameraBackendFactory(),
@@ -25,6 +30,9 @@ class CameraRepository(
     fun nativeLiveViewSession(): NativeLiveViewSession? = backend.nativeLiveViewSession
 
     fun isLiveViewRunning(): Boolean = liveViewRunning
+
+    // Stop ownership is distinct from confirmed running: a lost start response can leave only cleanup.
+    fun isLiveViewStopRequired(): Boolean = backend.liveViewStopRequired
 
     fun configureAndroidNetworkRouting(context: Context) {
         check(!active) { "Camera network routing cannot change while connected." }
@@ -120,11 +128,14 @@ class CameraRepository(
                     if (!backend.prefersBitmapLiveViewFrames) {
                         liveViewFrameUrl = nextLiveViewFrameUrl()
                     }
+                } catch (exception: CancellationException) {
+                    throw exception
                 } catch (exception: Exception) {
                     // A session can still provide settings and status without live view.
                     liveViewStartError = "${exception.javaClass.simpleName}: ${exception.message ?: "Live View start failed"}"
                 }
             }
+            coroutineContext.ensureActive()
             CameraSession(
                 transport = backend.transport,
                 connection = backend.connection,
@@ -139,7 +150,8 @@ class CameraRepository(
                 liveViewStartError = liveViewStartError,
             )
         } catch (exception: Exception) {
-            runCatching { backend.close() }
+            // Cancellation still owns any partly initialized backend until cleanup completes.
+            withContext(NonCancellable) { runCatching { backend.close() } }
             active = false
             liveViewRunning = false
             activeInfo = null
@@ -218,6 +230,11 @@ class CameraRepository(
 
     suspend fun stopBulbExposure(): CameraStatus = backend.stopBulbExposure()
 
+    suspend fun retryShutterRelease() = connectionMutex.withLock {
+        check(active) { "Camera is disconnected." }
+        backend.retryShutterRelease()
+    }
+
     suspend fun autofocus(): CameraStatus = connectionMutex.withLock {
         check(active) { "Camera is disconnected." }
         backend.autofocus()
@@ -293,7 +310,7 @@ class CameraRepository(
     suspend fun setLiveViewEnabled(enabled: Boolean, restart: Boolean = false): LiveViewRequest =
         connectionMutex.withLock {
             check(active) { "Camera is not connected." }
-            if (liveViewRunning && (!enabled || restart)) {
+            if ((liveViewRunning || backend.liveViewStopRequired) && (!enabled || restart)) {
                 // Retain ownership on failure so a later stop/disconnect can retry cleanup.
                 backend.stopLiveView()
                 liveViewRunning = false

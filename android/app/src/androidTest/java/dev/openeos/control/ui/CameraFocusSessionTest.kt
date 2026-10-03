@@ -1,10 +1,12 @@
 package dev.openeos.control.ui
 
 import android.graphics.Bitmap
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.ViewModelStore
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsDisplayed
@@ -33,6 +35,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -51,6 +54,7 @@ class CameraFocusSessionTest {
     private val advertiseNativeAf = AtomicBoolean(true)
     private val failManualRelease = AtomicBoolean(false)
     private val cameraWrites = CopyOnWriteArrayList<String>()
+    private val requestTrace = CopyOnWriteArrayList<String>()
     private val captureAf = CopyOnWriteArrayList<Boolean>()
     private val failNextCapture = AtomicBoolean(false)
     private val failAfStop = AtomicBoolean(false)
@@ -75,6 +79,7 @@ class CameraFocusSessionTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath
+                requestTrace += "${SystemClock.elapsedRealtime()} ${request.method} $path"
                 if (request.method == "POST" && path.endsWith("/shooting/control/shutterbutton/manual")) {
                     val body = JSONObject(request.body.readUtf8())
                     val action = body.getString("action")
@@ -510,8 +515,35 @@ class CameraFocusSessionTest {
         compose.waitUntil(8_000) { viewModel.uiState.value.cameraFocusInfo != null }
     }
 
-    private fun awaitFrame() = compose.waitUntil(8_000) {
-        viewModel.uiState.value.liveViewBitmap != null && !viewModel.uiState.value.busy
+    private fun awaitFrame() {
+        try {
+            compose.waitUntil(8_000) {
+                viewModel.uiState.value.liveViewBitmap != null && !viewModel.uiState.value.busy
+            }
+        } catch (exception: ComposeTimeoutException) {
+            val state = viewModel.uiState.value
+            val diagnostics = buildString {
+                appendLine("awaitFrame timed out before teardown at ${SystemClock.elapsedRealtime()} ms")
+                appendLine("connected=${state.connected}; hasInfo=${state.info != null}; previewMode=${state.previewMode}")
+                appendLine("hasBitmap=${state.liveViewBitmap != null}; hasFrameUrl=${state.liveViewFrameUrl != null}; hasNativeSession=${state.nativeLiveViewSession != null}")
+                appendLine("busy=${state.busy}; pendingOperations=${state.pendingOperations}")
+                appendLine("shutterReleaseUnconfirmed=${state.shutterReleaseUnconfirmed}; bulbExposureActive=${state.bulbExposureActive}; autofocusHoldState=${state.autofocusHoldState}")
+                appendLine("autoRefresh=${state.liveViewAutoRefresh}; source=${state.liveViewSource}; size=${state.liveViewSize}; temperatureAllowed=${state.liveViewTemperatureAllowed}")
+                appendLine("repositoryRunning=${repository.isLiveViewRunning()}; stopRequired=${repository.isLiveViewStopRequired()}")
+                appendLine("activityLifecycle=${compose.activity.lifecycle.currentState}")
+                appendLine("errorOperation=${state.errorOperation}; error=${state.error}")
+                appendLine("cameraWrites=${cameraWrites.toList()}")
+                appendLine("viewWrites=${viewWrites.toList()}; afWrites=${afWrites.toList()}; manualWrites=${manualWrites.toList()}")
+                appendLine("captureAf=${captureAf.toList()}; focusReads=${focusReads.get()}")
+                appendLine("recentRequestTrace (elapsedRealtime ms):")
+                requestTrace.takeLast(128).forEach { appendLine(it) }
+            }
+            exception.addSuppressed(AssertionError(diagnostics))
+            runCatching {
+                File(compose.activity.cacheDir, "focus-await-frame-timeout.txt").writeText(diagnostics)
+            }.onFailure(exception::addSuppressed)
+            throw exception
+        }
     }
 
     private fun awaitStopped() = compose.waitUntil(8_000) {

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="live_view_release_unconfirmed">尚未確認 Live View 已停止。請先關閉 Live View，再重試。</string>
+    <string name="shutter_disconnect_warning">上一台相機的快門釋放尚未確認，請在機身確認曝光已停止。</string>
+    <string name="retry_shutter_release">重試釋放快門，只發送停止</string>
+    <string name="shutter_release_retry_short">重試停止</string>
+    <string name="shutter_release_unconfirmed">曝光可能仍在進行。請按「重試停止」。</string>
+
     <string name="media_saved_location">已儲存至 %1$s</string>
     <string name="media_save_to_folder">另存至其他資料夾</string>
     <string name="storage_ready_compact">就緒</string>

@@ -36,7 +36,7 @@ enum class ConnectionTarget { CCAPI, DESKTOP_BRIDGE }
 
 enum class SettingPicker { ISO, SHUTTER, APERTURE, WHITE_BALANCE, LIVE_VIEW, MONITOR, MORE, LANGUAGE }
 
-enum class CameraOperation { CONNECT, STATUS, SETTING, DIRECTORY, CLOCK, MAINTENANCE, POWER, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE }
+enum class CameraOperation { CONNECT, STATUS, SETTING, DIRECTORY, CLOCK, MAINTENANCE, POWER, CAPTURE, RECORDING, FOCUS, LIVE_VIEW, MEDIA, USB, BRIDGE, SHUTTER_RELEASE }
 
 enum class MediaLibraryLoadStatus { NOT_LOADED, LOADING, COMPLETE, CANCELLED, FAILED }
 
@@ -78,6 +78,8 @@ enum class AutofocusHoldState { IDLE, STARTING, HOLDING, RELEASING, RELEASE_FAIL
 data class CameraUiState(
     val autofocusHoldState: AutofocusHoldState = AutofocusHoldState.IDLE,
     val shutterAutofocus: Boolean = true,
+    val shutterReleaseUnconfirmed: Boolean = false,
+    val shutterDisconnectWarning: Boolean = false,
     val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
     val ccapiSimulatorMode: Boolean? = null,
@@ -160,7 +162,7 @@ data class CameraUiState(
         capabilities?.matrix?.supports(feature) ?: false
 
     val busy: Boolean
-        get() = pendingOperations.isNotEmpty() || bulbExposureActive
+        get() = pendingOperations.isNotEmpty() || bulbExposureActive || shutterReleaseUnconfirmed
 
     val bulbExposureActive: Boolean
         get() = status?.bulbExposureActive == true
@@ -179,11 +181,21 @@ data class CameraUiState(
         get() = status?.temperature?.movieRecordingAllowed != false
 
     fun isBusy(operation: CameraOperation): Boolean =
-        operation in pendingOperations || (bulbExposureActive && operation != CameraOperation.CAPTURE) ||
+        operation in pendingOperations ||
+            ((shutterReleaseUnconfirmed || CameraOperation.SHUTTER_RELEASE in pendingOperations) &&
+                operation !in setOf(CameraOperation.SHUTTER_RELEASE, CameraOperation.STATUS, CameraOperation.USB, CameraOperation.BRIDGE)) ||
+            (bulbExposureActive && operation != CameraOperation.CAPTURE &&
+                !(shutterReleaseUnconfirmed && operation in setOf(CameraOperation.SHUTTER_RELEASE, CameraOperation.STATUS))) ||
             (CameraOperation.FOCUS in pendingOperations && operation in HELD_AF_INTERLOCK_OPERATIONS) ||
             (operation == CameraOperation.FOCUS && HELD_AF_INTERLOCK_OPERATIONS.any { it in pendingOperations }) ||
             (autofocusHoldState != AutofocusHoldState.IDLE && operation in HELD_AF_INTERLOCK_OPERATIONS) ||
             (CameraOperation.LIVE_VIEW in pendingOperations && operation in LIVE_VIEW_INTERLOCK_OPERATIONS)
+}
+
+internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
+    shutterReleaseUnconfirmed -> this
+    error != null -> copy(error = null, errorOperation = null)
+    else -> copy(errorOperation = null, shutterDisconnectWarning = false)
 }
 
 internal val HELD_AF_INTERLOCK_OPERATIONS = setOf(
@@ -205,6 +217,7 @@ internal fun CameraUiState.canStartHeldAutofocus(): Boolean = connected && !prev
 
 internal val LIVE_VIEW_INTERLOCK_OPERATIONS = setOf(
     CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING, CameraOperation.MAINTENANCE,
+    CameraOperation.SHUTTER_RELEASE,
 )
 
 data class FocusPoint(
@@ -224,7 +237,7 @@ internal fun CameraUiState.nextLiveViewMagnification(): LiveViewMagnification? {
 }
 
 internal fun captureModeSwitchEnabled(state: CameraUiState): Boolean =
-    state.autofocusHoldState == AutofocusHoldState.IDLE &&
+    !state.shutterReleaseUnconfirmed && state.autofocusHoldState == AutofocusHoldState.IDLE &&
     CameraOperation.FOCUS !in state.pendingOperations &&
     state.status?.recording != true &&
         !state.bulbExposureActive &&

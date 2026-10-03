@@ -11,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -18,6 +19,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
@@ -27,6 +30,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.openeos.control.R
 import dev.openeos.control.data.LiveViewSize
 import dev.openeos.control.data.LiveViewSource
 import dev.openeos.control.data.LiveViewMagnification
@@ -125,6 +129,7 @@ fun OpenEosControlApp(
         sleepCamera = viewModel::sleepCamera,
         captureStill = viewModel::captureStill,
         toggleBulbExposure = viewModel::toggleBulbExposure,
+        retryShutterRelease = viewModel::retryShutterRelease,
         autofocus = viewModel::autofocus,
         startHeldAutofocus = viewModel::startHeldAutofocus,
         setShutterAutofocus = viewModel::setShutterAutofocus,
@@ -202,8 +207,20 @@ fun OpenEosControlApp(
                         actions = actions,
                     )
                 }
-                Box(Modifier.align(Alignment.BottomCenter)) {
-                    ErrorBanner(state.error, actions.clearError)
+                Box(
+                    Modifier.align(if (state.shutterReleaseUnconfirmed) Alignment.TopCenter else Alignment.BottomCenter)
+                        .padding(top = if (state.shutterReleaseUnconfirmed) CAMERA_OVERLAY_HEADER_HEIGHT else 0.dp),
+                ) {
+                    ErrorBanner(
+                        when {
+                            state.shutterReleaseUnconfirmed -> stringResource(R.string.shutter_release_unconfirmed)
+                            state.error != null -> state.error
+                            state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
+                            else -> null
+                        },
+                        actions.clearError,
+                        dismissible = !state.shutterReleaseUnconfirmed,
+                    )
                 }
             }
             LanguageSettingsSheet(state, actions)
@@ -291,6 +308,7 @@ data class CameraActions(
     val sleepCamera: () -> Unit = {},
     val captureStill: () -> Unit,
     val toggleBulbExposure: () -> Unit = {},
+    val retryShutterRelease: () -> Unit = {},
     val autofocus: () -> Unit,
     val startHeldAutofocus: () -> Unit = {},
     val setShutterAutofocus: (Boolean) -> Unit = {},
