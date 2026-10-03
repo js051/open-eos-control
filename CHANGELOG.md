@@ -9,6 +9,8 @@ All notable release-level changes to Open EOS Control are documented here.
 - Android: isolate in-flight operations from replacement camera sessions and discard stale status reads after a newer command, without replaying camera writes.
 - Android direct CCAPI: prevent automatic HTTP replay of camera mutations after ambiguous failures. Retain unconfirmed full-press/Bulb releases and provide a stop-only retry with a persistent exposure warning; disconnect preserves an independent warning about the previous camera.
 - Android direct CCAPI: retain Live View stop ownership before starting, preserve failed stops, and bound/cancel stalled multipart opening requests rather than hiding cleanup failures behind transport fallback.
+- Android direct CCAPI: cancel blocked identity-fallback and RTP session-description reads without trying another discovery version, creating a native session, or switching Live View sources after cancellation.
+- Android: cancel first-frame and post-command preview reads when preview stops or the app backgrounds, without cancelling an unacknowledged shutter release. Explicit restarts can release a blocked frame before waiting for the existing transition lock; native video keeps its own presentation ownership.
 - Android: reject empty or truncated originals against known media/header lengths for CCAPI and Desktop Bridge, and clarify that CCAPI setup differs from Camera Connect smartphone pairing.
 - These changes are locally verified Development Preview work. Physical-camera behavior, optical focus, other camera models' storage paths, PC/iOS parity, and exact-head CI remain separate validation requirements.
 

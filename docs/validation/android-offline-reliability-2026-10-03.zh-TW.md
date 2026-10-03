@@ -1,5 +1,7 @@
 # Android 離線控制可靠性與 Camera Connect 流程對照
 
+本文件保留初次本地交付時的驗證快照。後續推送、雙 API 完整 CI、原重連案例的新增證據，以及再發現的讀取取消修復，見[後續驗證](android-read-cancellation-followup-2026-10-03.zh-TW.md)。下文的 552 項與 CPU-only 失敗紀錄不會被後來結果覆寫成「當時已通過」。
+
 ## 本輪目的與界線
 
 以 `1164d3610ddb1da702b024acb87ea75da5f3dcbe`（`v0.10.0` Development Preview）為主線基準，在雲端檢查並修正不需要接觸實體相機即可驗證的控制／傳輸流程。使用真實 App、ViewModel、Repository 與 HTTP client，遠端相機以可控制故障時序的合成 HTTP peer 代替。
