@@ -2,12 +2,15 @@ package dev.openeos.control.data
 
 import android.view.Surface
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
@@ -27,6 +30,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.net.InetAddress
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -40,7 +44,7 @@ class CcapiClientTest {
     @Before
     fun setUp() {
         server = MockWebServer()
-        server.start()
+        server.start(InetAddress.getByName("127.0.0.1"), 0)
         client = CcapiClient(server.url("/").toString())
     }
 
@@ -1436,6 +1440,108 @@ class CcapiClientTest {
         assertTrue(second.changedKeys.isEmpty())
         assertEquals("/ccapi/events?after=0", server.takeRequest().path)
         assertEquals("/ccapi/events?after=3", server.takeRequest().path)
+    }
+
+    @Test
+    fun identityFallbackStillContinuesAfter404AndAcceptsSuccessfulNonJsonBody() = runTest {
+        client = CcapiClient(server.url("/").newBuilder().host("127.0.0.1").build().toString(), treatAsSimulator = false)
+        repeat(3) { server.enqueue(MockResponse().setResponseCode(404)) }
+        server.enqueue(MockResponse().setResponseCode(200).setBody("identity response without JSON"))
+
+        client.initialize()
+
+        assertTrue(client.isRealCamera)
+        assertEquals("/ccapi/ver100", client.apiVersionPrefix)
+        assertEquals(4, server.requestCount)
+        assertEquals(listOf("/ccapi", "/ccapi/", "/ccapi/ver110/deviceinformation", "/ccapi/ver100/deviceinformation"),
+            List(4) { server.takeRequest().path })
+    }
+
+    @Test
+    fun cancellingIdentityFallbackInterruptsItsReadAndDoesNotTryTheNextVersion() = runBlocking {
+        val identityReceived = CountDownLatch(1)
+        val http = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse = when (request.path) {
+                "/ccapi", "/ccapi/" -> MockResponse().setResponseCode(404)
+                "/ccapi/ver110/deviceinformation" -> {
+                    identityReceived.countDown()
+                    MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+                }
+                else -> jsonResponse("""{"productname":"Synthetic Camera"}""")
+            }
+        }
+        client = CcapiClient(server.url("/").newBuilder().host("127.0.0.1").build().toString(), httpClient = http, treatAsSimulator = false)
+        val outcome = CompletableDeferred<Throwable?>()
+        val job = launch(Dispatchers.Default) {
+            outcome.complete(runCatching { client.initialize() }.exceptionOrNull())
+        }
+        try {
+            assertTrue(withContext(Dispatchers.IO) { identityReceived.await(2, TimeUnit.SECONDS) })
+            job.cancel()
+            assertTrue("Identity fallback must exit within one second of cancellation",
+                withTimeoutOrNull(1_000) { job.join(); true } ?: false)
+            assertTrue("Discovery must propagate cancellation instead of replacing it with a discovery error",
+                outcome.await() is CancellationException)
+            assertFalse(client.isRealCamera)
+            assertEquals(3, server.requestCount)
+            assertEquals(listOf("/ccapi", "/ccapi/", "/ccapi/ver110/deviceinformation"),
+                List(3) { server.takeRequest().path })
+        } finally {
+            // Keep the unfixed baseline bounded without masking the failed cancellation assertion.
+            http.dispatcher.cancelAll()
+            job.cancel()
+            job.join()
+        }
+    }
+
+    @Test
+    fun cancellingRtpDescriptionInterruptsItsReadWithoutStartingOrFallingBack() = runBlocking {
+        val descriptionReceived = CountDownLatch(1)
+        val factoryCalls = java.util.concurrent.atomic.AtomicInteger()
+        val http = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse = when (request.path) {
+                "/ccapi" -> jsonResponse(DISCOVERY_RTP_AND_JPEG_JSON)
+                "/ccapi/ver110/shooting/liveview/rtpsessiondesc" -> {
+                    descriptionReceived.countDown()
+                    MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+                }
+                else -> MockResponse().setResponseCode(204)
+            }
+        }
+        client = CcapiClient(
+            server.url("/").newBuilder().host("127.0.0.1").build().toString(),
+            httpClient = http,
+            treatAsSimulator = false,
+            rtpDestinationAddress = "192.0.2.10",
+            rtpSessionFactory = CcapiRtpSessionFactory { description, destination ->
+                factoryCalls.incrementAndGet()
+                FakeNativeLiveViewSession(description, destination)
+            },
+        )
+        client.initialize()
+        val outcome = CompletableDeferred<Throwable?>()
+        val job = launch(Dispatchers.Default) {
+            outcome.complete(runCatching { client.startLiveView() }.exceptionOrNull())
+        }
+        try {
+            assertTrue(withContext(Dispatchers.IO) { descriptionReceived.await(2, TimeUnit.SECONDS) })
+            job.cancel()
+            assertTrue("RTP description must exit within one second of cancellation",
+                withTimeoutOrNull(1_000) { job.join(); true } ?: false)
+            assertTrue(outcome.await() is CancellationException)
+            assertEquals(0, factoryCalls.get())
+            assertNull(client.nativeLiveViewSession)
+            assertFalse(client.liveViewStopRequired)
+            assertEquals(2, server.requestCount)
+            assertEquals(listOf("/ccapi", "/ccapi/ver110/shooting/liveview/rtpsessiondesc"),
+                List(2) { server.takeRequest().path })
+        } finally {
+            http.dispatcher.cancelAll()
+            job.cancel()
+            job.join()
+        }
     }
 
     @Test

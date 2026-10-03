@@ -278,35 +278,50 @@ class CcapiClient(
             try {
                 val request = Request.Builder().url("$baseUrl$prefix/deviceinformation").get().build()
                 withContext(Dispatchers.IO) {
-                    newCameraCall(request).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val identity = response.body?.string()?.let { body ->
-                                runCatching { JSONObject(body) }.getOrNull()
-                            }
-                            apiVersionPrefixes = listOf(prefix)
-                            apiVersionPrefix = prefix
-                            discoverySource = "GET $prefix/deviceinformation (identity fallback)"
-                            recordDiscoveryResponse(
-                                endpoint = "GET $prefix/deviceinformation",
-                                outcome = "IDENTITY",
-                                response = identity,
-                                httpStatus = response.code,
-                                operationCount = 0,
-                            )
-                            true
-                        } else {
-                            recordDiscoveryAttempt(
-                                CameraDiscoveryAttempt(
+                    val call = newCameraCall(request)
+                    val cancelCall = AtomicBoolean(true)
+                    val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
+                        try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
+                    }
+                    try {
+                        call.execute().use { response ->
+                            if (response.isSuccessful) {
+                                val identity = response.body?.string()?.let { body ->
+                                    runCatching { JSONObject(body) }.getOrNull()
+                                }
+                                apiVersionPrefixes = listOf(prefix)
+                                apiVersionPrefix = prefix
+                                discoverySource = "GET $prefix/deviceinformation (identity fallback)"
+                                recordDiscoveryResponse(
                                     endpoint = "GET $prefix/deviceinformation",
-                                    outcome = "HTTP_ERROR",
+                                    outcome = "IDENTITY",
+                                    response = identity,
                                     httpStatus = response.code,
-                                ),
-                            )
-                            errors.add("GET $prefix/deviceinformation: HTTP ${response.code}")
-                            false
+                                    operationCount = 0,
+                                )
+                                true
+                            } else {
+                                recordDiscoveryAttempt(
+                                    CameraDiscoveryAttempt(
+                                        endpoint = "GET $prefix/deviceinformation",
+                                        outcome = "HTTP_ERROR",
+                                        httpStatus = response.code,
+                                    ),
+                                )
+                                errors.add("GET $prefix/deviceinformation: HTTP ${response.code}")
+                                false
+                            }
                         }
+                    } catch (exception: Exception) {
+                        currentCoroutineContext().ensureActive()
+                        throw exception
+                    } finally {
+                        cancelCall.set(false)
+                        watcher.cancel()
                     }
                 }
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (e: Exception) {
                 recordDiscoveryFailure("GET $prefix/deviceinformation", e)
                 errors.add("GET $prefix/deviceinformation failed: ${e.message}")
@@ -3687,15 +3702,28 @@ class CcapiClient(
 
     private suspend fun getText(path: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url("$baseUrl$path").get().header("Accept", "text/plain").build()
-        newCameraCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw CcapiHttpException(
-                    statusCode = response.code,
-                    message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
-                )
+        val call = newCameraCall(request)
+        val cancelCall = AtomicBoolean(true)
+        val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
+        }
+        try {
+            call.execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    throw CcapiHttpException(
+                        statusCode = response.code,
+                        message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
+                    )
+                }
+                body
             }
-            body
+        } catch (exception: Exception) {
+            currentCoroutineContext().ensureActive()
+            throw exception
+        } finally {
+            cancelCall.set(false)
+            watcher.cancel()
         }
     }
 
