@@ -4,6 +4,9 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -71,6 +74,32 @@ class CameraGalleryUiTest {
         val location = cameraGalleryPath("Canon EOS R6 Mark III")
         compose.setContent { MaterialTheme { MediaScreen(state().copy(lastDownloadLocation = location), actions()) } }
         compose.onNodeWithText(compose.activity.getString(R.string.media_saved_location, location)).assertIsDisplayed()
+    }
+
+    @Test fun libraryScopeIsDisabledDuringTransferAndEnabledAfterwards() {
+        val state = mutableStateOf(state().copy(
+            pendingOperations = setOf(CameraOperation.MEDIA),
+            mediaLibraryScope = MediaLibraryScope.RECENT,
+            mediaLibraryHasMore = true,
+            mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
+        ))
+        val requested = mutableListOf<MediaLibraryScope>()
+        compose.setContent {
+            MaterialTheme {
+                MediaScreen(state.value, actions().copy(setMediaLibraryScope = { requested += it }))
+            }
+        }
+        val recent = compose.onNodeWithText(compose.activity.getString(R.string.media_scope_recent))
+        val all = compose.onNodeWithText(compose.activity.getString(R.string.media_scope_all))
+        recent.assertIsSelected().assertIsNotEnabled()
+        all.assertIsNotEnabled().performClick()
+        compose.runOnIdle {
+            assertTrue(requested.isEmpty())
+            state.value = state.value.copy(pendingOperations = emptySet())
+        }
+        recent.assertIsEnabled()
+        all.assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(listOf(MediaLibraryScope.ALL), requested) }
     }
 
     private fun actions() = CameraActions(

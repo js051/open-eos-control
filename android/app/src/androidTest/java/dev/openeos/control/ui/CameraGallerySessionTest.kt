@@ -201,6 +201,40 @@ class CameraGallerySessionTest {
         assertDestinationBytes(destination)
     }
 
+    @Test
+    fun scopeStaysRecentDuringDownloadThenLoadsTheWholeCardAfterwards() {
+        val before = viewModel.uiState.value
+        val item = before.mediaItems.first()
+        val destination = documentDestination(item)
+        blockNextDownload.set(true)
+        compose.runOnIdle { viewModel.downloadMedia(compose.activity, item, destination) }
+        assertTrue(downloadEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        compose.runOnIdle {
+            assertTrue(viewModel.uiState.value.isBusy(CameraOperation.MEDIA))
+            viewModel.setMediaLibraryScope(MediaLibraryScope.ALL)
+            val during = viewModel.uiState.value
+            assertEquals(MediaLibraryScope.RECENT, during.mediaLibraryScope)
+            assertEquals(before.mediaItems, during.mediaItems)
+            assertEquals(before.mediaLibraryHasMore, during.mediaLibraryHasMore)
+            assertEquals(before.mediaLibraryLoadStatus, during.mediaLibraryLoadStatus)
+        }
+        assertEquals(0, secondPageRequests.get())
+        releaseDownload.countDown()
+        awaitDownload(item)
+        assertDestinationBytes(destination)
+
+        compose.runOnIdle { viewModel.setMediaLibraryScope(MediaLibraryScope.ALL) }
+        awaitCompleteLibrary(mediaPaths.size)
+        compose.runOnIdle {
+            val state = viewModel.uiState.value
+            assertEquals(MediaLibraryScope.ALL, state.mediaLibraryScope)
+            assertFalse(state.mediaLibraryHasMore)
+            assertEquals(mediaPaths, state.mediaItems.map(CameraMediaItem::id))
+            assertNull(state.error)
+        }
+        assertEquals(1, secondPageRequests.get())
+    }
+
     private fun documentDestination(item: CameraMediaItem): Uri {
         val file = File(testDirectory, item.name)
         check(file.createNewFile())

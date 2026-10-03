@@ -294,7 +294,7 @@ class CameraViewModel(
 
     fun setMediaLibraryScope(scope: MediaLibraryScope) {
         val state = _uiState.value
-        if (state.mediaLibraryScope == scope) return
+        if (state.mediaLibraryScope == scope || state.isBusy(CameraOperation.MEDIA)) return
         if (state.mediaLibraryLoading) invalidateMediaLibraryLoad(MediaLibraryLoadStatus.CANCELLED)
         _uiState.update { current ->
             val retained = if (scope == MediaLibraryScope.RECENT) {
