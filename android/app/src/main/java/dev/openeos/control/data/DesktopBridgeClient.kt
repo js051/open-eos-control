@@ -770,6 +770,7 @@ class DesktopBridgeClient(
                         }
                     }
                 }
+                validateOriginalMediaDownload(item, bytesTransferred, responseLength)
                 destination.flush()
                 if (bytesTransferred != lastReportedBytes || bytesTransferred == 0L) {
                     onProgress(CameraMediaTransferProgress(bytesTransferred, totalBytes))

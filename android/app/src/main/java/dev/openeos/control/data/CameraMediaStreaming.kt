@@ -9,6 +9,25 @@ import java.io.Closeable
 import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicBoolean
 
+/** A complete HTTP message is not necessarily the complete camera original. */
+internal fun validateOriginalMediaDownload(
+    item: CameraMediaItem,
+    bytesTransferred: Long,
+    responseLength: Long?,
+) {
+    check(bytesTransferred > 0L) { "Camera returned an empty original for ${item.name}." }
+    responseLength?.let { expected ->
+        check(bytesTransferred == expected) {
+            "Media download length for ${item.name} was $bytesTransferred bytes; HTTP declared $expected."
+        }
+    }
+    item.sizeBytes?.let { expected ->
+        check(bytesTransferred == expected) {
+            "Media download length for ${item.name} was $bytesTransferred bytes; the original declared $expected."
+        }
+    }
+}
+
 interface CameraMediaStreamSource : Closeable {
     val item: CameraMediaItem
 

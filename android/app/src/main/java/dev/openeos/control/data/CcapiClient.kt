@@ -3150,6 +3150,7 @@ class CcapiClient(
                                     }
                                 }
                             }
+                            validateOriginalMediaDownload(item, bytesTransferred, totalBytes)
                             destination.flush()
                             if (bytesTransferred != lastReportedBytes || bytesTransferred == 0L) {
                                 onProgress(CameraMediaTransferProgress(bytesTransferred, totalBytes))
