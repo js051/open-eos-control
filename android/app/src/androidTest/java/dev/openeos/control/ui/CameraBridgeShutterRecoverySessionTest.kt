@@ -2,6 +2,7 @@ package dev.openeos.control.ui
 
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsActions
@@ -415,9 +416,13 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
     val advertiseBulb = AtomicBoolean(true)
     val frames = AtomicInteger()
     private val requests = CopyOnWriteArrayList<String>()
-    val baseUrl: String get() = server.url("/").toString()
+    lateinit var baseUrl: String
+        private set
 
     fun start() {
+        check(Looper.myLooper() != Looper.getMainLooper()) {
+            "Bridge fixture initialization must run on the instrumentation test thread."
+        }
         val bitmap = Bitmap.createBitmap(16, 12, Bitmap.Config.ARGB_8888)
         val jpeg = try {
             ByteArrayOutputStream().apply { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, this) }.toByteArray()
@@ -471,6 +476,8 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
             }
         }
         server.start()
+        // MockWebServer URL creation may resolve the hostname; keep it off the UI thread.
+        baseUrl = server.url("/").toString()
     }
 
     fun count(method: String, suffix: String): Int = requests.count { it == "$method $sessionPath/$suffix" }
