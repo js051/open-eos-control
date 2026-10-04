@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="live_view_release_unconfirmed">尚未確認 Live View 已停止。請先關閉 Live View，再重試。</string>
+    <string name="shutter_disconnect_warning">上一台相機的快門釋放尚未確認，請在機身確認曝光已停止。</string>
+    <string name="retry_shutter_release">重試釋放快門，只發送停止</string>
+    <string name="shutter_release_retry_short">重試停止</string>
+    <string name="shutter_release_unconfirmed">曝光可能仍在進行。請按「重試停止」。</string>
+
     <string name="media_saved_location">已儲存至 %1$s</string>
     <string name="media_save_to_folder">另存至其他資料夾</string>
     <string name="storage_ready_compact">就緒</string>
@@ -50,6 +56,7 @@
     <string name="direct_camera">直接連相機</string><string name="desktop_bridge">桌面橋接</string>
     <string name="preset_http">HTTP</string><string name="preset_https">HTTPS</string><string name="preset_simulator">模擬器</string>
     <string name="camera_url">相機 URL</string><string name="authentication">帳號驗證</string><string name="username">使用者名稱</string><string name="password">密碼</string>
+    <string name="ccapi_setup_hint">在支援的相機上啟用 Camera Control API，手機連上同一網路，再輸入相機顯示的 URL。Camera Connect 手機配對使用不同模式。</string>
     <string name="connect">連接</string><string name="connecting">連接中…</string>
     <string name="desktop_bridge_hint">請在連接相機的電腦上執行 Open EOS Bridge。若從區網連入，這裡必須填入電腦端設定的相同 Bearer token。</string>
     <string name="desktop_bridge_url">桌面橋接 URL</string><string name="desktop_bridge_token">Bearer token</string><string name="desktop_bridge_token_hint">只保留到 App 程序結束，永不儲存。</string>

@@ -64,6 +64,9 @@ interface CameraControlBackend {
         get() = null
     val activeLiveViewSource: LiveViewSource?
         get() = null
+    // True includes an unconfirmed remote start/stop; it does not establish a running preview.
+    val liveViewStopRequired: Boolean
+        get() = false
 
     fun observedFeatures(): Set<CameraFeature> = emptySet()
 
@@ -97,6 +100,7 @@ interface CameraControlBackend {
     }
     suspend fun startBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
     suspend fun stopBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
+    suspend fun retryShutterRelease(): Unit = unsupported(CameraFeature.STILL_CAPTURE)
     suspend fun autofocus(): CameraStatus = unsupported(CameraFeature.AUTOFOCUS)
     suspend fun holdAutofocus(whileHeld: suspend () -> Unit): Unit = unsupported(CameraFeature.AUTOFOCUS)
     suspend fun retryAutofocusStop(): Unit = unsupported(CameraFeature.AUTOFOCUS)
@@ -175,6 +179,9 @@ class CcapiCameraBackend(
     override val activeLiveViewSource: LiveViewSource?
         get() = client.currentLiveViewSource()
 
+    override val liveViewStopRequired: Boolean
+        get() = client.liveViewStopRequired
+
     override fun observedFeatures(): Set<CameraFeature> = client.observedFeatureSnapshot()
 
     override suspend fun initialize() = client.initialize()
@@ -229,6 +236,8 @@ class CcapiCameraBackend(
     override suspend fun startBulbExposure(): CameraStatus = client.startBulbExposure()
 
     override suspend fun stopBulbExposure(): CameraStatus = client.stopBulbExposure()
+
+    override suspend fun retryShutterRelease() = client.retryShutterRelease()
 
     override suspend fun autofocus(): CameraStatus = client.autofocus()
 

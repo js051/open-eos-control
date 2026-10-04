@@ -219,6 +219,27 @@ class CameraViewModelPreviewTest {
     }
 
     @Test
+    fun mediaScopeCannotChangeDuringAnOperationAndCanChangeAfterItFinishes() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+        val before = viewModel.uiState.value
+
+        viewModel.setMediaProtectionBatch(before.mediaItems.take(1), false)
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.MEDIA))
+        viewModel.setMediaLibraryScope(MediaLibraryScope.ALL)
+
+        assertEquals(MediaLibraryScope.RECENT, viewModel.uiState.value.mediaLibraryScope)
+        assertEquals(before.mediaItems, viewModel.uiState.value.mediaItems)
+        assertEquals(before.mediaLibraryHasMore, viewModel.uiState.value.mediaLibraryHasMore)
+        assertEquals(before.mediaLibraryLoadStatus, viewModel.uiState.value.mediaLibraryLoadStatus)
+
+        advanceUntilIdle()
+        assertFalse(viewModel.uiState.value.isBusy(CameraOperation.MEDIA))
+        viewModel.setMediaLibraryScope(MediaLibraryScope.ALL)
+        assertEquals(MediaLibraryScope.ALL, viewModel.uiState.value.mediaLibraryScope)
+    }
+
+    @Test
     fun previewMediaBatchActionsUpdateAndDeleteEverySelectedItem() = runTest(dispatcher) {
         val viewModel = CameraViewModel()
         viewModel.enterOfflinePreview()

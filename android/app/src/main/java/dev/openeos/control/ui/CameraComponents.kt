@@ -34,6 +34,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
@@ -60,6 +61,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.painterResource
@@ -71,6 +73,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -1792,8 +1795,9 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     val photo = state.captureMode == CaptureMode.PHOTO
     val bulb = photo && state.bulbMode
     val bulbActive = bulb && state.bulbExposureActive
+    val releaseOnly = state.shutterReleaseUnconfirmed
     val recordingActive = !photo && state.status?.recording == true
-    val supported = bulbActive || recordingActive || state.supports(
+    val supported = releaseOnly || bulbActive || recordingActive || state.supports(
         when {
             bulb -> CameraFeature.BULB_EXPOSURE
             photo -> CameraFeature.STILL_CAPTURE
@@ -1801,6 +1805,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
         },
     )
     val description = when {
+        releaseOnly -> stringResource(R.string.retry_shutter_release)
         bulbActive -> stringResource(R.string.stop_bulb_exposure)
         bulb -> stringResource(R.string.start_bulb_exposure)
         photo && !state.shutterAutofocus -> stringResource(R.string.capture_without_autofocus)
@@ -1808,10 +1813,11 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
         recordingActive -> stringResource(R.string.stop_recording)
         else -> stringResource(R.string.start_recording)
     }
-    val color = if (bulb) AppWarning else if (photo) AppText else AppRecord
-    val operation = if (photo) CameraOperation.CAPTURE else CameraOperation.RECORDING
+    val color = if (releaseOnly || bulb) AppWarning else if (photo) AppText else AppRecord
+    val operation = if (releaseOnly) CameraOperation.SHUTTER_RELEASE else if (photo) CameraOperation.CAPTURE else CameraOperation.RECORDING
     val processing = state.isBusy(operation)
     val temperatureAllowed = when {
+        releaseOnly -> true
         bulbActive -> true
         photo -> state.stillCaptureTemperatureAllowed
         recordingActive -> true
@@ -1829,6 +1835,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
             .background(AppBackground, CircleShape)
             .clickable(enabled = supported && temperatureAllowed && !processing) {
                 when {
+                    releaseOnly -> actions.retryShutterRelease()
                     bulb -> actions.toggleBulbExposure()
                     photo -> actions.captureStill()
                     else -> actions.toggleRecording()
@@ -1843,11 +1850,17 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
             Box(
                 Modifier.size(if (photo) 58.dp else 52.dp).background(
                     color,
-                    if (bulbActive || recordingActive) RoundedCornerShape(8.dp) else CircleShape,
+                    if (releaseOnly || bulbActive || recordingActive) RoundedCornerShape(8.dp) else CircleShape,
                 ),
                 contentAlignment = Alignment.Center,
             ) {
-                if (photo && !bulb && !state.shutterAutofocus) {
+                if (releaseOnly) {
+                    CameraRotatingSquareSlot(size = 50.dp) {
+                        CameraHudText(value = stringResource(R.string.shutter_release_retry_short), color = AppBackground,
+                            fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,
+                            maxLines = 2, softWrap = true)
+                    }
+                } else if (photo && !bulb && !state.shutterAutofocus) {
                     CameraRotatingSquareSlot(size = 50.dp) {
                         CameraHudText(value = stringResource(R.string.shutter_af_off), color = AppBackground,
                             fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,
@@ -1861,9 +1874,13 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
 }
 
 @Composable
-fun ErrorBanner(error: String?, onDismiss: () -> Unit) {
+fun ErrorBanner(error: String?, onDismiss: () -> Unit, dismissible: Boolean = true) {
     if (error == null) return
     val displayError = userFacingCameraErrorResource(error)?.let { stringResource(it) } ?: error
+    if (!dismissible) {
+        PersistentCameraWarning(displayError)
+        return
+    }
     CameraReadableSlot(
         width = 328.dp,
         height = 112.dp,
@@ -1887,13 +1904,50 @@ fun ErrorBanner(error: String?, onDismiss: () -> Unit) {
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), onDismiss)
+            if (dismissible) ToolIconButton(LucideR.drawable.lucide_ic_x, stringResource(R.string.dismiss), onDismiss)
+        }
+    }
+}
+
+@Composable
+private fun PersistentCameraWarning(message: String) {
+    val density = LocalDensity.current
+    val textStyle = LocalTextStyle.current.copy(color = AppText)
+    val textMeasurer = rememberTextMeasurer()
+    val swapDimensions = cameraRotationSwapsDimensions(LocalCameraControlTargetRotation.current)
+    BoxWithConstraints(
+        Modifier.navigationBarsPadding().padding(8.dp).testTag("camera-error-rotation"),
+    ) {
+        val readingWidth = minOf(328.dp, if (swapDimensions) maxHeight else maxWidth)
+        // Measure with the same width and typography as Text so accessibility font scaling
+        // grows this persistent safety warning instead of truncating its retry instruction.
+        val textLayout = textMeasurer.measure(
+            text = message,
+            style = textStyle,
+            constraints = Constraints(maxWidth = with(density) {
+                (readingWidth.roundToPx() - 16.dp.roundToPx() - 4.dp.roundToPx()).coerceAtLeast(1)
+            }),
+        )
+        CameraReadableSlot(
+            width = readingWidth,
+            height = with(density) { (textLayout.size.height + 2 * 8.dp.roundToPx()).toDp() },
+            animateRotation = false,
+        ) {
+            Text(
+                message,
+                style = textStyle,
+                modifier = Modifier.fillMaxSize()
+                    .background(Color(0xFF512326), RoundedCornerShape(6.dp))
+                    .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            )
         }
     }
 }
 
 internal fun userFacingCameraErrorResource(error: String): Int? = when {
     error.contains("AutofocusReleaseException") -> R.string.af_hold_release_failed
+    error.contains("ShutterReleaseException") -> R.string.shutter_release_unconfirmed
+    error.contains("CcapiLiveViewReleaseException") -> R.string.live_view_release_unconfirmed
     error.contains("SocketTimeoutException", ignoreCase = true) ||
         (error.contains("socket", ignoreCase = true) && error.contains("timeout", ignoreCase = true)) ->
         R.string.camera_error_timeout

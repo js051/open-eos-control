@@ -14,12 +14,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.AutofocusReleaseException
+import dev.openeos.control.data.ShutterReleaseException
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
+import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraSession
 import dev.openeos.control.data.CameraTransport
 import dev.openeos.control.data.FocusDriveDirection
@@ -40,6 +42,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -103,6 +107,7 @@ internal suspend fun executeMediaBatch(
     val failures = mutableListOf<String>()
     var succeeded = 0
     uniqueItems.forEachIndexed { index, item ->
+        coroutineContext.ensureActive()
         onProgress(
             MediaBatchProgress(
                 operation = operation,
@@ -213,6 +218,15 @@ class CameraViewModel(
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
     private var liveViewJob: Job? = null
+    private class LiveViewFrameRead(val job: Job, var stopped: Boolean = false)
+    private val liveViewFrameReads = mutableSetOf<LiveViewFrameRead>()
+    private var cameraSessionGeneration = 0L
+    private var cameraStateRevision = 0L
+    private val cameraOperationJobs = mutableMapOf<CameraOperation, Job>()
+    private var disconnectJob: Job? = null
+    private val liveViewReconciliationJobs = mutableSetOf<Job>()
+    private var eventMediaJob: Job? = null
+    private var mediaUploadCleanupJob: Job? = null
     private val liveViewTransitionMutex = Mutex()
     private var appInForeground = true
     private var liveViewGeneration = 0L
@@ -282,7 +296,7 @@ class CameraViewModel(
 
     fun setMediaLibraryScope(scope: MediaLibraryScope) {
         val state = _uiState.value
-        if (state.mediaLibraryScope == scope) return
+        if (state.mediaLibraryScope == scope || state.isBusy(CameraOperation.MEDIA)) return
         if (state.mediaLibraryLoading) invalidateMediaLibraryLoad(MediaLibraryLoadStatus.CANCELLED)
         _uiState.update { current ->
             val retained = if (scope == MediaLibraryScope.RECENT) {
@@ -485,6 +499,8 @@ class CameraViewModel(
     }
 
     fun enterOfflinePreview() {
+        // Switching to the local preview abandons a connection attempt just like Disconnect.
+        disconnect()
         stopHeldAutofocus()
         stopCameraFocusInfoLoop()
         stopLiveViewLoop()
@@ -497,7 +513,7 @@ class CameraViewModel(
     }
 
     fun clearError() {
-        _uiState.update { it.copy(error = null, errorOperation = null) }
+        _uiState.update { it.dismissVisibleCameraMessage() }
     }
 
     fun refreshUsbDiagnostics(context: Context) = runCamera(CameraOperation.USB) {
@@ -606,6 +622,7 @@ class CameraViewModel(
     }
 
     private suspend fun applyConnectedSession(session: CameraSession) {
+        coroutineContext.ensureActive()
         val supportedFps = _uiState.value.liveViewFrameRateFps.coerceIn(
             session.capabilities.liveView.minFps,
             session.capabilities.liveView.maxFps,
@@ -646,8 +663,7 @@ class CameraViewModel(
             reconcileLiveView()
         } else if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW) && session.status.temperature?.liveViewAllowed != false) {
             if (session.nativeLiveViewSession == null) {
-                refreshLiveViewFrameInternal(reportErrors = true)
-                startLiveViewLoopIfNeeded()
+                if (refreshLiveViewFrameInternal(reportErrors = true)) startLiveViewLoopIfNeeded()
             }
         }
         refreshCaptureReview()
@@ -667,6 +683,19 @@ class CameraViewModel(
     }
 
     fun disconnect() {
+        val previousState = _uiState.value
+        val shutterWarning = previousState.shutterDisconnectWarning || previousState.shutterReleaseUnconfirmed ||
+            previousState.bulbExposureActive || CameraOperation.CAPTURE in previousState.pendingOperations ||
+            CameraOperation.SHUTTER_RELEASE in previousState.pendingOperations
+        cameraSessionGeneration += 1
+        val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList()
+        cameraOperationJobs.clear()
+        liveViewReconciliationJobs.clear()
+        operationJobs.forEach(Job::cancel)
+        val uploadCleanupJob = mediaUploadCleanupJob
+        mediaUploadCleanupJob = null
+        uploadCleanupJob?.cancel()
+        val previousDisconnect = disconnectJob
         stopHeldAutofocus()
         val focusJob = heldAutofocusJob
         stopCameraFocusInfoLoop()
@@ -685,25 +714,34 @@ class CameraViewModel(
         resetFrameMetrics()
         lastPhotoShootingMode = null
         if (_uiState.value.previewMode) {
-            _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+            _uiState.update {
+                it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
+                    pendingOperations = emptySet(), shutterDisconnectWarning = shutterWarning,
+                )
+            }
             return
         }
-        viewModelScope.launch {
-            try {
-                uploadJob?.join()
-                focusJob?.join()
-                repository.disconnect()
-            } catch (e: Exception) {
-                // ignore
-            }
+        val job = viewModelScope.launch(NonCancellable, start = CoroutineStart.LAZY) {
+            previousDisconnect?.join()
+            operationJobs.forEach { it.join() }
+            uploadJob?.join()
+            uploadCleanupJob?.join()
+            focusJob?.join()
+            repository.disconnect()
         }
-        _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+        disconnectJob = job
+        job.invokeOnCompletion { if (disconnectJob === job) disconnectJob = null }
+        job.start()
+        _uiState.update {
+            it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
+                pendingOperations = emptySet(), shutterDisconnectWarning = shutterWarning,
+            )
+        }
     }
 
     fun refresh() = runCamera(CameraOperation.STATUS) {
         if (_uiState.value.previewMode) return@runCamera
-        val status = repository.refreshStatus()
-        val capabilities = repository.refreshCapabilities()
+        val (status, capabilities) = readCameraStateSnapshot()
         val networkDiagnostics = repository.refreshNetworkDiagnostics()
         val captureMode = captureModeFrom(capabilities)
         _uiState.update {
@@ -747,18 +785,31 @@ class CameraViewModel(
             liveViewGeneration += 1
             stopLiveViewLoop()
             repository.setNativeLiveViewRenderingEnabled(false)
+        } else if (restart && _uiState.value.nativeLiveViewSession == null && liveViewFrameReads.any { !it.stopped }) {
+            // Release an in-flight frame before waiting for the transition mutex. Do not pause
+            // native rendering or bypass a camera-command interlock before reconciliation.
+            liveViewGeneration += 1
+            cancelLiveViewFrameReads()
         }
-        viewModelScope.launch {
+        val generation = cameraSessionGeneration
+        val connection = _uiState.value.info
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            if (generation != cameraSessionGeneration) return@launch
             try {
-                reconcileLiveView(restart)
+                reconcileLiveView(restart, generation)
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
                 _uiState.update {
-                    if (it.connected) it.copy(error = formatException(exception), errorOperation = CameraOperation.LIVE_VIEW) else it
+                    if (generation == cameraSessionGeneration && it.info === connection && it.connected) {
+                        it.copy(error = formatException(exception), errorOperation = CameraOperation.LIVE_VIEW)
+                    } else it
                 }
             }
         }
+        liveViewReconciliationJobs += job
+        job.invokeOnCompletion { liveViewReconciliationJobs.remove(job) }
+        job.start()
     }
 
     fun setRtpAudioEnabled(enabled: Boolean) {
@@ -813,17 +864,24 @@ class CameraViewModel(
 
     fun restartLiveView() = queueLiveViewReconciliation(restart = true)
 
-    private suspend fun reconcileLiveView(restart: Boolean = false) = liveViewTransitionMutex.withLock {
+    private suspend fun reconcileLiveView(
+        restart: Boolean = false,
+        generation: Long = cameraSessionGeneration,
+    ) = liveViewTransitionMutex.withLock {
+        coroutineContext.ensureActive()
+        if (generation != cameraSessionGeneration) return@withLock
         val state = _uiState.value
         if (
             !state.connected || state.previewMode || !state.supports(CameraFeature.LIVE_VIEW)
         ) return@withLock
         // Do not change the camera's remote-view session in the middle of a bulb exposure.
-        if (state.bulbExposureActive) return@withLock
+        if (state.bulbExposureActive || state.shutterReleaseUnconfirmed) return@withLock
         if (state.pendingOperations.any { it in LIVE_VIEW_INTERLOCK_OPERATIONS }) return@withLock
         val enabled = appInForeground && state.liveViewAutoRefresh && state.liveViewTemperatureAllowed
         val hasPresentation = state.nativeLiveViewSession != null || state.liveViewBitmap != null || state.liveViewFrameUrl != null
-        if (enabled == repository.isLiveViewRunning() && !restart && (!enabled || hasPresentation)) return@withLock
+        if (enabled == repository.isLiveViewRunning() && !restart && (!enabled || hasPresentation) &&
+            (enabled || !repository.isLiveViewStopRequired())) return@withLock
+        cameraStateRevision += 1
         _uiState.update { it.copy(pendingOperations = it.pendingOperations + CameraOperation.LIVE_VIEW) }
         try {
             liveViewGeneration += 1
@@ -835,7 +893,8 @@ class CameraViewModel(
                     liveViewAudioStatus = NativeLiveViewAudioStatus.None)
             }
             val effectiveRequest = repository.setLiveViewEnabled(enabled, restart)
-            if (_uiState.value.info !== state.info) return@withLock
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== state.info) return@withLock
             _uiState.update {
                 it.copy(
                     error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
@@ -844,7 +903,8 @@ class CameraViewModel(
             }
             if (!enabled || !appInForeground || !_uiState.value.liveViewAutoRefresh || !_uiState.value.connected) return@withLock
             val capabilities = repository.refreshCapabilities()
-            if (_uiState.value.info !== state.info) return@withLock
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== state.info) return@withLock
             val nativeSession = repository.nativeLiveViewSession()
             configureNativeLiveViewSession(nativeSession, _uiState.value.liveViewFrameRateFps)
             _uiState.update {
@@ -865,15 +925,17 @@ class CameraViewModel(
             }
             resetFrameMetrics()
             if (nativeSession == null) {
-                refreshLiveViewFrameInternal(reportErrors = true)
-                startLiveViewLoopIfNeeded()
+                if (refreshLiveViewFrameInternal(reportErrors = true)) startLiveViewLoopIfNeeded()
             }
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            if (_uiState.value.info === state.info) throw exception
+            if (generation == cameraSessionGeneration && _uiState.value.info === state.info) throw exception
         } finally {
-            _uiState.update { it.copy(pendingOperations = it.pendingOperations - CameraOperation.LIVE_VIEW) }
+            if (generation == cameraSessionGeneration && _uiState.value.info === state.info) {
+                cameraStateRevision += 1
+                _uiState.update { it.copy(pendingOperations = it.pendingOperations - CameraOperation.LIVE_VIEW) }
+            }
         }
     }
 
@@ -922,8 +984,10 @@ class CameraViewModel(
                 }
                 return@runCamera
             }
-            val status = repository.setCameraSetting(key, value)
+            val revision = cameraStateRevision
+            val response = repository.setCameraSetting(key, value)
             val capabilities = repository.refreshCapabilities()
+            val status = latestCameraStatus(response, revision)
             val captureMode = if (key.isCaptureModeKey()) {
                 captureModeFrom(capabilities)
             } else {
@@ -939,15 +1003,15 @@ class CameraViewModel(
                     captureMode = captureMode ?: it.captureMode,
                 )
             }
-            refreshLiveViewFrameInternal(reportErrors = false)
-            startLiveViewLoopIfNeeded()
+            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
     }
 
     fun syncCameraClock() = runCamera(CameraOperation.CLOCK) {
         val state = _uiState.value
         if (state.previewMode || !state.supports(CameraFeature.CAMERA_CLOCK_SYNC)) return@runCamera
-        val status = repository.syncCameraClock()
+        val revision = cameraStateRevision
+        val status = latestCameraStatus(repository.syncCameraClock(), revision)
         _uiState.update {
             it.copy(
                 status = status,
@@ -1056,8 +1120,7 @@ class CameraViewModel(
                 lastPhotoShootingMode = null
                 _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
             } else {
-                val status = repository.refreshStatus()
-                val capabilities = repository.refreshCapabilities()
+                val (status, capabilities) = readCameraStateSnapshot()
                 _uiState.update { it.copy(status = status, capabilities = capabilities) }
                 restoreSessionWork = true
             }
@@ -1084,12 +1147,12 @@ class CameraViewModel(
         }
         val previousReviewId = _uiState.value.captureReviewItem?.id
             ?: selectCaptureReviewItem(_uiState.value.mediaItems)?.id
-        val status = repository.captureStill(autofocus = _uiState.value.shutterAutofocus)
+        val revision = cameraStateRevision
+        val status = latestCameraStatus(repository.captureStill(autofocus = _uiState.value.shutterAutofocus), revision)
         _uiState.update { it.copy(status = status) }
         showCaptureSuccess()
         refreshCaptureReview(expectedPreviousId = previousReviewId)
-        refreshLiveViewFrameInternal(reportErrors = false)
-        startLiveViewLoopIfNeeded()
+        if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
     }
 
     fun toggleBulbExposure() = runCamera(CameraOperation.CAPTURE) {
@@ -1110,7 +1173,10 @@ class CameraViewModel(
         }
         pauseLiveViewForBulb()
         try {
-            val status = if (active) repository.stopBulbExposure() else repository.startBulbExposure()
+            val revision = cameraStateRevision
+            val response = if (active) repository.stopBulbExposure() else repository.startBulbExposure()
+            val status = latestCameraStatus(response, revision)
+            coroutineContext.ensureActive()
             _uiState.update {
                 it.copy(
                     status = status,
@@ -1125,9 +1191,49 @@ class CameraViewModel(
                 showCaptureSuccess()
                 resumeLiveViewAfterBulb()
             }
-        } catch (exception: Exception) {
-            if (!active) resumeLiveViewAfterBulb()
+        } catch (exception: CancellationException) {
             throw exception
+        } catch (exception: Exception) {
+            coroutineContext.ensureActive()
+            if (exception is ShutterReleaseException) markShutterReleaseUnconfirmed()
+            else if (!active) resumeLiveViewAfterBulb()
+            throw exception
+        }
+    }
+
+    fun retryShutterRelease() {
+        val state = _uiState.value
+        if (!state.connected || state.previewMode || !state.shutterReleaseUnconfirmed) return
+        val generation = cameraSessionGeneration
+        runCamera(CameraOperation.SHUTTER_RELEASE) {
+            repository.retryShutterRelease()
+            coroutineContext.ensureActive()
+            // The stop was confirmed. A later status-read failure must not pretend the release failed.
+            _uiState.update {
+                it.copy(
+                    shutterReleaseUnconfirmed = false,
+                    status = it.status?.copy(bulbExposureActive = false),
+                    bulbStartedAtMillis = null,
+                )
+            }
+            try {
+                val revision = cameraStateRevision
+                val status = latestCameraStatus(repository.refreshStatus(), revision)
+                _uiState.update { it.copy(status = status) }
+            } finally {
+                if (generation == cameraSessionGeneration && _uiState.value.info === state.info) {
+                    resumeLiveViewAfterBulb()
+                }
+            }
+        }
+    }
+
+    private fun markShutterReleaseUnconfirmed() {
+        liveViewGeneration += 1
+        pauseLiveViewForBulb()
+        invalidateCameraFocusInfo()
+        _uiState.update {
+            it.copy(shutterReleaseUnconfirmed = true, bulbStartedAtMillis = null, captureFeedback = null, hudVisible = true)
         }
     }
 
@@ -1219,12 +1325,12 @@ class CameraViewModel(
             },
         ) {
             val connection = _uiState.value.info
-            val status = repository.autofocus()
+            val revision = cameraStateRevision
+            val status = latestCameraStatus(repository.autofocus(), revision)
             if (_uiState.value.info !== connection) return@runCamera
             _uiState.update { it.copy(status = status, focusFeedback = FocusFeedback.ACCEPTED) }
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
-            refreshLiveViewFrameInternal(reportErrors = false)
-            startLiveViewLoopIfNeeded()
+            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
     }
 
@@ -1246,12 +1352,12 @@ class CameraViewModel(
             },
         ) {
             val connection = _uiState.value.info
-            val status = repository.halfPressShutter()
+            val revision = cameraStateRevision
+            val status = latestCameraStatus(repository.halfPressShutter(), revision)
             if (_uiState.value.info !== connection) return@runCamera
             _uiState.update { it.copy(status = status, focusFeedback = FocusFeedback.ACCEPTED) }
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
-            refreshLiveViewFrameInternal(reportErrors = false)
-            startLiveViewLoopIfNeeded()
+            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
     }
 
@@ -1275,8 +1381,7 @@ class CameraViewModel(
             repository.driveFocus(direction, step)
             _uiState.update { it.copy(focusFeedback = FocusFeedback.ACCEPTED) }
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
-            refreshLiveViewFrameInternal(reportErrors = false)
-            startLiveViewLoopIfNeeded()
+            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
     }
 
@@ -1296,8 +1401,7 @@ class CameraViewModel(
             val result = repository.setLiveViewMagnification(magnification)
             if (result.ok) {
                 _uiState.update { it.copy(liveViewMagnification = result.magnification) }
-                refreshLiveViewFrameInternal(reportErrors = false)
-                startLiveViewLoopIfNeeded()
+                if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
             }
         }
     }
@@ -1523,7 +1627,7 @@ class CameraViewModel(
     }
 
     fun previewAdjacentMedia(items: List<CameraMediaItem>, direction: Int) {
-        if (direction == 0) return
+        if (direction == 0 || _uiState.value.isBusy(CameraOperation.MEDIA)) return
         val currentId = _uiState.value.mediaPreviewItem?.id ?: return
         val index = items.indexOfFirst { it.id == currentId }
         val next = items.getOrNull(index + direction) ?: return
@@ -1712,7 +1816,6 @@ class CameraViewModel(
         ) return
         val resolver = context.applicationContext.contentResolver
         _uiState.update { it.copy(lastDownloadedMediaName = null, lastMediaBatchResult = null, lastDownloadLocation = null) }
-        cancelMediaLibraryLoad()
         val job = launchCameraOperation(CameraOperation.MEDIA) {
             try {
                 val result = executeMediaBatch(
@@ -2011,18 +2114,22 @@ class CameraViewModel(
                         }
                     }
                 }
-                val finishUpload: suspend () -> Unit = {
+                val finishUpload: suspend () -> Unit = finish@{
+                    if (_uiState.value.info !== state.info) return@finish
                     _uiState.update {
                         it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING)
                     }
                     val items = try {
                         repository.listMedia()
+                    } catch (exception: CancellationException) {
+                        throw exception
                     } catch (exception: Exception) {
                         _uiState.update {
-                            it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED)
+                            if (it.info === state.info) it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) else it
                         }
                         throw exception
                     }
+                    if (_uiState.value.info !== state.info) return@finish
                     check(
                         items.any {
                             it.id == result.item.id ||
@@ -2032,6 +2139,7 @@ class CameraViewModel(
                         "The uploaded media was not present in the camera's refreshed media list."
                     }
                     val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
+                    if (_uiState.value.info !== state.info) return@finish
                     cancelMediaThumbnailLoads()
                     _uiState.update {
                         it.copy(
@@ -2069,17 +2177,19 @@ class CameraViewModel(
         val name = state.activeMediaUploadName
         val sizeBytes = state.mediaUploadProgress?.totalBytes
         mediaUploadJob = null
-        viewModelScope.launch {
+        val generation = cameraSessionGeneration
+        val cleanupJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
             job.cancelAndJoin()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== state.info) return@launch
             if (_uiState.value.lastUploadedMediaName != null) return@launch
             if (state.transport == CameraTransport.DESKTOP_BRIDGE && name != null) {
-                reconcileCancelledBridgeUpload(name, sizeBytes)
+                reconcileCancelledBridgeUpload(name, sizeBytes, generation)
                 return@launch
             }
             withContext(NonCancellable + Dispatchers.IO) { runCatching { repository.disconnect() } }
             closeMediaStream()
             _uiState.update { current ->
-                if (current.transport == CameraTransport.USB_PTP) {
+                if (generation == cameraSessionGeneration && current.info === state.info) {
                     current.withClearedSession(
                         baseUrl = current.baseUrl,
                         error = "USB upload was interrupted before commit confirmation. Reconnect and refresh media before retrying.",
@@ -2089,20 +2199,24 @@ class CameraViewModel(
                 }
             }
         }
+        mediaUploadCleanupJob = cleanupJob
+        cleanupJob.invokeOnCompletion { if (mediaUploadCleanupJob === cleanupJob) mediaUploadCleanupJob = null }
+        cleanupJob.start()
     }
 
-    private suspend fun reconcileCancelledBridgeUpload(name: String, sizeBytes: Long?) {
+    private suspend fun reconcileCancelledBridgeUpload(name: String, sizeBytes: Long?, generation: Long) {
         _uiState.update {
             it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING)
         }
         val items = withContext(NonCancellable + Dispatchers.IO) {
             runCatching { repository.listMedia() }.getOrNull()
         } ?: run {
-            _uiState.update {
+            if (generation == cameraSessionGeneration) _uiState.update {
                 it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED)
             }
             return
         }
+        if (generation != cameraSessionGeneration) return
         val uploaded = items.firstOrNull { item ->
             item.name.equals(name, ignoreCase = true) &&
                 (sizeBytes == null || item.sizeBytes == sizeBytes)
@@ -2203,8 +2317,7 @@ class CameraViewModel(
                 )
             }
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
-            refreshLiveViewFrameInternal(reportErrors = false)
-            startLiveViewLoopIfNeeded()
+            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
     }
 
@@ -2244,7 +2357,8 @@ class CameraViewModel(
                 clearFocusFeedbackAfter(FocusFeedback.FAILURE)
             },
         ) {
-            val status = repository.clickWhiteBalance(x, y)
+            val revision = cameraStateRevision
+            val status = latestCameraStatus(repository.clickWhiteBalance(x, y), revision)
             _uiState.update {
                 it.copy(
                     status = status,
@@ -2253,8 +2367,7 @@ class CameraViewModel(
                 )
             }
             clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
-            refreshLiveViewFrameInternal(reportErrors = false)
-            startLiveViewLoopIfNeeded()
+            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
     }
 
@@ -2262,10 +2375,33 @@ class CameraViewModel(
         operation: CameraOperation,
         block: suspend () -> dev.openeos.control.data.CameraStatus,
     ) = runCamera(operation) {
-        val status = block()
+        val revision = cameraStateRevision
+        val response = block()
+        val status = if (_uiState.value.previewMode) response else latestCameraStatus(response, revision)
         _uiState.update { it.copy(status = status) }
-        refreshLiveViewFrameInternal(reportErrors = false)
-        startLiveViewLoopIfNeeded()
+        if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
+    }
+
+    /** Re-read only status when another operation crossed a command's response; never replay the command. */
+    private suspend fun latestCameraStatus(initial: CameraStatus, revision: Long): CameraStatus {
+        var status = initial
+        var observedRevision = revision
+        while (true) {
+            coroutineContext.ensureActive()
+            if (observedRevision == cameraStateRevision) return status
+            observedRevision = cameraStateRevision
+            status = repository.refreshStatus()
+        }
+    }
+
+    private suspend fun readCameraStateSnapshot(): Pair<CameraStatus, CameraCapabilities> {
+        while (true) {
+            val revision = cameraStateRevision
+            val status = repository.refreshStatus()
+            val capabilities = repository.refreshCapabilities()
+            coroutineContext.ensureActive()
+            if (revision == cameraStateRevision) return status to capabilities
+        }
     }
 
     private fun updatePreviewExposure(
@@ -2309,7 +2445,23 @@ class CameraViewModel(
         block: suspend () -> Unit,
     ): Job? {
         if (_uiState.value.isBusy(operation)) return null
+        val mediaReadsToJoin = if (operation == CameraOperation.MEDIA) {
+            listOfNotNull(mediaLibraryJob, eventMediaJob).also { cancelMediaLibraryLoad() }
+        } else emptyList()
+        // A reconnect cannot inherit work whose item IDs or commands belong to the old backend.
+        val previousJobs = if (operation == CameraOperation.CONNECT) {
+            cameraSessionGeneration += 1
+            (cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList()).also { jobs ->
+                cameraOperationJobs.clear()
+                liveViewReconciliationJobs.clear()
+                jobs.forEach(Job::cancel)
+                _uiState.update { it.copy(pendingOperations = emptySet()) }
+            }
+        } else emptyList()
+        val generation = cameraSessionGeneration
         val connection = _uiState.value.info
+        val teardown = disconnectJob
+        cameraStateRevision += 1
         _uiState.update {
             it.copy(
                 pendingOperations = it.pendingOperations + operation,
@@ -2317,17 +2469,27 @@ class CameraViewModel(
                 errorOperation = null,
             )
         }
-        return viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
+                if (operation == CameraOperation.CONNECT) {
+                    teardown?.join()
+                    previousJobs.forEach { it.join() }
+                    mediaUploadCleanupJob?.join()
+                }
+                mediaReadsToJoin.forEach { it.join() }
+                coroutineContext.ensureActive()
                 block()
-                if (operation in CAPABILITY_EVIDENCE_OPERATIONS) {
+                coroutineContext.ensureActive()
+                if (generation == cameraSessionGeneration && operation in CAPABILITY_EVIDENCE_OPERATIONS) {
                     refreshCapabilityEvidence()
                 }
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
-                if (operation == CameraOperation.FOCUS && _uiState.value.info !== connection) return@launch
+                if (generation != cameraSessionGeneration ||
+                    (operation == CameraOperation.FOCUS && _uiState.value.info !== connection)) return@launch
                 exception.printStackTrace()
+                if (exception is ShutterReleaseException) markShutterReleaseUnconfirmed()
                 onError(exception)
                 _uiState.update {
                     it.copy(
@@ -2339,16 +2501,24 @@ class CameraViewModel(
                     )
                 }
             } finally {
-                if (operation != CameraOperation.FOCUS || _uiState.value.info === connection) {
+                if (generation == cameraSessionGeneration &&
+                    (operation != CameraOperation.FOCUS || _uiState.value.info === connection)) {
+                    cameraStateRevision += 1
                     _uiState.update {
                         if (operation == CameraOperation.FOCUS && it.autofocusHoldState == AutofocusHoldState.RELEASE_FAILED) it
                         else it.copy(pendingOperations = it.pendingOperations - operation)
                     }
+                    afterFinally()
+                    if (operation in LIVE_VIEW_INTERLOCK_OPERATIONS) queueLiveViewReconciliation()
                 }
-                afterFinally()
-                if (operation in LIVE_VIEW_INTERLOCK_OPERATIONS) queueLiveViewReconciliation()
             }
         }
+        cameraOperationJobs[operation] = job
+        job.invokeOnCompletion {
+            if (cameraOperationJobs[operation] === job) cameraOperationJobs.remove(operation)
+        }
+        job.start()
+        return job
     }
 
     private fun refreshCapabilityEvidence() {
@@ -2433,10 +2603,43 @@ class CameraViewModel(
         }
     }
 
-    private suspend fun refreshLiveViewFrameInternal(reportErrors: Boolean) {
+    private suspend fun refreshLiveViewFrameInternal(reportErrors: Boolean): Boolean {
+        // Native video owns its presentation and listener generation; it has no bitmap read to stop.
+        if (_uiState.value.nativeLiveViewSession != null) return false
+        return refreshOwnedLiveViewFrame(reportErrors)
+    }
+
+    private suspend fun refreshOwnedLiveViewFrame(reportErrors: Boolean): Boolean = supervisorScope {
+        val job = async(start = CoroutineStart.LAZY) { readLiveViewFrameInternal(reportErrors) }
+        val read = LiveViewFrameRead(job)
+        liveViewFrameReads += read
+        job.start()
+        try {
+            job.await()
+            coroutineContext.ensureActive()
+            !read.stopped
+        } catch (exception: CancellationException) {
+            // Stopping preview must not cancel the control connection. A cancelled parent still
+            // owns its session cleanup and must propagate cancellation instead of publishing it.
+            coroutineContext.ensureActive()
+            if (!read.stopped) throw exception
+            false
+        } finally {
+            liveViewFrameReads.remove(read)
+        }
+    }
+
+    private fun cancelLiveViewFrameReads() {
+        liveViewFrameReads.toList().forEach { read ->
+            read.stopped = true
+            read.job.cancel()
+        }
+    }
+
+    private suspend fun readLiveViewFrameInternal(reportErrors: Boolean) {
         if (
             !appInForeground || !_uiState.value.liveViewAutoRefresh || !repository.isLiveViewRunning() ||
-            !_uiState.value.connected ||
+            !_uiState.value.connected || _uiState.value.shutterReleaseUnconfirmed ||
             _uiState.value.previewMode ||
             !_uiState.value.supports(CameraFeature.LIVE_VIEW)
             || !_uiState.value.liveViewTemperatureAllowed
@@ -2448,7 +2651,7 @@ class CameraViewModel(
         if (!repository.isRealCamera()) {
             val nextUrl = repository.nextLiveViewFrameUrl()
             _uiState.update {
-                if (it.connected && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration) {
+                if (it.connected && !it.shutterReleaseUnconfirmed && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration) {
                     it.copy(
                         liveViewFrameUrl = nextUrl,
                         liveViewBitmap = null,
@@ -2477,7 +2680,7 @@ class CameraViewModel(
             )
 
             _uiState.update {
-                if (it.connected && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration) {
+                if (it.connected && !it.shutterReleaseUnconfirmed && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration) {
                     it.copy(
                         liveViewFrameUrl = frame.sourceUrl,
                         liveViewBitmap = bitmap,
@@ -2534,7 +2737,7 @@ class CameraViewModel(
         liveViewJob?.cancel()
         val state = _uiState.value
         if (
-            !state.connected ||
+            !state.connected || state.shutterReleaseUnconfirmed ||
             !appInForeground || !repository.isLiveViewRunning() ||
             state.previewMode ||
             !state.liveViewAutoRefresh ||
@@ -2550,7 +2753,7 @@ class CameraViewModel(
                 val frameStartedAt = SystemClock.elapsedRealtime()
 
                 if (repository.isRealCamera()) {
-                    refreshLiveViewFrameInternal(reportErrors = false)
+                    if (!refreshLiveViewFrameInternal(reportErrors = false)) break
                 } else {
                     val nextUrl = repository.nextLiveViewFrameUrl()
                     _uiState.update {
@@ -2580,6 +2783,7 @@ class CameraViewModel(
     }
 
     private fun stopLiveViewLoop() {
+        cancelLiveViewFrameReads()
         liveViewJob?.cancel()
         liveViewJob = null
     }
@@ -2587,12 +2791,7 @@ class CameraViewModel(
     private fun startEventPollingIfSupported() {
         stopEventPollingLoop()
         val state = _uiState.value
-        if (
-            !state.connected ||
-            state.previewMode ||
-            !state.supports(CameraFeature.EVENT_POLLING)
-        ) return
-
+        if (!state.connected || state.previewMode || !state.supports(CameraFeature.EVENT_POLLING)) return
         val generation = eventPollingGeneration
         eventPollingJob = viewModelScope.launch {
             var consecutiveFailures = 0
@@ -2601,74 +2800,11 @@ class CameraViewModel(
                     val event = repository.pollEvent()
                     consecutiveFailures = 0
                     if (event.changedKeys.isEmpty()) continue
-                    val status = repository.refreshStatus()
-                    val capabilities = repository.refreshCapabilities()
-                    val captureMode = captureModeFrom(capabilities)
-                    val mediaResult = if ("contents" in event.changedKeys) {
-                        if (capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER)) {
-                            _uiState.update { current ->
-                                if (
-                                    generation == eventPollingGeneration &&
-                                    current.connected &&
-                                    !current.previewMode
-                                ) {
-                                    current.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING)
-                                } else {
-                                    current
-                                }
-                            }
-                            runCatching { repository.listMedia(RECENT_MEDIA_REQUEST_ITEMS) }
-                        } else {
-                            Result.success(emptyList())
-                        }
-                    } else {
-                        null
-                    }
-                    val mediaBatch = mediaResult?.getOrNull()?.toMediaLibraryBatch(MediaLibraryScope.RECENT)
-                    val mediaItems = mediaBatch?.items
-                    if (mediaItems != null) cancelMediaThumbnailLoads()
-                    val updateState: (CameraUiState) -> CameraUiState = { current ->
-                        if (
-                            generation == eventPollingGeneration &&
-                            current.connected &&
-                            !current.previewMode
-                        ) {
-                            val refreshed = current.copy(
-                                status = status,
-                                capabilities = capabilities,
-                                captureMode = captureMode ?: current.captureMode,
-                                liveViewMagnification = capabilities.liveView.currentMagnification
-                                    ?: current.liveViewMagnification?.takeIf { value ->
-                                        value in capabilities.liveView.magnifications
-                                    },
-                                mediaLibraryLoadStatus = when {
-                                    mediaResult?.isSuccess == true -> MediaLibraryLoadStatus.COMPLETE
-                                    mediaResult?.isFailure == true -> MediaLibraryLoadStatus.FAILED
-                                    else -> current.mediaLibraryLoadStatus
-                                },
-                            )
-                            if (mediaItems != null) {
-                                val merged = if (current.mediaLibraryScope == MediaLibraryScope.ALL) {
-                                    mergeRecentMedia(mediaItems, current.mediaItems)
-                                } else {
-                                    mediaItems
-                                }
-                                refreshed.withEventMediaItems(merged).copy(
-                                    mediaLibraryHasMore = current.mediaLibraryScope == MediaLibraryScope.RECENT &&
-                                        mediaBatch.hasMore,
-                                )
-                            } else {
-                                refreshed
-                            }
-                        } else {
-                            current
-                        }
-                    }
-                    if (mediaItems != null) {
-                        transitionMediaState(updateState)
-                        refreshCaptureReview(mediaItems)
-                    } else {
-                        _uiState.update(updateState)
+                    // Publish control state before any potentially slow media listing. A command
+                    // that starts or finishes during a read invalidates that snapshot and retries.
+                    val capabilities = refreshEventCameraState(generation) ?: break
+                    if ("contents" in event.changedKeys && capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER)) {
+                        refreshEventMedia(generation)
                     }
                 } catch (exception: CancellationException) {
                     throw exception
@@ -2680,13 +2816,88 @@ class CameraViewModel(
         }
     }
 
+    private suspend fun refreshEventCameraState(generation: Long): CameraCapabilities? {
+        while (generation == eventPollingGeneration && _uiState.value.connected) {
+            if (_uiState.value.pendingOperations.isNotEmpty()) {
+                delay(50L)
+                continue
+            }
+            val revision = cameraStateRevision
+            val status = repository.refreshStatus()
+            val capabilities = repository.refreshCapabilities()
+            coroutineContext.ensureActive()
+            if (generation != eventPollingGeneration) return null
+            if (revision != cameraStateRevision || _uiState.value.pendingOperations.isNotEmpty()) continue
+            val captureMode = captureModeFrom(capabilities)
+            _uiState.update { current ->
+                current.copy(
+                    status = status,
+                    capabilities = capabilities,
+                    captureMode = captureMode ?: current.captureMode,
+                    liveViewMagnification = capabilities.liveView.currentMagnification
+                        ?: current.liveViewMagnification?.takeIf { it in capabilities.liveView.magnifications },
+                )
+            }
+            return capabilities
+        }
+        return null
+    }
+
+    private suspend fun refreshEventMedia(generation: Long) {
+        val libraryGeneration = mediaLibraryGeneration
+        while (generation == eventPollingGeneration && _uiState.value.connected && _uiState.value.isBusy(CameraOperation.MEDIA)) {
+            delay(50L)
+        }
+        if (generation != eventPollingGeneration || libraryGeneration != mediaLibraryGeneration ||
+            !_uiState.value.connected || _uiState.value.mediaLibraryLoading) return
+        _uiState.update { it.copy(mediaLibraryLoading = true, mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING) }
+        // The child is independently cancellable by a download, explicit Cancel, or a scope change.
+        // Cancelling it must leave event polling alive; cancelling the parent cancels both.
+        supervisorScope {
+            val job = async(start = CoroutineStart.LAZY) { repository.listMedia(RECENT_MEDIA_REQUEST_ITEMS) }
+            eventMediaJob = job
+            try {
+                job.start()
+                val items = job.await()
+                coroutineContext.ensureActive()
+                if (generation != eventPollingGeneration || libraryGeneration != mediaLibraryGeneration) return@supervisorScope
+                val batch = items.toMediaLibraryBatch(MediaLibraryScope.RECENT)
+                cancelMediaThumbnailLoads()
+                transitionMediaState { current ->
+                    val merged = if (current.mediaLibraryScope == MediaLibraryScope.ALL) {
+                        mergeRecentMedia(batch.items, current.mediaItems)
+                    } else batch.items
+                    current.withEventMediaItems(merged).copy(
+                        mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
+                        mediaLibraryHasMore = current.mediaLibraryScope == MediaLibraryScope.RECENT && batch.hasMore,
+                    )
+                }
+                refreshCaptureReview(batch.items)
+            } catch (exception: CancellationException) {
+                // A cancelled child is an ordinary gallery cancellation, not an event-loop failure.
+                coroutineContext.ensureActive()
+            } catch (_: Exception) {
+                if (generation == eventPollingGeneration && libraryGeneration == mediaLibraryGeneration) {
+                    _uiState.update { it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) }
+                }
+            } finally {
+                if (eventMediaJob === job) eventMediaJob = null
+                if (generation == eventPollingGeneration && libraryGeneration == mediaLibraryGeneration) {
+                    _uiState.update { it.copy(mediaLibraryLoading = false) }
+                }
+            }
+        }
+    }
+
     private fun stopEventPollingLoop() {
+        if (eventMediaJob != null) invalidateMediaLibraryLoad(MediaLibraryLoadStatus.CANCELLED)
         eventPollingGeneration += 1
         eventPollingJob?.cancel()
         eventPollingJob = null
     }
 
     private suspend fun stopEventPollingLoopAndJoin() {
+        if (eventMediaJob != null) invalidateMediaLibraryLoad(MediaLibraryLoadStatus.CANCELLED)
         eventPollingGeneration += 1
         val job = eventPollingJob
         eventPollingJob = null
@@ -2699,14 +2910,23 @@ class CameraViewModel(
     }
 
     private suspend fun resumeLiveViewAfterBulb() {
+        if (_uiState.value.shutterReleaseUnconfirmed) return
         reconcileLiveView()
         repository.setNativeLiveViewRenderingEnabled(appInForeground && _uiState.value.liveViewAutoRefresh)
         if (!appInForeground || !_uiState.value.liveViewAutoRefresh) return
-        refreshLiveViewFrameInternal(reportErrors = false)
-        startLiveViewLoopIfNeeded()
+        if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
     }
 
     override fun onCleared() {
+        cameraSessionGeneration += 1
+        val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList()
+        cameraOperationJobs.clear()
+        liveViewReconciliationJobs.clear()
+        operationJobs.forEach(Job::cancel)
+        val teardown = disconnectJob
+        val uploadCleanupJob = mediaUploadCleanupJob
+        mediaUploadCleanupJob = null
+        uploadCleanupJob?.cancel()
         stopHeldAutofocus()
         val focusJob = heldAutofocusJob
         stopCameraFocusInfoLoop()
@@ -2722,7 +2942,10 @@ class CameraViewModel(
         uploadJob?.cancel()
         cancelMediaThumbnailLoads()
         viewModelScope.launch(NonCancellable + Dispatchers.IO) {
+            teardown?.join()
+            operationJobs.forEach { it.join() }
             uploadJob?.join()
+            uploadCleanupJob?.join()
             focusJob?.join()
             repository.disconnect()
         }
@@ -2735,6 +2958,7 @@ class CameraViewModel(
     ): CameraUiState = copy(
         autofocusHoldState = AutofocusHoldState.IDLE,
         shutterAutofocus = true,
+        shutterReleaseUnconfirmed = false,
         pendingOperations = pendingOperations - CameraOperation.FOCUS,
         baseUrl = baseUrl,
         previewMode = false,
@@ -2980,6 +3204,8 @@ class CameraViewModel(
         mediaLibraryGeneration += 1
         mediaLibraryJob?.cancel()
         mediaLibraryJob = null
+        eventMediaJob?.cancel()
+        eventMediaJob = null
         _uiState.update {
             it.copy(
                 mediaLibraryLoading = false,

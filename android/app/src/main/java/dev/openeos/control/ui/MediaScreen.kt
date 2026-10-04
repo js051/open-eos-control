@@ -363,6 +363,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
 
         MediaLibraryScopeBar(
             selected = state.mediaLibraryScope,
+            enabled = !state.isBusy(CameraOperation.MEDIA),
             onSelected = actions.setMediaLibraryScope,
         )
 
@@ -560,6 +561,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
 @OptIn(ExperimentalMaterial3Api::class)
 private fun MediaLibraryScopeBar(
     selected: MediaLibraryScope,
+    enabled: Boolean,
     onSelected: (MediaLibraryScope) -> Unit,
 ) {
     val scopes = listOf(
@@ -572,6 +574,7 @@ private fun MediaLibraryScopeBar(
         scopes.forEachIndexed { index, (scope, label) ->
             SegmentedButton(
                 selected = selected == scope,
+                enabled = enabled,
                 onClick = { onSelected(scope) },
                 shape = SegmentedButtonDefaults.itemShape(index, scopes.size),
                 colors = SegmentedButtonDefaults.colors(
