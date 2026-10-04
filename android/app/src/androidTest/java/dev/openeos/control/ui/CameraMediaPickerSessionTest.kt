@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -18,6 +19,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.core.app.ActivityOptionsCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModelStore
@@ -208,6 +211,98 @@ class CameraMediaPickerSessionTest {
         assertTrue(cameraB.deletes.isEmpty())
     }
 
+    @Test
+    fun everyStalePickerLeavesItsReturnedDocumentOrSourceUntouched() {
+        for (kind in CameraMediaPickerKind.entries) {
+            val item = viewModel.uiState.value.mediaItems.first()
+            when (kind) {
+                CameraMediaPickerKind.DOWNLOAD_DOCUMENT -> launchSingleDocument(item)
+                CameraMediaPickerKind.DOWNLOAD_FOLDER -> launchFolder()
+                CameraMediaPickerKind.UPLOAD -> launchUpload()
+            }
+            val request = registry.lastRequest(when (kind) {
+                CameraMediaPickerKind.DOWNLOAD_DOCUMENT -> ActivityResultContracts.CreateDocument::class.java
+                CameraMediaPickerKind.DOWNLOAD_FOLDER -> ActivityResultContracts.OpenDocumentTree::class.java
+                CameraMediaPickerKind.UPLOAD -> ActivityResultContracts.OpenDocument::class.java
+            })
+            val sentinel = "keep-this-user-selected-document".toByteArray()
+            val returned = if (kind == CameraMediaPickerKind.DOWNLOAD_FOLDER) unavailableTree()
+                else document("unchanged-${kind.name}.jpg", sentinel)
+            compose.runOnIdle { viewModel.disconnect() }
+            connect(cameraB)
+            openAlbum()
+            compose.runOnIdle {
+                registry.deliver(request, returned)
+                assertEquals(compose.activity.getString(R.string.media_picker_session_expired), viewModel.uiState.value.error)
+                assertFalse(viewModel.uiState.value.isBusy(CameraOperation.MEDIA))
+            }
+            if (kind != CameraMediaPickerKind.DOWNLOAD_FOLDER) assertArrayEquals(sentinel, read(returned))
+            assertTrue(cameraA.originalReads.isEmpty())
+            assertTrue(cameraB.originalReads.isEmpty())
+            assertTrue(uploads.isEmpty())
+        }
+    }
+
+    @Test
+    fun cancelledAndUnavailableUploadPickersReleaseTheirTicketsForRetry() {
+        launchUpload()
+        val cancelled = registry.lastRequest(ActivityResultContracts.OpenDocument::class.java)
+        compose.runOnIdle { registry.deliver(cancelled, null) }
+        registry.nextLaunchFailure = ActivityNotFoundException("Synthetic picker is unavailable")
+        launchUpload()
+        compose.runOnIdle {
+            assertEquals(compose.activity.getString(R.string.media_picker_open_failed), viewModel.uiState.value.error)
+            assertTrue(uploads.isEmpty())
+        }
+        launchUpload()
+        val retry = registry.lastRequest(ActivityResultContracts.OpenDocument::class.java)
+        val bytes = "synthetic-retry-upload".toByteArray()
+        val source = document("retry-upload.jpg", bytes)
+        compose.runOnIdle { registry.deliver(retry, source) }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            viewModel.uiState.value.lastUploadedMediaName == "retry-upload.jpg" && !viewModel.uiState.value.busy
+        }
+        assertEquals(1, uploads.size)
+        assertArrayEquals(bytes, uploads.single())
+        assertArrayEquals(bytes, read(source))
+    }
+
+    @Test
+    fun cancelledFolderReleasesItsTicketAndScopeRefreshDoesNotInvalidateNextDownload() {
+        val item = viewModel.uiState.value.mediaItems.first()
+        launchFolder()
+        val cancelled = registry.lastRequest(ActivityResultContracts.OpenDocumentTree::class.java)
+        compose.runOnIdle { registry.deliver(cancelled, null) }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.exit_media_selection)).performClick()
+        launchSingleDocument(item)
+        val request = registry.lastRequest(ActivityResultContracts.CreateDocument::class.java)
+        compose.runOnIdle { viewModel.setMediaLibraryScope(MediaLibraryScope.ALL) }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !viewModel.uiState.value.mediaLibraryLoading }
+        val destination = document("after-scope-change.jpg")
+        compose.runOnIdle { registry.deliver(request, destination) }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { viewModel.uiState.value.lastDownloadedMediaName == item.name }
+        assertArrayEquals(cameraA.imageBytes, read(destination))
+        assertEquals(listOf("/ccapi/media/${item.id}"), cameraA.originalReads.toList())
+    }
+
+    @Test
+    fun restoredFolderRequestKeepsItsBatchAndReportsProviderFailureForEveryOriginalItem() {
+        val items = viewModel.uiState.value.mediaItems
+        launchFolder()
+        val request = registry.lastRequest(ActivityResultContracts.OpenDocumentTree::class.java)
+        restoreComposition()
+        // A deliberately missing provider exercises the real batch entry point without
+        // granting a real SAF tree. This verifies restoration/error accounting, not SAF success.
+        compose.runOnIdle { registry.deliver(request, unavailableTree()) }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { viewModel.uiState.value.lastMediaBatchResult != null }
+        val result = requireNotNull(viewModel.uiState.value.lastMediaBatchResult)
+        assertEquals(items.size, result.totalItems)
+        assertEquals(0, result.succeededItems)
+        assertEquals(items.map(CameraMediaItem::name), result.failedItemNames)
+        assertTrue(cameraA.originalReads.isEmpty())
+        assertTrue(cameraB.originalReads.isEmpty())
+    }
+
     private fun newViewModel(): CameraViewModel = CameraViewModel().also { model ->
         stores += ViewModelStore().apply { put("picker", model) }
         models += model
@@ -253,6 +348,17 @@ class CameraMediaPickerSessionTest {
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.upload_media)).performClick()
     }
 
+    private fun launchFolder() {
+        val item = viewModel.uiState.value.mediaItems.first()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.preview_media, item.name))
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.select_all_media)).performClick()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.edit_selected_media, 2)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_save_to_folder)).performScrollTo().performClick()
+    }
+
+    private fun unavailableTree(): Uri = Uri.parse("content://dev.openeos.control.test.missing-provider/tree/synthetic-folder")
+
     private fun restoreComposition(replaceViewModel: Boolean = false) {
         val savedRegistry = Bundle()
         compose.runOnIdle {
@@ -278,6 +384,7 @@ class CameraMediaPickerSessionTest {
 private class DeferredPickerRegistry : ActivityResultRegistry() {
     data class Request(val code: Int, val contract: Class<*>)
     private val requests = mutableListOf<Request>()
+    var nextLaunchFailure: RuntimeException? = null
 
     override fun <I, O> onLaunch(
         requestCode: Int,
@@ -285,6 +392,10 @@ private class DeferredPickerRegistry : ActivityResultRegistry() {
         input: I,
         options: ActivityOptionsCompat?,
     ) {
+        nextLaunchFailure?.let { failure ->
+            nextLaunchFailure = null
+            throw failure
+        }
         requests += Request(requestCode, contract.javaClass)
     }
 

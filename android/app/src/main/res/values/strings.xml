@@ -1,4 +1,7 @@
 <resources>
+    <string name="media_picker_session_expired">The camera connection changed. Please select the file or folder again.</string>
+    <string name="media_picker_transfer_unavailable">This transfer is not available right now. Please select the file or folder again when the camera is ready.</string>
+    <string name="media_picker_open_failed">Android could not open the file picker. Please try again.</string>
     <string name="live_view_release_unconfirmed">Live View stop unconfirmed. Turn Live View off, then retry.</string>
     <string name="shutter_disconnect_warning">Check the previous camera: its shutter release was not confirmed.</string>
     <string name="retry_shutter_release">Retry releasing shutter; stop only</string>

@@ -12,6 +12,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 - Android: retain a consumed camera event until its authoritative status/capability refresh succeeds. Temporary read failures retry with capped backoff without requiring another event, losing contents hints, or replaying camera commands; disconnect discards the old session recovery.
 
+- Android: preserve a pending media picker request across same-ViewModel recreation, and bind returned documents/folders/uploads to the original camera session. Old results after process/session replacement are consumed before any transfer I/O and explain how to choose again; cancellation and launch failures free only their matching request.
+
 - Android: keep the selected media-library scope unchanged while a media operation is active, so a recent result cannot be mislabeled as a completed full-card listing. Scope controls become available again after the operation finishes.
 - Android: cancel and join unfinished card traversal before single-file and batch downloads, including event-triggered refreshes; cancelling media work now cancels its active JSON, thumbnail, and display HTTP reads.
 - Android: isolate in-flight operations from replacement camera sessions and discard stale status reads after a newer command, without replaying camera writes.
