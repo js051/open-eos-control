@@ -10,8 +10,10 @@ import android.os.SystemClock
 import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.AutofocusReleaseException
 import dev.openeos.control.data.ShutterReleaseException
@@ -221,6 +223,7 @@ class CameraViewModel(
     private class LiveViewFrameRead(val job: Job, var stopped: Boolean = false)
     private val liveViewFrameReads = mutableSetOf<LiveViewFrameRead>()
     private var cameraSessionGeneration = 0L
+    private val mediaPickerRequests = CameraMediaPickerRequests()
     private var cameraStateRevision = 0L
     private val cameraOperationJobs = mutableMapOf<CameraOperation, Job>()
     private var disconnectJob: Job? = null
@@ -1756,6 +1759,57 @@ class CameraViewModel(
                 )
             }
         }
+    }
+
+    internal fun beginMediaPicker(
+        kind: CameraMediaPickerKind,
+        items: List<CameraMediaItem> = emptyList(),
+    ): String? {
+        val state = _uiState.value
+        if (!canStartMediaPickerTransfer(state, kind)) return null
+        if (kind != CameraMediaPickerKind.UPLOAD && items.isEmpty()) return null
+        return mediaPickerRequests.begin(kind, cameraSessionGeneration, requireNotNull(state.info), items)
+    }
+
+    internal fun completeMediaPicker(context: Context, kind: CameraMediaPickerKind, id: String?, uri: Uri?) {
+        if (uri == null) {
+            mediaPickerRequests.cancel(kind, id)
+            return
+        }
+        val state = _uiState.value
+        when (val result = mediaPickerRequests.consume(
+            kind, id, cameraSessionGeneration, state.info.takeIf { state.connected && !state.previewMode },
+        )) {
+            CameraMediaPickerRequests.Result.Ignored -> Unit
+            CameraMediaPickerRequests.Result.Expired -> reportMediaPickerError(context, R.string.media_picker_session_expired)
+            is CameraMediaPickerRequests.Result.Ready -> {
+                if (!canStartMediaPickerTransfer(state, kind)) {
+                    reportMediaPickerError(context, R.string.media_picker_transfer_unavailable)
+                    return
+                }
+                // Validate and consume before any source read, output open, document creation,
+                // or camera command. Rejected results never enter transfer cleanup/delete paths.
+                when (kind) {
+                    CameraMediaPickerKind.DOWNLOAD_DOCUMENT -> downloadMedia(context, result.items.single(), uri)
+                    CameraMediaPickerKind.DOWNLOAD_FOLDER -> downloadMediaBatch(context, result.items, uri)
+                    CameraMediaPickerKind.UPLOAD -> uploadMedia(context, uri)
+                }
+            }
+        }
+    }
+
+    internal fun failMediaPickerLaunch(context: Context, kind: CameraMediaPickerKind, id: String) {
+        if (mediaPickerRequests.cancel(kind, id)) reportMediaPickerError(context, R.string.media_picker_open_failed)
+    }
+
+    private fun canStartMediaPickerTransfer(state: CameraUiState, kind: CameraMediaPickerKind): Boolean =
+        state.connected && !state.previewMode && !state.isBusy(CameraOperation.MEDIA) &&
+            mediaDownloadJob == null && mediaUploadJob == null && state.supports(
+                if (kind == CameraMediaPickerKind.UPLOAD) CameraFeature.MEDIA_UPLOAD else CameraFeature.MEDIA_DOWNLOAD,
+            )
+
+    private fun reportMediaPickerError(context: Context, @StringRes message: Int) {
+        _uiState.update { it.copy(error = context.getString(message), errorOperation = CameraOperation.MEDIA) }
     }
 
     fun downloadMedia(context: Context, item: CameraMediaItem, destination: Uri) {

@@ -4100,7 +4100,7 @@ class CameraScreensTest {
         halfPressShutter = {},
         clickWhiteBalance = { _, _ -> },
         refreshMedia = {}, loadMediaThumbnail = {}, openMediaPreview = {}, closeMediaPreview = {},
-        downloadMedia = { _, _ -> }, deleteMedia = {},
+        downloadMedia = {}, deleteMedia = {},
         cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {},
         setAutoRefresh = {}, setFps = {}, setLiveViewSize = {}, setLiveViewSource = {}, setAppLanguage = {}, clearError = {},

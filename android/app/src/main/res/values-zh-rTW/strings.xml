@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="media_picker_session_expired">相機連線已變更，請重新選擇檔案或資料夾。</string>
+    <string name="media_picker_transfer_unavailable">目前無法進行此傳輸。請等相機就緒後，重新選擇檔案或資料夾。</string>
+    <string name="media_picker_open_failed">Android 無法開啟檔案選擇器，請重試。</string>
     <string name="live_view_release_unconfirmed">尚未確認 Live View 已停止。請先關閉 Live View，再重試。</string>
     <string name="shutter_disconnect_warning">上一台相機的快門釋放尚未確認，請在機身確認曝光已停止。</string>
     <string name="retry_shutter_release">重試釋放快門，只發送停止</string>

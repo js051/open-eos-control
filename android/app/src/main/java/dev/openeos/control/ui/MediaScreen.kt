@@ -1,8 +1,6 @@
 package dev.openeos.control.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -55,8 +53,6 @@ import java.util.Locale
 
 @Composable
 fun MediaScreen(state: CameraUiState, actions: CameraActions) {
-    var pendingDownload by remember { mutableStateOf<CameraMediaItem?>(null) }
-    var pendingBatchDownload by remember { mutableStateOf<List<CameraMediaItem>?>(null) }
     var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
     var pendingBatchDelete by remember { mutableStateOf<List<CameraMediaItem>?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
@@ -82,31 +78,13 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         val availableIds = state.mediaItems.mapTo(hashSetOf(), CameraMediaItem::id)
         selectedIds = selectedIds.intersect(availableIds)
     }
-    val createDocument = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream"),
-    ) { destination ->
-        val item = pendingDownload
-        pendingDownload = null
-        if (destination != null && item != null) actions.downloadMedia(item, destination)
-    }
-    val openUploadDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { source ->
-        if (source != null) actions.uploadMedia(source)
-    }
-    val openDownloadFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { folder ->
-        val items = pendingBatchDownload
-        pendingBatchDownload = null
-        if (folder != null && !items.isNullOrEmpty()) actions.downloadMediaBatch(items, folder)
-    }
-
     fun download(items: List<CameraMediaItem>) {
         if (items.all(::canSaveMediaToGallery)) {
             actions.saveMediaToPhone(items)
         } else if (items.size == 1) {
-            pendingDownload = items.single()
-            createDocument.launch(items.single().name)
+            actions.downloadMedia(items.single())
         } else {
-            pendingBatchDownload = items
-            openDownloadFolder.launch(null)
+            actions.downloadMediaBatch(items)
         }
     }
 
@@ -208,8 +186,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
             onSaveToFolder = {
                 batchMetadataVisible = false
-                pendingBatchDownload = selectedItems
-                openDownloadFolder.launch(null)
+                actions.downloadMediaBatch(selectedItems)
             },
         )
     }
@@ -239,8 +216,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 },
                 onSaveToFolder = {
                     activeMetadataItemId = null
-                    pendingDownload = item
-                    createDocument.launch(item.name)
+                    actions.downloadMedia(item)
                 },
                 onOpenInSerein = {
                     activeMetadataItemId = null
@@ -345,7 +321,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                     ToolIconButton(
                         LucideR.drawable.lucide_ic_upload,
                         stringResource(R.string.upload_media),
-                        { openUploadDocument.launch(arrayOf("image/*", "video/*", "application/octet-stream")) },
+                        actions.uploadMedia,
                         enabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA),
                     )
                 }

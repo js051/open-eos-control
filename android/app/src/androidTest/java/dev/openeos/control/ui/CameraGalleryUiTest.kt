@@ -114,7 +114,7 @@ class CameraGalleryUiTest {
         captureStill = {}, autofocus = {}, driveFocus = { _, _ -> }, setLiveViewMagnification = {},
         toggleRecording = {}, tapFocus = { _, _ -> }, halfPressShutter = {}, clickWhiteBalance = { _, _ -> },
         refreshMedia = {}, loadMediaThumbnail = {}, openMediaPreview = {}, closeMediaPreview = {},
-        downloadMedia = { _, _ -> }, deleteMedia = {}, cancelMediaDownload = {},
+        downloadMedia = {}, deleteMedia = {}, cancelMediaDownload = {},
         refreshLiveView = {}, restartLiveView = {}, setAutoRefresh = {}, setFps = {}, setLiveViewSize = {},
         setLiveViewSource = {}, setAppLanguage = {}, clearError = {},
     )
