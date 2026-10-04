@@ -7,6 +7,33 @@ final class OpenEOSControlUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testConnectionHitGeometryRejectsOffscreenOrClippedButtons() {
+        let window = CGRect(x: 0, y: 0, width: 874, height: 402)
+        let visible = CGRect(x: 157, y: 200, width: 560, height: 77.33333333333337)
+        let cases: [(String, CGRect, CGRect, CGRect, Bool)] = [
+            ("fully visible", visible, window, window, true),
+            ("observed offscreen but AX-hittable Connect",
+             CGRect(x: 157, y: 596.6666666666666, width: 560, height: 77.33333333333337), window, window, false),
+            ("center visible but bottom clipped", CGRect(x: 157, y: 376, width: 560, height: 44), window, window, false),
+            ("top clipped", CGRect(x: 157, y: -10, width: 560, height: 77), window, window, false),
+            ("left clipped", CGRect(x: -10, y: 200, width: 560, height: 77), window, window, false),
+            ("inside window but below scroll viewport", visible,
+             CGRect(x: 0, y: 0, width: 874, height: 250), window, false),
+            ("inside scroll content but below window", CGRect(x: 157, y: 500, width: 560, height: 77),
+             CGRect(x: 0, y: 0, width: 874, height: 900), window, false),
+            ("44pt target", CGRect(x: 157, y: 200, width: 44, height: 44), window, window, true),
+            ("too short", CGRect(x: 157, y: 200, width: 560, height: 43), window, window, false),
+            ("too narrow", CGRect(x: 157, y: 200, width: 43, height: 77), window, window, false),
+            ("missing button", .null, window, window, false),
+            ("empty viewport", visible, .zero, window, false),
+            ("infinite viewport", visible, .infinite, window, false),
+            ("nonfinite button", CGRect(x: CGFloat.nan, y: 200, width: 560, height: 77), window, window, false),
+        ]
+        for (name, button, scroll, window, expected) in cases {
+            XCTAssertEqual(Self.connectionButtonHasVisibleHitFrame(button, scroll: scroll, window: window), expected, name)
+        }
+    }
+
     func testShutterRecoveryStopRemainsReachableAcrossLanguagesFontsAndRotation() throws {
         let languages = [
             ("english", "en", "en_US", "Stop · Release shutter", "Shutter release is unconfirmed"),
@@ -21,7 +48,8 @@ final class OpenEOSControlUITests: XCTestCase {
                         contentSizeCategory: font
                     )
                     let connect = app.buttons["connect-button"]
-                    XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+                    XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+                    assertConnectionButtonHitFrame(in: app)
                     connect.tap()
                     let stop = app.buttons["release-shutter-button"]
                     XCTAssertTrue(waitForInteraction(stop, timeout: 8))
@@ -54,7 +82,8 @@ final class OpenEOSControlUITests: XCTestCase {
             environment: ["OEC_SHUTTER_RECOVERY_FIXTURE": "previous-and-current"]
         )
         let connect = app.buttons["connect-button"]
-        XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+        XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+        assertConnectionButtonHitFrame(in: app)
         connect.tap()
         XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 8))
         openMoreActions(in: app)
@@ -70,11 +99,9 @@ final class OpenEOSControlUITests: XCTestCase {
         guard waitForConnectionScreen(in: app, timeout: 8) else { return }
         let previous = app.staticTexts["previous-shutter-release-warning"]
         XCTAssertTrue(previous.waitForExistence(timeout: 8))
-        for _ in 0..<8 {
-            if connect.isHittable { break }
-            app.scrollViews["connection-scroll-view"].swipeUp()
-        }
+        XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
         XCTAssertTrue(waitForInteraction(connect, timeout: 5))
+        assertConnectionButtonHitFrame(in: app)
         connect.tap()
         let stop = app.buttons["release-shutter-button"]
         XCTAssertTrue(waitForInteraction(stop, timeout: 8))
@@ -108,7 +135,8 @@ final class OpenEOSControlUITests: XCTestCase {
                 contentSizeCategory: font
             )
             let connect = app.buttons["connect-button"]
-            XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+            XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+            assertConnectionButtonHitFrame(in: app)
             connect.tap()
             XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 8))
             XCUIDevice.shared.orientation = orientation
@@ -124,8 +152,9 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertFalse(app.staticTexts["camera-model-status"].exists)
             XCTAssertFalse(app.buttons["release-shutter-button"].exists)
 
-            XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+            XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
             recordShutterRecoveryConnectGeometry(in: app, phase: "\(name)-before-reconnect")
+            assertConnectionButtonHitFrame(in: app)
             connect.tap()
             let reconnectDeadline = ProcessInfo.processInfo.systemUptime + 8
             recordShutterRecoveryConnectGeometry(in: app, phase: "\(name)-after-reconnect")
@@ -140,8 +169,9 @@ final class OpenEOSControlUITests: XCTestCase {
                 reconnected = stop.exists && stop.isEnabled && stop.isHittable
             }
             // Record the result before a failure aborts the test. Keep the same
-            // single tap and total eight-second budget after it returns. Pre-tap
-            // observation can still change a race; this is diagnosis, not a fix.
+            // single tap and total eight-second budget after it returns. The
+            // test helper now rejects the proven offscreen AX false-positive;
+            // these observations alone do not prove a production repair.
             if !reconnected {
                 recordShutterRecoveryConnectGeometry(in: app, phase: "\(name)-failed-reconnect")
             }
@@ -687,6 +717,69 @@ final class OpenEOSControlUITests: XCTestCase {
             }
         }
         return element.exists && element.isEnabled && element.isHittable
+    }
+
+    private static func connectionButtonHasVisibleHitFrame(
+        _ button: CGRect, scroll: CGRect, window: CGRect
+    ) -> Bool {
+        guard [button, scroll, window].allSatisfy({ frame in
+            !frame.isNull && !frame.isInfinite && !frame.isEmpty
+                && [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy { $0.isFinite }
+        }), button.width >= 44, button.height >= 44 else { return false }
+        let viewport = scroll.intersection(window)
+        let center = CGPoint(x: button.midX, y: button.midY)
+        return !viewport.isEmpty && viewport.contains(button) && viewport.contains(center)
+    }
+
+    private func scrollConnectionButtonIntoView(in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let connect = app.buttons["connect-button"]
+        let scroll = app.scrollViews["connection-scroll-view"]
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        var swipes = 0
+        while ProcessInfo.processInfo.systemUptime < deadline, swipes < 8 {
+            guard connect.exists, scroll.exists else {
+                Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
+                continue
+            }
+            let frame = connect.frame
+            let window = app.windows.firstMatch.frame
+            let viewport = scroll.frame.intersection(window)
+            if Self.connectionButtonHasVisibleHitFrame(frame, scroll: scroll.frame, window: window) {
+                if connect.isEnabled && connect.isHittable { return true }
+                // A visible but disabled button needs state to settle, not a swipe.
+                Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
+                continue
+            }
+            guard !viewport.isNull, !viewport.isEmpty else { return false }
+            guard ProcessInfo.processInfo.systemUptime < deadline else { break }
+            // Only this known scroll container may move. Do not trust AX's
+            // isHittable for offscreen content or tap until the frame is visible.
+            if frame.maxY > viewport.maxY {
+                scroll.swipeUp()
+            } else if frame.minY < viewport.minY {
+                scroll.swipeDown()
+            } else {
+                return false // Vertical scrolling cannot fix width or target size.
+            }
+            swipes += 1
+        }
+        return connect.exists && scroll.exists && connect.isEnabled && connect.isHittable
+            && Self.connectionButtonHasVisibleHitFrame(
+                connect.frame, scroll: scroll.frame, window: app.windows.firstMatch.frame
+            )
+    }
+
+    private func assertConnectionButtonHitFrame(
+        in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let frame = app.buttons["connect-button"].frame
+        let scroll = app.scrollViews["connection-scroll-view"].frame
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(
+            Self.connectionButtonHasVisibleHitFrame(frame, scroll: scroll, window: window),
+            "Connect \(frame) must be a full 44pt target inside scroll/window viewport \(scroll.intersection(window))",
+            file: file, line: line
+        )
     }
 
     private func openMoreActions(in app: XCUIApplication) {

@@ -55,7 +55,7 @@ Darwin 實際 TCP fixture 已送出完整 HTTP 200 headers、Content-Length 64�
 
 最小修正在 send 回傳前比對仍可比較的 identity body byte count 與 Content-Length，拒絕長度不符、無效／衝突／溢位的長度。依 [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) 的 body／framing 規則，排除 HEAD、1xx、204、304、成功 CONNECT，以及有 Transfer-Encoding 的回應；非 identity Content-Encoding 也不直接用 decoded byte count 比較。依 [RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.6)，相同的合併 Content-Length 值可正規化。這不新增 Canon-specific 回覆契約、不 replay full_press，也不增加自動重試。
 
-新增 6 個 helper 測試方法、1 個實際 wire 正向方法（9 組完整／合法回應對照，含 gzip、chunked）；既有 lost／truncated、fresh／pooled 故障矩陣與 exact-once 斷言不改。預期 Core 共 228 個方法，尚待本輪精確 head 的 macOS 編譯及執行。encoded／chunked 的完整性仍依賴 URLSession，不能宣稱這個 identity Content-Length guard 已覆蓋其所有截斷情況。
+新增 6 個 helper 測試方法、1 個實際 wire 正向方法（9 組完整／合法回應對照，含 gzip、chunked）；既有 lost／truncated、fresh／pooled 故障矩陣與 exact-once 斷言不改。後續 e076956 與 5594055 的正常 macOS CI 已實際編譯並通過全部 228 個 Core 方法，包含這些正／負向對照。encoded／chunked 的完整性仍依賴 URLSession，不能宣稱這個 identity Content-Length guard 已覆蓋其所有截斷情況。
 
 ### 已重現的 sheet hit overlap 與最小修正
 
@@ -63,9 +63,22 @@ Darwin 實際 TCP fixture 已送出完整 HTTP 200 headers、Content-Length 64�
 
 修正僅把 sheet host 與 recovery 改成同一 VStack 中明確分配空間的 siblings，保留 recovery 的 layout priority，取代 NavigationStack 外側的 safeAreaInset；相機命令及警告語意不變。原跨連線測試仍只點一次 Disconnect、等待 8 秒，並保留所有既有斷言。
 
-新增回歸直接要求唯一可操作 sheet Stop、Disconnect／Stop 無交集、各自完整位於畫面內且至少 44pt 高。4 組情境涵蓋英文／繁中、XS／accessibility XXXL、直向／左右橫向、active／unknown；每組實際驗證單次 Disconnect 退休連線，以及重連後單次 Stop 釋放快門但保留目前連線與 actions sheet。原 root recovery 的完整語言／字體／方向矩陣保留。預期本輪 UI 共 14 個方法，新增 layout、回歸及 screenshots 尚待 macOS CI，沒有實體相機證據。
+新增回歸直接要求唯一可操作 sheet Stop、Disconnect／Stop 無交集、各自完整位於畫面內且至少 44pt 高。4 組情境涵蓋英文／繁中、XS／accessibility XXXL、直向／左右橫向、active／unknown；每組要求單次 Disconnect 退休連線，以及重連後單次 Stop 釋放快門但保留目前連線與 actions sheet。原 root recovery 的完整語言／字體／方向矩陣保留。後續 CI 已驗證 layout 的分離，仍有下面獨立的測試操作缺陷待閉合；沒有實體相機證據。
 
-本機沒有 Swift／Xcode。本輪 diff check 已通過；先前版本已完成語系 key parity、原規則機密掃描與 source manifest／patch 完整性檢查，但仍需對最終整合 head 重跑適用檢查。前述 baseline、App unit 或 12 個 UI 成功都不能當成修改後全綠；修正必須由精確 head 正常 macOS CI 閉合，不能跳過失敗或放寬 exact-once。
+### 後續實測：產品修正通過的部分與 Connect 測試操作缺陷
+
+[CI 37207124228](https://github.com/js051/open-eos-control/actions/runs/37207124228)，head e076956eece92014c6e529bb31686c37c1c4e121，以及加上有界回連診斷的 [CI 37208791469](https://github.com/js051/open-eos-control/actions/runs/37208791469)，head 5594055324aed78f2ff2752b4719d8955173d924：
+- Core 228／228、App unit 90／90 通過；UI 14 個方法中 13 個通過、1 個失敗，不能宣稱整體已綠。
+- 原上一連線警告／新 Stop 測試及完整 root 語言／字體／方向矩陣通過。新 sheet 回歸 4 組都確認 Disconnect／Stop 無交集並成功單次斷線，前 3 組也確認重連後 Stop 的獨立效果。
+- 第 4 組繁中 accessibility XXXL、landscapeRight 在斷線後無法完成測試所要求的回連，所以尚未執行該組後半段 Stop。
+
+5594055 的 before／after／failed-reconnect 幾何及 PNG 顯示：window 與 connection scroll viewport 都是 `(0, 0, 874, 402)`，Connect frame 卻是 `(157, 596.67, 560, 77.33)`，完全不在畫面內；AX 仍回報 enabled／hittable 為 true。舊通用 helper 只看 exists／enabled／isHittable，直接返回而沒有滑動。名義上的單次 Connect tap 前 PNG 為 HTTP preset 選中，tap 後及原 8 秒 budget 失敗後 PNG 都變成 Simulator preset 選中；Connect frame 仍在畫面外，model／Stop 都不存在。這證明本次紅燈是測試操作點錯目標，不能据此修改 fixture 的第二連線狀態或宣稱 production connect 壞掉。
+
+本輪只修測試 harness：對這 3 個 recovery 測試的所有 Connect setup／reconnect，採專用 connection-scroll-view helper；最多 8 次、8 秒內的有界上下滑動，要求按鈕完整 frame 與中心都在 scroll／window 交集內、寬高至少 44pt，再做原單次 tap。各 tap 前另有直接幾何斷言。一般 media helper、production、字體、方向、Stop／Disconnect 次數及產品結果斷言不變；回連的 8 秒期限仍從 tap 返回立即開始，tap 後診斷算入該期限，沒有額外等待寬限。
+
+新增 1 個純 CGRect 判準測試方法，14 組手工案例含上述真實 offscreen frame、中心可見但邊界裁切、scroll 與 window 交集、44pt 門檻、空／無限／非有限 frame。下一輪 UI 預期 15 個方法，尚未 macOS 編譯或執行。保留同名 before／after／failed 診斷附件，繼續用實際可見 Connect tap、第二 session、sheet Stop 與無舊責任干擾的最終結果閉合，不能把 helper 寫好當成回歸已通過。
+
+本機沒有 Swift／Xcode。本輪 diff check 已通過；先前版本已完成語系 key parity、原規則機密掃描與 source manifest／patch 完整性檢查，但仍需對最終整合 head 重跑適用檢查。前述 Core、App unit 或 13 個 UI 成功都不能當成修改後全綠；修正必須由精確 head 正常 macOS CI 閉合，不能跳過失敗或放寬 exact-once。
 
 ## 相容性與發布評估
 
