@@ -1,6 +1,8 @@
 # Feature Status And Acceptance
 
-Last audited: 2026-08-14.
+Original full-ledger audit: 2026-08-14. Scoped follow-ups below retain their own dates and validation boundaries.
+
+Product workflow audit (2026-10-04): [prioritized complete-workflow gaps and acceptance criteria](product-workflow-acceptance.zh-TW.md), based on PR #194 head `5a042d2`. This is a cross-platform gap review, not renewed physical-device validation or a declaration that every implemented capability is complete.
 
 This is the canonical completeness ledger for Open EOS Control. A UI control, interface method, or simulator response alone does not make a feature complete.
 
