@@ -26,11 +26,17 @@ struct RootView: View {
         }
         .background(Color.cameraBackground.ignoresSafeArea())
         .sheet(item: $camera.activeSheet) { sheet in
-            CameraSheetHost(sheet: sheet)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if camera.shutterReleaseRequired { ShutterReleaseRecoveryView() }
+            // A NavigationStack footer can ignore an outer safe-area inset.
+            // Reserve actual sibling space so Disconnect cannot sit under Stop.
+            VStack(spacing: 0) {
+                CameraSheetHost(sheet: sheet)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if camera.shutterReleaseRequired {
+                    ShutterReleaseRecoveryView()
+                        .layoutPriority(1)
                 }
-                .presentationBackground(Color.cameraSurface)
+            }
+            .presentationBackground(Color.cameraSurface)
         }
         .alert(
             Text("operation_failed"),

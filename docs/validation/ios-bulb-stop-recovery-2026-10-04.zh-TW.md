@@ -38,11 +38,34 @@ DELETE /v1/session/{id} 由連線清理擁有，等待結果後才解除 session
 
 ## 測試分層與尚未通過的 gate
 
-保留 baseline 2 例不改。新增 Core ownership 16、Bridge recovery 29、URLSession/Darwin TCP 2 個方法（8 組 fresh／pooled 故障矩陣）、App 17、UI 2 個方法。wire tests 要直接量到 full_press 次數，不以 mock 預期代替真傳輸。
+保留 baseline 2 例不改。新增 Core ownership 16、Bridge recovery 29、App 17；URLSession/Darwin TCP 原故障矩陣保留，另外有 transport 長度檢查與正常回應對照。UI 原新增 2 個方法之外，本輪再加 1 個 sheet hit-target 回歸。wire tests 要直接量到 full_press 次數，不以 mock 預期代替真傳輸。
 
 DEBUG UI fixture 僅 DEBUG build 且 OEC_SHUTTER_RECOVERY_FIXTURE 為明確白名單情境才啟用；普通啟動／Release 使用原 client。fixture 標記 simulated-shutter-recovery，新增回歸要求實體驗證匯出被拒。它是注入 transport 的 UI 證據，與 Darwin socket tests、實體相機三者嚴格分開。
 
-本機沒有 Swift／Xcode。implementation 的編譯、上述新增測試、wire、UI screenshots 皆尚未執行；已完成 diff check、語系 key parity、原規則機密掃描與 source manifest／patch 完整性檢查。baseline 的 171 綠不能當成修改後全綠。修正必須由精確 head 正常 macOS CI 閉合，不能跳過失敗或放寬 exact-once。
+### 第二輪 macOS CI 的實際結果
+
+[CI 37205228838](https://github.com/js051/open-eos-control/actions/runs/37205228838)，PR head f4dc8b17e96009cde64599160af2d4d6c4b11c93：
+- Core 成功編譯；221 個測試方法中 219 個通過、2 個 wire 方法失敗，合計 11 個失敗斷言。
+- App 成功編譯；90 個 unit tests 全過，含本分支新增 17 個。
+- 13 個 UI tests 中 12 個通過；上一連線警告／新 Stop 流程在單次 Disconnect 後無法回到連線畫面。不能把這輪說成整體通過。
+
+### 已重現的 HTTP 截斷因果與修正邊界
+
+Darwin 實際 TCP fixture 已送出完整 HTTP 200 headers、Content-Length 64，但 body 只送 1 byte 後關閉連線。PUT 在 fresh 與 pooled 連線中都被 URLSession 當成功回傳；同矩陣的 POST 回傳 NSURLErrorDomain -1005。Core 因 PUT 的假成功跳過原本應做的補償 release，所以這是 transport 完整性問題，不是等待太短，也不是應把失敗測試改成成功。
+
+最小修正在 send 回傳前比對仍可比較的 identity body byte count 與 Content-Length，拒絕長度不符、無效／衝突／溢位的長度。依 [RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3) 的 body／framing 規則，排除 HEAD、1xx、204、304、成功 CONNECT，以及有 Transfer-Encoding 的回應；非 identity Content-Encoding 也不直接用 decoded byte count 比較。依 [RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.6)，相同的合併 Content-Length 值可正規化。這不新增 Canon-specific 回覆契約、不 replay full_press，也不增加自動重試。
+
+新增 6 個 helper 測試方法、1 個實際 wire 正向方法（9 組完整／合法回應對照，含 gzip、chunked）；既有 lost／truncated、fresh／pooled 故障矩陣與 exact-once 斷言不改。預期 Core 共 228 個方法，尚待本輪精確 head 的 macOS 編譯及執行。encoded／chunked 的完整性仍依賴 URLSession，不能宣稱這個 identity Content-Length guard 已覆蓋其所有截斷情況。
+
+### 已重現的 sheet hit overlap 與最小修正
+
+同一 CI 的 pre-tap 幾何為 Disconnect `(20, 784, 362, 48)`、可操作 Stop `(12, 766, 378, 62)`；兩者重疊 44pt 高，Disconnect 中心位於 Stop 內。兩者都被 accessibility 回報 hittable。單次 Disconnect element tap 後，More actions sheet 與原 camera model 保留，Stop／當前警告消失。由於 requestDisconnect 會同步清掉 snapshot 與 activeSheet，這組幾何與狀態轉移證明問題是按鈕 hit area 重疊，不能用 cleanup timeout 或第二次點擊掩蓋。
+
+修正僅把 sheet host 與 recovery 改成同一 VStack 中明確分配空間的 siblings，保留 recovery 的 layout priority，取代 NavigationStack 外側的 safeAreaInset；相機命令及警告語意不變。原跨連線測試仍只點一次 Disconnect、等待 8 秒，並保留所有既有斷言。
+
+新增回歸直接要求唯一可操作 sheet Stop、Disconnect／Stop 無交集、各自完整位於畫面內且至少 44pt 高。4 組情境涵蓋英文／繁中、XS／accessibility XXXL、直向／左右橫向、active／unknown；每組實際驗證單次 Disconnect 退休連線，以及重連後單次 Stop 釋放快門但保留目前連線與 actions sheet。原 root recovery 的完整語言／字體／方向矩陣保留。預期本輪 UI 共 14 個方法，新增 layout、回歸及 screenshots 尚待 macOS CI，沒有實體相機證據。
+
+本機沒有 Swift／Xcode。本輪 diff check 已通過；先前版本已完成語系 key parity、原規則機密掃描與 source manifest／patch 完整性檢查，但仍需對最終整合 head 重跑適用檢查。前述 baseline、App unit 或 12 個 UI 成功都不能當成修改後全綠；修正必須由精確 head 正常 macOS CI 閉合，不能跳過失敗或放寬 exact-once。
 
 ## 相容性與發布評估
 

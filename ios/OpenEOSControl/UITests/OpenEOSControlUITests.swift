@@ -60,10 +60,11 @@ final class OpenEOSControlUITests: XCTestCase {
         openMoreActions(in: app)
         let disconnect = app.buttons["disconnect-menu-button"]
         XCTAssertTrue(scrollToInteraction(disconnect, in: app, timeout: 8))
-        // Keep the same single element tap. Capture its target and every recovery
-        // control first: an accessibility-hittable footer may still be covered
-        // by the sheet's safety inset, and retrying the tap would hide that bug.
+        // Keep the same single element tap. The accessibility-hittable footer
+        // previously overlapped Stop; capture both targets and reject overlap
+        // rather than hiding a wrong action with a second tap.
         recordShutterRecoveryDisconnectGeometry(in: app, phase: "before-tap")
+        guard assertSeparateRecoverySheetControls(in: app) != nil else { return }
         disconnect.tap()
         recordShutterRecoveryDisconnectGeometry(in: app, phase: "after-tap")
         guard waitForConnectionScreen(in: app, timeout: 8) else { return }
@@ -88,6 +89,57 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(waitForInteraction(stop, timeout: 5), "Acknowledging the old camera must leave the new Stop available")
         stop.tap()
         XCTAssertTrue(stop.waitForNonExistence(timeout: 5))
+    }
+
+    func testRecoverySheetStopAndDisconnectHaveIndependentHitTargets() throws {
+        // The root recovery matrix already covers both languages/font extremes
+        // in every orientation. Exercise both sheet actions in these additional
+        // portrait/landscape and active/unknown combinations.
+        let cases: [(String, String, String, String, UIDeviceOrientation, String)] = [
+            ("english", "en", "en_US", "UICTContentSizeCategoryXS", .portrait, "active"),
+            ("english", "en", "en_US", "UICTContentSizeCategoryXS", .landscapeLeft, "unknown"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "UICTContentSizeCategoryAccessibilityXXXL", .portrait, "unknown"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "UICTContentSizeCategoryAccessibilityXXXL", .landscapeRight, "active"),
+        ]
+        for (language, appleLanguage, locale, font, orientation, scenario) in cases {
+            let app = launch(
+                appLanguage: language, appleLanguage: appleLanguage, locale: locale,
+                environment: ["OEC_SHUTTER_RECOVERY_FIXTURE": scenario],
+                contentSizeCategory: font
+            )
+            let connect = app.buttons["connect-button"]
+            XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+            connect.tap()
+            XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 8))
+            XCUIDevice.shared.orientation = orientation
+            openMoreActions(in: app)
+            let name = "\(language)-\(font)-\(orientation.rawValue)-\(scenario)"
+            recordShutterRecoveryDisconnectGeometry(in: app, phase: "\(name)-before-disconnect")
+            guard assertSeparateRecoverySheetControls(in: app) != nil else { return }
+            // A single Disconnect must retire the connection while release is
+            // still required; tapping Stop by mistake must fail this assertion.
+            app.buttons["disconnect-menu-button"].tap()
+            guard waitForConnectionScreen(in: app, timeout: 8) else { return }
+            XCTAssertFalse(app.buttons["disconnect-menu-button"].exists)
+            XCTAssertFalse(app.staticTexts["camera-model-status"].exists)
+            XCTAssertFalse(app.buttons["release-shutter-button"].exists)
+
+            XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+            connect.tap()
+            XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 8))
+            openMoreActions(in: app)
+            guard let sheetStop = assertSeparateRecoverySheetControls(in: app) else { return }
+            // Conversely, Stop must release without invoking Disconnect or
+            // dismissing the actions sheet. Do not retry either action.
+            sheetStop.tap()
+            XCTAssertTrue(app.buttons["release-shutter-button"].waitForNonExistence(timeout: 5))
+            XCTAssertFalse(app.staticTexts["shutter-release-warning"].exists)
+            XCTAssertTrue(waitForInteraction(app.buttons["disconnect-menu-button"], timeout: 5))
+            XCTAssertTrue(app.staticTexts["camera-model-status"].exists)
+            XCTAssertFalse(connect.exists)
+            addScreenshot(name: "shutter-recovery-sheet-stop-\(name)")
+            app.terminate()
+        }
     }
 
     func testOfflineCameraWorkflowInPortraitAndLandscape() throws {
@@ -628,7 +680,7 @@ final class OpenEOSControlUITests: XCTestCase {
         let disconnect = app.buttons["disconnect-menu-button"]
         let disconnectFrame = disconnect.exists ? disconnect.frame : CGRect.null
         let disconnectCenter = CGPoint(x: disconnectFrame.midX, y: disconnectFrame.midY)
-        let actionsSheetExists = app.navigationBars["More actions"].exists
+        let actionsSheetExists = disconnect.exists && app.navigationBars.firstMatch.exists
         var lines = ["[OEC_SHUTTER_DISCONNECT_GEOMETRY] \(phase)"]
         lines.append("window=\(app.windows.firstMatch.frame)")
         lines.append("more-actions-sheet-exists=\(actionsSheetExists)")
@@ -662,6 +714,33 @@ final class OpenEOSControlUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         addScreenshot(name: "shutter-recovery-disconnect-\(phase)")
+    }
+
+    private func assertSeparateRecoverySheetControls(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement? {
+        let disconnect = app.buttons["disconnect-menu-button"]
+        XCTAssertTrue(waitForInteraction(disconnect, timeout: 5), file: file, line: line)
+        let visibleStops = app.buttons.matching(identifier: "release-shutter-button")
+            .allElementsBoundByIndex.filter { $0.exists && $0.isEnabled && $0.isHittable }
+        XCTAssertEqual(visibleStops.count, 1, "Exactly one sheet Stop must be interactive", file: file, line: line)
+        guard let stop = visibleStops.first else { return nil }
+        let disconnectFrame = disconnect.frame
+        let stopFrame = stop.frame
+        XCTAssertTrue(
+            disconnectFrame.intersection(stopFrame).isEmpty,
+            "Disconnect \(disconnectFrame) must not overlap Stop \(stopFrame)",
+            file: file, line: line
+        )
+        XCTAssertLessThanOrEqual(disconnectFrame.maxY, stopFrame.minY, file: file, line: line)
+        let window = app.windows.firstMatch.frame
+        for frame in [disconnectFrame, stopFrame] {
+            XCTAssertTrue(window.contains(frame), "Sheet action must remain on screen: \(frame)", file: file, line: line)
+            XCTAssertGreaterThanOrEqual(frame.height, 44, file: file, line: line)
+        }
+        return stop
     }
 
     private func waitForConnectionScreen(in app: XCUIApplication, timeout: TimeInterval) -> Bool {
