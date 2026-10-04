@@ -271,6 +271,47 @@ class CameraEventRefreshSessionTest {
         assertEquals(0, camera.deliveredEvents.get())
     }
 
+    @Test
+    fun singleBodyEventSurvivesOneFailedStatusReadWithoutAnotherNotification() {
+        assertSingleBodyEventRecovers("/ccapi/status")
+    }
+
+    @Test
+    fun singleBodyEventSurvivesOneFailedCapabilityReadWithoutAnotherNotification() {
+        assertSingleBodyEventRecovers("/ccapi/capabilities")
+    }
+
+    private fun assertSingleBodyEventRecovers(failedPath: String) {
+        val failNextRead = AtomicBoolean(true)
+        camera.intercept = { request ->
+            if (request.method == "GET" && request.requestUrl?.encodedPath == failedPath &&
+                failNextRead.compareAndSet(true, false)) {
+                MockResponse().setResponseCode(503).setBody("Synthetic transient event refresh failure")
+            } else null
+        }
+        val mediaReads = camera.mediaReads.get()
+        val polls = camera.eventPolls.get()
+        // Only the camera-side state changes. No app command and no second event repairs it.
+        camera.recording.set(true)
+        camera.iso.set("25600")
+        camera.enqueueContentsEvent()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            val state = viewModel.uiState.value
+            state.status?.recording == true && state.status?.exposure?.iso == "25600" &&
+                camera.mediaReads.get() > mediaReads && camera.eventPolls.get() >= polls + 3
+        }
+        compose.runOnIdle {
+            assertFalse(failNextRead.get())
+            assertEquals(true, viewModel.uiState.value.status?.recording)
+            assertNull(viewModel.uiState.value.error)
+            assertEquals(MediaLibraryLoadStatus.COMPLETE, viewModel.uiState.value.mediaLibraryLoadStatus)
+        }
+        assertEquals(1, camera.deliveredEvents.get())
+        assertEquals(mediaReads + 1, camera.mediaReads.get())
+        assertTrue(camera.recordingWrites.isEmpty())
+        assertTrue(camera.mutations.isEmpty())
+    }
+
     private fun toggleAndAwaitRecording(expected: Boolean) {
         compose.runOnIdle { viewModel.toggleRecording() }
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {

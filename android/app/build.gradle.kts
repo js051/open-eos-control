@@ -60,6 +60,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    lint {
+        // A skipped or crashed custom registry must fail the quality gate.
+        fatal += setOf("ObsoleteLintCustomCheck", "LintError")
+    }
+
     buildFeatures {
         compose = true
     }

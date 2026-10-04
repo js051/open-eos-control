@@ -1,4 +1,7 @@
 <resources>
+    <string name="media_picker_session_expired">The camera connection changed. Please select the file or folder again.</string>
+    <string name="media_picker_transfer_unavailable">This transfer is not available right now. Please select the file or folder again when the camera is ready.</string>
+    <string name="media_picker_open_failed">Android could not open the file picker. Please try again.</string>
     <string name="live_view_release_unconfirmed">Live View stop unconfirmed. Turn Live View off, then retry.</string>
     <string name="shutter_disconnect_warning">Check the previous camera: its shutter release was not confirmed.</string>
     <string name="retry_shutter_release">Retry releasing shutter; stop only</string>
@@ -710,4 +713,20 @@
     <string name="serein_launch_failed">Serein could not be opened. No camera media was changed.</string>
     <string name="serein_receipt_missing">Serein did not return a verified import receipt. The camera originals remain unchanged.</string>
     <string name="serein_import_result">Serein preserved %1$d item(s); %2$d failed and %3$d were cancelled.</string>
+    <string name="media_save_choose_destination">Choose where to save the original.</string>
+    <string name="media_save_queued">Waiting to save this original…</string>
+    <string name="media_save_failed">Could not save the original: %1$s</string>
+    <string name="media_save_cancelled">Download cancelled.</string>
+    <string name="media_save_retry">Retry saving original</string>
+    <string name="media_save_selected_document">your selected document</string>
+    <string name="media_save_selected_folder">your selected folder</string>
+
+    <string name="capture_command_acknowledged">Shutter command acknowledged</string>
+    <string name="capture_status_readback_failed">The shutter command was acknowledged, but its camera status check failed.</string>
+    <string name="capture_review_searching">Checking for newly visible media…</string>
+    <string name="capture_review_not_ready">New media has not been found yet.</string>
+    <string name="capture_review_latest_visible">Latest visible media is available.</string>
+    <string name="capture_review_explanation">This checks recent camera media only and does not send another shutter command. A newly visible item cannot be linked conclusively to this shutter command.</string>
+    <string name="capture_review_retry">Check recent media again</string>
+    <string name="capture_review_open_previous">Open previously visible media</string>
 </resources>

@@ -192,14 +192,23 @@ fun CaptureReviewButton(
     actions: CameraActions,
     modifier: Modifier = Modifier,
 ) {
-    if (!state.supports(CameraFeature.MEDIA_BROWSER)) {
+    if (!state.supports(CameraFeature.MEDIA_BROWSER) && !state.captureStatusReadbackFailed) {
         Box(modifier.size(64.dp))
         return
     }
     val item = state.captureReviewItem
-    val enabled = item != null
-    val description = item?.let { stringResource(R.string.open_latest_media_named, it.name) }
-        ?: stringResource(R.string.open_latest_media)
+    val waitingForNewMedia = state.captureReviewStatus != CaptureReviewStatus.IDLE
+    val hasNotice = waitingForNewMedia || state.captureStatusReadbackFailed
+    var showStatus by remember(state.info) { mutableStateOf(false) }
+    LaunchedEffect(hasNotice) { if (!hasNotice) showStatus = false }
+    val enabled = item != null || hasNotice
+    val description = when {
+        state.captureReviewStatus == CaptureReviewStatus.SEARCHING -> stringResource(R.string.capture_review_searching)
+        state.captureReviewStatus == CaptureReviewStatus.NOT_READY -> stringResource(R.string.capture_review_not_ready)
+        state.captureStatusReadbackFailed -> stringResource(R.string.capture_status_readback_failed)
+        item != null -> stringResource(R.string.open_latest_media_named, item.name)
+        else -> stringResource(R.string.open_latest_media)
+    }
     TooltipBox(
         positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text(description) } },
@@ -209,7 +218,9 @@ fun CaptureReviewButton(
             modifier = modifier
                 .size(64.dp)
                 .testTag("capture-review-button")
-                .clickable(enabled = enabled, onClick = actions.openCaptureReview)
+                .clickable(enabled = enabled) {
+                    if (hasNotice) showStatus = true else actions.openCaptureReview()
+                }
                 .semantics {
                     contentDescription = description
                     role = Role.Button
@@ -223,7 +234,7 @@ fun CaptureReviewButton(
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     val thumbnail = state.captureReviewThumbnail
-                    if (thumbnail != null) {
+                    if (thumbnail != null && !hasNotice) {
                         Image(
                             bitmap = thumbnail.asImageBitmap(),
                             contentDescription = null,
@@ -232,7 +243,11 @@ fun CaptureReviewButton(
                         )
                     } else {
                         Icon(
-                            painterResource(LucideR.drawable.lucide_ic_images),
+                            painterResource(when {
+                                waitingForNewMedia -> LucideR.drawable.lucide_ic_clock
+                                state.captureStatusReadbackFailed -> LucideR.drawable.lucide_ic_triangle_alert
+                                else -> LucideR.drawable.lucide_ic_images
+                            }),
                             contentDescription = null,
                             tint = AppAccent,
                             modifier = Modifier.size(24.dp),
@@ -249,6 +264,9 @@ fun CaptureReviewButton(
                 }
             }
         }
+    }
+    if (showStatus) {
+        CaptureReviewStatusDialog(state, actions) { showStatus = false }
     }
 }
 
