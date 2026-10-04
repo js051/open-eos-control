@@ -37,3 +37,24 @@ ViewModel 在 connect／手動刷新／事件刷新／操作回覆採納停止�
 沒有實體 EOS／Android 手機、跨機型或光學對焦新證據。Bridge 的非 CCAPI engine 不因此取得同等相機端停止保證；process death／永久斷網仍需使用者檢查機身。這不是全產品所有網路讀取／逾時的完整稽核。
 
 Release Assessment：v0.10.0 Development Preview 之上的 patch；不改版本、不合併、不發布。PR ready 需精確 head 的 ci-complete 與新 instrumentation 執行成功。
+
+## 審查後補上的取消與恢復補讀期限
+
+獨立故障 peer 持續少量傳送 response body，因此不觸發 idle read timeout。真 production client 的 Stop 先收到完整 502，接著新增的 fresh status 補讀一直持有 NonCancellable 與 session mutex，阻擋 retry／DELETE；一般 status 的 coroutine cancel 也未取消實際 HTTP body read。
+
+調整後的故障回歸 4 例中 2 紅：5 秒＋1.5 秒排程餘裕後 Stop 仍未結束、DELETE 尚未到；ordinary cancel 在 1.5 秒內未完成。frozen baseline transport control 約 0.25 秒結束，這只是原失敗傳輸路徑的對照，不冒稱整個舊 checkout 已重跑。finally 保存並取消實際 Call，沒有靠 peer 自然讀完才使測試退出。
+
+最小修正：requestJson／requestOk 的 cancellation watcher 涵蓋 Call 與 body；正常完成先解除 watcher，避免把成功誤標取消。只有 Stop 失敗後的額外 GET /v1/session/{id}/status 有 5 秒 whole-call budget，且保留既有更短設定。這是 App 願意等待額外證明的政策，不是 Canon 時序保證。
+
+到期仍為 release unconfirmed，釋放 mutex 後可再明確 Stop 或 DELETE。POST /v1/session/{id}/bulb/stop 仍受 NonCancellable 保護、原預算不變；普通 GET、媒體及其他命令未被改成 5 秒。沒有自動重播 start，也沒有將 timeout 判成停止成功。
+
+focused 42／42 通過：新增 deadline 9、既有 recovery 19、client 14。涵蓋 expiry → 維持風險並阻擋新寫入 → 再次明確 Stop 確認 → 解鎖、fresh 成功、原 300 ms 預算、兩類 body cancel、protected Stop 不被呼叫端取消。最終完整 aggregate 與精確 CI 另記，不以 focused 通過取代。
+
+## 最終本機 aggregate
+
+- App JVM 594／594（49 suites），contract 14／14（1 suite），0 failure／error／skip；4 分 45 秒。
+- Lint 0 errors／54 warnings，4 個 custom registry 執行限制仍存在；App 與 AndroidTest APK 均成功。
+- 162 個 Android source/config 前後一致，manifest SHA256：2a647230622e3ada81b3e2226a8f3f2ce6d61cfcaaaac8634383d5bf9bf4fb70。再 fast-forward 納入 PR #199 的 test-only 尾端至 180dbfa，162 個 hash 全部相同，沒有以較舊 Android source 充當最終驗證。
+- App APK SHA256：5eb743fdbf9440c98fcf8d2524692d6fabc30fea7f29988d1e9ead4276b5a720。
+- AndroidTest APK SHA256：f88172a2dfd74e1659b8b34f7bdf0665351b393beb2d7847b95391b41aa81505。
+- 本機沒有執行 instrumentation。六個新增 runtime cases 與精確 remote head ci-complete 接續由正常 CI 驗證，尚不能算 PR ready。

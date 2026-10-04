@@ -477,7 +477,7 @@ class DesktopBridgeClient(
         val confirmedStart = session.hasConfirmedStart
         return session.stop(
             release = { parseBulbStatus(postJson(endpoint("v1", "session", session.id, "bulb", "stop"), JSONObject())) },
-            read = { readBridgeStatus(session) },
+            read = { readBridgeStatus(session, recoveryRead = true) },
         ).also { if (confirmedStart) observedFeatures.add(CameraFeature.BULB_EXPOSURE) }
     }
 
@@ -1039,11 +1039,14 @@ class DesktopBridgeClient(
         return parseStatus(body)
     }
 
-    private suspend fun readBridgeStatus(session: BridgeShutterReleaseSession): CameraStatus = parseStatus(
+    private suspend fun readBridgeStatus(
+        session: BridgeShutterReleaseSession,
+        recoveryRead: Boolean = false,
+    ): CameraStatus = parseStatus(
         requestJson(Request.Builder()
             .url(endpoint("v1", "session", session.id, "status"))
             .header("Cache-Control", "no-cache, no-store")
-            .get().build(), observeStatus = false),
+            .get().build(), observeStatus = false, recoveryRead = recoveryRead),
     )
 
     private suspend fun getJson(url: HttpUrl): JSONObject = requestJson(
@@ -1072,17 +1075,41 @@ class DesktopBridgeClient(
             .build(),
     )
 
-    private suspend fun requestJson(request: Request, observeStatus: Boolean = true): JSONObject = withContext(Dispatchers.IO) {
+    private suspend fun requestJson(
+        request: Request,
+        observeStatus: Boolean = true,
+        recoveryRead: Boolean = false,
+    ): JSONObject = withContext(Dispatchers.IO) {
         val session = sessionForRequest(request)
         val revision = session?.revision
-        newBridgeCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            session?.let(::requireCurrentSession)
-            if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
-            val parsed = runCatching { JSONObject(body) }
-                .getOrElse { throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it) }
-            if (observeStatus && session != null && revision != null) session.observe(parseStatus(parsed), revision)
-            parsed
+        val call = newBridgeCall(request)
+        if (recoveryRead) {
+            // Bound only the additional release-proof read, including a continuously paced body.
+            // This is an app recovery policy, not a camera timing guarantee or a release ACK.
+            val maximum = TimeUnit.SECONDS.toNanos(RECOVERY_STATUS_CALL_TIMEOUT_SECONDS)
+            val configured = call.timeout().timeoutNanos()
+            if (configured == 0L || configured > maximum) call.timeout().timeout(maximum, TimeUnit.NANOSECONDS)
+        }
+        val cancelCall = AtomicBoolean(true)
+        val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
+        }
+        try {
+            call.execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                session?.let(::requireCurrentSession)
+                if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
+                val parsed = runCatching { JSONObject(body) }
+                    .getOrElse { throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it) }
+                if (observeStatus && session != null && revision != null) session.observe(parseStatus(parsed), revision)
+                parsed
+            }
+        } catch (exception: Exception) {
+            currentCoroutineContext().ensureActive()
+            throw exception
+        } finally {
+            cancelCall.set(false)
+            cancellationWatcher.cancel()
         }
     }
 
@@ -1136,10 +1163,23 @@ class DesktopBridgeClient(
     private suspend fun requestOk(request: Request): Unit = withContext(Dispatchers.IO) {
         val session = sessionForRequest(request)
         val revision = session?.revision
-        newBridgeCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            session?.let(::requireCurrentSession)
-            if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
+        val call = newBridgeCall(request)
+        val cancelCall = AtomicBoolean(true)
+        val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
+        }
+        try {
+            call.execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                session?.let(::requireCurrentSession)
+                if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
+            }
+        } catch (exception: Exception) {
+            currentCoroutineContext().ensureActive()
+            throw exception
+        } finally {
+            cancelCall.set(false)
+            cancellationWatcher.cancel()
         }
     }
 
@@ -1255,6 +1295,7 @@ class DesktopBridgeClient(
     }
 
     private companion object {
+        const val RECOVERY_STATUS_CALL_TIMEOUT_SECONDS = 5L
         val SUPPORTED_LOCAL_ENGINES = setOf("libgphoto2", "edsdk")
         const val BRIDGE_SERVICE_NAME = "open-eos-control-bridge"
         const val MAX_LIVE_VIEW_FRAME_BYTES = 12 * 1024 * 1024L
