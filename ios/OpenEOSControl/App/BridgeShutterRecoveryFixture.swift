@@ -35,6 +35,7 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
             nextID += 1
             let id = "shutter-fixture-\(nextID)"
             sessions[id] = State(unknown: initiallyUnknown, active: !initiallyUnknown)
+            NSLog("[OEC_SHUTTER_FIXTURE] session-open %@", id)
             return response(#"{"id":"\#(id)","engine":"libgphoto2"}"#)
         }
         let components = path.split(separator: "/").map(String.init)
@@ -53,6 +54,9 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
             stopCount += 1
             let released = State(unknown: false, active: false)
             sessions[id] = released
+            // This DEBUG-only transport accepts only its own generated session
+            // IDs. Log recognized mutations, never request URLs, headers or bodies.
+            NSLog("[OEC_SHUTTER_FIXTURE] bulb-stop-released %@", id)
             return response(statusJSON(released))
         case ("GET", "status"):
             return response(statusJSON(state))
@@ -60,8 +64,10 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
             sessions.removeValue(forKey: id)
             if failFirstClose {
                 failFirstClose = false
+                NSLog("[OEC_SHUTTER_FIXTURE] session-delete-unconfirmed %@", id)
                 return response(#"{"error":{"code":"SHUTTER_RELEASE_UNCONFIRMED","message":"Fixture cleanup release was not confirmed"}}"#, status: 502)
             }
+            NSLog("[OEC_SHUTTER_FIXTURE] session-delete-confirmed %@", id)
             return response(#"{"ok":true}"#)
         default:
             // Wrong methods, old IDs and unrequested capture commands must fail.

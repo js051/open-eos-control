@@ -58,7 +58,14 @@ final class OpenEOSControlUITests: XCTestCase {
         connect.tap()
         XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 8))
         openMoreActions(in: app)
-        XCTAssertTrue(tapCameraAction(app.buttons["disconnect-menu-button"], in: app))
+        let disconnect = app.buttons["disconnect-menu-button"]
+        XCTAssertTrue(scrollToInteraction(disconnect, in: app, timeout: 8))
+        // Keep the same single element tap. Capture its target and every recovery
+        // control first: an accessibility-hittable footer may still be covered
+        // by the sheet's safety inset, and retrying the tap would hide that bug.
+        recordShutterRecoveryDisconnectGeometry(in: app, phase: "before-tap")
+        disconnect.tap()
+        recordShutterRecoveryDisconnectGeometry(in: app, phase: "after-tap")
         guard waitForConnectionScreen(in: app, timeout: 8) else { return }
         let previous = app.staticTexts["previous-shutter-release-warning"]
         XCTAssertTrue(previous.waitForExistence(timeout: 8))
@@ -615,6 +622,46 @@ final class OpenEOSControlUITests: XCTestCase {
         let moreActions = app.buttons["more-actions-button"]
         XCTAssertTrue(waitForInteraction(moreActions, timeout: 8))
         moreActions.tap()
+    }
+
+    private func recordShutterRecoveryDisconnectGeometry(in app: XCUIApplication, phase: String) {
+        let disconnect = app.buttons["disconnect-menu-button"]
+        let disconnectFrame = disconnect.exists ? disconnect.frame : CGRect.null
+        let disconnectCenter = CGPoint(x: disconnectFrame.midX, y: disconnectFrame.midY)
+        let actionsSheetExists = app.navigationBars["More actions"].exists
+        var lines = ["[OEC_SHUTTER_DISCONNECT_GEOMETRY] \(phase)"]
+        lines.append("window=\(app.windows.firstMatch.frame)")
+        lines.append("more-actions-sheet-exists=\(actionsSheetExists)")
+        for identifier in [
+            "disconnect-menu-button", "release-shutter-button", "shutter-button",
+            "more-actions-button", "connect-button",
+        ] {
+            let matches = app.buttons.matching(identifier: identifier)
+            lines.append("\(identifier) count=\(matches.count)")
+            // The root and sheet can both expose a Stop. Record each rather than
+            // assuming the first accessibility match is the visible one.
+            for (index, element) in matches.allElementsBoundByIndex.prefix(4).enumerated() {
+                let frame = element.frame
+                lines.append("\(identifier)[\(index)] enabled=\(element.isEnabled) hittable=\(element.isHittable) frame=\(frame)")
+                if identifier == "release-shutter-button" || identifier == "shutter-button" {
+                    let overlap = disconnectFrame.intersection(frame)
+                    let containsCenter = !disconnectFrame.isNull && frame.contains(disconnectCenter)
+                    lines.append("\(identifier)[\(index)] disconnect-overlap=\(overlap) contains-disconnect-center=\(containsCenter)")
+                }
+            }
+        }
+        for identifier in ["shutter-release-warning", "previous-shutter-release-warning", "camera-model-status"] {
+            lines.append("\(identifier)-exists=\(app.staticTexts[identifier].exists)")
+        }
+        // Only fixed control IDs, geometry and booleans from the synthetic
+        // recovery test are emitted, never arbitrary labels or camera details.
+        let diagnostic = lines.joined(separator: "\n")
+        print(diagnostic)
+        let attachment = XCTAttachment(string: diagnostic)
+        attachment.name = "shutter-recovery-disconnect-\(phase)-geometry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        addScreenshot(name: "shutter-recovery-disconnect-\(phase)")
     }
 
     private func waitForConnectionScreen(in app: XCUIApplication, timeout: TimeInterval) -> Bool {
