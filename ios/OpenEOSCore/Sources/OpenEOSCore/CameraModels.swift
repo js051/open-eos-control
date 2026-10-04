@@ -188,6 +188,8 @@ public struct CameraStatus: Equatable, Sendable {
     public let batteryStatus: String
     public let recording: Bool?
     public let bulbExposureActive: Bool?
+    /// Nil means an older peer did not supply release-confirmation evidence.
+    public let shutterReleaseUnconfirmed: Bool?
     public let mode: String
     public let mediaAvailable: Bool?
     public let remainingMinutes: Int?
@@ -210,6 +212,7 @@ public struct CameraStatus: Equatable, Sendable {
         batteryStatus: String = "unknown",
         recording: Bool? = nil,
         bulbExposureActive: Bool? = nil,
+        shutterReleaseUnconfirmed: Bool? = nil,
         mode: String = "unknown",
         mediaAvailable: Bool? = nil,
         remainingMinutes: Int? = nil,
@@ -231,6 +234,7 @@ public struct CameraStatus: Equatable, Sendable {
         self.batteryStatus = batteryStatus
         self.recording = recording
         self.bulbExposureActive = bulbExposureActive
+        self.shutterReleaseUnconfirmed = shutterReleaseUnconfirmed
         self.mode = mode
         self.mediaAvailable = mediaAvailable
         self.remainingMinutes = remainingMinutes
@@ -249,12 +253,21 @@ public struct CameraStatus: Equatable, Sendable {
     }
 
     public func withBulbExposureActive(_ active: Bool?) -> CameraStatus {
+        replacingShutterState(active: active, unconfirmed: shutterReleaseUnconfirmed)
+    }
+
+    public func withShutterReleaseState(_ state: CameraShutterReleaseState) -> CameraStatus {
+        replacingShutterState(active: state.bulbExposureActive, unconfirmed: state.releaseUnconfirmed)
+    }
+
+    private func replacingShutterState(active: Bool?, unconfirmed: Bool?) -> CameraStatus {
         CameraStatus(
             connected: connected,
             batteryLevel: batteryLevel,
             batteryStatus: batteryStatus,
             recording: recording,
             bulbExposureActive: active,
+            shutterReleaseUnconfirmed: unconfirmed,
             mode: mode,
             mediaAvailable: mediaAvailable,
             remainingMinutes: remainingMinutes,

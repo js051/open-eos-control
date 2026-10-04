@@ -21,6 +21,8 @@ public struct DesktopBridgeCamera: Identifiable, Equatable, Sendable {
 public enum DesktopBridgeError: Error, Equatable, Sendable {
     case invalidBaseURL(String)
     case notInitialized
+    case sessionChanged
+    case shutterReleaseUnconfirmed
     case invalidResponse(String)
     case http(
         statusCode: Int,
@@ -41,6 +43,10 @@ extension DesktopBridgeError: LocalizedError {
             "Invalid Desktop Bridge URL: \(value)"
         case .notInitialized:
             "The Desktop Bridge session has not been initialized."
+        case .sessionChanged:
+            "The Desktop Bridge session changed or is closing. Connect again before using the camera."
+        case .shutterReleaseUnconfirmed:
+            "Camera shutter release is not confirmed. Retry Stop Bulb before starting another camera operation."
         case let .invalidResponse(message):
             message
         case let .http(statusCode, method, url, code, message, feature, engine):
@@ -90,6 +96,26 @@ public actor DesktopBridgeClient {
     private let profileHint: String?
     private let transport: any CameraHTTPTransport
 
+    // An obligation is owned by this exact session. Never reconstruct its stop URL
+    // from a later connection, or erase it because a start/stop response was lost.
+    private struct ShutterReleaseObligation {
+        let stopURL: URL
+        var unconfirmed = true
+        var active: Bool? = nil
+        var acceptsLegacyStop = false
+        var stopAttemptCompleted = false
+    }
+
+    private var sessionGeneration = UUID()
+    private var initializationToken: UUID?
+    private var initializationCancelled = false
+    private var isClosing = false
+    private var closeWaiters: [CheckedContinuation<CameraShutterReleaseState, Never>] = []
+    private var bulbOperationInFlight = false
+    private var bulbOperationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var shutterRelease: ShutterReleaseObligation?
+    private var ownsShutterStatus = false
+    private var releaseRevision = UUID()
     private var sessionID: String?
     private var sessionEngine: String?
     private var bridgeVersion: String?
@@ -155,9 +181,18 @@ public actor DesktopBridgeClient {
     }
 
     public func initialize() async throws {
+        guard !isClosing else { throw DesktopBridgeError.sessionChanged }
         guard sessionID == nil else { return }
+        guard initializationToken == nil else { throw DesktopBridgeError.sessionChanged }
+        let token = UUID()
+        initializationToken = token
+        initializationCancelled = false
+        defer {
+            if initializationToken == token { initializationToken = nil }
+        }
         liveViewMagnifications = []
         try await validateService()
+        guard initializationToken == token, !initializationCancelled, !isClosing else { throw DesktopBridgeError.sessionChanged }
         var payload: BridgeJSON = ["engine": cameraEngine ?? "auto"]
         if let cameraID { payload["cameraId"] = cameraID }
         if let profileHint { payload["profileHint"] = profileHint }
@@ -165,20 +200,76 @@ public actor DesktopBridgeClient {
         guard let id = body.nonEmptyString("id") else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge did not return a session ID.")
         }
+        guard initializationToken == token, !initializationCancelled, !isClosing, !Task.isCancelled else {
+            // Close may have invalidated an opening connection while POST was away.
+            // Dispose only that returned ID; never install it into a newer session.
+            try? await requestOK(endpoint(["v1", "session", id]), method: "DELETE")
+            throw DesktopBridgeError.sessionChanged
+        }
+        sessionGeneration = UUID()
+        releaseRevision = UUID()
+        shutterRelease = nil
+        ownsShutterStatus = false
         sessionID = id
         sessionEngine = body.nonEmptyString("engine")
     }
 
+    public func shutterReleaseState() -> CameraShutterReleaseState {
+        guard let shutterRelease else { return .idle }
+        return CameraShutterReleaseState(
+            releaseRequired: true,
+            releaseUnconfirmed: shutterRelease.unconfirmed,
+            bulbExposureActive: shutterRelease.unconfirmed ? nil : shutterRelease.active
+        )
+    }
+
     public func close() async {
-        guard let sessionID else { return }
-        defer {
-            self.sessionID = nil
-            sessionEngine = nil
-            eventPollingSupported = false
-            liveViewMagnifications = []
+        _ = await closeWithShutterReleaseState()
+    }
+
+    public func closeWithShutterReleaseState() async -> CameraShutterReleaseState {
+        if isClosing {
+            return await withCheckedContinuation { closeWaiters.append($0) }
+        }
+        initializationCancelled = true
+        guard let id = sessionID else { return .idle }
+        isClosing = true
+        // A transport may ignore cancellation. Do not race DELETE against an
+        // already dispatched full_press and then let that start arrive afterward.
+        if bulbOperationInFlight {
+            await withCheckedContinuation { bulbOperationWaiters.append($0) }
         }
         await stopEventPolling()
-        try? await requestOK(endpoint(["v1", "session", sessionID]), method: "DELETE")
+        var result = CameraShutterReleaseState.idle
+        do {
+            // Unstructured cleanup does not inherit the caller's cancellation.
+            // Still await its result before retiring the session or close waiters.
+            let deletion = Task {
+                try await requestOK(endpoint(["v1", "session", id]), method: "DELETE")
+            }
+            try await deletion.value
+        } catch {
+            if shutterRelease != nil || Self.isShutterReleaseError(error) {
+                // DELETE can remove the server session even when cleanup fails.
+                // The caller presents this as a previous-connection warning only.
+                result = CameraShutterReleaseState(
+                    releaseRequired: false, releaseUnconfirmed: true, bulbExposureActive: nil
+                )
+            }
+        }
+        sessionID = nil
+        sessionEngine = nil
+        sessionGeneration = UUID()
+        releaseRevision = UUID()
+        shutterRelease = nil
+        ownsShutterStatus = false
+        eventPollingSupported = false
+        liveViewMagnifications = []
+        isClosing = false
+        let waiters = closeWaiters
+        closeWaiters.removeAll()
+        waiters.forEach { $0.resume(returning: result) }
+        return result
     }
 
     public func connectSnapshot() async throws -> CameraSnapshot {
@@ -426,13 +517,103 @@ public actor DesktopBridgeClient {
     }
 
     public func startBulbExposure() async throws -> CameraStatus {
-        let body = try await postJSON(sessionEndpoint(["bulb", "start"]), payload: [:])
-        return parseStatus(body)
+        try Task.checkCancellation()
+        guard !isClosing else { throw DesktopBridgeError.sessionChanged }
+        guard shutterRelease == nil, !bulbOperationInFlight else {
+            throw DesktopBridgeError.shutterReleaseUnconfirmed
+        }
+        let startURL = try sessionEndpoint(["bulb", "start"])
+        let stopURL = try sessionEndpoint(["bulb", "stop"])
+        let generation = sessionGeneration
+        shutterRelease = ShutterReleaseObligation(stopURL: stopURL)
+        ownsShutterStatus = true
+        releaseRevision = UUID()
+        bulbOperationInFlight = true
+        defer { finishBulbOperation() }
+        do {
+            let body = try await requestJSON(
+                url: startURL, method: "POST", payload: [:], shutterOperation: true
+            )
+            try Task.checkCancellation()
+            guard sessionGeneration == generation else { throw DesktopBridgeError.sessionChanged }
+            // A successful HTTP exchange alone is not proof of an observed start.
+            // Legacy compatibility is confined to an acknowledged, literal true.
+            guard Self.strictBool(body["bulbExposureActive"]) == true,
+                  body["shutterReleaseUnconfirmed"] == nil
+                    || Self.strictBool(body["shutterReleaseUnconfirmed"]) == false else {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            shutterRelease?.unconfirmed = false
+            shutterRelease?.active = true
+            shutterRelease?.acceptsLegacyStop = body["shutterReleaseUnconfirmed"] == nil
+            releaseRevision = UUID()
+            guard !isClosing else { throw DesktopBridgeError.sessionChanged }
+            return parseStatus(body)
+        } catch {
+            if sessionGeneration == generation { markShutterReleaseUnconfirmed(stopCompleted: false) }
+            throw error
+        }
     }
 
     public func stopBulbExposure() async throws -> CameraStatus {
-        let body = try await postJSON(sessionEndpoint(["bulb", "stop"]), payload: [:])
-        return parseStatus(body)
+        try Task.checkCancellation()
+        guard !isClosing else { throw DesktopBridgeError.sessionChanged }
+        guard !bulbOperationInFlight else { throw DesktopBridgeError.shutterReleaseUnconfirmed }
+        let generation = sessionGeneration
+        let stopURL = try shutterRelease?.stopURL ?? sessionEndpoint(["bulb", "stop"])
+        // A normal legacy Stop without an earlier local Start remains usable.
+        // Once any ambiguity occurs, only the new explicit proof may unlock it.
+        let acceptsLegacyStop = shutterRelease?.acceptsLegacyStop ?? true
+        if shutterRelease == nil { shutterRelease = ShutterReleaseObligation(stopURL: stopURL) }
+        ownsShutterStatus = true
+        markShutterReleaseUnconfirmed(stopCompleted: false)
+        bulbOperationInFlight = true
+        defer { finishBulbOperation() }
+        do {
+            let body = try await requestJSON(
+                url: stopURL, method: "POST", payload: [:], shutterOperation: true
+            )
+            try Task.checkCancellation()
+            guard sessionGeneration == generation else { throw DesktopBridgeError.sessionChanged }
+            let legacyAcknowledgement = acceptsLegacyStop
+                && body["shutterReleaseUnconfirmed"] == nil
+                && Self.strictBool(body["bulbExposureActive"]) == false
+            guard Self.provesShutterReleased(body) || legacyAcknowledgement else {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            shutterRelease = nil
+            releaseRevision = UUID()
+            guard !isClosing else { throw DesktopBridgeError.sessionChanged }
+            return parseStatus(body)
+        } catch {
+            if sessionGeneration == generation { markShutterReleaseUnconfirmed(stopCompleted: true) }
+            throw error
+        }
+    }
+
+    public func retryShutterRelease() async throws {
+        guard shutterRelease != nil else { return }
+        let generation = sessionGeneration
+        do {
+            _ = try await stopBulbExposure()
+        } catch {
+            let stopError = error
+            guard !Task.isCancelled, !isClosing, generation == sessionGeneration,
+                  shutterRelease?.stopAttemptCompleted == true, !bulbOperationInFlight else {
+                throw stopError
+            }
+            // The camera may have acknowledged release but the stop response or
+            // its follow-up status failed. Only a fresh same-session status can
+            // settle that result; never restart or fetch a full snapshot here.
+            do {
+                _ = try await status()
+            } catch {
+                throw stopError
+            }
+            guard generation == sessionGeneration, !isClosing, shutterRelease == nil else {
+                throw stopError
+            }
+        }
     }
 
     public func autofocus() async throws -> CameraStatus {
@@ -817,6 +998,7 @@ public actor DesktopBridgeClient {
         var request = makeRequest(url: url, method: "POST", accept: "application/json", timeoutInterval: 120)
         request.setValue(contentType ?? inferredContentType, forHTTPHeaderField: "Content-Type")
         request.setValue(String(fileSize), forHTTPHeaderField: "Content-Length")
+        try validateMutation(url: url, method: "POST")
         let response = try await transport.upload(request, from: fileURL) { value in
             progress(
                 CameraMediaTransferProgress(
@@ -898,12 +1080,13 @@ public actor DesktopBridgeClient {
             }
             return LensStatus(mounted: mounted, name: mounted ? name : "")
         }()
-        return CameraStatus(
+        let status = CameraStatus(
             connected: body.optionalBool("connected") ?? true,
             batteryLevel: battery.int("level"),
             batteryStatus: battery.string("status") ?? "unknown",
             recording: body.optionalBool("recording"),
-            bulbExposureActive: body.optionalBool("bulbExposureActive"),
+            bulbExposureActive: Self.strictBool(body["bulbExposureActive"]),
+            shutterReleaseUnconfirmed: Self.strictBool(body["shutterReleaseUnconfirmed"]),
             mode: body.string("mode") ?? "unknown",
             mediaAvailable: media.optionalBool("available"),
             remainingMinutes: nil,
@@ -925,6 +1108,105 @@ public actor DesktopBridgeClient {
             lens: lens,
             temperature: body.string("temperature").flatMap(CameraTemperatureStatus.init(rawValue:))
         )
+        return ownsShutterStatus ? status.withShutterReleaseState(shutterReleaseState()) : status
+    }
+
+    private func finishBulbOperation() {
+        bulbOperationInFlight = false
+        let waiters = bulbOperationWaiters
+        bulbOperationWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    private func markShutterReleaseUnconfirmed(stopCompleted: Bool) {
+        guard shutterRelease != nil else { return }
+        shutterRelease?.unconfirmed = true
+        shutterRelease?.active = nil
+        shutterRelease?.acceptsLegacyStop = false
+        shutterRelease?.stopAttemptCompleted = stopCompleted
+        releaseRevision = UUID()
+    }
+
+    private func adoptShutterRelease(unconfirmed: Bool, acceptsLegacyStop: Bool) throws {
+        ownsShutterStatus = true
+        if shutterRelease == nil {
+            shutterRelease = ShutterReleaseObligation(stopURL: try sessionEndpoint(["bulb", "stop"]))
+        }
+        shutterRelease?.unconfirmed = unconfirmed
+        shutterRelease?.active = unconfirmed ? nil : true
+        shutterRelease?.acceptsLegacyStop = acceptsLegacyStop
+        releaseRevision = UUID()
+    }
+
+    private func observeShutterStatus(_ body: BridgeJSON, canConfirmRelease: Bool) throws {
+        let unconfirmed = Self.strictBool(body["shutterReleaseUnconfirmed"])
+        let active = Self.strictBool(body["bulbExposureActive"])
+        if unconfirmed == true {
+            try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
+        } else if shutterRelease == nil, active == true {
+            let malformedFlag = body["shutterReleaseUnconfirmed"] != nil && unconfirmed == nil
+            try adoptShutterRelease(
+                unconfirmed: malformedFlag,
+                acceptsLegacyStop: body["shutterReleaseUnconfirmed"] == nil
+            )
+        } else if canConfirmRelease, shutterRelease?.stopAttemptCompleted == true,
+                  Self.provesShutterReleased(body) {
+            shutterRelease = nil
+            releaseRevision = UUID()
+        }
+    }
+
+    private static func provesShutterReleased(_ body: BridgeJSON) -> Bool {
+        strictBool(body["shutterReleaseUnconfirmed"]) == false
+            && strictBool(body["bulbExposureActive"]) == false
+    }
+
+    private static func strictBool(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    private static func isShutterReleaseError(_ error: Error) -> Bool {
+        guard let error = error as? DesktopBridgeError else { return false }
+        if case .http(_, _, _, let code, _, _, _) = error {
+            return code == "SHUTTER_RELEASE_UNCONFIRMED"
+        }
+        return error == .shutterReleaseUnconfirmed
+    }
+
+    private func isCurrentSessionURL(_ url: URL) throws -> Bool {
+        guard let sessionID else { return false }
+        let root = try endpoint(["v1", "session", sessionID]).absoluteString
+        return url.absoluteString == root || url.absoluteString.hasPrefix(root + "/")
+    }
+
+    private func isRecoveryMutation(url: URL, method: String) throws -> Bool {
+        // Session DELETE, including a discarded late initialize result, always
+        // remains possible. It does not move responsibility to another session.
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let segments = (components?.percentEncodedPath ?? "").split(separator: "/")
+        if method == "DELETE", url.scheme == baseURL.scheme, url.host == baseURL.host,
+           url.port == baseURL.port, components?.query == nil, components?.fragment == nil,
+           segments.count == 3, segments[0] == "v1", segments[1] == "session" {
+            return true
+        }
+        guard sessionID != nil else { return false }
+        if method == "DELETE", url == (try sessionEndpoint(["events"])) { return true }
+        guard method == "POST" else { return false }
+        for path in [["bulb", "stop"], ["recording", "stop"], ["liveview", "stop"]] {
+            if url == (try sessionEndpoint(path)) { return true }
+        }
+        return false
+    }
+
+    private func validateMutation(url: URL, method: String, shutterOperation: Bool = false) throws {
+        guard !["GET", "HEAD", "OPTIONS"].contains(method) else { return }
+        let recovery = try isRecoveryMutation(url: url, method: method)
+        guard !isClosing || recovery else { throw DesktopBridgeError.sessionChanged }
+        guard shutterRelease == nil || shutterOperation || recovery else {
+            throw DesktopBridgeError.shutterReleaseUnconfirmed
+        }
     }
 
     private func getJSON(_ url: URL) async throws -> BridgeJSON {
@@ -940,8 +1222,13 @@ public actor DesktopBridgeClient {
         method: String,
         payload: BridgeJSON?,
         timeoutInterval: TimeInterval = 10,
-        maximumBytes: Int? = nil
+        maximumBytes: Int? = nil,
+        shutterOperation: Bool = false
     ) async throws -> BridgeJSON {
+        try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
+        let generation = sessionGeneration
+        let revision = releaseRevision
+        let scopedToSession = try isCurrentSessionURL(url)
         var request = makeRequest(
             url: url,
             method: method,
@@ -952,9 +1239,24 @@ public actor DesktopBridgeClient {
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
+        if method == "GET", scopedToSession, url == (try? sessionEndpoint(["status"])) {
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        }
         let response = try await transport.send(request)
+        if scopedToSession {
+            try Task.checkCancellation()
+            guard generation == sessionGeneration, !isClosing || shutterOperation else {
+                throw DesktopBridgeError.sessionChanged
+            }
+        }
         guard (200..<300).contains(response.statusCode) else {
-            throw Self.httpError(response: response, method: method, url: url)
+            let error = Self.httpError(response: response, method: method, url: url)
+            if scopedToSession, revision == releaseRevision, !shutterOperation,
+               Self.isShutterReleaseError(error) {
+                try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
+            }
+            throw error
         }
         if let maximumBytes, response.body.count > maximumBytes {
             throw DesktopBridgeError.invalidResponse(
@@ -969,6 +1271,10 @@ public actor DesktopBridgeClient {
                 "Desktop Bridge returned invalid JSON for \(url.path)."
             )
         }
+        if scopedToSession, !shutterOperation, revision == releaseRevision, !bulbOperationInFlight {
+            let isFreshStatus = method == "GET" && url == (try? sessionEndpoint(["status"]))
+            try observeShutterStatus(object, canConfirmRelease: isFreshStatus)
+        }
         return object
     }
 
@@ -978,14 +1284,23 @@ public actor DesktopBridgeClient {
         payload: BridgeJSON? = nil,
         timeoutInterval: TimeInterval = 10
     ) async throws {
+        try validateMutation(url: url, method: method)
+        let generation = sessionGeneration
+        let revision = releaseRevision
+        let scopedToSession = try isCurrentSessionURL(url)
         var request = makeRequest(url: url, method: method, accept: "application/json", timeoutInterval: timeoutInterval)
         if let payload {
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
         let response = try await transport.send(request)
+        if scopedToSession, generation != sessionGeneration { throw DesktopBridgeError.sessionChanged }
         guard (200..<300).contains(response.statusCode) else {
-            throw Self.httpError(response: response, method: method, url: url)
+            let error = Self.httpError(response: response, method: method, url: url)
+            if scopedToSession, revision == releaseRevision, Self.isShutterReleaseError(error) {
+                try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
+            }
+            throw error
         }
     }
 

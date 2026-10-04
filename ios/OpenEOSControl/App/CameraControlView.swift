@@ -444,7 +444,7 @@ private struct CaptureBar: View {
     }
 
     private var captureSupported: Bool {
-        if camera.bulbMode && camera.bulbExposureActive { return true }
+        if camera.shutterReleaseRequired { return true }
         if camera.captureMode == .video && camera.recording { return true }
         return camera.supports(
             camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording
@@ -452,7 +452,7 @@ private struct CaptureBar: View {
     }
 
     private var captureTemperatureAllowed: Bool {
-        if camera.bulbMode && camera.bulbExposureActive { return true }
+        if camera.shutterReleaseRequired { return true }
         if camera.captureMode == .video && camera.recording { return true }
         return camera.captureMode == .photo
             ? camera.stillCaptureTemperatureAllowed
@@ -463,7 +463,9 @@ private struct CaptureBar: View {
     private var captureButton: some View {
         Button {
             Task {
-                if camera.captureMode == .photo {
+                if camera.shutterReleaseRequired {
+                    await camera.retryShutterRelease()
+                } else if camera.captureMode == .photo {
                     if camera.bulbMode {
                         await camera.toggleBulbExposure()
                     } else {
@@ -479,7 +481,11 @@ private struct CaptureBar: View {
                     Circle()
                         .stroke(Color.cameraText, lineWidth: 4)
                         .frame(width: compact ? 62 : 72, height: compact ? 62 : 72)
-                    if camera.captureMode == .video {
+                    if camera.shutterReleaseRequired {
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.cameraWarning)
+                            .frame(width: 40, height: 40)
+                    } else if camera.captureMode == .video {
                         RoundedRectangle(cornerRadius: camera.recording ? 5 : 25)
                             .fill(Color.cameraRecording)
                             .frame(width: camera.recording ? 28 : 54, height: camera.recording ? 28 : 54)
@@ -493,15 +499,17 @@ private struct CaptureBar: View {
                         }
                         .frame(width: compact ? 49 : 58, height: compact ? 49 : 58)
                     }
-                    if camera.isBusy(camera.captureMode == .photo ? .capture : .recording) {
+                    if camera.busyOperations.contains(camera.shutterReleaseRequired || camera.captureMode == .photo ? .capture : .recording) {
                         ProgressView().tint(camera.captureMode == .photo ? Color.cameraBackground : Color.cameraText)
                     }
                 }
                 .accessibilityLabel(
                     Text(
                         LocalizedStringKey(
-                            camera.bulbMode
-                                ? camera.bulbExposureActive ? "stop_bulb_exposure" : "start_bulb_exposure"
+                            camera.shutterReleaseRequired
+                                ? camera.shutterReleaseUnconfirmed ? "release_shutter_now" : "stop_bulb_exposure"
+                                : camera.bulbMode
+                                ? "start_bulb_exposure"
                                 : camera.captureMode == .photo ? "capture_photo" : camera.recording ? "stop_recording" : "start_recording"
                         )
                     )
@@ -511,7 +519,9 @@ private struct CaptureBar: View {
         .buttonStyle(.plain)
         .disabled(
             !captureSupported || !captureTemperatureAllowed ||
-                camera.isBusy(camera.captureMode == .photo ? .capture : .recording)
+                (camera.shutterReleaseRequired
+                    ? !camera.canRetryShutterRelease
+                    : camera.isBusy(camera.captureMode == .photo ? .capture : .recording))
         )
         .opacity(captureSupported && captureTemperatureAllowed ? 1 : 0.38)
         .accessibilityIdentifier(camera.captureMode == .photo ? "shutter-button" : "record-button")

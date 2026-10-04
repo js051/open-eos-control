@@ -1,8 +1,9 @@
 package dev.openeos.control.ui
 
+import dev.openeos.control.data.CameraTransport
+
 import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -49,6 +50,7 @@ fun OpenEosControlApp(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val mediaPickers = rememberCameraMediaPickerLaunchers(viewModel)
     val sereinLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -142,6 +144,7 @@ fun OpenEosControlApp(
         tapFocus = viewModel::tapFocus,
         clickWhiteBalance = viewModel::clickWhiteBalance,
         openCaptureReview = viewModel::openCaptureReview,
+        retryCaptureReview = viewModel::retryCaptureReview,
         refreshMedia = viewModel::refreshMedia,
         setMediaLibraryScope = viewModel::setMediaLibraryScope,
         cancelMediaLibraryLoad = viewModel::cancelMediaLibraryLoad,
@@ -158,12 +161,12 @@ fun OpenEosControlApp(
         setMediaArchivedBatch = viewModel::setMediaArchivedBatch,
         setMediaRatingBatch = viewModel::setMediaRatingBatch,
         setMediaRotationBatch = viewModel::setMediaRotationBatch,
-        downloadMedia = { item, destination -> viewModel.downloadMedia(context, item, destination) },
-        downloadMediaBatch = { items, destination -> viewModel.downloadMediaBatch(context, items, destination) },
+        downloadMedia = mediaPickers.downloadDocument,
+        downloadMediaBatch = mediaPickers.downloadFolder,
         saveMediaToPhone = { items -> viewModel.downloadMediaBatch(context, items) },
         cancelMediaThumbnail = viewModel::cancelMediaThumbnail,
         openInSerein = { items -> viewModel.openInSerein(context, items) },
-        uploadMedia = { source -> viewModel.uploadMedia(context, source) },
+        uploadMedia = mediaPickers.upload,
         deleteMedia = viewModel::deleteMedia,
         deleteMediaBatch = viewModel::deleteMediaBatch,
         cancelMediaDownload = viewModel::cancelMediaDownload,
@@ -213,7 +216,10 @@ fun OpenEosControlApp(
                 ) {
                     ErrorBanner(
                         when {
-                            state.shutterReleaseUnconfirmed -> stringResource(R.string.shutter_release_unconfirmed)
+                            state.shutterReleaseUnconfirmed -> stringResource(
+                                if (state.transport == CameraTransport.DESKTOP_BRIDGE) R.string.bridge_shutter_release_unconfirmed
+                                else R.string.shutter_release_unconfirmed,
+                            )
                             state.error != null -> state.error
                             state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
                             else -> null
@@ -321,6 +327,7 @@ data class CameraActions(
     val tapFocus: (Double, Double) -> Unit,
     val clickWhiteBalance: (Double, Double) -> Unit,
     val openCaptureReview: () -> Unit = {},
+    val retryCaptureReview: () -> Unit = {},
     val refreshMedia: () -> Unit,
     val setMediaLibraryScope: (MediaLibraryScope) -> Unit = {},
     val cancelMediaLibraryLoad: () -> Unit = {},
@@ -337,12 +344,12 @@ data class CameraActions(
     val setMediaArchivedBatch: (List<CameraMediaItem>, Boolean) -> Unit = { _, _ -> },
     val setMediaRatingBatch: (List<CameraMediaItem>, Int) -> Unit = { _, _ -> },
     val setMediaRotationBatch: (List<CameraMediaItem>, Int) -> Unit = { _, _ -> },
-    val downloadMedia: (CameraMediaItem, Uri) -> Unit,
-    val downloadMediaBatch: (List<CameraMediaItem>, Uri) -> Unit = { _, _ -> },
+    val downloadMedia: (CameraMediaItem) -> Unit,
+    val downloadMediaBatch: (List<CameraMediaItem>) -> Unit = {},
     val saveMediaToPhone: (List<CameraMediaItem>) -> Unit = {},
     val cancelMediaThumbnail: (CameraMediaItem) -> Unit = {},
     val openInSerein: (List<CameraMediaItem>) -> Unit = {},
-    val uploadMedia: (Uri) -> Unit = {},
+    val uploadMedia: () -> Unit = {},
     val deleteMedia: (CameraMediaItem) -> Unit,
     val deleteMediaBatch: (List<CameraMediaItem>) -> Unit = {},
     val cancelMediaDownload: () -> Unit,

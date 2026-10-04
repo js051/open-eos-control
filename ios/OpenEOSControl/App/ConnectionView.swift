@@ -89,6 +89,7 @@ struct ConnectionView: View {
             .padding(.vertical, 18)
             .frame(maxWidth: .infinity)
         }
+        .accessibilityIdentifier("connection-scroll-view")
         .scrollDismissesKeyboard(.interactively)
         .background(Color.cameraBackground)
     }

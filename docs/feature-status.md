@@ -4,6 +4,8 @@ Original full-ledger audit: 2026-08-14. Scoped follow-ups below retain their own
 
 Product workflow audit (2026-10-04): [prioritized complete-workflow gaps and acceptance criteria](product-workflow-acceptance.zh-TW.md), based on PR #194 head `5a042d2`. This is a cross-platform gap review, not renewed physical-device validation or a declaration that every implemented capability is complete.
 
+Scoped delivery follow-up (2026-10-04 UTC): PR #194, #199, #200, #203 and #201 are main accepted through `d70de29115320570d5f8fef3fcfc8ffcc79d0e4b`. The [current-status addendum](product-workflow-acceptance.zh-TW.md#後續交付狀態2026-10-04-utc) records exact commits and CI evidence for Bridge CCAPI/PC, Android Bridge and iOS direct CCAPI/Bridge stop recovery, plus the Android event, picker and capture/save journeys. These scoped updates preserve the original audit snapshot; they do not renew the full ledger, establish every cross-platform workflow, or add physical-device evidence.
+
 This is the canonical completeness ledger for Open EOS Control. A UI control, interface method, or simulator response alone does not make a feature complete.
 
 ## Status Rules

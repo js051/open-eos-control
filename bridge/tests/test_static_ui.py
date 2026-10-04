@@ -73,6 +73,8 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "latest-media-thumbnail",
         "latest-media-label",
         "bulb-indicator",
+        "shutter-disconnect-warning",
+        "shutter-disconnect-confirm",
         "half-press-button",
         "focus-reticle",
         "focus-section",
@@ -431,3 +433,37 @@ def test_physical_validation_controls_are_accessible_and_unframed() -> None:
     section_rule = styles.split(".diagnostic-validation {", 1)[1].split("}", 1)[0]
     assert "border-radius" not in section_rule
     assert "box-shadow" not in section_rule
+
+
+def test_bulb_recovery_has_distinct_accessible_current_and_previous_session_warnings() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'id="shutter-disconnect-warning" class="shutter-disconnect-warning" role="alert" hidden' in html
+    assert 'id="shutter-disconnect-confirm"' in html
+    assert 'role="status" hidden>BULB' in html
+    assert 'const bulbWasActive = bulbControlLocked();' in script
+    assert 'const bulb = bulbWasActive || (isPhoto && isBulbMode());' in script
+    assert 'status.shutterReleaseUnconfirmed === false' in script
+    assert 'status.bulbExposureActive === false' in script
+    reset = script.split('function resetSession()', 1)[1].split('function featureSupported', 1)[0]
+    assert 'state.shutterReleaseUnconfirmed = false;' in reset
+    assert 'state.shutterDisconnectWarning = false;' not in reset
+    for key in ('retryBulbStop', 'bulbReleaseUnconfirmed', 'previousShutterWarning', 'confirmCameraChecked'):
+        assert len(re.findall(rf'^\s+{key}: "', script, flags=re.MULTILINE)) == 2
+
+
+def test_shutter_recovery_alerts_do_not_cover_controls_and_live_start_has_a_guard() -> None:
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    warning_style = styles.split(".shutter-disconnect-warning {", 1)[1].split("}", 1)[0]
+    assert "position: fixed" not in warning_style
+    assert "position: absolute" not in warning_style
+    assert "warningHost.append(ui.shutterDisconnectWarning);" in script
+    assert ".viewfinder-placeholder .button:disabled" in styles
+    camera_start = script.split("async function startLiveView(", 1)[1].split("async function stopLiveView", 1)[0]
+    assert "bulbControlLocked()" in camera_start.split("beginCameraInteraction()", 1)[0]
+    toast = script.split("function showToast(", 1)[1].split("function renderHealth", 1)[0]
+    assert "bulbControlLocked() || state.shutterDisconnectWarning" in toast
+    bulb_lock = script.split("function bulbControlLocked()", 1)[1].split("function clearBulbTimer", 1)[0]
+    assert "shutterReleaseUnconfirmed() || state.status?.bulbExposureActive === true" in bulb_lock
+    assert "ui.toast.hidden = true;" in toast

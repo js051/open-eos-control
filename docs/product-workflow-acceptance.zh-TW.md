@@ -2,6 +2,18 @@
 
 稽核日期：2026-10-04。程式基準：`5a042d24724ca2f4d2b5dc2988d2e9ef99711c6f`，即 PR #194 本次取得的 head。本文是該基準的產品流程稽核快照；各修正分支的測試與交付另記，不將進行中的工作計入完成。
 
+## 後續交付狀態（2026-10-04 UTC）
+
+以下補記目前交付狀態；後面的原始結論、缺口矩陣、程式行號與驗收契約保留上述基準，不把已完成的修正重新列為當前 blocker，也不回寫歷史測試結果。
+
+- PR #194 已以 [`28dc3d2`](https://github.com/js051/open-eos-control/commit/28dc3d2db0a3f9a295931419098f1c6c3bc0bff7) squash 接受；其 tree 與本頁基準 `5a042d2` 相同。
+- PR #199 已以 [`f3e9871`](https://github.com/js051/open-eos-control/commit/f3e9871588a1e8c25fbb571f4b504ad5ebd3e76d) 達到 main accepted，完成下方第一批契約的 Bridge CCAPI／PC 停止責任與恢復入口。開始回應不明時保留原 session 的 release 責任，停止重試不重送開始；[故障與 UI 驗收紀錄](validation/bridge-bulb-stop-recovery-2026-10-04.zh-TW.md)保留各來源提交的測試邊界。
+- PR #200 已以 [`76d7ab4`](https://github.com/js051/open-eos-control/commit/76d7ab46a7c9eac1d0a90edd507e01102c9c868d) 達到 main accepted，補齊 [Android Bridge 停止恢復](validation/android-bridge-shutter-recovery-2026-10-04.zh-TW.md)。只有同次 Stop 後的明確新證據才解除風險；額外 status 補讀有 5 秒 whole-call 上限，原 Stop 保護與預算不變。
+- PR #203 已以 [`b61c837`](https://github.com/js051/open-eos-control/commit/b61c8372414474fbbce934d1eb5a636717c9a737) 達到 [main accepted](https://github.com/js051/open-eos-control/actions/runs/37238311008)，整合 Android [事件狀態恢復](validation/android-event-state-recovery-2026-10-04.zh-TW.md)、[picker session／重建邊界](validation/android-media-picker-session-2026-10-04.zh-TW.md)、[拍後確認與預覽原檔保存](validation/android-capture-media-journey-2026-10-04.zh-TW.md)。來源 head `42066cb69ea6f632eafd6829f7f4faf290dd0ec6` 的 [CI 37236220311](https://github.com/js051/open-eos-control/actions/runs/37236220311) 成功，API 34／36 各 211 例通過，含各 13 個拍攝／保存旅程案例；此為該精確 head 的結果，不跨分支加總。
+- PR #201 已以 [`d70de29`](https://github.com/js051/open-eos-control/commit/d70de29115320570d5f8fef3fcfc8ffcc79d0e4b) 達到 [main accepted](https://github.com/js051/open-eos-control/actions/runs/37240097659)，完成 [iOS direct CCAPI／Bridge 的 Bulb 停止責任與 App 恢復入口](validation/ios-bulb-stop-recovery-2026-10-04.zh-TW.md)。來源 head `419ed6372ae902080263025cd3d4e816a5c2950c` 的 [CI 37238805887](https://github.com/js051/open-eos-control/actions/runs/37238805887) 成功：Core 228、App unit 90、UI 15 例均由該次 run 實際通過；未受影響的平台 job 依路徑分類跳過。此為本補記已接受的 main 基準。
+
+以上閉合的是各批明列的停止恢復與 Android 拍攝／保存範圍，不構成所有命令、gphoto2／EDSDK 或其他平台旅程的同等保證。真相機快門、光學對焦、實體手機／SAF provider、跨程序續傳與跨機型相容性仍依各自證據判定；沒有新增物理裝置驗證或發版。
+
 ## 結論
 
 專案已有可執行的拍攝、監看、相簿與傳輸基礎，不能再用「有沒有某個按鈕」評估完成度。接下來應依「可靠控制 → 完整拍攝流程 → 相簿與傳輸 → 易用性與相容性」交付，逐條驗證使用者在錯誤、取消、背景與換相機後仍能完成工作。

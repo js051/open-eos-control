@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="media_picker_session_expired">相機連線已變更，請重新選擇檔案或資料夾。</string>
+    <string name="media_picker_transfer_unavailable">目前無法進行此傳輸。請等相機就緒後，重新選擇檔案或資料夾。</string>
+    <string name="media_picker_open_failed">Android 無法開啟檔案選擇器，請重試。</string>
     <string name="live_view_release_unconfirmed">尚未確認 Live View 已停止。請先關閉 Live View，再重試。</string>
     <string name="shutter_disconnect_warning">上一台相機的快門釋放尚未確認，請在機身確認曝光已停止。</string>
     <string name="retry_shutter_release">重試釋放快門，只發送停止</string>
     <string name="shutter_release_retry_short">重試停止</string>
     <string name="shutter_release_unconfirmed">曝光可能仍在進行。請按「重試停止」。</string>
+    <string name="bridge_shutter_release_unconfirmed">曝光可能仍在進行。請重試停止；若仍失敗，請在機身停止曝光並更新 Bridge。</string>
 
     <string name="media_saved_location">已儲存至 %1$s</string>
     <string name="media_save_to_folder">另存至其他資料夾</string>
@@ -472,4 +476,20 @@
     <string name="serein_launch_failed">無法開啟 Serein；相機媒體沒有被修改。</string>
     <string name="serein_receipt_missing">Serein 未回傳可驗證的匯入回執；相機原檔保持不變。</string>
     <string name="serein_import_result">Serein 已保存 %1$d 個項目；%2$d 個失敗，%3$d 個取消。</string>
+    <string name="media_save_choose_destination">選擇原檔的儲存位置。</string>
+    <string name="media_save_queued">正在等待儲存這個原檔…</string>
+    <string name="media_save_failed">無法儲存原檔：%1$s</string>
+    <string name="media_save_cancelled">已取消下載。</string>
+    <string name="media_save_retry">重試儲存原檔</string>
+    <string name="media_save_selected_document">您選取的文件</string>
+    <string name="media_save_selected_folder">您選取的資料夾</string>
+
+    <string name="capture_command_acknowledged">快門指令已確認</string>
+    <string name="capture_status_readback_failed">快門指令已確認，但隨後的相機狀態讀取失敗。</string>
+    <string name="capture_review_searching">正在尋找新出現的素材…</string>
+    <string name="capture_review_not_ready">尚未找到新出現的素材。</string>
+    <string name="capture_review_latest_visible">目前可開啟最新可見素材。</string>
+    <string name="capture_review_explanation">只會查詢相機的最近素材，不會再次發送快門指令。新出現的素材無法確定與這次快門指令相對應。</string>
+    <string name="capture_review_retry">重新查詢最近素材</string>
+    <string name="capture_review_open_previous">開啟先前可見素材</string>
 </resources>

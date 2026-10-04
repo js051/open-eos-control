@@ -4,10 +4,13 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.OutputStream
 import java.time.Instant
 import java.util.Locale
@@ -127,8 +130,8 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
         if (!item.previewAvailable || file.length() !in 1..MAX_HOST_PREVIEW_BYTES) {
             throw PtpProtocolException("${item.name} does not have a bounded Android-decodable image preview.")
         }
-        val bytes = file.inputStream().buffered().use { input ->
-            input.readNBytes((MAX_HOST_PREVIEW_BYTES + 1L).toInt())
+        val bytes = file.inputStream().use { input ->
+            input.readBoundedHostPreview((MAX_HOST_PREVIEW_BYTES + 1L).toInt())
         }
         if (bytes.size.toLong() > MAX_HOST_PREVIEW_BYTES) {
             throw PtpProtocolException("${item.name} exceeds the bounded image preview limit.")
@@ -213,6 +216,34 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
         ratingWritable = false,
         streamAvailable = kind == "video",
     )
+}
+
+// Use legacy InputStream APIs on Android 8+, keeping ownership with the caller.
+internal suspend fun InputStream.readBoundedHostPreview(maxBytes: Int): ByteArray {
+    require(maxBytes >= 0) { "The preview read limit must not be negative." }
+    val context = currentCoroutineContext()
+    context.ensureActive()
+    var bytes = ByteArray(minOf(maxBytes, FILE_COPY_BUFFER_BYTES))
+    var size = 0
+    while (size < maxBytes) {
+        context.ensureActive()
+        if (size == bytes.size) {
+            bytes = bytes.copyOf(minOf(maxBytes.toLong(), bytes.size.toLong() * 2L).toInt())
+        }
+        val count = read(bytes, size, minOf(bytes.size - size, FILE_COPY_BUFFER_BYTES))
+        context.ensureActive()
+        if (count < 0) break
+        if (count == 0) {
+            // Defend against a stream that makes no bulk-read progress without spinning.
+            val byte = read()
+            context.ensureActive()
+            if (byte < 0) break
+            bytes[size++] = byte.toByte()
+        } else {
+            size += count
+        }
+    }
+    return if (size == bytes.size) bytes else bytes.copyOf(size)
 }
 
 private fun sanitizeFilename(filename: String): String {

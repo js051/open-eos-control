@@ -197,6 +197,8 @@ class CameraStatus(ApiModel):
     battery: BatteryStatus
     recording: bool | None = None
     bulb_exposure_active: bool | None = None
+    # Stop-only responsibility, not evidence that the camera is currently exposing.
+    shutter_release_unconfirmed: bool = False
     mode: str = "unknown"
     media: StorageStatus
     exposure: ExposureState

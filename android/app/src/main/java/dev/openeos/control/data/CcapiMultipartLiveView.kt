@@ -150,7 +150,7 @@ internal class CcapiMultipartLiveViewSession(
     private var producedGeneration = 0L
     private var consumedGeneration = 0L
     private var terminalError: Throwable? = null
-    private var closed = false
+    @Volatile private var closed = false
     private val worker = Thread({ drain(boundary) }, "ccapi-multipart-live-view").apply {
         isDaemon = true
         start()
@@ -203,8 +203,10 @@ internal class CcapiMultipartLiveViewSession(
             closed = true
             monitor.notifyAll()
         }
+        // OkHttp body sources are not safe to close while the reader is using them.
+        // Cancellation unblocks the socket; drain() alone owns response.close() in its
+        // finally block, after both reads and their timeout cleanup have finished.
         call.cancel()
-        response.close()
         worker.interrupt()
     }
 }

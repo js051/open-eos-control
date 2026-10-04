@@ -372,6 +372,21 @@ public actor CCAPIClient {
     private var cachedModel = "Canon Camera"
     private var recording: Bool?
     private var bulbExposureActive = false
+    private struct BulbRelease: Sendable {
+        let id: UUID
+        let operation: CCAPIOperation
+        let simulator: Bool
+    }
+    private var pendingBulbRelease: BulbRelease?
+    private var bulbStartAcknowledged = false
+    private var bulbReleaseUnconfirmed = false
+    private var bulbStateAuthoritative = false
+    private var bulbStartTask: Task<CameraStatus, Error>?
+    private var bulbStartID: UUID?
+    private var bulbReleaseTask: Task<Void, Error>?
+    private var closing = false
+    private var closeTask: Task<CameraShutterReleaseState, Never>?
+    private var cameraMutationCount = 0
     private var latestTemperatureStatus: CameraTemperatureStatus?
     private var liveViewSizeControlSupported = true
     private var rejectedLiveViewSizes = Set<LiveViewSize>()
@@ -542,11 +557,42 @@ public actor CCAPIClient {
     }
 
     public func close() async {
+        _ = await closeWithShutterReleaseState()
+    }
+
+    /// Retains the existing close API while exposing a failed final release to callers.
+    public func closeWithShutterReleaseState() async -> CameraShutterReleaseState {
+        if let closeTask { return await closeTask.value }
+        closing = true
+        let task = Task.detached(priority: .userInitiated) { await self.finishClose() }
+        closeTask = task
+        return await task.value
+    }
+
+    private func finishClose() async -> CameraShutterReleaseState {
+        // A press suspended in transport must finish before its final release.
+        if let bulbStartTask { _ = await bulbStartTask.result }
+        try? await releasePendingBulb()
         await stopEventPolling()
-        if bulbExposureActive {
-            _ = try? await stopBulbExposure()
-        }
         await stopLiveView()
+        let unconfirmed = pendingBulbRelease != nil || bulbReleaseUnconfirmed
+        // A retired connection keeps a warning, never a command to replay in its replacement.
+        pendingBulbRelease = nil
+        bulbExposureActive = false
+        bulbReleaseUnconfirmed = unconfirmed
+        return CameraShutterReleaseState(
+            releaseRequired: false,
+            releaseUnconfirmed: unconfirmed,
+            bulbExposureActive: unconfirmed ? nil : false
+        )
+    }
+
+    public func shutterReleaseState() -> CameraShutterReleaseState {
+        CameraShutterReleaseState(
+            releaseRequired: pendingBulbRelease != nil,
+            releaseUnconfirmed: bulbReleaseUnconfirmed,
+            bulbExposureActive: bulbReleaseUnconfirmed ? nil : bulbExposureActive
+        )
     }
 
     public func info() async throws -> CameraInfo {
@@ -589,7 +635,18 @@ public actor CCAPIClient {
             else { observedFeatures.insert(.lensStatus) }
             if status.temperature == nil { observedFeatures.remove(.temperatureStatus) }
             else { observedFeatures.insert(.temperatureStatus) }
-            return status
+            if !bulbStateAuthoritative, status.bulbExposureActive == true {
+                // The Simulator contract explicitly reports an existing exposure.
+                // Adopt its known stop route without claiming a locally observed start.
+                pendingBulbRelease = BulbRelease(
+                    id: UUID(), operation: CCAPIOperation(method: .post, path: "/ccapi/bulb/stop"), simulator: true
+                )
+                bulbStateAuthoritative = true
+                bulbExposureActive = true
+                bulbStartAcknowledged = false
+                bulbReleaseUnconfirmed = false
+            }
+            return bulbStateAuthoritative ? status.withShutterReleaseState(shutterReleaseState()) : status
         }
 
         let battery = try await firstJSON(
@@ -646,7 +703,8 @@ public actor CCAPIClient {
             batteryLevel: batteryState.level,
             batteryStatus: batteryState.status,
             recording: recording,
-            bulbExposureActive: bulbExposureActive,
+            bulbExposureActive: bulbReleaseUnconfirmed ? nil : bulbExposureActive,
+            shutterReleaseUnconfirmed: bulbReleaseUnconfirmed,
             mode: settingObject(in: settings, aliases: ["shootingmode"])?.string("value", default: "unknown") ?? "unknown",
             mediaAvailable: storageState?.available,
             exposure: exposureState(settings),
@@ -834,6 +892,8 @@ public actor CCAPIClient {
     }
 
     public func setSetting(key: String, value: String) async throws -> CameraStatus {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             switch key {
@@ -987,6 +1047,8 @@ public actor CCAPIClient {
     }
 
     public func createDirectory(name: String) async throws -> String {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         guard Self.isValidDirectoryCreateName(name) else {
             throw CCAPIError.invalidSetting(key: "directoryname", value: name)
@@ -1022,6 +1084,8 @@ public actor CCAPIClient {
         field: CameraFileNamingField,
         value: String
     ) async throws -> CameraFileNaming {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         let current: CameraFileNaming
         if resolvedMode == .simulator {
@@ -1096,6 +1160,8 @@ public actor CCAPIClient {
     }
 
     public func sleepCamera() async throws {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             try await requestOK(path: "/ccapi/camera-sleep", method: .post, json: [:])
@@ -1118,6 +1184,8 @@ public actor CCAPIClient {
     }
 
     public func cleanSensor(autoPowerOff: Bool) async throws {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             try await requestOK(
@@ -1143,6 +1211,8 @@ public actor CCAPIClient {
     }
 
     public func captureStill() async throws -> CameraStatus {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         try await refreshTemperatureStatusForRestrictedCommand()
         try requireTemperatureAllowsStillCapture()
@@ -1168,6 +1238,8 @@ public actor CCAPIClient {
     }
 
     public func syncCameraClock() async throws -> CameraStatus {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             _ = try await requestJSON(path: "/ccapi/clock/sync", method: .post, json: [:])
@@ -1203,6 +1275,8 @@ public actor CCAPIClient {
     }
 
     public func halfPressShutter() async throws -> CameraStatus {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             try await performGuaranteedRelease(
@@ -1226,49 +1300,140 @@ public actor CCAPIClient {
     }
 
     public func startBulbExposure() async throws -> CameraStatus {
-        try await ensureInitialized()
-        if bulbExposureActive { return try await status() }
-        let baseline = try await status()
-        try requireTemperatureAllowsStillCapture()
-        if resolvedMode == .simulator {
-            do {
-                _ = try await requestJSON(path: "/ccapi/bulb/start", method: .post, json: [:])
-            } catch {
-                _ = try? await requestJSON(path: "/ccapi/bulb/stop", method: .post, json: [:])
-                throw error
-            }
-        } else {
-            guard let manual = manualShutterOperation() else {
-                throw CCAPIError.unsupported(.bulbExposure)
-            }
-            do {
-                try await commandOK(operation: manual, json: ["af": false, "action": "full_press"])
-            } catch {
-                try? await commandOK(operation: manual, json: ["af": false, "action": "release"])
-                throw error
+        try Task.checkCancellation()
+        guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
+        guard bulbStartTask == nil, bulbReleaseTask == nil, pendingBulbRelease == nil,
+              cameraMutationCount == 0 else {
+            throw CCAPIError.invalidResponse("Release the shutter before starting another camera operation.")
+        }
+        // Reserving before the first await also excludes two concurrent start preflights.
+        let id = UUID()
+        bulbStartID = id
+        let task = Task { try await self.performBulbStart(id: id) }
+        bulbStartTask = task
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performBulbStart(id: UUID) async throws -> CameraStatus {
+        defer {
+            if bulbStartID == id {
+                bulbStartTask = nil
+                bulbStartID = nil
             }
         }
-        bulbExposureActive = true
-        return baseline.withBulbExposureActive(true)
+        try await ensureInitialized()
+        let baseline = try await status()
+        guard pendingBulbRelease == nil else {
+            throw CCAPIError.invalidResponse("Release the existing shutter exposure before starting again.")
+        }
+        try requireTemperatureAllowsStillCapture()
+        try Task.checkCancellation()
+        guard !closing, bulbStartID == id else { throw CancellationError() }
+        let simulator = resolvedMode == .simulator
+        let operation: CCAPIOperation
+        if simulator {
+            operation = CCAPIOperation(method: .post, path: "/ccapi/bulb/stop")
+        } else if let manual = manualShutterOperation() {
+            operation = manual
+        } else {
+            throw CCAPIError.unsupported(.bulbExposure)
+        }
+        let release = BulbRelease(id: id, operation: operation, simulator: simulator)
+        pendingBulbRelease = release
+        bulbStateAuthoritative = true
+        bulbStartAcknowledged = false
+        bulbReleaseUnconfirmed = true
+        do {
+            try await sendBulbCommand(release, start: true)
+            bulbStartAcknowledged = true
+            // A cancelled/closing caller still owes release after a late successful ACK.
+            try Task.checkCancellation()
+            guard !closing, pendingBulbRelease?.id == id else { throw CancellationError() }
+            bulbExposureActive = true
+            bulbReleaseUnconfirmed = false
+            return baseline.withShutterReleaseState(shutterReleaseState())
+        } catch {
+            let primary = error
+            do {
+                try await releasePendingBulb()
+            } catch {
+                throw CCAPIError.operationAndReleaseFailed(
+                    operation: primary.localizedDescription,
+                    release: error.localizedDescription
+                )
+            }
+            throw primary
+        }
     }
 
     public func stopBulbExposure() async throws -> CameraStatus {
-        try await ensureInitialized()
-        if !bulbExposureActive { return try await status() }
-        if resolvedMode == .simulator {
-            _ = try await requestJSON(path: "/ccapi/bulb/stop", method: .post, json: [:])
-        } else {
-            guard let manual = manualShutterOperation() else {
-                throw CCAPIError.unsupported(.bulbExposure)
-            }
-            try await commandOK(operation: manual, json: ["af": false, "action": "release"])
-        }
-        bulbExposureActive = false
-        observedFeatures.insert(.bulbExposure)
+        try await retryShutterRelease()
         return try await status()
     }
 
+    /// Stop-only; its successful return confirms release independently of status refresh.
+    public func retryShutterRelease() async throws {
+        guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
+        if let bulbStartTask { _ = await bulbStartTask.result }
+        guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
+        try await releasePendingBulb()
+    }
+
+    private func releasePendingBulb() async throws {
+        if let bulbReleaseTask {
+            try await bulbReleaseTask.value
+            return
+        }
+        guard let release = pendingBulbRelease else { return }
+        // This task is owned by the connection, not the cancelled UI caller.
+        let task = Task.detached(priority: .userInitiated) { try await self.performBulbRelease(release) }
+        bulbReleaseTask = task
+        defer { bulbReleaseTask = nil }
+        try await task.value
+    }
+
+    private func performBulbRelease(_ release: BulbRelease) async throws {
+        guard pendingBulbRelease?.id == release.id else { return }
+        do {
+            try await sendBulbCommand(release, start: false)
+            guard pendingBulbRelease?.id == release.id else { return }
+            pendingBulbRelease = nil
+            bulbExposureActive = false
+            bulbReleaseUnconfirmed = false
+            if bulbStartAcknowledged { observedFeatures.insert(.bulbExposure) }
+            bulbStartAcknowledged = false
+        } catch {
+            if pendingBulbRelease?.id == release.id {
+                bulbExposureActive = false
+                bulbReleaseUnconfirmed = true
+            }
+            throw error
+        }
+    }
+
+    private func sendBulbCommand(_ release: BulbRelease, start: Bool) async throws {
+        // The owned command deliberately bypasses the ordinary mutation interlock.
+        // No alternate method, endpoint, or press retry is attempted here.
+        let path = start && release.simulator ? "/ccapi/bulb/start" : release.operation.path
+        guard let url = URL(string: baseURLString + path) else {
+            throw CCAPIError.invalidResponse("Invalid saved shutter endpoint.")
+        }
+        var request = request(url: url, method: release.operation.method)
+        let payload: JSONDictionary = release.simulator ? [:] : ["af": false, "action": start ? "full_press" : "release"]
+        request.httpBody = try encodeJSONObject(payload)
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        let response = try await transport.send(request)
+        try validate(response, request: request)
+        if release.simulator { _ = try decodeJSONObject(response.body) }
+    }
+
     public func autofocus() async throws -> CameraStatus {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             try await performGuaranteedRelease(
@@ -1299,7 +1464,9 @@ public actor CCAPIClient {
     }
 
     public func startRecording() async throws -> CameraStatus {
-        try await setRecording(true)
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
+        return try await setRecording(true)
     }
 
     public func stopRecording() async throws -> CameraStatus {
@@ -1307,6 +1474,8 @@ public actor CCAPIClient {
     }
 
     public func tapFocus(x: Double, y: Double) async throws -> FocusResult {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/focus/tap", method: .post, json: ["x": x, "y": y])
@@ -1335,6 +1504,8 @@ public actor CCAPIClient {
     }
 
     public func clickWhiteBalance(x: Double, y: Double) async throws -> CameraStatus {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let status = try parseSimulatorStatus(await requestJSON(
@@ -1362,6 +1533,8 @@ public actor CCAPIClient {
         direction: FocusDriveDirection,
         step: FocusDriveStep
     ) async throws -> FocusDriveResult {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(
@@ -1395,6 +1568,8 @@ public actor CCAPIClient {
     }
 
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         try await refreshTemperatureStatusForRestrictedCommand()
         try requireTemperatureAllowsLiveView()
@@ -1634,6 +1809,8 @@ public actor CCAPIClient {
     public func setLiveViewMagnification(
         _ magnification: LiveViewMagnification
     ) async throws -> LiveViewMagnificationResult {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         if resolvedMode == .simulator {
             guard activeLiveViewSource != nil,
@@ -2077,7 +2254,9 @@ public actor CCAPIClient {
     }
 
     public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
-        try await modifyMedia(
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
+        return try await modifyMedia(
             item,
             action: "protect",
             value: enabled ? "enable" : "disable",
@@ -2087,6 +2266,8 @@ public actor CCAPIClient {
     }
 
     public func setMediaRating(_ item: CameraMediaItem, rating: Int) async throws -> CameraMediaItem {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         guard (0...5).contains(rating) else {
             throw CCAPIError.invalidResponse("Media rating must be from 0 through 5.")
         }
@@ -2100,6 +2281,8 @@ public actor CCAPIClient {
     }
 
     public func setMediaRotation(_ item: CameraMediaItem, degrees: Int) async throws -> CameraMediaItem {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         guard Self.mediaRotations.contains(degrees) else {
             throw CCAPIError.invalidResponse("Media rotation must be 0, 90, 180, or 270 degrees.")
         }
@@ -2113,7 +2296,9 @@ public actor CCAPIClient {
     }
 
     public func setMediaArchive(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
-        try await modifyMedia(
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
+        return try await modifyMedia(
             item,
             action: "archive",
             value: enabled ? "enable" : "disable",
@@ -2252,6 +2437,8 @@ public actor CCAPIClient {
     }
 
     public func deleteMedia(_ item: CameraMediaItem) async throws {
+        try beginCameraMutation()
+        defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         let path: String
         if resolvedMode == .simulator {
@@ -4288,12 +4475,38 @@ public actor CCAPIClient {
         }
     }
 
+    private func beginCameraMutation() throws {
+        guard !closing, bulbStartTask == nil, bulbReleaseTask == nil, pendingBulbRelease == nil else {
+            throw CCAPIError.invalidResponse("Release the shutter before another camera operation.")
+        }
+        cameraMutationCount += 1
+    }
+
+    private func validateShutterMutation(path: String, method: HTTPMethod, json: JSONDictionary?) throws {
+        guard method != .get, closing || bulbStartTask != nil || bulbReleaseTask != nil || pendingBulbRelease != nil else { return }
+        let action = json?["action"] as? String
+        // Only existing, explicit cleanup contracts may pass the interlock.
+        let safeStop =
+            (method == .delete && (path.hasSuffix("/event/polling") || path.hasSuffix("/shooting/liveview") || path.hasSuffix("/shooting/liveview/multipart"))) ||
+            (path.hasSuffix("/shooting/liveview") && method == .post && (json?["liveviewsize"] as? String) == "off") ||
+            (path.hasSuffix("/shooting/liveview/rtp") && method == .post && action == "stop") ||
+            (path.hasSuffix("/shooting/control/recbutton") && (method == .post || method == .put) && action == "stop") ||
+            (path == "/ccapi/record/stop" && method == .post) ||
+            (path.hasSuffix("/shooting/control/af") && (method == .post || method == .put) && action == "stop") ||
+            (path.hasSuffix("/shooting/control/shutterbutton/manual") && (method == .post || method == .put) && action == "release") ||
+            (path == "/ccapi/shutter/release" && method == .post)
+        guard safeStop else {
+            throw CCAPIError.invalidResponse("Release the shutter before another camera operation.")
+        }
+    }
+
     private func request(
         path: String,
         method: HTTPMethod,
         json: JSONDictionary? = nil,
         timeoutInterval: TimeInterval = 10
     ) throws -> URLRequest {
+        try validateShutterMutation(path: path, method: method, json: json)
         guard let url = URL(string: baseURLString + path) else {
             throw CCAPIError.invalidResponse("Invalid camera request path: \(path)")
         }
