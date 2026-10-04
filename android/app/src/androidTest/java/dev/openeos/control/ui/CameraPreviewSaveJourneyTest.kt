@@ -328,6 +328,47 @@ class CameraPreviewSaveJourneyTest {
         assertEquals(1, shutterRequests.get())
     }
 
+    @Test
+    fun knownCaptureCanSaveBeforeTheAllScopeListingResponds() {
+        compose.runOnIdle { viewModel.setMediaLibraryScope(MediaLibraryScope.ALL) }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.COMPLETE &&
+                !viewModel.uiState.value.mediaLibraryLoading
+        }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo))
+            .assertIsEnabled().performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            val state = viewModel.uiState.value
+            !state.busy && state.captureReviewItem?.id == capturedId && !state.captureReviewLoading
+        }
+        val gate = camera.gate()
+        val gateNextListing = AtomicBoolean(true)
+        val ordinaryResponse = camera.intercept
+        camera.intercept = { request ->
+            if (request.method == "GET" && request.requestUrl?.encodedPath == "/ccapi/media" &&
+                gateNextListing.compareAndSet(true, false)) gate.blockResponse()
+            ordinaryResponse(request)
+        }
+        compose.onNodeWithTag("capture-review-button").performClick()
+        assertTrue(gate.entered.await(SESSION_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        awaitPreview(capturedId)
+        val item = requireNotNull(viewModel.uiState.value.mediaPreviewItem)
+        assertEquals(MediaLibraryScope.ALL, viewModel.uiState.value.mediaLibraryScope)
+        assertTrue(viewModel.uiState.value.mediaLibraryLoading)
+        assertArrayEquals(camera.imageBytes, viewModel.uiState.value.mediaPreviewBytes)
+        dialogAction(R.string.close_media_preview).assertIsDisplayed().assertIsEnabled()
+
+        // Saving retains the original cancel+join policy. The gated peer is intentionally
+        // not released until the original has actually reached MediaStore.
+        downloadButton(item).assertIsDisplayed().assertIsEnabled().performClick()
+        awaitSaved(item)
+        assertEquals(MediaLibraryLoadStatus.CANCELLED, viewModel.uiState.value.mediaLibraryLoadStatus)
+        assertPublishedOriginal()
+        dialogText(savedMessage()).assertIsDisplayed()
+        assertEquals(1, shutterRequests.get())
+        gate.release()
+    }
+
     private fun connect() {
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !viewModel.uiState.value.busy }
         compose.runOnIdle {
@@ -357,7 +398,8 @@ class CameraPreviewSaveJourneyTest {
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !viewModel.uiState.value.mediaLibraryLoading }
         val state = viewModel.uiState.value
         assertEquals(MediaLibraryScope.RECENT, state.mediaLibraryScope)
-        assertTrue(state.mediaItems.any { it.id == capturedId })
+        assertEquals("Preview loading must not cancel the album needed for adjacent navigation", MediaLibraryLoadStatus.COMPLETE, state.mediaLibraryLoadStatus)
+        assertTrue("The completed album must contain the reviewed capture", state.mediaItems.any { it.id == capturedId })
         assertTrue(camera.previewReads.contains("/ccapi/media/$capturedId"))
         return requireNotNull(state.mediaPreviewItem)
     }

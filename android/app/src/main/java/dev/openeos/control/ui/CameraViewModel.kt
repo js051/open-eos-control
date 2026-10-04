@@ -1534,7 +1534,12 @@ class CameraViewModel(
         val state = _uiState.value
         if (!state.supports(CameraFeature.MEDIA_BROWSER)) return
         val item = state.captureReviewItem ?: return
+        val needsRefresh = state.mediaItems.none { it.id == item.id }
+        // A read already in flight may have snapshotted the card before this known capture.
+        if (needsRefresh && state.mediaLibraryLoading) cancelMediaLibraryLoad()
         setUiMode(UiMode.MEDIA)
+        // setUiMode starts an empty album; a populated but older album needs the same refresh.
+        if (needsRefresh && !_uiState.value.mediaLibraryLoading) refreshMedia()
         if (item.previewAvailable || item.isVideo) openMediaPreview(item)
     }
 
@@ -1629,18 +1634,23 @@ class CameraViewModel(
                 mediaStreamSource = null,
             )
         }
-        runCamera(
+        val generation = cameraSessionGeneration
+        val connection = state.info
+        launchCameraOperation(
             operation = CameraOperation.MEDIA,
+            cancelMediaReads = false,
             onError = {
                 _uiState.update { current ->
-                    if (current.mediaPreviewItem?.id == item.id) current.copy(mediaPreviewLoading = false) else current
+                    if (generation == cameraSessionGeneration && current.info === connection &&
+                        current.mediaPreviewItem?.id == item.id) current.copy(mediaPreviewLoading = false) else current
                 }
             },
         ) {
             val stream = if (isVideo) repository.openMediaStream(item) else null
             val preview = if (isVideo) null else repository.mediaPreview(item)
             _uiState.update { current ->
-                if (current.mediaPreviewItem?.id == item.id) {
+                if (generation == cameraSessionGeneration && current.info === connection &&
+                    current.mediaPreviewItem?.id == item.id) {
                     current.copy(
                         mediaPreviewBytes = preview?.bytes,
                         mediaPreviewLoading = false,
@@ -2595,17 +2605,20 @@ class CameraViewModel(
         afterFinally: () -> Unit = {},
         block: suspend () -> Unit,
     ) {
-        launchCameraOperation(operation, onError, afterFinally, block)
+        launchCameraOperation(operation, onError, afterFinally, block = block)
     }
 
     private fun launchCameraOperation(
         operation: CameraOperation,
         onError: (Exception) -> Unit = {},
         afterFinally: () -> Unit = {},
+        cancelMediaReads: Boolean = true,
         block: suspend () -> Unit,
     ): Job? {
         if (_uiState.value.isBusy(operation)) return null
-        val mediaReadsToJoin = if (operation == CameraOperation.MEDIA) {
+        // A display read can coexist with listing, including ALL on a slow/full card. Saves
+        // and every other MEDIA operation retain cancellation + join before camera/file I/O.
+        val mediaReadsToJoin = if (operation == CameraOperation.MEDIA && cancelMediaReads) {
             listOfNotNull(mediaLibraryJob, eventMediaJob).also { cancelMediaLibraryLoad() }
         } else emptyList()
         // A reconnect cannot inherit work whose item IDs or commands belong to the old backend.
@@ -3218,9 +3231,12 @@ class CameraViewModel(
         captureReviewItem = captureReviewItem?.let { current -> if (current.id == item.id) item else current },
     )
 
-    internal fun CameraUiState.withEventMediaItems(items: List<CameraMediaItem>): CameraUiState {
+    internal fun CameraUiState.withEventMediaItems(
+        items: List<CameraMediaItem>,
+        preservePreview: Boolean = false,
+    ): CameraUiState {
         val itemIds = items.mapTo(hashSetOf(), CameraMediaItem::id)
-        val previewStillExists = mediaPreviewItem?.id in itemIds
+        val previewStillExists = preservePreview || mediaPreviewItem?.id in itemIds
         return copy(
             mediaItems = items,
             mediaThumbnails = mediaThumbnails.filterKeys(itemIds::contains),
@@ -3233,7 +3249,8 @@ class CameraViewModel(
     }
 
     private fun applyMediaItems(items: List<CameraMediaItem>, hasMore: Boolean) = transitionMediaState { current ->
-        current.withEventMediaItems(items).copy(mediaLibraryHasMore = hasMore)
+        // An intermediate page is not evidence that the separately requested preview was deleted.
+        current.withEventMediaItems(items, preservePreview = true).copy(mediaLibraryHasMore = hasMore)
     }
 
     private fun applyDeletedMedia(item: CameraMediaItem) = transitionMediaState { current ->
