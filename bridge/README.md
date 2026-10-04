@@ -18,6 +18,16 @@ Camera media downloads are consumed as cancellable Fetch streams with visible by
 
 Direct CCAPI media details expose Canon file protection, archive state, rating from 0 through 5, and display rotation at 0, 90, 180, or 270 degrees only when discovery advertises contents `PUT`. The engine sends Canon's exact action/value body, then requires `kind=info` readback to match before reporting success or observed evidence. The browser reads metadata only when its single media-actions dialog opens. libgphoto2 sessions keep these controls unavailable because no separately verified mutation contract is claimed.
 
+## CCAPI Bulb release recovery
+
+If a Bulb start or stop cannot confirm shutter release, the Bridge preserves the exact release operation in that session. Camera mutations are blocked until an explicit Stop succeeds; status and capability reads, recording/Live View/event stops, and disconnect remain available. The PC control page shows a persistent **Retry Stop Bulb** action even if the camera mode changes or a status refresh fails. Recovery confirms release without claiming that an unacknowledged exposure completed.
+
+`CameraStatus.shutterReleaseUnconfirmed` is an additive boolean, defaulting to `false`. When `true`, `bulbExposureActive` is `null`, because actual exposure state is unknown. Failed release and blocked mutations use the existing error envelope with code `SHUTTER_RELEASE_UNCONFIRMED`; clients must use the same session's `/bulb/stop`, never repeat `/bulb/start`. Existing Android and iOS Bridge adapters tolerate the additive field but do not yet expose this recovery state; their UI recovery is a separate follow-up. Server-side mutation blocking also applies to those clients.
+
+Disconnect makes one final release attempt and closes the session. If that attempt fails, DELETE returns an error explaining that release is unconfirmed and the user must check and stop the exposure on the camera before reconnecting. The removed session cannot be retried, and its release operation is never sent through a new session. A separate previous-connection warning remains visible across reconnection until the user confirms they have checked the camera; it never marks the new session as exposing. Closing the browser is best-effort cleanup, so check the camera if an exposure or warning was still present.
+
+This workflow is covered by an independent synthetic HTTP peer and automated tests; physical-camera validation remains pending.
+
 ## Install
 
 Windows x64 release assets include a single-file executable:

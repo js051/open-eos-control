@@ -305,3 +305,16 @@ The same process serves the responsive PC control UI at `http://127.0.0.1:18181/
 Errors must name the feature and engine so the UI can disable controls and show actionable diagnostics.
 
 Pydantic request validation also uses this envelope with code `INVALID_REQUEST`, so clients do not need a second parser for malformed input responses.
+
+
+## CCAPI Bulb release responsibility
+
+`CameraStatus` adds optional/default-false `shutterReleaseUnconfirmed`. For the CCAPI engine, a lost start or stop response can leave an exact same-session release pending. While the flag is true, `bulbExposureActive` is `null`; it is not proof that exposure is active or stopped. A known successful start still reports `bulbExposureActive: true`. Other engines retain the default false field and do not acquire an unverified equivalent cleanup contract.
+
+`POST /v1/session/{id}/bulb/start` records the camera-advertised manual release method/path before sending `full_press`. A failed compensating release returns `SHUTTER_RELEASE_UNCONFIRMED` in the existing error envelope. A repeated start or other implemented camera mutation is rejected with HTTP 409 until release is confirmed. Status/capability reads, `POST .../bulb/stop`, recording stop, Live View/event stop and disconnect remain available. Unsupported CCAPI upload stays unsupported.
+
+`POST /v1/session/{id}/bulb/stop` retries only the saved release, never the start or a newly discovered path. HTTP 502 with `SHUTTER_RELEASE_UNCONFIRMED` preserves the obligation. Once camera release is acknowledged, the server clears responsibility even if a subsequent status read fails. A fresh same-session status reporting both `shutterReleaseUnconfirmed: false` and `bulbExposureActive: false` can confirm that result. Missing fields in older server payloads are not equivalent recovery proof. An unacknowledged start followed by successful cleanup does not count as an observed completed Bulb exposure.
+
+`DELETE /v1/session/{id}` keeps the camera registration reserved while final cleanup runs, then removes the session even on cleanup failure. An unresolved release returns HTTP 502 with a camera-side recovery warning rather than false-success 204. That removed session cannot be retried; the old release is never sent in a replacement session. Client UI must distinguish an old-connection warning from a current-session stop obligation. Closing a browser or process cannot guarantee a physical camera was stopped.
+
+The PC UI implements stop-only recovery and a separately acknowledged previous-connection warning. Existing Android/iOS Bridge clients tolerate the additive field but their recovery UI is not implemented by this server/PC change. This is deterministic protocol coverage, not physical-camera validation.

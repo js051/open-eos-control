@@ -10,6 +10,10 @@
 </head>
 <body>
   <div id="app">
+    <section id="shutter-disconnect-warning" class="shutter-disconnect-warning" role="alert" hidden>
+      <p data-i18n="previousShutterWarning">Shutter release in the previous connection was not confirmed. Check the camera and stop any exposure before shooting again.</p>
+      <button id="shutter-disconnect-confirm" class="button secondary" type="button" data-i18n="confirmCameraChecked">I've checked the camera</button>
+    </section>
     <section id="connection-view" class="connection-shell">
       <header class="connection-brand">
         <img src="/app/app-icon.png" alt="" width="64" height="64">
@@ -168,7 +172,7 @@
             <div id="record-indicator" class="record-indicator" hidden>
               <span aria-hidden="true"></span> REC
             </div>
-            <div id="bulb-indicator" class="bulb-indicator" hidden>BULB 00:00</div>
+            <div id="bulb-indicator" class="bulb-indicator" role="status" hidden>BULB 00:00</div>
             <div id="temperature-warning" class="temperature-warning" role="status" hidden>
               <span class="icon" data-icon="triangle-alert" aria-hidden="true"></span>
               <span id="temperature-warning-text"></span>

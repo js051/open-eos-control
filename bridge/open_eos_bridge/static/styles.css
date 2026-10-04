@@ -682,6 +682,7 @@ input:disabled {
 }
 
 .bulb-indicator {
+  max-width: calc(100% - 28px);
   position: absolute;
   z-index: 4;
   top: 14px;
@@ -689,6 +690,26 @@ input:disabled {
   color: #171205;
   background: #f0b429;
   border-color: #ffd66b;
+}
+
+.shutter-disconnect-warning {
+  position: fixed;
+  z-index: 50;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(680px, calc(100% - 24px));
+  padding: 12px;
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-high);
+  box-shadow: 0 4px 20px #0008;
+}
+
+.shutter-disconnect-warning p {
+  margin: 0 0 10px;
+  line-height: 1.4;
 }
 
 .record-indicator span {
