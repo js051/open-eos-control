@@ -220,6 +220,12 @@
       stopBulb: "Stop Bulb exposure",
       bulbStarted: "Bulb exposure started",
       bulbStopped: "Bulb exposure stopped",
+      previousShutterWarning: "Shutter release in the previous connection was not confirmed. Check the camera and stop any exposure before shooting again.",
+      confirmCameraChecked: "I've checked the camera",
+      retryBulbStop: "Retry Stop Bulb",
+      bulbReleaseConfirmed: "Shutter release confirmed",
+      bulbReleaseUnconfirmed: "Shutter release unconfirmed. Retry Stop Bulb or check the camera.",
+      bulbDisconnectWarning: "Connection closed locally; shutter release is unconfirmed. Check the camera before reconnecting.",
       autofocusComplete: "Autofocus complete",
       halfPressComplete: "Shutter half-press complete",
       recordingStarted: "Recording started",
@@ -621,6 +627,12 @@
       stopBulb: "停止 Bulb 長曝光",
       bulbStarted: "Bulb 長曝光已開始",
       bulbStopped: "Bulb 長曝光已停止",
+      previousShutterWarning: "上一連線尚未確認快門釋放。再次拍攝前，請先檢查相機並停止可能仍在進行的曝光。",
+      confirmCameraChecked: "我已檢查相機",
+      retryBulbStop: "重試停止 Bulb",
+      bulbReleaseConfirmed: "已確認快門釋放",
+      bulbReleaseUnconfirmed: "尚未確認快門釋放。請重試停止 Bulb，或檢查相機。",
+      bulbDisconnectWarning: "本機連線已關閉，但尚未確認快門釋放。重新連線前請先檢查相機。",
       autofocusComplete: "自動對焦完成",
       halfPressComplete: "快門半按完成",
       recordingStarted: "已開始錄影",
@@ -1079,6 +1091,8 @@
       desqueeze: 1,
       cubeLut: null,
     },
+    shutterDisconnectWarning: false,
+    shutterReleaseUnconfirmed: false,
     bulbStartedAt: null,
     bulbTimer: null,
     focusStep: "MEDIUM",
@@ -1147,6 +1161,8 @@
     scanButton: byId("scan-button"),
     connectButton: byId("connect-button"),
     connectionError: byId("connection-error"),
+    shutterDisconnectWarning: byId("shutter-disconnect-warning"),
+    shutterDisconnectConfirm: byId("shutter-disconnect-confirm"),
     cameraName: byId("camera-name"),
     batteryValue: byId("battery-value"),
     storageValue: byId("storage-value"),
@@ -1422,6 +1438,11 @@
 
   function showToast(message, error = false) {
     clearTimeout(state.toastTimer);
+    if (bulbControlLocked() || state.shutterDisconnectWarning) {
+      // Persistent shutter alerts already explain recovery; never cover the Stop control.
+      ui.toast.hidden = true;
+      return;
+    }
     ui.toast.textContent = message;
     ui.toast.classList.toggle("error", error);
     ui.toast.hidden = false;
@@ -1662,6 +1683,8 @@
   async function disconnectCamera() {
     if (!state.session) return;
     const sessionId = state.session.id;
+    const hadBulbResponsibility = bulbControlLocked();
+    let disconnectError = null;
     beginCameraInteraction();
     cancelMediaDownload({ silent: true });
     renderAvailability();
@@ -1671,10 +1694,20 @@
     try {
       await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
     } catch (error) {
-      captureError(error);
+      disconnectError = captureError(error);
+      state.shutterDisconnectWarning ||= hadBulbResponsibility ||
+        disconnectError.code === "SHUTTER_RELEASE_UNCONFIRMED";
     }
     resetSession();
-    showToast(t("disconnected"));
+    if (disconnectError) {
+      const message = hadBulbResponsibility && disconnectError.code !== "SHUTTER_RELEASE_UNCONFIRMED"
+        ? t("bulbDisconnectWarning") : disconnectError.message;
+      ui.connectionError.textContent = message;
+      ui.connectionError.hidden = false;
+      showToast(message, true);
+    } else {
+      showToast(t("disconnected"));
+    }
   }
 
   function resetSession() {
@@ -1716,6 +1749,7 @@
     state.activeLiveSource = null;
     state.liveMagnification = 1;
     clearBulbTimer();
+    state.shutterReleaseUnconfirmed = false;
     state.busy = false;
     state.token = "";
     ui.connectionView.hidden = false;
@@ -1912,6 +1946,14 @@
     return null;
   }
 
+  function shutterReleaseUnconfirmed() {
+    return state.shutterReleaseUnconfirmed || state.status?.shutterReleaseUnconfirmed === true;
+  }
+
+  function bulbControlLocked() {
+    return shutterReleaseUnconfirmed() || state.status?.bulbExposureActive === true;
+  }
+
   function clearBulbTimer() {
     if (state.bulbTimer != null) window.clearInterval(state.bulbTimer);
     state.bulbTimer = null;
@@ -1929,18 +1971,22 @@
   }
 
   function renderBulbIndicator() {
-    const active = Boolean(state.status?.bulbExposureActive);
-    ui.bulbIndicator.hidden = !active;
-    if (active) {
+    const unconfirmed = shutterReleaseUnconfirmed();
+    const active = state.status?.bulbExposureActive === true;
+    ui.bulbIndicator.hidden = !active && !unconfirmed;
+    if (unconfirmed) {
+      ui.bulbIndicator.textContent = t("bulbReleaseUnconfirmed");
+    } else if (active) {
       const startedAt = state.bulbStartedAt || Date.now();
       ui.bulbIndicator.textContent = `BULB ${formatBulbElapsed(Date.now() - startedAt)}`;
     }
   }
 
   function syncBulbTimer() {
-    const active = Boolean(state.status?.bulbExposureActive);
+    const active = state.status?.bulbExposureActive === true && !shutterReleaseUnconfirmed();
     if (!active) {
       clearBulbTimer();
+      renderBulbIndicator();
       return;
     }
     if (state.bulbStartedAt == null) state.bulbStartedAt = Date.now();
@@ -2125,7 +2171,7 @@
       cleanButton.className = "button secondary";
       cleanButton.dataset.cameraCommand = "sensor-cleaning";
       cleanButton.textContent = t("sensorCleaningNow");
-      cleanButton.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || Boolean(state.status?.bulbExposureActive);
+      cleanButton.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || bulbControlLocked();
       cleanButton.addEventListener("click", () => {
         if (window.confirm(t("sensorCleaningConfirm"))) void cleanSensor(cleanButton, false);
       });
@@ -2155,7 +2201,7 @@
       button.type = "button";
       button.className = "button danger";
       button.dataset.cameraCommand = "sleep";
-      button.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || Boolean(state.status?.bulbExposureActive);
+      button.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || bulbControlLocked();
       const icon = document.createElement("span");
       icon.className = "icon";
       icon.dataset.icon = "power";
@@ -2479,7 +2525,7 @@
       cameraInteractionBusy() ||
       !featureSupported(FEATURES.CAMERA_SLEEP) ||
       state.status?.recording ||
-      state.status?.bulbExposureActive
+      bulbControlLocked()
     ) return;
     const sessionId = state.session.id;
     const wasLive = state.liveActive;
@@ -2520,7 +2566,7 @@
       cameraInteractionBusy() ||
       !featureSupported(FEATURES.SENSOR_CLEANING) ||
       state.status?.recording ||
-      state.status?.bulbExposureActive
+      bulbControlLocked()
     ) return;
     const sessionId = state.session.id;
     const wasLive = state.liveActive;
@@ -2634,8 +2680,9 @@
     const cameraMode = captureModeFromCamera();
     if (recording) state.captureMode = "video";
     else if (cameraMode) state.captureMode = cameraMode;
-    const bulb = state.captureMode === "photo" && isBulbMode();
-    const bulbActive = bulb && Boolean(state.status?.bulbExposureActive);
+    const releaseOnly = shutterReleaseUnconfirmed();
+    const bulbActive = bulbControlLocked();
+    const bulb = bulbActive || (state.captureMode === "photo" && isBulbMode());
     if (!featureSupported(FEATURES.VIDEO_RECORDING) && !recording && state.captureMode === "video") {
       state.captureMode = "photo";
     }
@@ -2648,7 +2695,7 @@
     ui.shutterButton.classList.toggle("bulb", bulb);
     ui.shutterButton.classList.toggle("bulb-active", bulbActive);
     ui.recordIndicator.hidden = !recording;
-    const labelKey = bulb
+    const labelKey = releaseOnly ? "retryBulbStop" : bulb
       ? (bulbActive ? "stopBulb" : "startBulb")
       : state.captureMode === "photo" ? "capture" : recording ? "stopRecording" : "record";
     ui.shutterLabel.textContent = t(labelKey);
@@ -2680,9 +2727,11 @@
 
   async function operateShutter() {
     if (!state.session || cameraInteractionBusy()) return;
+    const sessionId = state.session.id;
     const isPhoto = state.captureMode === "photo";
-    const bulb = isPhoto && isBulbMode();
-    const bulbWasActive = bulb && Boolean(state.status?.bulbExposureActive);
+    const releaseOnly = shutterReleaseUnconfirmed();
+    const bulbWasActive = bulbControlLocked();
+    const bulb = bulbWasActive || (isPhoto && isBulbMode());
     const recordingWasActive = !isPhoto && Boolean(state.status?.recording);
     const supported = bulbWasActive || recordingWasActive || (bulb
       ? featureSupported(FEATURES.BULB_EXPOSURE)
@@ -2697,13 +2746,16 @@
       if (bulb) {
         if (!bulbWasActive) pauseLivePolling();
         const bulbPath = bulbWasActive ? "/bulb/stop" : "/bulb/start";
-        state.status = await api(
-          `/v1/session/${encodeURIComponent(state.session.id)}${bulbPath}`,
+        const status = await api(
+          `/v1/session/${encodeURIComponent(sessionId)}${bulbPath}`,
           { method: "POST" },
         );
-        const result = bulbWasActive ? t("bulbStopped") : t("bulbStarted");
-        if (bulbWasActive && state.status?.bulbExposureActive !== true) {
-          flashCapture();
+        if (state.session?.id !== sessionId) return;
+        state.status = status;
+        state.shutterReleaseUnconfirmed = status.shutterReleaseUnconfirmed === true;
+        const result = releaseOnly ? t("bulbReleaseConfirmed") : bulbWasActive ? t("bulbStopped") : t("bulbStarted");
+        if (bulbWasActive && !bulbControlLocked()) {
+          if (!releaseOnly) flashCapture();
           resumeLivePolling();
         }
         setOperationState(result);
@@ -2728,13 +2780,47 @@
         showToast(result);
       }
     } catch (error) {
-      if (bulb && !bulbWasActive) resumeLivePolling();
+      if (state.session?.id !== sessionId) return;
       const normalized = captureError(error);
+      if (bulb) {
+        // Keep stop responsibility even if the API response or a later read is lost.
+        const uncertain = bulbWasActive || [
+          "SHUTTER_RELEASE_UNCONFIRMED", "NETWORK_ERROR", "HTTP_ERROR",
+        ].includes(normalized.code);
+        state.shutterReleaseUnconfirmed ||= uncertain;
+        try {
+          const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/status`);
+          if (state.session?.id !== sessionId) return;
+          state.status = status;
+          if (
+            bulbWasActive && status.shutterReleaseUnconfirmed === false &&
+            status.bulbExposureActive === false
+          ) {
+            // This read follows this Stop in the same session. Ordinary polls cannot clear
+            // the sticky warning, and missing fields from older servers are not proof.
+            state.shutterReleaseUnconfirmed = false;
+            state.lastError = null;
+            resumeLivePolling();
+            setOperationState(t("bulbReleaseConfirmed"));
+            showToast(t("bulbReleaseConfirmed"));
+            return;
+          }
+          state.shutterReleaseUnconfirmed ||= status.shutterReleaseUnconfirmed === true;
+        } catch (_) {
+          if (state.session?.id !== sessionId) return;
+          // A failed refresh never erases the stop-only warning.
+          state.shutterReleaseUnconfirmed = true;
+        }
+        if (shutterReleaseUnconfirmed()) pauseLivePolling();
+        else if (!bulbWasActive) resumeLivePolling();
+      }
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
-      state.busy = false;
-      renderSession();
+      if (state.session?.id === sessionId) {
+        state.busy = false;
+        renderSession();
+      }
     }
   }
 
@@ -3065,7 +3151,10 @@
   }
 
   async function startLocalVideo({ announce = true } = {}) {
-    if (!state.session || !localPreviewSelected() || !state.localVideoSupport.available || state.localVideoBusy) return;
+    if (
+      !state.session || !localPreviewSelected() || !state.localVideoSupport.available ||
+      state.localVideoBusy || shutterReleaseUnconfirmed()
+    ) return;
     const generation = state.localVideoGeneration + 1;
     state.localVideoGeneration = generation;
     state.localVideoBusy = true;
@@ -3353,7 +3442,7 @@
 
   async function startLiveView({ announce = true } = {}) {
     if (
-      localPreviewSelected() || !state.session || cameraInteractionBusy() ||
+      localPreviewSelected() || !state.session || cameraInteractionBusy() || bulbControlLocked() ||
       !featureSupported(FEATURES.LIVE_VIEW)
     ) return;
     beginCameraInteraction();
@@ -4045,7 +4134,7 @@
   function renderLiveMagnification() {
     const supported = featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION);
     const cameraPreview = !localPreviewSelected();
-    const bulbActive = Boolean(state.status?.bulbExposureActive);
+    const bulbActive = bulbControlLocked();
     const values = liveMagnifications();
     const target = nextLiveMagnification();
     const available = values.length >= 2 && state.captureMode !== "video";
@@ -4062,7 +4151,7 @@
   async function setLiveViewMagnification() {
     if (
       localPreviewSelected() || !state.session || cameraInteractionBusy() || !state.liveActive ||
-      state.status?.bulbExposureActive ||
+      bulbControlLocked() ||
       state.captureMode === "video" ||
       !featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION) || liveMagnifications().length < 2
     ) return;
@@ -4197,8 +4286,14 @@
   }
 
   function renderAvailability() {
+    ui.shutterDisconnectWarning.hidden = !state.shutterDisconnectWarning;
     const connected = Boolean(state.session);
-    const bulbActive = Boolean(state.status?.bulbExposureActive);
+    const warningHost = connected ? ui.shutterButton.parentElement : ui.connectionError.parentElement;
+    if (ui.shutterDisconnectWarning.parentElement !== warningHost) {
+      warningHost.append(ui.shutterDisconnectWarning);
+    }
+    if (bulbControlLocked() || state.shutterDisconnectWarning) ui.toast.hidden = true;
+    const bulbActive = bulbControlLocked();
     const interactionBusy = cameraInteractionBusy();
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
     const recording = Boolean(state.status?.recording);
@@ -4206,13 +4301,13 @@
     ui.scanButton.disabled = state.busy;
     const connectionReady = state.connectionMode === "ccapi" ? validCcapiUrl() : Boolean(ui.cameraSelect.value);
     ui.connectButton.disabled = state.busy || !connectionReady;
-    ui.refreshButton.disabled = !connected || interactionBusy || bulbActive;
+    ui.refreshButton.disabled = !connected || interactionBusy;
     ui.disconnectButton.disabled = !connected || state.busy;
     ui.photoModeButton.disabled = interactionBusy || bulbActive || Boolean(state.status?.recording);
     ui.videoModeButton.disabled = interactionBusy || bulbActive || !videoAvailable;
     ui.videoModeButton.hidden = !videoAvailable;
     ui.videoModeButton.parentElement.classList.toggle("single", !videoAvailable);
-    const bulbActiveStop = state.captureMode === "photo" && isBulbMode() && bulbActive;
+    const bulbActiveStop = bulbActive;
     const shutterSupported = bulbActiveStop || recording || (state.captureMode === "photo" && isBulbMode()
       ? featureSupported(FEATURES.BULB_EXPOSURE)
       : state.captureMode === "photo" ? featureSupported(FEATURES.STILL_CAPTURE)
@@ -4235,7 +4330,7 @@
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       button.hidden = !cameraLiveSupported && !localLiveSupported;
       button.disabled = localPreviewSelected()
-        ? state.localVideoBusy || !localLiveSupported
+        ? state.localVideoBusy || !localLiveSupported || (shutterReleaseUnconfirmed() && !state.localVideoActive)
         : interactionBusy || bulbActive || !selectedLiveSupported || !cameraLiveTemperatureAllowed;
     });
     const quickActionCount = [
@@ -5628,6 +5723,10 @@
     });
     ui.refreshButton.addEventListener("click", () => refreshSession());
     ui.disconnectButton.addEventListener("click", disconnectCamera);
+    ui.shutterDisconnectConfirm.addEventListener("click", () => {
+      state.shutterDisconnectWarning = false;
+      renderAvailability();
+    });
     document.querySelectorAll(".tab").forEach((button) => {
       button.addEventListener("click", () => selectView(button.dataset.view));
     });

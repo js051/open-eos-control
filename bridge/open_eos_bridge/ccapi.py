@@ -12,6 +12,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
+from http.client import HTTPException
 from pathlib import Path
 from typing import BinaryIO, Protocol
 from urllib.error import HTTPError, URLError
@@ -648,11 +649,27 @@ class UrllibCcapiTransport:
     ) -> CcapiResponse:
         response = self._open(method, url, body=body, headers=headers, timeout=timeout)
         try:
-            payload = response.body.read(max_bytes + 1)
+            try:
+                payload = response.body.read(max_bytes + 1)
+            except (OSError, HTTPException) as error:
+                raise BridgeError(
+                    "CCAPI_UNREACHABLE",
+                    "The camera CCAPI response was interrupted; command completion is unknown.",
+                    status_code=502,
+                    engine=ENGINE_NAME,
+                ) from error
             if len(payload) > max_bytes:
                 raise BridgeError(
                     "CCAPI_RESPONSE_TOO_LARGE",
                     f"The camera response exceeded the {max_bytes}-byte safety limit.",
+                    status_code=502,
+                    engine=ENGINE_NAME,
+                )
+            declared_length = response.headers.get("content-length", "")
+            if declared_length.isdigit() and len(payload) < int(declared_length):
+                raise BridgeError(
+                    "CCAPI_UNREACHABLE",
+                    "The camera CCAPI response was truncated; command completion is unknown.",
                     status_code=502,
                     engine=ENGINE_NAME,
                 )
@@ -697,7 +714,7 @@ class UrllibCcapiTransport:
             response = urlopen(request, timeout=timeout)  # noqa: S310 - user-selected camera origin is intentional.
         except HTTPError as error:
             response = error
-        except (OSError, TimeoutError, URLError) as error:
+        except (OSError, HTTPException, URLError) as error:
             raise BridgeError(
                 "CCAPI_UNREACHABLE",
                 f"Could not reach the camera CCAPI endpoint: {_network_error_detail(error)}",
@@ -816,7 +833,10 @@ class CcapiSession:
         self._camera_sleep_path: str | None = None
         self._discovery_source = "unknown"
         self._recording: bool | None = None
-        self._bulb_exposure_active = False
+        self._bulb_exposure_active: bool | None = False
+        self._bulb_release_operation: CcapiOperation | None = None
+        self._bulb_start_confirmed = False
+        self._shutter_release_unconfirmed = False
         self._temperature_status: CameraTemperatureStatus | None = None
         self._live_view_active = False
         self._active_live_view_source: str | None = None
@@ -962,16 +982,13 @@ class CcapiSession:
                 self.stop_event_polling()
             except BridgeError as error:
                 self._last_error = error.message
-            if self._bulb_exposure_active:
-                manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
-                    "POST", "/shooting/control/shutterbutton/manual"
-                )
-                if manual is not None:
-                    try:
-                        self._command_ok(manual, {"af": False, "action": "release"})
-                        self._bulb_exposure_active = False
-                    except BridgeError as error:
-                        self._last_error = error.message
+            release_error = None
+            if self._bulb_release_operation is not None:
+                try:
+                    self._release_bulb_locked()
+                except BridgeError:
+                    release_error = self._shutter_release_error(disconnected=True)
+                    self._last_error = release_error.message
             if self._live_view_active:
                 try:
                     self._stop_live_view_locked()
@@ -991,6 +1008,8 @@ class CcapiSession:
             self._media_cache.clear()
             self.transport.close()
             self._closed = True
+            if release_error is not None:
+                raise release_error
 
     def info(self) -> CameraInfo:
         with self._lock:
@@ -1056,6 +1075,7 @@ class CcapiSession:
                 battery=battery_status,
                 recording=self._recording,
                 bulb_exposure_active=self._bulb_exposure_active,
+                shutter_release_unconfirmed=self._shutter_release_unconfirmed,
                 mode=_setting_value(settings, "shootingmode") or "unknown",
                 media=storage_status,
                 exposure=ExposureState(
@@ -1388,6 +1408,7 @@ class CcapiSession:
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             canonical = SETTING_ALIASES.get(key, key)
             settings = self._load_settings(
@@ -1507,6 +1528,7 @@ class CcapiSession:
 
     def create_directory(self, name: str) -> str:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             if not DIRECTORY_CREATE_NAME_PATTERN.fullmatch(name):
                 raise BridgeError(
@@ -1544,6 +1566,7 @@ class CcapiSession:
 
     def set_file_naming(self, field: FileNamingField, value: str) -> FileNamingState:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             state = self._load_file_naming(force=False)
             operations = self._file_naming_operations()
@@ -1591,6 +1614,7 @@ class CcapiSession:
 
     def sleep_camera(self) -> None:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             self.stop_event_polling()
             if self._live_view_active:
@@ -1614,6 +1638,7 @@ class CcapiSession:
 
     def clean_sensor(self, auto_power_off: bool) -> None:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             operation = self._operation("POST", "/functions/sensorcleaning")
             if operation is None:
@@ -1635,6 +1660,7 @@ class CcapiSession:
 
     def sync_camera_clock(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             operations = self._camera_clock_operations()
             if operations is None:
@@ -1666,6 +1692,7 @@ class CcapiSession:
 
     def capture_still(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._refresh_temperature_status()
             self._require_temperature_allows_still_capture()
             direct = self._operation("POST", "/shooting/control/shutterbutton")
@@ -1687,6 +1714,7 @@ class CcapiSession:
 
     def half_press_shutter(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
                 "POST", "/shooting/control/shutterbutton/manual"
             )
@@ -1703,6 +1731,7 @@ class CcapiSession:
 
     def start_bulb_exposure(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             if self._bulb_exposure_active:
                 return self.status()
             manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
@@ -1712,33 +1741,76 @@ class CcapiSession:
                 raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
             baseline = self.status()
             self._require_temperature_allows_still_capture()
+            # Record stop responsibility before the request can reach the camera. Never rediscover
+            # or transfer this operation to a different camera session when retrying the release.
+            self._bulb_release_operation = manual
+            self._bulb_exposure_active = None
+            self._shutter_release_unconfirmed = True
             try:
                 self._command_ok(manual, {"af": False, "action": "full_press"})
             except BridgeError as error:
                 try:
-                    self._command_ok(manual, {"af": False, "action": "release"})
+                    self._release_bulb_locked()
                 except BridgeError as release_error:
-                    error.add_note(f"Bulb cleanup failed: {release_error.message}")
+                    raise release_error from error
                 raise
             self._bulb_exposure_active = True
+            self._shutter_release_unconfirmed = False
+            self._bulb_start_confirmed = True
             return baseline.model_copy(update={"bulb_exposure_active": True})
 
     def stop_bulb_exposure(self) -> CameraStatus:
         with self._lock:
-            if not self._bulb_exposure_active:
-                return self.status()
-            manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
-                "POST", "/shooting/control/shutterbutton/manual"
-            )
-            if manual is None:
-                raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
-            self._command_ok(manual, {"af": False, "action": "release"})
-            self._bulb_exposure_active = False
-            self._observed.add(CameraFeature.BULB_EXPOSURE)
+            self._require_open()
+            if self._bulb_release_operation is not None and self._release_bulb_locked():
+                self._observed.add(CameraFeature.BULB_EXPOSURE)
             return self.status()
+
+    def _release_bulb_locked(self) -> bool:
+        operation = self._bulb_release_operation
+        if operation is None:
+            return False
+        try:
+            self._command_ok(operation, {"af": False, "action": "release"})
+        except BridgeError as error:
+            self._bulb_exposure_active = None
+            self._shutter_release_unconfirmed = True
+            failure = self._shutter_release_error()
+            self._last_error = failure.message
+            raise failure from error
+        # A later status read is not part of the release acknowledgement.
+        confirmed_start = self._bulb_start_confirmed
+        self._bulb_start_confirmed = False
+        self._bulb_release_operation = None
+        self._bulb_exposure_active = False
+        self._shutter_release_unconfirmed = False
+        self._last_error = None
+        return confirmed_start
+
+    def _shutter_release_error(self, *, disconnected: bool = False, blocked: bool = False) -> BridgeError:
+        message = (
+            "The Bridge session was closed, but shutter release was not confirmed. "
+            "Check the camera and stop the exposure on the camera before reconnecting."
+            if disconnected else
+            "Shutter release was not confirmed; the camera may still be exposing. "
+            "Retry Stop Bulb in this session, or stop the exposure on the camera before disconnecting."
+        )
+        return BridgeError(
+            "SHUTTER_RELEASE_UNCONFIRMED",
+            message,
+            status_code=409 if blocked else 502,
+            feature=CameraFeature.BULB_EXPOSURE.value,
+            engine=self.engine_name,
+        )
+
+    def _require_shutter_release_confirmed(self) -> None:
+        self._require_open()
+        if self._shutter_release_unconfirmed:
+            raise self._shutter_release_error(blocked=True)
 
     def autofocus(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             operation = self._operation("POST", "/shooting/control/af")
             manual = self._operation("PUT", "/shooting/control/shutterbutton/manual") or self._operation(
                 "POST", "/shooting/control/shutterbutton/manual"
@@ -1770,6 +1842,7 @@ class CcapiSession:
 
     def drive_focus(self, direction: str, step: str) -> FocusResult:
         with self._lock:
+            self._require_shutter_release_confirmed()
             normalized_direction = direction.strip().upper()
             normalized_step = step.strip().upper()
             step_number = {"SMALL": 1, "MEDIUM": 2, "LARGE": 3}.get(normalized_step)
@@ -1784,6 +1857,7 @@ class CcapiSession:
 
     def set_live_view_magnification(self, value: int) -> LiveViewMagnificationResult:
         with self._lock:
+            self._require_shutter_release_confirmed()
             if not self._live_view_active:
                 raise BridgeError(
                     "LIVE_VIEW_REQUIRED",
@@ -1832,6 +1906,7 @@ class CcapiSession:
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
         with self._lock:
+            self._require_shutter_release_confirmed()
             operation = self._operation("PUT", "/shooting/liveview/afframeposition")
             if operation is None or not self._supports_coordinate_tap_focus():
                 raise unsupported(CameraFeature.TAP_FOCUS.value, self.engine_name)
@@ -1843,6 +1918,7 @@ class CcapiSession:
 
     def click_white_balance(self, x: float, y: float) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             operation = self._operation("POST", "/shooting/liveview/clickwb")
             if operation is None or not self._supports_coordinate_click_white_balance():
                 raise unsupported(CameraFeature.CLICK_WHITE_BALANCE.value, self.engine_name)
@@ -1858,6 +1934,7 @@ class CcapiSession:
 
     def start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             self._refresh_temperature_status()
             self._require_temperature_allows_live_view()
@@ -2464,6 +2541,7 @@ class CcapiSession:
         matches: Callable[[MediaItem], bool],
     ) -> MediaItem:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             if not self._supports_media_modify():
                 raise unsupported(feature.value, self.engine_name)
@@ -2633,6 +2711,7 @@ class CcapiSession:
 
     def delete_media(self, media_id: str) -> None:
         with self._lock:
+            self._require_shutter_release_confirmed()
             self._ensure_initialized()
             if not self._supports_media_delete():
                 raise unsupported(CameraFeature.MEDIA_DELETE.value, self.engine_name)
@@ -2710,6 +2789,7 @@ class CcapiSession:
     def _set_recording(self, recording: bool) -> CameraStatus:
         with self._lock:
             if recording:
+                self._require_shutter_release_confirmed()
                 self._refresh_temperature_status()
                 self._require_temperature_allows_movie_recording()
             operation = self._operation("POST", "/shooting/control/recbutton") or self._operation(

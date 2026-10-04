@@ -111,16 +111,25 @@ class SessionManager:
     def delete(self, session_id: str) -> None:
         with self._lock:
             session = self._sessions.pop(session_id, None)
-            if session is not None:
-                self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
         if session is None:
             raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
-        session.close()
+        try:
+            session.close()
+        finally:
+            # Do not let a new session register while this session's final release is in flight.
+            with self._lock:
+                self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
 
     def close_all(self) -> None:
         with self._lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()
             self._camera_sessions.clear()
+        failure = None
         for session in sessions:
-            session.close()
+            try:
+                session.close()
+            except BridgeError as error:
+                failure = failure or error
+        if failure is not None:
+            raise failure
