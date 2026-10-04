@@ -4,9 +4,11 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-目前的開發預覽版為 [v0.10.0](docs/releases/v0.10.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
+目前的開發預覽版為 [v0.11.0](docs/releases/v0.11.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
 
-本修補版修正 Android 拍攝資訊在旋轉與大字體下的裁切，保留固定控制位置、完整數字與可存取的白平衡完整名稱。既有 AF 釋放恢復與相機命令不變。PC 與 iOS 只對齊版本，未同步本輪 Android UI 修正；實機合焦行為與機身半按容易失焦的原因仍待確認。
+本次 minor 預覽版串接 Android 拍攝確認、最近素材、全螢幕預覽與原檔保存，直接在預覽內顯示進度、取消、保存位置及明確重試。同時改善 Android、Desktop Bridge／PC 與 iOS 的部分命令及 Bulb 停止恢復路徑，並修正 Android API 26–32 的 USB host 已接收影像預覽讀取相容性。Camera Import artifact 1.1.0／wire 1.0 維持不變。
+
+關閉仍在載入的 display 預覽仍不會取消該 display HTTP 請求；媒體操作可能持續忙碌直到讀取結束，較晚的失敗也可能成為全域錯誤。這個已知限制與取消原檔保存是不同操作。新增證據來自自動測試／fixture，不能當成真機或光學合焦驗證，也不代表完整 Camera Connect 功能已完成。精確證據、恢復方式與其餘限制請見[發行說明](docs/releases/v0.11.0.md)。
 
 這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已有標準 USB/PTP backend 與依能力開放的 Canon EOS 控制。Android 與 iOS 現在都能透過同一套 camera contract 使用可執行的 Desktop Bridge，控制以 USB 接在電腦上的相機。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI／Desktop Bridge client 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
 
@@ -125,7 +127,7 @@ python -m uvicorn main:app --host 0.0.0.0 --port 18080
   -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
 ```
 
-這會透過 `10.0.2.2` 執行兩條必跑流程。Simulator preset 負責完整 App 控制，包括解碼 Live View、曝光、拍照、對焦、錄影、Bulb、媒體預覽／刪除與斷線；另一條 HTTP preset 會明確停用 Simulator 捷徑，要求走 Canon `/ccapi` discovery、版本化 ISO／拍照／JPEG endpoint、Canon 1.1 event polling、免手動 Refresh 的機身端 ISO 同步，以及 GET／DELETE 清理。每次 pull request 與推送至 `main` 時，CI 都會執行兩條路徑；它們仍是可重現的協定證據，不能取代真機驗證。
+這會透過 `10.0.2.2` 執行兩條必跑流程。Simulator preset 負責完整 App 控制，包括解碼 Live View、曝光、拍照、對焦、錄影、Bulb、媒體預覽／刪除與斷線；另一條 HTTP preset 會明確停用 Simulator 捷徑，要求走 Canon `/ccapi` discovery、版本化 ISO／拍照／JPEG endpoint、Canon 1.1 event polling、免手動 Refresh 的機身端 ISO 同步，以及 GET／DELETE 清理。受影響的 pull request 會執行兩條路徑；`main` acceptance 核對成功 PR 的 tree，不重跑產品測試；它們仍是可重現的協定證據，不能取代真機驗證。
 
 debug APK 會輸出到：
 
@@ -133,9 +135,9 @@ debug APK 會輸出到：
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions 會在 pull request 跑完整 Android、iOS、Desktop Bridge、Windows 與 Simulator 矩陣；同一 PR 被新提交取代的舊 run 會自動取消，唯一的 `ci-complete` check 才代表 PR 已可合併。
+GitHub Actions 依 pull request 變更路徑選擇受影響的 Android、iOS、Desktop Bridge、Windows、Simulator 與契約工作。版本宣告會觸發相關平台工作；未變更的 standalone iOS Core 可刻意略過，先前通過且來源完全相同的 Core 證據另行標示；同一 PR 被新提交取代的舊 run 會自動取消，唯一的 `ci-complete` check 才代表 PR 已可合併。
 
-開發版完全由 GitHub Actions 線上建置，但不再於 PR、`main` 與 tag 三階段重跑同一套完整矩陣。PR 通過後會產生不可變的 Bridge 與 Windows 候選包；`Main acceptance` 先確認 squash merge 的 Git tree 與該成功 PR 完全相同，再加入固定開發簽章的 Android APK、寫入 `BUILD-PROVENANCE.json`，並上傳以 commit 定址的單一候選包。相符的 `vX.Y.Z` tag 只能發布這份已接受候選包、release notes 與 SHA-256 校驗檔。狀態定義與發版步驟請見[開發流程](docs/development-workflow.md)。
+開發版完全由 GitHub Actions 線上建置，但不再於 PR、`main` 與 tag 三階段重跑同一套完整矩陣。PR 通過後會產生不可變的 Bridge 與 Windows 候選包；`Main acceptance` 先確認 squash merge 的 Git tree 與該成功 PR 完全相同；只有產品版本變更時才加入固定開發簽章的 Android APK、沿用已測試的 Bridge／Windows／契約 payload，把六個 payload 記入 `BUILD-PROVENANCE.json`，並上傳以 commit 定址的單一候選包。相符的 `vX.Y.Z` tag 只能發布這份已接受候選包、release notes 與 SHA-256 校驗檔。狀態定義與發版步驟請見[開發流程](docs/development-workflow.md)。
 
 iOS App 會在 iPhone Simulator 完成編譯與測試，但 Release 不會附上可安裝的 IPA。實體裝置發行需要 Apple Developer Team、distribution certificate 與相符的 provisioning profile；這些簽章憑證都不會存放在公開 repository。
 
@@ -159,7 +161,7 @@ xcodegen generate
 open OpenEOSControl.xcodeproj
 ```
 
-GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 跑過八個 UI 流程。Simulator preset 的網路流程會從正式 SwiftUI -> `CameraAppState` -> `OpenEOSCore` 路徑驗證已解碼 Live View、曝光、拍照、對焦、錄影、Bulb、媒體預覽／刪除與斷線；另一條 HTTP preset 流程會明確選擇 Canon client contract，要求完成 `/ccapi` discovery、版本化 JPEG Live View、Canon 1.1 long polling、免手動 Refresh 的機身端 ISO／拍照媒體同步，以及 GET／DELETE 清理。事件刷新不會覆蓋較新的互動操作，遇到媒體工作進行中也會等待後重新讀取。workflow 明確使用 `CODE_SIGNING_ALLOWED=NO`，因此這個 build 無法安裝到實體 iPhone，也不會作為 IPA 發布；可重現的 Simulator 證據仍不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄。細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
+GitHub Actions 會建置未簽章的 Simulator App bundle、確認 ICON／語系／區網／方向 metadata，執行 App unit tests，並在 iPhone Simulator 執行 UI 流程。v0.11.0 已接受的產品來源通過 14 個流程方法及 1 個含 14 邊界案例的幾何方法；精確 head 與 run 記於發行說明。Simulator preset 的網路流程會從正式 SwiftUI -> `CameraAppState` -> `OpenEOSCore` 路徑驗證已解碼 Live View、曝光、拍照、對焦、錄影、Bulb、媒體預覽／刪除與斷線；另一條 HTTP preset 流程會明確選擇 Canon client contract，要求完成 `/ccapi` discovery、版本化 JPEG Live View、Canon 1.1 long polling、免手動 Refresh 的機身端 ISO／拍照媒體同步，以及 GET／DELETE 清理。事件刷新不會覆蓋較新的互動操作，遇到媒體工作進行中也會等待後重新讀取。workflow 明確使用 `CODE_SIGNING_ALLOWED=NO`，因此這個 build 無法安裝到實體 iPhone，也不會作為 IPA 發布；可重現的 Simulator 證據仍不能取代實體 iPhone 與 EOS R6 Mark III 的驗證紀錄。細節請見 [docs/ios-ccapi.md](docs/ios-ccapi.md)。
 
 ## Camera Import 契約
 
