@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export a bounded, synthetic-only shutter recovery evidence artifact.
+"""Export bounded, synthetic-only shutter recovery and white-balance UI evidence.
 
 Requires the runner's Xcode 16+ xcresulttool; no installs or legacy/full dumps.
 Apple documents the modern commands and their runtime help in:
@@ -22,7 +22,9 @@ TESTS = (
     "testPreviousConnectionWarningStaysSeparateFromNewConnectionStop",
     "testShutterRecoveryStopRemainsReachableAcrossLanguagesFontsAndRotation",
     "testRecoverySheetStopAndDisconnectHaveIndependentHitTargets",
+    "testDirectCCAPIControlsReachTheRunningCameraSimulator",
 )
+WHITE_BALANCE_PHASES = ("before-tap", "after-tap", "selection-failed")
 HIT_TARGET_CASES = (
     "english-UICTContentSizeCategoryXS-1-active",
     "english-UICTContentSizeCategoryXS-3-unknown",
@@ -121,6 +123,9 @@ def attachment_name(suggested: object, test: str) -> str | None:
         base = (rf"(?:shutter-recovery-disconnect-{cases}-before-disconnect(?:-geometry)?|"
                 rf"shutter-recovery-connect-{cases}-{reconnect}(?:-geometry)?|"
                 rf"shutter-recovery-sheet-stop-{cases})")
+    elif test == TESTS[3]:
+        phases = "(?:" + "|".join(WHITE_BALANCE_PHASES) + ")"
+        base = rf"click-white-balance-{phases}(?:-geometry)?"
     else:
         return None
     # Xcode may append a counter/UUID and a file extension to the supplied name.
@@ -129,7 +134,9 @@ def attachment_name(suggested: object, test: str) -> str | None:
 
 
 def attachment_priority(name: str) -> tuple[int, bool, str]:
-    if name.startswith("shutter-recovery-connect-"):
+    if name.startswith("click-white-balance-"):
+        priority = 0 if name.removesuffix("-geometry").endswith("-selection-failed") else 2
+    elif name.startswith("shutter-recovery-connect-"):
         priority = 0 if name.removesuffix("-geometry").endswith("-failed-reconnect") else 2
     else:
         priority = 1
@@ -185,6 +192,40 @@ def geometry_text(data: bytes) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def white_balance_geometry_text(data: bytes, phase: str) -> bytes:
+    """Only the complete, ordered synthetic selection schema may leave xcresult."""
+    if phase not in WHITE_BALANCE_PHASES:
+        raise EvidenceError("Unsupported white-balance geometry phase")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError as error:
+        raise EvidenceError("Geometry attachment is not UTF-8") from error
+    number = r"(?:[+-]?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|inf|nan))"
+    rect = rf"\({number}, {number}, {number}, {number}\)"
+    boolean = r"(?:true|false)"
+    patterns = (
+        rf"\[OEC_CLICK_WHITE_BALANCE_GEOMETRY\] {re.escape(phase)}",
+        rf"window={rect}",
+        rf"more-settings-viewport={rect}",
+        r"picker-value=(?:focus|whiteBalance|none|unavailable)",
+        rf"picker exists={boolean} hittable={boolean} frame={rect}",
+        rf"white-balance-segment exists={boolean} enabled={boolean} hittable={boolean} selected={boolean} frame={rect}",
+        rf"focus-segment exists={boolean} selected={boolean}",
+        rf"live-view-interaction-surface exists={boolean} hittable={boolean} frame={rect}",
+        rf"white-balance-center-in-viewport={boolean}",
+        rf"white-balance-fully-in-viewport={boolean}",
+        rf"live-view-contains-white-balance-center={boolean}",
+        r"simulator-focus-count=(?:\d+|unavailable)",
+        r"simulator-click-white-balance-count=(?:\d+|unavailable)",
+    )
+    lines = text.splitlines()
+    if len(lines) != len(patterns) or any(
+        not re.fullmatch(pattern, line) for pattern, line in zip(patterns, lines)
+    ):
+        raise EvidenceError("White-balance geometry attachment contains unsupported fields")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
 def collect_attachments(staging: Path, output: Path, test: str, report: dict,
                         budget: int = MAX_ARTIFACT_BYTES - SUMMARY_RESERVE) -> None:
     manifest = staging / "manifest.json"
@@ -222,7 +263,11 @@ def collect_attachments(staging: Path, output: Path, test: str, report: dict,
             continue
         data = source.read_bytes()
         if is_text:
-            data = geometry_text(data)
+            if test == TESTS[3]:
+                phase = name.removeprefix("click-white-balance-").removesuffix("-geometry")
+                data = white_balance_geometry_text(data, phase)
+            else:
+                data = geometry_text(data)
         elif not data.startswith(PNG_SIGNATURE):
             raise EvidenceError("Selected screenshot is not a PNG")
         if len(report["files"]) >= MAX_FILES or report["bytes"] + len(data) > budget:
@@ -236,7 +281,7 @@ def collect_attachments(staging: Path, output: Path, test: str, report: dict,
 
 
 def export_evidence(bundle: Path, output: Path, run=command) -> dict:
-    report = {"scope": "Synthetic iOS Simulator shutter recovery; no physical-camera validation",
+    report = {"scope": "Synthetic iOS Simulator shutter recovery and white-balance selection; no physical-camera validation",
               "status": "incomplete", "tests": {}, "files": [], "bytes": 0, "warnings": []}
     if not bundle.is_dir():
         report["warnings"].append("No xcresult bundle; tests may not have started")
@@ -252,7 +297,9 @@ def export_evidence(bundle: Path, output: Path, run=command) -> dict:
         tests = selected_tests(read_json(run(["get", "test-results", "tests", "--path", str(bundle)])))
         # Prioritize direct Stop/Disconnect hit-target proof, then the previous
         # connection flow, then four representative language/font/orientation PNGs.
-        for test in (TESTS[2], TESTS[0], TESTS[1]):
+        # Append the narrowly scoped selection diagnostics without displacing the
+        # original three recovery tests under the same global artifact cap.
+        for test in (TESTS[2], TESTS[0], TESTS[1], TESTS[3]):
             if test not in tests:
                 report["warnings"].append(f"Test not found in xcresult: {test}")
                 continue
@@ -279,7 +326,7 @@ def export_evidence(bundle: Path, output: Path, run=command) -> dict:
 
 def write_summary(output: Path, report: dict) -> None:
     # Never dump test logs, failure messages, device IDs, raw manifests or metadata.
-    lines = ["# iOS shutter recovery UI evidence", "", report["scope"], "",
+    lines = ["# iOS shutter recovery and white-balance UI evidence", "", report["scope"], "",
              f"Evidence status: {report['status']}",
              f"Exported {len(report['files'])} files / {report['bytes']} bytes (24 MiB artifact cap).",
              "Test outcomes below are independent of evidence export success.",
