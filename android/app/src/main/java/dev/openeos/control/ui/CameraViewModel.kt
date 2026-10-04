@@ -241,6 +241,7 @@ class CameraViewModel(
     private var eventPollingJob: Job? = null
     private var eventPollingGeneration = 0L
     private var mediaDownloadJob: Job? = null
+    @Volatile private var mediaSaveRequest: MediaSaveRequest? = null
     private var mediaUploadJob: Job? = null
     private var mediaLibraryJob: Job? = null
     private var mediaLibraryGeneration = 0L
@@ -1776,12 +1777,20 @@ class CameraViewModel(
         val state = _uiState.value
         if (!canStartMediaPickerTransfer(state, kind)) return null
         if (kind != CameraMediaPickerKind.UPLOAD && items.isEmpty()) return null
-        return mediaPickerRequests.begin(kind, cameraSessionGeneration, requireNotNull(state.info), items)
+        val id = mediaPickerRequests.begin(kind, cameraSessionGeneration, requireNotNull(state.info), items)
+        if (id != null && kind != CameraMediaPickerKind.UPLOAD) {
+            beginMediaSave(state, items, id, MediaSaveFeedback.SelectingDestination)
+        }
+        return id
     }
 
     internal fun completeMediaPicker(context: Context, kind: CameraMediaPickerKind, id: String?, uri: Uri?) {
         if (uri == null) {
-            mediaPickerRequests.cancel(kind, id)
+            if (mediaPickerRequests.cancel(kind, id)) {
+                mediaSaveRequest?.takeIf { it.pickerId == id }?.let { request ->
+                    finishPendingMediaSave(request, MediaSaveFeedback.Cancelled)
+                }
+            }
             return
         }
         val state = _uiState.value
@@ -1792,6 +1801,9 @@ class CameraViewModel(
             CameraMediaPickerRequests.Result.Expired -> reportMediaPickerError(context, R.string.media_picker_session_expired)
             is CameraMediaPickerRequests.Result.Ready -> {
                 if (!canStartMediaPickerTransfer(state, kind)) {
+                    mediaSaveRequest?.takeIf { it.pickerId == id }?.let { request ->
+                        finishPendingMediaSave(request, MediaSaveFeedback.Failed(context.getString(R.string.media_picker_transfer_unavailable)))
+                    }
                     reportMediaPickerError(context, R.string.media_picker_transfer_unavailable)
                     return
                 }
@@ -1807,7 +1819,12 @@ class CameraViewModel(
     }
 
     internal fun failMediaPickerLaunch(context: Context, kind: CameraMediaPickerKind, id: String) {
-        if (mediaPickerRequests.cancel(kind, id)) reportMediaPickerError(context, R.string.media_picker_open_failed)
+        if (mediaPickerRequests.cancel(kind, id)) {
+            mediaSaveRequest?.takeIf { it.pickerId == id }?.let { request ->
+                finishPendingMediaSave(request, MediaSaveFeedback.Failed(context.getString(R.string.media_picker_open_failed)))
+            }
+            reportMediaPickerError(context, R.string.media_picker_open_failed)
+        }
     }
 
     private fun canStartMediaPickerTransfer(state: CameraUiState, kind: CameraMediaPickerKind): Boolean =
@@ -1820,56 +1837,103 @@ class CameraViewModel(
         _uiState.update { it.copy(error = context.getString(message), errorOperation = CameraOperation.MEDIA) }
     }
 
-    fun downloadMedia(context: Context, item: CameraMediaItem, destination: Uri) {
-        if (
-            _uiState.value.previewMode ||
-            _uiState.value.isBusy(CameraOperation.MEDIA) ||
-            mediaDownloadJob != null
-        ) return
-        val resolver = context.applicationContext.contentResolver
-        _uiState.update {
+    private fun beginMediaSave(
+        state: CameraUiState,
+        items: List<CameraMediaItem>,
+        pickerId: String? = null,
+        initial: MediaSaveFeedback = MediaSaveFeedback.Queued,
+    ): MediaSaveRequest {
+        val request = MediaSaveRequest(cameraSessionGeneration, requireNotNull(state.info), pickerId)
+        mediaSaveRequest = request
+        updateMediaSave(request) {
             it.copy(
-                activeMediaDownloadName = item.name,
-                mediaDownloadProgress = CameraMediaTransferProgress(0L, item.sizeBytes),
+                mediaSaveFeedback = items.associate { item -> item.id to initial },
                 lastDownloadedMediaName = null,
                 lastDownloadLocation = null,
                 lastMediaBatchResult = null,
             )
         }
-        val job = launchCameraOperation(CameraOperation.MEDIA) {
+        return request
+    }
+
+    private fun updateMediaSave(request: MediaSaveRequest, update: (CameraUiState) -> CameraUiState) {
+        _uiState.update { current ->
+            if (request.owns(mediaSaveRequest, cameraSessionGeneration, current.info)) update(current) else current
+        }
+    }
+
+    private fun publishMediaSave(request: MediaSaveRequest, item: CameraMediaItem, feedback: MediaSaveFeedback) {
+        updateMediaSave(request) { it.copy(mediaSaveFeedback = it.mediaSaveFeedback + (item.id to feedback)) }
+    }
+
+    private fun publishMediaSaveProgress(request: MediaSaveRequest, item: CameraMediaItem, progress: CameraMediaTransferProgress) {
+        updateMediaSave(request) {
+            it.copy(
+                mediaSaveFeedback = it.mediaSaveFeedback + (item.id to MediaSaveFeedback.Saving(progress)),
+                activeMediaDownloadName = item.name,
+                mediaDownloadProgress = progress,
+            )
+        }
+    }
+
+    private fun finishPendingMediaSave(request: MediaSaveRequest, feedback: MediaSaveFeedback) {
+        updateMediaSave(request) { state ->
+            state.copy(mediaSaveFeedback = state.mediaSaveFeedback.mapValues { (_, previous) ->
+                if (previous.isPending) feedback else previous
+            })
+        }
+    }
+
+    private fun trackMediaSaveJob(request: MediaSaveRequest, job: Job?) {
+        mediaDownloadJob = job
+        job?.invokeOnCompletion { cause ->
+            // Includes cancellation while joining an earlier listing, before the transfer block runs.
+            if (cause is CancellationException) finishPendingMediaSave(request, MediaSaveFeedback.Cancelled)
+            updateMediaSave(request) {
+                it.copy(mediaBatchProgress = null, activeMediaDownloadName = null, mediaDownloadProgress = null)
+            }
+            // Keep terminal feedback, but retire the writer before another workflow can start.
+            if (mediaSaveRequest === request) mediaSaveRequest = null
+            if (mediaDownloadJob === job) mediaDownloadJob = null
+        }
+    }
+
+    fun downloadMedia(context: Context, item: CameraMediaItem, destination: Uri) {
+        val state = _uiState.value
+        if (state.info == null || state.previewMode || state.isBusy(CameraOperation.MEDIA) || mediaDownloadJob != null) return
+        val resolver = context.applicationContext.contentResolver
+        val request = beginMediaSave(state, listOf(item))
+        val job = launchCameraOperation(
+            CameraOperation.MEDIA,
+            onError = { finishPendingMediaSave(request, MediaSaveFeedback.Failed(formatException(it))) },
+        ) {
+            publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
             try {
                 val result = withContext(Dispatchers.IO) {
                     val rawOutput = resolver.openOutputStream(destination, "w")
                         ?: error("Android could not open the selected download destination.")
                     BufferedOutputStream(rawOutput).use { output ->
-                        repository.downloadMedia(item, output) { progress ->
-                            _uiState.update { state -> state.copy(mediaDownloadProgress = progress) }
-                        }
+                        repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
                     }
                 }
-                _uiState.update { it.copy(lastDownloadedMediaName = result.item.name) }
+                coroutineContext.ensureActive()
+                publishMediaSave(request, item, MediaSaveFeedback.Saved(context.getString(R.string.media_save_selected_document)))
+                updateMediaSave(request) { it.copy(lastDownloadedMediaName = result.item.name) }
             } catch (exception: Exception) {
                 withContext(NonCancellable + Dispatchers.IO) {
                     runCatching { resolver.delete(destination, null, null) }
                 }
                 throw exception
-            } finally {
-                _uiState.update {
-                    it.copy(activeMediaDownloadName = null, mediaDownloadProgress = null)
-                }
             }
         }
-        mediaDownloadJob = job
-        job?.invokeOnCompletion {
-            if (mediaDownloadJob === job) mediaDownloadJob = null
-        }
+        trackMediaSaveJob(request, job)
     }
 
     fun downloadMediaBatch(context: Context, items: List<CameraMediaItem>, destinationTree: Uri? = null) {
         val state = _uiState.value
         val selectedItems = items.distinctBy(CameraMediaItem::id)
         if (
-            selectedItems.isEmpty() ||
+            selectedItems.isEmpty() || state.info == null ||
             state.previewMode ||
             state.isBusy(CameraOperation.MEDIA) ||
             !state.supports(CameraFeature.MEDIA_DOWNLOAD) ||
@@ -1877,70 +1941,59 @@ class CameraViewModel(
             mediaDownloadJob != null
         ) return
         val resolver = context.applicationContext.contentResolver
-        _uiState.update { it.copy(lastDownloadedMediaName = null, lastMediaBatchResult = null, lastDownloadLocation = null) }
-        val job = launchCameraOperation(CameraOperation.MEDIA) {
-            try {
-                val result = executeMediaBatch(
-                    items = selectedItems,
-                    operation = MediaBatchOperation.DOWNLOAD,
-                    onProgress = { progress ->
-                        _uiState.update {
-                            it.copy(
-                                mediaBatchProgress = progress,
-                                activeMediaDownloadName = progress.currentItemName,
-                                mediaDownloadProgress = CameraMediaTransferProgress(
-                                    0L,
-                                    selectedItems.firstOrNull { item -> item.name == progress.currentItemName }?.sizeBytes,
-                                ),
-                            )
-                        }
-                    },
-                ) { item ->
+        val request = beginMediaSave(state, selectedItems)
+        val location = if (destinationTree == null) cameraGalleryPath(state.info.model)
+            else context.getString(R.string.media_save_selected_folder)
+        val job = launchCameraOperation(
+            CameraOperation.MEDIA,
+            onError = { finishPendingMediaSave(request, MediaSaveFeedback.Failed(formatException(it))) },
+        ) {
+            val result = executeMediaBatch(
+                items = selectedItems,
+                operation = MediaBatchOperation.DOWNLOAD,
+                onProgress = { progress ->
+                    updateMediaSave(request) { it.copy(mediaBatchProgress = progress) }
+                },
+            ) { item ->
+                publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
+                try {
                     retryMediaRead {
                         if (destinationTree == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            CameraMediaGalleryStore(resolver).save(state.info?.model, item) { output ->
-                                repository.downloadMedia(item, output) { progress ->
-                                    _uiState.update { current -> current.copy(mediaDownloadProgress = progress) }
-                                }
+                            CameraMediaGalleryStore(resolver).save(state.info.model, item) { output ->
+                                repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
                             }
-                            _uiState.update { it.copy(lastDownloadLocation = cameraGalleryPath(state.info?.model)) }
-                            return@retryMediaRead
-                        }
-                        var destination: Uri? = null
-                        try {
-                            withContext(Dispatchers.IO) {
-                                destination = createMediaDocument(resolver, requireNotNull(destinationTree), item)
-                                val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
-                                    ?: error("Android could not open the selected download destination.")
-                                BufferedOutputStream(rawOutput).use { output ->
-                                    repository.downloadMedia(item, output) { progress ->
-                                        _uiState.update { current -> current.copy(mediaDownloadProgress = progress) }
+                        } else {
+                            var destination: Uri? = null
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    destination = createMediaDocument(resolver, requireNotNull(destinationTree), item)
+                                    val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
+                                        ?: error("Android could not open the selected download destination.")
+                                    BufferedOutputStream(rawOutput).use { output ->
+                                        repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
                                     }
                                 }
+                            } catch (exception: Exception) {
+                                withContext(NonCancellable + Dispatchers.IO) {
+                                    destination?.let { runCatching { resolver.delete(it, null, null) } }
+                                }
+                                throw exception
                             }
-                        } catch (exception: Exception) {
-                            withContext(NonCancellable + Dispatchers.IO) {
-                                destination?.let { runCatching { resolver.delete(it, null, null) } }
-                            }
-                            throw exception
                         }
                     }
-                }
-                _uiState.update { it.copy(lastMediaBatchResult = result) }
-            } finally {
-                _uiState.update {
-                    it.copy(
-                        mediaBatchProgress = null,
-                        activeMediaDownloadName = null,
-                        mediaDownloadProgress = null,
-                    )
+                    coroutineContext.ensureActive()
+                    publishMediaSave(request, item, MediaSaveFeedback.Saved(location))
+                    if (destinationTree == null) updateMediaSave(request) { it.copy(lastDownloadLocation = location) }
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    publishMediaSave(request, item, MediaSaveFeedback.Failed(formatException(exception)))
+                    throw exception
                 }
             }
+            updateMediaSave(request) { it.copy(lastMediaBatchResult = result) }
         }
-        mediaDownloadJob = job
-        job?.invokeOnCompletion {
-            if (mediaDownloadJob === job) mediaDownloadJob = null
-        }
+        trackMediaSaveJob(request, job)
     }
 
     fun openInSerein(context: Context, items: List<CameraMediaItem>) {
@@ -3066,6 +3119,7 @@ class CameraViewModel(
         captureReviewItem = null,
         captureReviewThumbnail = null,
         captureReviewLoading = false,
+        mediaSaveFeedback = emptyMap(),
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,

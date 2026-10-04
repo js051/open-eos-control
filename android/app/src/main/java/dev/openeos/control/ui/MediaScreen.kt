@@ -98,6 +98,9 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                 state.supports(CameraFeature.MEDIA_ROTATE) ||
                 state.supports(CameraFeature.MEDIA_DELETE)
             )
+        val otherSave = state.mediaSaveFeedback.entries.firstOrNull {
+            it.key != item.id && it.value is MediaSaveFeedback.Saving
+        }
         MediaViewerDialog(
             item = item,
             bytes = state.mediaPreviewBytes,
@@ -111,6 +114,13 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             onPrevious = { actions.previewAdjacentMedia(displayedItems, -1) },
             onNext = { actions.previewAdjacentMedia(displayedItems, 1) },
             downloadEnabled = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+            downloadBusy = state.isBusy(CameraOperation.MEDIA) || state.mediaSaveFeedback.values.any { it.isPending },
+            saveFeedback = state.mediaSaveFeedback[item.id],
+            otherDownloadName = otherSave?.let { entry ->
+                state.mediaItems.firstOrNull { it.id == entry.key }?.name ?: state.activeMediaDownloadName
+            },
+            otherDownloadProgress = (otherSave?.value as? MediaSaveFeedback.Saving)?.progress,
+            onCancelDownload = actions.cancelMediaDownload,
             onDownload = {
                 download(listOf(item))
             },
@@ -826,7 +836,7 @@ private fun formatMediaSize(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-private fun formatMediaProgress(progress: CameraMediaTransferProgress): String {
+internal fun formatMediaProgress(progress: CameraMediaTransferProgress): String {
     val transferred = formatMediaSize(progress.bytesTransferred)
     val total = progress.totalBytes?.takeIf { it > 0L } ?: return transferred
     val percent = ((progress.bytesTransferred.toDouble() / total) * 100.0).coerceIn(0.0, 100.0).toInt()

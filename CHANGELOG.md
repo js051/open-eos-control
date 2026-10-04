@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android: keep original-file save progress, cancellation, destination and retry feedback visible inside the full-screen media viewer. Feedback belongs to the exact item and camera session, busy taps cannot start duplicate transfers, and bounded feedback keeps close, navigation and zoom controls reachable.
+
 - Android Desktop Bridge: preserve same-session Bulb release responsibility, disable automatic mutation replay, and offer persistent stop-only recovery after ambiguous responses. Stop remains reachable across mode/capability changes; old-session callbacks cannot clear a new session's warning. Legacy happy paths remain supported, while ambiguous legacy payloads cannot prove release.
 
 - Android CCAPI multipart: give the stream reader sole ownership of closing its response. Stop cancels the call and interrupts the reader without racing its timeout cleanup, so local teardown cannot prevent the camera-side stream/general stop commands.

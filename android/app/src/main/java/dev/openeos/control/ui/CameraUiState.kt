@@ -108,6 +108,7 @@ data class CameraUiState(
     val mediaPreviewBytes: ByteArray? = null,
     val mediaPreviewLoading: Boolean = false,
     val mediaStreamSource: CameraMediaStreamSource? = null,
+    val mediaSaveFeedback: Map<String, MediaSaveFeedback> = emptyMap(),
     val activeMediaDownloadName: String? = null,
     val mediaDownloadProgress: CameraMediaTransferProgress? = null,
     val lastDownloadedMediaName: String? = null,
