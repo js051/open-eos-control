@@ -2795,22 +2795,32 @@ class CameraViewModel(
         val generation = eventPollingGeneration
         eventPollingJob = viewModelScope.launch {
             var consecutiveFailures = 0
+            var pendingChangedKeys = emptySet<String>()
             while (isActive && generation == eventPollingGeneration) {
                 try {
-                    val event = repository.pollEvent()
-                    consecutiveFailures = 0
-                    if (event.changedKeys.isEmpty()) continue
+                    // Polling consumes the notification. Keep its complete hint until the
+                    // authoritative snapshot succeeds; an empty later poll cannot repair it.
+                    if (pendingChangedKeys.isEmpty()) {
+                        pendingChangedKeys = repository.pollEvent().changedKeys.toSet()
+                        if (pendingChangedKeys.isEmpty()) {
+                            consecutiveFailures = 0
+                            continue
+                        }
+                    }
                     // Publish control state before any potentially slow media listing. A command
                     // that starts or finishes during a read invalidates that snapshot and retries.
                     val capabilities = refreshEventCameraState(generation) ?: break
-                    if ("contents" in event.changedKeys && capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER)) {
+                    val refreshContents = "contents" in pendingChangedKeys
+                    pendingChangedKeys = emptySet()
+                    consecutiveFailures = 0
+                    if (refreshContents && capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER)) {
                         refreshEventMedia(generation)
                     }
                 } catch (exception: CancellationException) {
                     throw exception
                 } catch (_: Exception) {
-                    consecutiveFailures += 1
-                    delay(EVENT_RETRY_DELAYS_MILLIS[(consecutiveFailures - 1).coerceAtMost(EVENT_RETRY_DELAYS_MILLIS.lastIndex)])
+                    consecutiveFailures = (consecutiveFailures + 1).coerceAtMost(EVENT_RETRY_DELAYS_MILLIS.size)
+                    delay(EVENT_RETRY_DELAYS_MILLIS[consecutiveFailures - 1])
                 }
             }
         }
