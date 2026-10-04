@@ -125,8 +125,27 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertFalse(app.buttons["release-shutter-button"].exists)
 
             XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+            recordShutterRecoveryConnectGeometry(in: app, phase: "\(name)-before-reconnect")
             connect.tap()
-            XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 8))
+            let reconnectDeadline = ProcessInfo.processInfo.systemUptime + 8
+            recordShutterRecoveryConnectGeometry(in: app, phase: "\(name)-after-reconnect")
+            let stop = app.buttons["release-shutter-button"]
+            let remaining = max(0, reconnectDeadline - ProcessInfo.processInfo.systemUptime)
+            let reconnected: Bool
+            if remaining > 0 {
+                reconnected = waitForInteraction(stop, timeout: remaining)
+            } else {
+                // Diagnostics consumed the budget: take one current sample,
+                // never start another wait or grant a fresh eight seconds.
+                reconnected = stop.exists && stop.isEnabled && stop.isHittable
+            }
+            // Record the result before a failure aborts the test. Keep the same
+            // single tap and total eight-second budget after it returns. Pre-tap
+            // observation can still change a race; this is diagnosis, not a fix.
+            if !reconnected {
+                recordShutterRecoveryConnectGeometry(in: app, phase: "\(name)-failed-reconnect")
+            }
+            XCTAssertTrue(reconnected)
             openMoreActions(in: app)
             guard let sheetStop = assertSeparateRecoverySheetControls(in: app) else { return }
             // Conversely, Stop must release without invoking Disconnect or
@@ -741,6 +760,59 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(frame.height, 44, file: file, line: line)
         }
         return stop
+    }
+
+    private func recordShutterRecoveryConnectGeometry(in app: XCUIApplication, phase: String) {
+        let connect = app.buttons["connect-button"]
+        let connectFrame = connect.exists ? connect.frame : CGRect.null
+        let center = CGPoint(x: connectFrame.midX, y: connectFrame.midY)
+        let window = app.windows.firstMatch.frame
+        let scrollView = app.scrollViews["connection-scroll-view"]
+        let viewport = scrollView.exists ? scrollView.frame.intersection(window) : CGRect.null
+        var lines = ["[OEC_SHUTTER_CONNECT_GEOMETRY] \(phase)"]
+        lines.append("window=\(window)")
+        lines.append("connection-scroll-view-exists=\(scrollView.exists)")
+        lines.append("connection-scroll-view-frame=\(viewport)")
+        lines.append("connect-visible-frame=\(connectFrame.intersection(viewport))")
+        lines.append("connect-center-in-viewport=\(!connectFrame.isNull && viewport.contains(center))")
+        lines.append("connect-fully-in-viewport=\(!connectFrame.isNull && viewport.contains(connectFrame))")
+        lines.append("keyboard-count=\(app.keyboards.count)")
+        lines.append("alert-count=\(app.alerts.count)")
+        for identifier in [
+            "connect-button", "offline-preview-button", "release-shutter-button",
+            "disconnect-menu-button", "more-actions-button", "preset-http-button",
+            "preset-https-button", "preset-simulator-button",
+        ] {
+            let matches = app.buttons.matching(identifier: identifier)
+            lines.append("\(identifier) count=\(matches.count)")
+            for (index, element) in matches.allElementsBoundByIndex.prefix(4).enumerated() {
+                let frame = element.frame
+                lines.append("\(identifier)[\(index)] enabled=\(element.isEnabled) hittable=\(element.isHittable) frame=\(frame)")
+                if identifier != "connect-button" {
+                    let overlap = connectFrame.intersection(frame)
+                    let containsCenter = !connectFrame.isNull && frame.contains(center)
+                    lines.append("\(identifier)[\(index)] connect-overlap=\(overlap) contains-connect-center=\(containsCenter)")
+                }
+            }
+        }
+        for identifier in ["shutter-release-warning", "previous-shutter-release-warning", "camera-model-status"] {
+            lines.append("\(identifier)-exists=\(app.staticTexts[identifier].exists)")
+        }
+        let model = app.staticTexts["camera-model-status"]
+        // Compare only known synthetic fixture names; never log the label itself,
+        // connection field values, alert text, request data or authentication data.
+        let modelLabel = model.exists ? model.label : ""
+        lines.append("model-fixture-session-1=\(modelLabel == "Shutter recovery fixture shutter-fixture-1")")
+        lines.append("model-fixture-session-2=\(modelLabel == "Shutter recovery fixture shutter-fixture-2")")
+        let offlinePreview = app.staticTexts["Offline UI preview"].exists || app.staticTexts["離線 UI 預覽"].exists
+        lines.append("offline-preview-visible=\(offlinePreview)")
+        let diagnostic = lines.joined(separator: "\n")
+        print(diagnostic)
+        let attachment = XCTAttachment(string: diagnostic)
+        attachment.name = "shutter-recovery-connect-\(phase)-geometry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        addScreenshot(name: "shutter-recovery-connect-\(phase)")
     }
 
     private func waitForConnectionScreen(in app: XCUIApplication, timeout: TimeInterval) -> Bool {
