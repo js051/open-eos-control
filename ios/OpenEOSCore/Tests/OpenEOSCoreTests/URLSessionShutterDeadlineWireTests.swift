@@ -3,26 +3,35 @@ import Foundation
 import OpenEOSCore
 import XCTest
 
-/// Characterization, not a desired exposure budget: these tests distinguish an idle
-/// timeout from a whole-call deadline without changing the production 120s resource limit.
+/// Characterization, not a desired exposure budget. Ownership/cancellation evidence
+/// must not be described as an idle-timeout reset unless the silent controls pass.
+/// The production 120s resource limit is unchanged.
 final class URLSessionShutterDeadlineWireTests: XCTestCase {
     func testNoDripResponseActuallyTimesOutWithTheShortRequestIdleInterval() async throws {
         let peer = try DeadlineWirePeer()
         defer { XCTAssertTrue(peer.stop(), "All fixture sockets and workers must terminate") }
         let transport = ShortIdleWireTransport()
-        let request = URLRequest(url: URL(string: peer.baseURL + "/idle-control")!)
-        let job = DeadlineWireJob("non-dripping response finishes") { try await transport.send(request) }
-        defer { job.cancel() }
+        let jobs = DeadlineWireIdlePhase.allCases.map { phase in
+            let request = URLRequest(url: URL(string: peer.baseURL + phase.rawValue)!)
+            return (phase, DeadlineWireJob(phase.metricLabel + " finishes") { try await transport.send(request) })
+        }
+        defer { jobs.forEach { $0.1.cancel() } }
 
-        await fulfillment(of: [peer.idleEntered, job.finished], timeout: 3)
-        do {
-            _ = try job.value()
-            XCTFail("A body with no subsequent bytes must hit the request idle timeout")
-        } catch let error as URLError {
-            XCTAssertEqual(error.code, .timedOut)
+        // Same unchanged 3s bound for both phases, running concurrently. Do not turn
+        // test cleanup cancellation into evidence of a network timeout.
+        await fulfillment(of: [peer.idleBeforeHeadersEntered, peer.idleBodyEntered] + jobs.map { $0.1.finished }, timeout: 3)
+        for (phase, job) in jobs {
+            do {
+                _ = try job.value()
+                XCTFail("\(phase.metricLabel): a silent peer must hit the request idle timeout")
+            } catch let error as URLError {
+                XCTAssertEqual(error.code, .timedOut, phase.metricLabel)
+            } catch {
+                XCTFail("\(phase.metricLabel): no completed URLError.timedOut result")
+            }
         }
         XCTAssertFalse(peer.completionWasOpened)
-        XCTAssertEqual(peer.requests().map(\.path), ["/idle-control"])
+        XCTAssertEqual(peer.requests().map(\.path).sorted(), DeadlineWireIdlePhase.allCases.map(\.rawValue).sorted())
         XCTAssertTrue(peer.errors().isEmpty, peer.errors().joined(separator: "\n"))
     }
 
@@ -67,7 +76,7 @@ final class URLSessionShutterDeadlineWireTests: XCTestCase {
         }
         defer { first.cancel(); second.cancel() }
         await fulfillment(of: entered, timeout: 2)
-        await fulfillment(of: [peer.dripCheckpoint], timeout: 3)
+        await fulfillment(of: [peer.dripCheckpoint], timeout: ShortIdleWireTransport.dripCheckpointWait)
         XCTAssertGreaterThanOrEqual(peer.dripElapsed, ShortIdleWireTransport.idleInterval * 3, context)
         XCTAssertFalse(start.isFinished, context)
         XCTAssertFalse(first.isFinished, context)
@@ -148,7 +157,7 @@ final class URLSessionShutterDeadlineWireTests: XCTestCase {
         }
         defer { first.cancel(); second.cancel() }
         await fulfillment(of: entered, timeout: 2)
-        await fulfillment(of: [peer.dripCheckpoint], timeout: 3)
+        await fulfillment(of: [peer.dripCheckpoint], timeout: ShortIdleWireTransport.dripCheckpointWait)
         XCTAssertGreaterThanOrEqual(peer.dripElapsed, ShortIdleWireTransport.idleInterval * 3)
         XCTAssertFalse(start.isFinished)
         XCTAssertFalse(first.isFinished)
@@ -199,7 +208,10 @@ private extension DesktopBridgeClient {
 /// Changes only URLRequest's idle interval. All networking, response integrity and
 /// cancellation still run through the unmodified production URLSession transport.
 private struct ShortIdleWireTransport: CameraHTTPTransport {
-    static let idleInterval: TimeInterval = 0.4
+    static let idleInterval: TimeInterval = 1.0
+    static let dripCheckpointInterval: TimeInterval = idleInterval * 3.25
+    // 3.25s target plus 1.25s scheduling margin; the silent control remains 3s.
+    static let dripCheckpointWait: TimeInterval = dripCheckpointInterval + 1.25
     private let underlying = URLSessionCameraHTTPTransport()
     private let startPath: String?
     private let recorder = DeadlineWireTransportRecorder()
@@ -248,9 +260,10 @@ private struct ShortIdleWireTransport: CameraHTTPTransport {
     private func reportMetric(
         _ outcome: DeadlineWireTransportOutcome, request: URLRequest, observesStart: Bool, began: UInt64
     ) {
-        guard observesStart || request.url?.path == "/idle-control" else { return }
+        let phase = request.url.flatMap { DeadlineWireIdlePhase(rawValue: $0.path) }
+        guard observesStart || phase != nil else { return }
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - began) / 1_000_000_000
-        let label = observesStart ? "start" : "no-drip"
+        let label = observesStart ? "start" : phase!.metricLabel
         print("deadline-wire \(label) configuredIdleSeconds=\(Self.idleInterval) elapsedSeconds=\(elapsed) \(outcome.metricFields)")
     }
 }
@@ -337,6 +350,18 @@ private enum DeadlineWireError: Error {
     case operationDidNotFinish
 }
 
+private enum DeadlineWireIdlePhase: String, CaseIterable, Sendable {
+    case beforeHeaders = "/idle-before-headers"
+    case body = "/idle-body"
+
+    var metricLabel: String {
+        switch self {
+        case .beforeHeaders: return "no-drip-before-headers"
+        case .body: return "no-drip-body"
+        }
+    }
+}
+
 private struct DeadlineWireEndpoint: Sendable {
     let version: String
     let method: String
@@ -393,7 +418,8 @@ private extension Array where Element == DeadlineWireRequest {
 private final class DeadlineWirePeer: @unchecked Sendable {
     let baseURL: String
     let pressReceived = XCTestExpectation(description: "peer consumed full press and began body")
-    let idleEntered = XCTestExpectation(description: "peer began a non-dripping response")
+    let idleBeforeHeadersEntered = XCTestExpectation(description: "peer withholds all response headers")
+    let idleBodyEntered = XCTestExpectation(description: "peer sent headers and one body byte, then went silent")
     let dripCheckpoint = XCTestExpectation(description: "body kept arriving beyond three configured idle intervals")
     private let listener: Int32
     private let endpoint: DeadlineWireEndpoint?
@@ -514,9 +540,14 @@ private final class DeadlineWirePeer: @unchecked Sendable {
         do {
             let request = try readRequest(socket)
             locked { recorded.append(request) }
-            if request.method == "GET", request.path == "/idle-control" {
-                try sendAll(Data("HTTP/1.1 200 OK\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{".utf8), socket)
-                idleEntered.fulfill()
+            if request.method == "GET", let phase = DeadlineWireIdlePhase(rawValue: request.path) {
+                switch phase {
+                case .beforeHeaders:
+                    idleBeforeHeadersEntered.fulfill()
+                case .body:
+                    try sendAll(Data("HTTP/1.1 200 OK\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{".utf8), socket)
+                    idleBodyEntered.fulfill()
+                }
                 condition.lock()
                 let deadline = Date().addingTimeInterval(Self.maximumHold)
                 while !stopped, Date() < deadline { _ = condition.wait(until: deadline) }
@@ -588,7 +619,7 @@ private final class DeadlineWirePeer: @unchecked Sendable {
                 // Cancellation intentionally closes this socket with the barrier shut.
                 return
             }
-            if !checkpointSent, elapsed >= ShortIdleWireTransport.idleInterval * 3.25 {
+            if !checkpointSent, elapsed >= ShortIdleWireTransport.dripCheckpointInterval {
                 checkpointSent = true
                 locked { checkpointElapsed = elapsed }
                 dripCheckpoint.fulfill()
