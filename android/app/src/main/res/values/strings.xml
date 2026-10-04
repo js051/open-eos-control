@@ -4,6 +4,7 @@
     <string name="retry_shutter_release">Retry releasing shutter; stop only</string>
     <string name="shutter_release_retry_short">RETRY STOP</string>
     <string name="shutter_release_unconfirmed">Exposure may still be active. Tap RETRY STOP.</string>
+    <string name="bridge_shutter_release_unconfirmed">Exposure may still be active. RETRY STOP; if it fails, stop on camera and update Bridge.</string>
 
     <string name="media_saved_location">Saved to %1$s</string>
     <string name="media_save_to_folder">Save to another folder</string>

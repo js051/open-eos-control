@@ -424,6 +424,8 @@ data class CameraStatus(
     val rawRecordableJson: String = "",
     val rawTransportJson: String = "",
     val bulbExposureActive: Boolean? = null,
+    // null preserves the distinction between an older Bridge and explicit release evidence.
+    val shutterReleaseUnconfirmed: Boolean? = null,
     val lens: LensStatus? = null,
     val temperature: CameraTemperatureStatus? = null,
 )

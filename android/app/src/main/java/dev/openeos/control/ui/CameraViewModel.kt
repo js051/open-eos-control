@@ -640,6 +640,7 @@ class CameraViewModel(
                 transport = session.transport,
                 info = session.info,
                 status = session.status,
+                shutterReleaseUnconfirmed = session.status.shutterReleaseUnconfirmed == true,
                 capabilities = session.capabilities,
                 networkDiagnostics = session.networkDiagnostics,
                 liveViewFrameUrl = session.liveViewFrameUrl,
@@ -659,6 +660,7 @@ class CameraViewModel(
                 errorOperation = session.liveViewStartError?.let { CameraOperation.LIVE_VIEW },
             )
         }
+        adoptShutterReleaseStatus(session.status)
         if (!appInForeground || !_uiState.value.liveViewAutoRefresh) {
             reconcileLiveView()
         } else if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW) && session.status.temperature?.liveViewAllowed != false) {
@@ -1157,7 +1159,7 @@ class CameraViewModel(
 
     fun toggleBulbExposure() = runCamera(CameraOperation.CAPTURE) {
         val active = _uiState.value.bulbExposureActive
-        if (!_uiState.value.bulbMode || (!active && !_uiState.value.supports(CameraFeature.BULB_EXPOSURE))) {
+        if (!active && (!_uiState.value.bulbMode || !_uiState.value.supports(CameraFeature.BULB_EXPOSURE))) {
             return@runCamera
         }
         if (_uiState.value.previewMode) {
@@ -1212,7 +1214,7 @@ class CameraViewModel(
             _uiState.update {
                 it.copy(
                     shutterReleaseUnconfirmed = false,
-                    status = it.status?.copy(bulbExposureActive = false),
+                    status = it.status?.copy(bulbExposureActive = false, shutterReleaseUnconfirmed = false),
                     bulbStartedAtMillis = null,
                 )
             }
@@ -1233,8 +1235,14 @@ class CameraViewModel(
         pauseLiveViewForBulb()
         invalidateCameraFocusInfo()
         _uiState.update {
-            it.copy(shutterReleaseUnconfirmed = true, bulbStartedAtMillis = null, captureFeedback = null, hudVisible = true)
+            it.copy(shutterReleaseUnconfirmed = true,
+                status = it.status?.copy(bulbExposureActive = null, shutterReleaseUnconfirmed = true),
+                bulbStartedAtMillis = null, captureFeedback = null, hudVisible = true)
         }
+    }
+
+    private fun adoptShutterReleaseStatus(status: CameraStatus) {
+        if (status.shutterReleaseUnconfirmed == true) markShutterReleaseUnconfirmed()
     }
 
     fun startHeldAutofocus() {
@@ -2388,7 +2396,10 @@ class CameraViewModel(
         var observedRevision = revision
         while (true) {
             coroutineContext.ensureActive()
-            if (observedRevision == cameraStateRevision) return status
+            if (observedRevision == cameraStateRevision) {
+                adoptShutterReleaseStatus(status)
+                return status
+            }
             observedRevision = cameraStateRevision
             status = repository.refreshStatus()
         }
@@ -2398,6 +2409,10 @@ class CameraViewModel(
         while (true) {
             val revision = cameraStateRevision
             val status = repository.refreshStatus()
+            coroutineContext.ensureActive()
+            if (revision != cameraStateRevision) continue
+            // Safety state must survive a later capability-read failure.
+            adoptShutterReleaseStatus(status)
             val capabilities = repository.refreshCapabilities()
             coroutineContext.ensureActive()
             if (revision == cameraStateRevision) return status to capabilities
@@ -2422,6 +2437,7 @@ class CameraViewModel(
     }
 
     private fun showCaptureSuccess() {
+        if (_uiState.value.shutterReleaseUnconfirmed) return
         _uiState.update { it.copy(captureFeedback = CaptureFeedback.SUCCESS) }
         viewModelScope.launch {
             delay(CAPTURE_FLASH_MILLIS)
@@ -2808,7 +2824,10 @@ class CameraViewModel(
                     }
                 } catch (exception: CancellationException) {
                     throw exception
-                } catch (_: Exception) {
+                } catch (exception: Exception) {
+                    if (exception is ShutterReleaseException && generation == eventPollingGeneration) {
+                        markShutterReleaseUnconfirmed()
+                    }
                     consecutiveFailures += 1
                     delay(EVENT_RETRY_DELAYS_MILLIS[(consecutiveFailures - 1).coerceAtMost(EVENT_RETRY_DELAYS_MILLIS.lastIndex)])
                 }
@@ -2824,6 +2843,10 @@ class CameraViewModel(
             }
             val revision = cameraStateRevision
             val status = repository.refreshStatus()
+            coroutineContext.ensureActive()
+            if (generation != eventPollingGeneration) return null
+            if (revision != cameraStateRevision || _uiState.value.pendingOperations.isNotEmpty()) continue
+            adoptShutterReleaseStatus(status)
             val capabilities = repository.refreshCapabilities()
             coroutineContext.ensureActive()
             if (generation != eventPollingGeneration) return null

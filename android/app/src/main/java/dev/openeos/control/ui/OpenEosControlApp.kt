@@ -1,5 +1,7 @@
 package dev.openeos.control.ui
 
+import dev.openeos.control.data.CameraTransport
+
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.net.Uri
@@ -213,7 +215,10 @@ fun OpenEosControlApp(
                 ) {
                     ErrorBanner(
                         when {
-                            state.shutterReleaseUnconfirmed -> stringResource(R.string.shutter_release_unconfirmed)
+                            state.shutterReleaseUnconfirmed -> stringResource(
+                                if (state.transport == CameraTransport.DESKTOP_BRIDGE) R.string.bridge_shutter_release_unconfirmed
+                                else R.string.shutter_release_unconfirmed,
+                            )
                             state.error != null -> state.error
                             state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
                             else -> null

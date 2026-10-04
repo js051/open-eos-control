@@ -7,6 +7,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
@@ -77,6 +78,11 @@ class DesktopBridgeClient(
             }
         }
     }.build()
+    private val mutationHttpClient = this.httpClient.newBuilder()
+        .retryOnConnectionFailure(false)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
     private val eventHttpClient = this.httpClient.newBuilder()
         .readTimeout(EVENT_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .callTimeout(EVENT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -84,6 +90,7 @@ class DesktopBridgeClient(
     private val activeEventCall = AtomicReference<Call?>(null)
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var sessionId: String? = null
+    @Volatile private var shutterSession: BridgeShutterReleaseSession? = null
     private var sessionCameraModel: String? = null
     private var eventPollingSupported = false
     private var liveViewMagnifications: List<LiveViewMagnification> = emptyList()
@@ -109,6 +116,7 @@ class DesktopBridgeClient(
         profileHint?.takeIf(String::isNotBlank)?.let { payload.put("profileHint", it) }
         val created = postJson(endpoint("v1", "session"), payload)
         sessionId = created.requireString("id", "Desktop bridge did not return a session ID.")
+        shutterSession = BridgeShutterReleaseSession(requireNotNull(sessionId))
         sessionCameraModel = created.optJSONObject("camera")
             ?.optNullableString("model")
             ?.trim()
@@ -116,15 +124,22 @@ class DesktopBridgeClient(
     }
 
     suspend fun close() {
-        val id = sessionId ?: return
-        try {
-            stopEventPolling()
-            requestOk(Request.Builder().url(endpoint("v1", "session", id)).delete().build())
-        } finally {
-            sessionId = null
-            sessionCameraModel = null
-            eventPollingSupported = false
-            liveViewMagnifications = emptyList()
+        val session = shutterSession ?: return
+        session.mutex.withLock {
+            if (session.closed) return@withLock
+            try {
+                stopEventPolling()
+                requestOk(Request.Builder().url(endpoint("v1", "session", session.id)).delete().build())
+            } finally {
+                session.close()
+                if (shutterSession === session) {
+                    shutterSession = null
+                    sessionId = null
+                    sessionCameraModel = null
+                    eventPollingSupported = false
+                    liveViewMagnifications = emptyList()
+                }
+            }
         }
     }
 
@@ -144,7 +159,18 @@ class DesktopBridgeClient(
         }
     }
 
-    suspend fun status(): CameraStatus = parseStatus(getJson(sessionEndpoint("status")))
+    suspend fun status(): CameraStatus {
+        val session = requireShutterSession()
+        while (true) {
+            requireCurrentSession(session)
+            val revision = session.revision
+            val status = readBridgeStatus(session)
+            requireCurrentSession(session)
+            if (session.observe(status, revision)) return session.decorate(status)
+            // A stop crossed this read. Re-read status, never a command. Observing this read's
+            // own warning must not trigger another request that could hide valid safety data.
+        }
+    }
 
     suspend fun pollEvent(): CameraEvent {
         check(eventPollingSupported) { "Desktop Bridge did not advertise camera event polling." }
@@ -437,13 +463,28 @@ class DesktopBridgeClient(
         postJson(sessionEndpoint("capture", "still"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }
 
-    suspend fun startBulbExposure(): CameraStatus = parseStatus(
-        postJson(sessionEndpoint("bulb", "start"), JSONObject())
-    )
+    suspend fun startBulbExposure(): CameraStatus {
+        val session = requireShutterSession()
+        return session.start(read = ::status, press = {
+            parseBulbStatus(postJson(endpoint("v1", "session", session.id, "bulb", "start"), JSONObject(), shutterStart = true))
+        })
+    }
 
-    suspend fun stopBulbExposure(): CameraStatus = parseStatus(
-        postJson(sessionEndpoint("bulb", "stop"), JSONObject())
-    ).also { observedFeatures.add(CameraFeature.BULB_EXPOSURE) }
+    suspend fun stopBulbExposure(): CameraStatus = stopBulbExposure(requireShutterSession())
+
+    private suspend fun stopBulbExposure(session: BridgeShutterReleaseSession): CameraStatus {
+        requireCurrentSession(session)
+        val confirmedStart = session.hasConfirmedStart
+        return session.stop(
+            release = { parseBulbStatus(postJson(endpoint("v1", "session", session.id, "bulb", "stop"), JSONObject())) },
+            read = { readBridgeStatus(session) },
+        ).also { if (confirmedStart) observedFeatures.add(CameraFeature.BULB_EXPOSURE) }
+    }
+
+    suspend fun retryShutterRelease() {
+        val session = requireShutterSession()
+        if (session.hasReleaseResponsibility) stopBulbExposure(session)
+    }
 
     suspend fun autofocus(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("focus", "auto"), JSONObject())
@@ -536,9 +577,12 @@ class DesktopBridgeClient(
             .header("Accept", "image/jpeg")
             .header("Cache-Control", "no-cache")
             .build()
+        val session = sessionForRequest(request)
+        val revision = session?.revision
         httpClient.newCall(request).execute().use { response ->
+            session?.let(::requireCurrentSession)
             val body = response.body ?: error("Desktop Bridge returned an empty Live View response.")
-            if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Live View frame")
+            if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Live View frame", session, revision)
             val contentLength = body.contentLength()
             check(contentLength <= MAX_LIVE_VIEW_FRAME_BYTES || contentLength < 0) {
                 "Desktop Bridge Live View frame exceeded $MAX_LIVE_VIEW_FRAME_BYTES bytes."
@@ -694,9 +738,12 @@ class DesktopBridgeClient(
             .header("Accept", "image/*")
             .get()
             .build()
+        val session = sessionForRequest(request)
+        val revision = session?.revision
         httpClient.newCall(request).execute().use { response ->
+            session?.let(::requireCurrentSession)
             val body = response.body ?: error("Desktop Bridge returned an empty $label response.")
-            if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media $label")
+            if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media $label", session, revision)
             val contentLength = body.contentLength()
             check(contentLength <= maxBytes || contentLength < 0L) {
                 "Desktop Bridge $label exceeded $maxBytes bytes."
@@ -729,6 +776,8 @@ class DesktopBridgeClient(
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(sessionEndpoint("media", item.id)).get().build()
+        val session = sessionForRequest(request)
+        val revision = session?.revision
         val call = httpClient.newCall(request)
         val cancelCall = AtomicBoolean(true)
         val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
@@ -748,8 +797,9 @@ class DesktopBridgeClient(
                 throw exception
             }
             response.use {
+                session?.let(::requireCurrentSession)
                 val body = response.body ?: error("Desktop Bridge returned an empty media response.")
-                if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media download")
+                if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media download", session, revision)
                 val responseLength = body.contentLength().takeIf { it >= 0L }
                 val totalBytes = responseLength ?: item.sizeBytes
                 var bytesTransferred = 0L
@@ -821,7 +871,10 @@ class DesktopBridgeClient(
                 check(source.read() == -1) { "Upload source exceeds its declared $sizeBytes bytes." }
             }
         }
-        val call = httpClient.newCall(Request.Builder().url(uploadUrl).post(body).build())
+        val request = Request.Builder().url(uploadUrl).post(body).build()
+        val session = sessionForRequest(request)
+        val revision = session?.revision
+        val call = newBridgeCall(request)
         val cancelCall = AtomicBoolean(true)
         val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
             try {
@@ -840,8 +893,9 @@ class DesktopBridgeClient(
                 throw exception
             }
             response.use {
+                session?.let(::requireCurrentSession)
                 val responseBody = response.body?.readBoundedUtf8(MAX_UPLOAD_RESPONSE_BYTES).orEmpty()
-                if (!response.isSuccessful) throw bridgeError(response.code, responseBody, "Media upload")
+                if (!response.isSuccessful) throw bridgeError(response.code, responseBody, "Media upload", session, revision)
                 check(bytesTransferred == sizeBytes) {
                     "Desktop Bridge upload completed after $bytesTransferred of $sizeBytes bytes."
                 }
@@ -959,7 +1013,8 @@ class DesktopBridgeClient(
             rawStorageJson = media.toString(),
             rawRecordableJson = raw.optJSONObject("recordable")?.toString() ?: "null",
             rawTransportJson = raw.toString(),
-            bulbExposureActive = body.optNullableBoolean("bulbExposureActive"),
+            bulbExposureActive = body.opt("bulbExposureActive") as? Boolean,
+            shutterReleaseUnconfirmed = body.opt("shutterReleaseUnconfirmed") as? Boolean,
             lens = body.optJSONObject("lens")?.let { lens ->
                 val mounted = lens.opt("mounted") as? Boolean
                 val name = lens.opt("name") as? String
@@ -977,13 +1032,28 @@ class DesktopBridgeClient(
         )
     }
 
+    private fun parseBulbStatus(body: JSONObject): CameraStatus {
+        check(!body.has("shutterReleaseUnconfirmed") || body.opt("shutterReleaseUnconfirmed") is Boolean) {
+            "Desktop Bridge returned an invalid shutter release confirmation."
+        }
+        return parseStatus(body)
+    }
+
+    private suspend fun readBridgeStatus(session: BridgeShutterReleaseSession): CameraStatus = parseStatus(
+        requestJson(Request.Builder()
+            .url(endpoint("v1", "session", session.id, "status"))
+            .header("Cache-Control", "no-cache, no-store")
+            .get().build(), observeStatus = false),
+    )
+
     private suspend fun getJson(url: HttpUrl): JSONObject = requestJson(
         Request.Builder().url(url).get().build()
     )
 
-    private suspend fun postJson(url: HttpUrl, payload: JSONObject): JSONObject = requestJson(
+    private suspend fun postJson(url: HttpUrl, payload: JSONObject, shutterStart: Boolean = false): JSONObject = requestJson(
         Request.Builder()
             .url(url)
+            .tag(BridgeShutterStart::class.java, if (shutterStart) BridgeShutterStart else null)
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build()
     )
@@ -1002,16 +1072,23 @@ class DesktopBridgeClient(
             .build(),
     )
 
-    private suspend fun requestJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
-        httpClient.newCall(request).execute().use { response ->
+    private suspend fun requestJson(request: Request, observeStatus: Boolean = true): JSONObject = withContext(Dispatchers.IO) {
+        val session = sessionForRequest(request)
+        val revision = session?.revision
+        newBridgeCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath)
-            runCatching { JSONObject(body) }
+            session?.let(::requireCurrentSession)
+            if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
+            val parsed = runCatching { JSONObject(body) }
                 .getOrElse { throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it) }
+            if (observeStatus && session != null && revision != null) session.observe(parseStatus(parsed), revision)
+            parsed
         }
     }
 
     private suspend fun requestEventJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
+        val session = sessionForRequest(request)
+        val revision = session?.revision
         val call = eventHttpClient.newCall(request)
         check(activeEventCall.compareAndSet(null, call)) { "A Desktop Bridge event polling request is already active." }
         val cancelCall = AtomicBoolean(true)
@@ -1043,7 +1120,8 @@ class DesktopBridgeClient(
                     }
                 }
                 val body = output.toByteArray().toString(Charsets.UTF_8)
-                if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath)
+                session?.let(::requireCurrentSession)
+                if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
                 runCatching { JSONObject(body) }.getOrElse {
                     throw IllegalStateException("Desktop Bridge returned invalid event JSON.", it)
                 }
@@ -1056,23 +1134,71 @@ class DesktopBridgeClient(
     }
 
     private suspend fun requestOk(request: Request): Unit = withContext(Dispatchers.IO) {
-        httpClient.newCall(request).execute().use { response ->
+        val session = sessionForRequest(request)
+        val revision = session?.revision
+        newBridgeCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath)
+            session?.let(::requireCurrentSession)
+            if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
         }
     }
 
-    private fun bridgeError(statusCode: Int, body: String, operation: String): DesktopBridgeException {
+    private fun bridgeError(
+        statusCode: Int, body: String, operation: String,
+        session: BridgeShutterReleaseSession?,
+        expectedRevision: Long? = null,
+    ): IllegalStateException {
         val error = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
         val code = error?.optString("code")?.takeIf(String::isNotBlank) ?: "HTTP_$statusCode"
         val message = error?.optString("message")?.takeIf(String::isNotBlank)
             ?: body.trim().take(MAX_ERROR_BODY_CHARS).ifBlank { "Desktop Bridge returned HTTP $statusCode." }
-        return DesktopBridgeException(
+        val failure = DesktopBridgeException(
             code = code,
             feature = error?.optNullableString("feature"),
             engine = error?.optNullableString("engine"),
             message = "Desktop Bridge $operation failed [$code]: $message",
         )
+        if (code == "SHUTTER_RELEASE_UNCONFIRMED" &&
+            (expectedRevision == null || session?.revision == expectedRevision)) {
+            session?.markUnconfirmed()
+            return ShutterReleaseException(failure)
+        }
+        return failure
+    }
+
+    private fun requireShutterSession() = requireNotNull(shutterSession) { "Desktop bridge session is not initialized." }
+
+    private fun requireCurrentSession(session: BridgeShutterReleaseSession) {
+        if (shutterSession !== session || session.closed) throw CancellationException("Desktop Bridge session changed.")
+    }
+
+    private fun sessionForRequest(request: Request): BridgeShutterReleaseSession? = shutterSession?.takeIf {
+        val path = endpoint("v1", "session", it.id).encodedPath
+        request.url.encodedPath == path || request.url.encodedPath.startsWith("$path/")
+    }
+
+    private object BridgeShutterStart
+
+    private fun newBridgeCall(request: Request): Call {
+        val session = sessionForRequest(request)
+        session?.let(::requireCurrentSession)
+        if (request.method in setOf("GET", "HEAD")) return httpClient.newCall(request)
+        if (session?.unconfirmed == true && request.tag(BridgeShutterStart::class.java) == null) {
+            val path = request.url.encodedPath
+            val root = endpoint("v1", "session", session.id).encodedPath
+            val stopOnly = (request.method == "POST" && path in setOf("$root/bulb/stop", "$root/liveview/stop", "$root/recording/stop")) ||
+                (request.method == "DELETE" && path in setOf(root, "$root/events"))
+            if (!stopOnly) throw ShutterReleaseException(IllegalStateException("Retry Stop Bulb before another Bridge operation."))
+        }
+        val oneShot = request.body?.let { body ->
+            object : RequestBody() {
+                override fun contentType() = body.contentType()
+                override fun contentLength() = body.contentLength()
+                override fun isOneShot() = true
+                override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
+            }
+        }
+        return mutationHttpClient.newCall(request.newBuilder().method(request.method, oneShot).build())
     }
 
     private fun endpoint(vararg segments: String): HttpUrl = rootUrl.newBuilder().apply {
@@ -1117,7 +1243,7 @@ class DesktopBridgeClient(
     }
 
     private fun revokePlaybackTicket(playbackUrl: HttpUrl) {
-        httpClient.newCall(Request.Builder().url(playbackUrl).delete().build()).enqueue(
+        newBridgeCall(Request.Builder().url(playbackUrl).delete().build()).enqueue(
             object : Callback {
                 override fun onFailure(call: Call, e: IOException) = Unit
 

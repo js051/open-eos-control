@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android Desktop Bridge: preserve same-session Bulb release responsibility, disable automatic mutation replay, and offer persistent stop-only recovery after ambiguous responses. Stop remains reachable across mode/capability changes; old-session callbacks cannot clear a new session's warning. Legacy happy paths remain supported, while ambiguous legacy payloads cannot prove release.
+
 - Android CCAPI multipart: give the stream reader sole ownership of closing its response. Stop cancels the call and interrupts the reader without racing its timeout cleanup, so local teardown cannot prevent the camera-side stream/general stop commands.
 
 - Desktop Bridge CCAPI/PC: retain exact Bulb stop responsibility after ambiguous start/release failures, block unsafe mutations, and expose persistent stop-only recovery across mode changes. Disconnect reports unresolved release and preserves a separate previous-camera warning; no old release is sent in a new session. Mobile Bridge adapters and physical-camera behavior remain separate follow-ups.

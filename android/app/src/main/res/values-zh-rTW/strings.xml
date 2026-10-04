@@ -5,6 +5,7 @@
     <string name="retry_shutter_release">重試釋放快門，只發送停止</string>
     <string name="shutter_release_retry_short">重試停止</string>
     <string name="shutter_release_unconfirmed">曝光可能仍在進行。請按「重試停止」。</string>
+    <string name="bridge_shutter_release_unconfirmed">曝光可能仍在進行。請重試停止；若仍失敗，請在機身停止曝光並更新 Bridge。</string>
 
     <string name="media_saved_location">已儲存至 %1$s</string>
     <string name="media_save_to_folder">另存至其他資料夾</string>
