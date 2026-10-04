@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- iOS direct CCAPI/Bridge: retain session-owned Bulb release responsibility after ambiguous starts or failed stops, preserve stop-only recovery across mode changes, and isolate cancelled or late operations from replacement connections. The app keeps distinct current/previous-session warnings without changing background exposure policy; macOS and physical-camera validation remain separately reported.
+
 - Android CCAPI multipart: give the stream reader sole ownership of closing its response. Stop cancels the call and interrupts the reader without racing its timeout cleanup, so local teardown cannot prevent the camera-side stream/general stop commands.
 
 - Desktop Bridge CCAPI/PC: retain exact Bulb stop responsibility after ambiguous start/release failures, block unsafe mutations, and expose persistent stop-only recovery across mode changes. Disconnect reports unresolved release and preserves a separate previous-camera warning; no old release is sent in a new session. Mobile Bridge adapters and physical-camera behavior remain separate follow-ups.

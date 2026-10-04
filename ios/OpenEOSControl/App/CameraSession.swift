@@ -17,6 +17,34 @@ enum CameraSession: Sendable {
         }
     }
 
+    func status() async throws -> CameraStatus {
+        switch self {
+        case let .ccapi(client): return try await client.status()
+        case let .desktopBridge(client): return try await client.status()
+        }
+    }
+
+    func shutterReleaseState() async -> CameraShutterReleaseState {
+        switch self {
+        case let .ccapi(client): return await client.shutterReleaseState()
+        case let .desktopBridge(client): return await client.shutterReleaseState()
+        }
+    }
+
+    func retryShutterRelease() async throws {
+        switch self {
+        case let .ccapi(client): try await client.retryShutterRelease()
+        case let .desktopBridge(client): try await client.retryShutterRelease()
+        }
+    }
+
+    func closeWithShutterReleaseState() async -> CameraShutterReleaseState {
+        switch self {
+        case let .ccapi(client): return await client.closeWithShutterReleaseState()
+        case let .desktopBridge(client): return await client.closeWithShutterReleaseState()
+        }
+    }
+
     func capabilities() async throws -> CameraCapabilities {
         switch self {
         case let .ccapi(client): return try await client.capabilities()

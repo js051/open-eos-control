@@ -1,9 +1,86 @@
 import Foundation
 import XCTest
+import UIKit
 
 final class OpenEOSControlUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
+    }
+
+    func testShutterRecoveryStopRemainsReachableAcrossLanguagesFontsAndRotation() throws {
+        let languages = [
+            ("english", "en", "en_US", "Stop · Release shutter", "Shutter release is unconfirmed"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "停止・釋放快門", "尚未確認快門已釋放"),
+        ]
+        for (language, appleLanguage, locale, stopLabel, warningLabel) in languages {
+            for font in ["UICTContentSizeCategoryXS", "UICTContentSizeCategoryAccessibilityXXXL"] {
+                for scenario in ["active", "unknown"] {
+                    let app = launch(
+                        appLanguage: language, appleLanguage: appleLanguage, locale: locale,
+                        environment: ["OEC_SHUTTER_RECOVERY_FIXTURE": scenario],
+                        contentSizeCategory: font
+                    )
+                    let connect = app.buttons["connect-button"]
+                    XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+                    connect.tap()
+                    let stop = app.buttons["release-shutter-button"]
+                    XCTAssertTrue(waitForInteraction(stop, timeout: 8))
+                    XCTAssertTrue(stop.label.contains(stopLabel))
+                    if scenario == "unknown" {
+                        XCTAssertEqual(app.staticTexts["shutter-release-warning"].label, warningLabel)
+                    }
+                    for orientation in [UIDeviceOrientation.portrait, .landscapeLeft, .landscapeRight] {
+                        XCUIDevice.shared.orientation = orientation
+                        XCTAssertTrue(waitForInteraction(stop, timeout: 5))
+                        XCTAssertTrue(stop.label.contains(stopLabel))
+                        XCTAssertGreaterThanOrEqual(stop.frame.minX, app.windows.firstMatch.frame.minX)
+                        XCTAssertLessThanOrEqual(stop.frame.maxX, app.windows.firstMatch.frame.maxX)
+                        XCTAssertGreaterThanOrEqual(stop.frame.minY, app.windows.firstMatch.frame.minY)
+                        XCTAssertLessThanOrEqual(stop.frame.maxY, app.windows.firstMatch.frame.maxY)
+                        addScreenshot(name: "shutter-recovery-\(language)-\(font)-\(scenario)-\(orientation.rawValue)")
+                    }
+                    stop.tap()
+                    XCTAssertTrue(stop.waitForNonExistence(timeout: 5))
+                    XCTAssertFalse(app.staticTexts["shutter-release-warning"].exists)
+                    app.terminate()
+                }
+            }
+        }
+    }
+
+    func testPreviousConnectionWarningStaysSeparateFromNewConnectionStop() throws {
+        let app = launch(
+            appLanguage: "english", appleLanguage: "en", locale: "en_US",
+            environment: ["OEC_SHUTTER_RECOVERY_FIXTURE": "previous-and-current"]
+        )
+        let connect = app.buttons["connect-button"]
+        XCTAssertTrue(scrollToInteraction(connect, in: app, timeout: 8))
+        connect.tap()
+        XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 8))
+        openMoreActions(in: app)
+        XCTAssertTrue(tapCameraAction(app.buttons["disconnect-menu-button"], in: app))
+        guard waitForConnectionScreen(in: app, timeout: 8) else { return }
+        let previous = app.staticTexts["previous-shutter-release-warning"]
+        XCTAssertTrue(previous.waitForExistence(timeout: 8))
+        for _ in 0..<8 {
+            if connect.isHittable { break }
+            app.scrollViews["connection-scroll-view"].swipeUp()
+        }
+        XCTAssertTrue(waitForInteraction(connect, timeout: 5))
+        connect.tap()
+        let stop = app.buttons["release-shutter-button"]
+        XCTAssertTrue(waitForInteraction(stop, timeout: 8))
+        let confirm = app.buttons["confirm-previous-shutter-release-button"]
+        XCTAssertTrue(scrollToInteraction(confirm, in: app, timeout: 8))
+        XCTAssertTrue(previous.exists)
+        XCTAssertTrue(stop.isHittable)
+        addScreenshot(name: "previous-warning-and-current-stop")
+        confirm.tap()
+        app.buttons["Confirm shutter is released"].tap()
+        XCTAssertTrue(previous.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForInteraction(stop, timeout: 5), "Acknowledging the old camera must leave the new Stop available")
+        stop.tap()
+        XCTAssertTrue(stop.waitForNonExistence(timeout: 5))
     }
 
     func testOfflineCameraWorkflowInPortraitAndLandscape() throws {
@@ -485,7 +562,8 @@ final class OpenEOSControlUITests: XCTestCase {
         appLanguage: String,
         appleLanguage: String,
         locale: String,
-        environment: [String: String] = [:]
+        environment: [String: String] = [:],
+        contentSizeCategory: String? = nil
     ) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -496,6 +574,9 @@ final class OpenEOSControlUITests: XCTestCase {
             "-AppleLanguages", "(\(appleLanguage))",
             "-AppleLocale", locale,
         ]
+        if let contentSizeCategory {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+        }
         app.launchEnvironment.merge(environment) { _, newValue in newValue }
         app.launch()
         return app

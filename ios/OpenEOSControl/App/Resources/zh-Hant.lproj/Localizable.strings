@@ -459,3 +459,13 @@
 "file_naming_rule" = "Canon 要求固定長度的大寫 ASCII 字元。底線不可放在第一個字元；五字元影片名稱不可使用底線。";
 "file_naming_unavailable" = "檔名設定目前無法使用";
 "apply" = "套用";
+
+// Shutter release recovery
+"shutter_release_unconfirmed" = "尚未確認快門已釋放";
+"bulb_exposure_running" = "Bulb 長曝光進行中";
+"shutter_release_recovery_help" = "相機可能仍在曝光。「停止」只會重試釋放快門。確認釋放前，其他相機控制會保持鎖定。";
+"release_shutter_now" = "停止・釋放快門";
+"previous_shutter_release_warning" = "上一個連線未確認快門已釋放。請直接檢查該相機；重新連線不會清除此警告。";
+"confirm_previous_shutter_released" = "我已檢查上一台相機";
+"previous_shutter_physically_verified" = "確認快門已釋放";
+"previous_shutter_confirmation_help" = "請先確認上一台相機已停止曝光。此操作只清除警告，不會向任何相機傳送指令。";

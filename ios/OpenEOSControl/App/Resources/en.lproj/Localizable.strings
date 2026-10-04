@@ -459,3 +459,13 @@
 "file_naming_rule" = "Canon requires exact uppercase ASCII lengths. An underscore cannot be the first character; the five-character movie name does not allow underscores.";
 "file_naming_unavailable" = "File naming is unavailable";
 "apply" = "Apply";
+
+// Shutter release recovery
+"shutter_release_unconfirmed" = "Shutter release is unconfirmed";
+"bulb_exposure_running" = "Bulb exposure is running";
+"shutter_release_recovery_help" = "The camera may still be exposing. Stop retries shutter release only. Other camera controls stay locked until release is confirmed.";
+"release_shutter_now" = "Stop · Release shutter";
+"previous_shutter_release_warning" = "The previous connection did not confirm shutter release. Check that camera directly. Connecting again does not clear this warning.";
+"confirm_previous_shutter_released" = "I checked the previous camera";
+"previous_shutter_physically_verified" = "Confirm shutter is released";
+"previous_shutter_confirmation_help" = "Confirm only after checking that the previous camera is no longer exposing. This clears the warning only; it sends no command to either camera.";
