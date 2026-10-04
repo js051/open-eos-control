@@ -29,6 +29,7 @@ HIT_TARGET_CASES = (
     "traditionalChinese-UICTContentSizeCategoryAccessibilityXXXL-1-unknown",
     "traditionalChinese-UICTContentSizeCategoryAccessibilityXXXL-4-active",
 )
+RECONNECT_PHASES = ("before-reconnect", "after-reconnect", "failed-reconnect")
 MATRIX_SAMPLES = (
     "shutter-recovery-english-UICTContentSizeCategoryXS-active-1",
     "shutter-recovery-english-UICTContentSizeCategoryAccessibilityXXXL-unknown-3",
@@ -116,13 +117,25 @@ def attachment_name(suggested: object, test: str) -> str | None:
         base = "(?:" + "|".join(map(re.escape, MATRIX_SAMPLES)) + ")"
     elif test == TESTS[2]:
         cases = "(?:" + "|".join(map(re.escape, HIT_TARGET_CASES)) + ")"
+        reconnect = "(?:" + "|".join(RECONNECT_PHASES) + ")"
         base = (rf"(?:shutter-recovery-disconnect-{cases}-before-disconnect(?:-geometry)?|"
+                rf"shutter-recovery-connect-{cases}-{reconnect}(?:-geometry)?|"
                 rf"shutter-recovery-sheet-stop-{cases})")
     else:
         return None
     # Xcode may append a counter/UUID and a file extension to the supplied name.
     match = re.fullmatch(rf"({base})(?:_[A-Za-z0-9-]+)*(?:\.(?:png|txt))?", suggested)
     return match[1] if match else None
+
+
+def attachment_priority(name: str) -> tuple[int, bool, str]:
+    if name.startswith("shutter-recovery-connect-"):
+        priority = 0 if name.removesuffix("-geometry").endswith("-failed-reconnect") else 2
+    else:
+        priority = 1
+    # Keep the failed-wait diagnosis first, followed by original hit-target proof.
+    # Within each group, preserve the small geometry files before larger PNGs.
+    return priority, not name.endswith("-geometry"), name
 
 
 def geometry_text(data: bytes) -> bytes:
@@ -147,6 +160,24 @@ def geometry_text(data: bytes) -> bytes:
         r"(?:shutter-release-warning|previous-shutter-release-warning|camera-model-status)-exists=(?:true|false)",
     )
     lines = text.splitlines()
+    if lines and lines[0].startswith("[OEC_SHUTTER_CONNECT_GEOMETRY]"):
+        reconnect_phases = "|".join(re.escape(f"{case}-{phase}")
+                                    for case in HIT_TARGET_CASES for phase in RECONNECT_PHASES)
+        peers = (r"(?:offline-preview-button|release-shutter-button|disconnect-menu-button|"
+                 r"more-actions-button|preset-http-button|preset-https-button|preset-simulator-button)")
+        buttons = rf"(?:connect-button|{peers})"
+        # Keep the new reconnect schema separate; do not broaden disconnect text.
+        patterns = (
+            rf"\[OEC_SHUTTER_CONNECT_GEOMETRY\] (?:{reconnect_phases})",
+            rf"(?:window|connection-scroll-view-frame|connect-visible-frame)={rect}",
+            r"(?:connection-scroll-view-exists|connect-center-in-viewport|connect-fully-in-viewport|"
+            r"shutter-release-warning-exists|previous-shutter-release-warning-exists|camera-model-status-exists|"
+            r"model-fixture-session-1|model-fixture-session-2|offline-preview-visible)=(?:true|false)",
+            r"(?:keyboard|alert)-count=\d+",
+            rf"{buttons} count=\d+",
+            rf"{buttons}\[[0-3]\] enabled=(?:true|false) hittable=(?:true|false) frame={rect}",
+            rf"{peers}\[[0-3]\] connect-overlap={rect} contains-connect-center=(?:true|false)",
+        )
     if not lines or len(lines) > 128 or any(
         not any(re.fullmatch(pattern, line) for pattern in patterns) for line in lines
     ):
@@ -174,7 +205,7 @@ def collect_attachments(staging: Path, output: Path, test: str, report: dict,
                 candidates.append((name, attachment.get("exportedFileName")))
     if len(candidates) > 1024:
         raise EvidenceError("Attachment manifest exceeded the entry limit")
-    for name, filename in sorted(candidates, key=lambda item: item[0]):
+    for name, filename in sorted(candidates, key=lambda item: attachment_priority(item[0])):
         if not isinstance(filename, str) or Path(filename).name != filename or "\\" in filename:
             raise EvidenceError("Unsafe attachment filename")
         source = staging / filename

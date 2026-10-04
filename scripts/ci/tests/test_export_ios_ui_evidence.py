@@ -23,6 +23,28 @@ GEOMETRY = (
     "release-shutter-button[0] disconnect-overlap=(inf, inf, 0.0, 0.0) contains-disconnect-center=false\n"
     "camera-model-status-exists=true\n"
 ).encode()
+RECONNECT_GEOMETRY = (
+    "[OEC_SHUTTER_CONNECT_GEOMETRY] " + evidence.HIT_TARGET_CASES[-1] + "-failed-reconnect\n"
+    "window=(0.0, 0.0, 800.0, 400.0)\n"
+    "connection-scroll-view-exists=true\n"
+    "connection-scroll-view-frame=(0.0, 0.0, 800.0, 400.0)\n"
+    "connect-visible-frame=(20.0, 100.0, 360.0, 48.0)\n"
+    "connect-center-in-viewport=true\n"
+    "connect-fully-in-viewport=true\n"
+    "keyboard-count=0\n"
+    "alert-count=0\n"
+    "connect-button count=1\n"
+    "connect-button[0] enabled=true hittable=true frame=(20.0, 100.0, 360.0, 48.0)\n"
+    "offline-preview-button count=1\n"
+    "offline-preview-button[0] enabled=true hittable=true frame=(20.0, 200.0, 360.0, 48.0)\n"
+    "offline-preview-button[0] connect-overlap=(inf, inf, 0.0, 0.0) contains-connect-center=false\n"
+    "shutter-release-warning-exists=false\n"
+    "previous-shutter-release-warning-exists=true\n"
+    "camera-model-status-exists=false\n"
+    "model-fixture-session-1=false\n"
+    "model-fixture-session-2=false\n"
+    "offline-preview-visible=false\n"
+).encode()
 
 
 def test_tree():
@@ -51,8 +73,8 @@ class IOSEvidenceTests(unittest.TestCase):
         (self.staging / filename).write_bytes(data)
         return {"suggestedHumanReadableName": name, "exportedFileName": filename}
 
-    def collect(self, **kwargs):
-        evidence.collect_attachments(self.staging, self.output, evidence.TESTS[0], self.report, **kwargs)
+    def collect(self, test=evidence.TESTS[0], **kwargs):
+        evidence.collect_attachments(self.staging, self.output, test, self.report, **kwargs)
 
     def test_selects_only_exact_requested_test_cases_and_deduplicates_runs(self):
         tree = test_tree()
@@ -120,6 +142,65 @@ class IOSEvidenceTests(unittest.TestCase):
             evidence.geometry_text(GEOMETRY + b"camera-serial=SYNTHETIC-PRIVATE\n")
         scientific = GEOMETRY.replace(b"20.0", b"-2.2e-13")
         self.assertEqual(evidence.geometry_text(scientific), scientific)
+
+    def test_accepts_only_three_reconnect_phases_for_the_existing_four_cases(self):
+        for case in evidence.HIT_TARGET_CASES:
+            for phase in evidence.RECONNECT_PHASES:
+                name = f"shutter-recovery-connect-{case}-{phase}"
+                for suffix in ("", "-geometry"):
+                    self.assertEqual(evidence.attachment_name(name + suffix, evidence.TESTS[2]), name + suffix)
+                    self.assertIsNone(evidence.attachment_name(name + suffix, evidence.TESTS[0]))
+                text = RECONNECT_GEOMETRY.replace(
+                    (evidence.HIT_TARGET_CASES[-1] + "-failed-reconnect").encode(),
+                    (case + "-" + phase).encode(),
+                )
+                self.assertEqual(evidence.geometry_text(text), text)
+        for name in ("shutter-recovery-connect-unrecognized-before-reconnect",
+                     f"shutter-recovery-connect-{evidence.HIT_TARGET_CASES[0]}-unknown-phase"):
+            self.assertIsNone(evidence.attachment_name(name, evidence.TESTS[2]))
+
+    def test_reconnect_geometry_keeps_fixed_fields_and_disconnect_schema_separate(self):
+        for control in ("offline-preview-button", "release-shutter-button", "disconnect-menu-button",
+                        "more-actions-button", "preset-http-button", "preset-https-button", "preset-simulator-button"):
+            text = RECONNECT_GEOMETRY.replace(b"offline-preview-button", control.encode())
+            self.assertEqual(evidence.geometry_text(text), text)
+        for field in (b"model-label=SYNTHETIC-PRIVATE\n", b"connect-button[4] enabled=true hittable=true frame=(0.0, 0.0, 1.0, 1.0)\n",
+                      b"alert-text=SYNTHETIC-PRIVATE\n", b"url=SYNTHETIC-PRIVATE\n",
+                      b"model-fixture-session-1=SYNTHETIC-PRIVATE\n"):
+            with self.assertRaises(evidence.EvidenceError):
+                evidence.geometry_text(RECONNECT_GEOMETRY + field)
+        with self.assertRaises(evidence.EvidenceError):
+            evidence.geometry_text(GEOMETRY + b"offline-preview-visible=true\n")
+        with self.assertRaises(evidence.EvidenceError):
+            evidence.geometry_text(RECONNECT_GEOMETRY + b"more-actions-sheet-exists=true\n")
+
+    def test_failed_reconnect_geometry_and_png_are_kept_first_under_small_budget(self):
+        case = evidence.HIT_TARGET_CASES[-1]
+        failed = f"shutter-recovery-connect-{case}-failed-reconnect"
+        self.manifest(
+            self.attachment(f"shutter-recovery-disconnect-{case}-before-disconnect", "hit.png"),
+            self.attachment(f"shutter-recovery-connect-{case}-before-reconnect", "before.png"),
+            self.attachment(failed, "failed.png"),
+            self.attachment(failed + "-geometry", "failed.txt", RECONNECT_GEOMETRY),
+        )
+        budget = len(RECONNECT_GEOMETRY) + len(PNG)
+        self.collect(test=evidence.TESTS[2], budget=budget)
+        files = [item["file"] for item in self.report["files"]]
+        self.assertEqual(files, [f"01-{failed}-geometry.txt", f"02-{failed}.png"])
+        self.assertEqual(self.report["bytes"], budget)
+        self.assertEqual(len(self.report["warnings"]), 2)
+        self.assertLessEqual(sum(p.stat().st_size for p in self.output.iterdir()), budget)
+
+    def test_original_hit_target_proof_precedes_nonfailure_reconnect_phases(self):
+        case = evidence.HIT_TARGET_CASES[0]
+        original = f"shutter-recovery-sheet-stop-{case}"
+        self.manifest(
+            self.attachment(f"shutter-recovery-connect-{case}-after-reconnect", "after.png"),
+            self.attachment(original, "hit.png"),
+        )
+        self.collect(test=evidence.TESTS[2], budget=len(PNG))
+        self.assertEqual(self.report["files"][0]["file"], f"01-{original}.png")
+        self.assertEqual(len(self.report["files"]), 1)
 
     def test_rejects_traversal_and_symlinks(self):
         self.manifest({"suggestedHumanReadableName": "previous-warning-and-current-stop", "exportedFileName": "../outside.png"})
