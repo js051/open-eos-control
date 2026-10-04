@@ -36,6 +36,7 @@ targets:
           - Fixtures
       - path: Tests/Fixtures
         buildPhase: resources
+      - path: ../OpenEOSCore/Tests/OpenEOSCoreTests/URLSessionShutterDeadlineWireTests.swift
     dependencies:
       - target: OpenEOSControl
     settings:
