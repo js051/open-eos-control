@@ -1,8 +1,16 @@
 package dev.openeos.control.ui
 
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
-import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertWidthIsEqualTo
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.performTouchInput
 import java.io.ByteArrayOutputStream
@@ -13,11 +21,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
-import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
@@ -152,88 +159,164 @@ class CameraGalleryUiTest {
         compose.runOnIdle { assertTrue(cancelled) }
     }
 
-    @Test fun largeTextLandscapeFailureKeepsCloseDownloadAndRetryReachable() {
-        var retried = false
+    @Test fun largeTextLandscapeFailureKeepsCloseDownloadAndRetryReachable() = withLandscapeWindow {
+        var downloads = 0
+        val visible = mutableStateOf(true)
         compose.setContent {
-            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(640.dp, 320.dp))) {
-                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
-                    MaterialTheme {
-                        MediaViewerDialog(
-                            item = item, bytes = null, streamSource = null, loading = false,
-                            position = 1, totalCount = 1, canMovePrevious = false, canMoveNext = false,
-                            onPrevious = {}, onNext = {}, downloadEnabled = true,
-                            saveFeedback = MediaSaveFeedback.Failed(
-                                "The connection was interrupted while saving this original. Keep the camera awake and try again.",
-                            ),
-                            onDownload = { retried = true }, onDismiss = {},
-                            modifier = Modifier.requiredSize(640.dp, 320.dp),
-                        )
-                    }
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+                MaterialTheme {
+                    if (visible.value) MediaViewerDialog(
+                        item = item, bytes = null, streamSource = null, loading = false,
+                        position = 1, totalCount = 1, canMovePrevious = false, canMoveNext = false,
+                        onPrevious = {}, onNext = {}, downloadEnabled = true,
+                        saveFeedback = MediaSaveFeedback.Failed(
+                            "The connection was interrupted while saving this original. Keep the camera awake and try again.",
+                        ),
+                        onDownload = { downloads += 1 }, onDismiss = { visible.value = false },
+                        // Unlike requiredSize, size must obey the real Dialog window constraints.
+                        modifier = Modifier.size(640.dp, 320.dp),
+                    )
                 }
             }
         }
-        assertLandscapeViewerBounds()
-        compose.onNodeWithContentDescription(compose.activity.getString(R.string.close_media_preview)).assertIsDisplayed()
-        compose.onNodeWithContentDescription(compose.activity.getString(R.string.download_media, item.name))
-            .assertIsDisplayed().assertIsEnabled()
-        compose.onNodeWithText(compose.activity.getString(R.string.media_save_retry)).performScrollTo().assertIsDisplayed().performClick()
-        compose.runOnIdle { assertTrue(retried) }
+        val viewport = assertLandscapeViewerBounds()
+        val close = compose.onNodeWithContentDescription(compose.activity.getString(R.string.close_media_preview))
+        val download = compose.onNodeWithContentDescription(compose.activity.getString(R.string.download_media, item.name))
+            .assertIsEnabled()
+        download.assertIsDisplayed().performTouchInput { click() }
+        compose.runOnIdle { assertEquals(1, downloads) }
+        val retry = compose.onNodeWithText(compose.activity.getString(R.string.media_save_retry))
+            .performScrollTo().assertIsDisplayed().assertIsEnabled()
+        assertControlsInsideViewportWithoutOverlap(viewport, listOf(close, download, retry))
+        retry.performTouchInput { click() }
+        compose.runOnIdle { assertEquals(2, downloads) }
+        close.performTouchInput { click() }
+        compose.onNodeWithTag("media-viewer-content").assertDoesNotExist()
     }
 
-    @Test fun zoomAndDownloadControlsStayInsideTheActualLargeTextLandscapeViewport() {
+    @Test fun zoomAndDownloadControlsStayInsideTheActualLargeTextLandscapeViewport() = withLandscapeWindow {
         val bytes = Bitmap.createBitmap(32, 24, Bitmap.Config.ARGB_8888).let { bitmap ->
             try {
                 ByteArrayOutputStream().apply { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, this) }.toByteArray()
             } finally { bitmap.recycle() }
         }
         var cancelled = false
+        var downloads = 0
+        var nextRequests = 0
+        val visible = mutableStateOf(true)
         val media = item.copy(sizeBytes = 1_000L, captureTime = "2026-09-01T00:00:00Z")
         compose.setContent {
-            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(640.dp, 320.dp))) {
-                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
-                    MaterialTheme {
-                        MediaViewerDialog(
-                            item = media, bytes = bytes, streamSource = null, loading = false,
-                            position = 1, totalCount = 2, canMovePrevious = false, canMoveNext = true,
-                            onPrevious = {}, onNext = {}, downloadEnabled = true, downloadBusy = true,
-                            saveFeedback = MediaSaveFeedback.Saving(CameraMediaTransferProgress(500L, 1_000L)),
-                            onCancelDownload = { cancelled = true }, onDismiss = {},
-                            modifier = Modifier.requiredSize(640.dp, 320.dp),
-                        )
-                    }
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+                MaterialTheme {
+                    if (visible.value) MediaViewerDialog(
+                        item = media, bytes = bytes, streamSource = null, loading = false,
+                        position = 1, totalCount = 2, canMovePrevious = false, canMoveNext = true,
+                        onPrevious = {}, onNext = { nextRequests += 1 }, downloadEnabled = true, downloadBusy = true,
+                        saveFeedback = MediaSaveFeedback.Saving(CameraMediaTransferProgress(500L, 1_000L)),
+                        onDownload = { downloads += 1 },
+                        onCancelDownload = { cancelled = true }, onDismiss = { visible.value = false },
+                        modifier = Modifier.size(640.dp, 320.dp),
+                    )
                 }
             }
         }
         val viewport = assertLandscapeViewerBounds()
-        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_preview_content, media.name))
-            .assertIsDisplayed().performTouchInput { doubleClick() }
+        val image = compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_preview_content, media.name))
+        image.assertIsDisplayed().performTouchInput { doubleClick() }
         val close = compose.onNodeWithContentDescription(compose.activity.getString(R.string.close_media_preview))
-            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val download = compose.onNodeWithContentDescription(compose.activity.getString(R.string.download_media, media.name))
-            .assertIsDisplayed().assertIsNotEnabled().fetchSemanticsNode().boundsInRoot
+            .assertIsNotEnabled()
         val next = compose.onNodeWithContentDescription(compose.activity.getString(R.string.next_media))
-            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val reset = compose.onNodeWithContentDescription(compose.activity.getString(R.string.reset_media_zoom))
-            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val cancel = compose.onNodeWithText(compose.activity.getString(R.string.cancel_media_download))
-            .performScrollTo().assertIsDisplayed()
-        val cancelBounds = cancel.fetchSemanticsNode().boundsInRoot
-        val controls = listOf(close, download, next, reset, cancelBounds)
-        controls.forEach { bounds ->
-            assertTrue("A visible control must stay within the measured viewer", viewport.contains(bounds.topLeft) && viewport.contains(bounds.bottomRight))
+            .performScrollTo().assertIsDisplayed().assertIsEnabled()
+        assertControlsInsideViewportWithoutOverlap(viewport, listOf(close, download, next, reset, cancel))
+        download.performTouchInput { click() }
+        next.performTouchInput { click() }
+        compose.runOnIdle {
+            assertEquals(0, downloads)
+            assertEquals(1, nextRequests)
         }
-        controls.forEachIndexed { index, bounds ->
-            controls.drop(index + 1).forEach { other -> assertFalse("Viewer controls must not overlap", bounds.overlaps(other)) }
-        }
-        cancel.performClick()
+        reset.performTouchInput { click() }
+        reset.assertDoesNotExist()
+        image.performTouchInput { doubleClick() }
+        assertControlsInsideViewportWithoutOverlap(viewport, listOf(close, download, next, reset, cancel))
+        cancel.performTouchInput { click() }
         compose.runOnIdle { assertTrue(cancelled) }
+        close.performTouchInput { click() }
+        compose.onNodeWithTag("media-viewer-content").assertDoesNotExist()
     }
 
-    private fun assertLandscapeViewerBounds(): androidx.compose.ui.geometry.Rect {
-        val bounds = compose.onNodeWithTag("media-viewer-content").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        // The dialog is a separate window: assert its measured content, not only LocalConfiguration.
+    private fun withLandscapeWindow(test: () -> Unit) {
+        val originalOrientation = compose.activity.requestedOrientation
+        try {
+            // ForcedSize only changes a composition, not the separate Android Dialog window.
+            // Rotate before setContent so Activity recreation cannot discard the test content.
+            compose.activityRule.scenario.onActivity {
+                it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            compose.waitUntil(timeoutMillis = 10_000L) {
+                var ready = false
+                compose.activityRule.scenario.onActivity {
+                    val decor = it.window.decorView
+                    ready = it.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
+                        decor.isLaidOut && decor.width > decor.height && decor.height > 0
+                }
+                ready
+            }
+            test()
+        } finally {
+            compose.activityRule.scenario.onActivity { it.requestedOrientation = originalOrientation }
+        }
+    }
+
+    private fun assertLandscapeViewerBounds(): Rect {
+        val viewer = compose.onNodeWithTag("media-viewer-content")
+            .assertIsDisplayed().assertWidthIsEqualTo(640.dp).assertHeightIsEqualTo(320.dp)
+        val bounds = assertFullyVisibleScreenBounds(viewer)
         assertEquals("The viewer must really be a 640x320 viewport", 2f, bounds.width / bounds.height, 0.05f)
         return bounds
+    }
+
+    private fun assertControlsInsideViewportWithoutOverlap(viewport: Rect, controls: List<SemanticsNodeInteraction>) {
+        val bounds = controls.map(::assertFullyVisibleScreenBounds)
+        bounds.forEach { control ->
+            assertContains("A visible control must stay within the measured viewer", viewport, control)
+        }
+        bounds.forEachIndexed { index, control ->
+            bounds.drop(index + 1).forEach { other ->
+                assertFalse("Viewer controls must not overlap: $control and $other", control.overlaps(other))
+            }
+        }
+    }
+
+    private fun assertFullyVisibleScreenBounds(interaction: SemanticsNodeInteraction): Rect {
+        val node = interaction.assertIsDisplayed().fetchSemanticsNode()
+        return compose.runOnIdle {
+            // boundsInRoot is clipped by ancestors and can hide off-window content. Compare the
+            // full measured node with both its clipped bounds and its real Android View viewport.
+            val fullWindowBounds = Rect(node.positionInWindow, node.size.toSize())
+            assertContains("The full control must not be clipped by a parent", node.boundsInWindow, fullWindowBounds)
+            val view = (node.root as ViewRootForTest).view
+            val localVisible = android.graphics.Rect()
+            assertTrue("The Dialog's Android root must be visible", view.getLocalVisibleRect(localVisible))
+            val location = IntArray(2).also(view::getLocationOnScreen)
+            val visibleScreenBounds = Rect(
+                (localVisible.left + location[0]).toFloat(), (localVisible.top + location[1]).toFloat(),
+                (localVisible.right + location[0]).toFloat(), (localVisible.bottom + location[1]).toFloat(),
+            )
+            val fullScreenBounds = Rect(node.positionOnScreen, node.size.toSize())
+            assertContains("The full control must fit the actual visible Dialog window", visibleScreenBounds, fullScreenBounds)
+            fullScreenBounds
+        }
+    }
+
+    private fun assertContains(message: String, outer: Rect, inner: Rect) {
+        // Allow only pixel-rounding noise, never a clipped touch target.
+        val tolerance = 1f
+        assertTrue("$message: inner=$inner, outer=$outer", inner.width > 0f && inner.height > 0f &&
+            inner.left >= outer.left - tolerance && inner.top >= outer.top - tolerance &&
+            inner.right <= outer.right + tolerance && inner.bottom <= outer.bottom + tolerance)
     }
 
     private fun actions() = CameraActions(
