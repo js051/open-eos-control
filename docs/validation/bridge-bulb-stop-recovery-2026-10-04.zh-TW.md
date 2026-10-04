@@ -37,3 +37,14 @@ self-contained 真 browser 回歸已接入既有 `npm run test:browser`，涵蓋
 - 既有 PC isBulbMode 優先採 cached capabilities value；browser fixture 對機身模式變更等待兩次完整 refresh，不把此未修的相鄰 cache 問題冒稱已解決。
 
 Release Assessment：live baseline v0.10.0 Development Preview，建議 patch；不合併、不改版號或發布。PR ready 仍須最終精確 head 的 CI 與必要 UI 證據。
+
+
+## 精確 CI 後的視覺追查
+
+初次 head `e3c2217642093a7ed093f40edc9576b2d9869005` 的 [CI 37195713746](https://github.com/js051/open-eos-control/actions/runs/37195713746) 已完整通過，包含 Ruff、pytest、真 browser、Windows bundle、JVM／APK 與 ci-complete。browser artifact 的 SHA256 為 `d5b0f4f98e683004f8eae0948bf355684a9c0a6212c54f8dc857735ddc2bcaca`。
+
+下載並目視後仍發現：窄螢幕長 error toast 遮住 Stop；中央 Start 雖已 disabled，但暗青色仍像可用；fixed 的上一連線提示覆蓋曝光列。另以獨立 production function 紅測證明 Start handler 缺少相同責任 guard，雖然 server 最終會拒絕。不能只憑 CI 綠燈就把這個使用流程算完。
+
+增量修正保留持續警告與操作區錯誤，不再疊 toast；中央 disabled Start 使用明確灰色，Camera／Local Start handler 與可用狀態保持一致。上一連線 alert 改在連線卡或快門操作區的正常文件流，保留確認按鈕，不擋新相機操作、不送任何跨 session 命令。
+
+本地 API 16 例、static UI 6 例、完整 JS module、syntax／diff check 通過。新增真 browser 斷言要求窄螢幕 Stop 完整在 viewport 內、五點 hit-test 無遮擋且可實際點擊；兩個 Start 一致 disabled；舊提示存在時新 session 的 Stop 與確認鈕仍可達，且提示不與曝光列重疊。增量的新精確 head CI 與四張截圖 QA 尚待執行，初次 e3c2217 結果不冒充這次修改的驗證。

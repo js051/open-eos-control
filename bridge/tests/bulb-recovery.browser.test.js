@@ -20,6 +20,39 @@ async function freePort() {
   });
 }
 
+async function assertActionable(page, selector) {
+  await page.locator(selector).scrollIntoViewIfNeeded();
+  const geometry = await page.evaluate((target) => {
+    const button = document.querySelector(target);
+    const box = button.getBoundingClientRect();
+    const points = [[0.5, 0.5], [0.25, 0.5], [0.75, 0.5], [0.5, 0.25], [0.5, 0.75]];
+    return {
+      visible: box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0 &&
+        box.right <= innerWidth && box.bottom <= innerHeight,
+      enabled: !button.disabled,
+      unobstructed: points.every(([x, y]) => button.contains(document.elementFromPoint(
+        box.left + box.width * x, box.top + box.height * y,
+      ))),
+    };
+  }, selector);
+  assert.deepEqual(geometry, { visible: true, enabled: true, unobstructed: true }, `${selector} must remain reachable`);
+}
+
+async function assertWarningDoesNotOverlapControls(page) {
+  const result = await page.evaluate(() => {
+    const warning = document.querySelector("#shutter-disconnect-warning");
+    const box = warning.getBoundingClientRect();
+    const overlap = (selector) => {
+      const control = document.querySelector(selector).getBoundingClientRect();
+      return Math.min(box.right, control.right) > Math.max(box.left, control.left) &&
+        Math.min(box.bottom, control.bottom) > Math.max(box.top, control.top);
+    };
+    return { normalFlow: getComputedStyle(warning).position === "static",
+      shutter: overlap("#shutter-button"), exposure: overlap("#exposure-strip") };
+  });
+  assert.deepEqual(result, { normalFlow: true, shutter: false, exposure: false });
+}
+
 async function run() {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
@@ -89,6 +122,9 @@ async function run() {
     assert.equal(await page.isDisabled("#photo-mode-button"), true);
     assert.equal(await page.isDisabled("#video-mode-button"), true);
     assert.equal(await page.isDisabled("#half-press-button"), true);
+    assert.equal(await page.isDisabled("#live-toggle-button"), true);
+    assert.equal(await page.isDisabled("#rail-live-button"), true);
+    assert.equal(await page.isVisible("#toast"), false);
     assert.match(await page.textContent("#bulb-indicator"), /release unconfirmed/i);
     assert.equal((await cameraState()).commands.length, 2);
 
@@ -109,8 +145,17 @@ async function run() {
     fs.mkdirSync(results, { recursive: true });
     await page.screenshot({ path: path.join(results, "bulb-release-unconfirmed.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
+    await assertActionable(page, "#shutter-button");
+    assert.equal(await page.isDisabled("#live-toggle-button"), true);
+    assert.equal(await page.isDisabled("#rail-live-button"), true);
+    assert.equal(await page.isVisible("#toast"), false);
+    // A real narrow-viewport retry must remain clickable immediately after the next failure.
+    await page.click("#shutter-button");
+    await page.waitForFunction(() => !document.querySelector("#shutter-button").disabled);
+    assert.equal((await cameraState()).commands.length, 4);
+    await assertActionable(page, "#shutter-button");
+    assert.equal(await page.isVisible("#toast"), false);
     await page.screenshot({ path: path.join(results, "bulb-release-unconfirmed-mobile.png"), fullPage: true });
-    await page.setViewportSize({ width: 1280, height: 900 });
 
     await configure({ reject_release: false });
     await page.click("#shutter-button");
@@ -119,9 +164,10 @@ async function run() {
     assert.equal(await page.isDisabled("#photo-mode-button"), false);
     assert.equal((await cameraState()).active, false);
     assert.equal(requests.filter((url) => url.endsWith("/bulb/start")).length, 1);
-    assert.equal(requests.filter((url) => url.endsWith("/bulb/stop")).length, 2);
+    assert.equal(requests.filter((url) => url.endsWith("/bulb/stop")).length, 3);
     assert.equal((await cameraState()).commands.filter(([, , body]) => body.action === "full_press").length, 1);
 
+    await page.setViewportSize({ width: 1280, height: 900 });
     // An acknowledged exposure keeps Stop when the body switches away from Bulb.
     await configure({ mode: "Bulb", drop_press: false, reject_release: false });
     await refreshMode();
@@ -162,13 +208,31 @@ async function run() {
     assert.equal((await cameraState()).commands.length, beforeReconnect);
     assert.equal(await page.isVisible("#shutter-disconnect-warning"), true);
     assert.match(await page.textContent("#shutter-disconnect-warning"), /previous connection/);
+    // A new exposure is explicitly requested; the old warning must never obstruct its Stop.
+    await configure({ drop_press: false, reject_release: false });
+    await page.click("#shutter-button");
+    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Stop Bulb exposure");
+    assert.equal((await cameraState()).commands.length, beforeReconnect + 1);
+    assert.equal(await page.isVisible("#toast"), false);
+    await assertActionable(page, "#shutter-button");
+    await assertActionable(page, "#shutter-disconnect-confirm");
+    await assertWarningDoesNotOverlapControls(page);
     await page.screenshot({ path: path.join(results, "bulb-previous-session-warning.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await assertActionable(page, "#shutter-button");
+    await assertActionable(page, "#shutter-disconnect-confirm");
+    await assertWarningDoesNotOverlapControls(page);
+    await page.screenshot({ path: path.join(results, "bulb-previous-session-warning-mobile.png"), fullPage: true });
     await page.click("#shutter-disconnect-confirm");
     assert.equal(await page.isVisible("#shutter-disconnect-warning"), false);
-    assert.equal((await cameraState()).commands.length, beforeReconnect);
+    assert.equal((await cameraState()).commands.length, beforeReconnect + 1);
+    await assertActionable(page, "#shutter-button");
+    await page.click("#shutter-button");
+    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Start Bulb exposure");
+    assert.equal((await cameraState()).commands.length, beforeReconnect + 2);
     await page.click("#disconnect-button");
     await page.waitForSelector("#connection-view:not([hidden])");
-    assert.equal((await cameraState()).commands.length, beforeReconnect);
+    assert.equal((await cameraState()).commands.length, beforeReconnect + 2);
     assert.deepEqual(pageErrors, []);
     console.log("PASS: real Bridge HTTP peer + browser stop-only recovery, status failure, mode change, retry, teardown and fresh-session isolation");
   } finally {

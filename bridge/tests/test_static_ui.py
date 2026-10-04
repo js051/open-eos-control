@@ -450,3 +450,18 @@ def test_bulb_recovery_has_distinct_accessible_current_and_previous_session_warn
     assert 'state.shutterDisconnectWarning = false;' not in reset
     for key in ('retryBulbStop', 'bulbReleaseUnconfirmed', 'previousShutterWarning', 'confirmCameraChecked'):
         assert len(re.findall(rf'^\s+{key}: "', script, flags=re.MULTILINE)) == 2
+
+
+def test_shutter_recovery_alerts_do_not_cover_controls_and_live_start_has_a_guard() -> None:
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+    warning_style = styles.split(".shutter-disconnect-warning {", 1)[1].split("}", 1)[0]
+    assert "position: fixed" not in warning_style
+    assert "position: absolute" not in warning_style
+    assert "warningHost.append(ui.shutterDisconnectWarning);" in script
+    assert ".viewfinder-placeholder .button:disabled" in styles
+    camera_start = script.split("async function startLiveView(", 1)[1].split("async function stopLiveView", 1)[0]
+    assert "bulbControlLocked()" in camera_start.split("beginCameraInteraction()", 1)[0]
+    toast = script.split("function showToast(", 1)[1].split("function renderHealth", 1)[0]
+    assert "shutterReleaseUnconfirmed() || state.shutterDisconnectWarning" in toast
+    assert "ui.toast.hidden = true;" in toast

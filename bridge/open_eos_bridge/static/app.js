@@ -1438,6 +1438,11 @@
 
   function showToast(message, error = false) {
     clearTimeout(state.toastTimer);
+    if (shutterReleaseUnconfirmed() || state.shutterDisconnectWarning) {
+      // Persistent shutter alerts already explain recovery; never cover the Stop control.
+      ui.toast.hidden = true;
+      return;
+    }
     ui.toast.textContent = message;
     ui.toast.classList.toggle("error", error);
     ui.toast.hidden = false;
@@ -3146,7 +3151,10 @@
   }
 
   async function startLocalVideo({ announce = true } = {}) {
-    if (!state.session || !localPreviewSelected() || !state.localVideoSupport.available || state.localVideoBusy) return;
+    if (
+      !state.session || !localPreviewSelected() || !state.localVideoSupport.available ||
+      state.localVideoBusy || shutterReleaseUnconfirmed()
+    ) return;
     const generation = state.localVideoGeneration + 1;
     state.localVideoGeneration = generation;
     state.localVideoBusy = true;
@@ -3434,7 +3442,7 @@
 
   async function startLiveView({ announce = true } = {}) {
     if (
-      localPreviewSelected() || !state.session || cameraInteractionBusy() ||
+      localPreviewSelected() || !state.session || cameraInteractionBusy() || bulbControlLocked() ||
       !featureSupported(FEATURES.LIVE_VIEW)
     ) return;
     beginCameraInteraction();
@@ -4280,6 +4288,11 @@
   function renderAvailability() {
     ui.shutterDisconnectWarning.hidden = !state.shutterDisconnectWarning;
     const connected = Boolean(state.session);
+    const warningHost = connected ? ui.shutterButton.parentElement : ui.connectionError.parentElement;
+    if (ui.shutterDisconnectWarning.parentElement !== warningHost) {
+      warningHost.append(ui.shutterDisconnectWarning);
+    }
+    if (shutterReleaseUnconfirmed() || state.shutterDisconnectWarning) ui.toast.hidden = true;
     const bulbActive = bulbControlLocked();
     const interactionBusy = cameraInteractionBusy();
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
@@ -4317,7 +4330,7 @@
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
       button.hidden = !cameraLiveSupported && !localLiveSupported;
       button.disabled = localPreviewSelected()
-        ? state.localVideoBusy || !localLiveSupported
+        ? state.localVideoBusy || !localLiveSupported || (shutterReleaseUnconfirmed() && !state.localVideoActive)
         : interactionBusy || bulbActive || !selectedLiveSupported || !cameraLiveTemperatureAllowed;
     });
     const quickActionCount = [

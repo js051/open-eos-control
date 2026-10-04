@@ -142,6 +142,44 @@ async function run() {
     assert.equal(test.state.shutterReleaseUnconfirmed, false);
     assert.equal(test.feedback.includes("resume"), false);
   }
+  {
+    const test = context({ bulbExposureActive: null, shutterReleaseUnconfirmed: true });
+    test.localPreviewSelected = () => false;
+    test.liveCapabilities = () => ({});
+    let begun = 0;
+    test.beginCameraInteraction = () => { begun += 1; throw new Error("Start must be blocked"); };
+    vm.runInContext(productionFunction("startLiveView"), test);
+    try { await test.startLiveView(); } catch (_) { /* Count any attempted start below. */ }
+    assert.equal(begun, 0, "Camera Start handler must respect stop-only responsibility");
+    test.localPreviewSelected = () => true;
+    test.state.localVideoSupport = { available: true };
+    test.state.localVideoBusy = false;
+    test.state.localVideoGeneration = 0;
+    let opened = 0;
+    test.localVideo = { start: async () => { opened += 1; throw new Error("Local Start must be blocked"); } };
+    test.navigator = { mediaDevices: {} };
+    test.captureLocalVideoError = (error) => error;
+    test.renderLiveState = () => {};
+    vm.runInContext(productionFunction("startLocalVideo"), test);
+    try { await test.startLocalVideo(); } catch (_) { /* Count attempted input opens below. */ }
+    assert.equal(opened, 0, "Local Start handler must respect stop-only responsibility");
+  }
+  {
+    const test = context({ bulbExposureActive: null, shutterReleaseUnconfirmed: true });
+    test.ui.toast = { hidden: false, classList: { toggle() {} } };
+    test.clearTimeout = () => {};
+    test.window = { setTimeout: () => 1 };
+    vm.runInContext(productionFunction("showToast"), test);
+    test.showToast("Synthetic release failed", true);
+    assert.equal(test.ui.toast.hidden, true, "Persistent release warning must replace the overlapping error toast");
+    test.state.status.shutterReleaseUnconfirmed = false;
+    test.state.shutterDisconnectWarning = true;
+    test.showToast("Connected");
+    assert.equal(test.ui.toast.hidden, true, "Previous-session alert must not compete with a toast");
+    test.state.shutterDisconnectWarning = false;
+    test.showToast("Shutter release confirmed");
+    assert.equal(test.ui.toast.hidden, false);
+  }
   console.log("PASS: production PC Bulb state contracts (mode/capability change, sticky failure, fresh Stop readback, legacy omission, session isolation)");
 }
 

@@ -692,13 +692,15 @@ input:disabled {
   border-color: #ffd66b;
 }
 
+.viewfinder-placeholder .button:disabled {
+  color: var(--muted);
+  border-color: var(--line);
+  background: var(--surface);
+}
+
 .shutter-disconnect-warning {
-  position: fixed;
-  z-index: 50;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(680px, calc(100% - 24px));
+  width: 100%;
+  margin-top: 10px;
   padding: 12px;
   border: 1px solid var(--warning);
   border-radius: 6px;
