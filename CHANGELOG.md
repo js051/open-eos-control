@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- iOS direct CCAPI/Bridge: retain session-owned Bulb release responsibility after ambiguous starts or failed stops, preserve stop-only recovery across mode changes, and isolate cancelled or late operations from replacement connections. The app keeps distinct current/previous-session warnings without changing background exposure policy; macOS and physical-camera validation remain separately reported.
+
 - Android: keep acknowledged shutter commands distinct from later status-read failures, retain a not-yet-visible media search, and offer bounded read-only review retry without sending another shutter. Old attempts cannot replace newer results, and media transfers block the new retry entry. Native optional-status behavior and physical-camera validation remain unchanged.
 
 - Android: keep original-file save progress, cancellation, destination and retry feedback visible inside the full-screen media viewer. Feedback belongs to the exact item and camera session, busy taps cannot start duplicate transfers, and bounded feedback keeps close, navigation and zoom controls reachable.

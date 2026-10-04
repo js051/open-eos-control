@@ -79,6 +79,8 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var lastFrameAt: Date?
     @Published private(set) var shutterFlash = false
     @Published private(set) var bulbStartedAt: Date?
+    @Published private(set) var shutterReleaseState = CameraShutterReleaseState.idle
+    @Published private(set) var previousShutterReleaseWarnings = Set<UUID>()
     @Published private(set) var focusMarker: FocusMarker?
     @Published private(set) var mediaItems: [CameraMediaItem] = []
     @Published private(set) var latestMediaItem: CameraMediaItem?
@@ -112,6 +114,11 @@ final class CameraAppState: ObservableObject {
 
     private let defaults: UserDefaults
     private var session: CameraSession?
+    private let sessionFactory: (@MainActor () throws -> CameraSession)?
+    private var sessionGeneration = UUID()
+    private var disconnectTask: Task<Void, Never>?
+    private var applicationActive = true
+    private var acknowledgedPreviousReleaseWarnings = Set<UUID>()
     private var liveViewTask: Task<Void, Never>?
     private var liveViewFPSUpdateTask: Task<Void, Never>?
     private var liveViewFPSUpdateRevision: UInt64 = 0
@@ -140,7 +147,13 @@ final class CameraAppState: ObservableObject {
         return item.previewAvailable && supports(.mediaPreview)
     }
     var recording: Bool { snapshot?.status.recording == true }
-    var bulbExposureActive: Bool { snapshot?.status.bulbExposureActive == true }
+    var bulbExposureActive: Bool { shutterReleaseState.bulbExposureActive == true }
+    var shutterReleaseRequired: Bool { shutterReleaseState.releaseRequired }
+    var shutterReleaseUnconfirmed: Bool { shutterReleaseState.releaseUnconfirmed }
+    var previousShutterReleaseUnconfirmed: Bool { !previousShutterReleaseWarnings.isEmpty }
+    var canRetryShutterRelease: Bool {
+        (session != nil || isPreview) && shutterReleaseRequired && !busyOperations.contains(.capture)
+    }
     var bulbMode: Bool {
         guard captureMode == .photo else { return false }
         let setting = capabilities?.settings.first { ["shootingmode", "autoexposuremode", "ae"].contains($0.key.lowercased()) }
@@ -190,8 +203,12 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        sessionFactory: (@MainActor () throws -> CameraSession)? = nil
+    ) {
         self.defaults = defaults
+        self.sessionFactory = sessionFactory
         if CommandLine.arguments.contains("-resetState") {
             [
                 DefaultsKey.baseURL,
@@ -227,7 +244,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func isBusy(_ operation: CameraOperation) -> Bool {
-        busyOperations.contains(operation) || (bulbExposureActive && operation != .capture)
+        busyOperations.contains(operation) || (shutterReleaseRequired && operation != .refresh)
     }
 
     func setBaseURL(_ value: String) {
@@ -291,51 +308,74 @@ final class CameraAppState: ObservableObject {
     }
 
     func connect() async {
-        guard begin(.connect) else { return }
-        defer { end(.connect) }
+        guard session == nil, !isPreview, begin(.connect) else { return }
+        let generation = sessionGeneration
+        defer { end(.connect, generation: generation) }
+        await disconnectTask?.value
+        guard generation == sessionGeneration, !Task.isCancelled else { return }
         cancelLiveViewFPSUpdate()
         operatorConfirmedFeatures.removeAll()
         do {
             let newSession: CameraSession
-            switch connectionMode {
-            case .ccapi:
-                let rtpAddress = CameraRTPNetworkAddress.destinationAddress(cameraURL: baseURL)
-                newSession = .ccapi(
-                    try CCAPIClient(
-                        baseURL: baseURL,
-                        mode: ccapiConnectionMode,
-                        username: username,
-                        password: password,
-                        rtpDestinationAddress: rtpAddress,
-                        rtpSessionFactory: rtpAddress == nil ? nil : rtpController
+            if let sessionFactory {
+                newSession = try sessionFactory()
+            } else {
+                switch connectionMode {
+                case .ccapi:
+                    let rtpAddress = CameraRTPNetworkAddress.destinationAddress(cameraURL: baseURL)
+                    newSession = .ccapi(
+                        try CCAPIClient(
+                            baseURL: baseURL,
+                            mode: ccapiConnectionMode,
+                            username: username,
+                            password: password,
+                            rtpDestinationAddress: rtpAddress,
+                            rtpSessionFactory: rtpAddress == nil ? nil : rtpController
+                        )
                     )
-                )
-            case .desktopBridge:
-                guard
-                    let selectedBridgeCameraID,
-                    let camera = bridgeCameras.first(where: { $0.id == selectedBridgeCameraID })
-                else {
-                    throw DesktopBridgeError.invalidResponse("Select a scanned Desktop Bridge camera before connecting.")
+                case .desktopBridge:
+                    guard
+                        let selectedBridgeCameraID,
+                        let camera = bridgeCameras.first(where: { $0.id == selectedBridgeCameraID })
+                    else {
+                        throw DesktopBridgeError.invalidResponse("Select a scanned Desktop Bridge camera before connecting.")
+                    }
+                    newSession = .desktopBridge(
+                        try DesktopBridgeClient(
+                            baseURL: bridgeURL,
+                            token: bridgeToken,
+                            cameraID: selectedBridgeCameraID,
+                            cameraEngine: camera.engine,
+                            profileHint: camera.model
+                        )
+                    )
                 }
-                newSession = .desktopBridge(
-                    try DesktopBridgeClient(
-                        baseURL: bridgeURL,
-                        token: bridgeToken,
-                        cameraID: selectedBridgeCameraID,
-                        cameraEngine: camera.engine,
-                        profileHint: camera.model
-                    )
-                )
             }
+            // Retain a connecting session so a disconnect also closes a suspended connect.
+            session = newSession
             let newSnapshot: CameraSnapshot
             do {
                 newSnapshot = try await newSession.connectSnapshot()
             } catch {
-                await newSession.close()
+                if generation == sessionGeneration {
+                    let release = await newSession.closeWithShutterReleaseState()
+                    guard generation == sessionGeneration else { return }
+                    preservePreviousReleaseWarning(release, generation: generation)
+                    session = nil
+                }
                 throw error
             }
-            session = newSession
+            let release = await newSession.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            if Task.isCancelled {
+                let release = await newSession.closeWithShutterReleaseState()
+                guard generation == sessionGeneration else { return }
+                preservePreviousReleaseWarning(release, generation: generation)
+                session = nil
+                return
+            }
             snapshot = newSnapshot
+            applyShutterReleaseState(release)
             isPreview = false
             screen = .control
             mediaItems = []
@@ -358,11 +398,13 @@ final class CameraAppState: ObservableObject {
                 await startLiveView()
             }
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
 
     func openOfflinePreview() {
+        requestDisconnect()
         stopLiveViewLoop()
         cancelLiveViewFPSUpdate()
         stopEventLoop()
@@ -399,18 +441,44 @@ final class CameraAppState: ObservableObject {
     }
 
     func requestDisconnect() {
+        let generation = sessionGeneration
+        let release = shutterReleaseState
         let closingSession = prepareDisconnect()
-        Task {
-            if let closingSession { await closingSession.close() }
+        guard let closingSession else { return }
+        preservePreviousReleaseWarning(release, generation: generation)
+        let precedingClose = disconnectTask
+        disconnectTask = Task { [weak self] in
+            await precedingClose?.value
+            let result = await closingSession.closeWithShutterReleaseState()
+            // This is a warning about the old connection, never state for its replacement.
+            self?.preservePreviousReleaseWarning(result, generation: generation)
         }
     }
 
     func disconnect() async {
-        let closingSession = prepareDisconnect()
-        if let closingSession { await closingSession.close() }
+        requestDisconnect()
+        await disconnectTask?.value
+    }
+
+    func confirmPreviousShutterReleased() {
+        // Operator acknowledgement never sends a command to any camera.
+        acknowledgedPreviousReleaseWarnings.formUnion(previousShutterReleaseWarnings)
+        previousShutterReleaseWarnings.removeAll()
+    }
+
+    private func preservePreviousReleaseWarning(_ state: CameraShutterReleaseState, generation: UUID) {
+        if state.releaseRequired || state.releaseUnconfirmed {
+            guard !acknowledgedPreviousReleaseWarnings.contains(generation) else { return }
+            previousShutterReleaseWarnings.insert(generation)
+        } else {
+            previousShutterReleaseWarnings.remove(generation)
+        }
     }
 
     private func prepareDisconnect() -> CameraSession? {
+        sessionGeneration = UUID()
+        operationRevision &+= 1
+        shutterReleaseState = .idle
         stopLiveViewLoop()
         cancelLiveViewFPSUpdate()
         stopEventLoop()
@@ -443,6 +511,7 @@ final class CameraAppState: ObservableObject {
         rtpController.setAudioEnabled(false)
         focusMarker = nil
         bulbStartedAt = nil
+        shutterFlash = false
         lastClockSyncAt = nil
         lastCreatedDirectoryName = nil
         operatorConfirmedFeatures.removeAll()
@@ -454,12 +523,23 @@ final class CameraAppState: ObservableObject {
 
     func refresh() async {
         guard let session, begin(.refresh) else { return }
-        defer { end(.refresh) }
+        let generation = sessionGeneration
+        let revision = operationRevision
+        let wasReleaseRequired = shutterReleaseRequired
+        defer { end(.refresh, generation: generation) }
         do {
-            snapshot = try await session.connectSnapshot()
+            let refreshed = try await session.connectSnapshot()
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration, revision == operationRevision else { return }
+            snapshot = refreshed
+            applyShutterReleaseState(release)
+            if wasReleaseRequired, !shutterReleaseRequired {
+                resumeLiveViewAfterBulb(session: session, generation: generation)
+            }
             lastError = nil
             clampLiveViewRequest()
         } catch {
+            guard generation == sessionGeneration, revision == operationRevision else { return }
             record(error)
         }
     }
@@ -477,7 +557,7 @@ final class CameraAppState: ObservableObject {
 
     private func scheduleLiveViewFPSUpdate() {
         cancelLiveViewFPSUpdate()
-        guard let session, activeLiveViewSource != nil else {
+        guard !shutterReleaseRequired, let session, activeLiveViewSource != nil else {
             return
         }
         let fps = requestedFPS
@@ -526,8 +606,9 @@ final class CameraAppState: ObservableObject {
 
     func setAutoRefresh(_ enabled: Bool) async {
         autoRefresh = enabled
-        rtpController.setRenderingEnabled(enabled)
-        if enabled {
+        let mayRender = enabled && applicationActive && !shutterReleaseRequired
+        rtpController.setRenderingEnabled(mayRender)
+        if mayRender {
             if activeLiveViewSource == .ccapiRTP {
                 return
             }
@@ -549,18 +630,30 @@ final class CameraAppState: ObservableObject {
     }
 
     func setApplicationActive(_ active: Bool) {
+        applicationActive = active
         rtpController.setApplicationActive(active)
+        if !active {
+            stopLiveViewLoop()
+        } else if let session {
+            resumeLiveViewAfterBulb(session: session, generation: sessionGeneration)
+        }
     }
 
     func startLiveView() async {
-        guard let session, supports(.liveView), liveViewTemperatureAllowed, begin(.liveView) else { return }
-        defer { end(.liveView) }
+        guard applicationActive, let session, supports(.liveView), liveViewTemperatureAllowed,
+              begin(.liveView) else { return }
+        let generation = sessionGeneration
+        defer { end(.liveView, generation: generation) }
         do {
             try await session.startLiveView(
                 LiveViewRequest(fps: requestedFPS, size: liveViewSize, source: effectiveRequestedLiveViewSource())
             )
-            activeLiveViewSource = await session.currentLiveViewSource()
-            if let activeSize = await session.currentLiveViewSize() {
+            let source = await session.currentLiveViewSource()
+            let activeSize = await session.currentLiveViewSize()
+            let nativeURL = await session.currentNativeLiveViewSourceURL()
+            guard generation == sessionGeneration, !shutterReleaseRequired else { return }
+            activeLiveViewSource = source
+            if let activeSize {
                 liveViewSize = activeSize
                 defaults.set(activeSize.rawValue, forKey: DefaultsKey.liveViewSize)
             }
@@ -570,8 +663,8 @@ final class CameraAppState: ObservableObject {
                 nativeLiveViewSize = nil
                 liveViewData = nil
                 frameContentType = "video/H264"
-                frameSourceURL = await session.currentNativeLiveViewSourceURL()
-                rtpController.setRenderingEnabled(autoRefresh)
+                frameSourceURL = nativeURL
+                rtpController.setRenderingEnabled(autoRefresh && applicationActive)
             } else {
                 rtpAudioRequested = false
                 rtpAudioStatus = .inactive
@@ -579,13 +672,17 @@ final class CameraAppState: ObservableObject {
                 if autoRefresh { beginLiveViewLoop(session: session) }
             }
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
 
     func restartLiveView() async {
+        guard !shutterReleaseRequired else { return }
+        let generation = sessionGeneration
         stopLiveViewLoop()
         if let session { await session.stopLiveView() }
+        guard generation == sessionGeneration, !shutterReleaseRequired else { return }
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
         await startLiveView()
@@ -736,30 +833,79 @@ final class CameraAppState: ObservableObject {
     }
 
     func toggleBulbExposure() async {
-        let wasActive = bulbExposureActive
-        guard bulbMode, (wasActive || supports(.bulbExposure)), begin(.capture) else { return }
-        defer { end(.capture) }
-        guard wasActive || stillCaptureTemperatureAllowed else { return }
+        if shutterReleaseRequired {
+            await retryShutterRelease()
+            return
+        }
+        guard bulbMode, supports(.bulbExposure), stillCaptureTemperatureAllowed,
+              busyOperations.isEmpty, begin(.capture) else { return }
+        let generation = sessionGeneration
+        defer { end(.capture, generation: generation) }
         if isPreview {
-            guard let snapshot else { return }
-            updateStatus(snapshot.status.withBulbExposureActive(!wasActive))
-            if wasActive { showShutterFlash() }
+            shutterReleaseState = CameraShutterReleaseState(
+                releaseRequired: true, releaseUnconfirmed: false, bulbExposureActive: true
+            )
+            if let snapshot { updateStatus(snapshot.status.withBulbExposureActive(true)) }
+            return
+        }
+        guard let session else { return }
+        // The request may reach the camera even if its acknowledgement never reaches us.
+        shutterReleaseState = CameraShutterReleaseState(
+            releaseRequired: true, releaseUnconfirmed: true, bulbExposureActive: nil
+        )
+        pauseLiveViewForBulb()
+        do {
+            let status = try await session.startBulbExposure()
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            applyShutterReleaseState(release)
+            updateStatus(status.withShutterReleaseState(release))
+            lastError = nil
+        } catch {
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            applyShutterReleaseState(release)
+            if !release.releaseRequired {
+                resumeLiveViewAfterBulb(session: session, generation: generation)
+            }
+            record(error)
+        }
+    }
+
+    func retryShutterRelease() async {
+        guard canRetryShutterRelease else { return }
+        let completedKnownExposure = bulbExposureActive && !shutterReleaseUnconfirmed
+        let generation = sessionGeneration
+        busyOperations.insert(.capture)
+        operationRevision &+= 1
+        defer { end(.capture, generation: generation) }
+        if isPreview {
+            applyShutterReleaseState(.idle)
+            if completedKnownExposure { showShutterFlash() }
             return
         }
         guard let session else { return }
         pauseLiveViewForBulb()
         do {
-            let newStatus = wasActive
-                ? try await session.stopBulbExposure()
-                : try await session.startBulbExposure()
-            updateStatus(newStatus)
-            if wasActive && newStatus.bulbExposureActive != true {
-                showShutterFlash()
-                resumeLiveViewAfterBulb(session: session)
-            }
+            try await session.retryShutterRelease()
+            guard generation == sessionGeneration else { return }
+            // A release ACK is authoritative, even if the subsequent status GET fails.
+            applyShutterReleaseState(.idle)
+            if completedKnownExposure { showShutterFlash() }
             lastError = nil
+            resumeLiveViewAfterBulb(session: session, generation: generation)
+            do {
+                let status = try await session.status()
+                guard generation == sessionGeneration else { return }
+                updateStatus(status)
+            } catch {
+                guard generation == sessionGeneration else { return }
+                record(error)
+            }
         } catch {
-            if !wasActive { resumeLiveViewAfterBulb(session: session) }
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            applyShutterReleaseState(release)
             record(error)
         }
     }
@@ -1701,7 +1847,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {
-        if bulbExposureActive && operation != .capture { return false }
+        if shutterReleaseRequired && operation != .refresh { return false }
         let inserted = busyOperations.insert(operation).inserted
         if inserted { operationRevision &+= 1 }
         return inserted
@@ -1711,10 +1857,38 @@ final class CameraAppState: ObservableObject {
         busyOperations.remove(operation)
     }
 
+    private func end(_ operation: CameraOperation, generation: UUID) {
+        guard generation == sessionGeneration else { return }
+        end(operation)
+    }
+
+    private func applyShutterReleaseState(_ state: CameraShutterReleaseState) {
+        shutterReleaseState = state
+        if let snapshot { self.snapshot = snapshot.replacing(status: snapshot.status.withShutterReleaseState(state)) }
+        bulbStartedAt = state.bulbExposureActive == true ? bulbStartedAt ?? Date() : nil
+        if state.releaseRequired { pauseLiveViewForBulb() }
+    }
+
+    private func adoptReportedShutterState(_ status: CameraStatus) {
+        // Ordinary reads must not erase an unresolved release. Only a release ACK can.
+        if status.shutterReleaseUnconfirmed == true {
+            shutterReleaseState = CameraShutterReleaseState(
+                releaseRequired: true, releaseUnconfirmed: true, bulbExposureActive: nil
+            )
+        } else if status.bulbExposureActive == true, !shutterReleaseRequired {
+            shutterReleaseState = CameraShutterReleaseState(
+                releaseRequired: true, releaseUnconfirmed: false, bulbExposureActive: true
+            )
+        }
+        if shutterReleaseRequired { pauseLiveViewForBulb() }
+        bulbStartedAt = bulbExposureActive ? bulbStartedAt ?? Date() : nil
+    }
+
     private func updateStatus(_ status: CameraStatus) {
         guard let snapshot else { return }
         self.snapshot = snapshot.replacing(status: status)
-        if status.bulbExposureActive == true {
+        adoptReportedShutterState(status)
+        if bulbExposureActive {
             bulbStartedAt = bulbStartedAt ?? Date()
         } else {
             bulbStartedAt = nil
@@ -1739,6 +1913,8 @@ final class CameraAppState: ObservableObject {
     }
 
     private func beginLiveViewLoop(session: CameraSession) {
+        guard applicationActive, !shutterReleaseRequired else { return }
+        let generation = sessionGeneration
         stopLiveViewLoop()
         resetLiveViewMetrics()
         liveViewTask = Task { [weak self] in
@@ -1748,12 +1924,16 @@ final class CameraAppState: ObservableObject {
                 let started = Date().timeIntervalSinceReferenceDate
                 do {
                     let frame = try await session.liveViewFrame(cacheKey: cacheKey)
+                    guard generation == sessionGeneration, !Task.isCancelled,
+                          applicationActive, !shutterReleaseRequired else { break }
                     cacheKey &+= 1
                     liveViewData = frame.data
                     frameBytes = frame.data.count
                     frameContentType = frame.contentType
                     frameSourceURL = frame.sourceURL
-                    if let activeSize = await session.currentLiveViewSize(), activeSize != liveViewSize {
+                    let activeSize = await session.currentLiveViewSize()
+                    guard generation == sessionGeneration, !Task.isCancelled else { break }
+                    if let activeSize, activeSize != liveViewSize {
                         liveViewSize = activeSize
                         defaults.set(activeSize.rawValue, forKey: DefaultsKey.liveViewSize)
                     }
@@ -1762,7 +1942,7 @@ final class CameraAppState: ObservableObject {
                     observedFPS = rateTracker.record(now.timeIntervalSinceReferenceDate)
                     if lastError?.contains("Live View") == true { lastError = nil }
                 } catch {
-                    if Task.isCancelled { break }
+                    if Task.isCancelled || generation != sessionGeneration { break }
                     record(error)
                 }
 
@@ -1795,6 +1975,7 @@ final class CameraAppState: ObservableObject {
                 do {
                     if pendingKeys.isEmpty {
                         let event = try await session.pollEvent()
+                        guard generation == eventGeneration, !Task.isCancelled else { break }
                         pendingKeys.formUnion(event.changedKeys)
                     }
                     guard !pendingKeys.isEmpty else {
@@ -1805,7 +1986,14 @@ final class CameraAppState: ObservableObject {
                         session: session,
                         generation: generation
                     ) else { break }
-                    snapshot = refreshed
+                    guard generation == eventGeneration, !Task.isCancelled else { break }
+                    guard refreshed.revision == operationRevision, busyOperations.isEmpty else { continue }
+                    let wasReleaseRequired = shutterReleaseRequired
+                    snapshot = refreshed.snapshot
+                    applyShutterReleaseState(refreshed.release)
+                    if wasReleaseRequired, !shutterReleaseRequired {
+                        resumeLiveViewAfterBulb(session: session, generation: sessionGeneration)
+                    }
                     clampLiveViewRequest()
                     let contentChanged = pendingKeys.contains { key in
                         let normalized = key.lowercased()
@@ -1843,7 +2031,7 @@ final class CameraAppState: ObservableObject {
     private func stableEventSnapshot(
         session: CameraSession,
         generation: UUID
-    ) async throws -> CameraSnapshot? {
+    ) async throws -> (snapshot: CameraSnapshot, release: CameraShutterReleaseState, revision: UInt64)? {
         while generation == eventGeneration, !Task.isCancelled {
             while !busyOperations.isEmpty, generation == eventGeneration, !Task.isCancelled {
                 try await Task.sleep(nanoseconds: 50_000_000)
@@ -1852,8 +2040,10 @@ final class CameraAppState: ObservableObject {
 
             let revision = operationRevision
             let refreshed = try await session.connectSnapshot()
+            let release = await session.shutterReleaseState()
+            guard generation == eventGeneration, !Task.isCancelled else { return nil }
             if revision == operationRevision, busyOperations.isEmpty {
-                return refreshed
+                return (refreshed, release, revision)
             }
         }
         return nil
@@ -1865,7 +2055,7 @@ final class CameraAppState: ObservableObject {
     ) async throws -> Bool {
         while generation == eventGeneration, !Task.isCancelled {
             if screen != .media { return true }
-            if mediaLibraryLoading || busyOperations.contains(.media) || bulbExposureActive {
+            if mediaLibraryLoading || busyOperations.contains(.media) || shutterReleaseRequired {
                 try await Task.sleep(nanoseconds: 50_000_000)
                 continue
             }
@@ -1910,11 +2100,14 @@ final class CameraAppState: ObservableObject {
     }
 
     private func pauseLiveViewForBulb() {
+        cancelLiveViewFPSUpdate()
         stopLiveViewLoop()
         rtpController.setRenderingEnabled(false)
     }
 
-    private func resumeLiveViewAfterBulb(session: CameraSession) {
+    private func resumeLiveViewAfterBulb(session: CameraSession, generation: UUID) {
+        guard generation == sessionGeneration, applicationActive, !shutterReleaseRequired,
+              liveViewTemperatureAllowed else { return }
         rtpController.setRenderingEnabled(autoRefresh)
         guard autoRefresh, activeLiveViewSource != nil else { return }
         if activeLiveViewSource != .ccapiRTP {
@@ -1952,9 +2145,11 @@ final class CameraAppState: ObservableObject {
     }
 
     private func showShutterFlash() {
+        let generation = sessionGeneration
         shutterFlash = true
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 130_000_000)
+            guard self?.sessionGeneration == generation else { return }
             self?.shutterFlash = false
         }
     }

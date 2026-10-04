@@ -111,6 +111,7 @@ extension CameraStatus {
             batteryStatus: batteryStatus,
             recording: recording ?? self.recording,
             bulbExposureActive: bulbExposureActive,
+            shutterReleaseUnconfirmed: shutterReleaseUnconfirmed,
             mode: mode,
             mediaAvailable: mediaAvailable,
             remainingMinutes: remainingMinutes,
