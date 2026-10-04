@@ -159,7 +159,10 @@ async function run() {
 
     await configure({ reject_release: false });
     await page.click("#shutter-button");
-    await page.waitForFunction(() => document.querySelector("#toast")?.textContent === "Shutter release confirmed");
+    await page.waitForFunction(() => {
+      const toast = document.querySelector("#toast");
+      return toast && !toast.hidden && toast.textContent === "Shutter release confirmed";
+    });
     assert.equal(await page.isVisible("#bulb-indicator"), false);
     assert.equal(await page.isDisabled("#photo-mode-button"), false);
     assert.equal((await cameraState()).active, false);
@@ -185,10 +188,16 @@ async function run() {
     assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Stop Bulb exposure");
     assert.equal(await page.isDisabled("#shutter-button"), false);
     const beforeStop = (await cameraState()).commands.length;
+    // A previous successful Stop leaves the same text in the now-hidden toast. Wait for
+    // this operation to publish a visible confirmation, not that stale DOM text.
+    assert.equal(await page.isVisible("#toast"), false);
     const stopResponse = page.waitForResponse((response) => response.url().endsWith("/bulb/stop"));
     await page.click("#shutter-button");
     assert.equal((await stopResponse).status(), 502);
-    await page.waitForFunction(() => document.querySelector("#toast")?.textContent === "Shutter release confirmed");
+    await page.waitForFunction(() => {
+      const toast = document.querySelector("#toast");
+      return toast && !toast.hidden && toast.textContent === "Shutter release confirmed";
+    });
     assert.equal(await page.isVisible("#bulb-indicator"), false);
     assert.equal(await page.isDisabled("#photo-mode-button"), false);
     assert.equal((await cameraState()).commands.length, beforeStop + 1);
