@@ -6,9 +6,19 @@ All notable release-level changes to Open EOS Control are documented here.
 
 - iOS direct CCAPI/Bridge: retain session-owned Bulb release responsibility after ambiguous starts or failed stops, preserve stop-only recovery across mode changes, and isolate cancelled or late operations from replacement connections. The app keeps distinct current/previous-session warnings without changing background exposure policy; macOS and physical-camera validation remain separately reported.
 
+- Android: keep acknowledged shutter commands distinct from later status-read failures, retain a not-yet-visible media search, and offer bounded read-only review retry without sending another shutter. Old attempts cannot replace newer results, and media transfers block the new retry entry. Native optional-status behavior and physical-camera validation remain unchanged.
+
+- Android: keep original-file save progress, cancellation, destination and retry feedback visible inside the full-screen media viewer. Feedback belongs to the exact item and camera session, busy taps cannot start duplicate transfers, and bounded feedback keeps close, navigation and zoom controls reachable.
+
+- Android Desktop Bridge: preserve same-session Bulb release responsibility, disable automatic mutation replay, and offer persistent stop-only recovery after ambiguous responses. Stop remains reachable across mode/capability changes; old-session callbacks cannot clear a new session's warning. Legacy happy paths remain supported, while ambiguous legacy payloads cannot prove release.
+
 - Android CCAPI multipart: give the stream reader sole ownership of closing its response. Stop cancels the call and interrupts the reader without racing its timeout cleanup, so local teardown cannot prevent the camera-side stream/general stop commands.
 
 - Desktop Bridge CCAPI/PC: retain exact Bulb stop responsibility after ambiguous start/release failures, block unsafe mutations, and expose persistent stop-only recovery across mode changes. Disconnect reports unresolved release and preserves a separate previous-camera warning; no old release is sent in a new session. Mobile Bridge adapters and physical-camera behavior remain separate follow-ups.
+
+- Android: retain a consumed camera event until its authoritative status/capability refresh succeeds. Temporary read failures retry with capped backoff without requiring another event, losing contents hints, or replaying camera commands; disconnect discards the old session recovery.
+
+- Android: preserve a pending media picker request across same-ViewModel recreation, and bind returned documents/folders/uploads to the original camera session. Old results after process/session replacement are consumed before any transfer I/O and explain how to choose again; cancellation and launch failures free only their matching request.
 
 - Android: keep the selected media-library scope unchanged while a media operation is active, so a recent result cannot be mislabeled as a completed full-card listing. Scope controls become available again after the operation finishes.
 - Android: cancel and join unfinished card traversal before single-file and batch downloads, including event-triggered refreshes; cancelling media work now cancels its active JSON, thumbnail, and display HTTP reads.

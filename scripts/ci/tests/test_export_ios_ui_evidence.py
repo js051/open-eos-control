@@ -255,6 +255,8 @@ class IOSEvidenceTests(unittest.TestCase):
             evidence.write_summary(self.output, report)
         summary = (self.output / "summary.md").read_text()
         self.assertIn("incomplete", summary)
+        self.assertIn("Manual export only", summary)
+        self.assertIn("does not run tests or arrange artifact uploads", summary)
         self.assertEqual((self.root / "step.md").read_text(), summary)
 
     def test_fake_tool_exports_scoped_attachments_and_reports_test_failure_separately(self):

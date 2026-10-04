@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Export a bounded, synthetic-only shutter recovery evidence artifact.
+"""Manually export bounded, synthetic-only shutter recovery evidence.
 
-Requires the runner's Xcode 16+ xcresulttool; no installs or legacy/full dumps.
+This helper is not wired to an automatic CI export/upload step. It reads an
+existing result bundle only; it neither runs tests nor changes their outcome.
+Requires an existing macOS host with Xcode 16+ xcresulttool; no installs or
+legacy/full dumps.
 Apple documents the modern commands and their runtime help in:
 https://developer.apple.com/documentation/xcode-release-notes/xcode-16_3-release-notes
 The original xcresult remains the source of truth, including failure details.
@@ -283,7 +286,8 @@ def write_summary(output: Path, report: dict) -> None:
              f"Evidence status: {report['status']}",
              f"Exported {len(report['files'])} files / {report['bytes']} bytes (24 MiB artifact cap).",
              "Test outcomes below are independent of evidence export success.",
-             "The full matrix test still runs; this artifact selects four representative matrix PNGs.", ""]
+             "Manual export only: this helper does not run tests or arrange artifact uploads.",
+             "Selected evidence includes up to four representative matrix PNGs from the supplied bundle.", ""]
     lines.extend(f"- {test}: {', '.join(results)}" for test, results in report["tests"].items())
     lines.extend(f"- Warning: {warning}" for warning in dict.fromkeys(report["warnings"]))
     lines.extend(["", "## Attachments", ""])

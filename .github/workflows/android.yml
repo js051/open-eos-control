@@ -81,8 +81,6 @@ jobs:
             ios_app:
               - 'ios/**'
               - 'simulator/**'
-              - 'scripts/ci/export_ios_ui_evidence.py'
-              - 'scripts/ci/tests/test_export_ios_ui_evidence.py'
               - '.github/workflows/**'
 
       - name: Scan repository history for secrets
@@ -644,25 +642,6 @@ jobs:
             ios/OpenEOSControl/TestResults.xcresult
             ${{ runner.temp }}/ios-camera-simulator.log
           if-no-files-found: ignore
-          retention-days: 7
-          overwrite: true
-
-      - name: Export bounded iOS shutter recovery UI evidence
-        if: always()
-        continue-on-error: true
-        run: |
-          python3 ../../scripts/ci/export_ios_ui_evidence.py \
-            --result-bundle TestResults.xcresult \
-            --output-dir "$RUNNER_TEMP/ios-shutter-recovery-ui-evidence"
-
-      - name: Upload iOS shutter recovery UI evidence
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ios-shutter-recovery-ui-evidence
-          path: ${{ runner.temp }}/ios-shutter-recovery-ui-evidence
-          if-no-files-found: warn
           retention-days: 7
           overwrite: true
 

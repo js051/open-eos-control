@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +16,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,6 +26,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -40,6 +44,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -64,11 +69,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
@@ -95,6 +103,7 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraMediaStreamSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -451,11 +460,18 @@ internal fun MediaViewerDialog(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     downloadEnabled: Boolean = false,
+    downloadBusy: Boolean = false,
+    saveFeedback: MediaSaveFeedback? = null,
+    otherDownloadName: String? = null,
+    otherDownloadProgress: CameraMediaTransferProgress? = null,
+    onCancelDownload: () -> Unit = {},
     onDownload: () -> Unit = {},
     actionsEnabled: Boolean = false,
     onActions: () -> Unit = {},
     onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
+    val hasSaveFeedback = saveFeedback != null || otherDownloadName != null
     val captureTime = mediaCaptureTimeLabel(item.captureTime)
     val size = mediaByteSizeLabel(item.sizeBytes)
     val dimensions = mediaDimensionsLabel(item)
@@ -465,127 +481,214 @@ internal fun MediaViewerDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Box(
-            Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing),
+        BoxWithConstraints(
+            modifier.fillMaxSize().background(Color.Black).testTag("media-viewer-content")
+                .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            when {
-                item.isVideo && streamSource != null -> CameraVideoPlayer(
-                    item = item,
-                    source = streamSource,
-                    downloadEnabled = downloadEnabled,
-                    onDownload = onDownload,
-                )
-                !item.isVideo && bytes != null -> ZoomableMediaImage(
-                    item = item,
-                    bytes = bytes,
-                    hasBottomMetadata = captureTime != null || technicalDetails != null,
-                )
-                loading -> CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center).size(36.dp),
-                    color = AppAccent,
-                    strokeWidth = 3.dp,
-                )
-                offlinePlaceholder -> Column(
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+            val maximumFeedbackHeight = maxHeight * 0.4f
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().height(76.dp)
+                        .background(Color.Black.copy(alpha = 0.76f)).padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        painterResource(LucideR.drawable.lucide_ic_image),
-                        contentDescription = null,
-                        tint = AppAccent,
-                        modifier = Modifier.size(48.dp),
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_x,
+                        stringResource(R.string.close_media_preview),
+                        onDismiss,
+                        tint = Color.White,
                     )
-                    Text(
-                        stringResource(R.string.offline_media_preview_placeholder),
-                        color = AppSubtleText,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.widthIn(max = 240.dp),
-                    )
-                }
-                else -> Text(
-                    stringResource(R.string.media_preview_unavailable),
-                    color = AppSubtleText,
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                )
-            }
-            Row(
-                Modifier.align(Alignment.TopCenter).fillMaxWidth().height(76.dp)
-                    .background(Color.Black.copy(alpha = 0.76f)).padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ToolIconButton(
-                    LucideR.drawable.lucide_ic_x,
-                    stringResource(R.string.close_media_preview),
-                    onDismiss,
-                    tint = Color.White,
-                )
-                Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                    Text(
-                        item.name,
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (position > 0 && totalCount > 0) {
+                    Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                         Text(
-                            stringResource(R.string.media_viewer_position, position, totalCount),
-                            color = Color.White.copy(alpha = 0.72f),
+                            item.name,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (position > 0 && totalCount > 0) {
+                            Text(
+                                stringResource(R.string.media_viewer_position, position, totalCount),
+                                color = Color.White.copy(alpha = 0.72f),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    if (downloadEnabled) {
+                        ToolIconButton(
+                            LucideR.drawable.lucide_ic_download,
+                            stringResource(R.string.download_media, item.name),
+                            onDownload,
+                            enabled = !downloadBusy,
+                            tint = Color.White,
+                        )
+                    }
+                    if (actionsEnabled) {
+                        ToolIconButton(
+                            LucideR.drawable.lucide_ic_ellipsis_vertical,
+                            stringResource(R.string.media_actions, item.name),
+                            onActions,
+                            tint = Color.White,
                         )
                     }
                 }
-                if (downloadEnabled) {
-                    ToolIconButton(
-                        LucideR.drawable.lucide_ic_download,
-                        stringResource(R.string.download_media, item.name),
-                        onDownload,
-                        tint = Color.White,
-                    )
-                }
-                if (actionsEnabled) {
-                    ToolIconButton(
-                        LucideR.drawable.lucide_ic_ellipsis_vertical,
-                        stringResource(R.string.media_actions, item.name),
-                        onActions,
-                        tint = Color.White,
-                    )
-                }
-            }
-            if (canMovePrevious) {
-                ViewerNavigationButton(
-                    icon = LucideR.drawable.lucide_ic_chevron_left,
-                    description = stringResource(R.string.previous_media),
-                    onClick = onPrevious,
-                    modifier = Modifier.align(Alignment.CenterStart),
-                )
-            }
-            if (canMoveNext) {
-                ViewerNavigationButton(
-                    icon = LucideR.drawable.lucide_ic_chevron_right,
-                    description = stringResource(R.string.next_media),
-                    onClick = onNext,
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                )
-            }
-            if (captureTime != null || technicalDetails != null) {
-                Column(
-                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.76f))
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    captureTime?.let {
-                        Text(it, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when {
+                        item.isVideo && streamSource != null -> CameraVideoPlayer(
+                            item = item,
+                            source = streamSource,
+                            downloadEnabled = downloadEnabled && !downloadBusy,
+                            onDownload = onDownload,
+                        )
+                        !item.isVideo && bytes != null -> ZoomableMediaImage(
+                            item = item,
+                            bytes = bytes,
+                            hasBottomMetadata = !hasSaveFeedback && (captureTime != null || technicalDetails != null),
+                        )
+                        loading -> CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.Center).size(36.dp),
+                            color = AppAccent,
+                            strokeWidth = 3.dp,
+                        )
+                        offlinePlaceholder -> Column(
+                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(
+                                painterResource(LucideR.drawable.lucide_ic_image),
+                                contentDescription = null,
+                                tint = AppAccent,
+                                modifier = Modifier.size(48.dp),
+                            )
+                            Text(
+                                stringResource(R.string.offline_media_preview_placeholder),
+                                color = AppSubtleText,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.widthIn(max = 240.dp),
+                            )
+                        }
+                        else -> Text(
+                            stringResource(R.string.media_preview_unavailable),
+                            color = AppSubtleText,
+                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                        )
                     }
-                    technicalDetails?.let {
-                        Text(it, color = Color.White.copy(alpha = 0.72f), maxLines = 1)
+                    if (canMovePrevious) {
+                        ViewerNavigationButton(
+                            icon = LucideR.drawable.lucide_ic_chevron_left,
+                            description = stringResource(R.string.previous_media),
+                            onClick = onPrevious,
+                            modifier = Modifier.align(Alignment.CenterStart),
+                        )
                     }
+                    if (canMoveNext) {
+                        ViewerNavigationButton(
+                            icon = LucideR.drawable.lucide_ic_chevron_right,
+                            description = stringResource(R.string.next_media),
+                            onClick = onNext,
+                            modifier = Modifier.align(Alignment.CenterEnd),
+                        )
+                    }
+                    if (!hasSaveFeedback && (captureTime != null || technicalDetails != null)) {
+                        Column(
+                            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.76f))
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            captureTime?.let {
+                                Text(it, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            technicalDetails?.let {
+                                Text(it, color = Color.White.copy(alpha = 0.72f), maxLines = 1)
+                            }
+                        }
+                    }
+                }
+                if (hasSaveFeedback) {
+                    MediaSaveFeedbackPanel(
+                        item = item,
+                        feedback = saveFeedback,
+                        otherDownloadName = otherDownloadName,
+                        otherDownloadProgress = otherDownloadProgress,
+                        captureTime = captureTime,
+                        technicalDetails = technicalDetails,
+                        retryEnabled = downloadEnabled && !downloadBusy,
+                        onRetry = onDownload,
+                        onCancel = onCancelDownload,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = maximumFeedbackHeight),
+                    )
                 }
             }
         }
     }
+}
+
+/** A separate, bounded pane leaves close, navigation and download touch targets unobscured. */
+@Composable
+private fun MediaSaveFeedbackPanel(
+    item: CameraMediaItem,
+    feedback: MediaSaveFeedback?,
+    otherDownloadName: String?,
+    otherDownloadProgress: CameraMediaTransferProgress?,
+    captureTime: String?,
+    technicalDetails: String?,
+    retryEnabled: Boolean,
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.background(AppSurface).testTag("media-save-feedback")
+            .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        val status = when (feedback) {
+            MediaSaveFeedback.SelectingDestination -> stringResource(R.string.media_save_choose_destination)
+            MediaSaveFeedback.Queued -> stringResource(R.string.media_save_queued)
+            is MediaSaveFeedback.Saving -> stringResource(R.string.downloading_media, item.name)
+            is MediaSaveFeedback.Saved -> stringResource(R.string.media_saved_location, feedback.location)
+            is MediaSaveFeedback.Failed -> stringResource(R.string.media_save_failed, feedback.message)
+            MediaSaveFeedback.Cancelled -> stringResource(R.string.media_save_cancelled)
+            null -> null
+        }
+        status?.let {
+            Text(
+                it,
+                color = if (feedback is MediaSaveFeedback.Saved) AppSuccess else AppText,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        if (feedback is MediaSaveFeedback.Saving) MediaSaveProgress(feedback.progress)
+        if (otherDownloadName != null) {
+            Text(stringResource(R.string.downloading_media, otherDownloadName), color = AppText)
+            otherDownloadProgress?.let { MediaSaveProgress(it) }
+        }
+        if (feedback is MediaSaveFeedback.Saving || feedback is MediaSaveFeedback.Queued || otherDownloadName != null) {
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel_media_download)) }
+        }
+        if (feedback is MediaSaveFeedback.Failed || feedback is MediaSaveFeedback.Cancelled) {
+            TextButton(onClick = onRetry, enabled = retryEnabled) { Text(stringResource(R.string.media_save_retry)) }
+        }
+        captureTime?.let { Text(it, color = AppSubtleText) }
+        technicalDetails?.let { Text(it, color = AppSubtleText) }
+    }
+}
+
+@Composable
+private fun MediaSaveProgress(progress: CameraMediaTransferProgress) {
+    val total = progress.totalBytes
+    if (total != null && total > 0L) {
+        LinearProgressIndicator(
+            progress = { (progress.bytesTransferred.toDouble() / total).coerceIn(0.0, 1.0).toFloat() },
+            modifier = Modifier.fillMaxWidth(),
+            color = AppAccent,
+        )
+    } else {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = AppAccent)
+    }
+    Text(formatMediaProgress(progress), color = AppSubtleText)
 }
 
 @Composable
@@ -600,7 +703,7 @@ private fun ZoomableMediaImage(
     var viewport by remember(bytes) { mutableStateOf(IntSize.Zero) }
     val imageSize = remember(bytes) { decodeMediaImageSize(bytes) }
     Box(
-        Modifier.fillMaxSize().padding(vertical = 76.dp).clipToBounds().onSizeChanged { viewport = it },
+        Modifier.fillMaxSize().padding(bottom = if (hasBottomMetadata) 76.dp else 0.dp).clipToBounds().onSizeChanged { viewport = it },
     ) {
         AsyncImage(
             model = ImageRequest.Builder(context).data(bytes).crossfade(false).build(),
@@ -656,8 +759,8 @@ private fun ZoomableMediaImage(
             Box(
                 Modifier.align(Alignment.BottomEnd)
                     .padding(
-                        end = 12.dp,
-                        bottom = if (hasBottomMetadata) 112.dp else 12.dp,
+                        end = 76.dp, // Leave the right-edge navigation hit target clear.
+                        bottom = 12.dp,
                     )
                     .clip(CircleShape)
                     .background(Color.Black.copy(alpha = 0.68f)),
@@ -770,7 +873,7 @@ private fun CameraVideoPlayer(
         }
     }
 
-    Box(Modifier.fillMaxSize().padding(vertical = 64.dp)) {
+    Box(Modifier.fillMaxSize().padding(bottom = 64.dp)) {
         if (mode == CameraVideoPlaybackMode.STREAM || mode == CameraVideoPlaybackMode.FILE) {
             val localFile = fallbackFile.takeIf { mode == CameraVideoPlaybackMode.FILE }
             val player = remember(source, localFile) {

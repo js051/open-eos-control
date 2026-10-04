@@ -36,7 +36,7 @@ DELETE /v1/session/{id} 由連線清理擁有，等待結果後才解除 session
 - 背景曝光維持既有政策，沒有新增自動 stop；阻止錯誤 Live View resume，明確 Stop／disconnect 做已擁有的清理。
 - 英文／繁中、不同字體、直橫向與新舊警告並存納入測試；實際畫面須 CI 執行後檢查。
 
-## 測試分層與尚未通過的 gate
+## 測試分層與歷史 gate
 
 保留 baseline 2 例不改。新增 Core ownership 16、Bridge recovery 29、App 17；URLSession/Darwin TCP 原故障矩陣保留，另外有 transport 長度檢查與正常回應對照。UI 原新增 2 個方法之外，本輪再加 1 個 sheet hit-target 回歸。wire tests 要直接量到 full_press 次數，不以 mock 預期代替真傳輸。
 
@@ -76,10 +76,32 @@ Darwin 實際 TCP fixture 已送出完整 HTTP 200 headers、Content-Length 64�
 
 本輪只修測試 harness：對這 3 個 recovery 測試的所有 Connect setup／reconnect，採專用 connection-scroll-view helper；最多 8 次、8 秒內的有界上下滑動，要求按鈕完整 frame 與中心都在 scroll／window 交集內、寬高至少 44pt，再做原單次 tap。各 tap 前另有直接幾何斷言。一般 media helper、production、字體、方向、Stop／Disconnect 次數及產品結果斷言不變；回連的 8 秒期限仍從 tap 返回立即開始，tap 後診斷算入該期限，沒有額外等待寬限。
 
-新增 1 個純 CGRect 判準測試方法，14 組手工案例含上述真實 offscreen frame、中心可見但邊界裁切、scroll 與 window 交集、44pt 門檻、空／無限／非有限 frame。下一輪 UI 預期 15 個方法，尚未 macOS 編譯或執行。保留同名 before／after／failed 診斷附件，繼續用實際可見 Connect tap、第二 session、sheet Stop 與無舊責任干擾的最終結果閉合，不能把 helper 寫好當成回歸已通過。
+新增 1 個純 CGRect 判準測試方法，14 組手工案例含上述真實 offscreen frame、中心可見但邊界裁切、scroll 與 window 交集、44pt 門檻、空／無限／非有限 frame。在 f1183d1 提交時，下一輪 UI 預期 15 個方法，當時尚未 macOS 編譯或執行；其後的精確 head 結果見下節。保留同名 before／after／failed 診斷附件，繼續用實際可見 Connect tap、第二 session、sheet Stop 與無舊責任干擾的最終結果閉合，不能把 helper 寫好當成回歸已通過。
 
 本機沒有 Swift／Xcode。本輪 diff check 已通過；先前版本已完成語系 key parity、原規則機密掃描與 source manifest／patch 完整性檢查，但仍需對最終整合 head 重跑適用檢查。前述 Core、App unit 或 13 個 UI 成功都不能當成修改後全綠；修正必須由精確 head 正常 macOS CI 閉合，不能跳過失敗或放寬 exact-once。
 
+## f1183d1 的已完成驗證與整合界線
+
+[CI 37211034672](https://github.com/js051/open-eos-control/actions/runs/37211034672) 對應精確 head `f1183d156030d18b93f089f3386316beb59efa6b`、tree `3e59501126c9dd57d5185ad19500cfecb9177013`，`ci-complete` 成功。Core 228／228、App unit 90／90、UI 15／15 方法通過；UI 為 14 個流程方法，加 1 個包含 14 組邊界案例的 CGRect 方法，不是 15 個完整 UI 流程。
+
+該 run 的有界 UI artifact 包含 37 個附件，合計 4,138,736 bytes；ZIP 為 3,423,556 bytes，SHA-256 `a54bcd113f821b320497290fafeed2969f55f8752806ae969ad1a1d230ccd240`。三個恢復測試都回報 Passed。先前失敗的繁中 accessibility XXXL、landscapeRight 情境，在 Connect tap 前的 frame 已為 `(157, 117, 560, 77.33)`，完整位於 `(0, 0, 874, 402)` viewport；回連後 fixture session 2、目前 Stop／警告均存在。既有附件保留為該歷史 run 的 synthetic iOS Simulator 證據，不是實體 iPhone／EOS 驗證。
+
+上述成功不替代本次收斂後新 head 的驗收。iOS product／App／Core／UI source 保留 f1183d1 的已驗證內容；合併已接受 main 與下列文件／工具用途修正後，仍須對新的精確 head 重新取得 `ci-complete`，squash 進 main 後另須 `main-accepted`。此處不預先宣稱整合 head 已綠或已發布。
+
+## 保留的手動證據工具
+
+本次收斂將 `.github/workflows/android.yml` 還原為接受當時 main 的完整 blob，移除本 PR 額外加入的 exporter paths-filter 與 export/upload steps，不移除或放寬 main 原有測試、checks、gates、XCResult／failure-log 保存行為。保留 `scripts/ci/export_ios_ui_evidence.py` 及其 synthetic helper tests 作為手動離線分析工具；目前 workflow 沒有自動執行它或上傳新的小型 PNG artifact。既有 CI helper unit-test discovery 仍會測試這個 Python helper，不能將這點說成 UI 附件自動匯出已啟用。
+
+在已有 Xcode 16+ 的 macOS host，從 repository root 對已存在的 `.xcresult` 手動執行：
+
+```sh
+python3 scripts/ci/export_ios_ui_evidence.py \
+  --result-bundle ios/OpenEOSControl/TestResults.xcresult \
+  --output-dir .codex/verification/ios-ui-evidence-manual
+```
+
+output directory 必須是尚不存在的新目錄。工具只讀取結果並匯出精確白名單的合成附件，維持 24 MiB 總量與單檔／schema 限制；不安裝 Xcode、不執行測試、不改變測試結果、不安排 upload。查看產出的 summary 與原始 XCResult，export 成功不等於測試成功。欲恢復自動 artifact 工作流程，須另案完成 workflow 與 live settings 的驗收，不能以本工具仍在 repository 中推論已持續生效。
+
 ## 相容性與發布評估
 
-v0.10.0 Development Preview 之上的既有流程 patch；不改版本、不合併、不發布。Android Bridge PR #200 為獨立分支，其結果不冒充本分支驗證。沒有實體 EOS／iPhone、其他機型或光學對焦新證據；永久斷線／process death 仍不能保證機身實際停止，使用者須檢查機身。
+v0.10.0 Development Preview 之上的既有流程 patch；本產品修正 PR 不改版本。是否進入 main 或發布 Preview 依各自 exact-head／provenance gate 判定，沒有新的實體驗證宣稱。Android Bridge PR #200 的結果不冒充本分支驗證。沒有實體 EOS／iPhone、其他機型或光學對焦新證據；永久斷線／process death 仍不能保證機身實際停止，使用者須檢查機身。
