@@ -4,7 +4,7 @@
 
 ## 繁體中文
 
-這套流程把「寫完程式」、「通過對應驗證」、「進入 main」與「真的發布」分成機器可判定的狀態。PR 會依變更路徑執行相關平台矩陣；workflow 或版本本身改變時仍跑完整矩陣。相同 Git tree 不會在 `main` 與 tag 再各跑一次。
+這套流程把「寫完程式」、「通過對應驗證」、「進入 main」與「真的發布」分成機器可判定的狀態。PR 會依變更路徑執行相關平台矩陣；workflow 改變時跑完整矩陣，版本 PR 仍依實際變更路徑分類。相同 Git tree 不會在 `main` 與 tag 再各跑一次。
 
 ### 狀態定義
 
@@ -55,10 +55,10 @@
 
 - `.github/workflows/android.yml` 只由 pull request 觸發。
 - 同一 PR 推入新 commit 時，舊 run 會取消，避免同時測試已過時的 SHA。
-- `dorny/paths-filter` 以固定 commit SHA 執行變更分類。所有 PR 都跑秘密掃描、版本一致性、device-evidence／CI／release helper 測試與 actionlint；只有受影響的平台才啟動 Android unit/UI API 34/UI API 36、Simulator、Desktop Bridge、Windows standalone、Swift Core 或 iOS App/UI。
+- `dorny/paths-filter` 以固定 commit SHA 執行變更分類。所有 PR 都跑秘密掃描、版本一致性、device-evidence／CI／release helper 測試與 actionlint；只有受影響的平台才啟動 Android unit/UI API 34/UI API 36、Camera Import contract、Simulator、Desktop Bridge、Windows standalone、Swift Core 或 iOS App/UI。
 - Repo 的 GitHub Actions allowlist 必須包含相同的 `dorny/paths-filter@<commit>`；更新 workflow 中的 SHA 時要在同一項工作同步更新 allowlist，且不得改成 owner-wide 萬用規則。
 - `simulator/**` 會同步觸發依賴 fake camera 的 Android、PC 與 iOS 整合測試；`.github/workflows/**` 會觸發完整矩陣，避免 workflow 自己未被驗證。
-- 版本 PR 會改到各平台版本宣告，因此自然觸發完整矩陣。Desktop Bridge wheel/source distribution 與 Windows executable 由已通過其測試的同一 job 建立，保存為該 run 的 immutable candidate artifacts。
+- 版本 PR 的標準版本檔會觸發 Android unit/UI API 34/UI API 36、Camera Import contract、Simulator、Desktop Bridge、Windows standalone 與 iOS App/UI；獨立 `ios-core` job 只有 `ios/OpenEOSCore/**` 或 `.github/workflows/**` 改動才啟動，不能把版本 PR 統稱完整矩陣。Desktop Bridge wheel/source distribution、Windows executable、Camera Import schema ZIP 與 Kotlin JAR 由對應驗證步驟／job 建立，保存為該 run 的 immutable candidate artifacts。
 - `ci-complete` 是唯一 GitHub required check。它逐項驗證受影響 job 必須成功、未受影響 job 必須是 `skipped`；只有它成功才能稱為 PR ready。
 
 ### Main 接受階段
@@ -67,8 +67,8 @@
 - provenance verifier 透過 GitHub API 找出 squash merge 所屬 PR，fetch 該 PR head，並比較兩者 Git tree SHA。
 - verifier 接著要求 exact PR head 最新的 `CI` workflow run 已完成且成功；不同 tree、失敗 run、進行中 run 或 direct push 都會拒絕。
 - workflow 以 TOML parser 比較 merge 前後的產品版本。一般 feature、fix、docs 或 maintenance merge 在 provenance 通過後即完成，不建置或保存無法發版的重複候選包。
-- 只有版本確實改變時，workflow 才從成功 PR run 下載 immutable Bridge／Windows candidates，另建置需要 repository secrets 的固定簽章 Android APK。
-- 版本 merge 的四個檔案名稱、大小與 SHA-256 會寫入 `BUILD-PROVENANCE.json`，再一起上傳為 `release-candidate-<main commit>`。
+- 只有版本確實改變時，workflow 才從成功 PR run 下載 immutable Bridge／Windows／Camera Import candidates，另建置需要 repository secrets 的固定簽章 Android APK。
+- 版本 merge 的六個產品資產（APK、Windows executable、wheel、source archive、Camera Import schema ZIP 與 Kotlin JAR）名稱、大小與 SHA-256 會寫入 `BUILD-PROVENANCE.json`，再一起上傳為 `release-candidate-<main commit>`。Camera Import 兩個資產使用 `contracts/camera-import/v1/VERSION` 的獨立契約版本，完整名稱以 `scripts/release/release_candidate.py` 為準。
 
 ### 發版階段
 
@@ -77,7 +77,7 @@
 3. 等待 `ci-complete`，squash merge，接著等待 exact main commit 的 `main-accepted`。
 4. 只在該 accepted commit 建立 annotated `vX.Y.Z` tag。
 5. Release workflow 驗證 tag、main ancestry 與 successful main run，下載 exact commit candidate，再次核對 provenance hashes 後發布。
-6. 只有 `release-published` 成功且 GitHub prerelease 顯示 APK、Windows executable、wheel、source archive、`BUILD-PROVENANCE.json` 與 `SHA256SUMS.txt` 時，才回報 Preview released。
+6. 只有 `release-published` 成功且 GitHub prerelease 顯示上述六個產品資產、`BUILD-PROVENANCE.json` 與 `SHA256SUMS.txt` 時，才回報 Preview released。
 
 Candidate artifacts 保留 14 天，因此版本 PR 合併後應在此期限內建立 tag。失敗或過期時必須重新經過 PR／main promotion，不可手動替換 Release 檔案。
 
@@ -91,7 +91,7 @@ Candidate artifacts 保留 14 天，因此版本 PR 合併後應在此期限內�
 
 ## English
 
-This workflow gives machine-verifiable meanings to implemented, appropriately validated, accepted on `main`, and actually released. Pull requests run the platform matrix selected by changed paths; workflow and version changes still run the complete matrix. The same Git tree is promoted instead of retested on both `main` and a tag.
+This workflow gives machine-verifiable meanings to implemented, appropriately validated, accepted on `main`, and actually released. Pull requests run the platform matrix selected by changed paths; workflow changes run the complete matrix, while version PRs still use actual changed-path classification. The same Git tree is promoted instead of retested on both `main` and a tag.
 
 ### State Model
 
@@ -140,10 +140,10 @@ A release requires all of the following:
 
 ### Promotion Path
 
-- Every pull request runs security, version consistency, evidence/helper tests, and actionlint. A commit-pinned `dorny/paths-filter` selects only affected Android, iOS, Bridge, Windows, and Simulator jobs; simulator changes also run every fake-camera consumer, while workflow changes run the complete matrix. New commits cancel stale runs. `ci-complete` is the only required check and verifies both required successes and intentional skips.
+- Every pull request runs security, version consistency, evidence/helper tests, and actionlint. A commit-pinned `dorny/paths-filter` selects only affected Android, Camera Import contract, iOS, Bridge, Windows, and Simulator jobs; simulator changes also run every fake-camera consumer, while workflow changes run the complete matrix. Standard version-file changes select Android unit/UI API 34/UI API 36, Camera Import contract, Simulator, Bridge, Windows and iOS App/UI. The separate `ios-core` job runs only for `ios/OpenEOSCore/**` or `.github/workflows/**` changes, so a version PR does not inherently run every job. New commits cancel stale runs. `ci-complete` is the only required check and verifies both required successes and intentional skips.
 - The repository Actions allowlist must contain that exact `dorny/paths-filter@<commit>`. Any workflow pin update must update the allowlist in the same task and must not broaden it to an owner-wide wildcard.
 - `Main acceptance` finds the merged PR through the GitHub API, fetches its head, compares Git tree SHAs, and requires the latest exact-head PR workflow to have succeeded. Non-version merges stop after this provenance check and do not generate disposable release bundles.
-- When the declared product version changed, `Main acceptance` reuses the tested Bridge and Windows artifacts, builds only the stable-signed Android APK that needs repository secrets, records every filename, size, and SHA-256 in `BUILD-PROVENANCE.json`, and uploads `release-candidate-<main commit>`.
+- When the declared product version changed, `Main acceptance` reuses the tested Bridge, Windows and Camera Import artifacts and builds only the stable-signed Android APK that needs repository secrets. It records the six product assets (APK, Windows executable, wheel, source archive, Camera Import schema ZIP and Kotlin JAR), their sizes and SHA-256 hashes in `BUILD-PROVENANCE.json`, then uploads `release-candidate-<main commit>`. The two Camera Import assets use the independent contract version in `contracts/camera-import/v1/VERSION`; `scripts/release/release_candidate.py` defines the exact expected names.
 - A version tag must match all code and documentation declarations, point to an accepted `main` commit, and reuse that exact candidate. The release job verifies provenance hashes, adds `SHA256SUMS.txt`, and publishes the prerelease without rerunning the product test matrix.
 
 ### Release Checklist
@@ -152,7 +152,7 @@ A release requires all of the following:
 2. Run `python scripts/release/verify-version.py --tag vX.Y.Z`.
 3. Wait for `ci-complete`, squash merge, and wait for `main-accepted` on the resulting commit.
 4. Create an annotated tag on that exact commit within the candidate's 14-day retention window.
-5. Report the version as Preview released only after `release-published` succeeds and the expected GitHub prerelease assets are visible.
+5. Report the version as Preview released only after `release-published` succeeds and all six product assets, `BUILD-PROVENANCE.json` and `SHA256SUMS.txt` are visible on the GitHub prerelease.
 
 Inspect existing worktrees, branches, PRs, and Actions runs before starting or rerunning work. Keep evidence, explicit non-goals, and physical-device status in every PR so follow-up exploration remains active without inflating the current completion claim.
 
