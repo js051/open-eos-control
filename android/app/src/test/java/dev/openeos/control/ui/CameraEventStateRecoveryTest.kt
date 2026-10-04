@@ -1,6 +1,5 @@
 package dev.openeos.control.ui
 
-import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.CameraBackendFactory
 import dev.openeos.control.data.CameraHttpTransport
 import dev.openeos.control.data.CameraHttpTransportFactory
@@ -8,7 +7,6 @@ import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -65,9 +63,11 @@ class CameraEventStateRecoveryTest {
             if (::viewModel.isInitialized) {
                 viewModel.disconnect()
                 http.dispatcher.cancelAll()
-                assertTrue(pumpUntil { http.dispatcher.runningCallsCount() == 0 })
-                viewModel.viewModelScope.cancel()
-                main.scheduler.runCurrent()
+                try {
+                    assertTrue(pumpUntil { http.dispatcher.runningCallsCount() == 0 })
+                } finally {
+                    viewModel.cancelAndAwaitTestScope(main)
+                }
             }
         } finally {
             try {
