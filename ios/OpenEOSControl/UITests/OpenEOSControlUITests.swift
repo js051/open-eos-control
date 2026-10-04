@@ -427,14 +427,26 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTFail("The white-balance segment did not become interactive.\n\(app.debugDescription)")
             return
         }
+        // Pre-tap evidence can change scheduling; this diagnoses the existing
+        // single-tap failure and must not be treated as a production repair.
+        await recordClickWhiteBalanceGeometry(in: app, phase: "before-tap")
         clickWhiteBalance.tap()
+        let selectionDeadline = ProcessInfo.processInfo.systemUptime + 5
+        await recordClickWhiteBalanceGeometry(in: app, phase: "after-tap")
         let selected = XCTNSPredicateExpectation(
             predicate: NSPredicate { candidate, _ in (candidate as? XCUIElement)?.isSelected == true },
             object: clickWhiteBalance
         )
-        guard XCTWaiter().wait(for: [selected], timeout: 5) == .completed else {
-            addScreenshot(name: "click-white-balance-selection-failed")
-            XCTFail("The white-balance segment did not select.\n\(app.debugDescription)")
+        // The after-tap observations consume the original five-second budget.
+        // Do not grant a fresh wait, retry the tap, or accept a late sample.
+        let remaining = max(0, selectionDeadline - ProcessInfo.processInfo.systemUptime)
+        let didSelect = remaining > 0 && XCTWaiter().wait(for: [selected], timeout: remaining) == .completed
+        guard didSelect else {
+            await recordClickWhiteBalanceGeometry(in: app, phase: "selection-failed")
+            let reason = remaining > 0
+                ? "The white-balance segment did not select."
+                : "The after-tap diagnostics exhausted the white-balance selection budget."
+            XCTFail("\(reason)\n\(app.debugDescription)")
             return
         }
         app.buttons["Done"].tap()
@@ -786,6 +798,74 @@ final class OpenEOSControlUITests: XCTestCase {
         let moreActions = app.buttons["more-actions-button"]
         XCTAssertTrue(waitForInteraction(moreActions, timeout: 8))
         moreActions.tap()
+    }
+
+    @MainActor
+    private func recordClickWhiteBalanceGeometry(in app: XCUIApplication, phase: String) async {
+        let picker = app.segmentedControls["live-view-tap-action-picker"]
+        let segment = picker.buttons["Click white balance"]
+        let focus = picker.buttons["Tap focus"]
+        let liveView = app.descendants(matching: .any)["live-view-interaction-surface"]
+        let scroll = app.scrollViews.containing(.segmentedControl, identifier: "live-view-tap-action-picker").firstMatch
+        let window = app.windows.firstMatch.frame
+        let viewport = scroll.exists ? scroll.frame.intersection(window) : CGRect.null
+        let segmentExists = segment.exists
+        let segmentFrame = segmentExists ? segment.frame : CGRect.null
+        let center = CGPoint(x: segmentFrame.midX, y: segmentFrame.midY)
+        let liveViewFrame = liveView.exists ? liveView.frame : CGRect.null
+        let rawValue = picker.exists ? picker.value as? String : nil
+        // Emit only the known synthetic picker states, never an arbitrary AX value.
+        let pickerValue = rawValue.flatMap { ["focus", "whiteBalance", "none"].contains($0) ? $0 : nil } ?? "unavailable"
+        var lines = ["[OEC_CLICK_WHITE_BALANCE_GEOMETRY] \(phase)"]
+        lines.append("window=\(window)")
+        lines.append("more-settings-viewport=\(viewport)")
+        lines.append("picker-value=\(pickerValue)")
+        lines.append("picker exists=\(picker.exists) hittable=\(picker.isHittable) frame=\(picker.exists ? picker.frame : CGRect.null)")
+        lines.append("white-balance-segment exists=\(segmentExists) enabled=\(segmentExists && segment.isEnabled) hittable=\(segment.isHittable) selected=\(segmentExists && segment.isSelected) frame=\(segmentFrame)")
+        lines.append("focus-segment exists=\(focus.exists) selected=\(focus.exists && focus.isSelected)")
+        lines.append("live-view-interaction-surface exists=\(liveView.exists) hittable=\(liveView.isHittable) frame=\(liveViewFrame)")
+        lines.append("white-balance-center-in-viewport=\(!segmentFrame.isNull && viewport.contains(center))")
+        lines.append("white-balance-fully-in-viewport=\(!segmentFrame.isNull && viewport.contains(segmentFrame))")
+        lines.append("live-view-contains-white-balance-center=\(!segmentFrame.isNull && !liveViewFrame.isNull && liveViewFrame.contains(center))")
+        // One diagnostic-only GET observes whether the tap reached Live View.
+        // URLRequest.timeoutInterval alone is an idle timeout, so independently
+        // cancel at a monotonic deadline, then await URLSession's cancellation.
+        // Only Sendable counts leave the operation, never state, URL or errors.
+        let counterDeadline = ProcessInfo.processInfo.systemUptime + 0.5
+        let operation = Task<(Int?, Int?), Never> {
+            guard let state = try? await self.simulatorRequest(path: "/ccapi/test/state", timeoutInterval: 0.5),
+                  !Task.isCancelled, ProcessInfo.processInfo.systemUptime <= counterDeadline else {
+                return (nil, nil)
+            }
+            return (
+                (state["focus"] as? [String: Any])?["count"] as? Int,
+                (state["click_white_balance"] as? [String: Any])?["count"] as? Int
+            )
+        }
+        let timer = Task<Void, Never> {
+            let remaining = max(0, counterDeadline - ProcessInfo.processInfo.systemUptime)
+            do {
+                try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            } catch { return }
+            operation.cancel()
+        }
+        let counts = await withTaskCancellationHandler {
+            await operation.value
+        } onCancel: {
+            operation.cancel()
+        }
+        timer.cancel()
+        await timer.value
+        for (field, count) in [("simulator-focus-count", counts.0), ("simulator-click-white-balance-count", counts.1)] {
+            lines.append("\(field)=\(count.flatMap { $0 >= 0 ? String($0) : nil } ?? "unavailable")")
+        }
+        let diagnostic = lines.joined(separator: "\n")
+        print(diagnostic)
+        let attachment = XCTAttachment(string: diagnostic)
+        attachment.name = "click-white-balance-\(phase)-geometry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        addScreenshot(name: "click-white-balance-\(phase)")
     }
 
     private func recordShutterRecoveryDisconnectGeometry(in app: XCUIApplication, phase: String) {

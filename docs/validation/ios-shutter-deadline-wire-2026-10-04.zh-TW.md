@@ -1,6 +1,6 @@
 # iOS 快門 idle timeout 與 close 次序的 wire characterization
 
-基底：PR #201 head `f1183d156030d18b93f089f3386316beb59efa6b`。本分支新增一份共享 wire test source、本文件，以及 `project.yml` 既有 App unit-test target 的 source 引用。不改 production、不縮短曝光命令預算、不新增 timeout API，也不改媒體與合法長命令的設定。
+基底：PR #201 head `f1183d156030d18b93f089f3386316beb59efa6b`。本分支先新增一份共享 wire test source、本文件，以及 `project.yml` 既有 App unit-test target 的 source 引用；首輪 CI 後另加入下述既有白平衡 UI 紅測的最小診斷。不改 production、不縮短曝光命令預算、不新增 timeout API，也不改媒體與合法長命令的設定。
 
 ## 目的與界線
 
@@ -45,8 +45,18 @@ Start 自身 deadline 則影響正常曝光命令，必須另作產品決策。�
 
 校準必須由精確 head 的 CI 分別驗證兩個 OS。預期每個成功慢滴流 case 約 3.25 秒加初始化/清理；安全上限與 CI 排程不是正常完成時間保證。此文件只記錄 wire 實驗，不宣稱整體 App/UI CI 通過。
 
-本機只完成本次校準的 diff/whitespace、五個 public-API-only 方法與有界等待的靜態範圍檢查；這些不是 Swift 編譯或網路執行證據。本次校準未提交或推送，尚需照原規則執行最終機密掃描。
+本機只完成本次校準的 diff/whitespace、五個 public-API-only 方法與有界等待的靜態範圍檢查；這些不是 Swift 編譯或網路執行證據。提交與推送仍依真 pre-commit 及實際 outgoing pre-push 掃描流程，最終結果以精確 head 的 CI 為準。
 
 最新版本基準為 v0.10.0 Development Preview。Release impact：`none`，純工程 characterization，沒有 distributable product 變更。不合併、不發布；沒有實體 iPhone/EOS 證據。
 
 參考：[Apple request timeout](https://developer.apple.com/documentation/foundation/urlsessionconfiguration/timeoutintervalforrequest)、[Apple resource timeout](https://developer.apple.com/documentation/foundation/urlsessionconfiguration/timeoutintervalforresource)。
+
+## 既有白平衡 UI 單擊的最小診斷
+
+首輪同一 CI 的 `testDirectCCAPIControlsReachTheRunningCameraSimulator` 在單次點擊 More settings 的 Click white balance segment 後，原五秒內仍未 selected。App／原 UI 測試來源與已綠的 PR201 完全一致；這不能單憑來源相同歸因環境，也不能證明新的產品根因。失敗 snapshot 中 picker value 仍是 focus，但缺 tap 前位置與當時後端 counter，尚無法區分位置變動、穿透或 binding 未更新。
+
+增量只在原單擊 before／after／selection-failed 留下封閉欄位的幾何、selected/hittable、picker enum、合成 simulator 的 focus／click_white_balance 計數與 PNG。counter GET 另有 test-only 0.5 秒單調時鐘到期取消，再 await URLSession 取消完成；這不是僅設定 request idle，也不是無需排程餘裕的精確完成承諾。只返回兩個可傳遞的數值，不輸出 state 原文、URL、憑證或任意 error。原 request helper、production 完全不動。
+
+仍只有一次 tap；after 診斷消耗原五秒 selection budget，沒有重點／延長，後續實際白平衡端點 count 與狀態斷言保留。tap 前取證可能改變排程，因此後續單次通過也不能稱已修復原紅測。若診斷耗盡 budget，失敗訊息另行指出。
+
+既有小型 xcresult exporter 只增加這個精確測試及三個 phase 的名稱、13行封閉schema；既有三個停止恢復測試優先、24MiB全域上限、原 xcresult 與所有 gate 不變。本機27個 CI Python tests 通過；Swift 編譯及 UI 執行等待同一精確 head 的正常 CI。
