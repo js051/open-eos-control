@@ -1438,7 +1438,7 @@
 
   function showToast(message, error = false) {
     clearTimeout(state.toastTimer);
-    if (shutterReleaseUnconfirmed() || state.shutterDisconnectWarning) {
+    if (bulbControlLocked() || state.shutterDisconnectWarning) {
       // Persistent shutter alerts already explain recovery; never cover the Stop control.
       ui.toast.hidden = true;
       return;
@@ -4292,7 +4292,7 @@
     if (ui.shutterDisconnectWarning.parentElement !== warningHost) {
       warningHost.append(ui.shutterDisconnectWarning);
     }
-    if (shutterReleaseUnconfirmed() || state.shutterDisconnectWarning) ui.toast.hidden = true;
+    if (bulbControlLocked() || state.shutterDisconnectWarning) ui.toast.hidden = true;
     const bulbActive = bulbControlLocked();
     const interactionBusy = cameraInteractionBusy();
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);

@@ -177,6 +177,10 @@ async function run() {
     test.showToast("Connected");
     assert.equal(test.ui.toast.hidden, true, "Previous-session alert must not compete with a toast");
     test.state.shutterDisconnectWarning = false;
+    test.state.status.bulbExposureActive = true;
+    test.showToast("Bulb exposure started");
+    assert.equal(test.ui.toast.hidden, true, "An acknowledged exposure must also keep Stop unobstructed");
+    test.state.status.bulbExposureActive = false;
     test.showToast("Shutter release confirmed");
     assert.equal(test.ui.toast.hidden, false);
   }

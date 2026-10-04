@@ -174,6 +174,11 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Start Bulb exposure");
     await page.click("#shutter-button");
     await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Stop Bulb exposure");
+    assert.equal(await page.isVisible("#toast"), false);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await assertActionable(page, "#shutter-button");
+    assert.equal(await page.isVisible("#toast"), false);
+    await page.setViewportSize({ width: 1280, height: 900 });
     withdrawBulbCapability = true;
     await configure({ mode: "Manual", status_failure_after_release: true });
     await refreshMode();
