@@ -463,5 +463,7 @@ def test_shutter_recovery_alerts_do_not_cover_controls_and_live_start_has_a_guar
     camera_start = script.split("async function startLiveView(", 1)[1].split("async function stopLiveView", 1)[0]
     assert "bulbControlLocked()" in camera_start.split("beginCameraInteraction()", 1)[0]
     toast = script.split("function showToast(", 1)[1].split("function renderHealth", 1)[0]
-    assert "shutterReleaseUnconfirmed() || state.shutterDisconnectWarning" in toast
+    assert "bulbControlLocked() || state.shutterDisconnectWarning" in toast
+    bulb_lock = script.split("function bulbControlLocked()", 1)[1].split("function clearBulbTimer", 1)[0]
+    assert "shutterReleaseUnconfirmed() || state.status?.bulbExposureActive === true" in bulb_lock
     assert "ui.toast.hidden = true;" in toast
