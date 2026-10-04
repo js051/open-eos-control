@@ -117,11 +117,20 @@ class CameraRepository(
             val info = backend.info()
             activeInfo = info
             val status = backend.status()
-            val capabilities = backend.capabilities().forCamera(info)
+            val capabilities = try {
+                backend.capabilities().forCamera(info)
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                if (status.shutterReleaseUnconfirmed != true) throw exception
+                // Preserve this session's only safe control even when capability discovery fails.
+                CameraCapabilities(emptyList(), emptyList(), emptyList(), emptyList()).forCamera(info)
+            }
             liveViewRequest = request.clampTo(capabilities.liveView)
             var liveViewFrameUrl: String? = null
             var liveViewStartError: String? = null
-            if (startLiveView && capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
+            if (startLiveView && status.shutterReleaseUnconfirmed != true &&
+                status.bulbExposureActive != true && capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
                 try {
                     backend.startLiveView(liveViewRequest)
                     liveViewRunning = true

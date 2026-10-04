@@ -1794,7 +1794,7 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
 fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     val photo = state.captureMode == CaptureMode.PHOTO
     val bulb = photo && state.bulbMode
-    val bulbActive = bulb && state.bulbExposureActive
+    val bulbActive = state.bulbExposureActive
     val releaseOnly = state.shutterReleaseUnconfirmed
     val recordingActive = !photo && state.status?.recording == true
     val supported = releaseOnly || bulbActive || recordingActive || state.supports(
@@ -1813,8 +1813,8 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
         recordingActive -> stringResource(R.string.stop_recording)
         else -> stringResource(R.string.start_recording)
     }
-    val color = if (releaseOnly || bulb) AppWarning else if (photo) AppText else AppRecord
-    val operation = if (releaseOnly) CameraOperation.SHUTTER_RELEASE else if (photo) CameraOperation.CAPTURE else CameraOperation.RECORDING
+    val color = if (releaseOnly || bulbActive || bulb) AppWarning else if (photo) AppText else AppRecord
+    val operation = if (releaseOnly) CameraOperation.SHUTTER_RELEASE else if (photo || bulbActive) CameraOperation.CAPTURE else CameraOperation.RECORDING
     val processing = state.isBusy(operation)
     val temperatureAllowed = when {
         releaseOnly -> true
@@ -1836,7 +1836,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
             .clickable(enabled = supported && temperatureAllowed && !processing) {
                 when {
                     releaseOnly -> actions.retryShutterRelease()
-                    bulb -> actions.toggleBulbExposure()
+                    bulbActive || bulb -> actions.toggleBulbExposure()
                     photo -> actions.captureStill()
                     else -> actions.toggleRecording()
                 }
@@ -1860,7 +1860,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
                             fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,
                             maxLines = 2, softWrap = true)
                     }
-                } else if (photo && !bulb && !state.shutterAutofocus) {
+                } else if (photo && !bulb && !bulbActive && !state.shutterAutofocus) {
                     CameraRotatingSquareSlot(size = 50.dp) {
                         CameraHudText(value = stringResource(R.string.shutter_af_off), color = AppBackground,
                             fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,
