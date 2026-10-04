@@ -4,7 +4,11 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
-- iOS direct CCAPI/Bridge: retain session-owned Bulb release responsibility after ambiguous starts or failed stops, preserve stop-only recovery across mode changes, and isolate cancelled or late operations from replacement connections. The app keeps distinct current/previous-session warnings without changing background exposure policy; macOS and physical-camera validation remain separately reported.
+## [0.11.0] - 2026-10-05
+
+Development Preview. This minor release connects Android capture review, recent media, full-screen preview and original-file saving, while improving selected cross-platform command/recovery paths. See the [bilingual release notes](docs/releases/v0.11.0.md) for exact evidence and distribution details.
+
+- iOS direct CCAPI/Bridge: retain session-owned Bulb release responsibility after ambiguous starts or failed stops, preserve stop-only recovery across mode changes, and isolate cancelled or late operations from replacement connections. The app keeps distinct current/previous-session warnings without changing background exposure policy. Accepted exact-head macOS/iPhone Simulator evidence is recorded in the release notes; physical-camera validation remains pending.
 
 - Android: keep acknowledged shutter commands distinct from later status-read failures, retain a not-yet-visible media search, and offer bounded read-only review retry without sending another shutter. Old attempts cannot replace newer results, and media transfers block the new retry entry. Native optional-status behavior and physical-camera validation remain unchanged.
 
@@ -14,7 +18,7 @@ All notable release-level changes to Open EOS Control are documented here.
 
 - Android CCAPI multipart: give the stream reader sole ownership of closing its response. Stop cancels the call and interrupts the reader without racing its timeout cleanup, so local teardown cannot prevent the camera-side stream/general stop commands.
 
-- Desktop Bridge CCAPI/PC: retain exact Bulb stop responsibility after ambiguous start/release failures, block unsafe mutations, and expose persistent stop-only recovery across mode changes. Disconnect reports unresolved release and preserves a separate previous-camera warning; no old release is sent in a new session. Mobile Bridge adapters and physical-camera behavior remain separate follow-ups.
+- Desktop Bridge CCAPI/PC: retain exact Bulb stop responsibility after ambiguous start/release failures, block unsafe mutations, and expose persistent stop-only recovery across mode changes. Disconnect reports unresolved release and preserves a separate previous-camera warning; no old release is sent in a new session. Android and iOS Bridge recovery is covered by the separate entries above; these CCAPI/Bridge results do not establish equivalent guarantees for every gphoto2/EDSDK engine or physical camera.
 
 - Android: retain a consumed camera event until its authoritative status/capability refresh succeeds. Temporary read failures retry with capped backoff without requiring another event, losing contents hints, or replaying camera commands; disconnect discards the old session recovery.
 
@@ -28,7 +32,14 @@ All notable release-level changes to Open EOS Control are documented here.
 - Android direct CCAPI: cancel blocked identity-fallback and RTP session-description reads without trying another discovery version, creating a native session, or switching Live View sources after cancellation.
 - Android: cancel first-frame and post-command preview reads when preview stops or the app backgrounds, without cancelling an unacknowledged shutter release. Explicit restarts can release a blocked frame before waiting for the existing transition lock; native video keeps its own presentation ownership.
 - Android: reject empty or truncated originals against known media/header lengths for CCAPI and Desktop Bridge, and clarify that CCAPI setup differs from Camera Connect smartphone pairing.
-- These changes are locally verified Development Preview work. Physical-camera behavior, optical focus, other camera models' storage paths, PC/iOS parity, and exact-head CI remain separate validation requirements.
+- Android: let known-item display preview run alongside album listing, refresh an album missing the known capture, and keep an explicitly opened preview when an intermediate listing page lacks it. Saving retains the existing cancel-and-join listing strategy.
+- Android Desktop Bridge: bound only the additional status read after a failed Bulb Stop to five seconds for the whole call; expiry preserves the warning and allows Stop or Disconnect. The original protected Stop request keeps its existing budget.
+- Android API 26–32: replace the API33-only `InputStream.readNBytes` used for USB host-capture image preview with a compatible bounded reader, retaining the size limit, cancellation checks and existing JPEG boundary and PNG signature/end-marker checks rather than full decode validation. API-contract, Lint, bytecode and 15 JVM cases support the fix; no new API26-device or physical USB-camera validation is claimed.
+- iOS: reject truncated comparable identity `Content-Length` PUT responses without automatic replay, excluding HEAD/bodyless/encoded/Transfer-Encoding responses from invalid decoded-length comparisons. Keep Stop and Disconnect independently reachable in the connection sheet; the normal Start resource deadline remains 120 seconds and the short idle-deadline experiment is excluded.
+- Version Android to 0.11.0 / code 27, iOS to 0.11.0 / build 25, and Bridge/Simulator to 0.11.0. Camera Import artifact 1.1.0 / wire 1.0 remains unchanged. iOS distribution remains source and Simulator evidence, without an installable signed IPA.
+- Accepted Android product CI passed API34/API36 211/211 each; local App JVM passed 649/649, and separately completed Lint 8.8.2 reported zero errors with four-registry canary evidence. Accepted iOS product CI passed Core 228/228, App 90/90 and UI 15/15. Exact heads/runs and local aggregate-exit limitations are recorded in the release notes. Version-PR, main-candidate and publication gates remain distinct; a skipped standalone Core job is supported only by prior passing exact-source evidence.
+- Known unresolved limitation: closing a still-loading display preview does not cancel its display HTTP work. MEDIA can remain busy until completion, and a late 503 can surface globally; wait or Disconnect/reconnect to recover. Display Close and original-save Cancel remain separate. The unpublished Close repair is not included.
+- These are Development Preview improvements with automated/fixture evidence, not full Camera Connect or cross-platform gallery parity. Physical-camera behavior, optical focus, actual weak networks, other camera models' storage paths, physical iPhone/USB and real SAF providers/cross-app grants still require corresponding validation. Matching lengths do not establish source checksums, and permanent network loss/process death cannot guarantee camera-side exposure cleanup.
 
 ## [0.10.0] - 2026-09-08
 
@@ -225,3 +236,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.5.0]: https://github.com/js051/open-eos-control/releases/tag/v0.5.0
 [0.6.0]: https://github.com/js051/open-eos-control/releases/tag/v0.6.0
 [0.6.1]: https://github.com/js051/open-eos-control/releases/tag/v0.6.1
+[0.11.0]: https://github.com/js051/open-eos-control/releases/tag/v0.11.0
