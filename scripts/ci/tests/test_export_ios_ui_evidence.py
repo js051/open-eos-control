@@ -47,6 +47,23 @@ RECONNECT_GEOMETRY = (
 ).encode()
 
 
+WHITE_BALANCE_GEOMETRY = (
+    "[OEC_CLICK_WHITE_BALANCE_GEOMETRY] before-tap\n"
+    "window=(0.0, 0.0, 400.0, 800.0)\n"
+    "more-settings-viewport=(0.0, 400.0, 400.0, 400.0)\n"
+    "picker-value=focus\n"
+    "picker exists=true hittable=true frame=(20.0, 500.0, 360.0, 31.0)\n"
+    "white-balance-segment exists=true enabled=true hittable=true selected=false frame=(200.0, 500.0, 180.0, 32.0)\n"
+    "focus-segment exists=true selected=true\n"
+    "live-view-interaction-surface exists=true hittable=false frame=(0.0, 60.0, 400.0, 700.0)\n"
+    "white-balance-center-in-viewport=true\n"
+    "white-balance-fully-in-viewport=true\n"
+    "live-view-contains-white-balance-center=true\n"
+    "simulator-focus-count=1\n"
+    "simulator-click-white-balance-count=0\n"
+).encode()
+
+
 def test_tree():
     return {"testNodes": [{"nodeType": "Test Suite", "children": [
         {"nodeType": "Test Case", "nodeIdentifier": f"OpenEOSControlUITests/{name}()",
@@ -202,6 +219,76 @@ class IOSEvidenceTests(unittest.TestCase):
         self.assertEqual(self.report["files"][0]["file"], f"01-{original}.png")
         self.assertEqual(len(self.report["files"]), 1)
 
+    def test_white_balance_names_are_exact_and_scoped_to_the_direct_simulator_test(self):
+        for phase in evidence.WHITE_BALANCE_PHASES:
+            for suffix in ("", "-geometry"):
+                name = f"click-white-balance-{phase}{suffix}"
+                self.assertEqual(evidence.attachment_name(name + "_0_AAAA.png", evidence.TESTS[3]), name)
+                for recovery_test in evidence.TESTS[:3]:
+                    self.assertIsNone(evidence.attachment_name(name, recovery_test))
+        for name in ("click-white-balance-unknown", "click-white-balance-before-tap-debug",
+                     "click-white-balance-selection-failed-camera", "simulator-state",
+                     "Screen Recording", "previous-warning-and-current-stop"):
+            self.assertIsNone(evidence.attachment_name(name, evidence.TESTS[3]))
+
+    def test_white_balance_geometry_accepts_only_fixed_states_and_counts_for_each_phase(self):
+        for phase in evidence.WHITE_BALANCE_PHASES:
+            text = WHITE_BALANCE_GEOMETRY.replace(b"before-tap", phase.encode())
+            self.assertEqual(evidence.white_balance_geometry_text(text, phase), text)
+            for value in (b"whiteBalance", b"none", b"unavailable"):
+                variant = text.replace(b"picker-value=focus", b"picker-value=" + value)
+                self.assertEqual(evidence.white_balance_geometry_text(variant, phase), variant)
+            unavailable = text.replace(b"simulator-focus-count=1", b"simulator-focus-count=unavailable").replace(
+                b"simulator-click-white-balance-count=0", b"simulator-click-white-balance-count=unavailable"
+            )
+            self.assertEqual(evidence.white_balance_geometry_text(unavailable, phase), unavailable)
+
+    def test_white_balance_geometry_rejects_raw_data_missing_duplicate_or_cross_schema_fields(self):
+        for field in (b"url=SYNTHETIC-PRIVATE\n", b"authorization=SYNTHETIC-PRIVATE\n",
+                      b"label=SYNTHETIC-PRIVATE\n", b"state={\"focus\":{\"count\":1}}\n",
+                      b"simulator-focus-count=1\n", b"more-actions-sheet-exists=true\n"):
+            with self.assertRaises(evidence.EvidenceError):
+                evidence.white_balance_geometry_text(WHITE_BALANCE_GEOMETRY + field, "before-tap")
+        for old, new in ((b"picker-value=focus", b"picker-value=SYNTHETIC-PRIVATE"),
+                         (b"simulator-focus-count=1", b"simulator-focus-count=-1"),
+                         (b"simulator-focus-count=1", b"simulator-focus-count=1.5"),
+                         (b"simulator-focus-count=1\n", b""),
+                         (b"before-tap", b"selection-failed")):
+            with self.assertRaises(evidence.EvidenceError):
+                evidence.white_balance_geometry_text(WHITE_BALANCE_GEOMETRY.replace(old, new), "before-tap")
+        with self.assertRaises(evidence.EvidenceError):
+            evidence.white_balance_geometry_text(WHITE_BALANCE_GEOMETRY, "unrecognized")
+        with self.assertRaises(evidence.EvidenceError):
+            evidence.white_balance_geometry_text(GEOMETRY, "before-tap")
+        with self.assertRaises(evidence.EvidenceError):
+            evidence.geometry_text(WHITE_BALANCE_GEOMETRY)
+
+    def test_white_balance_failure_geometry_and_original_png_precede_other_phases_under_cap(self):
+        failed = "click-white-balance-selection-failed"
+        geometry = WHITE_BALANCE_GEOMETRY.replace(b"before-tap", b"selection-failed")
+        self.manifest(
+            self.attachment("click-white-balance-before-tap", "before.png"),
+            self.attachment("click-white-balance-after-tap", "after.png"),
+            self.attachment(failed, "failed.png"),
+            self.attachment(failed + "-geometry", "failed.txt", geometry),
+            self.attachment("simulator-state", "state.txt", b"SYNTHETIC-PRIVATE"),
+            self.attachment("Screen Recording", "movie.mp4", b"synthetic video"),
+        )
+        budget = len(geometry) + len(PNG)
+        self.collect(test=evidence.TESTS[3], budget=budget)
+        self.assertEqual([item["file"] for item in self.report["files"]],
+                         [f"01-{failed}-geometry.txt", f"02-{failed}.png"])
+        self.assertEqual(self.report["bytes"], budget)
+        self.assertEqual(len(self.report["warnings"]), 2)
+        self.assertLessEqual(sum(p.stat().st_size for p in self.output.iterdir()), budget)
+        self.assertNotIn("SYNTHETIC-PRIVATE", json.dumps(self.report))
+
+    def test_white_balance_collection_binds_geometry_schema_to_the_attachment_phase(self):
+        self.manifest(self.attachment("click-white-balance-after-tap-geometry", "geometry.txt", WHITE_BALANCE_GEOMETRY))
+        with self.assertRaises(evidence.EvidenceError):
+            self.collect(test=evidence.TESTS[3])
+        self.assertEqual(self.report["files"], [])
+
     def test_rejects_traversal_and_symlinks(self):
         self.manifest({"suggestedHumanReadableName": "previous-warning-and-current-stop", "exportedFileName": "../outside.png"})
         with self.assertRaises(evidence.EvidenceError):
@@ -276,8 +363,10 @@ class IOSEvidenceTests(unittest.TestCase):
                 name = "previous-warning-and-current-stop"
             elif evidence.TESTS[1] in test:
                 name = evidence.MATRIX_SAMPLES[0]
-            else:
+            elif evidence.TESTS[2] in test:
                 name = "shutter-recovery-sheet-stop-" + evidence.HIT_TARGET_CASES[0]
+            else:
+                name = "click-white-balance-selection-failed"
             (directory / "synthetic.png").write_bytes(PNG)
             (directory / "manifest.json").write_text(json.dumps([{"attachments": [
                 {"exportedFileName": "synthetic.png", "suggestedHumanReadableName": name}
@@ -291,6 +380,9 @@ class IOSEvidenceTests(unittest.TestCase):
         self.assertEqual(len([args for args in calls if args[0] == "export"]), len(evidence.TESTS))
         first_export = next(args for args in calls if args[0] == "export")
         self.assertIn(evidence.TESTS[2], first_export[-1])
+        self.assertEqual([args[-1] for args in calls if args[0] == "export"], [
+            f"OpenEOSControlUITests/{evidence.TESTS[index]}()" for index in (2, 0, 1, 3)
+        ])
         evidence.write_summary(self.output, report)
         self.assertLessEqual(sum(p.stat().st_size for p in self.output.iterdir()), evidence.MAX_ARTIFACT_BYTES)
 
