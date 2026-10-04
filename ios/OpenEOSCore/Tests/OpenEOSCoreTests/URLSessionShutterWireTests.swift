@@ -11,54 +11,106 @@ final class URLSessionShutterWireTests: XCTestCase {
         for endpoint in ShutterRecoveryEndpoint.variants {
             for fault in LoopbackShutterPeer.PressFault.allCases {
                 for connectionMode in LoopbackShutterPeer.ConnectionMode.allCases {
-                    let peer = try LoopbackShutterPeer(
-                        endpoint: endpoint, pressFault: fault, failedReleases: 1, connectionMode: connectionMode
-                    )
-                    defer { XCTAssertTrue(peer.stop(), "Loopback peer must terminate and release its sockets") }
-                    let client = try CCAPIClient(
-                        baseURL: peer.baseURL, mode: .camera, transport: URLSessionCameraHTTPTransport()
-                    )
-
                     do {
-                        _ = try await client.startBulbExposure()
-                        XCTFail("A dropped or truncated press response must not report success: \(fault)")
+                        try await assertLostPressRecovery(endpoint: endpoint, fault: fault, connectionMode: connectionMode)
                     } catch {
-                        // The peer has already consumed full_press, so delivery remains ambiguous.
+                        XCTFail("\(endpoint.method) \(fault) \(connectionMode): unexpected recovery error: \(error)")
                     }
-
-                    let unknown = await client.shutterReleaseState()
-                    XCTAssertTrue(unknown.releaseRequired, "\(endpoint.method) \(fault)")
-                    XCTAssertTrue(unknown.releaseUnconfirmed, "\(endpoint.method) \(fault)")
-                    XCTAssertNil(unknown.bulbExposureActive)
-                    let beforeRetry = peer.requests()
-                    XCTAssertEqual(beforeRetry.shutterActions, ["full_press", "release"],
-                                   "The actual URLSession transport must not replay the state-changing press")
-                    XCTAssertEqual(beforeRetry.filter { $0.action == "full_press" }.count, 1)
-                    if connectionMode == .pooled,
-                       let pressIndex = beforeRetry.firstIndex(where: { $0.action == "full_press" }), pressIndex > 0 {
-                        let connections = peer.connectionIDs()
-                        XCTAssertEqual(beforeRetry[pressIndex - 1].method, "GET")
-                        XCTAssertEqual(connections[pressIndex], connections[pressIndex - 1],
-                                       "This case must exercise a real URLSession reused connection")
-                    }
-
-                    try await client.retryShutterRelease()
-
-                    let afterRetry = peer.requests()
-                    let retryRequests = Array(afterRetry.dropFirst(beforeRetry.count))
-                    XCTAssertEqual(retryRequests.count, 1, "Recovery must send only the retained release")
-                    XCTAssertEqual(retryRequests.first?.method, endpoint.method)
-                    XCTAssertEqual(retryRequests.first?.path, endpoint.manualPath)
-                    XCTAssertEqual(retryRequests.first?.action, "release")
-                    XCTAssertEqual(retryRequests.first?.autofocus, false)
-                    XCTAssertEqual(afterRetry.shutterActions, ["full_press", "release", "release"])
-                    let released = await client.shutterReleaseState()
-                    XCTAssertEqual(released, .idle)
-
-                    await client.close()
-                    XCTAssertEqual(peer.requests(), afterRetry, "Closing an acknowledged recovery must not issue another press or release")
-                    XCTAssertTrue(peer.errors().isEmpty, peer.errors().joined(separator: "\n"))
                 }
+            }
+        }
+    }
+
+    private func assertLostPressRecovery(
+        endpoint: ShutterRecoveryEndpoint,
+        fault: LoopbackShutterPeer.PressFault,
+        connectionMode: LoopbackShutterPeer.ConnectionMode
+    ) async throws {
+        let context = "\(endpoint.method) \(fault) \(connectionMode)"
+        let peer = try LoopbackShutterPeer(
+            endpoint: endpoint, pressFault: fault, failedReleases: 1, connectionMode: connectionMode
+        )
+        defer { XCTAssertTrue(peer.stop(), "\(context): loopback peer must terminate and release its sockets") }
+        let transport = RecordingURLSessionTransport()
+        let client = try CCAPIClient(baseURL: peer.baseURL, mode: .camera, transport: transport)
+
+        do {
+            _ = try await client.startBulbExposure()
+            let responses = await transport.responseDescriptions()
+            XCTFail("\(context): an incomplete press response must not report success. Transport results: \(responses)")
+        } catch {
+            // The peer has already consumed full_press, so delivery remains ambiguous.
+        }
+
+        let unknown = await client.shutterReleaseState()
+        XCTAssertTrue(unknown.releaseRequired, context)
+        XCTAssertTrue(unknown.releaseUnconfirmed, context)
+        XCTAssertNil(unknown.bulbExposureActive, context)
+        let beforeRetry = peer.requests()
+        XCTAssertEqual(beforeRetry.shutterActions, ["full_press", "release"],
+                       "\(context): the actual URLSession transport must not replay the state-changing press")
+        XCTAssertEqual(beforeRetry.filter { $0.action == "full_press" }.count, 1, context)
+        if connectionMode == .pooled,
+           let pressIndex = beforeRetry.firstIndex(where: { $0.action == "full_press" }), pressIndex > 0 {
+            let connections = peer.connectionIDs()
+            XCTAssertEqual(beforeRetry[pressIndex - 1].method, "GET", context)
+            XCTAssertEqual(connections[pressIndex], connections[pressIndex - 1],
+                           "\(context): this case must exercise a real URLSession reused connection")
+        }
+
+        try await client.retryShutterRelease()
+
+        let afterRetry = peer.requests()
+        let retryRequests = Array(afterRetry.dropFirst(beforeRetry.count))
+        XCTAssertEqual(retryRequests.count, 1, "\(context): recovery must send only the retained release")
+        XCTAssertEqual(retryRequests.first?.method, endpoint.method, context)
+        XCTAssertEqual(retryRequests.first?.path, endpoint.manualPath, context)
+        XCTAssertEqual(retryRequests.first?.action, "release", context)
+        XCTAssertEqual(retryRequests.first?.autofocus, false, context)
+        XCTAssertEqual(afterRetry.shutterActions, ["full_press", "release", "release"], context)
+        let released = await client.shutterReleaseState()
+        XCTAssertEqual(released, .idle, context)
+
+        await client.close()
+        XCTAssertEqual(peer.requests(), afterRetry, "\(context): closing an acknowledged recovery must not issue another press or release")
+        XCTAssertTrue(peer.errors().isEmpty, "\(context): \(peer.errors().joined(separator: "\n"))")
+    }
+
+    func testActualTransportRejectsIncompleteContentLengthWithoutReplayingThePress() async throws {
+        for endpoint in ShutterRecoveryEndpoint.variants {
+            for connectionMode in LoopbackShutterPeer.ConnectionMode.allCases {
+                let context = "\(endpoint.method) truncatedResponse \(connectionMode)"
+                let peer = try LoopbackShutterPeer(
+                    endpoint: endpoint, pressFault: .truncatedResponse,
+                    failedReleases: 0, connectionMode: connectionMode
+                )
+                defer { XCTAssertTrue(peer.stop(), context) }
+                let transport = URLSessionCameraHTTPTransport()
+                if connectionMode == .pooled {
+                    let read = URLRequest(url: URL(string: peer.baseURL + "/ccapi")!)
+                    let response = try await transport.send(read)
+                    XCTAssertEqual(response.statusCode, 200, context)
+                    XCTAssertEqual(response.body, Data(endpoint.discovery.utf8), context)
+                }
+                var press = URLRequest(url: URL(string: peer.baseURL + endpoint.manualPath)!)
+                press.httpMethod = endpoint.method
+                press.httpBody = Data(#"{"af":false,"action":"full_press"}"#.utf8)
+                press.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                do {
+                    let response = try await transport.send(press)
+                    XCTFail("\(context): returned \(wireResponseDescription(response)) after a one-byte body with declared length 64")
+                } catch {
+                    // A transport error is required even if the complete 200 headers arrived.
+                    let failure = error as NSError
+                    print("Wire truncation \(context): rejected with \(failure.domain) code \(failure.code)")
+                }
+                XCTAssertEqual(peer.requests().shutterActions, ["full_press"], context)
+                if connectionMode == .pooled {
+                    let connections = peer.connectionIDs()
+                    XCTAssertEqual(connections.count, 2, context)
+                    XCTAssertEqual(connections.first, connections.last, "\(context): the press must reuse the GET connection")
+                }
+                XCTAssertTrue(peer.errors().isEmpty, "\(context): \(peer.errors().joined(separator: "\n"))")
             }
         }
     }
@@ -89,6 +141,33 @@ final class URLSessionShutterWireTests: XCTestCase {
         XCTAssertEqual(afterClose.filter { $0.action == "full_press" }.count, 1)
         XCTAssertTrue(peer.errors().isEmpty, peer.errors().joined(separator: "\n"))
     }
+}
+
+/// Records only what the production transport actually returns; no reply is fabricated,
+/// retried, parsed, or modified here. Raw loopback counts remain the replay oracle.
+private actor RecordingURLSessionTransport: CameraHTTPTransport {
+    private let transport = URLSessionCameraHTTPTransport()
+    private var responses: [String] = []
+
+    func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        let response = try await transport.send(request)
+        responses.append("\(request.httpMethod ?? "GET") \(request.url?.path ?? "") -> \(wireResponseDescription(response))")
+        return response
+    }
+
+    func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse {
+        try await transport.download(request)
+    }
+
+    func responseDescriptions() -> String { responses.joined(separator: "; ") }
+}
+
+private func wireResponseDescription(_ response: CameraHTTPResponse) -> String {
+    // Only synthetic fixture data and framing-relevant headers are recorded.
+    "HTTP \(response.statusCode), body bytes \(response.body.count), " +
+        "Content-Length \(response.header("content-length") ?? "missing"), " +
+        "Content-Encoding \(response.header("content-encoding") ?? "missing"), " +
+        "Transfer-Encoding \(response.header("transfer-encoding") ?? "missing")"
 }
 
 private enum LoopbackShutterPeerError: Error {
@@ -326,6 +405,8 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
             case .disconnect:
                 return false
             case .truncatedResponse:
+                // RFC 9112 §§6.3 and 8: 200 with one of 64 declared octets is incomplete.
+                // A 204 response cannot exercise truncation because it has no message body.
                 try sendAll(Data("HTTP/1.1 200 OK\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{".utf8), on: socket)
             }
         case "release":
@@ -345,8 +426,10 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
     private func sendHTTP(status: Int, body: Data, on socket: Int32, keepAlive: Bool = false) throws {
         let reason = status == 204 ? "No Content" : status == 200 ? "OK" : "Failure"
         let connectionHeader = keepAlive ? "keep-alive" : "close"
+        // RFC 9110 §8.6 forbids Content-Length on 204, including Content-Length: 0.
+        let contentHeaders = status == 204 ? "" : "Content-Type: application/json\r\nContent-Length: \(body.count)\r\n"
         var response = Data(
-            "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: \(connectionHeader)\r\n\r\n".utf8
+            "HTTP/1.1 \(status) \(reason)\r\n\(contentHeaders)Connection: \(connectionHeader)\r\n\r\n".utf8
         )
         response.append(body)
         try sendAll(response, on: socket)

@@ -456,7 +456,10 @@ struct ShutterRecoveryRequest: Equatable, Sendable {
     var action: String? { payload?["action"] as? String }
     var autofocus: Bool? { payload?["af"] as? Bool }
     private var payload: [String: Any]? {
-        (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        // Reads have no JSON payload. Do not ask Foundation to parse their empty body
+        // while inspecting the interleaved read/mutation wire history.
+        guard !body.isEmpty else { return nil }
+        return (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
     }
 }
 
