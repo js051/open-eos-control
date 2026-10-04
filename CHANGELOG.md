@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android CCAPI multipart: give the stream reader sole ownership of closing its response. Stop cancels the call and interrupts the reader without racing its timeout cleanup, so local teardown cannot prevent the camera-side stream/general stop commands.
+
 - Desktop Bridge CCAPI/PC: retain exact Bulb stop responsibility after ambiguous start/release failures, block unsafe mutations, and expose persistent stop-only recovery across mode changes. Disconnect reports unresolved release and preserves a separate previous-camera warning; no old release is sent in a new session. Mobile Bridge adapters and physical-camera behavior remain separate follow-ups.
 
 - Android: keep the selected media-library scope unchanged while a media operation is active, so a recent result cannot be mislabeled as a completed full-card listing. Scope controls become available again after the operation finishes.
