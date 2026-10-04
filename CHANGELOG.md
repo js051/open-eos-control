@@ -10,6 +10,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 - Desktop Bridge CCAPI/PC: retain exact Bulb stop responsibility after ambiguous start/release failures, block unsafe mutations, and expose persistent stop-only recovery across mode changes. Disconnect reports unresolved release and preserves a separate previous-camera warning; no old release is sent in a new session. Mobile Bridge adapters and physical-camera behavior remain separate follow-ups.
 
+- Android: retain a consumed camera event until its authoritative status/capability refresh succeeds. Temporary read failures retry with capped backoff without requiring another event, losing contents hints, or replaying camera commands; disconnect discards the old session recovery.
+
 - Android: keep the selected media-library scope unchanged while a media operation is active, so a recent result cannot be mislabeled as a completed full-card listing. Scope controls become available again after the operation finishes.
 - Android: cancel and join unfinished card traversal before single-file and batch downloads, including event-triggered refreshes; cancelling media work now cancels its active JSON, thumbnail, and display HTTP reads.
 - Android: isolate in-flight operations from replacement camera sessions and discard stale status reads after a newer command, without replaying camera writes.
