@@ -17,6 +17,7 @@ import dev.openeos.control.R
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.AutofocusReleaseException
 import dev.openeos.control.data.ShutterReleaseException
+import dev.openeos.control.data.CaptureStatusReadbackException
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraMediaItem
@@ -247,6 +248,8 @@ class CameraViewModel(
     private var mediaLibraryGeneration = 0L
     private var captureReviewJob: Job? = null
     private var captureReviewGeneration = 0L
+    private data class CaptureReviewAttempt(val previousId: String?, val sessionGeneration: Long)
+    private var pendingCaptureReview: CaptureReviewAttempt? = null
     private val mediaThumbnailJobs = mutableMapOf<String, Job>()
     private val mediaThumbnailSemaphore = Semaphore(MAX_CONCURRENT_MEDIA_THUMBNAILS)
     private var mediaThumbnailGeneration = 0
@@ -753,6 +756,7 @@ class CameraViewModel(
         _uiState.update {
             it.copy(
                 status = status,
+                captureStatusReadbackFailed = false,
                 capabilities = capabilities,
                 networkDiagnostics = networkDiagnostics,
                 captureMode = captureMode ?: it.captureMode,
@@ -1153,11 +1157,44 @@ class CameraViewModel(
         }
         val previousReviewId = _uiState.value.captureReviewItem?.id
             ?: selectCaptureReviewItem(_uiState.value.mediaItems)?.id
+        // A newer shutter attempt supersedes every older review, even before its ACK arrives.
+        cancelCaptureReview()
+        val generation = cameraSessionGeneration
+        val connection = _uiState.value.info
+        fun stillOwnsCapture() = generation == cameraSessionGeneration && _uiState.value.info === connection
         val revision = cameraStateRevision
-        val status = latestCameraStatus(repository.captureStill(autofocus = _uiState.value.shutterAutofocus), revision)
-        _uiState.update { it.copy(status = status) }
-        showCaptureSuccess()
-        refreshCaptureReview(expectedPreviousId = previousReviewId)
+        val result = try {
+            repository.captureStill(autofocus = _uiState.value.shutterAutofocus)
+        } catch (_: CaptureStatusReadbackException) {
+            coroutineContext.ensureActive()
+            if (!stillOwnsCapture()) return@runCamera
+            _uiState.update { it.copy(captureStatusReadbackFailed = true) }
+            null
+        }
+        coroutineContext.ensureActive()
+        if (!stillOwnsCapture()) return@runCamera
+        pendingCaptureReview = CaptureReviewAttempt(previousReviewId, generation)
+        refreshCaptureReview()
+        // The command already returned successfully. A revision-reconciliation read can also
+        // fail, but must not turn that acknowledgement back into a failed shutter command.
+        if (result != null) {
+            val status = try {
+                latestCameraStatus(result, revision)
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                coroutineContext.ensureActive()
+                if (!stillOwnsCapture()) return@runCamera
+                _uiState.update { it.copy(captureStatusReadbackFailed = true) }
+                null
+            }
+            coroutineContext.ensureActive()
+            if (!stillOwnsCapture()) return@runCamera
+            if (status != null) {
+                _uiState.update { it.copy(status = status, captureStatusReadbackFailed = false) }
+                showCaptureSuccess()
+            }
+        }
         if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
     }
 
@@ -2972,6 +3009,7 @@ class CameraViewModel(
             _uiState.update { current ->
                 current.copy(
                     status = status,
+                    captureStatusReadbackFailed = false,
                     capabilities = capabilities,
                     captureMode = captureMode ?: current.captureMode,
                     liveViewMagnification = capabilities.liveView.currentMagnification
@@ -3120,6 +3158,8 @@ class CameraViewModel(
         captureReviewThumbnail = null,
         captureReviewLoading = false,
         mediaSaveFeedback = emptyMap(),
+        captureReviewStatus = CaptureReviewStatus.IDLE,
+        captureStatusReadbackFailed = false,
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
         lastDownloadedMediaName = null,
@@ -3217,20 +3257,33 @@ class CameraViewModel(
         mediaThumbnailJobs.clear()
     }
 
-    private fun refreshCaptureReview(expectedPreviousId: String? = null) {
+    fun retryCaptureReview() {
+        val state = _uiState.value
+        val attempt = pendingCaptureReview ?: return
+        if (!state.connected || state.previewMode || state.isBusy(CameraOperation.CAPTURE) || state.isBusy(CameraOperation.MEDIA) ||
+            state.captureReviewLoading || state.captureReviewStatus != CaptureReviewStatus.NOT_READY ||
+            attempt.sessionGeneration != cameraSessionGeneration) return
+        refreshCaptureReview()
+    }
+
+    private fun refreshCaptureReview() {
         val state = _uiState.value
         if (!state.connected || state.previewMode || !state.supports(CameraFeature.MEDIA_BROWSER)) return
+        val attempt = pendingCaptureReview
         val generation = beginCaptureReviewLoad()
         captureReviewJob = viewModelScope.launch {
             val selected = awaitCaptureReviewItem(
-                expectedPreviousId = expectedPreviousId,
+                expectedPreviousId = attempt?.previousId,
                 retryDelaysMillis = CAPTURE_REVIEW_RETRY_DELAYS_MILLIS,
             ) {
                 repository.listMedia(CAPTURE_REVIEW_REQUEST_ITEMS)
             }
             if (generation != captureReviewGeneration) return@launch
             if (selected == null) {
-                _uiState.update { it.copy(captureReviewLoading = false) }
+                _uiState.update { it.copy(
+                    captureReviewLoading = false,
+                    captureReviewStatus = if (attempt != null) CaptureReviewStatus.NOT_READY else CaptureReviewStatus.IDLE,
+                ) }
                 return@launch
             }
             publishCaptureReview(selected, generation)
@@ -3243,7 +3296,11 @@ class CameraViewModel(
 
     private fun refreshCaptureReview(items: List<CameraMediaItem>) {
         if (captureReviewJob?.isActive == true) return
-        val selected = selectCaptureReviewItem(items) ?: run {
+        val selected = selectCaptureReviewItem(items)
+        val attempt = pendingCaptureReview
+        // Event/gallery refreshes must not turn the old image into this attempt's result.
+        if (attempt != null && (selected == null || selected.id == attempt.previousId)) return
+        if (selected == null) {
             cancelCaptureReview()
             _uiState.update {
                 it.copy(captureReviewItem = null, captureReviewThumbnail = null, captureReviewLoading = false)
@@ -3262,17 +3319,22 @@ class CameraViewModel(
         captureReviewGeneration += 1
         captureReviewJob?.cancel()
         captureReviewJob = null
-        _uiState.update { it.copy(captureReviewLoading = true) }
+        _uiState.update { it.copy(
+            captureReviewLoading = true,
+            captureReviewStatus = if (pendingCaptureReview != null) CaptureReviewStatus.SEARCHING else CaptureReviewStatus.IDLE,
+        ) }
         return captureReviewGeneration
     }
 
     private suspend fun publishCaptureReview(item: CameraMediaItem, generation: Long) {
         if (generation != captureReviewGeneration) return
+        pendingCaptureReview = null
         val existing = _uiState.value
         val canLoadThumbnail = existing.supports(CameraFeature.MEDIA_THUMBNAIL)
         _uiState.update {
             it.copy(
                 captureReviewItem = item,
+                captureReviewStatus = CaptureReviewStatus.IDLE,
                 captureReviewThumbnail = it.captureReviewThumbnail.takeIf { _ -> it.captureReviewItem?.id == item.id },
                 captureReviewLoading = canLoadThumbnail,
             )
@@ -3299,7 +3361,12 @@ class CameraViewModel(
         captureReviewGeneration += 1
         captureReviewJob?.cancel()
         captureReviewJob = null
-        _uiState.update { it.copy(captureReviewLoading = false) }
+        pendingCaptureReview = null
+        _uiState.update { it.copy(
+            captureReviewLoading = false,
+            captureReviewStatus = CaptureReviewStatus.IDLE,
+            captureStatusReadbackFailed = false,
+        ) }
     }
 
     private suspend fun fetchMediaThumbnailBitmap(item: CameraMediaItem): android.graphics.Bitmap {

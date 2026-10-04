@@ -1294,7 +1294,15 @@ class CcapiClient(
             postJson("/ccapi/capture/still", JSONObject().put("af", autofocus))
         }
         observedFeatures.add(CameraFeature.STILL_CAPTURE)
-        return status()
+        return try {
+            status()
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            // Only this separate read follows an acknowledged command (and manual release).
+            // Never reinterpret a command/release failure, or replay the shutter here.
+            throw CaptureStatusReadbackException(exception)
+        }
     }
 
     suspend fun startBulbExposure(): CameraStatus {

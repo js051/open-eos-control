@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android: keep acknowledged shutter commands distinct from later status-read failures, retain a not-yet-visible media search, and offer bounded read-only review retry without sending another shutter. Old attempts cannot replace newer results, and media transfers block the new retry entry. Native optional-status behavior and physical-camera validation remain unchanged.
+
 - Android: keep original-file save progress, cancellation, destination and retry feedback visible inside the full-screen media viewer. Feedback belongs to the exact item and camera session, busy taps cannot start duplicate transfers, and bounded feedback keeps close, navigation and zoom controls reachable.
 
 - Android Desktop Bridge: preserve same-session Bulb release responsibility, disable automatic mutation replay, and offer persistent stop-only recovery after ambiguous responses. Stop remains reachable across mode/capability changes; old-session callbacks cannot clear a new session's warning. Legacy happy paths remain supported, while ambiguous legacy payloads cannot prove release.

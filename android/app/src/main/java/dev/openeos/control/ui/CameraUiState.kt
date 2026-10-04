@@ -69,6 +69,8 @@ data class LiveViewDiagnostics(
     val lastFrameAtMillis: Long? = null,
 )
 
+enum class CaptureReviewStatus { IDLE, SEARCHING, NOT_READY }
+
 enum class CaptureFeedback { SUCCESS }
 
 enum class FocusFeedback { FOCUSING, ACCEPTED, SUCCESS, FAILURE }
@@ -102,6 +104,8 @@ data class CameraUiState(
     val captureReviewItem: CameraMediaItem? = null,
     val captureReviewThumbnail: Bitmap? = null,
     val captureReviewLoading: Boolean = false,
+    val captureReviewStatus: CaptureReviewStatus = CaptureReviewStatus.IDLE,
+    val captureStatusReadbackFailed: Boolean = false,
     val mediaThumbnails: Map<String, Bitmap> = emptyMap(),
     val mediaThumbnailLoadingIds: Set<String> = emptySet(),
     val mediaPreviewItem: CameraMediaItem? = null,

@@ -720,4 +720,13 @@
     <string name="media_save_retry">Retry saving original</string>
     <string name="media_save_selected_document">your selected document</string>
     <string name="media_save_selected_folder">your selected folder</string>
+
+    <string name="capture_command_acknowledged">Shutter command acknowledged</string>
+    <string name="capture_status_readback_failed">The shutter command was acknowledged, but its camera status check failed.</string>
+    <string name="capture_review_searching">Checking for newly visible media…</string>
+    <string name="capture_review_not_ready">New media has not been found yet.</string>
+    <string name="capture_review_latest_visible">Latest visible media is available.</string>
+    <string name="capture_review_explanation">This checks recent camera media only and does not send another shutter command. A newly visible item cannot be linked conclusively to this shutter command.</string>
+    <string name="capture_review_retry">Check recent media again</string>
+    <string name="capture_review_open_previous">Open previously visible media</string>
 </resources>
