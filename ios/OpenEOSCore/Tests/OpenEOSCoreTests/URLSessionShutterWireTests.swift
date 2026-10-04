@@ -115,6 +115,56 @@ final class URLSessionShutterWireTests: XCTestCase {
         }
     }
 
+    func testActualTransportAcceptsCompleteAndDecodedHTTPResponses() async throws {
+        let json = Data(#"{"ok":true}"#.utf8)
+        // A fixed gzip member for the synthetic JSON above: 31 encoded bytes, 11 decoded.
+        let gzip = Data([
+            0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0xab,
+            0x56, 0xca, 0xcf, 0x56, 0xb2, 0x2a, 0x29, 0x2a, 0x4d, 0xad, 0x05,
+            0x00, 0x90, 0x5f, 0xd4, 0xa7, 0x0b, 0x00, 0x00, 0x00,
+        ])
+        func message(_ status: String, _ headers: String, _ body: Data = Data()) -> Data {
+            var result = Data("HTTP/1.1 \(status)\r\n\(headers)Connection: close\r\n\r\n".utf8)
+            result.append(body)
+            return result
+        }
+        typealias Control = (name: String, method: String, wire: Data, status: Int, body: Data)
+        let controls: [Control] = [
+            ("complete 200", "PUT", message("200 OK", "Content-Length: 11\r\n", json), 200, json),
+            ("empty 200", "PUT", message("200 OK", "Content-Length: 0\r\n"), 200, Data()),
+            ("no-content 204", "PUT", message("204 No Content", ""), 204, Data()),
+            ("HEAD representation length", "HEAD", message("200 OK", "Content-Length: 64\r\n"), 200, Data()),
+            ("304 representation length", "GET", message("304 Not Modified", "Content-Length: 64\r\n"), 304, Data()),
+            ("identity encoding", "PUT", message("200 OK", "Content-Length: 11\r\nContent-Encoding: identity\r\n", json), 200, json),
+            ("close-delimited", "GET", message("200 OK", "", json), 200, json),
+            ("chunked", "GET", message("200 OK", "Transfer-Encoding: chunked\r\n", Data("B\r\n{\"ok\":true}\r\n0\r\n\r\n".utf8)), 200, json),
+            ("gzip", "GET", message("200 OK", "Content-Length: 31\r\nContent-Encoding: gzip\r\n", gzip), 200, json),
+        ]
+        for control in controls {
+            let peer = try LoopbackShutterPeer(
+                endpoint: ShutterRecoveryEndpoint.variants[0], pressFault: .disconnect,
+                failedReleases: 0, controlResponse: control.wire
+            )
+            defer { XCTAssertTrue(peer.stop(), control.name) }
+            let transport = URLSessionCameraHTTPTransport()
+            var request = URLRequest(url: URL(string: peer.baseURL + "/transport-control")!)
+            request.httpMethod = control.method
+            do {
+                let response = try await transport.send(request)
+                XCTAssertEqual(response.statusCode, control.status, control.name)
+                XCTAssertEqual(response.body, control.body, control.name)
+                print("Wire positive control \(control.name): \(wireResponseDescription(response))")
+            } catch {
+                XCTFail("\(control.name): valid response rejected: \(error)")
+            }
+            let requests = peer.requests()
+            XCTAssertEqual(requests.count, 1, control.name)
+            XCTAssertEqual(requests.first?.method, control.method, control.name)
+            XCTAssertEqual(requests.first?.path, "/transport-control", control.name)
+            XCTAssertTrue(peer.errors().isEmpty, "\(control.name): \(peer.errors().joined(separator: "\n"))")
+        }
+    }
+
     func testClosePerformsRetainedReleaseAfterThePeerConsumesAnUnacknowledgedPress() async throws {
         let endpoint = ShutterRecoveryEndpoint.variants[1]
         let peer = try LoopbackShutterPeer(endpoint: endpoint, pressFault: .truncatedResponse, failedReleases: 1)
@@ -194,6 +244,7 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
     private let pressFault: PressFault
     private let failedReleases: Int
     private let connectionMode: ConnectionMode
+    private let controlResponse: Data?
     private let lock = NSLock()
     private let finished = DispatchGroup()
     private var stopped = false
@@ -208,12 +259,14 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
         endpoint: ShutterRecoveryEndpoint,
         pressFault: PressFault,
         failedReleases: Int,
-        connectionMode: ConnectionMode = .fresh
+        connectionMode: ConnectionMode = .fresh,
+        controlResponse: Data? = nil
     ) throws {
         self.endpoint = endpoint
         self.pressFault = pressFault
         self.failedReleases = failedReleases
         self.connectionMode = connectionMode
+        self.controlResponse = controlResponse
         let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard socket >= 0 else { throw LoopbackShutterPeerError.systemCall("socket", errno) }
         var initialized = false
@@ -381,6 +434,10 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
 
     /// Returns true only when the next request should be read from the same TCP socket.
     private func reply(to request: ShutterRecoveryRequest, on socket: Int32) throws -> Bool {
+        if request.path == "/transport-control", let controlResponse {
+            try sendAll(controlResponse, on: socket)
+            return false
+        }
         if request.method == "GET" {
             let response = endpoint.readResponse(path: request.path)
             guard response.statusCode == 200 else {

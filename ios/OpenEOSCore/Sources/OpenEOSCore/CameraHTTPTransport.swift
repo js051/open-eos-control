@@ -150,6 +150,41 @@ struct CameraHTTPResponseBodyAccumulator {
     }
 }
 
+/// Checks only framing that remains comparable after URLSession has decoded a response.
+/// Encoded/transfer-decoded responses still rely on URLSession's framing validation.
+enum CameraHTTPResponseIntegrity {
+    static func validate(_ response: CameraHTTPResponse, requestMethod: String) throws {
+        let method = requestMethod.uppercased()
+        // RFC 9112 §6.3: these responses have no HTTP message body to compare.
+        guard method != "HEAD", !(100..<200).contains(response.statusCode),
+              response.statusCode != 204, response.statusCode != 304,
+              !(method == "CONNECT" && (200..<300).contains(response.statusCode)) else { return }
+        // Transfer-Encoding takes precedence over Content-Length. URLSession removes
+        // transfer framing and may decompress content before returning Data, so neither
+        // of those wire lengths can safely be compared with the decoded body's count.
+        guard response.header("transfer-encoding") == nil else { return }
+        let optionalWhitespace = CharacterSet(charactersIn: " \t")
+        if let encoding = response.header("content-encoding"),
+           encoding.trimmingCharacters(in: optionalWhitespace).lowercased() != "identity" { return }
+        guard let field = response.header("content-length") else { return }
+
+        // RFC 9110 §8.6 permits normalization of identical, combined length values.
+        // Reject signs, empty/conflicting values and overflow rather than losing precision.
+        var expected: Int64?
+        for component in field.split(separator: ",", omittingEmptySubsequences: false) {
+            let value = component.trimmingCharacters(in: optionalWhitespace)
+            guard !value.isEmpty, value.utf8.allSatisfy({ (48...57).contains($0) }),
+                  let length = Int64(value), expected == nil || expected == length else {
+                throw CCAPIError.invalidResponse("Camera HTTP response contained an invalid Content-Length.")
+            }
+            expected = length
+        }
+        guard let expected, expected == Int64(response.body.count) else {
+            throw CCAPIError.invalidResponse("Camera HTTP response body did not match Content-Length.")
+        }
+    }
+}
+
 public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecked Sendable {
     private let session: URLSession
     private let streamConfiguration: URLSessionConfiguration
@@ -170,7 +205,9 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
     public func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
         let (data, response) = try await session.data(for: request)
         let http = try Self.httpResponse(response)
-        return CameraHTTPResponse(statusCode: http.statusCode, headers: Self.headers(http), body: data)
+        let result = CameraHTTPResponse(statusCode: http.statusCode, headers: Self.headers(http), body: data)
+        try CameraHTTPResponseIntegrity.validate(result, requestMethod: request.httpMethod ?? "GET")
+        return result
     }
 
     public func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
