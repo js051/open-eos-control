@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android and Desktop Bridge: expose optional, observed camera-folder provenance and let Android filter already loaded media by folder alongside date, rating and type. Keep unknown folders browseable, hidden selections intact and partial-library limits visible; never infer host paths, camera slots or recording-directory control. See the [folder journey validation notes](docs/validation/android-media-folder-filter-2026-10-05.zh-TW.md) for verification status and device limits.
+
 - Android: cancel abandoned connection and Bridge scan attempts when settings change, preserve explicit retry and cleanup ownership, and provide accessible cancellation plus localized failure recovery based on actual HTTP/transport evidence. Distinguish completed-empty scans and USB eligibility. See the [connection recovery validation notes](docs/validation/android-connection-recovery-2026-10-05.zh-TW.md) for tested scope and pending device evidence.
 
 - Android: add offline recent-download records for the latest 100 started original-file attempts, with honest interrupted outcomes and a confirmed records-only clear. Protect finalized SAF and Gallery originals from later cancellation or history failures. Local and device-test evidence remains subject to the [download history validation notes](docs/validation/android-download-history-2026-10-05.zh-TW.md); no resume, file-existence, source-checksum or physical-device guarantee is added.

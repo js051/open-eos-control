@@ -3598,6 +3598,150 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realMediaFoldersKeepCardAndPhotoMovieDirectoryIdentityWithoutInfoRequests() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        val root = "/ccapi/ver140/contents"
+        val card2 = "$root/card2"
+        val card1 = "$root/card1"
+        val card2Photos = "$card2/DCIM/100CANON"
+        val card2Movies = "$card2/XFVC/REEL_0001"
+        val card1Photos = "$card1/DCIM/100CANON"
+        val containers = listOf(
+            root to listOf(card2, card1),
+            card2 to listOf(card2Photos, card2Movies),
+            card1 to listOf(card1Photos),
+            card2Photos to listOf("$card2Photos/IMG_0001.JPG", "$card2Photos/IMG_0002.CR3"),
+            card2Movies to listOf("$card2Movies/MVI_0001.MP4"),
+            card1Photos to listOf("$card1Photos/IMG_0001.JPG"),
+        )
+        containers.forEach { (_, paths) ->
+            server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+            server.enqueue(jsonResponse(JSONObject().put("path", org.json.JSONArray(paths)).toString()))
+        }
+        val batches = mutableListOf<List<CameraMediaItem>>()
+
+        val items = client.listMedia { batches += it }
+
+        assertEquals(
+            listOf(
+                "$card2Photos/IMG_0001.JPG", "$card2Movies/MVI_0001.MP4",
+                "$card1Photos/IMG_0001.JPG", "$card2Photos/IMG_0002.CR3",
+            ),
+            items.map { it.id },
+        )
+        assertEquals(listOf("image", "video", "image", "raw"), items.map { it.kind })
+        assertEquals(
+            listOf(
+                CameraMediaFolder(card2Photos, "card2/DCIM/100CANON"),
+                CameraMediaFolder(card2Movies, "card2/XFVC/REEL_0001"),
+                CameraMediaFolder(card1Photos, "card1/DCIM/100CANON"),
+                CameraMediaFolder(card2Photos, "card2/DCIM/100CANON"),
+            ),
+            items.map { it.folder },
+        )
+        assertEquals(3, batches.size)
+        batches.flatten().forEach { item ->
+            assertEquals(items.single { it.id == item.id }.folder, item.folder)
+        }
+        assertEquals(12, server.requestCount)
+        containers.forEach { (container, _) ->
+            assertEquals("$container?kind=number", server.takeRequest().path)
+            assertEquals("$container?page=1&order=desc", server.takeRequest().path)
+        }
+    }
+
+    @Test
+    fun realMediaFoldersUseTheSameIdentityForAbsoluteAndRelativeListingsAndRefresh() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        val parent = "/ccapi/ver140/contents/card2/DCIM/100CANON"
+        val path = "$parent/IMG_0001.JPG"
+        val absolute = server.url(path).toString()
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse("""{"path":["$absolute?kind=main","$path"]}"""))
+
+        val item = client.listMedia().single()
+        val expectedFolder = CameraMediaFolder(parent, "card2/DCIM/100CANON")
+        assertEquals(path, item.id)
+        assertEquals(expectedFolder, item.folder)
+        server.enqueue(jsonResponse("""{"filesize":1234,"rating":"3"}"""))
+        val refreshed = client.mediaInfo(item)
+        assertEquals(path, refreshed.id)
+        assertEquals(expectedFolder, refreshed.folder)
+        assertEquals(1234L, refreshed.sizeBytes)
+        assertEquals(3, refreshed.rating)
+
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse("""{"path":["$path?kind=main","$absolute"]}"""))
+        assertEquals(expectedFolder, client.listMedia().single().folder)
+        assertEquals(5, server.requestCount)
+        assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/contents?page=1&order=desc", server.takeRequest().path)
+        assertEquals("$path?kind=info", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
+        assertEquals("/ccapi/ver140/contents?page=1&order=desc", server.takeRequest().path)
+    }
+
+    @Test
+    fun realMediaFolderLabelsDecodeDisplaySegmentsWithoutChangingRequestIdentities() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        val parent = "/ccapi/ver140/contents/card2/DCIM/Travel%20%2B%20%E7%B4%A0%E6%9D%90"
+        val path = "$parent/IMG_0001.JPG"
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse("""{"path":["$path"]}"""))
+        val item = client.listMedia().single()
+        assertEquals(path, item.id)
+        assertEquals(CameraMediaFolder(parent, "card2/DCIM/Travel + 素材"), item.folder)
+        assertEquals(2, server.requestCount)
+        server.takeRequest()
+        server.takeRequest()
+        server.enqueue(jsonResponse("""{"filesize":42}"""))
+        assertEquals(item.folder, client.mediaInfo(item).folder)
+        assertEquals("$path?kind=info", server.takeRequest().path)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun nonContentsResourcePathsRemainBrowseableButDoNotClaimCameraFolderProvenance() = runTest {
+        client.forceRealCamera(prefix = "/ccapi/ver140")
+        val paths = listOf(
+            "/ccapi/ver140/other/contents/IMG_0001.JPG",
+            "/ccapi/ver140/%63ontents/card1/IMG_0002.JPG",
+            "/ccapi/ver140/contents/card1/IMG_0003.JPG",
+        )
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse("""{"path":[${paths.joinToString(",") { "\"$it\"" }}]}"""))
+
+        val items = client.listMedia()
+
+        assertEquals(paths, items.map { it.id })
+        assertNull(items[0].folder)
+        assertNull(items[1].folder)
+        assertEquals(CameraMediaFolder("/ccapi/ver140/contents/card1", "card1"), items[2].folder)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun realMediaFolderListingStillRejectsForeignOriginsAndEncodedTraversal() = runTest {
+        val unsafePaths = listOf(
+            "http://attacker.invalid/ccapi/ver140/contents/card1/IMG_0001.JPG",
+            "/ccapi/ver140/contents/card1/%2e%2e/IMG_0001.JPG",
+        )
+        unsafePaths.forEach { path ->
+            val camera = CcapiClient(server.url("/").toString())
+            camera.forceRealCamera(prefix = "/ccapi/ver140")
+            server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+            server.enqueue(jsonResponse("""{"path":["$path"]}"""))
+
+            assertTrue(runCatching { camera.listMedia() }.exceptionOrNull() is IllegalArgumentException)
+        }
+        assertEquals(4, server.requestCount)
+        repeat(2) {
+            assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
+            assertEquals("/ccapi/ver140/contents?page=1&order=desc", server.takeRequest().path)
+        }
+    }
+
+    @Test
     fun realMediaListReportsCameraErrorsInsteadOfReturningAnEmptyLibrary() = runTest {
         client.forceRealCamera(prefix = "/ccapi/ver110")
         server.enqueue(MockResponse().setResponseCode(404).setBody("unsupported query"))
@@ -3713,6 +3857,16 @@ class CcapiClientTest {
             items.map { it.name },
         )
         assertEquals(1, items.count { it.kind == "video" })
+        assertEquals(
+            listOf(
+                CameraMediaFolder(photoContainer, "card2/DCIM/100EOSR6"),
+                CameraMediaFolder(videoContainer, "card2/XFVC/REEL_0001"),
+                CameraMediaFolder(photoContainer, "card2/DCIM/100EOSR6"),
+                CameraMediaFolder(photoContainer, "card2/DCIM/100EOSR6"),
+                CameraMediaFolder(photoContainer, "card2/DCIM/100EOSR6"),
+            ),
+            items.map { it.folder },
+        )
         assertEquals(listOf(5), progressCounts)
         assertEquals(14, server.requestCount)
         assertEquals("/ccapi/ver140/contents?kind=number", server.takeRequest().path)
@@ -3901,6 +4055,7 @@ class CcapiClientTest {
         val item = client.listMedia().single()
         assertTrue(item.previewAvailable)
         assertEquals(true, item.archived)
+        assertNull(item.folder)
         val result = client.downloadMedia(item, output, progress::add)
 
         assertEquals("/ccapi/media", server.takeRequest().path)
@@ -3911,6 +4066,24 @@ class CcapiClientTest {
         assertEquals(0L, progress.first().bytesTransferred)
         assertEquals(bytes.size.toLong(), progress.last().bytesTransferred)
         assertEquals(bytes.size.toLong(), progress.last().totalBytes)
+    }
+
+    @Test
+    fun simulatorMediaDoesNotInferFoldersFromOpaquePathLikeIds() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"items":[{"id":"card1/DCIM/100CANON/IMG_0001.JPG","name":"IMG_0001.JPG","kind":"image"},{"id":"usb:store_00020001/100CANON/MVI_0001.MP4","name":"MVI_0001.MP4","kind":"video"}]}""",
+            ),
+        )
+
+        val items = client.listMedia()
+
+        assertEquals(2, items.size)
+        assertEquals("card1/DCIM/100CANON/IMG_0001.JPG", items.first().id)
+        assertEquals("usb:store_00020001/100CANON/MVI_0001.MP4", items.last().id)
+        items.forEach { assertNull(it.folder) }
+        assertEquals(1, server.requestCount)
+        assertEquals("/ccapi/media", server.takeRequest().path)
     }
 
     @Test
@@ -4108,7 +4281,8 @@ class CcapiClientTest {
         client.initialize()
         server.takeRequest()
         val path = "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG"
-        val item = CameraMediaItem(path, "IMG_0001.JPG", "image")
+        val folder = CameraMediaFolder("/ccapi/ver110/contents/card1/100CANON", "card1/100CANON")
+        val item = CameraMediaItem(path, "IMG_0001.JPG", "image", folder = folder)
         server.enqueue(
             jsonResponse(
                 """{"filesize":1234,"protect":"disable","archive":"disable","rating":"off","rotate":"0","lastmodifieddate":"2026-08-05T10:00:00+08:00"}""",
@@ -4122,6 +4296,7 @@ class CcapiClientTest {
         assertEquals(false, info.archived)
         assertEquals(0, info.rating)
         assertEquals(0, info.rotationDegrees)
+        assertEquals(folder, info.folder)
         assertEquals("$path?kind=info", server.takeRequest().path)
 
         server.enqueue(jsonResponse("{}"))
@@ -4135,6 +4310,7 @@ class CcapiClientTest {
         assertEquals("enable", protectBody.getString("value"))
         assertEquals("$path?kind=info", server.takeRequest().path)
         assertEquals(true, protected.protected)
+        assertEquals(folder, protected.folder)
 
         server.enqueue(jsonResponse("{}"))
         server.enqueue(jsonResponse("""{"protect":"enable","archive":"enable","rating":"off","rotate":"0"}"""))
@@ -4145,6 +4321,7 @@ class CcapiClientTest {
         assertEquals("enable", archiveBody.getString("value"))
         server.takeRequest()
         assertEquals(true, archived.archived)
+        assertEquals(folder, archived.folder)
 
         server.enqueue(jsonResponse("{}"))
         server.enqueue(jsonResponse("""{"protect":"enable","archive":"disable","rating":"off","rotate":"0"}"""))
@@ -4155,10 +4332,13 @@ class CcapiClientTest {
         assertEquals("disable", unarchiveBody.getString("value"))
         server.takeRequest()
         assertEquals(false, unarchived.archived)
+        assertEquals(folder, unarchived.folder)
 
         server.enqueue(jsonResponse("{}"))
         server.enqueue(jsonResponse("""{"protect":"enable","archive":"disable","rating":"5","rotate":"0"}"""))
-        assertEquals(5, client.setMediaRating(unarchived, 5).rating)
+        val rated = client.setMediaRating(unarchived, 5)
+        assertEquals(5, rated.rating)
+        assertEquals(folder, rated.folder)
         val ratingRequest = server.takeRequest()
         val ratingBody = JSONObject(ratingRequest.body.readUtf8())
         assertEquals("rating", ratingBody.getString("action"))
@@ -4167,7 +4347,9 @@ class CcapiClientTest {
 
         server.enqueue(jsonResponse("{}"))
         server.enqueue(jsonResponse("""{"protect":"enable","archive":"disable","rating":"5","rotate":"270"}"""))
-        assertEquals(270, client.setMediaRotation(unarchived, 270).rotationDegrees)
+        val rotated = client.setMediaRotation(unarchived, 270)
+        assertEquals(270, rotated.rotationDegrees)
+        assertEquals(folder, rotated.folder)
         val rotateRequest = server.takeRequest()
         val rotateBody = JSONObject(rotateRequest.body.readUtf8())
         assertEquals("rotate", rotateBody.getString("action"))
@@ -4271,7 +4453,16 @@ class CcapiClientTest {
         server.enqueue(jsonResponse(listing))
         val full = client.listMedia()
         assertEquals(recent.map { it.captureTime }, full.map { it.captureTime })
+        val expectedFolder = CameraMediaFolder("/ccapi/ver140/contents/card1", "card1")
+        assertEquals(List(20) { expectedFolder }, recent.map { it.folder })
+        assertEquals(List(20) { expectedFolder }, full.map { it.folder })
         assertEquals(24, server.requestCount)
+
+        server.enqueue(jsonResponse("""{"pagenumber":1}"""))
+        server.enqueue(jsonResponse(listing))
+        val cachedRecent = client.listMedia(20)
+        assertEquals(recent, cachedRecent)
+        assertEquals(26, server.requestCount)
     }
 
     @Test

@@ -6,6 +6,7 @@ import dev.openeos.control.data.CameraFileNaming
 import dev.openeos.control.data.CameraIntegerRange
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraMediaFolder
 import dev.openeos.control.data.CameraProfile
 import dev.openeos.control.data.CameraSettingControl
 import dev.openeos.control.data.CameraStatus
@@ -22,6 +23,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
     previewMode = true,
     mediaDateRange = null,
     mediaRatingFilter = MediaRatingFilter.ALL,
+    mediaFolderFilter = MediaFolderFilter.All,
     mediaSessionGeneration = mediaSessionGeneration + 1,
     transport = null,
     info = CameraInfo(
@@ -169,12 +171,14 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
             "2026-07-21T10:08:24+08:00", true, protected = true, archived = false,
             rating = 4, rotationDegrees = 0,
             contentType = "image/x-canon-raw", widthPixels = 6000, heightPixels = 4000,
+            folder = CameraMediaFolder("preview-folder", "preview-card/DCIM/100EOS"),
         ),
         CameraMediaItem(
             "preview-002", "R6M3_0001.JPG", "image", 8_912_384,
             "2026-07-21T10:08:24+08:00", true, protected = false, archived = true,
             rating = 4, rotationDegrees = 0,
             contentType = "image/jpeg", widthPixels = 6000, heightPixels = 4000,
+            folder = CameraMediaFolder("preview-folder", "preview-card/DCIM/100EOS"),
         ),
         CameraMediaItem(
             "preview-003", "R6M3_0002.MP4", "video", 128_450_560,
@@ -189,6 +193,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
         "2026-07-21T10:08:24+08:00", true, protected = false, archived = true,
         rating = 4, rotationDegrees = 0,
         contentType = "image/jpeg", widthPixels = 6000, heightPixels = 4000,
+            folder = CameraMediaFolder("preview-folder", "preview-card/DCIM/100EOS"),
     ),
     mediaThumbnails = emptyMap(),
     mediaThumbnailLoadingIds = emptySet(),

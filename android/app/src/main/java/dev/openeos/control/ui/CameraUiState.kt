@@ -102,6 +102,7 @@ data class CameraUiState(
     val mediaLibraryScope: MediaLibraryScope = MediaLibraryScope.RECENT,
     val mediaDateRange: MediaDateRange? = null,
     val mediaRatingFilter: MediaRatingFilter = MediaRatingFilter.ALL,
+    val mediaFolderFilter: MediaFolderFilter = MediaFolderFilter.All,
     // Media UI identity only; transport operations retain their existing private generation.
     val mediaSessionGeneration: Long = 0,
     val mediaLibraryHasMore: Boolean = false,
@@ -348,4 +349,13 @@ internal fun CameraUiState.withMediaRatingFilterForSession(
     generation: Long,
 ): CameraUiState = if (info === connection && mediaSessionGeneration == generation) {
     copy(mediaRatingFilter = filter)
+} else this
+
+/** A folder menu belongs to the exact connection and media session that opened it. */
+internal fun CameraUiState.withMediaFolderFilterForSession(
+    filter: MediaFolderFilter,
+    connection: CameraInfo?,
+    generation: Long,
+): CameraUiState = if (info === connection && mediaSessionGeneration == generation) {
+    copy(mediaFolderFilter = filter)
 } else this

@@ -10,6 +10,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -89,6 +90,7 @@ class DesktopBridgeClientTest {
         assertEquals("image/jpeg", media.single().contentType)
         assertEquals(6000, media.single().widthPixels)
         assertEquals(4000, media.single().heightPixels)
+        assertNull(media.single().folder)
         assertEquals("gphoto2 2.5.33", info.engineVersion)
         assertEquals(82, initialStatus.batteryLevel)
         assertEquals(2048L, initialStatus.storageTotalBytes)
@@ -246,6 +248,147 @@ class DesktopBridgeClientTest {
             assertTrue(failure is IllegalArgumentException)
         }
         assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun mediaFoldersAcceptOnlyCompleteBoundedStringPairsAndKeepMalformedItemsBrowseable() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON))
+        val opaqueId = "synthetic-folder:TEST%2F+TEST"
+        val label = "card2/DCIM/100CANON"
+        val invalidPairs = buildList<Pair<Any?, Any?>> {
+            add(null to null) // Legacy response.
+            add(opaqueId to null)
+            add(null to label)
+            add(JSONObject.NULL to label)
+            add(opaqueId to JSONObject.NULL)
+            listOf(7, 1.5, true, JSONObject(), org.json.JSONArray()).forEach { value ->
+                add(value to label)
+                add(opaqueId to value)
+            }
+            add("" to label)
+            add(opaqueId to "")
+            add("   " to label)
+            add(opaqueId to "   ")
+            add("x".repeat(4097) to label)
+            add(opaqueId to "x".repeat(1025))
+            listOf('\u0000', '\t', '\n', '\r', '\u007f', '\u0085').forEach { control ->
+                add("$opaqueId$control" to label)
+                add(opaqueId to "$label$control")
+            }
+        }
+        val pairs = listOf(
+            opaqueId to label,
+            "x".repeat(4096) to "y".repeat(1024),
+            " opaque folder " to " 相機/card2/100CANON ",
+        ) + invalidPairs
+        val payload = org.json.JSONArray(pairs.mapIndexed { index, (folderId, folderLabel) ->
+            JSONObject()
+                .put("id", "edsdk:opaque-item-$index")
+                .put("name", "IMG_0001.JPG")
+                .put("kind", "image")
+                .put("folderId", folderId)
+                .put("folderLabel", folderLabel)
+        })
+        server.enqueue(jsonResponse(JSONObject().put("items", payload).toString()))
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+
+        val items = client.listMedia()
+
+        assertEquals(pairs.size, items.size)
+        assertEquals(pairs.indices.map { "edsdk:opaque-item-$it" }, items.map { it.id })
+        assertEquals(CameraMediaFolder(opaqueId, label), items[0].folder)
+        assertEquals(CameraMediaFolder("x".repeat(4096), "y".repeat(1024)), items[1].folder)
+        assertEquals(CameraMediaFolder(" opaque folder ", " 相機/card2/100CANON "), items[2].folder)
+        items.drop(3).forEach { assertNull("Invalid metadata for ${it.id}", it.folder) }
+        assertEquals(3, server.requestCount)
+        assertEquals("/health", server.takeRequest().path)
+        assertEquals("/v1/session", server.takeRequest().path)
+        assertEquals("/v1/session/session-1/media", server.takeRequest().path)
+    }
+
+    @Test
+    fun mediaFolderMetadataRefreshAndMutationsUseMatchingAuthoritativeItemResponses() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON))
+        val itemId = "gphoto2:opaque-item"
+        val folderId = "gphoto2:opaque-folder%2Fvalue"
+        val itemJson = JSONObject()
+            .put("id", itemId)
+            .put("name", "IMG_0001.JPG")
+            .put("kind", "image")
+            .put("folderId", folderId)
+            .put("folderLabel", "store_00020001/DCIM/100CANON")
+        server.enqueue(jsonResponse(JSONObject().put("items", org.json.JSONArray().put(itemJson)).toString()))
+        server.enqueue(jsonResponse(itemJson.toString()))
+        server.enqueue(jsonResponse(JSONObject(itemJson.toString()).put("protected", true).toString()))
+        server.enqueue(jsonResponse(JSONObject(itemJson.toString()).put("archived", true).toString()))
+        server.enqueue(jsonResponse(JSONObject(itemJson.toString()).put("rating", 5).toString()))
+        server.enqueue(jsonResponse(JSONObject(itemJson.toString()).put("rotationDegrees", 90).toString()))
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+
+        val item = client.listMedia().single()
+        val refreshed = client.mediaInfo(item)
+        val protected = client.setMediaProtection(refreshed, true)
+        val archived = client.setMediaArchived(protected, true)
+        val rated = client.setMediaRating(archived, 5)
+        val rotated = client.setMediaRotation(rated, 90)
+
+        val expectedFolder = CameraMediaFolder(folderId, "store_00020001/DCIM/100CANON")
+        listOf(item, refreshed, protected, archived, rated, rotated).forEach { response ->
+            assertEquals(itemId, response.id)
+            assertEquals(expectedFolder, response.folder)
+        }
+        assertEquals(true, protected.protected)
+        assertEquals(true, archived.archived)
+        assertEquals(5, rated.rating)
+        assertEquals(90, rotated.rotationDegrees)
+        assertEquals(8, server.requestCount)
+        repeat(3) { server.takeRequest() }
+        listOf("info", "protection", "archive", "rating", "rotation").forEach { endpoint ->
+            val request = server.takeRequest()
+            assertEquals("/v1/session/session-1/media/$itemId/$endpoint", request.path)
+            assertEquals(if (endpoint == "info") "GET" else "PUT", request.method)
+        }
+
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(MEDIA_BYTES)))
+        val destination = ByteArrayOutputStream()
+        val download = client.downloadMedia(rotated, destination)
+        assertEquals("/v1/session/session-1/media/$itemId", server.takeRequest().path)
+        assertEquals(itemId, download.item.id)
+        assertEquals(expectedFolder, download.item.folder)
+        assertArrayEquals(MEDIA_BYTES, destination.toByteArray())
+        assertEquals(9, server.requestCount)
+    }
+
+    @Test
+    fun mediaFolderResponsesDoNotReuseStaleMetadataOrAcceptAnotherItemsIdentity() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON))
+        server.enqueue(jsonResponse("""{"id":"ccapi:item","name":"IMG_0001.JPG","kind":"image"}"""))
+        server.enqueue(jsonResponse("""{"id":"ccapi:item","name":"IMG_0001.JPG","kind":"image","archived":true,"folderId":"other-folder"}"""))
+        val wrongItem = """{"id":"ccapi:another-item","name":"IMG_0001.JPG","kind":"image","protected":true,"folderId":"another-folder","folderLabel":"card2/DCIM/100CANON"}"""
+        server.enqueue(jsonResponse(wrongItem))
+        server.enqueue(jsonResponse(wrongItem))
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        val item = CameraMediaItem(
+            "ccapi:item", "IMG_0001.JPG", "image",
+            folder = CameraMediaFolder("known-folder", "card1/DCIM/100CANON"),
+        )
+
+        assertNull(client.mediaInfo(item).folder)
+        assertNull(client.setMediaArchived(item, true).folder)
+        val infoFailure = runCatching { client.mediaInfo(item) }.exceptionOrNull()
+        val mutationFailure = runCatching { client.setMediaProtection(item, true) }.exceptionOrNull()
+
+        listOf(infoFailure, mutationFailure).forEach { failure ->
+            assertTrue(failure is IllegalStateException)
+            assertTrue(failure?.message.orEmpty().contains("does not belong to the requested item"))
+        }
+        assertEquals(6, server.requestCount)
     }
 
     @Test

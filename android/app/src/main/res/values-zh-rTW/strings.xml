@@ -565,4 +565,12 @@
     <string name="download_history_outcome_failed">失敗</string>
     <string name="download_history_outcome_cancelled">已取消</string>
     <string name="download_history_outcome_unconfirmed">App 重啟後結果未確認</string>
+    <string name="media_folder_filter_current">資料夾：%1$s</string>
+    <string name="media_folder_all">所有資料夾</string>
+    <string name="media_folder_unknown">未知資料夾</string>
+    <string name="media_folder_unknown_count">未知資料夾（%1$d）</string>
+    <string name="media_folder_loaded_results">符合：%1$d／已載入：%2$d · 未知資料夾：%3$d</string>
+    <string name="media_folder_loaded_only">僅顯示已載入素材提供的資料夾；瀏覽資料夾不會改變相機拍攝的儲存位置。</string>
+    <string name="media_folder_not_provided">已載入素材尚未提供資料夾資訊，仍可在「所有資料夾」或「未知資料夾」瀏覽。</string>
+    <string name="media_folder_filter_label">資料夾</string>
 </resources>

@@ -572,6 +572,19 @@ data class LiveViewMagnificationResult(
     val magnification: LiveViewMagnification,
 )
 
+/** Authoritative source folder metadata; IDs are opaque outside the supplying transport. */
+data class CameraMediaFolder(
+    val id: String,
+    val label: String,
+)
+
+/** Optional display metadata must not make a valid media item unusable. */
+internal fun cameraMediaFolderOrNull(id: String?, label: String?): CameraMediaFolder? {
+    if (id.isNullOrBlank() || label.isNullOrBlank() || id.length > 4096 || label.length > 1024) return null
+    if (id.any(Char::isISOControl) || label.any(Char::isISOControl)) return null
+    return CameraMediaFolder(id, label)
+}
+
 data class CameraMediaItem(
     val id: String,
     val name: String,
@@ -588,6 +601,7 @@ data class CameraMediaItem(
     val contentType: String? = null,
     val widthPixels: Int? = null,
     val heightPixels: Int? = null,
+    val folder: CameraMediaFolder? = null,
 )
 
 val CameraMediaItem.isVideoMedia: Boolean

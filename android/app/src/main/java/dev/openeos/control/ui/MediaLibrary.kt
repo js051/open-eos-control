@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraMediaFolder
 import dev.openeos.control.data.isVideoMedia
 import java.math.BigInteger
 import java.time.Instant
@@ -17,6 +18,23 @@ import java.util.Locale
 enum class MediaFilter { ALL, PHOTOS, VIDEOS }
 
 enum class MediaSort { CAMERA, NEWEST, OLDEST, NAME, RATING_HIGH, RATING_LOW }
+
+/** A loaded-folder view never changes the camera recording directory or fetches metadata. */
+sealed interface MediaFolderFilter {
+    data object All : MediaFolderFilter
+    data object Unknown : MediaFolderFilter
+    data class Folder(val folder: CameraMediaFolder) : MediaFolderFilter
+}
+
+internal fun MediaFolderFilter.includes(item: CameraMediaItem): Boolean = when (this) {
+    MediaFolderFilter.All -> true
+    MediaFolderFilter.Unknown -> item.folder == null
+    is MediaFolderFilter.Folder -> item.folder?.id == folder.id
+}
+
+internal fun loadedMediaFolders(items: List<CameraMediaItem>): List<CameraMediaFolder> =
+    items.mapNotNull(CameraMediaItem::folder).distinctBy(CameraMediaFolder::id)
+        .sortedWith(compareBy<CameraMediaFolder> { it.label.lowercase(Locale.ROOT) }.thenBy { it.id })
 
 /** Only confirmed, loaded 0..5 ratings are known. Unknown is never the same as unrated. */
 enum class MediaRatingFilter(val minimumStars: Int? = null) {
@@ -138,9 +156,10 @@ internal fun mediaItemsForDisplay(
     dateRange: MediaDateRange? = null,
     displayZone: ZoneId = ZoneId.systemDefault(),
     ratingFilter: MediaRatingFilter = MediaRatingFilter.ALL,
+    folderFilter: MediaFolderFilter = MediaFolderFilter.All,
 ): List<CameraMediaItem> {
     val filtered = items.filter { item ->
-        ratingFilter.includes(item) &&
+        folderFilter.includes(item) && ratingFilter.includes(item) &&
             (dateRange == null || dateRange.includes(item.captureTime, displayZone)) && when (filter) {
             MediaFilter.ALL -> true
             MediaFilter.PHOTOS -> !item.isVideo

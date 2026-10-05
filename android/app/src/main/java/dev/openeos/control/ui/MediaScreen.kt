@@ -82,15 +82,18 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var selectionDrag by remember { mutableStateOf<MediaSelectionDrag?>(null) }
     val displayZone = ZoneId.systemDefault()
-    val libraryFilteredItems = remember(state.mediaItems, state.mediaDateRange, state.mediaRatingFilter, displayZone) {
+    val libraryFilteredItems = remember(state.mediaItems, state.mediaDateRange, state.mediaRatingFilter, state.mediaFolderFilter, displayZone) {
         mediaItemsForDisplay(
-            state.mediaItems, MediaFilter.ALL, MediaSort.CAMERA, state.mediaDateRange, displayZone, state.mediaRatingFilter,
+            state.mediaItems, MediaFilter.ALL, MediaSort.CAMERA, state.mediaDateRange, displayZone, state.mediaRatingFilter, state.mediaFolderFilter,
         )
     }
     val displayedItems = remember(libraryFilteredItems, mediaFilter, mediaSort) {
         mediaItemsForDisplay(libraryFilteredItems, mediaFilter, mediaSort)
     }
     val ratingViewActive = state.mediaRatingFilter != MediaRatingFilter.ALL || mediaSort.isRatingOrder
+    val folders = remember(state.mediaItems) { loadedMediaFolders(state.mediaItems) }
+    val unknownFolderCount = remember(state.mediaItems) { state.mediaItems.count { it.folder == null } }
+    val folderViewActive = state.mediaFolderFilter != MediaFolderFilter.All
     val unknownRatingCount = remember(state.mediaItems) { state.mediaItems.count { it.knownRating == null } }
     val unknownDateCount = remember(state.mediaItems, displayZone) {
         state.mediaItems.count { it.captureTime.toMediaDisplayDate(displayZone) == null }
@@ -412,6 +415,10 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             ratingFilter = state.mediaRatingFilter,
             onRatingFilter = actions.setMediaRatingFilter,
             onDownloadHistory = actions.openDownloadHistory,
+            folderFilter = state.mediaFolderFilter,
+            folders = folders,
+            unknownFolderCount = unknownFolderCount,
+            onFolderFilter = actions.setMediaFolderFilter,
         )
 
         if (hiddenSelectedCount > 0) {
@@ -423,7 +430,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             )
         }
-        if (state.mediaDateRange != null || ratingViewActive) {
+        if (state.mediaDateRange != null || ratingViewActive || folderViewActive) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -439,6 +446,17 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
                             color = AppSubtleText,
                         )
                         Text(stringResource(R.string.media_date_zone, displayZone.id), color = AppSubtleText)
+                    }
+                    if (folderViewActive) {
+                        Text(
+                            mediaFolderFilterLabel(state.mediaFolderFilter, folders),
+                            color = AppText, modifier = Modifier.testTag("media-folder-selection"),
+                        )
+                        Text(
+                            stringResource(R.string.media_folder_loaded_results, displayedItems.size, state.mediaItems.size, unknownFolderCount),
+                            color = AppSubtleText, modifier = Modifier.testTag("media-folder-summary"),
+                        )
+                        Text(stringResource(R.string.media_folder_loaded_only), color = AppSubtleText)
                     }
                     if (ratingViewActive) {
                         Text(

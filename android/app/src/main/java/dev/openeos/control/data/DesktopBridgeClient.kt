@@ -997,7 +997,16 @@ class DesktopBridgeClient(
             contentType = item.optNullableString("contentType"),
             widthPixels = item.optNullableInt("widthPixels")?.takeIf { it > 0 },
             heightPixels = item.optNullableInt("heightPixels")?.takeIf { it > 0 },
+            folder = parseMediaFolder(item),
         )
+    }
+
+    private fun parseMediaFolder(item: JSONObject): CameraMediaFolder? {
+        // Optional metadata must never make otherwise usable legacy media disappear.
+        // In particular, do not coerce JSON values or decode the Bridge's opaque IDs.
+        val id = item.opt("folderId") as? String ?: return null
+        val label = item.opt("folderLabel") as? String ?: return null
+        return cameraMediaFolderOrNull(id, label)
     }
 
     private fun parseStatus(body: JSONObject): CameraStatus {

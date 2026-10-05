@@ -57,6 +57,7 @@ private val MULTIPART_START_RETRY_DELAYS_MILLIS = longArrayOf(100L, 200L, 400L, 
 private val JPEG_FRAME_BUSY_RETRY_DELAYS_MILLIS = longArrayOf(50L, 100L)
 private const val CCAPI_NO_API_LIST_VALUE = "No list of APIs"
 private const val CCAPI_DEVELOPER_API_PATH = "/ccapi/ver100/topurlfordev"
+private val CCAPI_CONTENTS_FOLDER_PATTERN = Regex("/ccapi/ver[0-9]+/contents(?:/.+)?")
 private val CANON_DATETIME_FORMATTER = DateTimeFormatter.ofPattern(
     "EEE, dd MMM yyyy HH:mm:ss xx",
     Locale.US,
@@ -2972,7 +2973,11 @@ class CcapiClient(
             }
         }.map { it.value }
 
-    private fun List<String>.toMediaItems(): List<CameraMediaItem> = map { path ->
+    private fun List<String>.toMediaItems(): List<CameraMediaItem> {
+        // A large folder can contain thousands of items. Decode its display path once per
+        // listing snapshot, without a cross-session cache or another camera request.
+        val folders = mutableMapOf<String, CameraMediaFolder?>()
+        return map { path ->
             val kind = path.mediaKind()
             val cached = synchronized(mediaOrderingInfoCache) { mediaOrderingInfoCache[path] }
             CameraMediaItem(
@@ -2983,8 +2988,26 @@ class CcapiClient(
                 sizeBytes = cached?.sizeBytes,
                 previewAvailable = path.isCcapiDisplayPreviewPath(),
                 streamAvailable = kind == "video",
+                folder = path.substringBeforeLast('/', "").let { parent ->
+                    if (folders.containsKey(parent)) folders[parent]
+                    else path.mediaFolder().also { folders[parent] = it }
+                },
             )
         }
+    }
+
+    private fun String.mediaFolder(): CameraMediaFolder? {
+        // Listing already normalizes and validates these paths against the active camera.
+        val parentPath = substringBeforeLast('/', "")
+        // An unrelated resource containing the word "contents" is not folder evidence.
+        // Qualify the encoded API prefix before decoding the display-only segments.
+        if (!CCAPI_CONTENTS_FOLDER_PATTERN.matches(parentPath)) return null
+        // Decode display segments only. This URL is never requested; the identity remains
+        // the original validated path, including encoded separators and literal plus signs.
+        val segments = runCatching { "https://camera.invalid$parentPath".toHttpUrl().pathSegments }.getOrNull() ?: return null
+        val label = segments.drop(3).joinToString("/").ifEmpty { "/" }
+        return cameraMediaFolderOrNull(parentPath, label)
+    }
 
     private suspend fun listContentPaths(
         containerPath: String,
