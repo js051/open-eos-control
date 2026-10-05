@@ -101,10 +101,7 @@ class AndroidCameraHttpTransportFactory(
                 ?.routes
                 ?.any { route -> route.destination.contains(targetAddress) }
                 ?: false
-        } ?: throw IllegalStateException(
-            "No Wi-Fi route can reach camera host $host. " +
-                "Connect the phone to the camera's Wi-Fi and keep mobile data enabled."
-        )
+        } ?: throw CameraWifiRouteUnavailableException()
         val linkProperties = connectivityManager.getLinkProperties(selected)
         val rtpDestinationAddress = linkProperties?.linkAddresses
             ?.asSequence()
