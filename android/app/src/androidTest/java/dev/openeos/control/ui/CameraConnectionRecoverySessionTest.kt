@@ -167,9 +167,13 @@ class CameraConnectionRecoverySessionTest {
 
     @Test fun cancelButtonAbandonsHeldIdentityAndManualReconnectStartsFresh() {
         blockIdentityOnce.set(true)
+        // App initialization owns lifetime collectors (for example download history).
+        // Cancel must finish this attempt, not terminate the entire ViewModel.
+        val scopeJob = requireNotNull(viewModel.viewModelScope.coroutineContext[Job])
+        val existingJobs = scopeJob.children.toSet()
         compose.onNodeWithTag("connection-connect").performScrollTo().performClick()
         assertTrue(identityEntered.await(15, TimeUnit.SECONDS))
-        val attemptJobs = requireNotNull(viewModel.viewModelScope.coroutineContext[Job]).children.toList()
+        val attemptJobs = scopeJob.children.filterNot { it in existingJobs }.toList()
         assertTrue(attemptJobs.isNotEmpty())
         val heldRequests = requests.size
         compose.onNodeWithTag("connection-cancel").assertIsDisplayed().assertIsEnabled()

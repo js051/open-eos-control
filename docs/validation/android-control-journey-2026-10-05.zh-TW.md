@@ -23,6 +23,12 @@
 
 App APK SHA-256：`8a40e09c225cf177dec0cc78fa6ea8178488c08deca392012e80714a9bd9991d`；androidTest APK：`f8c6b0a19ee7402d219af15ced85363c78f8eb0701b7cc07e6a4868ffdf84a20`。額外以官方 dexdump 核對新舊關鍵測試 class 確實存在，且 test APK 含既有有效 H.264 asset；這不等於執行測試。
 
+## 送 CI 前的整合測試契約核對
+
+獨立來源審查發現 Cancel 案例原本等待 ViewModel 的全部子工作完成；整合媒體基底後，下載紀錄的 lifetime collector 正確地持續存活，因此這個條件不可能代表連線取消完成。改為在 Connect 前記錄已存在工作，held identity 到達後只追蹤本次新增工作。保留工作非空、全部完成、pending 清空、舊回覆未放行、沒有額外請求及手動重連完成的斷言；不終止 collector，也不放寬 15 秒。這是測試修正，不宣稱是舊 CPU 驗證拒絕案例的根因。
+
+這次僅 androidTest 修正於 2026-10-05T12:11:45Z 至 2026-10-05T12:12:55Z 完成編譯、Lint及test APK，exit 0（1m10s）。Lint仍為0 error／55 warning／2 information；App APK未變，775 JVM沒有重跑。最終來源manifest為 `ab2d1a5c0cc7133b9815ff0c9928c06501cb01dfcfc97c3b50ee0d079ac2b634`，test APK為 `1d51263e5174b990bcec17ff5cda9163d639ce319bed7c03aefcb469d4c93b51`；仍待實跑，不將這次編譯當成取消案例通過。
+
 ## 裝置 gate 與已知限制
 
 - 連線原獨立來源曾於 CPU-only API34 實跑：0 confirmed pass、1 assertion failure、1 interrupted、6 not run。手動修改驗證資料後的 assertConnected 15 秒 timeout 尚未定因；模擬器稍後 SIGKILL 不能用來替第一例歸因。整合仍保留原斷言與安全診斷，需在正常加速 CI 閉合。
