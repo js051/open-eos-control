@@ -235,6 +235,12 @@ class CameraDownloadHistoryJourneyTest {
         compose.runOnIdle { model.disconnect() }
         gate.release()
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !model.uiState.value.connected && !model.uiState.value.busy }
+        // Disconnect immediately clears session UI; the cancelled transfer still owns cleanup
+        // and asynchronously submits its terminal receipt to the process writer. A barrier
+        // queued before that submission is not evidence that cancellation has finished.
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            history.state.value.entries.singleOrNull()?.outcome == DownloadHistoryOutcome.CANCELLED
+        }
         runBlocking { history.awaitIdle() }
         assertEquals(DownloadHistoryOutcome.CANCELLED, history.state.value.entries.single().outcome)
         val previousReceipt = history.state.value.entries.single().receiptId

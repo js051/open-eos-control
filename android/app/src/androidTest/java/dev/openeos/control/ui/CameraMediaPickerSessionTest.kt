@@ -136,10 +136,15 @@ class CameraMediaPickerSessionTest {
         compose.runOnIdle {
             registry.deliver(request, destination)
             val state = viewModel.uiState.value
+            // Receipt admission is durable before destination I/O. The restored callback
+            // must synchronously own this exact item, but its disk admission may still be queued.
+            val admitted = state.mediaSaveFeedback[item.id] == MediaSaveFeedback.Queued &&
+                CameraOperation.MEDIA in state.pendingOperations
             assertTrue(
                 "The restored CreateDocument callback lost its selected camera item: " +
-                    "active=${state.activeMediaDownloadName}, saved=${state.lastDownloadedMediaName}, error=${state.error}",
-                state.activeMediaDownloadName == item.name || state.lastDownloadedMediaName == item.name,
+                    "feedback=${state.mediaSaveFeedback[item.id]}, active=${state.activeMediaDownloadName}, " +
+                    "saved=${state.lastDownloadedMediaName}, error=${state.error}",
+                admitted || state.activeMediaDownloadName == item.name || state.lastDownloadedMediaName == item.name,
             )
         }
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
