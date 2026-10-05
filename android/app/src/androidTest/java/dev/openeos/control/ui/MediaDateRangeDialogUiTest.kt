@@ -66,11 +66,13 @@ class MediaDateRangeDialogUiTest {
                     }
                 }
             }
+            compose.runOnIdle { assertLandscapeActivityWindow(compose.activity) }
             if (narrow) {
                 compose.onNodeWithTag("media-date-dialog").assertWidthIsEqualTo(320.dp).assertHeightIsEqualTo(320.dp)
             }
             val action = compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed().assertIsEnabled()
-            assertFullBoundsVisible(action)
+            // The narrow case intentionally has a square Dialog inside the real landscape Activity.
+            assertFullBoundsVisible(action, requireLandscapeDialog = !narrow)
             action.performTouchInput { click() }
             compose.onNodeWithTag("media-date-dialog").assertDoesNotExist()
             compose.runOnIdle {
@@ -83,10 +85,10 @@ class MediaDateRangeDialogUiTest {
         }
     }
 
-    private fun assertFullBoundsVisible(control: SemanticsNodeInteraction) {
+    private fun assertFullBoundsVisible(control: SemanticsNodeInteraction, requireLandscapeDialog: Boolean) {
         val node = control.fetchSemanticsNode()
         compose.runOnIdle {
-            assertFullyVisibleDialogAction(node, landscape = true)
+            assertFullyVisibleDialogAction(node, requireLandscapeDialog)
         }
     }
 }

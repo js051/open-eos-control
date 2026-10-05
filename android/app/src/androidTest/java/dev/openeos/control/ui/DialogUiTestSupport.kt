@@ -1,5 +1,7 @@
 package dev.openeos.control.ui
 
+import android.app.Activity
+import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -30,8 +32,22 @@ internal fun DialogFontScaleOverride(fontScale: Float, content: @Composable () -
     }
 }
 
+/** A deliberately square Dialog still needs a real landscape Activity behind it. Call on the UI thread. */
+internal fun assertLandscapeActivityWindow(activity: Activity) {
+    assertEquals(
+        "The Activity must use the real landscape configuration",
+        Configuration.ORIENTATION_LANDSCAPE,
+        activity.resources.configuration.orientation,
+    )
+    val decor = activity.window.decorView
+    assertTrue(
+        "The Activity must have a laid-out landscape window: ${decor.width} x ${decor.height}",
+        decor.isLaidOut && decor.width > decor.height && decor.height > 0,
+    )
+}
+
 /** Call on the UI thread. Returns the entire touch target in screen coordinates. */
-internal fun assertFullyVisibleDialogAction(node: SemanticsNode, landscape: Boolean = false): Rect {
+internal fun assertFullyVisibleDialogAction(node: SemanticsNode, requireLandscapeDialog: Boolean = false): Rect {
     val density = node.layoutInfo.density
     assertEquals("The Dialog must use the requested 2x font scale", 2f, density.fontScale, 0.01f)
 
@@ -69,7 +85,7 @@ internal fun assertFullyVisibleDialogAction(node: SemanticsNode, landscape: Bool
     assertContainsDialogBounds("Full action layout on screen", visibleScreen, Rect(node.positionOnScreen, node.size.toSize()))
     val touchScreen = touchRoot.translate(node.positionOnScreen - node.positionInRoot)
     assertContainsDialogBounds("Full action touch target on screen", visibleScreen, touchScreen)
-    if (landscape) {
+    if (requireLandscapeDialog) {
         assertTrue("The Dialog must use a real landscape window", visibleScreen.width > visibleScreen.height)
     }
     return touchScreen

@@ -10,6 +10,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
@@ -19,6 +20,7 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
@@ -85,7 +87,7 @@ class DownloadHistoryDialogInstrumentedTest {
         showHistory(onClear = { clears++ }, onDismiss = { dismissals++ })
         compose.onNodeWithTag("download-history-dialog").assertIsDisplayed()
 
-        pressBack()
+        pressBack("download-history-dialog")
 
         compose.onNodeWithTag("download-history-dialog").assertDoesNotExist()
         compose.runOnIdle {
@@ -102,7 +104,7 @@ class DownloadHistoryDialogInstrumentedTest {
         compose.onNodeWithTag("download-history-clear").performClick()
         compose.onNodeWithTag("download-history-clear-confirm").assertIsDisplayed()
 
-        pressBack()
+        pressBack("download-history-clear-confirm")
 
         compose.onNodeWithTag("download-history-clear-confirm").assertDoesNotExist()
         compose.onNodeWithTag("download-history-dialog").assertIsDisplayed()
@@ -111,7 +113,7 @@ class DownloadHistoryDialogInstrumentedTest {
             assertEquals(0, dismissals)
         }
 
-        pressBack()
+        pressBack("download-history-dialog")
         compose.onNodeWithTag("download-history-dialog").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(0, clears)
@@ -200,13 +202,15 @@ class DownloadHistoryDialogInstrumentedTest {
             onClear = { clears++ },
             onDismiss = { dismissals++ },
         )
+        compose.runOnIdle { assertLandscapeActivityWindow(compose.activity) }
         if (narrow) {
             compose.onNodeWithTag("download-history-dialog")
                 .assertWidthIsEqualTo(320.dp).assertHeightIsEqualTo(320.dp)
         }
 
-        val clearBounds = assertFullyVisibleAction(compose.onNodeWithTag("download-history-clear"), landscape = true)
-        val closeBounds = assertFullyVisibleAction(compose.onNodeWithTag("download-history-close"), landscape = true)
+        // The narrow case intentionally has a square Dialog inside the real landscape Activity.
+        val clearBounds = assertFullyVisibleAction(compose.onNodeWithTag("download-history-clear"), requireLandscapeDialog = !narrow)
+        val closeBounds = assertFullyVisibleAction(compose.onNodeWithTag("download-history-close"), requireLandscapeDialog = !narrow)
         assertFalse("The clear and close touch targets must not overlap", clearBounds.overlaps(closeBounds))
         compose.onNodeWithTag(tag).performTouchInput { click() }
 
@@ -263,10 +267,21 @@ class DownloadHistoryDialogInstrumentedTest {
         return compose.onNodeWithTag(tag)
     }
 
-    private fun pressBack() {
-        // Send Back to the active Android window, including the nested confirmation dialog.
+    private fun pressBack(dialogTag: String) {
+        val node = compose.onNodeWithTag(dialogTag).assertIsDisplayed().fetchSemanticsNode()
+        val dialogView = (node.root as ViewRootForTest).view
+        // Removing a confirmation's composition can finish before WindowManager returns focus
+        // to the parent Dialog. Compose idleness alone does not make it the Back event's target.
+        compose.waitUntil(timeoutMillis = 10_000L) {
+            compose.runOnIdle { dialogView.isAttachedToWindow && dialogView.hasWindowFocus() }
+        }
+        // Inject exactly one Back into the now-focused Android window, never a semantics action.
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        compose.waitForIdle()
+        // Android's Back callback/window dismissal may also complete after Compose is idle.
+        // Wait for this one event's intended result; callers still verify exact callback counts.
+        compose.waitUntil(timeoutMillis = 10_000L) {
+            compose.onAllNodesWithTag(dialogTag).fetchSemanticsNodes().isEmpty()
+        }
     }
 
     private fun withLandscapeWindow(test: () -> Unit) {
@@ -291,10 +306,10 @@ class DownloadHistoryDialogInstrumentedTest {
         }
     }
 
-    private fun assertFullyVisibleAction(control: SemanticsNodeInteraction, landscape: Boolean = false): Rect {
+    private fun assertFullyVisibleAction(control: SemanticsNodeInteraction, requireLandscapeDialog: Boolean = false): Rect {
         val node = control.assertIsDisplayed().assertIsEnabled().fetchSemanticsNode()
         return compose.runOnIdle {
-            assertFullyVisibleDialogAction(node, landscape)
+            assertFullyVisibleDialogAction(node, requireLandscapeDialog)
         }
     }
 
