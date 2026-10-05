@@ -40,3 +40,13 @@ Disconnect 會立即清除 session UI，但原傳輸仍負責清理並提交 CAN
 修正後的 API 34／36 裝置結果仍待重跑。首輪失敗證據保持原來源，不因測試契約更正而回寫為通過；新的裝置結果另記精確 head。
 
 Release Assessment：本次測試契約修正本身為 `none`；PR #205 整體新增媒體旅程相對 v0.11.0 仍為 `minor` Development Preview 評估。沒有改版本、合併 main 或發布，也沒有新增實體相機／手機／外部 SAF provider 證據。
+
+## 第二輪裝置結果與剩餘同步修正
+
+[CI 37297857008](https://github.com/js051/open-eos-control/actions/runs/37297857008) 的 head 為 `9c303e16b829fab58daf1313064ef6e760a4bb30`。API 34 為 264 例／6 failure（258 通過），API 36 為 264 例／7 failure（257 通過），均無 error／skip；JVM job 通過，`ci-complete` 仍失敗。
+
+原失敗清單中的 20 例已在兩個 API 實跑通過。共同剩餘 6 例為測試視窗契約：5 例將刻意 320×320 的方形 Dialog 也要求為橫向長寬比，另 1 例僅覆寫 composition 的語系，批次編輯 sheet 的真正 Android Context 仍為英文。後續保留真 Activity 橫向證據，同時獨立驗方形 Dialog 精確 320×320；批次編輯則使用真正 zh-TW／1.3 字級的 Android Context，驗其 resources／density、中文標籤與保護／取消保護的確切素材及布林回呼，不以英文預期代替原繁中目標。
+
+API 36 額外 1 例是在關閉清除確認後，第二次 Back 尚未令主 Dialog 消失。首次取消確認及 0 clear／0 dismiss 斷言已通過；不能單憑失敗位置斷言產品根因。fixture 現在先等待指定 Dialog 的 Android 視窗附著並取得焦點，再只注入一次 Back，並有界等待該次應消失的 Dialog；原兩階段回呼數與不清紀錄要求全部保留，沒有重按或固定 sleep。
+
+本次只變更 4 個 androidTest 檔案。AndroidTest 編譯、Lint 與 test APK 於 2026-10-05T11:19:07Z–2026-10-05T11:20:06Z 以 terminal exit 0 完成（58 秒，56 tasks，8 executed／48 up-to-date）；Lint 0 error／55 warning／2 information。Production 及 App APK SHA-256 與上一輪相同，沒有重跑也沒有再宣稱重新執行 725 JVM。來源 manifest 前後一致：`0ced732ecd0f393117b7c0d09fd8f6480f69c03608d86c5dcadbeb0904775e28`。新的裝置結果尚待重跑；上述同步修正未提前算作通過。
