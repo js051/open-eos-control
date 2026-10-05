@@ -18,7 +18,9 @@
 
 PR #205 將日期／評分挑片與最近 100 筆原檔下載紀錄合為一個媒體批次：原檔成功關閉／發佈後隔離取消與紀錄故障，重啟未完成項目顯示結果未確認。精確 head `1c672d5f18d084576fba23c2ffff518e5f4749d6` 的 [CI 37302730469](https://github.com/js051/open-eos-control/actions/runs/37302730469) 已全數通過適用 gate，API34／36 原始 XML 各264/264、0 failure/error/skip。這是 `PR ready` 證據，PR 仍為 draft／未合併；本地725 JVM與各階段測試修正另見[媒體 CI 紀錄](validation/android-media-journey-device-ci-2026-10-05.zh-TW.md)及 PR 摘要。歷史失敗保留，不能把所有輪次相加。
 
-控制旅程以 #205 為基底，整合連線設定歸屬、取消／失敗恢復及停錄後新可見影片查找。凍結同來源775 JVM通過，Lint與兩個APK成功；原CPU-only連線UI失敗及新增影片保存旅程尚待這一批自己的加速CI閉合，不能繼承 #205 的裝置結果。見[控制旅程整合驗收](validation/android-control-journey-2026-10-05.zh-TW.md)。
+控制旅程 PR #206 以 #205 為基底，整合連線設定歸屬、取消／失敗恢復及停錄後新可見影片查找。最終 head `cddab6207aa2d5fcb721e7cef85f1cdba64b7fd1` 的 [CI 37323715956](https://github.com/js051/open-eos-control/actions/runs/37323715956) 與 ci-complete 成功：API34／36各278/278、0 failure/error/skip，含兩個真 App 連線、兩個有效影片保存旅程，以及完整文字與三種真裁切／省略號反例。JVM／APK／signer及適用gate通過；本地完整JVM為776項。歷史CPU-only timeout及前兩輪失敗仍保留，不倒推其唯一根因。此為PR ready證據，仍draft／未合併；來源與紅綠機制見[控制旅程整合驗收](validation/android-control-journey-2026-10-05.zh-TW.md)及PR最終摘要。
+
+資料夾挑選接續P2，僅使用既有已載入素材的權威路徑資訊，與日期／評分／類型交集並保留隱藏選取。新增optional Bridge欄位不增加相機請求，USB／host／legacy無資料時保持未知；不包含拍攝卡槽或目錄mutation。本地793 JVM與374 Bridge測試已通過，新增5個UI旅程待該批精確CI，不能沿用#206結果。見[資料夾挑選驗收](validation/android-media-folder-filter-2026-10-05.zh-TW.md)。
 
 上述均是有界增量：不代表跨程序續傳、完整佇列恢復、下載去重、全卡素材因果或跨平台完成；真正相機／手機網路／USB／外部 SAF provider 尚待各自驗證。下方矩陣仍保留原始稽核基準，日期／評分與下載紀錄缺口的最新狀態以上述 #205 為準。
 
