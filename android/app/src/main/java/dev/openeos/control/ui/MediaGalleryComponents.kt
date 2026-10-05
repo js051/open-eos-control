@@ -105,6 +105,7 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraMediaFolder
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraMediaStreamSource
 import kotlinx.coroutines.CancellationException
@@ -174,6 +175,10 @@ internal fun MediaFilterBar(
     ratingFilter: MediaRatingFilter = MediaRatingFilter.ALL,
     onRatingFilter: (MediaRatingFilter) -> Unit = {},
     onDownloadHistory: () -> Unit = {},
+    folderFilter: MediaFolderFilter = MediaFolderFilter.All,
+    folders: List<CameraMediaFolder> = emptyList(),
+    unknownFolderCount: Int = 0,
+    onFolderFilter: (MediaFolderFilter) -> Unit = {},
 ) {
     val photos = items.count { !it.isVideo }
     val videos = items.size - photos
@@ -194,6 +199,7 @@ internal fun MediaFilterBar(
             onDateRange,
         )
         MediaRatingFilterButton(ratingFilter, onRatingFilter)
+        MediaFolderFilterButton(folderFilter, folders, unknownFolderCount, onFolderFilter)
         listOf(
             Triple(MediaFilter.ALL, R.string.media_all, items.size),
             Triple(MediaFilter.PHOTOS, R.string.media_photos, photos),

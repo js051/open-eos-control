@@ -3327,6 +3327,83 @@ def test_ccapi_media_rejects_cross_origin_camera_paths() -> None:
     assert failure.value.code == "INVALID_CAMERA_RESOURCE"
 
 
+def test_ccapi_media_folders_preserve_card_paths_without_extra_requests() -> None:
+    root = "/ccapi/ver100/contents"
+    first = f"{root}/card1/DCIM/100CANON/IMG_0001.JPG"
+    sibling = f"{root}/card1/DCIM/100CANON/IMG_0002.JPG"
+    other_card = f"{root}/card2/DCIM/100CANON/IMG_0001.JPG"
+    transport = FakeCcapiTransport(media_routes={
+        f"{root}?page=1&order=desc": _json_response({
+            "path": [f"http://192.0.2.1:8080{first}", sibling, other_card]
+        }),
+    })
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.0.2.1:8080")
+    before = len(transport.requests)
+
+    items = {item.id: item for item in session.list_media()}
+    assert [(request.method, request.path) for request in transport.requests[before:]] == [
+        ("GET", f"{root}?kind=number"),
+        ("GET", f"{root}?page=1&order=desc"),
+    ]
+    one, two, other = (items[_media_id(path)] for path in (first, sibling, other_card))
+    assert one.folder_id == two.folder_id
+    assert one.folder_label == two.folder_label == "card1/DCIM/100CANON"
+    assert other.folder_label == "card2/DCIM/100CANON"
+    assert one.folder_id != other.folder_id
+    assert one.name == other.name
+    assert "card1" not in one.folder_id
+    before = len(transport.requests)
+
+    refreshed = session.media_info(one.id)
+    assert [(request.method, request.path) for request in transport.requests[before:]] == [
+        ("GET", f"{first}?kind=info")
+    ]
+    assert refreshed.folder_id == one.folder_id
+    assert refreshed.folder_label == one.folder_label
+
+
+@pytest.mark.parametrize("folder", ["card1/%0A100CANON", "card1/" + "x" * 1025])
+def test_ccapi_invalid_optional_folder_does_not_hide_ordinary_media(folder: str) -> None:
+    root = "/ccapi/ver100/contents"
+    path = f"{root}/{folder}/IMG_0001.JPG"
+    transport = FakeCcapiTransport(media_routes={
+        f"{root}?page=1&order=desc": _json_response({"path": [path]}),
+    })
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.0.2.1:8080")
+
+    item = session.list_media()[0]
+    refreshed = session.media_info(item.id)
+    assert item.id == refreshed.id == _media_id(path)
+    assert item.name == refreshed.name == "IMG_0001.JPG"
+    assert item.folder_id is refreshed.folder_id is None
+    assert item.folder_label is refreshed.folder_label is None
+
+
+@pytest.mark.parametrize(
+    ("path", "label"),
+    [
+        ("/ccapi/ver100/contents/card2/DCIM/100CANON/IMG_0001.JPG", "card2/DCIM/100CANON"),
+        ("/ccapi/ver100/contents/card2/contents/IMG_0001.JPG", "card2/contents"),
+        ("/ccapi/ver100/contents/card2/My%20Photos/IMG_0001.JPG", "card2/My Photos"),
+        ("/ccapi/ver100/contents/IMG_0001.JPG", "/"),
+        ("/ccapi/ver100/other/IMG_0001.JPG", None),
+        ("/ccapi/ver100/other/contents/IMG_0001.JPG", None),
+    ],
+)
+def test_ccapi_uncached_info_uses_validated_resource_not_response_folder_claims(path: str, label: str | None) -> None:
+    transport = FakeCcapiTransport()
+    transport.media_metadata.update({"folderId": 42, "folderLabel": "/host/private", "unknownFutureField": {}})
+    session = CcapiEngine(lambda _username, _password: transport).open_connection("http://192.0.2.1:8080")
+    before = len(transport.requests)
+
+    item = session.media_info(_media_id(path))
+    assert (item.folder_id is not None) is (label is not None)
+    assert item.folder_label == label
+    assert [(request.method, request.path) for request in transport.requests[before:]] == [
+        ("GET", f"{path}?kind=info")
+    ]
+
+
 def test_ccapi_media_descending_order_fallback_is_remembered_across_containers() -> None:
     root = "/ccapi/ver100/contents"
     photo_container = f"{root}/card1/100CANON"
@@ -3733,6 +3810,9 @@ def test_bridge_api_creates_ccapi_session_and_never_echoes_camera_password() -> 
     assert preview.headers["content-type"].startswith("image/jpeg")
     assert preview.headers["cache-control"] == "private, no-store, max-age=0"
     assert media_info.json()["protected"] is False
+    assert media.json()["items"][0]["folderLabel"] == "card1/100CANON"
+    assert media_info.json()["folderLabel"] == "card1/100CANON"
+    assert media_info.json()["folderId"] == media.json()["items"][0]["folderId"]
     assert protected.json()["protected"] is True
     assert rated.json()["rating"] == 4
     assert rotated.json()["rotationDegrees"] == 180

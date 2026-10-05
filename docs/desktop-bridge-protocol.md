@@ -209,6 +209,10 @@ The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --std
 
 `GET /v1/session/{id}/media/{itemId}/info` returns the authoritative media item including nullable `protected`, `archived`, `rating`, and `rotationDegrees`. Camera-resident libgphoto2 items use the documented read-only `--folder ... --show-info ...` command to refresh the primary file MIME type, exact byte size, capture time, width and height; the parser is fixed to the `File:` section so thumbnail or audio metadata cannot replace the original file values, and a valid response with missing fields produces unknown values instead of stale listing data. Width and height are also retained when `--list-files` reports its optional `WIDTHxHEIGHT` pair. Host-RAM items are refreshed from the confined local capture store without invoking gphoto2. The shared model still does not expose libgphoto2's downloaded or permission lines, and no permission value is misrepresented as Canon protection metadata. gphoto2 formats `Time` through the CLI environment's local timezone; native execution is deterministic, while WSL physical validation must confirm that its timezone matches the Windows Bridge host before relying on that optional timestamp. Direct CCAPI enables `MEDIA_PROTECT`, `MEDIA_ARCHIVE`, `MEDIA_RATING`, and `MEDIA_ROTATE` only when discovery advertises contents `PUT`. The corresponding Bridge routes are `PUT .../protection` and `PUT .../archive` with `{"enabled":true|false}`, `PUT .../rating` with `{"value":0..5}`, and `PUT .../rotation` with `{"degrees":0|90|180|270}`. The engine maps these to Canon's documented `protect=enable|disable`, `archive=enable|disable`, `rating=off|1..5`, and `rotate=0|90|180|270` action/value bodies, then performs up to three bounded `kind=info` readbacks. A mismatch is an error and never observed evidence. libgphoto2 still returns unsupported for all four metadata-write routes.
 
+Media items also carry optional `folderId` and `folderLabel` together. The pair is display-only provenance for grouping the **already loaded items**: `folderId` is an opaque, nonblank identifier of at most 4096 UTF-16 code units, and `folderLabel` is a camera-relative, nonblank display string of at most 1024 UTF-16 code units. Neither permits C0 or C1 control characters. Missing, incomplete, malformed, or unavailable provenance becomes `null` for both fields without rejecting the media item; older clients can ignore these additive fields. Clients must compare IDs rather than labels, keep grouping within the current camera session, and must not decode IDs or derive folder provenance from item IDs or filenames. Counts describe the loaded selection, not every file in that folder or card.
+
+Direct CCAPI derives this pair from the normalized same-origin media parent path already returned by listing or used by a successful info read. Labels remove the API prefix through `/contents/` and retain the camera's card path, for example `card1/DCIM/100CANON`. libgphoto2 derives it only after an actual `--list-files` folder heading, with labels such as `store_00010001/DCIM/100CANON`; a missing heading remains unknown rather than claiming the parser's default root. Its `--show-info` refresh preserves previously observed cached provenance and never treats a caller-supplied item ID as new folder evidence. Equal folder names on different card paths have distinct IDs. Neither path implies a physical slot number. These fields add no camera queries or commands and do not enable recording-card selection, capture-directory selection, folder creation, or any other camera mutation. Host captures and providers without authoritative camera-folder metadata retain the nullable defaults; host filesystem paths must never be used for either field.
+
 ```json
 {
   "id": "gphoto2:opaque-id",
@@ -221,7 +225,9 @@ The libgphoto2 CLI adapter starts one cancellable `gphoto2 --capture-movie --std
   "previewAvailable": true,
   "protected": false,
   "rating": 3,
-  "rotationDegrees": 90
+  "rotationDegrees": 90,
+  "folderId": "gphoto2-folder:opaque-folder-id",
+  "folderLabel": "store_00010001/DCIM/100CANON"
 }
 ```
 

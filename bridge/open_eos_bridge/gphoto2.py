@@ -26,6 +26,7 @@ from .local_media import (
     is_previewable_media,
     preview_content_type,
 )
+from .media_folders import camera_folder_fields
 from .media_upload import validate_upload_request
 from .models import (
     BatteryStatus,
@@ -1047,6 +1048,7 @@ def parse_storage_info(output: str) -> StorageSnapshot:
 
 def parse_media_list(output: str) -> list[MediaItem]:
     current_folder = "/"
+    folder_fields: dict[str, str] = {}
     items: list[MediaItem] = []
     folder_pattern = re.compile(r"There (?:is|are) \d+ files? in folder '([^']+)'", re.I)
     file_pattern = re.compile(
@@ -1061,6 +1063,9 @@ def parse_media_list(output: str) -> list[MediaItem]:
         folder_match = folder_pattern.search(line)
         if folder_match:
             current_folder = folder_match.group(1)
+            folder_fields = camera_folder_fields(
+                "gphoto2-folder", current_folder, current_folder.lstrip("/") or "/"
+            )
             continue
         file_match = file_pattern.match(line)
         if not file_match:
@@ -1087,6 +1092,7 @@ def parse_media_list(output: str) -> list[MediaItem]:
                 width_pixels=width_pixels,
                 height_pixels=height_pixels,
                 preview_available=is_previewable_media(name, content_type, size),
+                **folder_fields,
             )
         )
     return list(reversed(items))
@@ -2263,6 +2269,7 @@ class GPhoto2Session:
 
             content_type = info.content_type or "application/octet-stream"
             size_bytes = info.size_bytes if info.size_bytes is not None else 0
+            cached = self._media_cache.get(media_id)
             item = MediaItem(
                 id=media_id,
                 name=name,
@@ -2273,6 +2280,8 @@ class GPhoto2Session:
                 width_pixels=info.width_pixels,
                 height_pixels=info.height_pixels,
                 preview_available=is_previewable_media(name, content_type, size_bytes),
+                folder_id=cached.folder_id if cached else None,
+                folder_label=cached.folder_label if cached else None,
             )
             self._media_cache[media_id] = item
             self._observed.add(CameraFeature.MEDIA_BROWSER)

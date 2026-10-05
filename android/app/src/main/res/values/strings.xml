@@ -802,4 +802,12 @@
     <string name="download_history_outcome_failed">Failed</string>
     <string name="download_history_outcome_cancelled">Cancelled</string>
     <string name="download_history_outcome_unconfirmed">Unconfirmed after app restart</string>
+    <string name="media_folder_filter_current">Folder: %1$s</string>
+    <string name="media_folder_all">All folders</string>
+    <string name="media_folder_unknown">Unknown folder</string>
+    <string name="media_folder_unknown_count">Unknown folder (%1$d)</string>
+    <string name="media_folder_loaded_results">Matches: %1$d / Loaded: %2$d · Unknown folders: %3$d</string>
+    <string name="media_folder_loaded_only">Only folders already reported for loaded items are shown. Browsing a folder does not change where the camera records.</string>
+    <string name="media_folder_not_provided">Loaded items have not provided folder information. They remain available in All folders or Unknown folder.</string>
+    <string name="media_folder_filter_label">Folders</string>
 </resources>
