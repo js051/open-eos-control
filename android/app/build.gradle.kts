@@ -111,3 +111,19 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("org.json:json:20240303")
 }
+
+// Gradle's built-in FULL formatter omits suppressed exceptions, including the original
+// failure carried by kotlinx-coroutines-test's UncaughtExceptionsBeforeTest. Preserve the
+// Throwable's complete hierarchy for failed tests only; no test or gate is changed.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    addTestListener(object : org.gradle.api.tasks.testing.TestListener {
+        override fun beforeSuite(suite: org.gradle.api.tasks.testing.TestDescriptor) = Unit
+        override fun afterSuite(suite: org.gradle.api.tasks.testing.TestDescriptor, result: org.gradle.api.tasks.testing.TestResult) = Unit
+        override fun beforeTest(test: org.gradle.api.tasks.testing.TestDescriptor) = Unit
+        override fun afterTest(test: org.gradle.api.tasks.testing.TestDescriptor, result: org.gradle.api.tasks.testing.TestResult) {
+            if (result.resultType == org.gradle.api.tasks.testing.TestResult.ResultType.FAILURE) {
+                result.exceptions.forEach { logger.error(it.stackTraceToString()) }
+            }
+        }
+    })
+}

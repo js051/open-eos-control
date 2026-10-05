@@ -6,10 +6,12 @@ import dev.openeos.control.data.CameraHttpTransport
 import dev.openeos.control.data.CameraHttpTransportFactory
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -57,15 +59,57 @@ class CameraRecordingReviewRecoveryTest {
             peer.releaseGates()
             model.disconnect()
             http.dispatcher.cancelAll()
-            pumpUntil { http.dispatcher.runningCallsCount() == 0 }
-            val scope = requireNotNull(model.viewModelScope.coroutineContext[Job])
-            model.viewModelScope.cancel()
-            assertTrue("ViewModel children did not finish teardown", pumpUntil { scope.isCompleted })
+            try {
+                assertTrue("HTTP calls did not finish teardown", pumpUntil { http.dispatcher.runningCallsCount() == 0 })
+            } finally {
+                finishTestSession()
+            }
         } finally {
             withContext(Dispatchers.IO) { peer.server.shutdown() }
             http.connectionPool.evictAll()
+            http.dispatcher.executorService.shutdown()
             Dispatchers.resetMain()
         }
+    }
+
+    @Test fun fixtureCleanupWaitsForDetachedEventDeleteAfterViewModelScopeCompletes() = runBlocking {
+        connect()
+        val gate = peer.gateNextEventDelete()
+        model.disconnect()
+        assertTrue("Disconnect must enter the actual event subscription DELETE", pumpUntil { gate.entered.count == 0L })
+        try {
+            model.cancelAndAwaitTestScope(main)
+            assertTrue(requireNotNull(model.viewModelScope.coroutineContext[Job]).isCompleted)
+            val cleanup = async(start = CoroutineStart.UNDISPATCHED) { finishTestSession() }
+            main.scheduler.runCurrent()
+            assertFalse("Completed ViewModel scope cannot substitute for detached repository cleanup", cleanup.isCompleted)
+            assertEquals(1L, gate.release.count)
+            gate.release.countDown()
+            assertTrue("Fixture cleanup must finish after the peer acknowledges DELETE", pumpUntil { cleanup.isCompleted })
+            cleanup.await()
+        } finally {
+            gate.release.countDown()
+            // Failure cleanup is independent of the helper being tested.
+            val repositoryCleanup = async(start = CoroutineStart.UNDISPATCHED) { repository.disconnect() }
+            try {
+                assertTrue(pumpUntil { repositoryCleanup.isCompleted })
+                repositoryCleanup.await()
+                main.scheduler.runCurrent()
+            } finally { repositoryCleanup.cancel() }
+        }
+    }
+
+    private suspend fun finishTestSession() = coroutineScope {
+        model.cancelAndAwaitTestScope(main)
+        // disconnect() owns a NonCancellable job outside viewModelScope's child tree.
+        // Join its repository lock while pumping the same Main dispatcher; merely cancelling
+        // attached children (or observing HTTP idle) cannot prove that cleanup returned.
+        val repositoryCleanup = async(start = CoroutineStart.UNDISPATCHED) { repository.disconnect() }
+        try {
+            assertTrue("Detached repository cleanup did not finish", pumpUntil { repositoryCleanup.isCompleted })
+            repositoryCleanup.await()
+            main.scheduler.runCurrent()
+        } finally { repositoryCleanup.cancel() }
     }
 
     @Test fun stoppedNativeRecordingFindsDelayedMp4WithoutContentsEventsOrAnotherCommand() = runBlocking {
@@ -459,9 +503,11 @@ private class RecordingReviewPeer {
     private val nextStop = AtomicReference<Gate?>()
     private val nextListing = AtomicReference<Gate?>()
     private val nextInfo = AtomicReference<Gate?>()
+    private val nextEventDelete = AtomicReference<Gate?>()
     fun gateNextStop() = Gate().also { gates += it; nextStop.set(it) }
     fun gateNextListing() = Gate().also { gates += it; nextListing.set(it) }
     fun gateNextInfo() = Gate().also { gates += it; nextInfo.set(it) }
+    fun gateNextEventDelete() = Gate().also { gates += it; nextEventDelete.set(it) }
     fun releaseGates() { gates.forEach { it.release.countDown() } }
     fun enqueueContentsEvent() { contentsPending.set(true) }
 
@@ -498,7 +544,7 @@ private class RecordingReviewPeer {
                     path == "/ccapi/status" -> if (failStatus.get()) MockResponse().setResponseCode(503)
                         else json("""{"connected":true,"recording":${if (unknownRecording.get()) "null" else reportedRecording.get() ?: recording.get()},"mode":"video","battery":{},"media":{},"exposure":{}}""")
                     path == "/ccapi/capabilities" -> json("""{"iso":["100"],"shutter":["1/125"],"aperture":["4.0"],"white_balance":["auto"]}""")
-                    path.endsWith("/event/polling") && request.method == "DELETE" -> json("{}")
+                    path.endsWith("/event/polling") && request.method == "DELETE" -> { hold(nextEventDelete); json("{}") }
                     path.endsWith("/event/polling") || path == "/ccapi/events" -> {
                         eventReads.incrementAndGet()
                         val changed = contentsPending.getAndSet(false)
