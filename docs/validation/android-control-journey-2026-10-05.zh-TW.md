@@ -31,15 +31,39 @@ App APK SHA-256：`8a40e09c225cf177dec0cc78fa6ea8178488c08deca392012e80714a9bd99
 
 ## 裝置 gate 與已知限制
 
-- 連線原獨立來源曾於 CPU-only API34 實跑：0 confirmed pass、1 assertion failure、1 interrupted、6 not run。手動修改驗證資料後的 assertConnected 15 秒 timeout 尚未定因；模擬器稍後 SIGKILL 不能用來替第一例歸因。整合仍保留原斷言與安全診斷，需在正常加速 CI 閉合。
-- 新錄影兩例已編譯，尚未實跑：無 event 延遲 MP4、耗盡後只讀重查。它們驗收真正 App／HTTP 路徑、有效 H.264 的 PlayerView 尺寸與播放進度、MediaStore video／解除 pending／原始 bytes，以及 COMPLETED 下載紀錄，另核對相機 Start／Stop 各一次。
+- 連線原獨立來源曾於 CPU-only API34 實跑：0 confirmed pass、1 assertion failure、1 interrupted、6 not run。手動修改驗證資料後的 assertConnected 15 秒 timeout 尚未定因；模擬器稍後 SIGKILL 不能用來替第一例歸因。整合保留原斷言與安全診斷；下方首輪加速 CI 已建立當前來源的通過證據，沒有倒推舊 CPU 失敗根因。
+- 新錄影兩例在送首輪 CI 前僅編譯；下方首輪兩平台均已實跑通過：無 event 延遲 MP4、耗盡後只讀重查。它們驗收真正 App／HTTP 路徑、有效 H.264 的 PlayerView 尺寸與播放進度、MediaStore video／解除 pending／原始 bytes，以及 COMPLETED 下載紀錄，另核對相機 Start／Stop 各一次。
 - 影片查找僅是已載入及既有有界候選的已知集合，不能保證全卡排除或檔案因果。Stop ACK 後 status readback 失敗沒有專用 typed acknowledgement，本批維持原錯誤語意，不猜停止成功、不自動重播。
 - 尚無新增物理相機、手機網路、USB 權限或第三方 SAF provider 證據。自動重連、背景匯入、預覽 Close 待處理項目與 PR #202 實驗不在本批。
+
+## 第一輪整合 CI 與 JVM 清理反例
+
+PR #206 首輪 head `407ed6b4dd0f86071c2301f4e66fb5acbd3ed390` 的 [CI 37308457268](https://github.com/js051/open-eos-control/actions/runs/37308457268) JVM為 **774/775**；`histogramAndWaveformRemainMutuallyExclusive` 在測試開始前拋出 `UncaughtExceptionsBeforeTest`，並非 histogram／waveform 產品斷言失敗。原 job 預設只印例外類型，沒有 suppressed cause 或 XML artifact；不能僅憑這行 log 宣稱根因已確證。
+
+來源查核發現新錄影 fixture 在 HTTP idle／ViewModel scope 完成後就重設 Main，但 `disconnect()` 的 NonCancellable 清理並不隸屬於該 scope。以真 ViewModel／Repository／HTTP 將取消 event subscription 的 DELETE 扣住：scope 已完成時，舊 fixture helper 仍會錯誤視為清理完成。新增獨立斷言精確失敗為 `Completed ViewModel scope cannot substitute for detached repository cleanup`，1/1 紅；不是刻意使拍攝或對焦指令失敗。
+
+修正 fixture 在 Main 仍安裝時等待 repository 清理鎖並泵入同一測試排程器，DELETE 確認後才結束；不更改產品 disconnect、安全停止或連線 timeout。相同反例與錄影、連線、preview、scope 四組 focused **45/45**（20＋10＋14＋1，0 failure/error/skip）通過，terminal exit0，59秒。這確證測試清理條件缺漏；尚未取得原 CI suppressed exception，仍保留兩者因果關聯的證據界線。
+
+先以人工 canary 發現 Gradle 原生 FULL formatter 仍漏 suppressed 訊息，故改用只在失敗時輸出 Throwable 完整階層的 TestListener，使後續非同步失敗能保留 cause／suppressed 訊息；沒有新增 logger 至產品、放寬斷言、隱藏失敗或改 workflow／required checks。最終 aggregate／裝置 CI 待本次來源獨立驗證。
+
+### 清理修正與診斷來源的本機完整檢查
+
+12:57:53–13:12:52 UTC 的同來源 aggregate 實際完成 **776/776 JVM、69 suites、0 failure/error/skip**，Lint **0 error／55 warning／2 information** 與 AndroidTest Kotlin 編譯；最後 test dex merge 階段 daemon 消失，整指令 exit1，原因未證實。沒有重跑已完成項目：同一來源於 2026-10-05T13:18:21Z–2026-10-05T13:18:44Z 只補 `assembleDebugAndroidTest`，**exit0、21秒**，完成 test APK。
+
+兩個指令的來源 manifest 前後完全相同，SHA-256 `bc5e8ad77ab3491aa874075592b3f1c8d7d6362bb21266da188acb824718b61d`；build.gradle.kts SHA-256 `0056bad85b2c7839a5d0667b8e41d8cb1de308182318978910ce84badfe5a48f`。App APK仍為 `8a40e09c225cf177dec0cc78fa6ea8178488c08deca392012e80714a9bd9991d`；新test APK為 `e77c70e654b2b9cfe7b1f22e6668e89e81183d1c1c9c38b27db0e95e8bf8a5b9`。兩段證據共同完成本機gate，第一段非零exit仍保留。
+
+人工失敗canary實際證實新失敗輸出同時含primary、cause與suppressed三個合成標記，且預期exit1；該臨時fixture已移除，最終776項不包含它。此來源仍需新的精確head CI，兩個layout失敗的原斷言沒有放寬。
+
+### 首輪 API34／36 原始結果
+
+同一 head `407ed6b` 兩個平台各 **272/274，2 failure，0 error/skip**，失敗清單相同：`localizedRecoveryAndConnectionChoicesWrapAtLargeText` 的繁中「直接連相機」，以及 `cancelStaysTouchableWhileTheNarrowLargeTextFormIsScrolled` 的英文 Connect，均觸發 TextLayout 的 visual overflow。原紀錄沒有尺寸、方向或失敗畫面，不能先將其歸為固定高度或忽略成字型誤差。後續保留原斷言，補實際約束、段落與文字尺寸、字級／密度、overflow方向及僅合成輸入的失敗 PNG。
+
+原先待閉合的兩個 native CCAPI App 連線案例，以及兩個有效 H.264→PlayerView→MediaStore→COMPLETED 紀錄旅程，在兩平台均已實跑通過。這只建立該來源的模擬器證據，不能倒推舊 CPU-only timeout 的唯一根因或代表物理相機已驗證。
 
 ## Release Assessment
 
 - Latest release baseline：`v0.11.0` Development Preview。
 - Proposed impact：`minor`；取消與失敗恢復是完整新增可見流程，錄影查找是既有流程修復。
 - 未改版本。此 PR 基於媒體 PR #205，須先完成相依批次及本批精確 head CI，不能直接宣稱 main accepted 或 preview released。
-- 目前 unresolved gate：本批 API34／36，尤其原連線 UI 失敗與新增影片保存旅程；若 CI 失敗需查清修復，不能弱化斷言或僅延長 timeout。
+- 目前 unresolved gate：本批仍有兩個大字級 layout 失敗，JVM 清理修正與後續來源亦須通過精確 CI；四個連線／影片旅程已有首輪來源通過證據。不能弱化斷言或僅延長 timeout。
 - Physical-device status：pending；fixture／模擬器證據不轉為相機相容性宣稱。

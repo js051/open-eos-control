@@ -1,6 +1,11 @@
 package dev.openeos.control.ui
 
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
+import androidx.test.services.storage.TestStorage
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +48,7 @@ import java.util.Locale
 /** Injected-state layout and action tests; production HTTP recovery has separate session tests. */
 class CameraConnectionRecoveryUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    private var layoutScenario = "initial"
 
     @Test fun cancelStaysTouchableWhileTheNarrowLargeTextFormIsScrolled() {
         val state = mutableStateOf(CameraUiState())
@@ -70,6 +76,7 @@ class CameraConnectionRecoveryUiTest {
         for (language in listOf("en", "zh-TW")) {
             for (viewport in listOf(DpSize(320.dp, 480.dp), DpSize(480.dp, 320.dp))) {
                 for (operation in listOf(CameraOperation.CONNECT, CameraOperation.BRIDGE)) {
+                    layoutScenario = "language=$language viewport=$viewport operation=$operation"
                     compose.runOnIdle {
                         size.value = viewport
                         locale.value = LocaleList(language)
@@ -166,6 +173,7 @@ class CameraConnectionRecoveryUiTest {
         )
         for (language in listOf("en", "zh-TW")) {
             for ((target, reason, expected) in cases) {
+                layoutScenario = "language=$language target=$target reason=$reason"
                 compose.runOnIdle {
                     locale.value = LocaleList(language)
                     size.value = if (language == "en") DpSize(320.dp, 480.dp) else DpSize(480.dp, 320.dp)
@@ -267,10 +275,29 @@ class CameraConnectionRecoveryUiTest {
         assertTrue("No text layout found under $tag", nodes.isNotEmpty())
         nodes.forEach { node ->
             val layouts = mutableListOf<TextLayoutResult>()
-            node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+            compose.runOnIdle { node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts) }
+            assertTrue("No text layout returned under $tag", layouts.isNotEmpty())
             layouts.forEach { layout ->
-                assertFalse("Clipped text in $tag: ${layout.layoutInput.text}", layout.hasVisualOverflow)
-                assertFalse("Ellipsized text in $tag", (0 until layout.lineCount).any(layout::isLineEllipsized))
+                val details = "scenario=$layoutScenario tag=$tag text=${layout.layoutInput.text} " +
+                    "size=${layout.size} paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height} " +
+                    "constraints=${layout.layoutInput.constraints} density=${layout.layoutInput.density} " +
+                    "fontSize=${layout.layoutInput.style.fontSize} lineHeight=${layout.layoutInput.style.lineHeight} " +
+                    "lines=${layout.lineCount} widthOverflow=${layout.didOverflowWidth} heightOverflow=${layout.didOverflowHeight} " +
+                    "nodeBounds=${node.boundsInWindow}"
+                val ellipsized = (0 until layout.lineCount).any(layout::isLineEllipsized)
+                if (layout.hasVisualOverflow || ellipsized) {
+                    println("CONNECTION_LAYOUT_FAILURE $details")
+                    // All inputs in this fixture are synthetic. Keep the original failure even
+                    // if screenshot capture/storage itself is unavailable.
+                    runCatching {
+                        val bitmap = compose.onRoot(useUnmergedTree = true).captureToImage().asAndroidBitmap()
+                        TestStorage().openOutputFile("connection-layout-$tag.png").use { output ->
+                            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                        }
+                    }.onFailure { println("CONNECTION_LAYOUT_SCREENSHOT_UNAVAILABLE ${it.javaClass.simpleName}") }
+                }
+                assertFalse("Clipped text: $details", layout.hasVisualOverflow)
+                assertFalse("Ellipsized text: $details", ellipsized)
             }
         }
     }
