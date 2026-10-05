@@ -90,6 +90,8 @@ data class CameraUiState(
     val bridgeBaseUrl: String = CameraRepository.DEFAULT_DESKTOP_BRIDGE_URL,
     val bridgeToken: String = "",
     val bridgeCameras: List<DesktopBridgeCamera> = emptyList(),
+    val bridgeScanCompleted: Boolean = false,
+    val connectionRecovery: ConnectionRecovery? = null,
     val selectedBridgeCameraId: String? = null,
     val previewMode: Boolean = false,
     val transport: CameraTransport? = null,
@@ -203,7 +205,7 @@ data class CameraUiState(
 
 internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
     shutterReleaseUnconfirmed -> this
-    error != null -> copy(error = null, errorOperation = null)
+    error != null || connectionRecovery != null -> copy(error = null, errorOperation = null, connectionRecovery = null)
     else -> copy(errorOperation = null, shutterDisconnectWarning = false)
 }
 

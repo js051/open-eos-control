@@ -43,7 +43,8 @@ internal class DesktopBridgeException(
     val feature: String? = null,
     val engine: String? = null,
     message: String,
-) : IllegalStateException(message)
+    override val statusCode: Int? = null,
+) : IllegalStateException(message), ConnectionHttpFailure
 
 class DesktopBridgeClient(
     baseUrl: String,
@@ -1212,6 +1213,7 @@ class DesktopBridgeClient(
             feature = error?.optNullableString("feature"),
             engine = error?.optNullableString("engine"),
             message = "Desktop Bridge $operation failed [$code]: $message",
+            statusCode = statusCode,
         )
         if (code == "SHUTTER_RELEASE_UNCONFIRMED" &&
             (expectedRevision == null || session?.revision == expectedRevision)) {

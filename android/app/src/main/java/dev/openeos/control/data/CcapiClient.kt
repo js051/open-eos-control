@@ -126,9 +126,9 @@ private data class MediaOrderingInfo(
 )
 
 private class CcapiHttpException(
-    val statusCode: Int,
+    override val statusCode: Int,
     message: String,
-) : IllegalStateException(message)
+) : IllegalStateException(message), ConnectionHttpFailure
 
 class CcapiClient(
     baseUrl: String,
@@ -255,9 +255,10 @@ class CcapiClient(
         }
 
         val errors = mutableListOf<String>()
+        val failureReasons = linkedSetOf<ConnectionFailureReason>()
 
         // 1. Try GET /ccapi
-        val success1 = discoverApiAt("/ccapi", errors)
+        val success1 = discoverApiAt("/ccapi", errors, failureReasons)
 
         if (success1) {
             isRealCamera = true
@@ -265,7 +266,7 @@ class CcapiClient(
         }
 
         // 2. Try GET /ccapi/
-        val success2 = discoverApiAt("/ccapi/", errors)
+        val success2 = discoverApiAt("/ccapi/", errors, failureReasons)
 
         if (success2) {
             isRealCamera = true
@@ -308,6 +309,7 @@ class CcapiClient(
                                         httpStatus = response.code,
                                     ),
                                 )
+                                failureReasons += httpConnectionFailureReason(response.code)
                                 errors.add("GET $prefix/deviceinformation: HTTP ${response.code}")
                                 false
                             }
@@ -324,6 +326,7 @@ class CcapiClient(
                 throw exception
             } catch (e: Exception) {
                 recordDiscoveryFailure("GET $prefix/deviceinformation", e)
+                failureReasons += connectionFailureReason(e)
                 errors.add("GET $prefix/deviceinformation failed: ${e.message}")
                 false
             }
@@ -344,10 +347,14 @@ class CcapiClient(
             append("2. \"Camera Control API\" (CCAPI) is enabled in the camera's communication settings.\n")
             append("3. The IP address/port in Direct Camera URL is correct.")
         }
-        throw IllegalStateException(errorMessage)
+        throw CcapiDiscoveryException(errorMessage, failureReasons)
     }
 
-    private suspend fun discoverApiAt(path: String, errors: MutableList<String>): Boolean {
+    private suspend fun discoverApiAt(
+        path: String,
+        errors: MutableList<String>,
+        failureReasons: MutableSet<ConnectionFailureReason>,
+    ): Boolean {
         return try {
             val rootDiscovery = try {
                 getJson(path)
@@ -392,6 +399,7 @@ class CcapiClient(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
+            failureReasons += connectionFailureReason(error)
             errors.add("GET $path failed: ${error.message}")
             false
         }

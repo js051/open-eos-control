@@ -21,6 +21,7 @@ import dev.openeos.control.data.CaptureStatusReadbackException
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
@@ -57,6 +58,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -70,6 +72,8 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import dev.openeos.control.data.ConnectionFailureReason
+import dev.openeos.control.data.connectionFailureReason
 import java.io.IOException
 import java.net.URLConnection
 import java.util.UUID
@@ -188,20 +192,29 @@ internal fun mergeRecentMedia(
 
 internal fun isRetryableMediaThumbnailFailure(exception: Exception): Boolean = exception is IOException
 
+private fun selectReviewCandidate(
+    items: List<CameraMediaItem>,
+    previousIds: Set<String>,
+    videosOnly: Boolean,
+): CameraMediaItem? = selectCaptureReviewItem(items.filter {
+    it.id !in previousIds && (!videosOnly || it.isVideo)
+})
+
 internal suspend fun awaitCaptureReviewItem(
-    expectedPreviousId: String?,
+    previousIds: Set<String>,
     retryDelaysMillis: LongArray,
+    videosOnly: Boolean = false,
     loadRecentMedia: suspend () -> List<CameraMediaItem>,
 ): CameraMediaItem? {
     for (attempt in 0..retryDelaysMillis.size) {
         val candidate = try {
-            selectCaptureReviewItem(loadRecentMedia())
+            selectReviewCandidate(loadRecentMedia(), previousIds, videosOnly)
         } catch (exception: CancellationException) {
             throw exception
         } catch (_: Exception) {
             null
         }
-        if (candidate != null && (expectedPreviousId == null || candidate.id != expectedPreviousId)) {
+        if (candidate != null) {
             return candidate
         }
         if (attempt < retryDelaysMillis.size) delay(retryDelaysMillis[attempt])
@@ -257,8 +270,18 @@ class CameraViewModel(
     private var mediaLibraryGeneration = 0L
     private var captureReviewJob: Job? = null
     private var captureReviewGeneration = 0L
-    private data class CaptureReviewAttempt(val previousId: String?, val sessionGeneration: Long)
+    private data class CaptureReviewAttempt(
+        val previousIds: Set<String>,
+        val sessionGeneration: Long,
+        val videosOnly: Boolean = false,
+    )
     private var pendingCaptureReview: CaptureReviewAttempt? = null
+    private data class CaptureReviewCandidates(
+        val ids: Set<String>,
+        val sessionGeneration: Long,
+        val connection: CameraInfo?,
+    )
+    private var captureReviewCandidates: CaptureReviewCandidates? = null
     private val mediaThumbnailJobs = mutableMapOf<String, Job>()
     private val mediaThumbnailSemaphore = Semaphore(MAX_CONCURRENT_MEDIA_THUMBNAILS)
     private var mediaThumbnailGeneration = 0
@@ -471,32 +494,38 @@ class CameraViewModel(
     fun closeSettingPicker() = _uiState.update { it.copy(activeSettingPicker = null) }
 
     fun setConnectionTarget(target: ConnectionTarget) {
-        if (_uiState.value.connected) return
-        _uiState.update { it.copy(connectionTarget = target, error = null, errorOperation = null) }
+        if (_uiState.value.connected || _uiState.value.connectionTarget == target) return
+        cancelConnectionAttempt()
+        _uiState.update { it.copy(connectionTarget = target, error = null, errorOperation = null, connectionRecovery = null) }
     }
 
     fun setBaseUrl(value: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.baseUrl == value) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update { it.withClearedSession(baseUrl = value, error = null) }
     }
 
     fun setUsername(value: String) {
-        if (_uiState.value.connected) return
-        _uiState.update { it.copy(username = value, error = null) }
+        if (_uiState.value.connected || _uiState.value.username == value) return
+        cancelConnectionAttempt()
+        _uiState.update { it.copy(username = value, error = null, errorOperation = null, connectionRecovery = null) }
     }
 
     fun setPassword(value: String) {
-        if (_uiState.value.connected) return
-        _uiState.update { it.copy(password = value, error = null) }
+        if (_uiState.value.connected || _uiState.value.password == value) return
+        cancelConnectionAttempt()
+        _uiState.update { it.copy(password = value, error = null, errorOperation = null, connectionRecovery = null) }
     }
 
     fun setBridgeBaseUrl(value: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.bridgeBaseUrl == value) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
                 bridgeBaseUrl = value,
+                bridgeScanCompleted = false,
                 bridgeCameras = emptyList(),
                 selectedBridgeCameraId = null,
             )
@@ -504,10 +533,13 @@ class CameraViewModel(
     }
 
     fun setBridgeToken(value: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.bridgeToken == value) return
+        cancelConnectionAttempt()
         _uiState.update {
             it.copy(
                 bridgeToken = value,
+                bridgeScanCompleted = false,
+                connectionRecovery = null,
                 bridgeCameras = emptyList(),
                 selectedBridgeCameraId = null,
                 error = null,
@@ -517,10 +549,12 @@ class CameraViewModel(
     }
 
     fun selectBridgeCamera(cameraId: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.selectedBridgeCameraId == cameraId) return
+        cancelConnectionAttempt()
         _uiState.update { state ->
             state.copy(
                 selectedBridgeCameraId = cameraId.takeIf { id -> state.bridgeCameras.any { it.id == id } },
+                connectionRecovery = null,
                 error = null,
                 errorOperation = null,
             )
@@ -529,6 +563,7 @@ class CameraViewModel(
 
     fun useDirectCameraPreset() {
         if (_uiState.value.connected) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_BASE_URL, error = null)
@@ -538,6 +573,7 @@ class CameraViewModel(
 
     fun useDirectCameraHttpsPreset() {
         if (_uiState.value.connected) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_HTTPS_URL, error = null)
@@ -547,10 +583,22 @@ class CameraViewModel(
 
     fun useDevSimulatorPreset() {
         if (_uiState.value.connected) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEV_EMULATOR_SIMULATOR_URL, error = null)
                 .copy(ccapiSimulatorMode = true)
+        }
+    }
+
+    /** An accepted edit or Cancel abandons setup; only another explicit action starts it again. */
+    fun cancelConnectionAttempt() {
+        val state = _uiState.value
+        if (!state.connected && (CameraOperation.CONNECT in state.pendingOperations ||
+                CameraOperation.BRIDGE in state.pendingOperations)) {
+            // Reuse the session-owned cancellation, join and cleanup path. A new attempt waits
+            // for this teardown before it can replace the repository backend.
+            disconnect()
         }
     }
 
@@ -584,7 +632,7 @@ class CameraViewModel(
         _uiState.update { it.copy(usbDiagnostics = diagnostics) }
     }
 
-    fun connect() = runCamera(CameraOperation.CONNECT) {
+    fun connect() = runCamera(CameraOperation.CONNECT, connectionAttempt = ConnectionAttemptTarget.CCAPI) {
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
@@ -594,6 +642,7 @@ class CameraViewModel(
         resetFrameMetrics()
         lastPhotoShootingMode = null
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+        validateConnectionAddress(_uiState.value.baseUrl, ConnectionAttemptTarget.CCAPI)
         val session = repository.connect(
             baseUrl = _uiState.value.baseUrl,
             username = _uiState.value.username,
@@ -609,7 +658,7 @@ class CameraViewModel(
         applyConnectedSession(session)
     }
 
-    fun connectUsb(deviceName: String, vendorId: Int, productId: Int) = runCamera(CameraOperation.CONNECT) {
+    fun connectUsb(deviceName: String, vendorId: Int, productId: Int) = runCamera(CameraOperation.CONNECT, connectionAttempt = ConnectionAttemptTarget.USB) {
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
@@ -633,24 +682,30 @@ class CameraViewModel(
         applyConnectedSession(session)
     }
 
-    fun scanDesktopBridge() = runCamera(CameraOperation.BRIDGE) {
+    fun scanDesktopBridge() = runCamera(CameraOperation.BRIDGE, connectionAttempt = ConnectionAttemptTarget.DESKTOP_BRIDGE) {
         val state = _uiState.value
+        _uiState.update { it.copy(bridgeScanCompleted = false) }
+        validateConnectionAddress(state.bridgeBaseUrl, ConnectionAttemptTarget.DESKTOP_BRIDGE)
+        val generation = cameraSessionGeneration
         val cameras = repository.discoverBridgeCameras(
             baseUrl = state.bridgeBaseUrl,
             token = state.bridgeToken,
         )
+        coroutineContext.ensureActive()
+        if (generation != cameraSessionGeneration) return@runCamera
         _uiState.update { current ->
             val selected = current.selectedBridgeCameraId
                 ?.takeIf { id -> cameras.any { it.id == id } }
                 ?: cameras.singleOrNull()?.id
             current.copy(
                 bridgeCameras = cameras,
+                bridgeScanCompleted = true,
                 selectedBridgeCameraId = selected,
             )
         }
     }
 
-    fun connectBridge() = runCamera(CameraOperation.CONNECT) {
+    fun connectBridge() = runCamera(CameraOperation.CONNECT, connectionAttempt = ConnectionAttemptTarget.DESKTOP_BRIDGE) {
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
@@ -662,6 +717,7 @@ class CameraViewModel(
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val state = _uiState.value
         val selectedCamera = state.bridgeCameras.firstOrNull { it.id == state.selectedBridgeCameraId }
+        validateConnectionAddress(state.bridgeBaseUrl, ConnectionAttemptTarget.DESKTOP_BRIDGE)
         val session = repository.connectBridge(
             baseUrl = state.bridgeBaseUrl,
             token = state.bridgeToken,
@@ -1186,13 +1242,31 @@ class CameraViewModel(
         }
     }
 
-    fun toggleRecording() = updateStatus(CameraOperation.RECORDING) {
-        if (_uiState.value.previewMode) {
-            return@updateStatus _uiState.value.status!!.copy(
-                recording = _uiState.value.status?.recording != true,
-            )
+    fun toggleRecording() {
+        // Keep the user's command direction even if an event changes displayed state while it runs.
+        val wasRecording = _uiState.value.status?.recording == true
+        runCamera(CameraOperation.RECORDING) {
+            val generation = cameraSessionGeneration
+            val connection = _uiState.value.info
+            val previousReviewIds = visibleMediaIds()
+            val revision = cameraStateRevision
+            val response = if (_uiState.value.previewMode) {
+                _uiState.value.status!!.copy(recording = !wasRecording)
+            } else {
+                repository.toggleRecording(wasRecording)
+            }
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== connection) return@runCamera
+            val status = if (_uiState.value.previewMode) response else latestCameraStatus(response, revision)
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== connection) return@runCamera
+            _uiState.update { it.copy(status = status) }
+            if (!_uiState.value.previewMode && wasRecording && response.recording == false && status.recording == false) {
+                pendingCaptureReview = CaptureReviewAttempt(previousReviewIds, generation, videosOnly = true)
+                refreshCaptureReview()
+            }
+            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
-        repository.toggleRecording(_uiState.value.status?.recording)
     }
 
     fun setShutterAutofocus(enabled: Boolean) {
@@ -1204,8 +1278,7 @@ class CameraViewModel(
             showCaptureSuccess()
             return@runCamera
         }
-        val previousReviewId = _uiState.value.captureReviewItem?.id
-            ?: selectCaptureReviewItem(_uiState.value.mediaItems)?.id
+        val previousReviewIds = visibleMediaIds()
         // A newer shutter attempt supersedes every older review, even before its ACK arrives.
         cancelCaptureReview()
         val generation = cameraSessionGeneration
@@ -1222,7 +1295,7 @@ class CameraViewModel(
         }
         coroutineContext.ensureActive()
         if (!stillOwnsCapture()) return@runCamera
-        pendingCaptureReview = CaptureReviewAttempt(previousReviewId, generation)
+        pendingCaptureReview = CaptureReviewAttempt(previousReviewIds, generation)
         refreshCaptureReview()
         // The command already returned successfully. A revision-reconciliation read can also
         // fail, but must not turn that acknowledgement back into a failed shutter command.
@@ -2673,9 +2746,10 @@ class CameraViewModel(
         operation: CameraOperation,
         onError: (Exception) -> Unit = {},
         afterFinally: () -> Unit = {},
+        connectionAttempt: ConnectionAttemptTarget? = null,
         block: suspend () -> Unit,
     ) {
-        launchCameraOperation(operation, onError, afterFinally, block = block)
+        launchCameraOperation(operation, onError, afterFinally, connectionAttempt = connectionAttempt, block = block)
     }
 
     private fun launchCameraOperation(
@@ -2683,6 +2757,7 @@ class CameraViewModel(
         onError: (Exception) -> Unit = {},
         afterFinally: () -> Unit = {},
         cancelMediaReads: Boolean = true,
+        connectionAttempt: ConnectionAttemptTarget? = null,
         block: suspend () -> Unit,
     ): Job? {
         if (_uiState.value.isBusy(operation)) return null
@@ -2708,6 +2783,7 @@ class CameraViewModel(
         _uiState.update {
             it.copy(
                 pendingOperations = it.pendingOperations + operation,
+                connectionRecovery = null,
                 error = null,
                 errorOperation = null,
             )
@@ -2731,12 +2807,22 @@ class CameraViewModel(
             } catch (exception: Exception) {
                 if (generation != cameraSessionGeneration ||
                     (operation == CameraOperation.FOCUS && _uiState.value.info !== connection)) return@launch
-                exception.printStackTrace()
+                val safetyFailure = exception is ShutterReleaseException || exception is AutofocusReleaseException ||
+                    exception is dev.openeos.control.data.CcapiLiveViewReleaseException
+                val recovery = if (connectionAttempt != null && !safetyFailure) {
+                    ConnectionRecovery(connectionAttempt, if (exception is InvalidConnectionAddressException) {
+                        ConnectionFailureReason.INVALID_ADDRESS
+                    } else connectionFailureReason(exception))
+                } else null
+                // Connection diagnostics can contain entered addresses or server bodies. The
+                // recovery flow only needs typed evidence, never these values in UI or logs.
+                if (recovery == null) exception.printStackTrace()
                 if (exception is ShutterReleaseException) markShutterReleaseUnconfirmed()
                 onError(exception)
                 _uiState.update {
                     it.copy(
-                        error = formatException(exception),
+                        error = recovery?.let { failure -> "Connection failed: ${failure.reason.name}" } ?: formatException(exception),
+                        connectionRecovery = recovery,
                         errorOperation = operation,
                         autofocusHoldState = if (operation == CameraOperation.FOCUS && exception is AutofocusReleaseException) {
                             AutofocusHoldState.RELEASE_FAILED
@@ -3274,6 +3360,7 @@ class CameraViewModel(
         operatorConfirmedFeatures = emptySet(),
         error = error,
         errorOperation = null,
+        connectionRecovery = null,
     )
 
     private fun fpsToFrameIntervalMillis(fps: Int): Long =
@@ -3347,6 +3434,17 @@ class CameraViewModel(
         mediaThumbnailJobs.clear()
     }
 
+    private fun visibleMediaIds(): Set<String> {
+        val state = _uiState.value
+        return buildSet {
+            captureReviewCandidates?.takeIf {
+                it.sessionGeneration == cameraSessionGeneration && it.connection === state.info
+            }?.let { addAll(it.ids) }
+            state.mediaItems.forEach { add(it.id) }
+            state.captureReviewItem?.let { add(it.id) }
+        }
+    }
+
     fun retryCaptureReview() {
         val state = _uiState.value
         val attempt = pendingCaptureReview ?: return
@@ -3360,15 +3458,33 @@ class CameraViewModel(
         val state = _uiState.value
         if (!state.connected || state.previewMode || !state.supports(CameraFeature.MEDIA_BROWSER)) return
         val attempt = pendingCaptureReview
+        val sessionGeneration = cameraSessionGeneration
+        val connection = state.info
         val generation = beginCaptureReviewLoad()
+        fun stillOwnsReview() = generation == captureReviewGeneration &&
+            sessionGeneration == cameraSessionGeneration && _uiState.value.info === connection
         captureReviewJob = viewModelScope.launch {
             val selected = awaitCaptureReviewItem(
-                expectedPreviousId = attempt?.previousId,
+                previousIds = attempt?.previousIds.orEmpty(),
                 retryDelaysMillis = CAPTURE_REVIEW_RETRY_DELAYS_MILLIS,
+                videosOnly = attempt?.videosOnly == true,
             ) {
-                repository.listMedia(CAPTURE_REVIEW_REQUEST_ITEMS)
+                // Keep the bounded read-only review queued while an existing media operation owns I/O.
+                _uiState.first { !it.isBusy(CameraOperation.MEDIA) }
+                coroutineContext.ensureActive()
+                repository.listMedia(CAPTURE_REVIEW_REQUEST_ITEMS).also { items ->
+                    coroutineContext.ensureActive()
+                    if (stillOwnsReview()) {
+                        // Remember only the existing bounded listing; never issue a baseline scan.
+                        captureReviewCandidates = CaptureReviewCandidates(
+                            items.take(CAPTURE_REVIEW_REQUEST_ITEMS).mapTo(mutableSetOf()) { it.id },
+                            sessionGeneration,
+                            connection,
+                        )
+                    }
+                }
             }
-            if (generation != captureReviewGeneration) return@launch
+            if (!stillOwnsReview()) return@launch
             if (selected == null) {
                 _uiState.update { it.copy(
                     captureReviewLoading = false,
@@ -3386,10 +3502,10 @@ class CameraViewModel(
 
     private fun refreshCaptureReview(items: List<CameraMediaItem>) {
         if (captureReviewJob?.isActive == true) return
-        val selected = selectCaptureReviewItem(items)
         val attempt = pendingCaptureReview
+        val selected = selectReviewCandidate(items, attempt?.previousIds.orEmpty(), attempt?.videosOnly == true)
         // Event/gallery refreshes must not turn the old image into this attempt's result.
-        if (attempt != null && (selected == null || selected.id == attempt.previousId)) return
+        if (attempt != null && selected == null) return
         if (selected == null) {
             cancelCaptureReview()
             _uiState.update {
@@ -3452,6 +3568,10 @@ class CameraViewModel(
         captureReviewJob?.cancel()
         captureReviewJob = null
         pendingCaptureReview = null
+        // An ordinary (including rejected) shutter attempt must not forget known session media.
+        captureReviewCandidates = captureReviewCandidates?.takeIf {
+            it.sessionGeneration == cameraSessionGeneration && it.connection === _uiState.value.info
+        }
         _uiState.update { it.copy(
             captureReviewLoading = false,
             captureReviewStatus = CaptureReviewStatus.IDLE,
