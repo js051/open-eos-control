@@ -25,6 +25,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToKey
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.test.assertIsEnabled
@@ -267,9 +269,9 @@ class CameraGalleryUiTest {
         compose.onNodeWithText(compose.activity.getString(R.string.media_filter_count,
             compose.activity.getString(R.string.media_videos), 1)).performScrollTo().performClick()
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_date_clear)).performClick()
-        compose.onNodeWithText("ONE.MP4").assertIsDisplayed()
-        compose.onNodeWithText("TWO.MP4").assertIsDisplayed()
-        compose.onNodeWithText(item.name).assertDoesNotExist()
+        galleryItem(videos[0]).assertIsDisplayed()
+        galleryItem(videos[1]).assertIsDisplayed()
+        assertExcludedFromGallery(item.id)
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_sort_current,
             compose.activity.getString(R.string.media_filename))).assertIsDisplayed()
     }
@@ -284,7 +286,7 @@ class CameraGalleryUiTest {
             }
         }
         fun selectItem() {
-            compose.onNodeWithContentDescription(compose.activity.getString(R.string.preview_media, item.name))
+            galleryItem(item)
                 .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
         }
         fun replaceConnection() = compose.runOnIdle {
@@ -319,7 +321,7 @@ class CameraGalleryUiTest {
                 MediaScreen(current.value, actions().copy(saveMediaToPhone = { saved += it }))
             }
         }
-        compose.onNodeWithContentDescription(compose.activity.getString(R.string.preview_media, older.name))
+        galleryItem(older)
             .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.select_all_media)).performClick()
         compose.runOnIdle {
@@ -424,8 +426,8 @@ class CameraGalleryUiTest {
             )),
         ))
         compose.setContent { MaterialTheme { MediaScreen(current.value, actions()) } }
-        compose.onNodeWithText(item.name).assertIsDisplayed()
-        compose.onNodeWithText("UNKNOWN.JPG").assertDoesNotExist()
+        galleryItem(item).assertIsDisplayed()
+        assertExcludedFromGallery("unknown")
         compose.onNodeWithText(compose.activity.getString(R.string.media_rating_loaded_results, 1, 2, 1)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
         compose.runOnIdle { current.value = current.value.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) }
@@ -439,7 +441,7 @@ class CameraGalleryUiTest {
         compose.setContent {
             MaterialTheme { MediaScreen(current.value, actions().copy(setMediaRatingFilter = { applied += it })) }
         }
-        compose.onNodeWithContentDescription(compose.activity.getString(R.string.preview_media, item.name))
+        galleryItem(item)
             .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
         compose.onNodeWithTag("media-rating-filter").performScrollTo().performClick()
         compose.onNodeWithTag("media-rating-menu").assertIsDisplayed()
@@ -469,6 +471,20 @@ class CameraGalleryUiTest {
         compose.onNodeWithText(compose.activity.getString(R.string.media_metadata_unknown)).assertDoesNotExist()
         (1..5).forEach { stars ->
             compose.onNodeWithContentDescription(compose.activity.getString(R.string.set_media_rating, item.name, stars)).assertDoesNotExist()
+        }
+    }
+
+    private fun galleryItem(item: CameraMediaItem): SemanticsNodeInteraction {
+        compose.onNodeWithTag("media-gallery-grid").performScrollToKey(item.id)
+        // This fixture advertises selection but not MEDIA_PREVIEW; the tile exposes Select.
+        return compose.onNodeWithContentDescription(compose.activity.getString(R.string.select_media_item, item.name))
+    }
+
+    private fun assertExcludedFromGallery(itemId: String) {
+        val grid = compose.onNodeWithTag("media-gallery-grid").fetchSemanticsNode()
+        compose.runOnIdle {
+            // Check the entire lazy data set, rather than mistaking an uncomposed tile for a filter match.
+            assertEquals("Filtered item $itemId must be absent from the gallery", -1, grid.config[SemanticsProperties.IndexForKey](itemId))
         }
     }
 

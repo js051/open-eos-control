@@ -2,6 +2,7 @@ package dev.openeos.control.ui
 
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.core.content.FileProvider
@@ -99,10 +101,9 @@ class CameraMediaDateFilterJourneyTest {
         val before = model.uiState.value.mediaItems
         val reads = camera.mediaReads.get()
         applyRange("2026-08-14", "2026-08-14")
-        compose.onNodeWithText("PAIR.CR3").assertIsDisplayed()
-        compose.onNodeWithText("PAIR.JPG").assertIsDisplayed()
-        compose.onNodeWithText("OLDER.JPG").assertDoesNotExist()
-        compose.onNodeWithText("UNKNOWN.JPG").assertDoesNotExist()
+        assertGalleryItemVisible("raw")
+        assertGalleryItemVisible("jpeg")
+        assertExcludedFromGallery("older", "unknown")
         compose.onNodeWithText(text(R.string.media_date_loaded_results, 2, 5, 1)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
         val applied = model.uiState.value.mediaDateRange
@@ -115,7 +116,7 @@ class CameraMediaDateFilterJourneyTest {
         assertEquals(reads, camera.mediaReads.get())
         assertTrue(camera.mutations.isEmpty())
         compose.onNodeWithContentDescription(text(R.string.media_date_clear)).performClick()
-        compose.onNodeWithText("OLDER.JPG").assertIsDisplayed()
+        assertGalleryItemVisible("older")
         assertNull(model.uiState.value.mediaDateRange)
     }
 
@@ -155,7 +156,7 @@ class CameraMediaDateFilterJourneyTest {
         store.put("fresh-date-filter", fresh)
         compose.runOnIdle { fresh.setMediaDateRange(applied, previous.info, previous.mediaSessionGeneration) }
         assertNull(fresh.uiState.value.mediaDateRange)
-        compose.onNodeWithText("OLDER.JPG").assertIsDisplayed()
+        assertGalleryItemVisible("older")
     }
 
     @Test fun captureReviewOutsideRangeStillOpensTheExactLatestItemAsOneOfOne() {
@@ -166,7 +167,8 @@ class CameraMediaDateFilterJourneyTest {
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !model.uiState.value.mediaPreviewLoading }
         assertEquals(review.id, model.uiState.value.mediaPreviewItem?.id)
         compose.onNodeWithText(text(R.string.media_viewer_position, 1, 1)).assertIsDisplayed()
-        compose.onNodeWithContentDescription(text(R.string.next_media)).assertIsNotEnabled()
+        compose.onNodeWithContentDescription(text(R.string.previous_media)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(text(R.string.next_media)).assertDoesNotExist()
         assertEquals(review, model.uiState.value.captureReviewItem)
         assertEquals("/ccapi/media/latest", camera.previewReads.last())
     }
@@ -196,6 +198,22 @@ class CameraMediaDateFilterJourneyTest {
         }
         assertArrayEquals(camera.imageBytes, file.readBytes())
         assertEquals(listOf("/ccapi/media/older"), camera.originalReads.toList())
+    }
+
+    private fun assertGalleryItemVisible(itemId: String) {
+        val name = records.single { it.first == itemId }.second
+        compose.onNodeWithTag("media-gallery-grid").performScrollToKey(itemId)
+        compose.onNodeWithContentDescription(text(R.string.preview_media, name)).assertIsDisplayed()
+    }
+
+    private fun assertExcludedFromGallery(vararg itemIds: String) {
+        val grid = compose.onNodeWithTag("media-gallery-grid").fetchSemanticsNode()
+        compose.runOnIdle {
+            itemIds.forEach { itemId ->
+                // IndexForKey checks all items, including tiles outside the composed viewport.
+                assertEquals("Filtered item $itemId must be absent from the gallery", -1, grid.config[SemanticsProperties.IndexForKey](itemId))
+            }
+        }
     }
 
     private fun connect() {

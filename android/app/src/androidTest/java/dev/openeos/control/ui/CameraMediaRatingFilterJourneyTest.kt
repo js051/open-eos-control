@@ -5,8 +5,8 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.core.content.FileProvider
@@ -141,7 +142,7 @@ class CameraMediaRatingFilterJourneyTest {
         pressBack()
         chooseRating(MediaRatingFilter.FIVE)
         chooseSort(MediaSort.RATING_HIGH)
-        compose.onNodeWithText("PAIR.CR3").assertDoesNotExist()
+        assertExcludedFromGallery("raw")
         compose.onNodeWithContentDescription(text(R.string.preview_media, "PAIR.JPG")).performScrollTo().performClick()
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !model.uiState.value.mediaPreviewLoading }
         assertEquals("jpeg", model.uiState.value.mediaPreviewItem?.id)
@@ -163,7 +164,7 @@ class CameraMediaRatingFilterJourneyTest {
         pressBack()
         compose.runOnIdle { model.clearError() }
         chooseRating(MediaRatingFilter.FIVE)
-        compose.onNodeWithText("PAIR.JPG").assertDoesNotExist()
+        assertExcludedFromGallery("jpeg")
         assertEquals(listOf("jpeg" to "5"), ratingWrites.toList())
         assertEquals(listOf("jpeg", "jpeg"), infoReads.toList())
     }
@@ -172,14 +173,14 @@ class CameraMediaRatingFilterJourneyTest {
         val original = model.uiState.value.mediaItems
         val reads = camera.mediaReads.get()
         chooseRating(MediaRatingFilter.UNKNOWN)
-        compose.onNodeWithText("LATEST.JPG").assertIsDisplayed()
-        compose.onNodeWithText("UNKNOWN.JPG").assertIsDisplayed()
-        compose.onNodeWithText("OLDER.JPG").assertDoesNotExist()
+        assertGalleryItemVisible("latest")
+        assertGalleryItemVisible("unknown")
+        assertExcludedFromGallery("older")
         compose.onNodeWithText(text(R.string.media_rating_loaded_results, 2, 6, 2)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
         chooseRating(MediaRatingFilter.UNRATED)
-        compose.onNodeWithText("OLDER.JPG").assertIsDisplayed()
-        compose.onNodeWithText("UNKNOWN.JPG").assertDoesNotExist()
+        assertGalleryItemVisible("older")
+        assertExcludedFromGallery("unknown")
         assertEquals(original, model.uiState.value.mediaItems)
         assertEquals(reads, camera.mediaReads.get())
         assertTrue(infoReads.isEmpty())
@@ -190,18 +191,18 @@ class CameraMediaRatingFilterJourneyTest {
         chooseRating(MediaRatingFilter.AT_LEAST_FOUR)
         applyRange("2026-08-14", "2026-08-14")
         chooseType(MediaFilter.PHOTOS, 2)
-        compose.onNodeWithText("PAIR.CR3").assertIsDisplayed()
-        compose.onNodeWithText("PAIR.JPG").assertIsDisplayed()
-        compose.onNodeWithText("CLIP.MP4").assertDoesNotExist()
+        assertGalleryItemVisible("raw")
+        assertGalleryItemVisible("jpeg")
+        assertExcludedFromGallery("video")
         chooseSort(MediaSort.RATING_LOW)
         compose.onNodeWithContentDescription(text(R.string.media_date_clear)).performClick()
         assertEquals(MediaRatingFilter.AT_LEAST_FOUR, model.uiState.value.mediaRatingFilter)
-        compose.onNodeWithText("OLDER.JPG").assertDoesNotExist()
+        assertExcludedFromGallery("older")
         applyRange("2026-08-14", "2026-08-14")
         chooseRating(MediaRatingFilter.ALL)
         assertEquals(mediaDateRangeFromInput("2026-08-14", "2026-08-14"), model.uiState.value.mediaDateRange)
-        compose.onNodeWithText("OLDER.JPG").assertDoesNotExist()
-        compose.onNodeWithText("CLIP.MP4").assertDoesNotExist()
+        assertExcludedFromGallery("older")
+        assertExcludedFromGallery("video")
         compose.onNodeWithContentDescription(text(R.string.media_sort_current, text(R.string.media_rating_low_first))).assertIsDisplayed()
         // Rating order has no date headings, even though the date filter is still active.
         compose.onNodeWithText("2026-08-14").assertDoesNotExist()
@@ -273,7 +274,7 @@ class CameraMediaRatingFilterJourneyTest {
         chooseRating(MediaRatingFilter.FIVE)
         assertEquals(item.name, model.uiState.value.activeMediaDownloadName)
         compose.onNodeWithContentDescription(text(R.string.cancel_media_download)).assertIsDisplayed()
-        compose.onNodeWithText("OLDER.JPG").assertDoesNotExist()
+        assertExcludedFromGallery("older")
         gate.release()
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
             !model.uiState.value.isBusy(CameraOperation.MEDIA) && model.uiState.value.lastDownloadedMediaName == item.name
@@ -299,7 +300,7 @@ class CameraMediaRatingFilterJourneyTest {
         store.put("fresh-rating-filter", fresh)
         compose.runOnIdle { fresh.setMediaRatingFilter(MediaRatingFilter.FIVE, previous.info, previous.mediaSessionGeneration) }
         assertEquals(MediaRatingFilter.ALL, fresh.uiState.value.mediaRatingFilter)
-        compose.onNodeWithText("OLDER.JPG").assertIsDisplayed()
+        assertGalleryItemVisible("older")
     }
 
     @Test fun captureReviewOutsideRatingFilterOpensItsExactItemAsOneOfOne() {
@@ -310,9 +311,26 @@ class CameraMediaRatingFilterJourneyTest {
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !model.uiState.value.mediaPreviewLoading }
         assertEquals(review.id, model.uiState.value.mediaPreviewItem?.id)
         compose.onNodeWithText(text(R.string.media_viewer_position, 1, 1)).assertIsDisplayed()
-        compose.onNodeWithContentDescription(text(R.string.next_media)).assertIsNotEnabled()
+        compose.onNodeWithContentDescription(text(R.string.previous_media)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(text(R.string.next_media)).assertDoesNotExist()
         assertEquals(review, model.uiState.value.captureReviewItem)
         assertEquals("/ccapi/media/latest", camera.previewReads.last())
+    }
+
+    private fun assertGalleryItemVisible(itemId: String) {
+        val name = records.single { it.id == itemId }.name
+        compose.onNodeWithTag("media-gallery-grid").performScrollToKey(itemId)
+        compose.onNodeWithContentDescription(text(R.string.preview_media, name)).assertIsDisplayed()
+    }
+
+    private fun assertExcludedFromGallery(vararg itemIds: String) {
+        val grid = compose.onNodeWithTag("media-gallery-grid").fetchSemanticsNode()
+        compose.runOnIdle {
+            itemIds.forEach { itemId ->
+                // IndexForKey checks all items, including tiles outside the composed viewport.
+                assertEquals("Filtered item $itemId must be absent from the gallery", -1, grid.config[SemanticsProperties.IndexForKey](itemId))
+            }
+        }
     }
 
     private fun pressBack() {

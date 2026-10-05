@@ -278,6 +278,7 @@ internal fun MediaGalleryGrid(
         state = gridState,
         modifier = Modifier
             .fillMaxSize()
+            .testTag("media-gallery-grid")
             .pointerInput(items) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { position ->
