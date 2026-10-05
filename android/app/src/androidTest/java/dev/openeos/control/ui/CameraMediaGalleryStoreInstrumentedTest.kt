@@ -14,6 +14,8 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -182,5 +184,55 @@ class CameraMediaGalleryStoreInstrumentedTest {
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test fun cancellationImmediatelyAfterPublicationKeepsTheOriginalAndOneCompletion() = runBlocking {
+        val owner = Job()
+        var completions = 0
+        val save = launch(owner) {
+            store.save(model, item, onFinalized = {
+                completions++
+                owner.cancel()
+            }) { output ->
+                output.write(jpeg)
+                CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+            }
+        }
+        save.join()
+        assertTrue(save.isCancelled)
+        assertEquals(1, completions)
+        val uri = testUris().single()
+        resolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null)!!.use {
+            assertTrue(it.moveToFirst())
+            assertEquals(0, it.getInt(0))
+        }
+        assertArrayEquals(jpeg, resolver.openInputStream(uri)!!.use { it.readBytes() })
+    }
+
+    @Test fun failingCompletionObserverCannotRemoveOrFailPublishedOriginal() = runBlocking {
+        var completions = 0
+        val uri = store.save(model, item, onFinalized = {
+            completions++
+            throw IOException("Synthetic history observer failure")
+        }) { output ->
+            output.write(jpeg)
+            CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+        }
+        assertEquals(1, completions)
+        assertEquals(listOf(uri.lastPathSegment), testUris().map { it.lastPathSegment })
+        assertArrayEquals(jpeg, resolver.openInputStream(uri)!!.use { it.readBytes() })
+    }
+
+    @Test fun allBytesWrittenButLengthValidationFailedDoesNotReportCompletion() = runBlocking {
+        var completions = 0
+        val failure = runCatching {
+            store.save(model, item, onFinalized = { completions++ }) { output ->
+                output.write(jpeg)
+                CameraMediaDownloadResult(item, jpeg.size.toLong() + 1L, "image/jpeg")
+            }
+        }.exceptionOrNull()
+        assertTrue(failure is IllegalStateException)
+        assertEquals(0, completions)
+        assertTrue(testUris().isEmpty())
     }
 }
