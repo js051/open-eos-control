@@ -10,9 +10,6 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.platform.ViewRootForTest
-import androidx.compose.ui.test.DeviceConfigurationOverride
-import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
@@ -27,7 +24,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.toSize
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.openeos.control.R
@@ -38,7 +34,6 @@ import dev.openeos.control.data.DownloadHistoryState
 import dev.openeos.control.data.DownloadHistoryWarning
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -244,7 +239,7 @@ class DownloadHistoryDialogInstrumentedTest {
     ) {
         val visible = mutableStateOf(true)
         compose.setContent {
-            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(fontScale)) {
+            DialogFontScaleOverride(fontScale) {
                 MaterialTheme {
                     if (visible.value) {
                         DownloadHistoryDialog(
@@ -299,37 +294,8 @@ class DownloadHistoryDialogInstrumentedTest {
     private fun assertFullyVisibleAction(control: SemanticsNodeInteraction, landscape: Boolean = false): Rect {
         val node = control.assertIsDisplayed().assertIsEnabled().fetchSemanticsNode()
         return compose.runOnIdle {
-            // Check the full measured bounds, not just already-clipped boundsInRoot.
-            val fullWindow = Rect(node.positionInWindow, node.size.toSize())
-            assertContains(node.boundsInWindow, fullWindow)
-            val view = (node.root as ViewRootForTest).view
-            val localVisible = android.graphics.Rect()
-            assertTrue("The Dialog's Android root must be visible", view.getLocalVisibleRect(localVisible))
-            val location = IntArray(2).also(view::getLocationOnScreen)
-            val visibleScreen = Rect(
-                (localVisible.left + location[0]).toFloat(),
-                (localVisible.top + location[1]).toFloat(),
-                (localVisible.right + location[0]).toFloat(),
-                (localVisible.bottom + location[1]).toFloat(),
-            )
-            val fullScreen = Rect(node.positionOnScreen, node.size.toSize())
-            assertContains(visibleScreen, fullScreen)
-            val minimumTouchTarget = 48f * view.resources.displayMetrics.density - 1f
-            assertTrue("The action must be at least 48dp tall", fullScreen.height >= minimumTouchTarget)
-            assertTrue("The action must be at least 48dp wide", fullScreen.width >= minimumTouchTarget)
-            assertEquals("The Dialog must retain the requested 2x font scale", 2f, node.layoutInfo.density.fontScale, 0.01f)
-            if (landscape) assertTrue("The Dialog must use a real landscape window", visibleScreen.width > visibleScreen.height)
-            fullScreen
+            assertFullyVisibleDialogAction(node, landscape)
         }
-    }
-
-    private fun assertContains(outer: Rect, inner: Rect) {
-        assertTrue(
-            "Full measured bounds must be visible: $inner inside $outer",
-            inner.width > 0 && inner.height > 0 &&
-                inner.left >= outer.left - 1 && inner.top >= outer.top - 1 &&
-                inner.right <= outer.right + 1 && inner.bottom <= outer.bottom + 1,
-        )
     }
 
     private fun text(resource: Int): String = compose.activity.getString(resource)
