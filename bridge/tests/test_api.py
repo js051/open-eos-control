@@ -351,6 +351,9 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
     assert media_info.json()["sizeBytes"] == 6
     assert media_info.json()["contentType"] == "image/jpeg"
     assert media_info.json()["previewAvailable"] is True
+    assert media.json()["items"][0]["folderLabel"] == "store_00010001/DCIM/100CANON"
+    assert media_info.json()["folderLabel"] == "store_00010001/DCIM/100CANON"
+    assert media_info.json()["folderId"] == media.json()["items"][0]["folderId"]
     assert thumbnail.content == THUMBNAIL
     assert thumbnail.headers["content-type"].startswith("image/jpeg")
     assert thumbnail.headers["cache-control"] == "private, no-store, max-age=0"
@@ -365,7 +368,8 @@ def test_bridge_contract_runs_end_to_end_through_gphoto2_adapter() -> None:
 
 def test_host_ram_capture_runs_end_to_end_through_media_api(tmp_path: Path) -> None:
     headers = {"Authorization": "Bearer test-token"}
-    engine = GPhoto2Engine(FakeRunner(), capture_directory=tmp_path)
+    runner = FakeRunner()
+    engine = GPhoto2Engine(runner, capture_directory=tmp_path)
 
     with TestClient(create_app(engine=engine, token="test-token")) as client:
         created = client.post("/v1/session", headers=headers, json={})
@@ -373,6 +377,9 @@ def test_host_ram_capture_runs_end_to_end_through_media_api(tmp_path: Path) -> N
         captured = client.post(f"/v1/session/{session_id}/capture/still", headers=headers)
         media = client.get(f"/v1/session/{session_id}/media", headers=headers)
         local_item = next(item for item in media.json()["items"] if item["id"].startswith("gphoto2-host:"))
+        before_info = len(runner.commands)
+        media_info = client.get(f"/v1/session/{session_id}/media/{local_item['id']}/info", headers=headers)
+        assert len(runner.commands) == before_info
         thumbnail = client.get(
             f"/v1/session/{session_id}/media/{local_item['id']}/thumbnail",
             headers=headers,
@@ -387,6 +394,13 @@ def test_host_ram_capture_runs_end_to_end_through_media_api(tmp_path: Path) -> N
     assert captured.status_code == 200
     assert local_item["contentType"] == "image/jpeg"
     assert local_item["previewAvailable"] is True
+    assert local_item["folderId"] is None
+    assert local_item["folderLabel"] is None
+    assert media_info.status_code == 200
+    assert media_info.json()["folderId"] is None
+    assert media_info.json()["folderLabel"] is None
+    assert str(tmp_path) not in media.text
+    assert str(tmp_path) not in media_info.text
     assert thumbnail.status_code == 200
     assert thumbnail.content.startswith(b"\xff\xd8")
     assert preview.status_code == 200

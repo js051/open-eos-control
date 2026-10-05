@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .media_folders import MAX_FOLDER_ID_LENGTH, MAX_FOLDER_LABEL_LENGTH, optional_folder_value
+
 
 def _to_camel(value: str) -> str:
     head, *tail = value.split("_")
@@ -476,6 +478,25 @@ class MediaItem(ApiModel):
     rating: int | None = Field(default=None, ge=0, le=5)
     rotation_degrees: Literal[0, 90, 180, 270] | None = None
     archived: bool | None = None
+    folder_id: str | None = Field(default=None, max_length=MAX_FOLDER_ID_LENGTH)
+    folder_label: str | None = Field(default=None, max_length=MAX_FOLDER_LABEL_LENGTH)
+
+    @field_validator("folder_id", mode="before")
+    @classmethod
+    def validate_folder_id(cls, value: object) -> str | None:
+        return optional_folder_value(value, MAX_FOLDER_ID_LENGTH)
+
+    @field_validator("folder_label", mode="before")
+    @classmethod
+    def validate_folder_label(cls, value: object) -> str | None:
+        return optional_folder_value(value, MAX_FOLDER_LABEL_LENGTH)
+
+    @model_validator(mode="after")
+    def validate_folder_pair(self) -> MediaItem:
+        if self.folder_id is None or self.folder_label is None:
+            self.folder_id = None
+            self.folder_label = None
+        return self
 
 
 class MediaProtectionUpdate(ApiModel):

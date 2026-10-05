@@ -15,6 +15,7 @@ from open_eos_bridge.gphoto2 import (
     MjpegFrameParser,
     SubprocessGPhotoRunner,
     WslHostState,
+    _media_id,
     _windows_path_to_wsl,
     parse_abilities,
     parse_auto_detect,
@@ -280,6 +281,65 @@ def test_media_parser_does_not_truncate_more_than_five_hundred_items() -> None:
     assert len(items) == 501
     assert items[0].name == "IMG_0501.JPG"
     assert items[-1].name == "IMG_0001.JPG"
+
+
+def test_media_folders_separate_identical_names_on_cards_and_share_sibling_provenance() -> None:
+    output = """There are 2 files in folder '/store_00010001/DCIM/100CANON'.
+#1 IMG_0001.JPG rd 1 KB image/jpeg
+#2 IMG_0002.JPG rd 1 KB image/jpeg
+There is 1 file in folder '/store_00020001/DCIM/100CANON'.
+#1 IMG_0001.JPG rd 1 KB image/jpeg
+"""
+    other_card, sibling, first = parse_media_list(output)
+
+    assert first.folder_id == sibling.folder_id
+    assert first.folder_label == sibling.folder_label == "store_00010001/DCIM/100CANON"
+    assert other_card.folder_label == "store_00020001/DCIM/100CANON"
+    assert other_card.folder_id != first.folder_id
+    assert first.name == other_card.name == "IMG_0001.JPG"
+    assert first.id != other_card.id
+    assert first.id == _media_id("/store_00010001/DCIM/100CANON", first.name)
+
+
+@pytest.mark.parametrize("heading", ["", "There is 1 file in folder '/card1/\t100CANON'.\n"])
+def test_media_folder_is_unknown_without_valid_observed_heading(heading: str) -> None:
+    item = parse_media_list(heading + "#1 IMG_0001.JPG rd 1 KB image/jpeg\n")[0]
+    assert item.name == "IMG_0001.JPG"
+    assert item.folder_id is None
+    assert item.folder_label is None
+
+
+def test_media_folder_distinguishes_observed_root_from_missing_heading() -> None:
+    item = parse_media_list("There is 1 file in folder '/'.\n#1 IMG_0001.JPG rd 1 KB image/jpeg\n")[0]
+    assert item.folder_id is not None
+    assert item.folder_label == "/"
+
+
+def test_media_info_preserves_only_previously_observed_folder_without_extra_commands() -> None:
+    runner = FakeRunner()
+    session = GPhoto2Engine(runner).open()
+    before = len(runner.commands)
+    listed = session.list_media()[0]
+    assert len(runner.commands) == before + 1
+    assert "--list-files" in runner.commands[-1]
+    before = len(runner.commands)
+
+    refreshed = session.media_info(listed.id)
+    assert len(runner.commands) == before + 1
+    assert "--show-info" in runner.commands[-1]
+    assert refreshed.folder_id == listed.folder_id
+    assert refreshed.folder_label == listed.folder_label
+
+    # The same valid camera item is unobserved in a fresh session. Its encoded ID and
+    # show-info response must not invent listing provenance or inherit another session's cache.
+    fresh_runner = FakeRunner()
+    fresh_session = GPhoto2Engine(fresh_runner).open()
+    before = len(fresh_runner.commands)
+    uncached = fresh_session.media_info(listed.id)
+    assert len(fresh_runner.commands) == before + 1
+    assert "--show-info" in fresh_runner.commands[-1]
+    assert uncached.folder_id is None
+    assert uncached.folder_label is None
 
 
 def test_gphoto_recent_media_bounds_response_but_uses_one_recursive_listing() -> None:

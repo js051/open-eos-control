@@ -20,6 +20,7 @@ from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from .errors import BridgeError, unsupported
+from .media_folders import camera_folder_fields
 from .models import (
     BatteryStatus,
     CameraCapabilities,
@@ -2431,6 +2432,7 @@ class CcapiSession:
                     kind=_media_kind(path),
                     content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
                     preview_available=_supports_ccapi_display_preview(path),
+                    **_media_folder_fields(path),
                 )
                 for path in media_paths
             ]
@@ -2526,6 +2528,7 @@ class CcapiSession:
                 "rating": _canon_rating(value.get("rating")),
                 "rotation_degrees": _canon_rotation(value.get("rotate")),
                 "archived": _canon_archive(value.get("archive")),
+                **_media_folder_fields(path),
             }
         )
         self._media_cache[media_id] = item
@@ -3945,6 +3948,14 @@ def _network_error_detail(error: Exception) -> str:
 def _camera_id(base_url: str) -> str:
     encoded = base64.urlsafe_b64encode(base_url.encode()).decode().rstrip("=")
     return f"ccapi-{encoded}"
+
+
+def _media_folder_fields(path: str) -> dict[str, str]:
+    folder = path.rsplit("/", 1)[0]
+    match = re.fullmatch(r"/ccapi/ver\d+/contents(?:/(.+))?", folder)
+    if match is None:
+        return {}
+    return camera_folder_fields("ccapi-folder", folder, unquote(match.group(1) or "/"))
 
 
 def _media_id(path: str) -> str:
