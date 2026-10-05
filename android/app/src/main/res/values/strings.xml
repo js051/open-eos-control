@@ -757,4 +757,29 @@
     <string name="media_rating_short_zero">0 stars</string>
     <string name="media_rating_short_minimum">%1$d+ stars</string>
     <string name="media_rating_short_unknown">Unknown</string>
+
+    <!-- Process-owned original-download receipts; no destination identifiers are stored. -->
+    <string name="download_history_title">Recent downloads</string>
+    <string name="download_history_scope">The latest 100 original-file downloads that actually started on this app. Older attempts and items that never started are not listed.</string>
+    <string name="download_history_outcome_hint">Completed means the file was saved then; it may have been moved or deleted since. If the result is unconfirmed, check the destination before saving again. Failed or cancelled attempts may leave an incomplete file.</string>
+    <string name="download_history_loading">Loading download records…</string>
+    <string name="download_history_empty">No download records to show.</string>
+    <string name="download_history_warning_read">Download records could not be read. Downloads are still available. Clear records to start a new history.</string>
+    <string name="download_history_warning_write">These records may not survive an app restart because they could not be saved. Your download result is unchanged.</string>
+    <string name="download_history_warning_clear">Records could not be cleared. Existing records are kept; try clearing again.</string>
+    <string name="download_history_warning_stopped">Download history is unavailable in this app session. Downloads are still available.</string>
+    <string name="download_history_clear">Clear records</string>
+    <string name="download_history_close">Close</string>
+    <string name="download_history_clear_title">Clear download records?</string>
+    <string name="download_history_clear_confirmation">This only clears this list. It does not delete files or cancel downloads. The remaining items of a download batch already started will not reappear in this history.</string>
+    <string name="download_history_destination_gallery">Destination: Gallery</string>
+    <string name="download_history_destination_document">Destination: Selected file</string>
+    <string name="download_history_destination_folder">Destination: Selected folder</string>
+    <string name="download_history_started">Started: %1$s</string>
+    <string name="download_history_finished">Finished: %1$s</string>
+    <string name="download_history_outcome_progress">In progress</string>
+    <string name="download_history_outcome_completed">Completed</string>
+    <string name="download_history_outcome_failed">Failed</string>
+    <string name="download_history_outcome_cancelled">Cancelled</string>
+    <string name="download_history_outcome_unconfirmed">Unconfirmed after app restart</string>
 </resources>

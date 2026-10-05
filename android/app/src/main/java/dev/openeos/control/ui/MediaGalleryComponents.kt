@@ -173,6 +173,7 @@ internal fun MediaFilterBar(
     dateRangeActive: Boolean,
     ratingFilter: MediaRatingFilter = MediaRatingFilter.ALL,
     onRatingFilter: (MediaRatingFilter) -> Unit = {},
+    onDownloadHistory: () -> Unit = {},
 ) {
     val photos = items.count { !it.isVideo }
     val videos = items.size - photos
@@ -181,6 +182,12 @@ internal fun MediaFilterBar(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_history,
+            stringResource(R.string.download_history_title),
+            onDownloadHistory,
+            testTag = "download-history-open",
+        )
         ToolIconButton(
             LucideR.drawable.lucide_ic_calendar_days,
             stringResource(if (dateRangeActive) R.string.media_date_edit else R.string.media_date_filter),

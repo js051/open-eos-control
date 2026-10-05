@@ -411,6 +411,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             dateRangeActive = state.mediaDateRange != null,
             ratingFilter = state.mediaRatingFilter,
             onRatingFilter = actions.setMediaRatingFilter,
+            onDownloadHistory = actions.openDownloadHistory,
         )
 
         if (hiddenSelectedCount > 0) {
