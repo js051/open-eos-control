@@ -85,13 +85,17 @@ class MediaFolderFilterUiTest {
             mediaLibraryScope = MediaLibraryScope.ALL, mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
         ))
         var batch = emptyList<CameraMediaItem>()
+        var saveCalls = 0
         var listingRequests = 0
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
                 MediaScreen(state.value, connectionRecoveryTestActions().copy(
                     setMediaFolderFilter = { state.value = state.value.copy(mediaFolderFilter = it) },
                     refreshMedia = { listingRequests++ },
-                    downloadMediaBatch = { batch = it },
+                    downloadMediaBatch = { batch = it; saveCalls++ },
+                    // Platform MIME support decides Gallery versus SAF; folder selection
+                    // must preserve the same exact originals in either supported route.
+                    saveMediaToPhone = { batch = it; saveCalls++ },
                 ))
             }
         }
@@ -103,10 +107,12 @@ class MediaFolderFilterUiTest {
         ).performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         chooseFolder("media-folder-option-${first.id}")
         compose.onNodeWithText(text(R.string.media_hidden_selected_summary, 1)).assertIsDisplayed()
-        compose.onNodeWithContentDescription(text(R.string.select_all_media)).performScrollTo().performClick()
-        compose.onNodeWithContentDescription(text(R.string.download_selected_media, 3)).performScrollTo().performClick()
+        // Selection actions are in the fixed top bar, not inside a scroll container.
+        compose.onNodeWithContentDescription(text(R.string.select_all_media)).assertIsDisplayed().performTouchInput { click(center) }
+        compose.onNodeWithContentDescription(text(R.string.download_selected_media, 3)).assertIsDisplayed().performTouchInput { click(center) }
         compose.runOnIdle {
             assertEquals(listOf(jpg.id, raw.id, other.id), batch.map { it.id })
+            assertEquals(1, saveCalls)
             assertEquals(0, listingRequests)
             assertEquals(4, state.value.mediaItems.size)
         }
@@ -120,7 +126,8 @@ class MediaFolderFilterUiTest {
         val selected = mutableStateOf<MediaFolderFilter>(MediaFolderFilter.All)
         var calls = 0
         compose.setContent {
-            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+            // DropdownMenu owns a Popup window; its Android view context must also be 2x.
+            DialogFontScaleOverride(2f) {
                 MaterialTheme(colorScheme = OpenEosColorScheme) {
                     Box(Modifier.size(320.dp, 480.dp).clipToBounds().background(AppBackground)) {
                         MediaFolderFilterButton(selected.value, folders, 3,
