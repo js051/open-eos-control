@@ -60,10 +60,22 @@ PR #206 首輪 head `407ed6b4dd0f86071c2301f4e66fb5acbd3ed390` 的 [CI 373084572
 
 原先待閉合的兩個 native CCAPI App 連線案例，以及兩個有效 H.264→PlayerView→MediaStore→COMPLETED 紀錄旅程，在兩平台均已實跑通過。這只建立該來源的模擬器證據，不能倒推舊 CPU-only timeout 的唯一根因或代表物理相機已驗證。
 
+### 第二輪 CI 與文字裁切判定修正
+
+head `30c87ba6b4c0cca8c53e8c510124483edff3623e` 的 [CI 37316397168](https://github.com/js051/open-eos-control/actions/runs/37316397168) 已結束：JVM／APK gate 通過，API34／36仍各 **272/274、2 failure、0 error/skip**，僅相同的兩個大字級案例失敗。其他連線與錄影旅程繼續通過；不將兩個版面失敗隱藏為全綠。
+
+新保留的四張實際畫面均顯示完整的「直接連相機」與 Connect。失敗數據是文字量測寬 325／328 與 270 px，而 semantics 的段落寬分別為 459 與 561 px；高度未溢位，也沒有省略號。這確證原判定將段落未使用空間當成裁切，沒有證實產品按鈕真的截字。
+
+已由 App APK 的 `META-INF/androidx.compose.foundation_foundation.version` 核對實際 Foundation **1.9.3**，並反組譯 App 解析到的同版 jar：`slowCreateTextLayoutResultOrNull` 用舊 max-width constraints 重建 MultiParagraph，卻沿用較窄的 rendered layoutSize。androidTest lint model 的 1.7.6 條目為 `provided=true`，不能代表執行時版本。這與 [AndroidX 的 semantics 重建變更](https://android.googlesource.com/platform/frameworks/support/+/7309b78a6a0047f7624f623441fb7f8488bf553b%5E1..7309b78a6a0047f7624f623441fb7f8488bf553b/) 一致；實際版本依 APK 與 App resolved jar 為準。
+
+測試改比較每行真正占用的左右界線，另以 intrinsic width 保留不換行文字的裁切檢查，繼續拒絕垂直溢位與省略號。新增四個真 Compose canary：寬容器內完整短字通過、確實水平裁切失敗、確實垂直裁切失敗、省略號失敗。獨立檢查沒有發現 blocker。Standalone fixture 同時補上 App 原有背景以利辨識；沒有修改產品 UI、字級、timeout 或連線斷言。
+
+修正來源於 14:15–14:17 UTC 完成 AndroidTest 編譯／Lint（52 秒）及獨立 test APK（13 秒），兩指令 exit0；Lint仍為0 error／55 warning／2 information。產品 App APK 未變；776 JVM 不為 androidTest-only 修改重跑。新增四例仍須在 API34／36 實跑，不能把編譯當成通過。此批預期裝置數為278，以實際 XML 為準。
+
 ## Release Assessment
 
 - Latest release baseline：`v0.11.0` Development Preview。
 - Proposed impact：`minor`；取消與失敗恢復是完整新增可見流程，錄影查找是既有流程修復。
 - 未改版本。此 PR 基於媒體 PR #205，須先完成相依批次及本批精確 head CI，不能直接宣稱 main accepted 或 preview released。
-- 目前 unresolved gate：本批仍有兩個大字級 layout 失敗，JVM 清理修正與後續來源亦須通過精確 CI；四個連線／影片旅程已有首輪來源通過證據。不能弱化斷言或僅延長 timeout。
+- 目前 unresolved gate：JVM 清理修正已通過第二輪 CI；兩個大字級案例已取得誤判機制與測試修正，修正及四個反例尚待精確 head 裝置 CI。四個連線／影片旅程已有兩輪兩平台通過證據。
 - Physical-device status：pending；fixture／模擬器證據不轉為相機相容性宣稱。

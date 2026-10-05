@@ -8,6 +8,20 @@ import androidx.compose.ui.test.onRoot
 import androidx.test.services.storage.TestStorage
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import org.junit.Assert.assertThrows
+import kotlin.math.ceil
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.DeviceConfigurationOverride
@@ -68,7 +82,7 @@ class CameraConnectionRecoveryUiTest {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
                     DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(locale.value)) {
-                        MaterialTheme(colorScheme = OpenEosColorScheme) { ConnectionScreen(state.value, actions) }
+                        ConnectionRecoveryTestContent(state.value, actions)
                     }
                 }
             }
@@ -122,7 +136,7 @@ class CameraConnectionRecoveryUiTest {
         compose.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 480.dp))) {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
-                    MaterialTheme(colorScheme = OpenEosColorScheme) { ConnectionScreen(state.value, actions) }
+                    ConnectionRecoveryTestContent(state.value, actions)
                 }
             }
         }
@@ -151,9 +165,7 @@ class CameraConnectionRecoveryUiTest {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(size.value)) {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
                     DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(locale.value)) {
-                        MaterialTheme(colorScheme = OpenEosColorScheme) {
-                            ConnectionScreen(state.value, connectionRecoveryTestActions().copy(connect = { retries++ }))
-                        }
+                        ConnectionRecoveryTestContent(state.value, connectionRecoveryTestActions().copy(connect = { retries++ }))
                     }
                 }
             }
@@ -201,7 +213,7 @@ class CameraConnectionRecoveryUiTest {
             scans++
             state.value = state.value.copy(bridgeScanCompleted = false, pendingOperations = setOf(CameraOperation.BRIDGE))
         })
-        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { ConnectionScreen(state.value, actions) } }
+        compose.setContent { ConnectionRecoveryTestContent(state.value, actions) }
         compose.onNodeWithTag("connection-bridge-scan-empty").assertDoesNotExist()
         compose.runOnIdle { state.value = state.value.copy(bridgeScanCompleted = true) }
         compose.onNodeWithTag("connection-bridge-scan-empty").performScrollTo().assertIsDisplayed()
@@ -228,7 +240,7 @@ class CameraConnectionRecoveryUiTest {
         compose.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 480.dp))) {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
-                    MaterialTheme(colorScheme = OpenEosColorScheme) { ConnectionScreen(state.value, actions) }
+                    ConnectionRecoveryTestContent(state.value, actions)
                 }
             }
         }
@@ -266,7 +278,43 @@ class CameraConnectionRecoveryUiTest {
         compose.onNodeWithText("Synthetic connection error").assertIsDisplayed()
     }
 
-    private fun assertTextFits(tag: String) {
+    @Test fun compactStringInWideContainerIsNotMistakenForHorizontalClipping() {
+        compose.setContent {
+            MaterialTheme { Box(Modifier.width(300.dp)) {
+                Text("Connect", modifier = Modifier.widthIn(max = 200.dp).testTag("text-layout-canary"))
+            } }
+        }
+        assertTextFits("text-layout-canary", captureFailure = false)
+    }
+
+    @Test fun actualHorizontalClippingIsStillRejectedEvenWhenHeightAllowsWrapping() {
+        compose.setContent {
+            MaterialTheme { Text("SYNTHETIC_LONG_UNWRAPPED_LABEL", softWrap = false,
+                modifier = Modifier.width(24.dp).height(400.dp).testTag("text-layout-canary")) }
+        }
+        val failure = assertThrows(AssertionError::class.java) { assertTextFits("text-layout-canary", captureFailure = false) }
+        assertTrue(failure.message.orEmpty(), failure.message.orEmpty().contains("Horizontal text clipping"))
+    }
+
+    @Test fun actualVerticalClippingIsStillRejected() {
+        compose.setContent {
+            MaterialTheme { Text("Connect", fontSize = 24.sp,
+                modifier = Modifier.width(160.dp).height(8.dp).testTag("text-layout-canary")) }
+        }
+        val failure = assertThrows(AssertionError::class.java) { assertTextFits("text-layout-canary", captureFailure = false) }
+        assertTrue(failure.message.orEmpty(), failure.message.orEmpty().contains("Vertical text clipping"))
+    }
+
+    @Test fun ellipsizedControlLabelsAreStillRejected() {
+        compose.setContent {
+            MaterialTheme { Text("SYNTHETIC LONG CONTROL LABEL", maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.width(64.dp).testTag("text-layout-canary")) }
+        }
+        val failure = assertThrows(AssertionError::class.java) { assertTextFits("text-layout-canary", captureFailure = false) }
+        assertTrue(failure.message.orEmpty(), failure.message.orEmpty().contains("Ellipsized text"))
+    }
+
+    private fun assertTextFits(tag: String, captureFailure: Boolean = true) {
         val nodes = compose.onAllNodes(
             (hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))) and
                 SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
@@ -285,7 +333,17 @@ class CameraConnectionRecoveryUiTest {
                     "lines=${layout.lineCount} widthOverflow=${layout.didOverflowWidth} heightOverflow=${layout.didOverflowHeight} " +
                     "nodeBounds=${node.boundsInWindow}"
                 val ellipsized = (0 until layout.lineCount).any(layout::isLineEllipsized)
-                if (layout.hasVisualOverflow || ellipsized) {
+                // Foundation's String fast path synthesizes this semantics result with the
+                // original maxWidth, but retains the tight rendered layoutSize. Paragraph.width
+                // therefore includes unused space; its didOverflowWidth is not a clipping test.
+                // Check occupied line extents instead, and preserve no-wrap/height/ellipsis gates.
+                val lineWidths = (0 until layout.lineCount).map { line ->
+                    ceil((layout.getLineRight(line) - layout.getLineLeft(line)).toDouble()).toInt()
+                }
+                val noWrapWidth = !layout.layoutInput.softWrap &&
+                    ceil(layout.multiParagraph.intrinsics.maxIntrinsicWidth.toDouble()).toInt() > layout.size.width
+                val horizontalClipping = noWrapWidth || lineWidths.any { it > layout.size.width }
+                if (captureFailure && (horizontalClipping || layout.didOverflowHeight || ellipsized)) {
                     println("CONNECTION_LAYOUT_FAILURE $details")
                     // All inputs in this fixture are synthetic. Keep the original failure even
                     // if screenshot capture/storage itself is unavailable.
@@ -296,8 +354,9 @@ class CameraConnectionRecoveryUiTest {
                         }
                     }.onFailure { println("CONNECTION_LAYOUT_SCREENSHOT_UNAVAILABLE ${it.javaClass.simpleName}") }
                 }
-                assertFalse("Clipped text: $details", layout.hasVisualOverflow)
                 assertFalse("Ellipsized text: $details", ellipsized)
+                assertFalse("Horizontal text clipping: lineWidths=$lineWidths $details", horizontalClipping)
+                assertFalse("Vertical text clipping: $details", layout.didOverflowHeight)
             }
         }
     }
@@ -314,6 +373,14 @@ class CameraConnectionRecoveryUiTest {
         deviceClass = 0, deviceSubclass = 0, deviceProtocol = 0, hasPermission = permission,
         interfaces = if (ptp) listOf(UsbCameraInterface(0, 6, 1, 1, emptyList())) else emptyList(),
     )
+}
+
+/** Match the actual App's background as well as its color scheme in standalone layout fixtures. */
+@Composable
+private fun ConnectionRecoveryTestContent(state: CameraUiState, actions: CameraActions) {
+    MaterialTheme(colorScheme = OpenEosColorScheme) {
+        Box(Modifier.fillMaxSize().background(AppBackground)) { ConnectionScreen(state, actions) }
+    }
 }
 
 internal fun connectionRecoveryTestActions() = CameraActions(
