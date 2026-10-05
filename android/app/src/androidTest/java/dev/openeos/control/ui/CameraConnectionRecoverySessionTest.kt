@@ -51,7 +51,11 @@ class CameraConnectionRecoverySessionTest {
     private val blockIdentityOnce = AtomicBoolean(false)
     private val identityEntered = CountDownLatch(1)
     private val releaseIdentity = CountDownLatch(1)
-    private data class Request(val method: String?, val path: String, val authorization: String?)
+    private data class Request(
+        val method: String?, val path: String, val authorization: String?,
+        val receivedNanos: Long = System.nanoTime(),
+        @Volatile var responseStatus: Int? = null,
+    )
     private val requests = CopyOnWriteArrayList<Request>()
     private val oldIdentityReturned = AtomicBoolean(false)
 
@@ -60,15 +64,20 @@ class CameraConnectionRecoverySessionTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = requireNotNull(request.requestUrl).encodedPath
-                requests += Request(request.method, path, request.getHeader("Authorization"))
+                val observed = Request(request.method, path, request.getHeader("Authorization"))
+                requests += observed
                 if (requireAuthentication.get() && request.getHeader("Authorization") != CORRECT_AUTHORIZATION) {
-                    return MockResponse().setResponseCode(if (path == "/ccapi") 401 else 404)
+                    val response = MockResponse().setResponseCode(if (path == "/ccapi") 401 else 404)
                         .setBody("SYNTHETIC-PRIVATE-RESPONSE")
+                    observed.responseStatus = if (path == "/ccapi") 401 else 404
+                    return response
                 }
                 if (path.endsWith("/deviceinformation") && blockIdentityOnce.compareAndSet(true, false)) {
                     identityEntered.countDown()
                     try {
-                        check(releaseIdentity.await(15, TimeUnit.SECONDS)) { "Identity response gate was not released." }
+                        // This peer intentionally remains silent across Cancel and a whole explicit retry.
+                        // Its cleanup budget must exceed those separate 15-second assertions.
+                        check(releaseIdentity.await(90, TimeUnit.SECONDS)) { "Identity response gate was not released." }
                     } finally { oldIdentityReturned.set(true) }
                 }
                 return when (path) {
@@ -77,7 +86,7 @@ class CameraConnectionRecoverySessionTest {
                     "/ccapi/ver110/devicestatus/battery" -> json("""{"level":"87"}""")
                     "/ccapi/ver110/shooting/settings" -> json("{}")
                     else -> MockResponse().setResponseCode(404)
-                }
+                }.also { observed.responseStatus = it.status.split(' ')[1].toInt() }
             }
         }
         server.start()
@@ -128,6 +137,7 @@ class CameraConnectionRecoverySessionTest {
         }
         compose.onNodeWithTag("connection-connect").performScrollTo().performClick()
         compose.waitUntil(TIMEOUT) { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy }
+        traceConnection("authentication-rejected")
         assertEquals(ConnectionRecovery(ConnectionAttemptTarget.CCAPI, ConnectionFailureReason.AUTHENTICATION_REJECTED),
             viewModel.uiState.value.connectionRecovery)
         assertFalse(viewModel.uiState.value.error.orEmpty().contains("SYNTHETIC-PRIVATE"))
@@ -144,8 +154,13 @@ class CameraConnectionRecoverySessionTest {
             assertFalse(viewModel.uiState.value.connected)
             assertTrue(viewModel.uiState.value.pendingOperations.isEmpty())
             assertEquals(failedRequests, requests.size)
+            assertTrue("The username edit must reach the production model", viewModel.uiState.value.username == "synthetic-corrected-user")
+            assertTrue("The password edit must reach the production model", viewModel.uiState.value.password == "synthetic-corrected-password")
+            assertEquals(false, viewModel.uiState.value.ccapiSimulatorMode)
         }
+        traceConnection("credentials-edited")
         compose.onNodeWithTag("connection-connect").performScrollTo().assertIsEnabled().performClick()
+        traceConnection("manual-retry-started")
         assertConnected()
         assertTrue(requests.any { it.path == "/ccapi/ver110/deviceinformation" && it.authorization == CORRECT_AUTHORIZATION })
     }
@@ -177,12 +192,30 @@ class CameraConnectionRecoverySessionTest {
     }
 
     private fun assertConnected() {
-        compose.waitUntil(TIMEOUT) { viewModel.uiState.value.connected && !viewModel.uiState.value.busy }
+        try {
+            compose.waitUntil(TIMEOUT) { viewModel.uiState.value.connected && !viewModel.uiState.value.busy }
+        } catch (failure: Throwable) {
+            traceConnection("connect-condition-failed")
+            throw failure
+        }
+        traceConnection("connected")
         compose.onNodeWithTag("camera-model-status").assertIsDisplayed()
         assertEquals("Synthetic recovery camera", viewModel.uiState.value.info?.model)
         assertEquals(87, viewModel.uiState.value.status?.batteryLevel)
         assertNull(viewModel.uiState.value.error)
         assertTrue("Connection recovery must not send camera commands", requests.all { it.method == "GET" })
+    }
+
+    /** Synthetic peer diagnostics: deliberately no URL, credential/header value or response body. */
+    private fun traceConnection(phase: String) {
+        val state = viewModel.uiState.value
+        println("CONNECTION_DIAGNOSTIC phase=$phase atNanos=${System.nanoTime()} connected=${state.connected} pending=${state.pendingOperations} " +
+            "recovery=${state.connectionRecovery} identityPresent=${state.info != null} statusPresent=${state.status != null} " +
+            "errorOperation=${state.errorOperation} nativeMode=${state.ccapiSimulatorMode == false} " +
+            "correctUsername=${state.username == "synthetic-corrected-user"} correctPassword=${state.password == "synthetic-corrected-password"} " +
+            "shutterUnconfirmed=${state.shutterReleaseUnconfirmed} bulbActive=${state.bulbExposureActive}")
+        val began = requests.firstOrNull()?.receivedNanos ?: 0L
+        println("CONNECTION_REQUESTS " + requests.map { "${it.method} ${it.path} afterMs=${(it.receivedNanos - began) / 1_000_000} correctAuthentication=${it.authorization == CORRECT_AUTHORIZATION} responseStatus=${it.responseStatus}" })
     }
 
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)

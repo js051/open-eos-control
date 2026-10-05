@@ -40,6 +40,16 @@ URL preflight 保留 http／https 與既有 base path，不改寫協定。Bridge
 
 裝置 runtime與精確head CI仍待結果。實體相機光學、真正手機網路與 USB 權限／硬體相容性仍無新證據。
 
+## 第一輪 API 34 runtime 結果（尚未閉合）
+
+本地單台 API34 AOSP x86_64、Android Emulator37.2.12、CPU-only／SwiftShader，使用上述精確 APK。裝置成功開機及安裝後，第一個真 App 驗證恢復案例於手動重試後的 `assertConnected` 出現15秒條件 timeout；第二個取消案例開始後，模擬器程序於09:12:46 UTC收到SIGKILL（-9），整批中斷，6個版面案例未執行。沒有任何可確認的通過案例。
+
+同時共享主機普通命令出現阻塞，但目前無證據把第一項斷言失敗全歸為環境。保留第一例失敗與第二例中斷的區分，補上不含 URL／帳密／body 的狀態與請求診斷，維持原 15 秒連線斷言。測試 peer 的 held-identity 清理等待由 15 秒改為 90 秒，使它明確長於 Cancel 加整次重連的獨立斷言；沒有延長 production 或連線完成 timeout。此批仍不可列為 PR ready。
+
+09:35–09:36 UTC 的診斷來源建置以 terminal exit 0 完成（1m22s）：新增的 `correctedNativeCredentialsReconnectToTheSameEndpoint` 以真 production VM／HTTP 在同一端點拒絕舊帳密、修改後明確重試，1/1 通過；另完成 Lint、AndroidTest 編譯及 APK 建置。這只補了同端點協定證據，不是完整 680 項 JVM 重跑，也不能代替上述 App UI 裝置失敗的閉合。
+
+Production 來源未改，App APK SHA-256 仍為 `ef6219bfdfffa23d9521a8956fd64d90c5ef7ebe7c0dc3ec2ce894bb73a7ad8e`；含安全診斷的 androidTest APK 為 `d7c0059044a6e80a1815dcf33cc3c1e4f8a5282186c02e62c3d6893cc43cadc1`，尚未執行。來源 manifest 前後均為 `7bce0cee07ee1495f093fa2685bfa8a96a70363887f4a03556d425a7672efd10`。
+
 ## 發版評估
 
 Release Assessment：相較 0.11.0，設定污染修正屬 `patch`；完整取消與失敗恢復入口屬新增使用者流程，整批建議 `minor` Development Preview。沒有改版本或發版；完整 CI、main acceptance、版本 PR 與 immutable candidate 依既有規則，各自完成後才可晉級。

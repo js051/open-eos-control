@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
+import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -196,6 +197,39 @@ class CameraConnectionConfigurationRecoveryTest {
         viewModel.setBaseUrl(newPeer.baseUrl)
         assertTrue(newPeer.requests.isEmpty())
         connectAndVerifyReplacement()
+    }
+
+    @Test fun correctedNativeCredentialsReconnectToTheSameEndpoint() = runBlocking {
+        val accepted = Credentials.basic("synthetic-corrected-user", "synthetic-corrected-password")
+        oldPeer.intercept = { request ->
+            if (request.getHeader("Authorization") != accepted) MockResponse()
+                .setResponseCode(if (request.requestUrl?.encodedPath == "/ccapi") 401 else 404)
+                .setBody("SYNTHETIC-PRIVATE-RESPONSE") else null
+        }
+        viewModel.useDirectCameraPreset()
+        viewModel.setBaseUrl(oldPeer.baseUrl)
+        viewModel.setUsername("synthetic-rejected-user")
+        viewModel.setPassword("synthetic-rejected-password")
+        viewModel.connect()
+        assertTrue(pumpUntil { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy })
+        assertEquals(ConnectionFailureReason.AUTHENTICATION_REJECTED, viewModel.uiState.value.connectionRecovery?.reason)
+        val failedRequestCount = oldPeer.requests.size
+        viewModel.setUsername("synthetic-corrected-user")
+        viewModel.setPassword("synthetic-corrected-password")
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        assertEquals(failedRequestCount, oldPeer.requests.size)
+        assertEquals(oldPeer.baseUrl, viewModel.uiState.value.baseUrl)
+        viewModel.connect()
+        assertTrue("Same-endpoint retry: ${viewModel.uiState.value.connectionRecovery}", pumpUntil {
+            viewModel.uiState.value.connected && !viewModel.uiState.value.busy
+        })
+        assertEquals(oldPeer.model, viewModel.uiState.value.info?.model)
+        assertEquals(31, viewModel.uiState.value.status?.batteryLevel)
+        assertNull(viewModel.uiState.value.error)
+        assertTrue(oldPeer.requests.drop(failedRequestCount).isNotEmpty())
+        assertTrue(oldPeer.requests.drop(failedRequestCount).all { it.authorization == accepted })
+        assertTrue(newPeer.requests.isEmpty())
+        assertReadOnlyRequests()
     }
 
     @Test fun bridgeAuthenticationFailureUsesActualStatusAndClearsWithNewToken() = runBlocking {
