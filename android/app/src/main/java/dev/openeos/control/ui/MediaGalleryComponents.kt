@@ -133,6 +133,8 @@ internal fun MediaSortButton(sort: MediaSort, onSort: (MediaSort) -> Unit) {
                 MediaSort.OLDEST to R.string.media_oldest_first,
                 MediaSort.NAME to R.string.media_filename,
                 MediaSort.CAMERA to R.string.media_camera_order,
+                MediaSort.RATING_HIGH to R.string.media_rating_high_first,
+                MediaSort.RATING_LOW to R.string.media_rating_low_first,
             ).forEach { (value, label) ->
                 DropdownMenuItem(
                     text = {
@@ -158,6 +160,8 @@ internal val MediaSort.labelResource: Int
         MediaSort.NEWEST -> R.string.media_newest_first
         MediaSort.OLDEST -> R.string.media_oldest_first
         MediaSort.NAME -> R.string.media_filename
+        MediaSort.RATING_HIGH -> R.string.media_rating_high_first
+        MediaSort.RATING_LOW -> R.string.media_rating_low_first
     }
 
 @Composable
@@ -167,6 +171,8 @@ internal fun MediaFilterBar(
     onSelected: (MediaFilter) -> Unit,
     onDateRange: () -> Unit,
     dateRangeActive: Boolean,
+    ratingFilter: MediaRatingFilter = MediaRatingFilter.ALL,
+    onRatingFilter: (MediaRatingFilter) -> Unit = {},
 ) {
     val photos = items.count { !it.isVideo }
     val videos = items.size - photos
@@ -180,6 +186,7 @@ internal fun MediaFilterBar(
             stringResource(if (dateRangeActive) R.string.media_date_edit else R.string.media_date_filter),
             onDateRange,
         )
+        MediaRatingFilterButton(ratingFilter, onRatingFilter)
         listOf(
             Triple(MediaFilter.ALL, R.string.media_all, items.size),
             Triple(MediaFilter.PHOTOS, R.string.media_photos, photos),
@@ -290,7 +297,7 @@ internal fun MediaGalleryGrid(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         groups.forEachIndexed { groupIndex, group ->
-            if (sort != MediaSort.CAMERA) {
+            if (sort.hasGroupHeadings) {
                 item(
                     key = "media-date-${group.date ?: "unknown"}-$groupIndex",
                     span = { GridItemSpan(maxLineSpan) },

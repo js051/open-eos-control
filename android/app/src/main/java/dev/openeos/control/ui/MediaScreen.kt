@@ -82,12 +82,16 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var selectionDrag by remember { mutableStateOf<MediaSelectionDrag?>(null) }
     val displayZone = ZoneId.systemDefault()
-    val dateFilteredItems = remember(state.mediaItems, state.mediaDateRange, displayZone) {
-        mediaItemsForDisplay(state.mediaItems, MediaFilter.ALL, MediaSort.CAMERA, state.mediaDateRange, displayZone)
+    val libraryFilteredItems = remember(state.mediaItems, state.mediaDateRange, state.mediaRatingFilter, displayZone) {
+        mediaItemsForDisplay(
+            state.mediaItems, MediaFilter.ALL, MediaSort.CAMERA, state.mediaDateRange, displayZone, state.mediaRatingFilter,
+        )
     }
-    val displayedItems = remember(dateFilteredItems, mediaFilter, mediaSort) {
-        mediaItemsForDisplay(dateFilteredItems, mediaFilter, mediaSort)
+    val displayedItems = remember(libraryFilteredItems, mediaFilter, mediaSort) {
+        mediaItemsForDisplay(libraryFilteredItems, mediaFilter, mediaSort)
     }
+    val ratingViewActive = state.mediaRatingFilter != MediaRatingFilter.ALL || mediaSort.isRatingOrder
+    val unknownRatingCount = remember(state.mediaItems) { state.mediaItems.count { it.knownRating == null } }
     val unknownDateCount = remember(state.mediaItems, displayZone) {
         state.mediaItems.count { it.captureTime.toMediaDisplayDate(displayZone) == null }
     }
@@ -401,10 +405,12 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         )
 
         MediaFilterBar(
-            mediaFilter, dateFilteredItems,
+            mediaFilter, libraryFilteredItems,
             onSelected = { mediaFilter = it },
             onDateRange = { dateDialogVisible = true },
             dateRangeActive = state.mediaDateRange != null,
+            ratingFilter = state.mediaRatingFilter,
+            onRatingFilter = actions.setMediaRatingFilter,
         )
 
         if (hiddenSelectedCount > 0) {
@@ -416,7 +422,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             )
         }
-        if (state.mediaDateRange != null) {
+        if (state.mediaDateRange != null || ratingViewActive) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -432,10 +438,17 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
                             color = AppSubtleText,
                         )
                         Text(stringResource(R.string.media_date_zone, displayZone.id), color = AppSubtleText)
-                        if (state.mediaLibraryScope == MediaLibraryScope.RECENT || state.mediaLibraryHasMore ||
-                            state.mediaLibraryLoadStatus != MediaLibraryLoadStatus.COMPLETE) {
-                            Text(stringResource(R.string.media_date_partial), color = AppWarning)
-                        }
+                    }
+                    if (ratingViewActive) {
+                        Text(
+                            stringResource(R.string.media_rating_loaded_results, displayedItems.size, state.mediaItems.size, unknownRatingCount),
+                            color = AppSubtleText, modifier = Modifier.testTag("media-rating-summary"),
+                        )
+                        Text(stringResource(R.string.media_rating_known_only), color = AppSubtleText)
+                    }
+                    if (state.mediaLibraryScope == MediaLibraryScope.RECENT || state.mediaLibraryHasMore ||
+                        state.mediaLibraryLoadStatus != MediaLibraryLoadStatus.COMPLETE) {
+                        Text(stringResource(R.string.media_date_partial), color = AppWarning)
                     }
                 }
                 if (state.mediaDateRange != null) {
@@ -798,27 +811,28 @@ private fun MediaMetadataSheet(
                 }
             }
 
+            // Read coverage and write capability are independent; unknown is useful information too.
+            MetadataSectionTitle(
+                title = stringResource(R.string.media_rating),
+                value = item.knownRating?.let { stringResource(R.string.media_rating_value, it) }
+                    ?: stringResource(R.string.media_rating_unknown),
+            )
             if (ratingSupported) {
-                MetadataSectionTitle(
-                    title = stringResource(R.string.media_rating),
-                    value = item.rating?.let { stringResource(R.string.media_rating_value, it) }
-                        ?: stringResource(R.string.media_metadata_unknown),
-                )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     ToolIconButton(
                         LucideR.drawable.lucide_ic_star_off,
                         stringResource(R.string.clear_media_rating, item.name),
                         { onRate(0) },
-                        enabled = !busy && item.rating != 0,
-                        tint = if (item.rating == 0) AppAccent else AppSubtleText,
+                        enabled = !busy && item.knownRating != 0,
+                        tint = if (item.knownRating == 0) AppAccent else AppSubtleText,
                     )
                     (1..5).forEach { rating ->
                         ToolIconButton(
                             LucideR.drawable.lucide_ic_star,
                             stringResource(R.string.set_media_rating, item.name, rating),
                             { onRate(rating) },
-                            enabled = !busy && item.rating != rating,
-                            tint = if ((item.rating ?: 0) >= rating) AppWarning else AppSubtleText,
+                            enabled = !busy && item.knownRating != rating,
+                            tint = if ((item.knownRating ?: 0) >= rating) AppWarning else AppSubtleText,
                         )
                     }
                 }

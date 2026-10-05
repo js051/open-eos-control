@@ -21,6 +21,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
     pendingOperations = pendingOperations - CameraOperation.FOCUS,
     previewMode = true,
     mediaDateRange = null,
+    mediaRatingFilter = MediaRatingFilter.ALL,
     mediaSessionGeneration = mediaSessionGeneration + 1,
     transport = null,
     info = CameraInfo(

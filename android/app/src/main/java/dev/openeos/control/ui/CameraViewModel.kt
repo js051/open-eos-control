@@ -313,6 +313,14 @@ class CameraViewModel(
         }
     }
 
+    fun setMediaRatingFilter(
+        filter: MediaRatingFilter,
+        connection: dev.openeos.control.data.CameraInfo? = _uiState.value.info,
+        generation: Long = _uiState.value.mediaSessionGeneration,
+    ) {
+        _uiState.update { it.withMediaRatingFilterForSession(filter, connection, generation) }
+    }
+
     fun setMediaLibraryScope(scope: MediaLibraryScope) {
         val state = _uiState.value
         if (state.mediaLibraryScope == scope || state.isBusy(CameraOperation.MEDIA)) return
@@ -3171,6 +3179,7 @@ class CameraViewModel(
         capabilities = null,
         mediaItems = emptyList(),
         mediaDateRange = null,
+        mediaRatingFilter = MediaRatingFilter.ALL,
         mediaSessionGeneration = mediaSessionGeneration + 1,
         mediaLibraryHasMore = false,
         mediaThumbnails = emptyMap(),

@@ -744,4 +744,17 @@
     <string name="media_date_partial">Recent or partial library only; other card items have not been searched.</string>
     <string name="media_hidden_selected">%1$d selected items are hidden by filters. Batch actions still include them.</string>
     <string name="media_hidden_selected_summary">Batch includes %1$d hidden items</string>
+    <string name="media_rating_filter_current">Rating: %1$s</string>
+    <string name="media_rating_all">All ratings</string>
+    <string name="media_rating_unrated">Unrated (0 stars)</string>
+    <string name="media_rating_unknown">Unknown rating</string>
+    <string name="media_rating_five">5 stars</string>
+    <string name="media_rating_at_least">Rating %1$d or higher</string>
+    <string name="media_rating_high_first">Known rating: high to low</string>
+    <string name="media_rating_low_first">Known rating: low to high</string>
+    <string name="media_rating_loaded_results">Matches: %1$d / Loaded: %2$d · Unknown ratings: %3$d</string>
+    <string name="media_rating_known_only">Uses ratings already read. Unknown is not 0 stars. Open an item’s actions to read its information; some cameras do not provide ratings. Unknown ratings appear last when sorting by rating.</string>
+    <string name="media_rating_short_zero">0 stars</string>
+    <string name="media_rating_short_minimum">%1$d+ stars</string>
+    <string name="media_rating_short_unknown">Unknown</string>
 </resources>

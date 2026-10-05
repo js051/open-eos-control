@@ -150,6 +150,9 @@ fun OpenEosControlApp(
         setMediaDateRange = { range ->
             viewModel.setMediaDateRange(range, state.info, state.mediaSessionGeneration)
         },
+        setMediaRatingFilter = { filter ->
+            viewModel.setMediaRatingFilter(filter, state.info, state.mediaSessionGeneration)
+        },
         cancelMediaLibraryLoad = viewModel::cancelMediaLibraryLoad,
         loadMediaThumbnail = viewModel::loadMediaThumbnail,
         openMediaPreview = viewModel::openMediaPreview,
@@ -334,6 +337,7 @@ data class CameraActions(
     val refreshMedia: () -> Unit,
     val setMediaLibraryScope: (MediaLibraryScope) -> Unit = {},
     val setMediaDateRange: (MediaDateRange?) -> Unit = {},
+    val setMediaRatingFilter: (MediaRatingFilter) -> Unit = {},
     val cancelMediaLibraryLoad: () -> Unit = {},
     val loadMediaThumbnail: (CameraMediaItem) -> Unit,
     val openMediaPreview: (CameraMediaItem) -> Unit,

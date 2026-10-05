@@ -265,7 +265,7 @@ class CameraGalleryUiTest {
             compose.activity.getString(R.string.media_newest_first))).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.media_filename)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.media_filter_count,
-            compose.activity.getString(R.string.media_videos), 1)).performClick()
+            compose.activity.getString(R.string.media_videos), 1)).performScrollTo().performClick()
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_date_clear)).performClick()
         compose.onNodeWithText("ONE.MP4").assertIsDisplayed()
         compose.onNodeWithText("TWO.MP4").assertIsDisplayed()
@@ -409,6 +409,67 @@ class CameraGalleryUiTest {
         assertTrue("$message: inner=$inner, outer=$outer", inner.width > 0f && inner.height > 0f &&
             inner.left >= outer.left - tolerance && inner.top >= outer.top - tolerance &&
             inner.right <= outer.right + tolerance && inner.bottom <= outer.bottom + tolerance)
+    }
+
+    @Test fun ratingFilterWorksWithReadOnlyMetadataAndKeepsCancelledFailedDisclosure() {
+        val initial = state()
+        val capabilities = requireNotNull(initial.capabilities)
+        val current = mutableStateOf(initial.copy(
+            mediaItems = listOf(item.copy(rating = 5, ratingWritable = false), item.copy(id = "unknown", name = "UNKNOWN.JPG", rating = 7)),
+            mediaLibraryLoadStatus = MediaLibraryLoadStatus.CANCELLED,
+            mediaLibraryScope = MediaLibraryScope.ALL,
+            mediaRatingFilter = MediaRatingFilter.FIVE,
+            capabilities = capabilities.copy(matrix = capabilities.matrix.copy(
+                supported = capabilities.matrix.supported - CameraFeature.MEDIA_RATING,
+            )),
+        ))
+        compose.setContent { MaterialTheme { MediaScreen(current.value, actions()) } }
+        compose.onNodeWithText(item.name).assertIsDisplayed()
+        compose.onNodeWithText("UNKNOWN.JPG").assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_rating_loaded_results, 1, 2, 1)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { current.value = current.value.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) }
+        compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("media-rating-filter").assertIsEnabled()
+    }
+
+    @Test fun equalFieldReplacementConnectionDiscardsOpenRatingMenuAndOldSelection() {
+        val current = mutableStateOf(state().copy(mediaItems = listOf(item.copy(rating = 5))), androidx.compose.runtime.neverEqualPolicy())
+        val applied = mutableListOf<MediaRatingFilter>()
+        compose.setContent {
+            MaterialTheme { MediaScreen(current.value, actions().copy(setMediaRatingFilter = { applied += it })) }
+        }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.preview_media, item.name))
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithTag("media-rating-filter").performScrollTo().performClick()
+        compose.onNodeWithTag("media-rating-menu").assertIsDisplayed()
+        compose.runOnIdle { current.value = current.value.copy(info = requireNotNull(current.value.info).copy()) }
+        compose.onNodeWithTag("media-rating-menu").assertDoesNotExist()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.exit_media_selection)).assertDoesNotExist()
+        compose.runOnIdle { assertTrue(applied.isEmpty()) }
+    }
+
+    @Test fun readOnlyRatingIsVisibleInInformationWithoutRatingMutationButtons() {
+        val initial = state()
+        val capabilities = requireNotNull(initial.capabilities)
+        // Keep unrelated rotation metadata known: only the rating value is under test here.
+        val readOnlyItem = item.copy(ratingWritable = false, rotationDegrees = 0)
+        val current = mutableStateOf(initial.copy(
+            mediaItems = listOf(readOnlyItem.copy(rating = 5)),
+            capabilities = capabilities.copy(matrix = capabilities.matrix.copy(
+                supported = capabilities.matrix.supported - CameraFeature.MEDIA_RATING,
+            )),
+        ))
+        compose.setContent { MaterialTheme { MediaScreen(current.value, actions()) } }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_actions, item.name)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_rating_value, 5)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.clear_media_rating, item.name)).assertDoesNotExist()
+        compose.runOnIdle { current.value = current.value.copy(mediaItems = listOf(readOnlyItem.copy(rating = 7))) }
+        compose.onNodeWithText(compose.activity.getString(R.string.media_rating_unknown)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_metadata_unknown)).assertDoesNotExist()
+        (1..5).forEach { stars ->
+            compose.onNodeWithContentDescription(compose.activity.getString(R.string.set_media_rating, item.name, stars)).assertDoesNotExist()
+        }
     }
 
     private fun actions() = CameraActions(
