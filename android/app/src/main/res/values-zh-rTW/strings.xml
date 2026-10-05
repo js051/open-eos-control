@@ -500,6 +500,9 @@
     <string name="media_save_queued">正在等待儲存這個原檔…</string>
     <string name="media_save_failed">無法儲存原檔：%1$s</string>
     <string name="media_save_cancelled">已取消下載。</string>
+    <string name="media_save_cancelled_cleanup_unconfirmed">下載已取消，可能仍有未完成檔案。再次儲存前，請先檢查儲存位置。</string>
+    <string name="media_save_failed_cleanup_unconfirmed">下載失敗，可能仍有未完成檔案。再次儲存前，請先檢查儲存位置。</string>
+    <string name="media_save_cleanup_unconfirmed">當時選擇的儲存位置可能仍有未完成檔案。再次儲存前，請先檢查。</string>
     <string name="media_save_retry">重試儲存原檔</string>
     <string name="media_save_selected_document">您選取的文件</string>
     <string name="media_save_selected_folder">您選取的資料夾</string>

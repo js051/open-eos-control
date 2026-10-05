@@ -681,13 +681,19 @@ private fun MediaSaveFeedbackPanel(
             is MediaSaveFeedback.Saving -> stringResource(R.string.downloading_media, item.name)
             is MediaSaveFeedback.Saved -> stringResource(R.string.media_saved_location, feedback.location)
             is MediaSaveFeedback.Failed -> stringResource(R.string.media_save_failed, feedback.message)
+            is MediaSaveFeedback.IncompleteFile -> stringResource(if (feedback.cancelled)
+                R.string.media_save_cancelled_cleanup_unconfirmed else R.string.media_save_failed_cleanup_unconfirmed)
             MediaSaveFeedback.Cancelled -> stringResource(R.string.media_save_cancelled)
             null -> null
         }
         status?.let {
             Text(
                 it,
-                color = if (feedback is MediaSaveFeedback.Saved) AppSuccess else AppText,
+                color = when (feedback) {
+                    is MediaSaveFeedback.Saved -> AppSuccess
+                    is MediaSaveFeedback.IncompleteFile -> AppWarning
+                    else -> AppText
+                },
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
@@ -699,7 +705,7 @@ private fun MediaSaveFeedbackPanel(
         if (feedback is MediaSaveFeedback.Saving || feedback is MediaSaveFeedback.Queued || otherDownloadName != null) {
             TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel_media_download)) }
         }
-        if (feedback is MediaSaveFeedback.Failed || feedback is MediaSaveFeedback.Cancelled) {
+        if (feedback is MediaSaveFeedback.Failed || feedback is MediaSaveFeedback.Cancelled || feedback is MediaSaveFeedback.IncompleteFile) {
             TextButton(onClick = onRetry, enabled = retryEnabled) { Text(stringResource(R.string.media_save_retry)) }
         }
         captureTime?.let { Text(it, color = AppSubtleText) }

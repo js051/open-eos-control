@@ -33,6 +33,59 @@ import kotlin.coroutines.coroutineContext
 class DownloadHistoryStoreTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
 
+    @Test fun schemaOneRecordsUpgradeWithoutLosingOutcomesAndRetainCleanupRiskOnRestart() = runTest {
+        val directory = temporaryFolder.newFolder()
+        snapshot(directory).writeText(fixtureJson().toString())
+        val store = newStore(directory)
+        store.awaitIdle()
+        assertEquals(listOf(fixtureEntry()), store.state.value.entries)
+        assertFalse(store.state.value.entries.single().cleanupUnconfirmed)
+
+        val receipt = store.begin(store.captureRequest(), "SYNTHETIC-CANCELLED.JPG", DownloadHistoryDestination.FOLDER)
+        store.recordFinished(receipt, DownloadHistoryOutcome.CANCELLED, cleanupUnconfirmed = true)
+        store.awaitIdle()
+        assertEquals(2, JSONObject(snapshot(directory).readText()).getInt("schema"))
+        assertEquals(fixtureEntry(), store.state.value.entries.last())
+        val reopened = newStore(directory)
+        reopened.awaitIdle()
+        assertEquals(store.state.value.entries, reopened.state.value.entries)
+        assertTrue(reopened.state.value.entries.first().cleanupUnconfirmed)
+        assertEquals(DownloadHistoryOutcome.CANCELLED, reopened.state.value.entries.first().outcome)
+    }
+
+    @Test fun schemaTwoRejectsMalformedRiskAndRiskOnCompletedOutputWithoutRewritingInput() = runTest {
+        val invalid = listOf<Any>(JSONObject.NULL, 1, "true", JSONObject()).map { value ->
+            fixtureJson().put("schema", 2).apply { row().put("outcome", "FAILED").put("cleanupUnconfirmed", value) }
+        } + fixtureJson().put("schema", 2).apply { row().put("cleanupUnconfirmed", true) }
+        for (fixture in invalid) {
+            val directory = temporaryFolder.newFolder()
+            val original = fixture.toString().toByteArray()
+            snapshot(directory).writeBytes(original)
+            val store = newStore(directory)
+            store.awaitIdle()
+            assertEquals(DownloadHistoryWarning.READ_FAILED, store.state.value.warning)
+            assertNull(store.begin(store.captureRequest(), "NEW.JPG", DownloadHistoryDestination.FOLDER))
+            assertArrayEquals(original, snapshot(directory).readBytes())
+        }
+    }
+
+    @Test fun lateCleanupRiskCannotDowngradeCompletedOrRestoreClearedReceipts() = runTest {
+        val directory = temporaryFolder.newFolder()
+        val store = newStore(directory)
+        val saved = store.begin(store.captureRequest(), "SAVED.JPG", DownloadHistoryDestination.DOCUMENT)
+        store.recordFinished(saved, DownloadHistoryOutcome.COMPLETED, cleanupUnconfirmed = true)
+        store.recordFinished(saved, DownloadHistoryOutcome.FAILED, cleanupUnconfirmed = true)
+        store.awaitIdle()
+        assertEquals(DownloadHistoryOutcome.COMPLETED, store.state.value.entries.single().outcome)
+        assertFalse(store.state.value.entries.single().cleanupUnconfirmed)
+        val pending = store.begin(store.captureRequest(), "CANCELLED.JPG", DownloadHistoryDestination.FOLDER)
+        assertTrue(store.clear())
+        store.recordFinished(pending, DownloadHistoryOutcome.CANCELLED, cleanupUnconfirmed = true)
+        store.awaitIdle()
+        assertTrue(store.state.value.entries.isEmpty())
+        assertTrue(DownloadHistoryFileStorage(directory).read().isEmpty())
+    }
+
     @Test fun missingSnapshotLoadsEmptyWithoutCreatingAFile() = runTest {
         val directory = File(temporaryFolder.root, "not-created-yet")
         val store = newStore(directory)
@@ -118,7 +171,7 @@ class DownloadHistoryStoreTest {
         val valid = fixtureJson()
         val invalidInputs = listOf(
             "{".toByteArray(),
-            valid.put("schema", 2).toString().toByteArray(),
+            valid.put("schema", 3).toString().toByteArray(),
             ByteArray(MAX_DOWNLOAD_HISTORY_SNAPSHOT_BYTES + 1) { ' '.code.toByte() },
             fixtureJson().apply { getJSONArray("records").put(getJSONArray("records").getJSONObject(0)) }.toString().toByteArray(),
             byteArrayOf(0xC3.toByte(), 0x28),
@@ -316,7 +369,7 @@ class DownloadHistoryStoreTest {
             assertFalse(it, bytes.contains(it))
         }
         assertEquals(setOf("schema", "records"), JSONObject(bytes).keys().asSequence().toSet())
-        assertEquals(setOf("receiptId", "filename", "destination", "startedAtMillis", "finishedAtMillis", "outcome"), JSONObject(bytes).row().keys().asSequence().toSet())
+        assertEquals(setOf("receiptId", "filename", "destination", "startedAtMillis", "finishedAtMillis", "outcome", "cleanupUnconfirmed"), JSONObject(bytes).row().keys().asSequence().toSet())
     }
 
     @Test fun terminalWriteFailureKeepsHonestLiveResultAndRestartUnconfirmed() = runTest {
