@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android: add a strict, inclusive media-date range in the device display time zone over loaded media, with partial-library and unknown-date disclosure. Keep hidden selections visible in the batch-scope warning, reset filters across camera sessions and reject stale callbacks, and open filtered-out capture review as a standalone item. Local JVM and build evidence is recorded in the [validation notes](docs/validation/android-media-date-filter-2026-10-05.zh-TW.md); device UI execution and physical-camera validation remain pending.
+
 ## [0.11.0] - 2026-10-05
 
 Development Preview. This minor release connects Android capture review, recent media, full-screen preview and original-file saving, while improving selected cross-platform command/recovery paths. See the [bilingual release notes](docs/releases/v0.11.0.md) for exact evidence and distribution details.
