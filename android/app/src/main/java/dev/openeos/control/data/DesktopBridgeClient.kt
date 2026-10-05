@@ -625,6 +625,11 @@ class DesktopBridgeClient(
 
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem =
         parseMediaItem(getJson(sessionEndpoint("media", item.id, "info")))
+            ?.also { updated ->
+                check(updated.id == item.id) {
+                    "Desktop Bridge media response does not belong to the requested item ${item.name}."
+                }
+            }
             ?: error("Desktop Bridge returned invalid media information for ${item.name}.")
 
     suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
@@ -650,6 +655,7 @@ class DesktopBridgeClient(
             endpoint = "rating",
             payload = JSONObject().put("value", rating),
             feature = CameraFeature.MEDIA_RATING,
+            expectedRating = rating,
         )
     }
 
@@ -668,9 +674,18 @@ class DesktopBridgeClient(
         endpoint: String,
         payload: JSONObject,
         feature: CameraFeature,
+        expectedRating: Int? = null,
     ): CameraMediaItem = parseMediaItem(
         putJson(sessionEndpoint("media", item.id, endpoint), payload),
-    )?.also { observedFeatures.add(feature) }
+    )?.also { updated ->
+        check(updated.id == item.id) {
+            "Desktop Bridge media response does not belong to the requested item ${item.name}."
+        }
+        check(expectedRating == null || updated.rating == expectedRating) {
+            "Desktop Bridge media response did not confirm the requested rating $expectedRating for ${item.name}."
+        }
+        observedFeatures.add(feature)
+    }
         ?: error("Desktop Bridge returned invalid media information after updating ${item.name}.")
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
@@ -975,7 +990,7 @@ class DesktopBridgeClient(
             previewAvailable = item.optBoolean("previewAvailable", false),
             protected = item.optNullableBoolean("protected"),
             archived = item.optNullableBoolean("archived"),
-            rating = item.optNullableInt("rating")?.takeIf { it in 0..5 },
+            rating = item.normalizedMediaRating(),
             rotationDegrees = item.optNullableInt("rotationDegrees")?.takeIf { it in MEDIA_ROTATIONS },
             streamAvailable = cameraMediaIsVideo(kind, name),
             contentType = item.optNullableString("contentType"),
