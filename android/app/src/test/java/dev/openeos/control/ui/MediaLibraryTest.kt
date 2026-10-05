@@ -47,7 +47,7 @@ class MediaLibraryTest {
         val new = media("new", "IMG_0002.JPG")
         var calls = 0
 
-        val selected = awaitCaptureReviewItem("old", longArrayOf(0, 0)) {
+        val selected = awaitCaptureReviewItem(setOf("old"), longArrayOf(0, 0)) {
             calls += 1
             if (calls < 3) listOf(old) else listOf(new, old)
         }
@@ -60,7 +60,7 @@ class MediaLibraryTest {
     fun captureReviewDoesNotSwallowCoroutineCancellation() {
         assertThrows(CancellationException::class.java) {
             runTest {
-                awaitCaptureReviewItem(null, longArrayOf(0)) { throw CancellationException("stop") }
+                awaitCaptureReviewItem(emptySet(), longArrayOf(0)) { throw CancellationException("stop") }
             }
         }
     }

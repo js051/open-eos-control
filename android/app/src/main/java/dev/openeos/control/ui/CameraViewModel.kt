@@ -21,6 +21,7 @@ import dev.openeos.control.data.CaptureStatusReadbackException
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
 import dev.openeos.control.data.CameraRepository
@@ -57,6 +58,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -190,20 +192,29 @@ internal fun mergeRecentMedia(
 
 internal fun isRetryableMediaThumbnailFailure(exception: Exception): Boolean = exception is IOException
 
+private fun selectReviewCandidate(
+    items: List<CameraMediaItem>,
+    previousIds: Set<String>,
+    videosOnly: Boolean,
+): CameraMediaItem? = selectCaptureReviewItem(items.filter {
+    it.id !in previousIds && (!videosOnly || it.isVideo)
+})
+
 internal suspend fun awaitCaptureReviewItem(
-    expectedPreviousId: String?,
+    previousIds: Set<String>,
     retryDelaysMillis: LongArray,
+    videosOnly: Boolean = false,
     loadRecentMedia: suspend () -> List<CameraMediaItem>,
 ): CameraMediaItem? {
     for (attempt in 0..retryDelaysMillis.size) {
         val candidate = try {
-            selectCaptureReviewItem(loadRecentMedia())
+            selectReviewCandidate(loadRecentMedia(), previousIds, videosOnly)
         } catch (exception: CancellationException) {
             throw exception
         } catch (_: Exception) {
             null
         }
-        if (candidate != null && (expectedPreviousId == null || candidate.id != expectedPreviousId)) {
+        if (candidate != null) {
             return candidate
         }
         if (attempt < retryDelaysMillis.size) delay(retryDelaysMillis[attempt])
@@ -259,8 +270,18 @@ class CameraViewModel(
     private var mediaLibraryGeneration = 0L
     private var captureReviewJob: Job? = null
     private var captureReviewGeneration = 0L
-    private data class CaptureReviewAttempt(val previousId: String?, val sessionGeneration: Long)
+    private data class CaptureReviewAttempt(
+        val previousIds: Set<String>,
+        val sessionGeneration: Long,
+        val videosOnly: Boolean = false,
+    )
     private var pendingCaptureReview: CaptureReviewAttempt? = null
+    private data class CaptureReviewCandidates(
+        val ids: Set<String>,
+        val sessionGeneration: Long,
+        val connection: CameraInfo?,
+    )
+    private var captureReviewCandidates: CaptureReviewCandidates? = null
     private val mediaThumbnailJobs = mutableMapOf<String, Job>()
     private val mediaThumbnailSemaphore = Semaphore(MAX_CONCURRENT_MEDIA_THUMBNAILS)
     private var mediaThumbnailGeneration = 0
@@ -1221,13 +1242,31 @@ class CameraViewModel(
         }
     }
 
-    fun toggleRecording() = updateStatus(CameraOperation.RECORDING) {
-        if (_uiState.value.previewMode) {
-            return@updateStatus _uiState.value.status!!.copy(
-                recording = _uiState.value.status?.recording != true,
-            )
+    fun toggleRecording() {
+        // Keep the user's command direction even if an event changes displayed state while it runs.
+        val wasRecording = _uiState.value.status?.recording == true
+        runCamera(CameraOperation.RECORDING) {
+            val generation = cameraSessionGeneration
+            val connection = _uiState.value.info
+            val previousReviewIds = visibleMediaIds()
+            val revision = cameraStateRevision
+            val response = if (_uiState.value.previewMode) {
+                _uiState.value.status!!.copy(recording = !wasRecording)
+            } else {
+                repository.toggleRecording(wasRecording)
+            }
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== connection) return@runCamera
+            val status = if (_uiState.value.previewMode) response else latestCameraStatus(response, revision)
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== connection) return@runCamera
+            _uiState.update { it.copy(status = status) }
+            if (!_uiState.value.previewMode && wasRecording && response.recording == false && status.recording == false) {
+                pendingCaptureReview = CaptureReviewAttempt(previousReviewIds, generation, videosOnly = true)
+                refreshCaptureReview()
+            }
+            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
-        repository.toggleRecording(_uiState.value.status?.recording)
     }
 
     fun setShutterAutofocus(enabled: Boolean) {
@@ -1239,8 +1278,7 @@ class CameraViewModel(
             showCaptureSuccess()
             return@runCamera
         }
-        val previousReviewId = _uiState.value.captureReviewItem?.id
-            ?: selectCaptureReviewItem(_uiState.value.mediaItems)?.id
+        val previousReviewIds = visibleMediaIds()
         // A newer shutter attempt supersedes every older review, even before its ACK arrives.
         cancelCaptureReview()
         val generation = cameraSessionGeneration
@@ -1257,7 +1295,7 @@ class CameraViewModel(
         }
         coroutineContext.ensureActive()
         if (!stillOwnsCapture()) return@runCamera
-        pendingCaptureReview = CaptureReviewAttempt(previousReviewId, generation)
+        pendingCaptureReview = CaptureReviewAttempt(previousReviewIds, generation)
         refreshCaptureReview()
         // The command already returned successfully. A revision-reconciliation read can also
         // fail, but must not turn that acknowledgement back into a failed shutter command.
@@ -3396,6 +3434,17 @@ class CameraViewModel(
         mediaThumbnailJobs.clear()
     }
 
+    private fun visibleMediaIds(): Set<String> {
+        val state = _uiState.value
+        return buildSet {
+            captureReviewCandidates?.takeIf {
+                it.sessionGeneration == cameraSessionGeneration && it.connection === state.info
+            }?.let { addAll(it.ids) }
+            state.mediaItems.forEach { add(it.id) }
+            state.captureReviewItem?.let { add(it.id) }
+        }
+    }
+
     fun retryCaptureReview() {
         val state = _uiState.value
         val attempt = pendingCaptureReview ?: return
@@ -3409,15 +3458,33 @@ class CameraViewModel(
         val state = _uiState.value
         if (!state.connected || state.previewMode || !state.supports(CameraFeature.MEDIA_BROWSER)) return
         val attempt = pendingCaptureReview
+        val sessionGeneration = cameraSessionGeneration
+        val connection = state.info
         val generation = beginCaptureReviewLoad()
+        fun stillOwnsReview() = generation == captureReviewGeneration &&
+            sessionGeneration == cameraSessionGeneration && _uiState.value.info === connection
         captureReviewJob = viewModelScope.launch {
             val selected = awaitCaptureReviewItem(
-                expectedPreviousId = attempt?.previousId,
+                previousIds = attempt?.previousIds.orEmpty(),
                 retryDelaysMillis = CAPTURE_REVIEW_RETRY_DELAYS_MILLIS,
+                videosOnly = attempt?.videosOnly == true,
             ) {
-                repository.listMedia(CAPTURE_REVIEW_REQUEST_ITEMS)
+                // Keep the bounded read-only review queued while an existing media operation owns I/O.
+                _uiState.first { !it.isBusy(CameraOperation.MEDIA) }
+                coroutineContext.ensureActive()
+                repository.listMedia(CAPTURE_REVIEW_REQUEST_ITEMS).also { items ->
+                    coroutineContext.ensureActive()
+                    if (stillOwnsReview()) {
+                        // Remember only the existing bounded listing; never issue a baseline scan.
+                        captureReviewCandidates = CaptureReviewCandidates(
+                            items.take(CAPTURE_REVIEW_REQUEST_ITEMS).mapTo(mutableSetOf()) { it.id },
+                            sessionGeneration,
+                            connection,
+                        )
+                    }
+                }
             }
-            if (generation != captureReviewGeneration) return@launch
+            if (!stillOwnsReview()) return@launch
             if (selected == null) {
                 _uiState.update { it.copy(
                     captureReviewLoading = false,
@@ -3435,10 +3502,10 @@ class CameraViewModel(
 
     private fun refreshCaptureReview(items: List<CameraMediaItem>) {
         if (captureReviewJob?.isActive == true) return
-        val selected = selectCaptureReviewItem(items)
         val attempt = pendingCaptureReview
+        val selected = selectReviewCandidate(items, attempt?.previousIds.orEmpty(), attempt?.videosOnly == true)
         // Event/gallery refreshes must not turn the old image into this attempt's result.
-        if (attempt != null && (selected == null || selected.id == attempt.previousId)) return
+        if (attempt != null && selected == null) return
         if (selected == null) {
             cancelCaptureReview()
             _uiState.update {
@@ -3501,6 +3568,10 @@ class CameraViewModel(
         captureReviewJob?.cancel()
         captureReviewJob = null
         pendingCaptureReview = null
+        // An ordinary (including rejected) shutter attempt must not forget known session media.
+        captureReviewCandidates = captureReviewCandidates?.takeIf {
+            it.sessionGeneration == cameraSessionGeneration && it.connection === _uiState.value.info
+        }
         _uiState.update { it.copy(
             captureReviewLoading = false,
             captureReviewStatus = CaptureReviewStatus.IDLE,

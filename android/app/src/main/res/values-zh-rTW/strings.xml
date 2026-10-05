@@ -509,7 +509,7 @@
     <string name="capture_review_searching">正在尋找新出現的素材…</string>
     <string name="capture_review_not_ready">尚未找到新出現的素材。</string>
     <string name="capture_review_latest_visible">目前可開啟最新可見素材。</string>
-    <string name="capture_review_explanation">只會查詢相機的最近素材，不會再次發送快門指令。新出現的素材無法確定與這次快門指令相對應。</string>
+    <string name="capture_review_explanation">只會查詢相機的最近素材，不會再次發送相機控制指令。新出現的素材無法確定與這次拍攝或錄影相對應。</string>
     <string name="capture_review_retry">重新查詢最近素材</string>
     <string name="capture_review_open_previous">開啟先前可見素材</string>
 
