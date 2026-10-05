@@ -19,6 +19,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -49,6 +52,8 @@ fun OpenEosControlApp(
     systemAutoRotationEnabled: Boolean = false,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val downloadHistory by viewModel.downloadHistoryState.collectAsStateWithLifecycle()
+    var showDownloadHistory by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val mediaPickers = rememberCameraMediaPickerLaunchers(viewModel)
     val sereinLauncher = rememberLauncherForActivityResult(
@@ -88,6 +93,7 @@ fun OpenEosControlApp(
         useHttpsPreset = viewModel::useDirectCameraHttpsPreset,
         useSimulatorPreset = viewModel::useDevSimulatorPreset,
         enterOfflinePreview = viewModel::enterOfflinePreview,
+        openDownloadHistory = { showDownloadHistory = true },
         connect = {
             viewModel.rememberConnection(context)
             viewModel.connect()
@@ -147,6 +153,12 @@ fun OpenEosControlApp(
         retryCaptureReview = viewModel::retryCaptureReview,
         refreshMedia = viewModel::refreshMedia,
         setMediaLibraryScope = viewModel::setMediaLibraryScope,
+        setMediaDateRange = { range ->
+            viewModel.setMediaDateRange(range, state.info, state.mediaSessionGeneration)
+        },
+        setMediaRatingFilter = { filter ->
+            viewModel.setMediaRatingFilter(filter, state.info, state.mediaSessionGeneration)
+        },
         cancelMediaLibraryLoad = viewModel::cancelMediaLibraryLoad,
         loadMediaThumbnail = viewModel::loadMediaThumbnail,
         openMediaPreview = viewModel::openMediaPreview,
@@ -230,6 +242,13 @@ fun OpenEosControlApp(
                 }
             }
             LanguageSettingsSheet(state, actions)
+            if (showDownloadHistory) {
+                DownloadHistoryDialog(
+                    state = downloadHistory,
+                    onClear = viewModel::clearDownloadHistory,
+                    onDismiss = { showDownloadHistory = false },
+                )
+            }
         }
     }
 }
@@ -277,6 +296,7 @@ data class CameraActions(
     val useHttpsPreset: () -> Unit,
     val useSimulatorPreset: () -> Unit,
     val enterOfflinePreview: () -> Unit,
+    val openDownloadHistory: () -> Unit = {},
     val connect: () -> Unit,
     val connectBridge: () -> Unit,
     val disconnect: () -> Unit,
@@ -330,6 +350,8 @@ data class CameraActions(
     val retryCaptureReview: () -> Unit = {},
     val refreshMedia: () -> Unit,
     val setMediaLibraryScope: (MediaLibraryScope) -> Unit = {},
+    val setMediaDateRange: (MediaDateRange?) -> Unit = {},
+    val setMediaRatingFilter: (MediaRatingFilter) -> Unit = {},
     val cancelMediaLibraryLoad: () -> Unit = {},
     val loadMediaThumbnail: (CameraMediaItem) -> Unit,
     val openMediaPreview: (CameraMediaItem) -> Unit,

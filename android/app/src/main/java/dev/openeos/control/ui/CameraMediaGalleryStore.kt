@@ -10,7 +10,6 @@ import androidx.annotation.RequiresApi
 import dev.openeos.control.data.CameraMediaDownloadResult
 import dev.openeos.control.data.CameraMediaItem
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
@@ -51,22 +50,21 @@ internal class CameraMediaGalleryStore(private val resolver: ContentResolver) {
     suspend fun save(
         cameraModel: String?,
         item: CameraMediaItem,
+        onFinalized: () -> Unit = {},
         download: suspend (OutputStream) -> CameraMediaDownloadResult,
     ): Uri {
         var created: Uri? = null
-        try {
-            return withContext(Dispatchers.IO) { savePending(cameraModel, item, { created = it }, download) }
-        } catch (failure: Throwable) {
-            withContext(NonCancellable + Dispatchers.IO) {
+        return withMediaOutputFinalization(
+            cleanupIncomplete = {
                 created?.let { destination ->
-                    try {
-                        check(resolver.delete(destination, null, null) == 1) { "Android could not remove the incomplete download." }
-                    } catch (cleanupFailure: Exception) {
-                        failure.addSuppressed(cleanupFailure)
-                    }
+                    check(resolver.delete(destination, null, null) == 1) { "Android could not remove the incomplete download." }
                 }
+            },
+            onFinalized = onFinalized,
+        ) { finalization ->
+            withContext(Dispatchers.IO) {
+                savePending(cameraModel, item, { created = it }, finalization, download)
             }
-            throw failure
         }
     }
 
@@ -74,6 +72,7 @@ internal class CameraMediaGalleryStore(private val resolver: ContentResolver) {
         cameraModel: String?,
         item: CameraMediaItem,
         onCreated: (Uri) -> Unit,
+        finalization: MediaOutputFinalization,
         download: suspend (OutputStream) -> CameraMediaDownloadResult,
     ): Uri {
         val mimeType = requireNotNull(galleryMimeType(item)) { "Choose a folder for this file format." }
@@ -105,6 +104,9 @@ internal class CameraMediaGalleryStore(private val resolver: ContentResolver) {
             put(MediaStore.MediaColumns.IS_PENDING, 0)
         }
         check(resolver.update(destination, published, null, null) == 1) { "Android could not publish the downloaded media." }
+        // No suspension between publication and ownership: prompt cancellation on the return
+        // from IO must not delete a successfully published original or lose its receipt.
+        finalization.confirm()
         return destination
     }
 }

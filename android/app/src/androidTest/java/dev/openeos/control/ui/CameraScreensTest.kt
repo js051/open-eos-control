@@ -43,6 +43,7 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -2973,16 +2974,24 @@ class CameraScreensTest {
         val preview = CameraUiState().withOfflinePreview()
         val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA)
         val first = state.mediaItems.first()
+        val protectionRequests = mutableListOf<Pair<List<CameraMediaItem>, Boolean>>()
+        val actions = noOpActions().copy(
+            setMediaProtectionBatch = { items, enabled -> protectionRequests += items to enabled },
+        )
+        lateinit var contentDensity: androidx.compose.ui.unit.Density
         assertTrue(state.supports(CameraFeature.MEDIA_PROTECT))
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
             ) {
-                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.3f)) {
-                    DeviceConfigurationOverride(
-                        DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
-                    ) {
-                        MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) }
+                DeviceConfigurationOverride(
+                    DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
+                ) {
+                    DialogFontScaleOverride(1.3f) {
+                        MaterialTheme(colorScheme = OpenEosColorScheme) {
+                            contentDensity = LocalDensity.current
+                            MediaScreen(state, actions)
+                        }
                     }
                 }
             }
@@ -2991,19 +3000,72 @@ class CameraScreensTest {
         compose.onNodeWithContentDescription("選取 ${first.name}")
             .performSemanticsAction(SemanticsActions.OnLongClick)
         compose.onNodeWithText("已選取 1 個").assertIsDisplayed()
-        compose.onNodeWithContentDescription("選取目前顯示的全部媒體").assertIsDisplayed()
-        compose.onNodeWithContentDescription("下載選取的 1 個項目").assertIsDisplayed()
-        compose.onNodeWithContentDescription("刪除選取的 1 個項目").assertIsDisplayed()
+        val controls = listOf(
+            "離開媒體選取模式", "全選顯示項目", "在 Serein 編輯選取的 1 個項目",
+            "下載選取的 1 個項目", "編輯選取的 1 個項目", "刪除選取的 1 個項目",
+        ).map { description ->
+            compose.onNode(
+                androidx.compose.ui.test.hasContentDescription(description) and androidx.compose.ui.test.hasClickAction(),
+            ).assertIsDisplayed().fetchSemanticsNode()
+        }
+        compose.runOnIdle {
+            val minimumTarget = with(contentDensity) { 48.dp.toPx() }
+            val fullBounds = controls.map { node ->
+                val full = androidx.compose.ui.geometry.Rect(node.positionInWindow, androidx.compose.ui.geometry.Size(
+                    node.size.width.toFloat(), node.size.height.toFloat(),
+                ))
+                val clipped = node.boundsInWindow
+                assertTrue("Full selection touch targets must be at least 48dp", full.width >= minimumTarget - 1f && full.height >= minimumTarget - 1f)
+                assertTrue("Selection actions must not be clipped by their parent", full.left >= clipped.left - 1f &&
+                    full.top >= clipped.top - 1f && full.right <= clipped.right + 1f && full.bottom <= clipped.bottom + 1f)
+                val view = (node.root as androidx.compose.ui.platform.ViewRootForTest).view
+                val visible = android.graphics.Rect()
+                assertTrue("The selection toolbar Android root must be visible", view.getLocalVisibleRect(visible))
+                val location = IntArray(2).also(view::getLocationOnScreen)
+                val screen = node.positionOnScreen
+                assertTrue("Full selection actions must fit the actual window", screen.x >= visible.left + location[0] - 1f &&
+                    screen.y >= visible.top + location[1] - 1f &&
+                    screen.x + node.size.width <= visible.right + location[0] + 1f &&
+                    screen.y + node.size.height <= visible.bottom + location[1] + 1f)
+                full
+            }
+            fullBounds.forEachIndexed { index, bounds ->
+                fullBounds.drop(index + 1).forEach { other ->
+                    assertFalse("Selection actions must not overlap", bounds.overlaps(other))
+                }
+            }
+        }
+        compose.onNodeWithContentDescription("全選顯示項目").performTouchInput { click() }
+        compose.onNodeWithText("已選取 ${state.mediaItems.size} 個").assertIsDisplayed()
+        compose.onNodeWithContentDescription("取消選取顯示項目").performTouchInput { click() }
+        compose.onNodeWithContentDescription("離開媒體選取模式").assertDoesNotExist()
+        compose.onNodeWithContentDescription("選取 ${first.name}")
+            .performSemanticsAction(SemanticsActions.OnLongClick)
         compose.onNodeWithContentDescription("編輯選取的 1 個項目").performClick()
-        compose.onNodeWithTag("media-batch-metadata-sheet").assertIsDisplayed()
-        compose.onNodeWithText(
-            resourceText(R.string.protect_selected_media),
-            useUnmergedTree = true,
-        ).assertIsDisplayed()
-        compose.onNodeWithText(
-            resourceText(R.string.unprotect_selected_media),
-            useUnmergedTree = true,
-        ).assertIsDisplayed()
+        val sheet = compose.onNodeWithTag("media-batch-metadata-sheet").assertIsDisplayed().fetchSemanticsNode()
+        val sheetResources = compose.runOnIdle {
+            // Verify the real Dialog context, not just the parent composition override.
+            (sheet.root as androidx.compose.ui.platform.ViewRootForTest).view.resources.also { resources ->
+                assertEquals("zh-TW", resources.configuration.locales[0].toLanguageTag())
+                assertEquals(1.3f, resources.configuration.fontScale, 0.01f)
+                assertEquals(1.3f, sheet.layoutInfo.density.fontScale, 0.01f)
+                assertEquals("全部保護", resources.getString(R.string.protect_selected_media))
+                assertEquals("全部取消保護", resources.getString(R.string.unprotect_selected_media))
+            }
+        }
+        val inSheet = hasAnyAncestor(hasTestTag("media-batch-metadata-sheet"))
+        compose.onNode(hasText(sheetResources.getString(R.string.edit_selected_media, 1)) and inSheet)
+            .assertIsDisplayed()
+        listOf(R.string.protect_selected_media to true, R.string.unprotect_selected_media to false)
+            .forEachIndexed { index, (label, enabled) ->
+                compose.onNode(
+                    hasText(sheetResources.getString(label)) and inSheet and androidx.compose.ui.test.hasClickAction(),
+                ).performScrollTo().assertIsDisplayed().assertIsEnabled().performTouchInput { click() }
+                compose.runOnIdle {
+                    assertEquals(index + 1, protectionRequests.size)
+                    assertEquals(listOf(first) to enabled, protectionRequests.last())
+                }
+            }
     }
 
     @Test

@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -69,6 +71,9 @@ fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
             }
             Text(stringResource(R.string.connect_title), color = AppText, fontWeight = FontWeight.Bold)
             Text(stringResource(R.string.connect_subtitle), color = AppSubtleText)
+            TextButton(onClick = actions.openDownloadHistory, modifier = Modifier.fillMaxWidth().testTag("download-history-open")) {
+                Text(stringResource(R.string.download_history_title))
+            }
 
             ModeSegment(
                 firstLabel = stringResource(R.string.direct_camera),

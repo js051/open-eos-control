@@ -132,8 +132,12 @@ class CameraPreviewSaveJourneyTest {
     }
 
     @Test
-    fun captureOnceOpensTheNewRecentItemAndSavesItsOriginalFromPreview() {
+    fun captureOnceOpensTheNewRecentItemOutsideDateRangeAndSavesItsOriginalFromPreview() {
+        val range = requireNotNull(mediaDateRangeFromInput("2000-01-01", "2000-01-01"))
+        compose.runOnIdle { viewModel.setMediaDateRange(range) }
         val item = captureAndOpenPreview()
+        assertEquals(range, viewModel.uiState.value.mediaDateRange)
+        dialogText(compose.activity.getString(R.string.media_viewer_position, 1, 1)).assertIsDisplayed()
         assertTrue(camera.originalReads.isEmpty())
         assertArrayEquals(camera.imageBytes, viewModel.uiState.value.mediaPreviewBytes)
         downloadButton(item).assertIsDisplayed().assertIsEnabled().performClick()

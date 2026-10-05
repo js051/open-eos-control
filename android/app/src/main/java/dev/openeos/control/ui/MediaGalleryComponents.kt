@@ -1,9 +1,11 @@
 package dev.openeos.control.ui
 
+import java.time.ZoneId
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -131,6 +133,8 @@ internal fun MediaSortButton(sort: MediaSort, onSort: (MediaSort) -> Unit) {
                 MediaSort.OLDEST to R.string.media_oldest_first,
                 MediaSort.NAME to R.string.media_filename,
                 MediaSort.CAMERA to R.string.media_camera_order,
+                MediaSort.RATING_HIGH to R.string.media_rating_high_first,
+                MediaSort.RATING_LOW to R.string.media_rating_low_first,
             ).forEach { (value, label) ->
                 DropdownMenuItem(
                     text = {
@@ -156,6 +160,8 @@ internal val MediaSort.labelResource: Int
         MediaSort.NEWEST -> R.string.media_newest_first
         MediaSort.OLDEST -> R.string.media_oldest_first
         MediaSort.NAME -> R.string.media_filename
+        MediaSort.RATING_HIGH -> R.string.media_rating_high_first
+        MediaSort.RATING_LOW -> R.string.media_rating_low_first
     }
 
 @Composable
@@ -163,14 +169,31 @@ internal fun MediaFilterBar(
     selected: MediaFilter,
     items: List<CameraMediaItem>,
     onSelected: (MediaFilter) -> Unit,
+    onDateRange: () -> Unit,
+    dateRangeActive: Boolean,
+    ratingFilter: MediaRatingFilter = MediaRatingFilter.ALL,
+    onRatingFilter: (MediaRatingFilter) -> Unit = {},
+    onDownloadHistory: () -> Unit = {},
 ) {
     val photos = items.count { !it.isVideo }
     val videos = items.size - photos
     Row(
-        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_history,
+            stringResource(R.string.download_history_title),
+            onDownloadHistory,
+            testTag = "download-history-open",
+        )
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_calendar_days,
+            stringResource(if (dateRangeActive) R.string.media_date_edit else R.string.media_date_filter),
+            onDateRange,
+        )
+        MediaRatingFilterButton(ratingFilter, onRatingFilter)
         listOf(
             Triple(MediaFilter.ALL, R.string.media_all, items.size),
             Triple(MediaFilter.PHOTOS, R.string.media_photos, photos),
@@ -178,7 +201,7 @@ internal fun MediaFilterBar(
         ).forEach { (filter, label, count) ->
             TextButton(
                 onClick = { onSelected(filter) },
-                modifier = Modifier.weight(1f).height(44.dp),
+                modifier = Modifier.heightIn(min = 48.dp),
             ) {
                 Text(
                     stringResource(R.string.media_filter_count, stringResource(label), count),
@@ -195,6 +218,7 @@ internal fun MediaFilterBar(
 internal fun MediaGalleryGrid(
     items: List<CameraMediaItem>,
     sort: MediaSort,
+    displayZone: ZoneId,
     state: CameraUiState,
     actions: CameraActions,
     selectedIds: Set<String>,
@@ -205,7 +229,7 @@ internal fun MediaGalleryGrid(
     onSelectionDrag: (String) -> Unit,
     onSelectionDragEnd: () -> Unit,
 ) {
-    val groups = remember(items, sort) { mediaGroupsForDisplay(items, sort) }
+    val groups = remember(items, sort, displayZone) { mediaGroupsForDisplay(items, sort, displayZone) }
     val itemIds = remember(items) { items.mapTo(hashSetOf(), CameraMediaItem::id) }
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
@@ -254,6 +278,7 @@ internal fun MediaGalleryGrid(
         state = gridState,
         modifier = Modifier
             .fillMaxSize()
+            .testTag("media-gallery-grid")
             .pointerInput(items) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { position ->
@@ -280,7 +305,7 @@ internal fun MediaGalleryGrid(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         groups.forEachIndexed { groupIndex, group ->
-            if (sort != MediaSort.CAMERA) {
+            if (sort.hasGroupHeadings) {
                 item(
                     key = "media-date-${group.date ?: "unknown"}-$groupIndex",
                     span = { GridItemSpan(maxLineSpan) },

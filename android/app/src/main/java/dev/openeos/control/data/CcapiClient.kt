@@ -2833,7 +2833,7 @@ class CcapiClient(
             previewAvailable = kind.isCcapiPreviewKind(),
             protected = item.opt("protect") as? Boolean,
             archived = item.opt("archive") as? Boolean,
-            rating = item.optInt("rating").takeIf { item.has("rating") && it in 0..5 },
+            rating = item.normalizedMediaRating(),
             rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
             ratingWritable = true,
             streamAvailable = cameraMediaIsVideo(kind, name),

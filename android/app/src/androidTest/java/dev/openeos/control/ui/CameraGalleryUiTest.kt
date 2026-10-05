@@ -22,7 +22,11 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToKey
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.test.assertIsEnabled
@@ -247,6 +251,96 @@ class CameraGalleryUiTest {
         compose.onNodeWithTag("media-viewer-content").assertDoesNotExist()
     }
 
+    @Test fun clearingDateRangeKeepsTheChosenMediaTypeAndSort() {
+        val videos = listOf(
+            item.copy(id = "one", name = "ONE.MP4", kind = "video", captureTime = "2026-08-14T12:00:00"),
+            item.copy(id = "two", name = "TWO.MP4", kind = "video", captureTime = "2026-08-15T12:00:00"),
+        )
+        val current = mutableStateOf(state().copy(
+            mediaItems = videos + item.copy(captureTime = "2026-08-14T12:00:00"),
+            mediaDateRange = mediaDateRangeFromInput("2026-08-14", "2026-08-14"),
+        ))
+        compose.setContent {
+            MaterialTheme { MediaScreen(current.value, actions().copy(setMediaDateRange = { current.value = current.value.copy(mediaDateRange = it) })) }
+        }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_sort_current,
+            compose.activity.getString(R.string.media_newest_first))).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_filename)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_filter_count,
+            compose.activity.getString(R.string.media_videos), 1)).performScrollTo().performClick()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_date_clear)).performClick()
+        galleryItem(videos[0]).assertIsDisplayed()
+        galleryItem(videos[1]).assertIsDisplayed()
+        assertExcludedFromGallery(item.id)
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_sort_current,
+            compose.activity.getString(R.string.media_filename))).assertIsDisplayed()
+    }
+
+    @Test fun replacementConnectionWithEqualFieldsDiscardsDateDraftSelectionAndDeleteDialog() {
+        val current = mutableStateOf(state(), androidx.compose.runtime.neverEqualPolicy())
+        val applied = mutableListOf<MediaDateRange?>()
+        val deleted = mutableListOf<CameraMediaItem>()
+        compose.setContent {
+            MaterialTheme {
+                MediaScreen(current.value, actions().copy(setMediaDateRange = { applied += it }, deleteMediaBatch = { deleted += it }))
+            }
+        }
+        fun selectItem() {
+            galleryItem(item)
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
+        }
+        fun replaceConnection() = compose.runOnIdle {
+            val before = requireNotNull(current.value.info)
+            val replacement = before.copy()
+            assertEquals(before, replacement)
+            assertTrue(before !== replacement)
+            // No disconnected frame, same media IDs and same generation: identity must still win.
+            current.value = current.value.copy(info = replacement)
+        }
+        selectItem()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_date_filter)).performClick()
+        compose.onNodeWithTag("media-date-start").performScrollTo().performTextReplacement("2026-08-14")
+        replaceConnection()
+        compose.onNodeWithTag("media-date-dialog").assertDoesNotExist()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.exit_media_selection)).assertDoesNotExist()
+        selectItem()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.delete_selected_media, 1)).performClick()
+        replaceConnection()
+        compose.onNodeWithText(compose.activity.getString(R.string.delete_selected_media_title, 1)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.exit_media_selection)).assertDoesNotExist()
+        compose.runOnIdle { assertTrue(applied.isEmpty()); assertTrue(deleted.isEmpty()) }
+    }
+
+    @Test fun zeroDateMatchesKeepHiddenSelectionDisclosureAndExactDownloadIds() {
+        val older = item.copy(id = "older", name = "OLDER.JPG", captureTime = "2026-08-13T12:00:00")
+        val later = item.copy(id = "later", name = "LATER.JPG", captureTime = "2026-08-14T12:00:00")
+        val current = mutableStateOf(state().copy(mediaItems = listOf(later, older)))
+        val saved = mutableListOf<List<CameraMediaItem>>()
+        compose.setContent {
+            MaterialTheme {
+                MediaScreen(current.value, actions().copy(saveMediaToPhone = { saved += it }))
+            }
+        }
+        galleryItem(older)
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.select_all_media)).performClick()
+        compose.runOnIdle {
+            current.value = current.value.copy(
+                mediaDateRange = mediaDateRangeFromInput("2020-01-01", "2020-01-01"),
+                mediaLibraryScope = MediaLibraryScope.ALL,
+                mediaLibraryLoadStatus = MediaLibraryLoadStatus.CANCELLED,
+            )
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.media_hidden_selected_summary, 2)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_hidden_selected_summary, 2)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.download_selected_media, 2)).performClick()
+        compose.runOnIdle { assertEquals(listOf(listOf(later, older)), saved) }
+        compose.runOnIdle { current.value = current.value.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) }
+        compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_date_clear)).assertIsDisplayed()
+    }
+
     private fun withLandscapeWindow(test: () -> Unit) {
         val originalOrientation = compose.activity.requestedOrientation
         try {
@@ -317,6 +411,81 @@ class CameraGalleryUiTest {
         assertTrue("$message: inner=$inner, outer=$outer", inner.width > 0f && inner.height > 0f &&
             inner.left >= outer.left - tolerance && inner.top >= outer.top - tolerance &&
             inner.right <= outer.right + tolerance && inner.bottom <= outer.bottom + tolerance)
+    }
+
+    @Test fun ratingFilterWorksWithReadOnlyMetadataAndKeepsCancelledFailedDisclosure() {
+        val initial = state()
+        val capabilities = requireNotNull(initial.capabilities)
+        val current = mutableStateOf(initial.copy(
+            mediaItems = listOf(item.copy(rating = 5, ratingWritable = false), item.copy(id = "unknown", name = "UNKNOWN.JPG", rating = 7)),
+            mediaLibraryLoadStatus = MediaLibraryLoadStatus.CANCELLED,
+            mediaLibraryScope = MediaLibraryScope.ALL,
+            mediaRatingFilter = MediaRatingFilter.FIVE,
+            capabilities = capabilities.copy(matrix = capabilities.matrix.copy(
+                supported = capabilities.matrix.supported - CameraFeature.MEDIA_RATING,
+            )),
+        ))
+        compose.setContent { MaterialTheme { MediaScreen(current.value, actions()) } }
+        galleryItem(item).assertIsDisplayed()
+        assertExcludedFromGallery("unknown")
+        compose.onNodeWithText(compose.activity.getString(R.string.media_rating_loaded_results, 1, 2, 1)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { current.value = current.value.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) }
+        compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("media-rating-filter").assertIsEnabled()
+    }
+
+    @Test fun equalFieldReplacementConnectionDiscardsOpenRatingMenuAndOldSelection() {
+        val current = mutableStateOf(state().copy(mediaItems = listOf(item.copy(rating = 5))), androidx.compose.runtime.neverEqualPolicy())
+        val applied = mutableListOf<MediaRatingFilter>()
+        compose.setContent {
+            MaterialTheme { MediaScreen(current.value, actions().copy(setMediaRatingFilter = { applied += it })) }
+        }
+        galleryItem(item)
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithTag("media-rating-filter").performScrollTo().performClick()
+        compose.onNodeWithTag("media-rating-menu").assertIsDisplayed()
+        compose.runOnIdle { current.value = current.value.copy(info = requireNotNull(current.value.info).copy()) }
+        compose.onNodeWithTag("media-rating-menu").assertDoesNotExist()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.exit_media_selection)).assertDoesNotExist()
+        compose.runOnIdle { assertTrue(applied.isEmpty()) }
+    }
+
+    @Test fun readOnlyRatingIsVisibleInInformationWithoutRatingMutationButtons() {
+        val initial = state()
+        val capabilities = requireNotNull(initial.capabilities)
+        // Keep unrelated rotation metadata known: only the rating value is under test here.
+        val readOnlyItem = item.copy(ratingWritable = false, rotationDegrees = 0)
+        val current = mutableStateOf(initial.copy(
+            mediaItems = listOf(readOnlyItem.copy(rating = 5)),
+            capabilities = capabilities.copy(matrix = capabilities.matrix.copy(
+                supported = capabilities.matrix.supported - CameraFeature.MEDIA_RATING,
+            )),
+        ))
+        compose.setContent { MaterialTheme { MediaScreen(current.value, actions()) } }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_actions, item.name)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_rating_value, 5)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.clear_media_rating, item.name)).assertDoesNotExist()
+        compose.runOnIdle { current.value = current.value.copy(mediaItems = listOf(readOnlyItem.copy(rating = 7))) }
+        compose.onNodeWithText(compose.activity.getString(R.string.media_rating_unknown)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_metadata_unknown)).assertDoesNotExist()
+        (1..5).forEach { stars ->
+            compose.onNodeWithContentDescription(compose.activity.getString(R.string.set_media_rating, item.name, stars)).assertDoesNotExist()
+        }
+    }
+
+    private fun galleryItem(item: CameraMediaItem): SemanticsNodeInteraction {
+        compose.onNodeWithTag("media-gallery-grid").performScrollToKey(item.id)
+        // This fixture advertises selection but not MEDIA_PREVIEW; the tile exposes Select.
+        return compose.onNodeWithContentDescription(compose.activity.getString(R.string.select_media_item, item.name))
+    }
+
+    private fun assertExcludedFromGallery(itemId: String) {
+        val grid = compose.onNodeWithTag("media-gallery-grid").fetchSemanticsNode()
+        compose.runOnIdle {
+            // Check the entire lazy data set, rather than mistaking an uncomposed tile for a filter match.
+            assertEquals("Filtered item $itemId must be absent from the gallery", -1, grid.config[SemanticsProperties.IndexForKey](itemId))
+        }
     }
 
     private fun actions() = CameraActions(

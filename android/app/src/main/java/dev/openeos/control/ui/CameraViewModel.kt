@@ -27,6 +27,10 @@ import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraSession
 import dev.openeos.control.data.CameraTransport
+import dev.openeos.control.data.DownloadHistoryDestination
+import dev.openeos.control.data.DownloadHistoryState
+import dev.openeos.control.data.DownloadHistoryStore
+import dev.openeos.control.data.DownloadHistoryWarning
 import dev.openeos.control.data.FocusDriveDirection
 import dev.openeos.control.data.FocusDriveStep
 import dev.openeos.control.data.LiveViewRequest
@@ -217,9 +221,14 @@ internal fun mediaThumbnailSampleSize(width: Int, height: Int, maximumEdge: Int 
 
 class CameraViewModel(
     private val repository: CameraRepository = CameraRepository(),
+    private val downloadHistoryFactory: (Context) -> DownloadHistoryStore = DownloadHistoryProvider::get,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
+    private val _downloadHistoryState = MutableStateFlow(DownloadHistoryState())
+    val downloadHistoryState: StateFlow<DownloadHistoryState> = _downloadHistoryState.asStateFlow()
+    private var downloadHistoryStore: DownloadHistoryStore? = null
+    private var downloadHistoryInitialized = false
     private var liveViewJob: Job? = null
     private class LiveViewFrameRead(val job: Job, var stopped: Boolean = false)
     private val liveViewFrameReads = mutableSetOf<LiveViewFrameRead>()
@@ -258,7 +267,27 @@ class CameraViewModel(
     private var networkRoutingConfigured = false
     private var lastPhotoShootingMode: String? = null
 
+    internal fun initializeDownloadHistory(context: Context) {
+        if (downloadHistoryInitialized) return
+        downloadHistoryInitialized = true
+        try {
+            val store = downloadHistoryFactory(context.applicationContext)
+            downloadHistoryStore = store
+            _downloadHistoryState.value = store.state.value
+            viewModelScope.launch { store.state.collect { _downloadHistoryState.value = it } }
+        } catch (_: Exception) {
+            // History initialization is optional. It cannot prevent camera setup or downloads.
+            _downloadHistoryState.value = DownloadHistoryState(loading = false, warning = DownloadHistoryWarning.STOPPED)
+        }
+    }
+
+    fun clearDownloadHistory() {
+        val store = downloadHistoryStore ?: return
+        viewModelScope.launch { store.clear() }
+    }
+
     fun initialize(context: Context) {
+        initializeDownloadHistory(context)
         if (!networkRoutingConfigured) {
             repository.configureAndroidNetworkRouting(context.applicationContext)
             networkRoutingConfigured = true
@@ -299,6 +328,26 @@ class CameraViewModel(
             )
         }
         if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
+    }
+
+    fun setMediaDateRange(
+        range: MediaDateRange?,
+        connection: dev.openeos.control.data.CameraInfo? = _uiState.value.info,
+        generation: Long = _uiState.value.mediaSessionGeneration,
+    ) {
+        // A display-only filter never changes loaded media, transfer ownership, or capture review.
+        // A queued callback from a dismissed old-session form must not alter the new session.
+        _uiState.update {
+            it.withMediaDateRangeForSession(range, connection, generation)
+        }
+    }
+
+    fun setMediaRatingFilter(
+        filter: MediaRatingFilter,
+        connection: dev.openeos.control.data.CameraInfo? = _uiState.value.info,
+        generation: Long = _uiState.value.mediaSessionGeneration,
+    ) {
+        _uiState.update { it.withMediaRatingFilterForSession(filter, connection, generation) }
     }
 
     fun setMediaLibraryScope(scope: MediaLibraryScope) {
@@ -1949,28 +1998,37 @@ class CameraViewModel(
         val state = _uiState.value
         if (state.info == null || state.previewMode || state.isBusy(CameraOperation.MEDIA) || mediaDownloadJob != null) return
         val resolver = context.applicationContext.contentResolver
+        initializeDownloadHistory(context)
+        val history = downloadHistoryStore
+        val historyRequest = history?.captureRequest()
         val request = beginMediaSave(state, listOf(item))
+        val location = context.getString(R.string.media_save_selected_document)
         val job = launchCameraOperation(
             CameraOperation.MEDIA,
             onError = { finishPendingMediaSave(request, MediaSaveFeedback.Failed(formatException(it))) },
         ) {
-            publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    val rawOutput = resolver.openOutputStream(destination, "w")
-                        ?: error("Android could not open the selected download destination.")
-                    BufferedOutputStream(rawOutput).use { output ->
-                        repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
+            withDownloadHistoryReceipt(history, historyRequest, item.name, DownloadHistoryDestination.DOCUMENT) { completed ->
+                publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
+                withMediaOutputFinalization(
+                    cleanupIncomplete = {
+                        check(resolver.delete(destination, null, null) == 1) { "Android could not remove the incomplete download." }
+                    },
+                    onFinalized = {
+                        completed()
+                        publishMediaSave(request, item, MediaSaveFeedback.Saved(location))
+                        updateMediaSave(request) { it.copy(lastDownloadedMediaName = item.name) }
+                    },
+                ) { finalized ->
+                    withContext(Dispatchers.IO) {
+                        val rawOutput = resolver.openOutputStream(destination, "w")
+                            ?: error("Android could not open the selected download destination.")
+                        BufferedOutputStream(rawOutput).use { output ->
+                            repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
+                        }
+                        // Successful close is the SAF checkpoint; no suspension before recording it.
+                        finalized.confirm()
                     }
                 }
-                coroutineContext.ensureActive()
-                publishMediaSave(request, item, MediaSaveFeedback.Saved(context.getString(R.string.media_save_selected_document)))
-                updateMediaSave(request) { it.copy(lastDownloadedMediaName = result.item.name) }
-            } catch (exception: Exception) {
-                withContext(NonCancellable + Dispatchers.IO) {
-                    runCatching { resolver.delete(destination, null, null) }
-                }
-                throw exception
             }
         }
         trackMediaSaveJob(request, job)
@@ -1988,9 +2046,14 @@ class CameraViewModel(
             mediaDownloadJob != null
         ) return
         val resolver = context.applicationContext.contentResolver
+        initializeDownloadHistory(context)
+        val history = downloadHistoryStore
+        // Clear invalidates this entire admitted batch, including items not yet started.
+        val historyRequest = history?.captureRequest()
         val request = beginMediaSave(state, selectedItems)
         val location = if (destinationTree == null) cameraGalleryPath(state.info.model)
             else context.getString(R.string.media_save_selected_folder)
+        val historyDestination = if (destinationTree == null) DownloadHistoryDestination.GALLERY else DownloadHistoryDestination.FOLDER
         val job = launchCameraOperation(
             CameraOperation.MEDIA,
             onError = { finishPendingMediaSave(request, MediaSaveFeedback.Failed(formatException(it))) },
@@ -2002,40 +2065,47 @@ class CameraViewModel(
                     updateMediaSave(request) { it.copy(mediaBatchProgress = progress) }
                 },
             ) { item ->
-                publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
-                try {
-                    retryMediaRead {
-                        if (destinationTree == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            CameraMediaGalleryStore(resolver).save(state.info.model, item) { output ->
-                                repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
-                            }
-                        } else {
-                            var destination: Uri? = null
-                            try {
-                                withContext(Dispatchers.IO) {
-                                    destination = createMediaDocument(resolver, requireNotNull(destinationTree), item)
-                                    val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
-                                        ?: error("Android could not open the selected download destination.")
-                                    BufferedOutputStream(rawOutput).use { output ->
-                                        repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
+                withDownloadHistoryReceipt(history, historyRequest, item.name, historyDestination) { completed ->
+                    publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
+                    val onFinalized = {
+                        completed()
+                        publishMediaSave(request, item, MediaSaveFeedback.Saved(location))
+                        if (destinationTree == null) updateMediaSave(request) { it.copy(lastDownloadLocation = location) }
+                    }
+                    try {
+                        retryMediaRead {
+                            if (destinationTree == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                CameraMediaGalleryStore(resolver).save(state.info.model, item, onFinalized) { output ->
+                                    repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
+                                }
+                            } else {
+                                var destination: Uri? = null
+                                withMediaOutputFinalization(
+                                    cleanupIncomplete = {
+                                        destination?.let {
+                                            check(resolver.delete(it, null, null) == 1) { "Android could not remove the incomplete download." }
+                                        }
+                                    },
+                                    onFinalized = onFinalized,
+                                ) { finalized ->
+                                    withContext(Dispatchers.IO) {
+                                        destination = createMediaDocument(resolver, requireNotNull(destinationTree), item)
+                                        val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
+                                            ?: error("Android could not open the selected download destination.")
+                                        BufferedOutputStream(rawOutput).use { output ->
+                                            repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
+                                        }
+                                        finalized.confirm()
                                     }
                                 }
-                            } catch (exception: Exception) {
-                                withContext(NonCancellable + Dispatchers.IO) {
-                                    destination?.let { runCatching { resolver.delete(it, null, null) } }
-                                }
-                                throw exception
                             }
                         }
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (exception: Exception) {
+                        publishMediaSave(request, item, MediaSaveFeedback.Failed(formatException(exception)))
+                        throw exception
                     }
-                    coroutineContext.ensureActive()
-                    publishMediaSave(request, item, MediaSaveFeedback.Saved(location))
-                    if (destinationTree == null) updateMediaSave(request) { it.copy(lastDownloadLocation = location) }
-                } catch (exception: CancellationException) {
-                    throw exception
-                } catch (exception: Exception) {
-                    publishMediaSave(request, item, MediaSaveFeedback.Failed(formatException(exception)))
-                    throw exception
                 }
             }
             updateMediaSave(request) { it.copy(lastMediaBatchResult = result) }
@@ -3158,6 +3228,9 @@ class CameraViewModel(
         status = null,
         capabilities = null,
         mediaItems = emptyList(),
+        mediaDateRange = null,
+        mediaRatingFilter = MediaRatingFilter.ALL,
+        mediaSessionGeneration = mediaSessionGeneration + 1,
         mediaLibraryHasMore = false,
         mediaThumbnails = emptyMap(),
         mediaThumbnailLoadingIds = emptySet(),
