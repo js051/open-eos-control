@@ -1,6 +1,7 @@
 package dev.openeos.control.ui
 
 import androidx.lifecycle.viewModelScope
+import dev.openeos.control.data.ConnectionFailureReason
 import dev.openeos.control.data.CameraBackendFactory
 import dev.openeos.control.data.CameraHttpTransport
 import dev.openeos.control.data.CameraHttpTransportFactory
@@ -174,6 +175,128 @@ class CameraConnectionConfigurationRecoveryTest {
         connectAndVerifyReplacement()
     }
 
+    @Test fun nativeAuthenticationFailureIsSafeAndEditingAllowsManualRecovery() = runBlocking {
+        oldPeer.intercept = { request ->
+            MockResponse().setResponseCode(if (request.requestUrl?.encodedPath == "/ccapi") 401 else 404)
+                .setBody("SYNTHETIC-PRIVATE-RESPONSE https://synthetic.example/?private=fixture")
+        }
+        viewModel.useDirectCameraPreset()
+        viewModel.setBaseUrl(oldPeer.baseUrl)
+        viewModel.setUsername("synthetic-user")
+        viewModel.setPassword("synthetic-password")
+        viewModel.connect()
+        assertTrue(pumpUntil { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy })
+        assertEquals(ConnectionRecovery(ConnectionAttemptTarget.CCAPI, ConnectionFailureReason.AUTHENTICATION_REJECTED),
+            viewModel.uiState.value.connectionRecovery)
+        assertFalse(viewModel.uiState.value.error.orEmpty().contains("synthetic", ignoreCase = true))
+        assertFalse(viewModel.uiState.value.error.orEmpty().contains(oldPeer.baseUrl))
+        viewModel.setUsername("synthetic-replacement")
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        assertNull(viewModel.uiState.value.error)
+        viewModel.setBaseUrl(newPeer.baseUrl)
+        assertTrue(newPeer.requests.isEmpty())
+        connectAndVerifyReplacement()
+    }
+
+    @Test fun bridgeAuthenticationFailureUsesActualStatusAndClearsWithNewToken() = runBlocking {
+        oldPeer.intercept = {
+            MockResponse().setResponseCode(401)
+                .setBody("""{"error":{"code":"NOT_AUTHENTICATION","message":"SYNTHETIC-PRIVATE-RESPONSE"}}""")
+        }
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy })
+        assertEquals(ConnectionRecovery(ConnectionAttemptTarget.DESKTOP_BRIDGE, ConnectionFailureReason.AUTHENTICATION_REJECTED),
+            viewModel.uiState.value.connectionRecovery)
+        assertFalse(viewModel.uiState.value.bridgeScanCompleted)
+        assertFalse(viewModel.uiState.value.error.orEmpty().contains("SYNTHETIC-PRIVATE"))
+        viewModel.setBridgeToken("synthetic-corrected-token")
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        viewModel.setBridgeBaseUrl(newPeer.baseUrl)
+        assertTrue(newPeer.requests.isEmpty())
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { viewModel.uiState.value.bridgeScanCompleted && !viewModel.uiState.value.busy })
+        assertEquals(newPeer.cameraId, viewModel.uiState.value.selectedBridgeCameraId)
+        assertTrue(newPeer.requests.all { it.authorization == "Bearer synthetic-corrected-token" })
+        assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test fun invalidAddressesFailBeforeHttpWithoutEchoingEnteredData() = runBlocking {
+        viewModel.setBaseUrl("synthetic private address")
+        viewModel.connect()
+        assertTrue(pumpUntil { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy })
+        assertEquals(ConnectionFailureReason.INVALID_ADDRESS, viewModel.uiState.value.connectionRecovery?.reason)
+        assertFalse(viewModel.uiState.value.error.orEmpty().contains("synthetic"))
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl("https://synthetic-user:synthetic-password@invalid.example/?synthetic=1")
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy })
+        assertEquals(ConnectionAttemptTarget.DESKTOP_BRIDGE, viewModel.uiState.value.connectionRecovery?.target)
+        assertEquals(ConnectionFailureReason.INVALID_ADDRESS, viewModel.uiState.value.connectionRecovery?.reason)
+        assertFalse(viewModel.uiState.value.error.orEmpty().contains("synthetic"))
+        assertTrue(oldPeer.requests.isEmpty() && newPeer.requests.isEmpty())
+    }
+
+    @Test fun completedEmptyScanIsDistinctFromInitialAndEditedConfiguration() = runBlocking {
+        oldPeer.intercept = { request ->
+            if (request.requestUrl?.encodedPath == "/v1/cameras") MockResponse()
+                .setHeader("Content-Type", "application/json").setBody("""{"cameras":[]}""") else null
+        }
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        assertFalse(viewModel.uiState.value.bridgeScanCompleted)
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { viewModel.uiState.value.bridgeScanCompleted && !viewModel.uiState.value.busy })
+        assertTrue(viewModel.uiState.value.bridgeCameras.isEmpty())
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        assertNull(viewModel.uiState.value.error)
+        viewModel.setBridgeBaseUrl(newPeer.baseUrl)
+        assertFalse(viewModel.uiState.value.bridgeScanCompleted)
+        assertTrue(newPeer.requests.isEmpty())
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { viewModel.uiState.value.bridgeScanCompleted && !viewModel.uiState.value.busy })
+        assertEquals(newPeer.cameraId, viewModel.uiState.value.selectedBridgeCameraId)
+    }
+
+    @Test fun unchangedFieldsDoNotCancelAnAcceptedScan() = runBlocking {
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        viewModel.setBridgeToken("synthetic-token")
+        val gate = oldPeer.gateNext("/v1/cameras")
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        val attempt = currentAttemptJobs()
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        viewModel.setBridgeToken("synthetic-token")
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        assertTrue(attempt.any { it.isActive })
+        assertTrue(CameraOperation.BRIDGE in viewModel.uiState.value.pendingOperations)
+        gate.release.countDown()
+        awaitAttempt(attempt)
+        assertEquals(oldPeer.cameraId, viewModel.uiState.value.selectedBridgeCameraId)
+        assertTrue(viewModel.uiState.value.bridgeScanCompleted)
+    }
+
+    @Test fun abandonedScanFailureCannotReplaceTheEditedConfigurationRecovery() = runBlocking {
+        oldPeer.intercept = { request -> if (request.requestUrl?.encodedPath == "/v1/cameras")
+            MockResponse().setResponseCode(401).setBody("synthetic obsolete response") else null }
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        val gate = oldPeer.gateNext("/v1/cameras")
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        val attempt = currentAttemptJobs()
+        viewModel.setBridgeBaseUrl(newPeer.baseUrl)
+        gate.release.countDown()
+        awaitAttempt(attempt)
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        assertNull(viewModel.uiState.value.error)
+        assertFalse(viewModel.uiState.value.bridgeScanCompleted)
+        assertTrue(viewModel.uiState.value.bridgeCameras.isEmpty())
+        assertTrue(newPeer.requests.isEmpty())
+    }
+
     private suspend fun holdDirectConnect(): List<Job> {
         viewModel.useDirectCameraPreset()
         viewModel.setBaseUrl(oldPeer.baseUrl)
@@ -252,6 +375,7 @@ private class ConnectionConfigurationPeer(label: String, private val batteryLeve
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
     }
+    @Volatile var intercept: ((RecordedRequest) -> MockResponse?)? = null
     private val nextGate = AtomicReference<Gate?>()
     private val gates = CopyOnWriteArrayList<Gate>()
 
@@ -268,7 +392,7 @@ private class ConnectionConfigurationPeer(label: String, private val batteryLeve
                 val path = requireNotNull(request.requestUrl).encodedPath
                 requests += Request(request.method, path, request.getHeader("Authorization"))
                 // Snapshot the response before the edit, then release this exact old result.
-                val response = when {
+                val response = intercept?.invoke(request) ?: when {
                     path == "/health" -> json("""{"service":"open-eos-control-bridge"}""")
                     path == "/v1/cameras" -> json("""{"cameras":[{"id":"$cameraId","model":"$model","port":"synthetic:001","engine":"libgphoto2"}]}""")
                     path == "/ccapi" -> json("""{"ver110":[{"path":"/deviceinformation","get":true},{"path":"/devicestatus/battery","get":true},{"path":"/shooting/settings","get":true}]}""")

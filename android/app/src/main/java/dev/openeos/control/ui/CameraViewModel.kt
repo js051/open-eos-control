@@ -70,6 +70,8 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import dev.openeos.control.data.ConnectionFailureReason
+import dev.openeos.control.data.connectionFailureReason
 import java.io.IOException
 import java.net.URLConnection
 import java.util.UUID
@@ -473,7 +475,7 @@ class CameraViewModel(
     fun setConnectionTarget(target: ConnectionTarget) {
         if (_uiState.value.connected || _uiState.value.connectionTarget == target) return
         cancelConnectionAttempt()
-        _uiState.update { it.copy(connectionTarget = target, error = null, errorOperation = null) }
+        _uiState.update { it.copy(connectionTarget = target, error = null, errorOperation = null, connectionRecovery = null) }
     }
 
     fun setBaseUrl(value: String) {
@@ -486,13 +488,13 @@ class CameraViewModel(
     fun setUsername(value: String) {
         if (_uiState.value.connected || _uiState.value.username == value) return
         cancelConnectionAttempt()
-        _uiState.update { it.copy(username = value, error = null) }
+        _uiState.update { it.copy(username = value, error = null, errorOperation = null, connectionRecovery = null) }
     }
 
     fun setPassword(value: String) {
         if (_uiState.value.connected || _uiState.value.password == value) return
         cancelConnectionAttempt()
-        _uiState.update { it.copy(password = value, error = null) }
+        _uiState.update { it.copy(password = value, error = null, errorOperation = null, connectionRecovery = null) }
     }
 
     fun setBridgeBaseUrl(value: String) {
@@ -502,6 +504,7 @@ class CameraViewModel(
         _uiState.update {
             it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
                 bridgeBaseUrl = value,
+                bridgeScanCompleted = false,
                 bridgeCameras = emptyList(),
                 selectedBridgeCameraId = null,
             )
@@ -514,6 +517,8 @@ class CameraViewModel(
         _uiState.update {
             it.copy(
                 bridgeToken = value,
+                bridgeScanCompleted = false,
+                connectionRecovery = null,
                 bridgeCameras = emptyList(),
                 selectedBridgeCameraId = null,
                 error = null,
@@ -528,6 +533,7 @@ class CameraViewModel(
         _uiState.update { state ->
             state.copy(
                 selectedBridgeCameraId = cameraId.takeIf { id -> state.bridgeCameras.any { it.id == id } },
+                connectionRecovery = null,
                 error = null,
                 errorOperation = null,
             )
@@ -605,7 +611,7 @@ class CameraViewModel(
         _uiState.update { it.copy(usbDiagnostics = diagnostics) }
     }
 
-    fun connect() = runCamera(CameraOperation.CONNECT) {
+    fun connect() = runCamera(CameraOperation.CONNECT, connectionAttempt = ConnectionAttemptTarget.CCAPI) {
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
@@ -615,6 +621,7 @@ class CameraViewModel(
         resetFrameMetrics()
         lastPhotoShootingMode = null
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
+        validateConnectionAddress(_uiState.value.baseUrl, ConnectionAttemptTarget.CCAPI)
         val session = repository.connect(
             baseUrl = _uiState.value.baseUrl,
             username = _uiState.value.username,
@@ -630,7 +637,7 @@ class CameraViewModel(
         applyConnectedSession(session)
     }
 
-    fun connectUsb(deviceName: String, vendorId: Int, productId: Int) = runCamera(CameraOperation.CONNECT) {
+    fun connectUsb(deviceName: String, vendorId: Int, productId: Int) = runCamera(CameraOperation.CONNECT, connectionAttempt = ConnectionAttemptTarget.USB) {
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
@@ -654,8 +661,10 @@ class CameraViewModel(
         applyConnectedSession(session)
     }
 
-    fun scanDesktopBridge() = runCamera(CameraOperation.BRIDGE) {
+    fun scanDesktopBridge() = runCamera(CameraOperation.BRIDGE, connectionAttempt = ConnectionAttemptTarget.DESKTOP_BRIDGE) {
         val state = _uiState.value
+        _uiState.update { it.copy(bridgeScanCompleted = false) }
+        validateConnectionAddress(state.bridgeBaseUrl, ConnectionAttemptTarget.DESKTOP_BRIDGE)
         val generation = cameraSessionGeneration
         val cameras = repository.discoverBridgeCameras(
             baseUrl = state.bridgeBaseUrl,
@@ -669,12 +678,13 @@ class CameraViewModel(
                 ?: cameras.singleOrNull()?.id
             current.copy(
                 bridgeCameras = cameras,
+                bridgeScanCompleted = true,
                 selectedBridgeCameraId = selected,
             )
         }
     }
 
-    fun connectBridge() = runCamera(CameraOperation.CONNECT) {
+    fun connectBridge() = runCamera(CameraOperation.CONNECT, connectionAttempt = ConnectionAttemptTarget.DESKTOP_BRIDGE) {
         stopEventPollingLoopAndJoin()
         stopLiveViewLoop()
         detachNativeLiveViewListener()
@@ -686,6 +696,7 @@ class CameraViewModel(
         _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
         val state = _uiState.value
         val selectedCamera = state.bridgeCameras.firstOrNull { it.id == state.selectedBridgeCameraId }
+        validateConnectionAddress(state.bridgeBaseUrl, ConnectionAttemptTarget.DESKTOP_BRIDGE)
         val session = repository.connectBridge(
             baseUrl = state.bridgeBaseUrl,
             token = state.bridgeToken,
@@ -2697,9 +2708,10 @@ class CameraViewModel(
         operation: CameraOperation,
         onError: (Exception) -> Unit = {},
         afterFinally: () -> Unit = {},
+        connectionAttempt: ConnectionAttemptTarget? = null,
         block: suspend () -> Unit,
     ) {
-        launchCameraOperation(operation, onError, afterFinally, block = block)
+        launchCameraOperation(operation, onError, afterFinally, connectionAttempt = connectionAttempt, block = block)
     }
 
     private fun launchCameraOperation(
@@ -2707,6 +2719,7 @@ class CameraViewModel(
         onError: (Exception) -> Unit = {},
         afterFinally: () -> Unit = {},
         cancelMediaReads: Boolean = true,
+        connectionAttempt: ConnectionAttemptTarget? = null,
         block: suspend () -> Unit,
     ): Job? {
         if (_uiState.value.isBusy(operation)) return null
@@ -2732,6 +2745,7 @@ class CameraViewModel(
         _uiState.update {
             it.copy(
                 pendingOperations = it.pendingOperations + operation,
+                connectionRecovery = null,
                 error = null,
                 errorOperation = null,
             )
@@ -2755,12 +2769,22 @@ class CameraViewModel(
             } catch (exception: Exception) {
                 if (generation != cameraSessionGeneration ||
                     (operation == CameraOperation.FOCUS && _uiState.value.info !== connection)) return@launch
-                exception.printStackTrace()
+                val safetyFailure = exception is ShutterReleaseException || exception is AutofocusReleaseException ||
+                    exception is dev.openeos.control.data.CcapiLiveViewReleaseException
+                val recovery = if (connectionAttempt != null && !safetyFailure) {
+                    ConnectionRecovery(connectionAttempt, if (exception is InvalidConnectionAddressException) {
+                        ConnectionFailureReason.INVALID_ADDRESS
+                    } else connectionFailureReason(exception))
+                } else null
+                // Connection diagnostics can contain entered addresses or server bodies. The
+                // recovery flow only needs typed evidence, never these values in UI or logs.
+                if (recovery == null) exception.printStackTrace()
                 if (exception is ShutterReleaseException) markShutterReleaseUnconfirmed()
                 onError(exception)
                 _uiState.update {
                     it.copy(
-                        error = formatException(exception),
+                        error = recovery?.let { failure -> "Connection failed: ${failure.reason.name}" } ?: formatException(exception),
+                        connectionRecovery = recovery,
                         errorOperation = operation,
                         autofocusHoldState = if (operation == CameraOperation.FOCUS && exception is AutofocusReleaseException) {
                             AutofocusHoldState.RELEASE_FAILED
@@ -3298,6 +3322,7 @@ class CameraViewModel(
         operatorConfirmedFeatures = emptySet(),
         error = error,
         errorOperation = null,
+        connectionRecovery = null,
     )
 
     private fun fpsToFrameIntervalMillis(fps: Int): Long =

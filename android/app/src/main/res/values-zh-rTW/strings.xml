@@ -56,6 +56,26 @@
     <string name="setting_movie_mode">影片模式</string>
     <string name="app_name">Open EOS Control</string>
     <string name="connect_title">連接你的 EOS</string>
+    <string name="cancel_connection">取消連線</string>
+    <string name="cancel_bridge_scan">取消掃描</string>
+    <string name="connection_recovery_title">請檢查連線設定</string>
+    <string name="connection_recovery_invalid_address">請輸入相機或桌面橋接顯示的完整 http:// 或 https:// 位址，包含連接埠，再試一次。</string>
+    <string name="connection_recovery_camera_auth">相機拒絕存取。請確認相機的 Camera Control API 使用者名稱、密碼與允許存取的設定。更新下方欄位，再點選連線。</string>
+    <string name="connection_recovery_bridge_auth">橋接服務拒絕存取。請確認 Bearer token 與電腦上 Open EOS Bridge 的設定相同，且設定允許這支手機存取，再重新掃描或連線。</string>
+    <string name="connection_recovery_tls">無法驗證安全連線。請確認 HTTPS 位址、相機或橋接服務的憑證，以及各裝置的日期與時間，再試一次。</string>
+    <string name="connection_recovery_host_not_found">找不到主機名稱。請確認位址沒有輸入錯誤，且手機與相機或橋接電腦位於同一網路，再試一次。</string>
+    <string name="connection_recovery_timeout">等候回應逾時。請保持相機喚醒或橋接服務執行中，確認手機位於同一網路，再試一次。</string>
+    <string name="connection_recovery_unreachable">無法連到此位址。請確認位址與連接埠、保持相機喚醒或橋接服務執行中，並加入同一網路後再試一次。</string>
+    <string name="connection_recovery_ccapi_endpoint">找不到可用的 Camera Control API 端點。請在支援的相機上啟用 CCAPI，輸入相機顯示的 URL，再點選連線。Camera Connect 手機配對使用不同模式。</string>
+    <string name="connection_recovery_bridge_endpoint">找不到可用的 Open EOS Bridge 端點。請確認 Open EOS Bridge 正在執行，輸入其服務 URL 與連接埠，再重新掃描或連線。</string>
+    <string name="connection_recovery_http">伺服器回應錯誤。請確認這是相機 CCAPI 或 Open EOS Bridge 的位址與連接埠，檢查其狀態後再試一次。</string>
+    <string name="connection_recovery_unknown">無法完成連線。請確認位址與驗證資訊、保持相機喚醒或橋接服務執行中，再試一次。</string>
+    <string name="connection_recovery_usb">無法開啟 USB 工作階段。請保持相機喚醒、檢查資料傳輸線與 USB 權限，再掃描 USB 並重新連線。</string>
+    <string name="connection_bridge_scan_empty">橋接服務已回應，但未找到相機。請確認相機已連到電腦、保持相機喚醒，並關閉其他使用相機的程式。準備好後再掃描一次。</string>
+    <string name="connection_usb_empty">找不到 USB 裝置。請以可傳輸資料的 USB 線連接已喚醒的相機，必要時使用 USB 主機轉接器，再掃描 USB。</string>
+    <string name="connection_usb_non_canon">本 App 的直接 USB 控制需要 Canon PTP 裝置。此裝置未被識別為 Canon。</string>
+    <string name="connection_usb_no_ptp">此 Canon 裝置未提供 PTP 介面。請檢查相機的 USB 模式與資料傳輸線，重新插接後再掃描 USB。</string>
+    <string name="connection_usb_permission">請允許 USB 存取，以開啟此 Canon PTP 裝置的工作階段。</string>
     <string name="connect_subtitle">直接連接相機、透過桌面橋接，或使用 USB。</string>
     <string name="direct_camera">直接連相機</string><string name="desktop_bridge">桌面橋接</string>
     <string name="preset_http">HTTP</string><string name="preset_https">HTTPS</string><string name="preset_simulator">模擬器</string>

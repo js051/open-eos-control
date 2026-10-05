@@ -102,6 +102,7 @@ fun OpenEosControlApp(
             viewModel.rememberConnection(context)
             viewModel.connectBridge()
         },
+        cancelConnectionAttempt = viewModel::cancelConnectionAttempt,
         disconnect = viewModel::disconnect,
         refresh = viewModel::refresh,
         refreshUsb = { viewModel.refreshUsbDiagnostics(context) },
@@ -226,19 +227,7 @@ fun OpenEosControlApp(
                     Modifier.align(if (state.shutterReleaseUnconfirmed) Alignment.TopCenter else Alignment.BottomCenter)
                         .padding(top = if (state.shutterReleaseUnconfirmed) CAMERA_OVERLAY_HEADER_HEIGHT else 0.dp),
                 ) {
-                    ErrorBanner(
-                        when {
-                            state.shutterReleaseUnconfirmed -> stringResource(
-                                if (state.transport == CameraTransport.DESKTOP_BRIDGE) R.string.bridge_shutter_release_unconfirmed
-                                else R.string.shutter_release_unconfirmed,
-                            )
-                            state.error != null -> state.error
-                            state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
-                            else -> null
-                        },
-                        actions.clearError,
-                        dismissible = !state.shutterReleaseUnconfirmed,
-                    )
+                    CameraErrorPresentation(state, actions.clearError)
                 }
             }
             LanguageSettingsSheet(state, actions)
@@ -251,6 +240,23 @@ fun OpenEosControlApp(
             }
         }
     }
+}
+
+@Composable
+internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit) {
+    ErrorBanner(
+        when {
+            state.shutterReleaseUnconfirmed -> stringResource(
+                if (state.transport == CameraTransport.DESKTOP_BRIDGE) R.string.bridge_shutter_release_unconfirmed
+                else R.string.shutter_release_unconfirmed,
+            )
+            state.error != null && (state.connected || state.connectionRecovery == null) -> state.error
+            state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
+            else -> null
+        },
+        onDismiss,
+        dismissible = !state.shutterReleaseUnconfirmed,
+    )
 }
 
 @Composable
@@ -299,6 +305,7 @@ data class CameraActions(
     val openDownloadHistory: () -> Unit = {},
     val connect: () -> Unit,
     val connectBridge: () -> Unit,
+    val cancelConnectionAttempt: () -> Unit = {},
     val disconnect: () -> Unit,
     val refresh: () -> Unit,
     val refreshUsb: () -> Unit,
