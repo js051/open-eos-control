@@ -26,6 +26,12 @@ focused suites：`CameraRecordingReviewRecoveryTest` 19、`CameraCaptureReviewRe
 
 19 個新 HTTP 案例覆蓋：空 event 下延遲 MP4、耗盡／重複只讀重查、已知舊 ID 重排與早到 event、先 JPG 後 MP4、只有 JPG 的 event 不解除影片待查、相簿未開時的歷史 MP4、拒絕 still 後保留候選、較早 timestamp 的新可見影片、Start／Stop 拒絕與不同狀態結果、未 typed 的 status 失敗、手動／自動 MEDIA 互斥、同 session 晚 retry、disconnect 晚 listing／晚 Stop。這是本機 `implemented` 證據，不是 PR ready／main accepted／preview released。
 
+## 真實 UI 旅程來源與編譯
+
+`CameraRecordingMediaJourneyTest` 新增兩個完整 App／ViewModel／HTTP 旅程：Stop 後無 contents event 的延遲 MP4，以及耗盡後的只讀重查。兩者使用既有有效 H.264 asset，驗收真 PlayerView 的解碼尺寸與播放前進，再保存 MediaStore 原始 bytes、video 類型、解除 pending 及 COMPLETED 下載紀錄；另核對 Start／Stop 各一次，預覽、保存與重查不增加相機 mutation。這是 simulator protocol 的實際 App 路徑，不冒充 native Canon 或物理裝置。
+
+2026-10-05 10:56 UTC，`compileDebugAndroidTestKotlin` 以 terminal exit 0 完成（43 秒，27 tasks／8 executed），本輪來源 manifest 前後一致，SHA-256 `06277c53e0984961dc58b728404d817c3bac4afc3db3a3fffd6ba419fc25637c`。兩個新案例目前僅編譯通過，尚未執行；aggregate、Lint／APK 與裝置 CI 仍須各自驗證。
+
 ## 範圍與尚未閉合的情況
 
 原有 Stop ACK 之後 status readback 失敗，目前沒有 recording 專用 typed acknowledgement。此批保持其既有錯誤／狀態語意，不捕捉一般 exception 當成 ACK，不猜測物理錄影已停止，也不在這種不明結果後開始本批查找。這個情況仍是後續獨立設計範圍。
