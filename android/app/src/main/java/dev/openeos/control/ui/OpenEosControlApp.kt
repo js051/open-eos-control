@@ -147,6 +147,9 @@ fun OpenEosControlApp(
         retryCaptureReview = viewModel::retryCaptureReview,
         refreshMedia = viewModel::refreshMedia,
         setMediaLibraryScope = viewModel::setMediaLibraryScope,
+        setMediaDateRange = { range ->
+            viewModel.setMediaDateRange(range, state.info, state.mediaSessionGeneration)
+        },
         cancelMediaLibraryLoad = viewModel::cancelMediaLibraryLoad,
         loadMediaThumbnail = viewModel::loadMediaThumbnail,
         openMediaPreview = viewModel::openMediaPreview,
@@ -330,6 +333,7 @@ data class CameraActions(
     val retryCaptureReview: () -> Unit = {},
     val refreshMedia: () -> Unit,
     val setMediaLibraryScope: (MediaLibraryScope) -> Unit = {},
+    val setMediaDateRange: (MediaDateRange?) -> Unit = {},
     val cancelMediaLibraryLoad: () -> Unit = {},
     val loadMediaThumbnail: (CameraMediaItem) -> Unit,
     val openMediaPreview: (CameraMediaItem) -> Unit,

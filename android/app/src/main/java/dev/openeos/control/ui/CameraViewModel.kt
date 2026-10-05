@@ -301,6 +301,18 @@ class CameraViewModel(
         if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
     }
 
+    fun setMediaDateRange(
+        range: MediaDateRange?,
+        connection: dev.openeos.control.data.CameraInfo? = _uiState.value.info,
+        generation: Long = _uiState.value.mediaSessionGeneration,
+    ) {
+        // A display-only filter never changes loaded media, transfer ownership, or capture review.
+        // A queued callback from a dismissed old-session form must not alter the new session.
+        _uiState.update {
+            it.withMediaDateRangeForSession(range, connection, generation)
+        }
+    }
+
     fun setMediaLibraryScope(scope: MediaLibraryScope) {
         val state = _uiState.value
         if (state.mediaLibraryScope == scope || state.isBusy(CameraOperation.MEDIA)) return
@@ -3158,6 +3170,8 @@ class CameraViewModel(
         status = null,
         capabilities = null,
         mediaItems = emptyList(),
+        mediaDateRange = null,
+        mediaSessionGeneration = mediaSessionGeneration + 1,
         mediaLibraryHasMore = false,
         mediaThumbnails = emptyMap(),
         mediaThumbnailLoadingIds = emptySet(),

@@ -4,17 +4,60 @@ import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.isVideoMedia
 import java.math.BigInteger
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.time.format.ResolverStyle
 import java.util.Locale
 
 enum class MediaFilter { ALL, PHOTOS, VIDEOS }
 
 enum class MediaSort { CAMERA, NEWEST, OLDEST, NAME }
+
+/** Displayed media dates, inclusive at both ends, in the same zone as gallery details. */
+data class MediaDateRange(val start: LocalDate, val end: LocalDate) {
+    init { require(!end.isBefore(start)) }
+
+    internal fun includes(captureTime: String?, displayZone: ZoneId): Boolean = captureTime.toMediaDisplayDate(displayZone)?.let {
+        !it.isBefore(start) && !it.isAfter(end)
+    } ?: false
+}
+
+internal fun mediaDateRangeFromInput(start: String, end: String): MediaDateRange? {
+    val first = start.toStrictMediaDate() ?: return null
+    val last = end.toStrictMediaDate() ?: return null
+    return if (last.isBefore(first)) null else MediaDateRange(first, last)
+}
+
+private fun String.toStrictMediaDate(): LocalDate? {
+    if (!ISO_DATE.matches(this)) return null
+    return parseMediaDate { LocalDate.parse(this, DateTimeFormatter.ISO_LOCAL_DATE) }
+}
+
+/** Missing dates and malformed full timestamps stay unknown, never normalized from a prefix. */
+internal fun String?.toMediaDisplayDate(displayZone: ZoneId): LocalDate? {
+    val value = this?.trim().orEmpty()
+    // A date without a time is not an instant; do not invent midnight or an offset.
+    return value.toStrictMediaDate()
+        ?: value.toStrictMediaInstant(displayZone)?.atZone(displayZone)?.toLocalDate()
+}
+
+private fun String.toStrictMediaInstant(displayZone: ZoneId): Instant? =
+    parseMediaDate { OffsetDateTime.parse(this).toInstant() }
+        ?: parseMediaDate { ZonedDateTime.parse(this).toInstant() }
+        ?: STRICT_LOCAL_DATE_TIME_FORMATS.firstNotNullOfOrNull { formatter ->
+            parseMediaDate { LocalDateTime.parse(this, formatter).atZone(displayZone).toInstant() }
+        }
+
+private inline fun <T> parseMediaDate(block: () -> T): T? = try {
+    block()
+} catch (_: DateTimeParseException) {
+    null
+}
 
 data class MediaDateGroup(
     val date: String?,
@@ -71,9 +114,11 @@ internal fun mediaItemsForDisplay(
     items: List<CameraMediaItem>,
     filter: MediaFilter,
     sort: MediaSort,
+    dateRange: MediaDateRange? = null,
+    displayZone: ZoneId = ZoneId.systemDefault(),
 ): List<CameraMediaItem> {
     val filtered = items.filter { item ->
-        when (filter) {
+        (dateRange == null || dateRange.includes(item.captureTime, displayZone)) && when (filter) {
             MediaFilter.ALL -> true
             MediaFilter.PHOTOS -> !item.isVideo
             MediaFilter.VIDEOS -> item.isVideo
@@ -103,7 +148,11 @@ internal fun selectCaptureReviewItem(items: List<CameraMediaItem>): CameraMediaI
 internal val CameraMediaItem.isVideo: Boolean
     get() = isVideoMedia
 
-internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort): List<MediaDateGroup> {
+internal fun mediaGroupsForDisplay(
+    items: List<CameraMediaItem>,
+    sort: MediaSort,
+    displayZone: ZoneId = ZoneId.systemDefault(),
+): List<MediaDateGroup> {
     if (items.isEmpty()) return emptyList()
     if (sort == MediaSort.CAMERA) return listOf(MediaDateGroup(date = null, items = items))
     val groups = mutableListOf<MediaDateGroup>()
@@ -112,7 +161,7 @@ internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort
         val heading = if (sort == MediaSort.NAME) {
             item.name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "#"
         } else {
-            item.mediaDate
+            item.captureTime.toMediaDisplayDate(displayZone)?.toString()
         }
         if (groups.isNotEmpty() && groups.last().date == heading) {
             groupItems += item
@@ -123,16 +172,6 @@ internal fun mediaGroupsForDisplay(items: List<CameraMediaItem>, sort: MediaSort
     }
     return groups
 }
-
-private val CameraMediaItem.mediaDate: String?
-    get() = captureTime?.trim()?.let { value ->
-        when {
-            ISO_DATE_PREFIX.matchesAt(value, 0) -> value.take(10)
-            COMPACT_DATE_PREFIX.matchesAt(value, 0) ->
-                "${value.take(4)}-${value.substring(4, 6)}-${value.substring(6, 8)}"
-            else -> null
-        }
-    }
 
 private fun compareMediaItems(
     left: CameraMediaItem,
@@ -157,9 +196,11 @@ private fun compareMediaItems(
     return 0
 }
 
-internal fun mediaCaptureTimeLabel(value: String?): String? = value.toMediaInstant()
-    ?.atZone(ZoneId.systemDefault())
-    ?.format(MEDIA_DISPLAY_DATE_TIME)
+internal fun mediaCaptureTimeLabel(value: String?, displayZone: ZoneId = ZoneId.systemDefault()): String? =
+    value?.trim()?.let {
+        it.toStrictMediaDate()?.toString()
+            ?: it.toStrictMediaInstant(displayZone)?.atZone(displayZone)?.format(MEDIA_DISPLAY_DATE_TIME)
+    }
 
 internal fun mediaByteSizeLabel(value: Long?): String? {
     val bytes = value?.takeIf { it >= 0 } ?: return null
@@ -227,8 +268,12 @@ private val LOCAL_DATE_TIME_FORMATS = listOf(
 )
 private val MEDIA_DISPLAY_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 private val NATURAL_PART = Regex("\\d+|\\D+")
-private val ISO_DATE_PREFIX = Regex("\\d{4}-\\d{2}-\\d{2}")
-private val COMPACT_DATE_PREFIX = Regex("\\d{8}")
+private val ISO_DATE = Regex("\\d{4}-\\d{2}-\\d{2}")
+private val STRICT_LOCAL_DATE_TIME_FORMATS = listOf(
+    DateTimeFormatter.ISO_LOCAL_DATE_TIME,
+    DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(ResolverStyle.STRICT),
+    DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss").withResolverStyle(ResolverStyle.STRICT),
+)
 private const val KIBIBYTE = 1024L
 private const val MEBIBYTE = KIBIBYTE * 1024L
 private const val GIBIBYTE = MEBIBYTE * 1024L

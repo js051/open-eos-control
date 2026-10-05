@@ -22,6 +22,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
@@ -245,6 +247,96 @@ class CameraGalleryUiTest {
         compose.runOnIdle { assertTrue(cancelled) }
         close.performTouchInput { click() }
         compose.onNodeWithTag("media-viewer-content").assertDoesNotExist()
+    }
+
+    @Test fun clearingDateRangeKeepsTheChosenMediaTypeAndSort() {
+        val videos = listOf(
+            item.copy(id = "one", name = "ONE.MP4", kind = "video", captureTime = "2026-08-14T12:00:00"),
+            item.copy(id = "two", name = "TWO.MP4", kind = "video", captureTime = "2026-08-15T12:00:00"),
+        )
+        val current = mutableStateOf(state().copy(
+            mediaItems = videos + item.copy(captureTime = "2026-08-14T12:00:00"),
+            mediaDateRange = mediaDateRangeFromInput("2026-08-14", "2026-08-14"),
+        ))
+        compose.setContent {
+            MaterialTheme { MediaScreen(current.value, actions().copy(setMediaDateRange = { current.value = current.value.copy(mediaDateRange = it) })) }
+        }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_sort_current,
+            compose.activity.getString(R.string.media_newest_first))).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_filename)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_filter_count,
+            compose.activity.getString(R.string.media_videos), 1)).performClick()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_date_clear)).performClick()
+        compose.onNodeWithText("ONE.MP4").assertIsDisplayed()
+        compose.onNodeWithText("TWO.MP4").assertIsDisplayed()
+        compose.onNodeWithText(item.name).assertDoesNotExist()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_sort_current,
+            compose.activity.getString(R.string.media_filename))).assertIsDisplayed()
+    }
+
+    @Test fun replacementConnectionWithEqualFieldsDiscardsDateDraftSelectionAndDeleteDialog() {
+        val current = mutableStateOf(state(), androidx.compose.runtime.neverEqualPolicy())
+        val applied = mutableListOf<MediaDateRange?>()
+        val deleted = mutableListOf<CameraMediaItem>()
+        compose.setContent {
+            MaterialTheme {
+                MediaScreen(current.value, actions().copy(setMediaDateRange = { applied += it }, deleteMediaBatch = { deleted += it }))
+            }
+        }
+        fun selectItem() {
+            compose.onNodeWithContentDescription(compose.activity.getString(R.string.preview_media, item.name))
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
+        }
+        fun replaceConnection() = compose.runOnIdle {
+            val before = requireNotNull(current.value.info)
+            val replacement = before.copy()
+            assertEquals(before, replacement)
+            assertTrue(before !== replacement)
+            // No disconnected frame, same media IDs and same generation: identity must still win.
+            current.value = current.value.copy(info = replacement)
+        }
+        selectItem()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_date_filter)).performClick()
+        compose.onNodeWithTag("media-date-start").performScrollTo().performTextReplacement("2026-08-14")
+        replaceConnection()
+        compose.onNodeWithTag("media-date-dialog").assertDoesNotExist()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.exit_media_selection)).assertDoesNotExist()
+        selectItem()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.delete_selected_media, 1)).performClick()
+        replaceConnection()
+        compose.onNodeWithText(compose.activity.getString(R.string.delete_selected_media_title, 1)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.exit_media_selection)).assertDoesNotExist()
+        compose.runOnIdle { assertTrue(applied.isEmpty()); assertTrue(deleted.isEmpty()) }
+    }
+
+    @Test fun zeroDateMatchesKeepHiddenSelectionDisclosureAndExactDownloadIds() {
+        val older = item.copy(id = "older", name = "OLDER.JPG", captureTime = "2026-08-13T12:00:00")
+        val later = item.copy(id = "later", name = "LATER.JPG", captureTime = "2026-08-14T12:00:00")
+        val current = mutableStateOf(state().copy(mediaItems = listOf(later, older)))
+        val saved = mutableListOf<List<CameraMediaItem>>()
+        compose.setContent {
+            MaterialTheme {
+                MediaScreen(current.value, actions().copy(saveMediaToPhone = { saved += it }))
+            }
+        }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.preview_media, older.name))
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.select_all_media)).performClick()
+        compose.runOnIdle {
+            current.value = current.value.copy(
+                mediaDateRange = mediaDateRangeFromInput("2020-01-01", "2020-01-01"),
+                mediaLibraryScope = MediaLibraryScope.ALL,
+                mediaLibraryLoadStatus = MediaLibraryLoadStatus.CANCELLED,
+            )
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.media_hidden_selected_summary, 2)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.media_hidden_selected_summary, 2)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.download_selected_media, 2)).performClick()
+        compose.runOnIdle { assertEquals(listOf(listOf(later, older)), saved) }
+        compose.runOnIdle { current.value = current.value.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) }
+        compose.onNodeWithText(compose.activity.getString(R.string.media_date_partial)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.media_date_clear)).assertIsDisplayed()
     }
 
     private fun withLandscapeWindow(test: () -> Unit) {

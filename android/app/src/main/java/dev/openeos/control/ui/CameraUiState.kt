@@ -98,6 +98,9 @@ data class CameraUiState(
     val capabilities: CameraCapabilities? = null,
     val mediaItems: List<CameraMediaItem> = emptyList(),
     val mediaLibraryScope: MediaLibraryScope = MediaLibraryScope.RECENT,
+    val mediaDateRange: MediaDateRange? = null,
+    // Media UI identity only; transport operations retain their existing private generation.
+    val mediaSessionGeneration: Long = 0,
     val mediaLibraryHasMore: Boolean = false,
     val mediaLibraryLoading: Boolean = false,
     val mediaLibraryLoadStatus: MediaLibraryLoadStatus = MediaLibraryLoadStatus.NOT_LOADED,
@@ -325,3 +328,12 @@ fun settingsForMode(settings: List<CameraSettingControl>, mode: CaptureMode): Li
         }
     }
 }
+
+/** Display-only state reducer. Old forms cannot apply or clear a replacement session's range. */
+internal fun CameraUiState.withMediaDateRangeForSession(
+    range: MediaDateRange?,
+    connection: CameraInfo?,
+    generation: Long,
+): CameraUiState = if (info === connection && mediaSessionGeneration == generation) {
+    copy(mediaDateRange = range)
+} else this

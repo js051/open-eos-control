@@ -1,9 +1,11 @@
 package dev.openeos.control.ui
 
+import java.time.ZoneId
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -163,14 +165,21 @@ internal fun MediaFilterBar(
     selected: MediaFilter,
     items: List<CameraMediaItem>,
     onSelected: (MediaFilter) -> Unit,
+    onDateRange: () -> Unit,
+    dateRangeActive: Boolean,
 ) {
     val photos = items.count { !it.isVideo }
     val videos = items.size - photos
     Row(
-        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        ToolIconButton(
+            LucideR.drawable.lucide_ic_calendar_days,
+            stringResource(if (dateRangeActive) R.string.media_date_edit else R.string.media_date_filter),
+            onDateRange,
+        )
         listOf(
             Triple(MediaFilter.ALL, R.string.media_all, items.size),
             Triple(MediaFilter.PHOTOS, R.string.media_photos, photos),
@@ -178,7 +187,7 @@ internal fun MediaFilterBar(
         ).forEach { (filter, label, count) ->
             TextButton(
                 onClick = { onSelected(filter) },
-                modifier = Modifier.weight(1f).height(44.dp),
+                modifier = Modifier.heightIn(min = 48.dp),
             ) {
                 Text(
                     stringResource(R.string.media_filter_count, stringResource(label), count),
@@ -195,6 +204,7 @@ internal fun MediaFilterBar(
 internal fun MediaGalleryGrid(
     items: List<CameraMediaItem>,
     sort: MediaSort,
+    displayZone: ZoneId,
     state: CameraUiState,
     actions: CameraActions,
     selectedIds: Set<String>,
@@ -205,7 +215,7 @@ internal fun MediaGalleryGrid(
     onSelectionDrag: (String) -> Unit,
     onSelectionDragEnd: () -> Unit,
 ) {
-    val groups = remember(items, sort) { mediaGroupsForDisplay(items, sort) }
+    val groups = remember(items, sort, displayZone) { mediaGroupsForDisplay(items, sort, displayZone) }
     val itemIds = remember(items) { items.mapTo(hashSetOf(), CameraMediaItem::id) }
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()

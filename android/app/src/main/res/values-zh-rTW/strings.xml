@@ -450,7 +450,7 @@
     <string name="exit_media_selection">離開媒體選取模式</string>
     <string name="media_selected_count">已選取 %1$d 個</string>
     <string name="select_all_media">選取目前顯示的全部媒體</string>
-    <string name="clear_media_selection">清除媒體選取</string>
+    <string name="clear_media_selection">清除目前顯示的媒體選取</string>
     <string name="download_selected_media">下載選取的 %1$d 個項目</string>
     <string name="edit_selected_media">編輯選取的 %1$d 個項目</string>
     <string name="delete_selected_media">刪除選取的 %1$d 個項目</string>
@@ -492,4 +492,19 @@
     <string name="capture_review_explanation">只會查詢相機的最近素材，不會再次發送快門指令。新出現的素材無法確定與這次快門指令相對應。</string>
     <string name="capture_review_retry">重新查詢最近素材</string>
     <string name="capture_review_open_previous">開啟先前可見素材</string>
+
+    <string name="media_date_filter">素材日期範圍</string>
+    <string name="media_date_edit">編輯素材日期範圍</string>
+    <string name="media_date_explanation">請輸入完整的起訖 YYYY-MM-DD 日期，包含兩日。依詳細資料顯示的日期篩選：有時區的時間轉為裝置時區，無時區的時間視為裝置當地時間，僅有日期則保留該日。只篩選已載入項目，排除缺少或無效日期。素材日期可能是檔案時間，未必是原始拍攝時間。範圍會保留到清除或相機連線階段變更。</string>
+    <string name="media_date_zone">顯示時區：%1$s</string>
+    <string name="media_date_start">開始日期（含當日）</string>
+    <string name="media_date_end">結束日期（含當日）</string>
+    <string name="media_date_invalid">請輸入兩個有效的 YYYY-MM-DD 日期，結束日期不可早於開始日期。</string>
+    <string name="media_date_apply">套用</string>
+    <string name="media_date_clear">清除日期範圍</string>
+    <string name="media_date_range">素材日期：%1$s 至 %2$s</string>
+    <string name="media_date_loaded_results">已載入 %2$d 個，符合 %1$d 個 · 排除 %3$d 個缺少或無效日期</string>
+    <string name="media_date_partial">僅篩選最近或部分載入內容，尚未搜尋卡片上的其他項目。</string>
+    <string name="media_hidden_selected">有 %1$d 個已選項目被篩選隱藏，批次操作仍包含這些項目。</string>
+    <string name="media_hidden_selected_summary">批次含 %1$d 個隱藏選取</string>
 </resources>

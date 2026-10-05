@@ -424,7 +424,7 @@
     <string name="exit_media_selection">Exit media selection</string>
     <string name="media_selected_count">%1$d selected</string>
     <string name="select_all_media">Select all visible media</string>
-    <string name="clear_media_selection">Clear media selection</string>
+    <string name="clear_media_selection">Clear visible media selection</string>
     <string name="download_selected_media">Download %1$d selected items</string>
     <string name="edit_selected_media">Edit %1$d selected items</string>
     <string name="delete_selected_media">Delete %1$d selected items</string>
@@ -729,4 +729,19 @@
     <string name="capture_review_explanation">This checks recent camera media only and does not send another shutter command. A newly visible item cannot be linked conclusively to this shutter command.</string>
     <string name="capture_review_retry">Check recent media again</string>
     <string name="capture_review_open_previous">Open previously visible media</string>
+
+    <string name="media_date_filter">Media date range</string>
+    <string name="media_date_edit">Edit media date range</string>
+    <string name="media_date_explanation">Enter both dates as YYYY-MM-DD; both days are included. Uses the date shown in media details. Timestamps with an offset use the device time zone; timestamps without an offset are treated as device-local. Date-only values keep their date. Only loaded items are filtered; missing or invalid dates are excluded. A media date may be a file timestamp, rather than the original capture time. The range stays until cleared or the camera session changes.</string>
+    <string name="media_date_zone">Display time zone: %1$s</string>
+    <string name="media_date_start">From (inclusive)</string>
+    <string name="media_date_end">To (inclusive)</string>
+    <string name="media_date_invalid">Enter two valid dates as YYYY-MM-DD. The end must be on or after the start.</string>
+    <string name="media_date_apply">Apply</string>
+    <string name="media_date_clear">Clear date range</string>
+    <string name="media_date_range">Media date: %1$s to %2$s</string>
+    <string name="media_date_loaded_results">%1$d of %2$d loaded items · %3$d missing or invalid dates excluded</string>
+    <string name="media_date_partial">Recent or partial library only; other card items have not been searched.</string>
+    <string name="media_hidden_selected">%1$d selected items are hidden by filters. Batch actions still include them.</string>
+    <string name="media_hidden_selected_summary">Batch includes %1$d hidden items</string>
 </resources>

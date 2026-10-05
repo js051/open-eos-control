@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -33,10 +34,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -46,23 +49,58 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
+import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaTransferProgress
 import java.util.Locale
+import java.time.ZoneId
 
 @Composable
 fun MediaScreen(state: CameraUiState, actions: CameraActions) {
+    // Reference identity matters: a camera can reconnect with identical descriptions and item IDs.
+    key(MediaScreenSessionKey(state.info, state.mediaSessionGeneration)) {
+        MediaScreenContent(state, actions)
+    }
+}
+
+private class MediaScreenSessionKey(private val info: CameraInfo?, private val generation: Long) {
+    override fun equals(other: Any?): Boolean = other is MediaScreenSessionKey &&
+        other.info === info && other.generation == generation
+    override fun hashCode(): Int = 31 * System.identityHashCode(info) + generation.hashCode()
+}
+
+@Composable
+private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
     var pendingBatchDelete by remember { mutableStateOf<List<CameraMediaItem>?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
     var batchMetadataVisible by remember { mutableStateOf(false) }
     var mediaFilter by remember { mutableStateOf(MediaFilter.ALL) }
     var mediaSort by remember { mutableStateOf(MediaSort.NEWEST) }
+    var dateDialogVisible by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var selectionDrag by remember { mutableStateOf<MediaSelectionDrag?>(null) }
-    val displayedItems = remember(state.mediaItems, mediaFilter, mediaSort) {
-        mediaItemsForDisplay(state.mediaItems, mediaFilter, mediaSort)
+    val displayZone = ZoneId.systemDefault()
+    val dateFilteredItems = remember(state.mediaItems, state.mediaDateRange, displayZone) {
+        mediaItemsForDisplay(state.mediaItems, MediaFilter.ALL, MediaSort.CAMERA, state.mediaDateRange, displayZone)
+    }
+    val displayedItems = remember(dateFilteredItems, mediaFilter, mediaSort) {
+        mediaItemsForDisplay(dateFilteredItems, mediaFilter, mediaSort)
+    }
+    val unknownDateCount = remember(state.mediaItems, displayZone) {
+        state.mediaItems.count { it.captureTime.toMediaDisplayDate(displayZone) == null }
+    }
+    val displayedIds = remember(displayedItems) { displayedItems.mapTo(hashSetOf(), CameraMediaItem::id) }
+    val hiddenSelectedCount = selectedIds.count { it !in displayedIds }
+    LaunchedEffect(displayedItems) { selectionDrag = null }
+    if (dateDialogVisible) {
+        MediaDateRangeDialog(
+            range = state.mediaDateRange,
+            displayZone = displayZone,
+            onApply = { actions.setMediaDateRange(it); dateDialogVisible = false },
+            onDismiss = { dateDialogVisible = false },
+        )
     }
     val selectedItems = remember(state.mediaItems, selectedIds) {
         state.mediaItems.filter { it.id in selectedIds }
@@ -89,7 +127,10 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
     }
 
     state.mediaPreviewItem?.let { item ->
-        val previewIndex = displayedItems.indexOfFirst { it.id == item.id }
+        // Capture review or refreshed metadata can open an item outside the current filter.
+        // Show that exact item as a standalone preview, never 0/N or an unrelated adjacent item.
+        val viewerItems = displayedItems.takeIf { item.id in displayedIds } ?: listOf(item)
+        val previewIndex = viewerItems.indexOfFirst { it.id == item.id }
         val viewerActionsEnabled = !state.isBusy(CameraOperation.MEDIA) && (
             state.supports(CameraFeature.MEDIA_BROWSER) ||
                 state.supports(CameraFeature.MEDIA_PROTECT) ||
@@ -108,11 +149,11 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             loading = state.mediaPreviewLoading,
             offlinePlaceholder = state.previewMode,
             position = previewIndex + 1,
-            totalCount = displayedItems.size,
+            totalCount = viewerItems.size,
             canMovePrevious = previewIndex > 0,
-            canMoveNext = previewIndex in 0 until displayedItems.lastIndex,
-            onPrevious = { actions.previewAdjacentMedia(displayedItems, -1) },
-            onNext = { actions.previewAdjacentMedia(displayedItems, 1) },
+            canMoveNext = previewIndex in 0 until viewerItems.lastIndex,
+            onPrevious = { actions.previewAdjacentMedia(viewerItems, -1) },
+            onNext = { actions.previewAdjacentMedia(viewerItems, 1) },
             downloadEnabled = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
             downloadBusy = state.isBusy(CameraOperation.MEDIA) || state.mediaSaveFeedback.values.any { it.isPending },
             saveFeedback = state.mediaSaveFeedback[item.id],
@@ -160,7 +201,13 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
         AlertDialog(
             onDismissRequest = { pendingBatchDelete = null },
             title = { Text(stringResource(R.string.delete_selected_media_title, items.size)) },
-            text = { Text(stringResource(R.string.delete_selected_media_confirmation, items.size)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.delete_selected_media_confirmation, items.size))
+                    val hidden = items.count { it.id !in displayedIds }
+                    if (hidden > 0) Text(stringResource(R.string.media_hidden_selected, hidden))
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -269,9 +316,9 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
                     onExit = { selectedIds = emptySet() },
                     onToggleSelectAll = {
                         selectedIds = if (allDisplayedSelected) {
-                            emptySet()
+                            selectedIds - displayedIds
                         } else {
-                            displayedItems.mapTo(hashSetOf(), CameraMediaItem::id)
+                            selectedIds + displayedIds
                         }
                     },
                     onOpenInSerein = { actions.openInSerein(selectedItems) },
@@ -353,7 +400,53 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             onSelected = actions.setMediaLibraryScope,
         )
 
-        MediaFilterBar(mediaFilter, state.mediaItems, onSelected = { mediaFilter = it })
+        MediaFilterBar(
+            mediaFilter, dateFilteredItems,
+            onSelected = { mediaFilter = it },
+            onDateRange = { dateDialogVisible = true },
+            dateRangeActive = state.mediaDateRange != null,
+        )
+
+        if (hiddenSelectedCount > 0) {
+            // Keep the batch scope visible even after scrolling the date/partial-library details.
+            Text(
+                stringResource(R.string.media_hidden_selected_summary, hiddenSelectedCount),
+                color = AppWarning,
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            )
+        }
+        if (state.mediaDateRange != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).heightIn(max = 104.dp).verticalScroll(rememberScrollState())) {
+                    state.mediaDateRange?.let { range ->
+                        Text(
+                            stringResource(R.string.media_date_range, range.start.toString(), range.end.toString()),
+                            color = AppText, modifier = Modifier.testTag("media-date-range"),
+                        )
+                        Text(
+                            stringResource(R.string.media_date_loaded_results, displayedItems.size, state.mediaItems.size, unknownDateCount),
+                            color = AppSubtleText,
+                        )
+                        Text(stringResource(R.string.media_date_zone, displayZone.id), color = AppSubtleText)
+                        if (state.mediaLibraryScope == MediaLibraryScope.RECENT || state.mediaLibraryHasMore ||
+                            state.mediaLibraryLoadStatus != MediaLibraryLoadStatus.COMPLETE) {
+                            Text(stringResource(R.string.media_date_partial), color = AppWarning)
+                        }
+                    }
+                }
+                if (state.mediaDateRange != null) {
+                    ToolIconButton(
+                        LucideR.drawable.lucide_ic_x,
+                        stringResource(R.string.media_date_clear),
+                        { actions.setMediaDateRange(null) },
+                    )
+                }
+            }
+        }
 
         if (state.isBusy(CameraOperation.MEDIA) || state.mediaLibraryLoading) {
             val progress = state.mediaUploadProgress ?: state.mediaDownloadProgress
@@ -520,6 +613,7 @@ fun MediaScreen(state: CameraUiState, actions: CameraActions) {
             else -> MediaGalleryGrid(
                 items = displayedItems,
                 sort = mediaSort,
+                displayZone = displayZone,
                 state = state,
                 actions = actions,
                 selectedIds = selectedIds,
