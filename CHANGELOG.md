@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android: use the SAF document deletion contract for interrupted originals and retain ownership from accepted file creation through cancellation cleanup. Stop automatic retries when cleanup is unconfirmed, preserve that risk in download history, and keep unstarted batch items distinct from the active partial file. See the [SAF cleanup validation notes](docs/validation/android-saf-cleanup-2026-10-05.zh-TW.md) for exact verification status; no process-death recovery or third-party provider compatibility is claimed.
+
 - Android and Desktop Bridge: expose optional, observed camera-folder provenance and let Android filter already loaded media by folder alongside date, rating and type. Keep unknown folders browseable, hidden selections intact and partial-library limits visible; never infer host paths, camera slots or recording-directory control. See the [folder journey validation notes](docs/validation/android-media-folder-filter-2026-10-05.zh-TW.md) for verification status and device limits.
 
 - Android: cancel abandoned connection and Bridge scan attempts when settings change, preserve explicit retry and cleanup ownership, and provide accessible cancellation plus localized failure recovery based on actual HTTP/transport evidence. Distinguish completed-empty scans and USB eligibility. See the [connection recovery validation notes](docs/validation/android-connection-recovery-2026-10-05.zh-TW.md) for tested scope and pending device evidence.
