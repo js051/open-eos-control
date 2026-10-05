@@ -2974,19 +2974,23 @@ class CameraScreensTest {
         val preview = CameraUiState().withOfflinePreview()
         val state = preview.copy(previewMode = false, uiMode = UiMode.MEDIA)
         val first = state.mediaItems.first()
+        val protectionRequests = mutableListOf<Pair<List<CameraMediaItem>, Boolean>>()
+        val actions = noOpActions().copy(
+            setMediaProtectionBatch = { items, enabled -> protectionRequests += items to enabled },
+        )
         lateinit var contentDensity: androidx.compose.ui.unit.Density
         assertTrue(state.supports(CameraFeature.MEDIA_PROTECT))
         compose.setContent {
             DeviceConfigurationOverride(
                 DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 800.dp)),
             ) {
-                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.3f)) {
-                    DeviceConfigurationOverride(
-                        DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
-                    ) {
+                DeviceConfigurationOverride(
+                    DeviceConfigurationOverride.Locales(LocaleList("zh-TW")),
+                ) {
+                    DialogFontScaleOverride(1.3f) {
                         MaterialTheme(colorScheme = OpenEosColorScheme) {
                             contentDensity = LocalDensity.current
-                            MediaScreen(state, noOpActions())
+                            MediaScreen(state, actions)
                         }
                     }
                 }
@@ -3038,9 +3042,30 @@ class CameraScreensTest {
         compose.onNodeWithContentDescription("選取 ${first.name}")
             .performSemanticsAction(SemanticsActions.OnLongClick)
         compose.onNodeWithContentDescription("編輯選取的 1 個項目").performClick()
-        compose.onNodeWithTag("media-batch-metadata-sheet").assertIsDisplayed()
-        compose.onNodeWithText("全部保護", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText("全部取消保護", useUnmergedTree = true).assertIsDisplayed()
+        val sheet = compose.onNodeWithTag("media-batch-metadata-sheet").assertIsDisplayed().fetchSemanticsNode()
+        val sheetResources = compose.runOnIdle {
+            // Verify the real Dialog context, not just the parent composition override.
+            (sheet.root as androidx.compose.ui.platform.ViewRootForTest).view.resources.also { resources ->
+                assertEquals("zh-TW", resources.configuration.locales[0].toLanguageTag())
+                assertEquals(1.3f, resources.configuration.fontScale, 0.01f)
+                assertEquals(1.3f, sheet.layoutInfo.density.fontScale, 0.01f)
+                assertEquals("全部保護", resources.getString(R.string.protect_selected_media))
+                assertEquals("全部取消保護", resources.getString(R.string.unprotect_selected_media))
+            }
+        }
+        val inSheet = hasAnyAncestor(hasTestTag("media-batch-metadata-sheet"))
+        compose.onNode(hasText(sheetResources.getString(R.string.edit_selected_media, 1)) and inSheet)
+            .assertIsDisplayed()
+        listOf(R.string.protect_selected_media to true, R.string.unprotect_selected_media to false)
+            .forEachIndexed { index, (label, enabled) ->
+                compose.onNode(
+                    hasText(sheetResources.getString(label)) and inSheet and androidx.compose.ui.test.hasClickAction(),
+                ).performScrollTo().assertIsDisplayed().assertIsEnabled().performTouchInput { click() }
+                compose.runOnIdle {
+                    assertEquals(index + 1, protectionRequests.size)
+                    assertEquals(listOf(first) to enabled, protectionRequests.last())
+                }
+            }
     }
 
     @Test
