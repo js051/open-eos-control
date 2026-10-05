@@ -471,28 +471,33 @@ class CameraViewModel(
     fun closeSettingPicker() = _uiState.update { it.copy(activeSettingPicker = null) }
 
     fun setConnectionTarget(target: ConnectionTarget) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.connectionTarget == target) return
+        cancelConnectionAttempt()
         _uiState.update { it.copy(connectionTarget = target, error = null, errorOperation = null) }
     }
 
     fun setBaseUrl(value: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.baseUrl == value) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update { it.withClearedSession(baseUrl = value, error = null) }
     }
 
     fun setUsername(value: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.username == value) return
+        cancelConnectionAttempt()
         _uiState.update { it.copy(username = value, error = null) }
     }
 
     fun setPassword(value: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.password == value) return
+        cancelConnectionAttempt()
         _uiState.update { it.copy(password = value, error = null) }
     }
 
     fun setBridgeBaseUrl(value: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.bridgeBaseUrl == value) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
@@ -504,7 +509,8 @@ class CameraViewModel(
     }
 
     fun setBridgeToken(value: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.bridgeToken == value) return
+        cancelConnectionAttempt()
         _uiState.update {
             it.copy(
                 bridgeToken = value,
@@ -517,7 +523,8 @@ class CameraViewModel(
     }
 
     fun selectBridgeCamera(cameraId: String) {
-        if (_uiState.value.connected) return
+        if (_uiState.value.connected || _uiState.value.selectedBridgeCameraId == cameraId) return
+        cancelConnectionAttempt()
         _uiState.update { state ->
             state.copy(
                 selectedBridgeCameraId = cameraId.takeIf { id -> state.bridgeCameras.any { it.id == id } },
@@ -529,6 +536,7 @@ class CameraViewModel(
 
     fun useDirectCameraPreset() {
         if (_uiState.value.connected) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_BASE_URL, error = null)
@@ -538,6 +546,7 @@ class CameraViewModel(
 
     fun useDirectCameraHttpsPreset() {
         if (_uiState.value.connected) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEFAULT_CAMERA_HTTPS_URL, error = null)
@@ -547,10 +556,22 @@ class CameraViewModel(
 
     fun useDevSimulatorPreset() {
         if (_uiState.value.connected) return
+        cancelConnectionAttempt()
         stopLiveViewLoop()
         _uiState.update {
             it.withClearedSession(baseUrl = CameraRepository.DEV_EMULATOR_SIMULATOR_URL, error = null)
                 .copy(ccapiSimulatorMode = true)
+        }
+    }
+
+    /** An accepted edit or Cancel abandons setup; only another explicit action starts it again. */
+    fun cancelConnectionAttempt() {
+        val state = _uiState.value
+        if (!state.connected && (CameraOperation.CONNECT in state.pendingOperations ||
+                CameraOperation.BRIDGE in state.pendingOperations)) {
+            // Reuse the session-owned cancellation, join and cleanup path. A new attempt waits
+            // for this teardown before it can replace the repository backend.
+            disconnect()
         }
     }
 
@@ -635,10 +656,13 @@ class CameraViewModel(
 
     fun scanDesktopBridge() = runCamera(CameraOperation.BRIDGE) {
         val state = _uiState.value
+        val generation = cameraSessionGeneration
         val cameras = repository.discoverBridgeCameras(
             baseUrl = state.bridgeBaseUrl,
             token = state.bridgeToken,
         )
+        coroutineContext.ensureActive()
+        if (generation != cameraSessionGeneration) return@runCamera
         _uiState.update { current ->
             val selected = current.selectedBridgeCameraId
                 ?.takeIf { id -> cameras.any { it.id == id } }
