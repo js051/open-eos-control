@@ -2,7 +2,6 @@ package dev.openeos.control.ui
 
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
@@ -10,7 +9,6 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
@@ -20,14 +18,12 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import dev.openeos.control.R
 import dev.openeos.control.data.DownloadHistoryDestination
 import dev.openeos.control.data.DownloadHistoryEntry
@@ -241,6 +237,8 @@ class DownloadHistoryDialogInstrumentedTest {
         onClear: () -> Unit = {},
         onDismiss: () -> Unit = {},
     ) {
+        // Model a user opening the dialog after the Activity has received its input window.
+        compose.awaitForegroundActivityWindow(compose.activity)
         val visible = mutableStateOf(true)
         compose.setContent {
             DialogFontScaleOverride(fontScale) {
@@ -268,20 +266,7 @@ class DownloadHistoryDialogInstrumentedTest {
     }
 
     private fun pressBack(dialogTag: String) {
-        val node = compose.onNodeWithTag(dialogTag).assertIsDisplayed().fetchSemanticsNode()
-        val dialogView = (node.root as ViewRootForTest).view
-        // Removing a confirmation's composition can finish before WindowManager returns focus
-        // to the parent Dialog. Compose idleness alone does not make it the Back event's target.
-        compose.waitUntil(timeoutMillis = 10_000L) {
-            compose.runOnIdle { dialogView.isAttachedToWindow && dialogView.hasWindowFocus() }
-        }
-        // Inject exactly one Back into the now-focused Android window, never a semantics action.
-        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        // Android's Back callback/window dismissal may also complete after Compose is idle.
-        // Wait for this one event's intended result; callers still verify exact callback counts.
-        compose.waitUntil(timeoutMillis = 10_000L) {
-            compose.onAllNodesWithTag(dialogTag).fetchSemanticsNodes().isEmpty()
-        }
+        compose.pressFocusedDialogBack(compose.activity, dialogTag)
     }
 
     private fun withLandscapeWindow(test: () -> Unit) {

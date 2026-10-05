@@ -3,7 +3,6 @@ package dev.openeos.control.ui
 import android.content.ContentUris
 import android.net.Uri
 import android.provider.MediaStore
-import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
@@ -19,7 +18,6 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.test.filters.SdkSuppress
-import androidx.test.platform.app.InstrumentationRegistry
 import dev.openeos.control.R
 import dev.openeos.control.data.DownloadHistoryDestination
 import dev.openeos.control.data.DownloadHistoryFileStorage
@@ -123,7 +121,7 @@ class CameraDownloadHistoryJourneyTest {
         compose.onNodeWithText(text(R.string.download_history_outcome_unconfirmed)).assertIsDisplayed()
         assertTrue(!model.uiState.value.connected)
         assertEquals(0, camera.server.requestCount)
-        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        compose.pressFocusedDialogBack(compose.activity, "download-history-dialog")
         compose.onNodeWithTag("download-history-dialog").assertDoesNotExist()
         assertEquals(0, camera.server.requestCount)
     }
@@ -277,6 +275,7 @@ class CameraDownloadHistoryJourneyTest {
     }
 
     private fun openHistory() {
+        compose.awaitForegroundActivityWindow(compose.activity)
         compose.onNodeWithTag("download-history-open").performScrollTo().performClick()
         compose.onNodeWithTag("download-history-dialog").assertIsDisplayed()
     }
