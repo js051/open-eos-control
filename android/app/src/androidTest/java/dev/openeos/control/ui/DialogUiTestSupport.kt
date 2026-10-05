@@ -2,6 +2,8 @@ package dev.openeos.control.ui
 
 import android.app.Activity
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.view.KeyEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -11,9 +13,15 @@ import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
+import androidx.compose.ui.test.junit4.ComposeTestRule
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.services.storage.TestStorage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 
@@ -30,6 +38,60 @@ internal fun DialogFontScaleOverride(fontScale: Float, content: @Composable () -
             ComposeView(context).apply { setContent { currentContent() } }
         })
     }
+}
+
+/** A semantics click can run before WindowManager has foregrounded the Activity. */
+internal fun ComposeTestRule.awaitForegroundActivityWindow(activity: Activity) {
+    try {
+        waitUntil(10_000L) {
+            var ready = false
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                ready = activity.window.decorView.let { it.isAttachedToWindow && it.hasWindowFocus() }
+            }
+            ready
+        }
+    } catch (failure: Throwable) {
+        recordWindowFocusFailure("activity", activity, activity.window.decorView)
+        throw failure
+    }
+}
+
+/** One native Back after its real target gains focus; never replay or dismiss by semantics. */
+internal fun ComposeTestRule.pressFocusedDialogBack(activity: Activity, tag: String) {
+    val node = onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode()
+    val view = (node.root as ViewRootForTest).view
+    try {
+        waitUntil(10_000L) {
+            var ready = false
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                ready = view.isAttachedToWindow && view.hasWindowFocus()
+            }
+            ready
+        }
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        waitUntil(10_000L) { onAllNodesWithTag(tag).fetchSemanticsNodes().isEmpty() }
+    } catch (failure: Throwable) {
+        recordWindowFocusFailure(tag, activity, view)
+        throw failure
+    }
+}
+
+private fun recordWindowFocusFailure(tag: String, activity: Activity, view: android.view.View) {
+    val instrumentation = InstrumentationRegistry.getInstrumentation()
+    instrumentation.runOnMainSync {
+        println("WINDOW_FOCUS_FAILURE tag=$tag activityFocus=${activity.window.decorView.hasWindowFocus()} " +
+            "activityAttached=${activity.window.decorView.isAttachedToWindow} activityDestroyed=${activity.isDestroyed} " +
+            "targetFocus=${view.hasWindowFocus()} targetAttached=${view.isAttachedToWindow} targetShown=${view.isShown} " +
+            "targetVisibility=${view.windowVisibility} targetSize=${view.width}x${view.height}")
+    }
+    // This suite contains synthetic UI only. Capture the actual display, including a window
+    // that might cover the intended target, while preserving the original assertion failure.
+    runCatching {
+        val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        TestStorage().openOutputFile("window-focus-$tag.png").use { output ->
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+        }
+    }.onFailure { println("WINDOW_FOCUS_SCREENSHOT_UNAVAILABLE ${it.javaClass.simpleName}") }
 }
 
 /** A deliberately square Dialog still needs a real landscape Activity behind it. Call on the UI thread. */
