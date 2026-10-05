@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- This is installed in the test APK, with a different UID from the target app.
+             Only DocumentsUI or an actual picker URI grant may access these synthetic files. -->
+        <provider
+            android:name="dev.openeos.control.saf.SyntheticDocumentsProvider"
+            android:authorities="${applicationId}.saf_documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+    </application>
+</manifest>
