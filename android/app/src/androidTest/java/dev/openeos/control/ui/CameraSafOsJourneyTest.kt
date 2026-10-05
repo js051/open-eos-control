@@ -259,7 +259,9 @@ class CameraSafOsJourneyTest {
         useTruncatedOriginal()
         installAppAndOpenAlbum()
         val item = model.uiState.value.mediaItems.first()
-        val tree = launchTree(listOf(item))
+        // The picker may remember this provider. Its toolbar title then duplicates the
+        // root drawer label; explicitly exercise reselecting that same destination.
+        val tree = launchTree(listOf(item), reselectRoot = true)
         awaitTransferFinished(item)
         val cleaned = snapshot(tree)
         val attempts = MEDIA_READ_RETRY_DELAYS_MILLIS.size + 1
@@ -354,7 +356,7 @@ class CameraSafOsJourneyTest {
         compose.onNodeWithText(text(R.string.media_save_to_folder)).performScrollTo().performClick()
     }
 
-    private fun launchTree(items: List<CameraMediaItem>, refusing: Boolean = false): Uri {
+    private fun launchTree(items: List<CameraMediaItem>, refusing: Boolean = false, reselectRoot: Boolean = false): Uri {
         val root = if (refusing) SyntheticDocumentsProvider.REFUSING_ROOT else SyntheticDocumentsProvider.NORMAL_ROOT
         val title = if (refusing) SyntheticDocumentsProvider.REFUSING_TITLE else SyntheticDocumentsProvider.NORMAL_TITLE
         val tree = DocumentsContract.buildTreeDocumentUri(authority, "$root/$runId")
@@ -367,7 +369,7 @@ class CameraSafOsJourneyTest {
         picker.awaitPicker()
         items.forEach(::assertWaitingForDestination)
         // Create a random subfolder IN the OS picker. No prior run can have its URI grant.
-        picker.selectNewTree(title, runId) { assertNoGrant(tree) }
+        picker.selectNewTree(title, runId, reselectRoot) { assertNoGrant(tree) }
         grantedTrees += tree
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { hasGrant(tree, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
         assertGranted(tree)
@@ -492,8 +494,9 @@ private class DocumentsUiDriver {
         click("Save document") { it.isEnabled && it.text?.toString()?.equals("Save", ignoreCase = true) == true }
     }
 
-    fun selectNewTree(rootTitle: String, folderName: String, beforeGrant: () -> Unit) {
+    fun selectNewTree(rootTitle: String, folderName: String, reselectRoot: Boolean, beforeGrant: () -> Unit) {
         chooseRoot(rootTitle)
+        if (reselectRoot) chooseRoot(rootTitle)
         // The platform exposes this in the toolbar or its overflow menu depending on width.
         val create = find { it.isVisibleToUser && (it.viewIdResourceName?.endsWith(":id/option_menu_create_dir") == true ||
             it.contentDescription?.toString() in listOf("New folder", "Create folder")) }
@@ -537,7 +540,24 @@ private class DocumentsUiDriver {
         awaitNode("Synthetic root contents") { it.text?.toString() == SyntheticDocumentsProvider.SENTINEL }.recycle()
     }
 
-    private fun click(description: String, predicate: (AccessibilityNodeInfo) -> Boolean) = clickNode(awaitNode(description, predicate))
+    private fun click(description: String, predicate: (AccessibilityNodeInfo) -> Boolean) = clickNode(
+        awaitNode(description, clickableOnly = true) { it.isVisibleToUser && predicate(it) },
+    )
+
+    private fun clickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var current = AccessibilityNodeInfo.obtain(node)
+        try {
+            repeat(5) {
+                if (current.isVisibleToUser && current.isClickable && current.isEnabled) {
+                    return AccessibilityNodeInfo.obtain(current)
+                }
+                val parent = current.parent ?: return null
+                current.recycle()
+                current = parent
+            }
+            return null
+        } finally { current.recycle() }
+    }
 
     private fun clickNode(node: AccessibilityNodeInfo) {
         var current = node
@@ -555,19 +575,26 @@ private class DocumentsUiDriver {
         } finally { current.recycle() }
     }
 
-    private fun awaitNode(description: String, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo {
+    private fun awaitNode(
+        description: String,
+        clickableOnly: Boolean = false,
+        predicate: (AccessibilityNodeInfo) -> Boolean,
+    ): AccessibilityNodeInfo {
         val deadline = SystemClock.uptimeMillis() + SESSION_TEST_TIMEOUT_MILLIS
         do {
-            find(predicate)?.let { return it }
+            find(clickableOnly, predicate)?.let { return it }
             SystemClock.sleep(100)
         } while (SystemClock.uptimeMillis() < deadline)
         error("Timed out waiting for $description. Platform picker nodes: ${describeWindow()}")
     }
 
-    private fun find(predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+    private fun find(clickableOnly: Boolean = false, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
         fun visit(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
             try {
-                if (predicate(node)) return AccessibilityNodeInfo.obtain(node)
+                if (predicate(node)) {
+                    if (!clickableOnly) return AccessibilityNodeInfo.obtain(node)
+                    clickableAncestor(node)?.let { return it }
+                }
                 repeat(node.childCount) { index -> node.getChild(index)?.let { child -> visit(child)?.let { return it } } }
                 return null
             } finally { node.recycle() }
