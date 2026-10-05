@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android: filter loaded media by known star rating, explicit 0-star/unrated, or unknown, and sort ratings in either direction with unknown last and stable item IDs. Date/type/rating filters compose without losing hidden selections or changing active transfers. Invalid wire ratings stay unknown, Bridge metadata replies must match the requested item, and rating writes must confirm the requested value before reporting success. See the [rating validation notes](docs/validation/android-media-rating-filter-2026-10-05.zh-TW.md) for automated evidence and pending device validation.
+
 - Android: add a strict, inclusive media-date range in the device display time zone over loaded media, with partial-library and unknown-date disclosure. Keep hidden selections visible in the batch-scope warning, reset filters across camera sessions and reject stale callbacks, and open filtered-out capture review as a standalone item. Local JVM and build evidence is recorded in the [validation notes](docs/validation/android-media-date-filter-2026-10-05.zh-TW.md); device UI execution and physical-camera validation remain pending.
 
 ## [0.11.0] - 2026-10-05
