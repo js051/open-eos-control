@@ -1819,9 +1819,9 @@ class CameraViewModel(
         if (direction == 0 || _uiState.value.isBusy(CameraOperation.MEDIA)) return
         val currentId = _uiState.value.mediaPreviewItem?.id ?: return
         val index = items.indexOfFirst { it.id == currentId }
+        if (index < 0) return
         val next = items.getOrNull(index + direction) ?: return
-        _uiState.value.mediaStreamSource?.close()
-        _uiState.update { it.copy(mediaPreviewItem = null, mediaPreviewBytes = null, mediaStreamSource = null) }
+        // Validate the target before replacing the viewer or closing its active stream.
         openMediaPreview(next)
     }
 

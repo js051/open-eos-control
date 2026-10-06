@@ -83,6 +83,43 @@ class CameraCapturePreviewListingTest {
         assertEquals(1, peer.captureWrites.get())
     }
 
+    @Test fun unsupportedAdjacentMediaKeepsTheCurrentPreviewInBothDirections() = runBlocking {
+        peer.unsupportedSibling.set(true)
+        capture()
+        openCaptureWhileListIsGated()
+        val items = viewModel.uiState.value.mediaItems
+        assertEquals(listOf("new", "sibling", "old"), items.map { it.id })
+        assertFalse(items[1].previewAvailable)
+        assertFalse(items[1].streamAvailable)
+
+        for ((current, direction) in listOf(items.first() to 1, items.last() to -1)) {
+            viewModel.openMediaPreview(current)
+            assertTrue(pumpUntil { viewModel.uiState.value.mediaPreviewBytes != null && !viewModel.uiState.value.busy })
+            val reads = peer.previewReads.toList()
+            viewModel.previewAdjacentMedia(items, direction)
+            val state = viewModel.uiState.value
+            assertEquals("An unavailable neighbor must not dismiss the current viewer", current.id, state.mediaPreviewItem?.id)
+            assertArrayEquals(peer.displayBytes, state.mediaPreviewBytes)
+            assertFalse(state.mediaPreviewLoading)
+            assertFalse(state.isBusy(CameraOperation.MEDIA))
+            assertEquals("Unsupported navigation must not request camera bytes", reads, peer.previewReads.toList())
+        }
+    }
+
+    @Test fun staleNavigationListCannotJumpFromAnUnlistedCurrentItemToAnUnrelatedItem() = runBlocking {
+        capture()
+        openCaptureWhileListIsGated()
+        val reads = peer.previewReads.toList()
+        val differentList = viewModel.uiState.value.mediaItems.filterNot { it.id == "new" }
+        viewModel.previewAdjacentMedia(differentList, 1)
+        val state = viewModel.uiState.value
+        assertEquals("A stale list is not evidence for another current position", "new", state.mediaPreviewItem?.id)
+        assertArrayEquals(peer.displayBytes, state.mediaPreviewBytes)
+        assertFalse(state.mediaPreviewLoading)
+        assertFalse(state.isBusy(CameraOperation.MEDIA))
+        assertEquals(reads, peer.previewReads.toList())
+    }
+
     @Test fun populatedAllAlbumRefreshesWithoutDelayingTheKnownCapturePreview() = runBlocking {
         viewModel.setMediaLibraryScope(MediaLibraryScope.ALL)
         viewModel.setUiMode(UiMode.MEDIA)
@@ -262,6 +299,7 @@ private class PreviewListingPeer {
     val displayBytes = byteArrayOf(1, 2, 3, 4) // Preview state reads bytes; image decoding is instrumented separately.
     val captureWrites = AtomicInteger()
     val omitCaptureFromList = AtomicBoolean(false)
+    val unsupportedSibling = AtomicBoolean(false)
     val infoReads = AtomicInteger()
     val listReads = AtomicInteger()
     val previewReads = CopyOnWriteArrayList<String>()
@@ -332,8 +370,12 @@ private class PreviewListingPeer {
         baseUrl = server.url("/").newBuilder().host("127.0.0.1").build().toString()
     }
 
-    private fun item(id: String) = JSONObject().put("id", id).put("name", "$id.JPG").put("kind", "image")
-        .put("capture_time", if (id == "new") "2026-09-01T00:00:03Z" else "2026-09-01T00:00:01Z")
+    private fun item(id: String): JSONObject {
+        val unsupported = id == "sibling" && unsupportedSibling.get()
+        return JSONObject().put("id", id).put("name", if (unsupported) "$id.DAT" else "$id.JPG")
+            .put("kind", if (unsupported) "other" else "image")
+            .put("capture_time", if (id == "new") "2026-09-01T00:00:03Z" else "2026-09-01T00:00:01Z")
+    }
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
     companion object { const val CONTENTS = "/ccapi/ver100/contents" }
 }

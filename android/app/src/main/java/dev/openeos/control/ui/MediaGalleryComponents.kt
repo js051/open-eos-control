@@ -117,6 +117,15 @@ import java.io.File
 import kotlin.math.max
 import kotlin.math.min
 
+// Offline items open the existing placeholder; they never imply camera preview support.
+internal fun canPreviewGalleryItem(state: CameraUiState, item: CameraMediaItem): Boolean =
+    !state.isBusy(CameraOperation.MEDIA) &&
+        (state.previewMode || if (item.isVideo) {
+            item.streamAvailable
+        } else {
+            state.supports(CameraFeature.MEDIA_PREVIEW) && item.previewAvailable
+        })
+
 @Composable
 internal fun MediaSortButton(sort: MediaSort, onSort: (MediaSort) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
@@ -331,17 +340,11 @@ internal fun MediaGalleryGrid(
                     if (thumbnailSupported) actions.loadMediaThumbnail(item)
                     onDispose { actions.cancelMediaThumbnail(item) }
                 }
-                val previewEnabled = !state.previewMode && !state.isBusy(CameraOperation.MEDIA) &&
-                    if (item.isVideo) {
-                        item.streamAvailable
-                    } else {
-                        state.supports(CameraFeature.MEDIA_PREVIEW) && item.previewAvailable
-                    }
                 MediaGalleryTile(
                     item = item,
                     thumbnail = state.mediaThumbnails[item.id],
                     loading = item.id in state.mediaThumbnailLoadingIds,
-                    previewEnabled = previewEnabled,
+                    previewEnabled = canPreviewGalleryItem(state, item),
                     actionsEnabled = !state.isBusy(CameraOperation.MEDIA),
                     selectionActive = selectedIds.isNotEmpty(),
                     selected = item.id in selectedIds,
