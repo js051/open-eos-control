@@ -42,7 +42,7 @@ public final class SyntheticDocumentsProvider extends DocumentsProvider {
 
     private static final String[] ROOT_COLUMNS = {
             Root.COLUMN_ROOT_ID, Root.COLUMN_DOCUMENT_ID, Root.COLUMN_TITLE,
-            Root.COLUMN_FLAGS, Root.COLUMN_MIME_TYPES, Root.COLUMN_AVAILABLE_BYTES
+            Root.COLUMN_FLAGS, Root.COLUMN_MIME_TYPES, Root.COLUMN_AVAILABLE_BYTES, Root.COLUMN_ICON
     };
     private static final String[] DOCUMENT_COLUMNS = {
             Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE,
@@ -89,6 +89,7 @@ public final class SyntheticDocumentsProvider extends DocumentsProvider {
                 switch (column) {
                     case Root.COLUMN_ROOT_ID: case Root.COLUMN_DOCUMENT_ID: value = id; break;
                     case Root.COLUMN_TITLE: value = title(id); break;
+                    case Root.COLUMN_ICON: value = android.R.drawable.ic_menu_save; break;
                     case Root.COLUMN_FLAGS:
                         value = Root.FLAG_SUPPORTS_CREATE | Root.FLAG_SUPPORTS_IS_CHILD;
                         break;

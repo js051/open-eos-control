@@ -1,10 +1,10 @@
 package dev.openeos.control.ui
 
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Bundle
+import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.Process
 import android.os.SystemClock
 import android.provider.DocumentsContract
@@ -25,6 +25,13 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.services.storage.TestStorage
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.Configurator
+import androidx.test.uiautomator.StaleObjectException
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraBackendFactory
 import dev.openeos.control.data.CameraHttpTransport
@@ -63,6 +70,7 @@ import org.junit.Test
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 /**
  * Production App -> ActivityResult launcher -> real DocumentsUI -> cross-UID URI grant ->
@@ -75,7 +83,7 @@ class CameraSafOsJourneyTest {
     private val runId = "saf-${UUID.randomUUID()}"
     private val camera = CameraSessionTestSimulator(runId)
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
-    private val picker = DocumentsUiDriver()
+    private val picker = DocumentsUiDriver(runId)
     private val client = OkHttpClient.Builder().retryOnConnectionFailure(false)
         .readTimeout(60, TimeUnit.SECONDS).callTimeout(60, TimeUnit.SECONDS).build()
     private val repository = CameraRepository(CameraBackendFactory(
@@ -476,48 +484,53 @@ class CameraSafOsJourneyTest {
     }
 }
 
-/** Bounded navigation of the platform picker with APIs already supplied by Instrumentation. */
+/**
+ * Real platform touch input through UI Automator. Accessibility labels identify the target;
+ * they are not assumed to implement ACTION_CLICK themselves. Every action is sent once.
+ */
 @Suppress("DEPRECATION")
-private class DocumentsUiDriver {
+private class DocumentsUiDriver(private val evidenceId: String) {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val automation get() = instrumentation.uiAutomation
+    private val device = UiDevice.getInstance(instrumentation)
+    private val pickerPackage = Pattern.compile(".*documentsui.*")
+    private val drawerDescription = Pattern.compile("Show roots|Open navigation drawer")
+    private var evidenceSequence = 0
 
     fun awaitPicker() {
-        automation.serviceInfo = automation.serviceInfo.apply {
-            flags = flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-        }
-        awaitNode("DocumentsUI window") { it.packageName?.toString()?.contains("documentsui") == true }.recycle()
+        withBoundedUiActions { awaitObject("DocumentsUI window", By.pkg(pickerPackage)) }
     }
 
-    fun saveDocument(rootTitle: String) {
+    fun saveDocument(rootTitle: String) = withBoundedUiActions {
         chooseRoot(rootTitle)
-        click("Save document") { it.isEnabled && it.text?.toString()?.equals("Save", ignoreCase = true) == true }
+        click("Save document", By.text(Pattern.compile("Save", Pattern.CASE_INSENSITIVE)).enabled(true))
     }
 
-    fun selectNewTree(rootTitle: String, folderName: String, reselectRoot: Boolean, beforeGrant: () -> Unit) {
+    fun selectNewTree(rootTitle: String, folderName: String, reselectRoot: Boolean, beforeGrant: () -> Unit) = withBoundedUiActions {
         chooseRoot(rootTitle)
         if (reselectRoot) chooseRoot(rootTitle)
-        // The platform exposes this in the toolbar or its overflow menu depending on width.
-        val create = find { it.isVisibleToUser && (it.viewIdResourceName?.endsWith(":id/option_menu_create_dir") == true ||
-            it.contentDescription?.toString() in listOf("New folder", "Create folder")) }
-        if (create != null) {
-            clickNode(create)
-        } else {
-            click("DocumentsUI overflow menu") { it.contentDescription?.toString() == "More options" }
-            click("New folder menu item") { it.text?.toString() in listOf("New folder", "Create folder") }
+        // The same native action can appear as a toolbar icon or an overflow item.
+        val createById = By.res(Pattern.compile(".*:id/option_menu_create_dir")).enabled(true)
+        val createByDescription = By.desc(Pattern.compile("New folder|Create folder")).enabled(true)
+        when {
+            device.hasObject(createById) -> click("New folder toolbar action", createById)
+            device.hasObject(createByDescription) -> click("New folder toolbar action", createByDescription)
+            else -> {
+                click("DocumentsUI overflow menu", By.desc("More options"))
+                click("New folder menu item", By.text(Pattern.compile("New folder|Create folder")))
+            }
         }
-        val input = awaitNode("New folder name field") { it.className?.toString() == "android.widget.EditText" }
-        try {
-            assertTrue(input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, folderName)
-            }))
-        } finally { input.recycle() }
-        click("Create synthetic folder") { it.viewIdResourceName == "android:id/button1" && it.isEnabled }
-        awaitNode("New synthetic folder breadcrumb") { it.text?.toString() == folderName }.recycle()
+        val input = awaitObject("New folder name field", By.clazz("android.widget.EditText").enabled(true))
+        withEvidence("Enter synthetic folder name") {
+            check(isPickerForeground()) { "DocumentsUI lost the foreground before entering the folder name" }
+            input.text = folderName
+        }
+        click("Create synthetic folder", By.res("android:id/button1").enabled(true))
+        awaitObject("New synthetic folder breadcrumb", By.text(folderName).pkg(pickerPackage))
         beforeGrant()
-        click("Use this folder") { it.isEnabled && it.text?.toString()?.equals("Use this folder", ignoreCase = true) == true }
-        click("Allow access to synthetic folder") { it.isEnabled && it.viewIdResourceName == "android:id/button1" &&
-            it.text?.toString()?.equals("Allow", ignoreCase = true) == true }
+        click("Use this folder", By.text(Pattern.compile("Use this folder", Pattern.CASE_INSENSITIVE)).enabled(true))
+        click("Allow access to synthetic folder",
+            By.res("android:id/button1").text(Pattern.compile("Allow", Pattern.CASE_INSENSITIVE)).enabled(true))
     }
 
     fun dismissIfOpen() {
@@ -531,85 +544,124 @@ private class DocumentsUiDriver {
         }
     }
 
+    private inline fun <T> withBoundedUiActions(block: () -> T): T {
+        // UI Automator 2.3.0 otherwise waits up to ten seconds inside EACH lookup,
+        // visibleBounds read and click. Our explicit deadline/readiness checks own waiting;
+        // in particular, no implicit wait may separate the foreground check from the tap.
+        val configuration = Configurator.getInstance()
+        val previous = configuration.waitForIdleTimeout
+        configuration.setWaitForIdleTimeout(0L)
+        return try { block() } finally { configuration.setWaitForIdleTimeout(previous) }
+    }
+
     private fun chooseRoot(title: String) {
         awaitPicker()
-        // Always navigate through the root drawer, regardless of DocumentsUI's last location.
-        val drawer = find { it.contentDescription?.toString() in listOf("Show roots", "Open navigation drawer") }
-        if (drawer != null) clickNode(drawer)
-        click("Synthetic provider root '$title'") { it.text?.toString() == title && it.isVisibleToUser }
-        awaitNode("Synthetic root contents") { it.text?.toString() == SyntheticDocumentsProvider.SENTINEL }.recycle()
+        // The toolbar may repeat the current root title. Require a real actionable row
+        // ancestor in the opened drawer, then tap the label's freshly queried visible bounds.
+        if (device.hasObject(By.desc(drawerDescription))) {
+            click("Open DocumentsUI roots", By.desc(drawerDescription))
+        }
+        val rootRow = By.text(title).pkg(pickerPackage).hasAncestor(By.clickable(true)).enabled(true)
+        click("Synthetic provider root '$title'", rootRow)
+        awaitRootDrawerClosed(rootRow)
+        awaitObject("Synthetic root contents", By.text(SyntheticDocumentsProvider.SENTINEL).pkg(pickerPackage))
     }
 
-    private fun click(description: String, predicate: (AccessibilityNodeInfo) -> Boolean) = clickNode(
-        awaitNode(description, clickableOnly = true) { it.isVisibleToUser && predicate(it) },
-    )
-
-    private fun clickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        var current = AccessibilityNodeInfo.obtain(node)
-        try {
-            repeat(5) {
-                if (current.isVisibleToUser && current.isClickable && current.isEnabled) {
-                    return AccessibilityNodeInfo.obtain(current)
-                }
-                val parent = current.parent ?: return null
-                current.recycle()
-                current = parent
-            }
-            return null
-        } finally { current.recycle() }
-    }
-
-    private fun clickNode(node: AccessibilityNodeInfo) {
-        var current = node
-        try {
-            repeat(5) {
-                if (current.isClickable && current.isEnabled) {
-                    assertTrue("Platform picker node rejected click", current.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-                    return
-                }
-                val parent = current.parent ?: error("Platform picker node has no clickable ancestor")
-                current.recycle()
-                current = parent
-            }
-            error("Platform picker node has no clickable ancestor within five levels")
-        } finally { current.recycle() }
-    }
-
-    private fun awaitNode(
-        description: String,
-        clickableOnly: Boolean = false,
-        predicate: (AccessibilityNodeInfo) -> Boolean,
-    ): AccessibilityNodeInfo {
+    private fun awaitRootDrawerClosed(rootRow: BySelector) = withEvidence("Root drawer closes after selection") {
         val deadline = SystemClock.uptimeMillis() + SESSION_TEST_TIMEOUT_MILLIS
         do {
-            find(clickableOnly, predicate)?.let { return it }
+            if (isPickerForeground() && !device.hasObject(rootRow)) return@withEvidence
+            SystemClock.sleep(100)
+        } while (SystemClock.uptimeMillis() < deadline)
+        error("DocumentsUI did not close the selected root drawer")
+    }
+
+    private fun click(description: String, selector: BySelector) = withEvidence(description) {
+        // Roots load asynchronously and can reorder after the drawer appears. Observe the
+        // same target geometry across consecutive fresh queries before sending one touch.
+        // This never retries a Save/Create/Allow or treats a failed action as successful.
+        val node = awaitObject(description, selector, requireStableBounds = true)
+        check(isPickerForeground()) { "DocumentsUI lost the foreground before $description" }
+        node.click()
+    }
+
+    private fun isPickerForeground(): Boolean {
+        val root = automation.rootInActiveWindow ?: return false
+        return try {
+            pickerPackage.matcher(root.packageName?.toString().orEmpty()).matches()
+        } finally { root.recycle() }
+    }
+
+    private fun awaitObject(
+        description: String,
+        selector: BySelector,
+        requireStableBounds: Boolean = false,
+    ): UiObject2 = withEvidence(description) {
+        val deadline = SystemClock.uptimeMillis() + SESSION_TEST_TIMEOUT_MILLIS
+        var previousBounds: Rect? = null
+        var unchangedSince = 0L
+        do {
+            // A stale read means this snapshot disappeared before any action was sent.
+            val candidate = try {
+                (if (isPickerForeground()) device.findObject(selector) else null)?.let { node ->
+                    val bounds = node.visibleBounds
+                    if (bounds.isEmpty) null else node to bounds
+                }
+            } catch (_: StaleObjectException) {
+                null
+            }
+            if (candidate != null) {
+                val (node, bounds) = candidate
+                if (!requireStableBounds) return@withEvidence node
+                val now = SystemClock.uptimeMillis()
+                if (bounds != previousBounds) {
+                    previousBounds = Rect(bounds)
+                    unchangedSince = now
+                } else if (now - unchangedSince >= 200L) {
+                    return@withEvidence node
+                }
+            } else {
+                previousBounds = null
+                unchangedSince = 0L
+            }
             SystemClock.sleep(100)
         } while (SystemClock.uptimeMillis() < deadline)
         error("Timed out waiting for $description. Platform picker nodes: ${describeWindow()}")
     }
 
-    private fun find(clickableOnly: Boolean = false, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
-        fun visit(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+    private inline fun <T> withEvidence(description: String, block: () -> T): T = try {
+        block()
+    } catch (failure: Throwable) {
+        val prefix = "saf-picker-$evidenceId-${evidenceSequence++}"
+        val window = runCatching(::describeWindow).getOrElse { "Unavailable: ${it.javaClass.simpleName}" }
+        println("SAF_PICKER_FAILURE step=$description evidence=$prefix nodes=$window")
+        // Keep every failed step, including OS dialogs covering the picker. Never dismiss an
+        // ANR or grant permissions to make the test continue. All visible data is synthetic.
+        runCatching {
+            TestStorage().openOutputFile("$prefix.xml").use { device.dumpWindowHierarchy(it) }
+        }.onFailure { println("SAF_PICKER_XML_UNAVAILABLE ${it.javaClass.simpleName}") }
+        runCatching {
+            val bitmap = requireNotNull(automation.takeScreenshot())
             try {
-                if (predicate(node)) {
-                    if (!clickableOnly) return AccessibilityNodeInfo.obtain(node)
-                    clickableAncestor(node)?.let { return it }
+                TestStorage().openOutputFile("$prefix.png").use {
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
                 }
-                repeat(node.childCount) { index -> node.getChild(index)?.let { child -> visit(child)?.let { return it } } }
-                return null
-            } finally { node.recycle() }
-        }
-        return automation.rootInActiveWindow?.let(::visit)
+            } finally { bitmap.recycle() }
+        }.onFailure { println("SAF_PICKER_SCREENSHOT_UNAVAILABLE ${it.javaClass.simpleName}") }
+        throw failure
     }
 
     private fun describeWindow(): String {
         val nodes = mutableListOf<String>()
-        find { node ->
-            if (nodes.size < 50 && (!node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank())) {
-                nodes += "${node.viewIdResourceName}: ${node.text ?: node.contentDescription}"
-            }
-            false
+        fun visit(node: AccessibilityNodeInfo) {
+            try {
+                if (nodes.size < 50 && (!node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank())) {
+                    nodes += "${node.viewIdResourceName}: ${node.text ?: node.contentDescription}"
+                }
+                repeat(node.childCount) { index -> node.getChild(index)?.let(::visit) }
+            } finally { node.recycle() }
         }
+        automation.rootInActiveWindow?.let(::visit)
         return nodes.joinToString(" | ")
     }
 }
