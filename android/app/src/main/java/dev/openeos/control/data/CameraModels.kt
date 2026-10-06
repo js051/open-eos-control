@@ -604,6 +604,15 @@ data class CameraMediaItem(
     val folder: CameraMediaFolder? = null,
 )
 
+/**
+ * Identity listing. Complete means every observed container/page was read below local limits;
+ * sequential camera GETs do not provide an atomic snapshot of a card that is changing.
+ */
+data class CameraMediaInventory(
+    val items: List<CameraMediaItem>,
+    val complete: Boolean,
+)
+
 val CameraMediaItem.isVideoMedia: Boolean
     get() = cameraMediaIsVideo(kind = kind, name = name)
 

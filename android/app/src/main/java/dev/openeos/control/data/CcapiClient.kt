@@ -47,6 +47,10 @@ internal class CcapiLiveViewReleaseException(cause: Throwable) :
     IllegalStateException("Live View stop was not confirmed. Retry stopping Live View before starting again.", cause)
 
 private const val MAX_CCAPI_EVENT_BODY_BYTES = 256 * 1024
+// Local polling safeguards, not limits advertised by the Canon protocol.
+private const val MAX_MEDIA_INVENTORY_REQUESTS = 512
+private const val MAX_MEDIA_INVENTORY_CONTAINERS = 512
+
 private const val MAX_CCAPI_EVENT_KEYS = 64
 private const val MAX_CCAPI_EVENT_KEY_CHARS = 128
 private const val MAX_DEVICE_STATUS_TEXT_CHARS = 512
@@ -121,6 +125,8 @@ private data class StrictNullableLong(
     val value: Long?,
 )
 
+private class MediaInventoryTraversalLimitException : IllegalStateException()
+
 private data class MediaOrderingInfo(
     val captureTime: String?,
     val sizeBytes: Long?,
@@ -155,6 +161,23 @@ class CcapiClient(
     }.build()
     private val mutationHttpClient = this.httpClient.newBuilder()
         .retryOnConnectionFailure(false)
+        .build()
+    private val singleAttemptDownloadHttpClient = this.httpClient.newBuilder()
+        .retryOnConnectionFailure(false)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .authenticator(okhttp3.Authenticator.NONE)
+        .proxyAuthenticator(okhttp3.Authenticator.NONE)
+        .cache(null)
+        .addNetworkInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            if (!response.isSuccessful) {
+                // Fail before OkHttp's follow-up interceptor can repeat a 503/Retry-After: 0.
+                response.close()
+                throw IOException("Original media request failed: HTTP ${response.code}.")
+            }
+            response
+        }
         .build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val eventHttpClient = this.httpClient.newBuilder()
@@ -1576,6 +1599,34 @@ class CcapiClient(
         return items
     }
 
+    /** Lists identities without the per-item metadata requests used to order recent media. */
+    suspend fun listMediaIdentities(maximumItems: Int): CameraMediaInventory {
+        require(maximumItems > 0) { "Media item limit must be positive." }
+        val inventory = if (isRealCamera) {
+            check(supportsApi("GET", "/contents")) { "Camera did not advertise CCAPI media browsing." }
+            listRealMediaIdentities(maximumItems)
+        } else {
+            // Use the existing simulator endpoint, but reject malformed/omitted identities.
+            val rawItems = getJson("/ccapi/media").getJSONArray("items")
+            val items = linkedMapOf<String, CameraMediaItem>()
+            for (index in 0 until rawItems.length()) {
+                val rawItem = rawItems.getJSONObject(index)
+                check(rawItem.opt("id") is String && rawItem.opt("name") is String) {
+                    "Simulator returned an invalid media identity."
+                }
+                val item = checkNotNull(parseSimulatorMediaItem(rawItem)) {
+                    "Simulator returned an invalid media identity."
+                }
+                val previous = items.putIfAbsent(item.id, item)
+                check(previous == null || previous == item) { "Simulator returned conflicting media identities." }
+                if (items.size >= maximumItems) break
+            }
+            CameraMediaInventory(items.values.toList(), complete = items.size < maximumItems)
+        }
+        observedFeatures.add(CameraFeature.MEDIA_BROWSER)
+        return inventory
+    }
+
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
         val (bytes, contentType) = mediaImageRepresentation(
             item = item,
@@ -1821,6 +1872,26 @@ class CcapiClient(
             listOf("/ccapi/media/$encodedId")
         }
         val result = requestMediaFile(paths, item, destination, onProgress)
+        observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
+        return result
+    }
+
+    /** One canonical original GET, including at the HTTP transport layer; never a URL fallback. */
+    suspend fun downloadMediaSingleAttempt(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaDownloadResult {
+        if (isRealCamera) {
+            check(supportsApi("GET", "/contents")) { "Camera did not advertise CCAPI media download." }
+        }
+        val path = mediaItemPath(item)
+        if (isRealCamera) {
+            require(CCAPI_CONTENTS_FOLDER_PATTERN.matches(path) && path.isMediaFilePath()) {
+                "Camera media identity is not a CCAPI contents file."
+            }
+        }
+        val result = requestMediaFile(listOf(path), item, destination, onProgress, singleAttempt = true)
         observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD)
         return result
     }
@@ -2852,6 +2923,56 @@ class CcapiClient(
         )
     }
 
+    private suspend fun listRealMediaIdentities(maximumItems: Int): CameraMediaInventory {
+        val rootPath = apiPath("GET", "/contents")
+        val pending = ArrayDeque<String>()
+        // Record at enqueue time: duplicate references and cycles never repeat traversal.
+        val containers = linkedSetOf(rootPath)
+        val mediaPaths = linkedSetOf<String>()
+        var complete = true
+        var requests = 0
+        pending.add(rootPath)
+        try {
+            while (pending.isNotEmpty() && complete) {
+                currentCoroutineContext().ensureActive()
+                listContentPaths(
+                    containerPath = pending.removeFirst(),
+                    strict = true,
+                    beforeRequest = {
+                        if (requests >= MAX_MEDIA_INVENTORY_REQUESTS) throw MediaInventoryTraversalLimitException()
+                        requests += 1
+                    },
+                    onPage = { listedPaths ->
+                        for (rawPath in listedPaths) {
+                            val path = normalizeCameraResource(rawPath).substringBefore('?')
+                            check(CCAPI_CONTENTS_FOLDER_PATTERN.matches(path)) {
+                                "Camera returned an identity outside CCAPI contents."
+                            }
+                            if (path.isMediaFilePath()) {
+                                mediaPaths.add(path)
+                                if (mediaPaths.size >= maximumItems) {
+                                    complete = false
+                                    break
+                                }
+                            } else if (path !in containers) {
+                                if (containers.size >= MAX_MEDIA_INVENTORY_CONTAINERS) {
+                                    complete = false
+                                    break
+                                }
+                                containers.add(path)
+                                pending.add(path)
+                            }
+                        }
+                        complete
+                    },
+                )
+            }
+        } catch (_: MediaInventoryTraversalLimitException) {
+            complete = false
+        }
+        return CameraMediaInventory(mediaPaths.toList().toMediaItems(), complete)
+    }
+
     private suspend fun listRealMedia(
         maximumItems: Int?,
         onProgress: (List<CameraMediaItem>) -> Unit,
@@ -3012,40 +3133,54 @@ class CcapiClient(
     private suspend fun listContentPaths(
         containerPath: String,
         onPage: (List<String>) -> Boolean = { true },
+        strict: Boolean = false,
+        beforeRequest: () -> Unit = {},
     ): List<String> {
-        val pageInfo = getFirstJson(
-            listOf(
-                "$containerPath?kind=number",
-                "$containerPath?type=all,kind=number",
-            ),
+        val numberPaths = listOf(
+            "$containerPath?kind=number",
+            "$containerPath?type=all,kind=number",
         )
-        val pageCount = pageInfo?.optInt("pagenumber", 0) ?: 0
+        val pageInfo = if (strict) {
+            getInventoryPageInfo(numberPaths, beforeRequest)
+        } else {
+            getFirstJson(numberPaths)
+        }
+        val pageCount = if (strict && pageInfo != null) {
+            pageInfo.inventoryPageCount()
+        } else {
+            pageInfo?.optInt("pagenumber", 0) ?: 0
+        }
         check(pageCount >= 0) { "Camera returned a negative media page count at $containerPath." }
         val paths = linkedSetOf<String>()
         if (pageCount <= 0) {
-            paths.addAll(
+            val response = if (strict) {
+                beforeRequest()
+                getJson(containerPath)
+            } else {
                 getFirstJsonRequired(listOf(containerPath), "Reading camera media page")
-                    .contentPaths(),
-            )
+            }
+            paths.addAll(response.contentPaths(strict = strict))
             onPage(paths.toList())
         } else if (mediaDescendingOrderSupported == false) {
             for (page in pageCount downTo 1) {
-                paths.addAll(getContentPage(containerPath, page).contentPaths(reverse = true))
+                val response = getContentPage(containerPath, page, strict, beforeRequest)
+                paths.addAll(response.contentPaths(reverse = true, strict = strict))
                 if (!onPage(paths.toList())) break
             }
         } else {
-            val firstResponse = getContentPage(containerPath, 1)
+            val firstResponse = getContentPage(containerPath, 1, strict, beforeRequest)
             if (mediaDescendingOrderSupported == false) {
                 for (page in pageCount downTo 1) {
-                    val response = if (page == 1) firstResponse else getContentPage(containerPath, page)
-                    paths.addAll(response.contentPaths(reverse = true))
+                    val response = if (page == 1) firstResponse else getContentPage(containerPath, page, strict, beforeRequest)
+                    paths.addAll(response.contentPaths(reverse = true, strict = strict))
                     if (!onPage(paths.toList())) break
                 }
             } else {
-                paths.addAll(firstResponse.contentPaths())
+                paths.addAll(firstResponse.contentPaths(strict = strict))
                 if (onPage(paths.toList())) {
                     for (page in 2..pageCount) {
-                        paths.addAll(getContentPage(containerPath, page).contentPaths())
+                        val response = getContentPage(containerPath, page, strict, beforeRequest)
+                        paths.addAll(response.contentPaths(strict = strict))
                         if (!onPage(paths.toList())) break
                     }
                 }
@@ -3054,19 +3189,66 @@ class CcapiClient(
         return paths.toList()
     }
 
-    private suspend fun getContentPage(containerPath: String, page: Int): JSONObject {
+    private suspend fun getInventoryPageInfo(paths: List<String>, beforeRequest: () -> Unit): JSONObject? {
+        for (path in paths) {
+            beforeRequest()
+            try {
+                return getJson(path)
+            } catch (exception: CcapiHttpException) {
+                // Only an explicitly unsupported query may fall back to the existing variant.
+                // Authentication, busy, transport and malformed-JSON failures must not become empty baselines.
+                if (exception.statusCode !in setOf(400, 404, 405)) throw exception
+            }
+        }
+        return null
+    }
+
+    private fun JSONObject.inventoryPageCount(): Int {
+        if (!has("pagenumber")) {
+            // Some cameras ignore kind=number and return an unpaged path listing.
+            contentPaths(strict = true)
+            return 0
+        }
+        val count = when (val value = opt("pagenumber")) {
+            is Int -> value.toLong()
+            is Long -> value
+            else -> error("Camera returned an invalid media page count.")
+        }
+        check(count in 0..Int.MAX_VALUE.toLong()) { "Camera returned an invalid media page count." }
+        return count.toInt()
+    }
+
+    private suspend fun getContentPage(
+        containerPath: String,
+        page: Int,
+        strict: Boolean = false,
+        beforeRequest: () -> Unit = {},
+    ): JSONObject {
         val plainPath = "$containerPath?page=$page"
         if (mediaDescendingOrderSupported == false) {
-            return getFirstJsonRequired(listOf(plainPath), "Reading camera media page")
+            return if (strict) {
+                beforeRequest()
+                getJson(plainPath)
+            } else {
+                getFirstJsonRequired(listOf(plainPath), "Reading camera media page")
+            }
         }
 
         val orderedPath = "$plainPath&order=desc"
         return try {
+            beforeRequest()
             getJson(orderedPath).also { mediaDescendingOrderSupported = true }
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            getFirstJsonRequired(listOf(plainPath), "Reading camera media page").also {
+            if (strict && (exception !is CcapiHttpException || exception.statusCode != 400)) throw exception
+            val response = if (strict) {
+                beforeRequest()
+                getJson(plainPath)
+            } else {
+                getFirstJsonRequired(listOf(plainPath), "Reading camera media page")
+            }
+            response.also {
                 if (exception is CcapiHttpException && exception.statusCode == 400) {
                     mediaDescendingOrderSupported = false
                 }
@@ -3122,11 +3304,20 @@ class CcapiClient(
         return normalized
     }
 
-    private fun JSONObject.contentPaths(reverse: Boolean = false): List<String> {
-        val array = optJSONArray("path") ?: return emptyList()
+    private fun JSONObject.contentPaths(reverse: Boolean = false, strict: Boolean = false): List<String> {
+        val array = optJSONArray("path") ?: run {
+            check(!strict) { "Camera returned an invalid media path listing." }
+            return emptyList()
+        }
         val indices = if (reverse) array.length() - 1 downTo 0 else 0 until array.length()
         return indices.mapNotNull { index ->
-            array.optString(index).takeIf { it.isNotBlank() }
+            if (strict) {
+                val path = array.opt(index)
+                check(path is String && path.isNotBlank()) { "Camera returned an invalid media identity." }
+                path
+            } else {
+                array.optString(index).takeIf { it.isNotBlank() }
+            }
         }
     }
 
@@ -3135,6 +3326,7 @@ class CcapiClient(
         item: CameraMediaItem,
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit,
+        singleAttempt: Boolean = false,
     ): CameraMediaDownloadResult =
         withContext(Dispatchers.IO) {
             val errors = mutableListOf<String>()
@@ -3142,7 +3334,7 @@ class CcapiClient(
             for (path in paths) {
                 currentCoroutineContext().ensureActive()
                 val request = Request.Builder().url("$baseUrl$path").get().build()
-                val call = newCameraCall(request)
+                val call = if (singleAttempt) singleAttemptDownloadHttpClient.newCall(request) else newCameraCall(request)
                 val cancelCall = AtomicBoolean(true)
                 val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
@@ -3172,7 +3364,12 @@ class CcapiClient(
                     }
 
                     val contentType = response.header("content-type")
-                    val previewBytes = response.peekBody(MEDIA_SNIFF_BYTES).bytes()
+                    val previewBytes = try {
+                        response.peekBody(MEDIA_SNIFF_BYTES).bytes()
+                    } catch (exception: Exception) {
+                        response.close()
+                        throw exception
+                    }
                     if (contentType.isTextLikeContentType() || previewBytes.looksLikeTextPayload()) {
                         response.use {
                             val preview = previewBytes.toString(StandardCharsets.UTF_8).take(MAX_ERROR_BODY_CHARS)

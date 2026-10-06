@@ -117,6 +117,9 @@ interface CameraControlBackend {
         onProgress: (List<CameraMediaItem>) -> Unit = {},
     ): List<CameraMediaItem> =
         unsupported(CameraFeature.MEDIA_BROWSER)
+    // Application-side inventory support is separate from advertised camera features.
+    suspend fun listMediaIdentities(maximumItems: Int): CameraMediaInventory =
+        throw UnsupportedOperationException("This camera backend does not support identity inventory.")
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail =
         unsupported(CameraFeature.MEDIA_THUMBNAIL)
     suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview =
@@ -128,6 +131,12 @@ interface CameraControlBackend {
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = unsupported(CameraFeature.MEDIA_DOWNLOAD)
+    suspend fun downloadMediaSingleAttempt(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaDownloadResult =
+        throw UnsupportedOperationException("This camera backend does not support single-attempt download.")
     suspend fun uploadMedia(
         name: String,
         sizeBytes: Long,
@@ -261,6 +270,9 @@ class CcapiCameraBackend(
         onProgress: (List<CameraMediaItem>) -> Unit,
     ): List<CameraMediaItem> = client.listMedia(maximumItems, onProgress)
 
+    override suspend fun listMediaIdentities(maximumItems: Int): CameraMediaInventory =
+        client.listMediaIdentities(maximumItems)
+
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
 
     override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview = client.mediaPreview(item)
@@ -273,6 +285,12 @@ class CcapiCameraBackend(
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaDownloadResult = client.downloadMedia(item, destination, onProgress)
+
+    override suspend fun downloadMediaSingleAttempt(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): CameraMediaDownloadResult = client.downloadMediaSingleAttempt(item, destination, onProgress)
 
     override suspend fun uploadMedia(
         name: String,
