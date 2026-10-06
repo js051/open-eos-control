@@ -49,26 +49,31 @@ internal class DownloadHistoryFileStorage(
         val root = tokener.nextValue() as? JSONObject ?: throw IOException("Invalid history snapshot")
         require(tokener.nextClean() == '\u0000')
         require(root.keySetCompat() == setOf("schema", "records"))
-        require(root.exactLong("schema") == 1L)
+        val schema = root.exactLong("schema")
+        require(schema == 1L || schema == 2L)
         val records = root.get("records") as? JSONArray ?: throw IOException("Invalid history records")
         require(records.length() <= MAX_DOWNLOAD_HISTORY_ENTRIES)
         val ids = HashSet<String>()
         return List(records.length()) { index ->
             val record = records.get(index) as? JSONObject ?: throw IOException("Invalid history record")
-            require(record.keySetCompat() == setOf(
+            val fields = setOf(
                 "receiptId", "filename", "destination", "startedAtMillis", "finishedAtMillis", "outcome",
-            ))
+            ) + if (schema == 2L) setOf("cleanupUnconfirmed") else emptySet()
+            require(record.keySetCompat() == fields)
             val id = record.exactString("receiptId")
             require(UUID.fromString(id).toString() == id && ids.add(id))
             val filename = record.exactString("filename")
             require(filename == sanitizeDownloadHistoryFilename(filename))
             val destination = DownloadHistoryDestination.valueOf(record.exactString("destination"))
             val outcome = DownloadHistoryOutcome.valueOf(record.exactString("outcome"))
+            val cleanupUnconfirmed = if (schema == 2L) record.get("cleanupUnconfirmed") as? Boolean
+                ?: throw IOException("Invalid history cleanup state") else false
+            require(!cleanupUnconfirmed || outcome == DownloadHistoryOutcome.FAILED || outcome == DownloadHistoryOutcome.CANCELLED)
             val started = record.exactLong("startedAtMillis").also { require(it >= 0L) }
             val finished = if (record.get("finishedAtMillis") === JSONObject.NULL) null
                 else record.exactLong("finishedAtMillis").also { require(it >= 0L) }
             require((finished != null) == outcome.isTerminal())
-            DownloadHistoryEntry(id, filename, destination, started, finished, outcome)
+            DownloadHistoryEntry(id, filename, destination, started, finished, outcome, cleanupUnconfirmed)
         }
     }
 
@@ -83,9 +88,10 @@ internal class DownloadHistoryFileStorage(
                 put("startedAtMillis", entry.startedAtMillis)
                 put("finishedAtMillis", entry.finishedAtMillis ?: JSONObject.NULL)
                 put("outcome", entry.outcome.name)
+                put("cleanupUnconfirmed", entry.cleanupUnconfirmed)
             })
         }
-        val bytes = JSONObject().put("schema", 1).put("records", records)
+        val bytes = JSONObject().put("schema", 2).put("records", records)
             .toString().toByteArray(StandardCharsets.UTF_8)
         require(bytes.size <= MAX_DOWNLOAD_HISTORY_SNAPSHOT_BYTES)
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("History directory unavailable")

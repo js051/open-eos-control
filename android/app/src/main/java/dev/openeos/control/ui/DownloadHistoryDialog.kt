@@ -145,6 +145,10 @@ private fun DownloadHistoryRow(entry: DownloadHistoryEntry) {
             DownloadHistoryOutcome.CANCELLED -> R.string.download_history_outcome_cancelled
             DownloadHistoryOutcome.UNCONFIRMED -> R.string.download_history_outcome_unconfirmed
         }))
+        if (entry.cleanupUnconfirmed) {
+            Text(stringResource(R.string.media_save_cleanup_unconfirmed), color = AppWarning,
+                modifier = Modifier.testTag("download-history-cleanup-${entry.receiptId}"))
+        }
         Text(stringResource(when (entry.destination) {
             DownloadHistoryDestination.GALLERY -> R.string.download_history_destination_gallery
             DownloadHistoryDestination.DOCUMENT -> R.string.download_history_destination_document

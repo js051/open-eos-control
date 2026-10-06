@@ -421,6 +421,14 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             onFolderFilter = actions.setMediaFolderFilter,
         )
 
+        if (state.mediaPreviewItem == null && state.mediaSaveFeedback.values.any { it is MediaSaveFeedback.IncompleteFile }) {
+            Text(
+                stringResource(R.string.media_save_cleanup_unconfirmed), color = AppWarning,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 112.dp)
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp)
+                    .testTag("media-save-cleanup-unconfirmed"),
+            )
+        }
         if (hiddenSelectedCount > 0) {
             // Keep the batch scope visible even after scrolling the date/partial-library details.
             Text(
