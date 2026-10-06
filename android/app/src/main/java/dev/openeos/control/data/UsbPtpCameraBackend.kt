@@ -2,7 +2,9 @@ package dev.openeos.control.data
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -31,6 +33,8 @@ class UsbPtpCameraBackend(
     private var storageSnapshot: List<PtpStorageInfo> = emptyList()
     private var storageError: String? = null
     private val mediaInfo = mutableMapOf<Long, PtpObjectInfo>()
+    private val mediaFolderLock = Any()
+    private var mediaFolderContext: MediaFolderContext? = null
     private val mediaRatingContracts = mutableMapOf<Int, MtpRatingContract?>()
     private val validatedMediaRatingFormats = mutableSetOf<Int>()
     private var propertyDescriptors: Map<Int, PtpDevicePropertyDescriptor> = emptyMap()
@@ -63,6 +67,7 @@ class UsbPtpCameraBackend(
             val info = newSession.initialize()
             deviceInfo = info
             session = newSession
+            resetObservedMediaFolders(newSession)
             loadPropertyDescriptors(newSession, info)
             observedFeatures.addAll(setOf(CameraFeature.USB_DIAGNOSTICS, CameraFeature.CAMERA_IDENTITY))
         } catch (exception: Exception) {
@@ -72,6 +77,10 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun close() {
+        synchronized(mediaFolderLock) {
+            resetObservedMediaFolders(null)
+            observedFeatures.clear()
+        }
         val current = session
         if (current != null) {
             if (bulbExposureActive) runCatching { stopBulbExposure() }
@@ -88,9 +97,6 @@ class UsbPtpCameraBackend(
         deviceInfo = null
         storageSnapshot = emptyList()
         storageError = null
-        mediaInfo.clear()
-        mediaRatingContracts.clear()
-        validatedMediaRatingFormats.clear()
         propertyDescriptors = emptyMap()
         propertyValues.clear()
         propertyErrors.clear()
@@ -110,7 +116,10 @@ class UsbPtpCameraBackend(
         advertisedStorageTargets = emptyMap()
         bulbExposureActive = false
         bulbHostTransferPrepared = false
-        observedFeatures.clear()
+        synchronized(mediaFolderLock) {
+            // Cleanup may observe its own features; never clear a replacement session's set.
+            if (mediaFolderContext == null) observedFeatures.clear()
+        }
         current?.shutdown()
     }
 
@@ -236,7 +245,7 @@ class UsbPtpCameraBackend(
         val supportsHostMedia = hostCaptureStore != null
         val supportsMtpMediaRating = supportsMediaBrowser(info) &&
             supportsMtpObjectProperties(info) &&
-            validatedMediaRatingFormats.isNotEmpty()
+            synchronized(mediaFolderLock) { validatedMediaRatingFormats.isNotEmpty() }
         val supportsMediaUpload = supportsMediaUpload(info, storageSnapshot)
         val supported = buildSet {
             add(CameraFeature.USB_DIAGNOSTICS)
@@ -753,6 +762,7 @@ class UsbPtpCameraBackend(
         onProgress: (List<CameraMediaItem>) -> Unit,
     ): List<CameraMediaItem> {
         require(maximumItems == null || maximumItems > 0) { "Media item limit must be positive." }
+        currentCoroutineContext().ensureActive()
         requireMediaBrowser()
         val hostItems = hostCaptureStore?.list().orEmpty().let { items ->
             maximumItems?.let(items::take) ?: items
@@ -762,58 +772,152 @@ class UsbPtpCameraBackend(
             return hostItems.also(onProgress)
         }
         val ptp = requireSession()
-        val streamAvailable = requireDeviceInfo().supports(PtpOperationCode.GET_PARTIAL_OBJECT)
-        val handles = ptp.storageIds()
-            .flatMap { storageId -> ptp.objectHandles(storageId) }
+        val context = beginMediaFolderListing(ptp)
+        val info = requireDeviceInfo()
+        val streamAvailable = info.supports(PtpOperationCode.GET_PARTIAL_OBJECT)
+        val storageIds = ptp.storageIds()
+        val folders = PtpObservedMediaFolders.Builder(storageIds)
+        val handles = storageIds
+            .flatMap { storageId ->
+                ensureMediaListingSession(context)
+                ptp.objectHandles(storageId)
+            }
             .distinct()
             .reversed()
             .let { values -> maximumItems?.let { values.take((it - hostItems.size).coerceAtLeast(0)) } ?: values }
 
         var firstFailure: Exception? = null
-        mediaInfo.clear()
-        mediaRatingContracts.clear()
-        validatedMediaRatingFormats.clear()
         val objectInfos = mutableListOf<PtpObjectInfo>()
         handles.forEach { handle ->
+            ensureMediaListingSession(context)
             try {
-                ptp.objectInfo(handle)
-                    .takeUnless { it.objectFormat == PtpObjectFormat.ASSOCIATION || it.filename.isBlank() }
-                    ?.also {
-                        mediaInfo[handle] = it
-                        objectInfos += it
-                        if (objectInfos.size % MEDIA_LIST_PROGRESS_BATCH_SIZE == 0) {
-                            onProgress(
-                                hostItems + objectInfos.map { objectInfo ->
-                                    objectInfo.toMediaItem(streamAvailable = streamAvailable)
-                                },
-                            )
-                        }
+                val objectInfo = ptp.objectInfo(handle)
+                ensureMediaListingSession(context)
+                folders.observe(objectInfo)
+                if (objectInfo.objectFormat != PtpObjectFormat.ASSOCIATION && objectInfo.filename.isNotBlank()) {
+                    rememberMediaInfo(context, objectInfo)
+                    objectInfos += objectInfo
+                    if (objectInfos.size % MEDIA_LIST_PROGRESS_BATCH_SIZE == 0) {
+                        val snapshot = folders.snapshot()
+                        publishMediaFolders(context, snapshot)
+                        onProgress(hostItems + objectInfos.map {
+                            it.toMediaItem(streamAvailable = streamAvailable, folder = snapshot.folderFor(it))
+                        })
                     }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: Exception) {
                 if (firstFailure == null) firstFailure = exception
             }
         }
+        ensureMediaListingSession(context)
         val ratingSamples = mutableMapOf<Long, MtpMediaRatingRead>()
-        if (supportsMtpObjectProperties(requireDeviceInfo())) {
+        if (supportsMtpObjectProperties(info)) {
             objectInfos.groupBy(PtpObjectInfo::objectFormat).values.forEach { sameFormat ->
+                ensureMediaListingSession(context)
                 val sample = sameFormat.first()
-                runCatching { readMtpMediaRating(sample) }
-                    .getOrNull()
-                    ?.let { ratingSamples[sample.handle] = it }
+                val rating = try {
+                    readMtpMediaRating(sample, context)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    null
+                }
+                rating?.let { ratingSamples[sample.handle] = it }
             }
         }
+        ensureMediaListingSession(context)
+        val snapshot = folders.snapshot()
+        val ratedFormats = objectInfos.filter { it.handle in ratingSamples }.map { it.objectFormat }.toSet()
         val items = objectInfos.map { objectInfo ->
             objectInfo.toMediaItem(
                 rating = ratingSamples[objectInfo.handle]?.stars,
-                ratingWritable = objectInfo.objectFormat in validatedMediaRatingFormats,
+                ratingWritable = objectInfo.objectFormat in ratedFormats,
                 streamAvailable = streamAvailable,
+                folder = snapshot.folderFor(objectInfo),
             )
         }
         if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null && hostItems.isEmpty()) throw firstFailure!!
-        observedFeatures.add(CameraFeature.MEDIA_BROWSER)
-        return (hostItems + items)
-            .let { listed -> maximumItems?.let(listed::take) ?: listed }
-            .also(onProgress)
+        return completeMediaOperation(context, CameraFeature.MEDIA_BROWSER) {
+            publishMediaFolders(context, snapshot)
+            (hostItems + items).let { listed -> maximumItems?.let(listed::take) ?: listed }
+        }.also(onProgress)
+    }
+
+    // Only the latest listing of this session may publish shared provenance. Older calls
+    // still build their own progress/final values, without clearing or borrowing another call's data.
+    private data class MediaFolderContext(
+        val session: PtpSession,
+        val generation: Any = Any(),
+        val folders: PtpObservedMediaFolders = PtpObservedMediaFolders.Empty,
+    )
+
+    private fun resetObservedMediaFolders(ptp: PtpSession?) = synchronized(mediaFolderLock) {
+        mediaFolderContext = ptp?.let { MediaFolderContext(it) }
+        mediaInfo.clear()
+        mediaRatingContracts.clear()
+        validatedMediaRatingFormats.clear()
+    }
+
+    private fun beginMediaFolderListing(ptp: PtpSession): MediaFolderContext = synchronized(mediaFolderLock) {
+        if (mediaFolderContext?.session !== ptp) throw CancellationException("USB media session changed.")
+        MediaFolderContext(ptp).also {
+            mediaFolderContext = it
+            mediaInfo.clear()
+            mediaRatingContracts.clear()
+            validatedMediaRatingFormats.clear()
+        }
+    }
+
+    private fun captureMediaFolderContext(ptp: PtpSession): MediaFolderContext = synchronized(mediaFolderLock) {
+        mediaFolderContext?.takeIf { it.session === ptp } ?: MediaFolderContext(ptp)
+    }
+
+    private fun isCurrentMediaFolderContext(context: MediaFolderContext): Boolean =
+        mediaFolderContext?.let { it.session === context.session && it.generation === context.generation } == true
+
+    private suspend fun ensureMediaListingSession(context: MediaFolderContext) {
+        currentCoroutineContext().ensureActive()
+        synchronized(mediaFolderLock) {
+            if (mediaFolderContext?.session !== context.session) throw CancellationException("USB media session changed.")
+        }
+    }
+
+    private fun publishMediaFolders(context: MediaFolderContext, folders: PtpObservedMediaFolders) =
+        synchronized(mediaFolderLock) {
+            if (isCurrentMediaFolderContext(context)) mediaFolderContext = context.copy(folders = folders)
+        }
+
+    private fun observedMediaFolder(context: MediaFolderContext, info: PtpObjectInfo): CameraMediaFolder? =
+        synchronized(mediaFolderLock) {
+            if (isCurrentMediaFolderContext(context)) mediaFolderContext?.folders?.folderFor(info) else null
+        }
+
+    private fun rememberMediaInfo(context: MediaFolderContext, info: PtpObjectInfo) = synchronized(mediaFolderLock) {
+        if (isCurrentMediaFolderContext(context)) mediaInfo[info.handle] = info
+    }
+
+    private fun cachedMediaInfo(context: MediaFolderContext, handle: Long): PtpObjectInfo? = synchronized(mediaFolderLock) {
+        if (isCurrentMediaFolderContext(context)) mediaInfo[handle] else null
+    }
+
+    private fun hasValidatedMediaRating(context: MediaFolderContext, format: Int): Boolean = synchronized(mediaFolderLock) {
+        isCurrentMediaFolderContext(context) && format in validatedMediaRatingFormats
+    }
+
+    // Linearize media success with close's invalidation. A newer listing in the same
+    // session may retire cache ownership without cancelling an otherwise valid operation.
+    private suspend fun <T> completeMediaOperation(
+        context: MediaFolderContext,
+        feature: CameraFeature? = null,
+        result: () -> T,
+    ): T {
+        currentCoroutineContext().ensureActive()
+        return synchronized(mediaFolderLock) {
+            if (mediaFolderContext?.session !== context.session) throw CancellationException("USB media session changed.")
+            result().also { feature?.let(observedFeatures::add) }
+        }
     }
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
@@ -822,7 +926,10 @@ class UsbPtpCameraBackend(
         }
         requireOperation(PtpOperationCode.GET_THUMB, CameraFeature.MEDIA_THUMBNAIL)
         val handle = item.ptpHandle()
-        val objectInfo = mediaInfo[handle] ?: requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
+        val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
+        val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
+        ensureMediaListingSession(context)
         if (objectInfo.thumbnailSizeBytes <= 0L || objectInfo.thumbnailFormat == 0) {
             throw PtpProtocolException("${item.name} does not advertise an embedded PTP thumbnail.")
         }
@@ -832,17 +939,19 @@ class UsbPtpCameraBackend(
                     "limit is $MAX_PTP_THUMBNAIL_BYTES bytes."
             )
         }
-        val bytes = requireSession().objectThumbnail(handle)
+        val bytes = ptp.objectThumbnail(handle)
         if (bytes.size > MAX_PTP_THUMBNAIL_BYTES) {
             throw PtpProtocolException(
                 "${item.name} thumbnail is ${bytes.size} bytes; limit is $MAX_PTP_THUMBNAIL_BYTES bytes."
             )
         }
-        return CameraMediaThumbnail(
-            item = item,
-            bytes = bytes,
-            contentType = thumbnailContentType(objectInfo.thumbnailFormat, bytes),
-        ).also { observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL) }
+        return completeMediaOperation(context, CameraFeature.MEDIA_THUMBNAIL) {
+            CameraMediaThumbnail(
+                item = item.copy(folder = observedMediaFolder(context, objectInfo)),
+                bytes = bytes,
+                contentType = thumbnailContentType(objectInfo.thumbnailFormat, bytes),
+            )
+        }
     }
 
     override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
@@ -851,21 +960,26 @@ class UsbPtpCameraBackend(
         }
         requireOperation(PtpOperationCode.GET_OBJECT, CameraFeature.MEDIA_PREVIEW)
         val handle = item.ptpHandle()
-        val objectInfo = mediaInfo[handle] ?: requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
-        val mediaItem = objectInfo.toMediaItem()
+        val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
+        val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
+        ensureMediaListingSession(context)
+        val mediaItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
         if (!mediaItem.previewAvailable) {
             throw PtpProtocolException("${item.name} does not advertise a bounded JPEG or PNG preview object.")
         }
         val output = BoundedByteArrayOutputStream(MAX_PTP_MEDIA_PREVIEW_BYTES)
-        requireSession().downloadObject(handle, output)
+        ptp.downloadObject(handle, output)
         val bytes = output.toByteArray()
         val contentType = mediaPreviewContentType(objectInfo.objectFormat, bytes)
             ?: throw PtpProtocolException("${item.name} is not a complete JPEG or PNG image.")
-        return CameraMediaPreview(
-            item = mediaItem,
-            bytes = bytes,
-            contentType = contentType,
-        ).also { observedFeatures.add(CameraFeature.MEDIA_PREVIEW) }
+        return completeMediaOperation(context, CameraFeature.MEDIA_PREVIEW) {
+            CameraMediaPreview(
+                item = mediaItem.copy(folder = observedMediaFolder(context, objectInfo)),
+                bytes = bytes,
+                contentType = contentType,
+            )
+        }
     }
 
     override suspend fun openMediaStream(item: CameraMediaItem): CameraMediaStreamSource {
@@ -873,16 +987,23 @@ class UsbPtpCameraBackend(
         require(item.isVideoMedia) { "Media streaming is available only for video items." }
         requireOperation(PtpOperationCode.GET_PARTIAL_OBJECT, CameraFeature.MEDIA_DOWNLOAD)
         val handle = item.ptpHandle()
-        val objectInfo = mediaInfo[handle] ?: requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
-        val mediaItem = objectInfo.toMediaItem()
+        val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
+        val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
+        ensureMediaListingSession(context)
+        val mediaItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
         require(mediaItem.sizeBytes != null && mediaItem.sizeBytes > 0L) {
             "${item.name} does not report a valid video size."
         }
-        return ChunkedCameraMediaStreamSource(
-            item = mediaItem,
-            contentType = contentTypeFor(mediaItem.name, mediaItem.kind),
-        ) { position, maxBytes ->
-            requireSession().partialObject(handle, position, maxBytes)
+        return completeMediaOperation(context) {
+            ChunkedCameraMediaStreamSource(
+                item = mediaItem,
+                contentType = contentTypeFor(mediaItem.name, mediaItem.kind),
+            ) { position, maxBytes ->
+                ensureMediaListingSession(context)
+                val bytes = ptp.partialObject(handle, position, maxBytes)
+                completeMediaOperation(context) { bytes }
+            }
         }
     }
 
@@ -897,14 +1018,19 @@ class UsbPtpCameraBackend(
         }
         requireOperation(PtpOperationCode.GET_OBJECT, CameraFeature.MEDIA_DOWNLOAD)
         val handle = item.ptpHandle()
-        val bytesTransferred = requireSession().downloadObject(handle, destination) { transferred, total ->
+        val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
+        val objectInfo = cachedMediaInfo(context, handle)
+        val bytesTransferred = ptp.downloadObject(handle, destination) { transferred, total ->
             onProgress(CameraMediaTransferProgress(transferred, total.takeIf { it > 0L } ?: item.sizeBytes))
         }
-        return CameraMediaDownloadResult(
-            item = item,
-            bytesTransferred = bytesTransferred,
-            contentType = contentTypeFor(item.name, item.kind),
-        ).also { observedFeatures.add(CameraFeature.MEDIA_DOWNLOAD) }
+        return completeMediaOperation(context, CameraFeature.MEDIA_DOWNLOAD) {
+            CameraMediaDownloadResult(
+                item = item.copy(folder = objectInfo?.let { observedMediaFolder(context, it) }),
+                bytesTransferred = bytesTransferred,
+                contentType = contentTypeFor(item.name, item.kind),
+            )
+        }
     }
 
     override suspend fun uploadMedia(
@@ -930,6 +1056,7 @@ class UsbPtpCameraBackend(
         val target = writable.firstOrNull { it.storageId == currentStorage } ?: writable.firstOrNull()
             ?: throw PtpProtocolException("No writable camera storage has enough free space for $safeName.")
         val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
         val existingRootItems = ptp.objectHandles(
             storageId = target.storageId,
             associationHandle = PTP_ROOT_OBJECT_HANDLE,
@@ -991,10 +1118,11 @@ class UsbPtpCameraBackend(
                 "Camera accepted $safeName but ObjectInfo readback did not match the uploaded object."
             )
         }
-        mediaInfo[readback.handle] = readback
+        rememberMediaInfo(context, readback)
         refreshStorageSnapshot(info)
         val item = readback.toMediaItem(
             streamAvailable = requireDeviceInfo().supports(PtpOperationCode.GET_PARTIAL_OBJECT),
+            folder = observedMediaFolder(context, readback),
         )
         observedFeatures.addAll(setOf(CameraFeature.MEDIA_UPLOAD, CameraFeature.MEDIA_BROWSER))
         return CameraMediaUploadResult(item = item, bytesTransferred = sizeBytes)
@@ -1010,13 +1138,19 @@ class UsbPtpCameraBackend(
         hostCaptureStore?.takeIf { it.owns(item) }?.let { return item }
         requireMediaBrowser()
         val handle = item.ptpHandle()
-        val objectInfo = requireSession().objectInfo(handle).also { mediaInfo[handle] = it }
-        val rating = if (supportsMtpObjectProperties(requireDeviceInfo())) readMtpMediaRating(objectInfo) else null
-        return objectInfo.toMediaItem(
-            rating = rating?.stars,
-            ratingWritable = rating != null,
-            streamAvailable = item.streamAvailable,
-        )
+        val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
+        val objectInfo = ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
+        ensureMediaListingSession(context)
+        val rating = if (supportsMtpObjectProperties(requireDeviceInfo())) readMtpMediaRating(objectInfo, context) else null
+        return completeMediaOperation(context) {
+            objectInfo.toMediaItem(
+                rating = rating?.stars,
+                ratingWritable = rating != null,
+                streamAvailable = item.streamAvailable,
+                folder = observedMediaFolder(context, objectInfo),
+            )
+        }
     }
 
     override suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem {
@@ -1025,19 +1159,23 @@ class UsbPtpCameraBackend(
         requireOperation(PtpOperationCode.SET_OBJECT_PROTECTION, CameraFeature.MEDIA_PROTECT)
         val handle = item.ptpHandle()
         val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
         ptp.setObjectProtection(handle, enabled)
+        ensureMediaListingSession(context)
 
         var latest = item
         repeat(PTP_OBJECT_PROTECTION_READBACK_ATTEMPTS) { attempt ->
-            val refreshed = ptp.objectInfo(handle).also { mediaInfo[handle] = it }
+            ensureMediaListingSession(context)
+            val refreshed = ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
+            ensureMediaListingSession(context)
             latest = refreshed.toMediaItem(
                 rating = item.rating,
-                ratingWritable = refreshed.objectFormat in validatedMediaRatingFormats,
+                ratingWritable = hasValidatedMediaRating(context, refreshed.objectFormat),
                 streamAvailable = item.streamAvailable,
+                folder = observedMediaFolder(context, refreshed),
             )
             if (latest.protected == enabled) {
-                observedFeatures.add(CameraFeature.MEDIA_PROTECT)
-                return latest
+                return completeMediaOperation(context, CameraFeature.MEDIA_PROTECT) { latest }
             }
             if (attempt < PTP_OBJECT_PROTECTION_READBACK_ATTEMPTS - 1) {
                 delay(PTP_OBJECT_PROTECTION_READBACK_DELAY_MILLIS)
@@ -1058,8 +1196,10 @@ class UsbPtpCameraBackend(
 
         val handle = item.ptpHandle()
         val ptp = requireSession()
-        val objectInfo = ptp.objectInfo(handle).also { mediaInfo[handle] = it }
-        val contract = resolveMtpRatingContract(objectInfo.objectFormat)
+        val context = captureMediaFolderContext(ptp)
+        val objectInfo = ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
+        ensureMediaListingSession(context)
+        val contract = resolveMtpRatingContract(objectInfo.objectFormat, context)
             ?: throw UnsupportedOperationException(
                 "${item.name} does not advertise a writable standard MTP Rating property for " +
                     "format ${objectInfo.objectFormat.ptpHexCode()}."
@@ -1074,19 +1214,23 @@ class UsbPtpCameraBackend(
 
         var lastReadback: PtpPropertyValue? = null
         repeat(MTP_RATING_READBACK_ATTEMPTS) { attempt ->
+            ensureMediaListingSession(context)
             lastReadback = ptp.objectPropertyValue(
                 handle = handle,
                 propertyCode = MtpObjectPropertyCode.RATING,
                 dataType = contract.dataType,
             )
+            ensureMediaListingSession(context)
             if (lastReadback == requested) {
-                validatedMediaRatingFormats += objectInfo.objectFormat
-                observedFeatures.add(CameraFeature.MEDIA_RATING)
-                return objectInfo.toMediaItem(
-                    rating = rating,
-                    ratingWritable = true,
-                    streamAvailable = item.streamAvailable,
-                )
+                return completeMediaOperation(context, CameraFeature.MEDIA_RATING) {
+                    if (isCurrentMediaFolderContext(context)) validatedMediaRatingFormats += objectInfo.objectFormat
+                    objectInfo.toMediaItem(
+                        rating = rating,
+                        ratingWritable = true,
+                        streamAvailable = item.streamAvailable,
+                        folder = observedMediaFolder(context, objectInfo),
+                    )
+                }
             }
             if (attempt < MTP_RATING_READBACK_ATTEMPTS - 1) delay(MTP_RATING_READBACK_DELAY_MILLIS)
         }
@@ -1727,15 +1871,16 @@ class UsbPtpCameraBackend(
 
     private suspend fun refreshStorageSnapshot(info: PtpDeviceInfo): Result<List<PtpStorageInfo>>? {
         if (!supportsStorage(info)) return null
+        val context = captureMediaFolderContext(requireSession())
         return runCatching { readStorageSnapshot() }.also { result ->
             val refreshed = result.getOrDefault(emptyList())
             if (
                 storageSnapshot.isNotEmpty() &&
                 storageSnapshot.map(PtpStorageInfo::storageId) != refreshed.map(PtpStorageInfo::storageId)
             ) {
-                mediaInfo.clear()
-                mediaRatingContracts.clear()
-                validatedMediaRatingFormats.clear()
+                synchronized(mediaFolderLock) {
+                    if (isCurrentMediaFolderContext(context)) resetObservedMediaFolders(context.session)
+                }
             }
             storageSnapshot = refreshed
             storageError = result.exceptionOrNull()?.message
@@ -2144,37 +2289,52 @@ class UsbPtpCameraBackend(
             info.supports(PtpOperationCode.GET_OBJECT_PROP_VALUE) &&
             info.supports(PtpOperationCode.SET_OBJECT_PROP_VALUE)
 
-    private suspend fun resolveMtpRatingContract(objectFormat: Int): MtpRatingContract? {
+    private suspend fun resolveMtpRatingContract(
+        objectFormat: Int,
+        context: MediaFolderContext,
+    ): MtpRatingContract? {
         if (objectFormat == PtpObjectFormat.ASSOCIATION) return null
-        if (mediaRatingContracts.containsKey(objectFormat)) return mediaRatingContracts[objectFormat]
-        val ptp = requireSession()
-        val contract = if (MtpObjectPropertyCode.RATING in ptp.objectPropertiesSupported(objectFormat)) {
-            MtpRatingContract.from(
-                ptp.objectPropertyDescriptor(MtpObjectPropertyCode.RATING, objectFormat),
-            )
-        } else {
-            null
+        ensureMediaListingSession(context)
+        val cached = synchronized(mediaFolderLock) {
+            if (isCurrentMediaFolderContext(context) && mediaRatingContracts.containsKey(objectFormat)) {
+                true to mediaRatingContracts[objectFormat]
+            } else false to null
         }
-        mediaRatingContracts[objectFormat] = contract
+        if (cached.first) return cached.second
+        val ptp = context.session
+        val supported = ptp.objectPropertiesSupported(objectFormat)
+        ensureMediaListingSession(context)
+        val contract = if (MtpObjectPropertyCode.RATING in supported) {
+            MtpRatingContract.from(ptp.objectPropertyDescriptor(MtpObjectPropertyCode.RATING, objectFormat))
+        } else null
+        ensureMediaListingSession(context)
+        synchronized(mediaFolderLock) {
+            if (isCurrentMediaFolderContext(context)) mediaRatingContracts[objectFormat] = contract
+        }
         return contract
     }
 
-    private suspend fun readMtpMediaRating(objectInfo: PtpObjectInfo): MtpMediaRatingRead? {
-        val contract = resolveMtpRatingContract(objectInfo.objectFormat) ?: return null
-        val value = requireSession().objectPropertyValue(
+    private suspend fun readMtpMediaRating(
+        objectInfo: PtpObjectInfo,
+        context: MediaFolderContext,
+    ): MtpMediaRatingRead? {
+        val contract = resolveMtpRatingContract(objectInfo.objectFormat, context) ?: return null
+        ensureMediaListingSession(context)
+        val value = context.session.objectPropertyValue(
             handle = objectInfo.handle,
             propertyCode = MtpObjectPropertyCode.RATING,
             dataType = contract.dataType,
         )
+        ensureMediaListingSession(context)
         val wireValue = (value as? PtpPropertyValue.Unsigned)?.value
             ?: throw PtpProtocolException("MTP Rating readback was not an unsigned value.")
         if (wireValue > 100UL) {
             throw PtpProtocolException("MTP Rating readback $wireValue is outside the standard 0-100 range.")
         }
-        validatedMediaRatingFormats += objectInfo.objectFormat
-        return MtpMediaRatingRead(
-            stars = contract.stars(value),
-        )
+        synchronized(mediaFolderLock) {
+            if (isCurrentMediaFolderContext(context)) validatedMediaRatingFormats += objectInfo.objectFormat
+        }
+        return MtpMediaRatingRead(stars = contract.stars(value))
     }
 }
 
@@ -2195,6 +2355,7 @@ private fun PtpObjectInfo.toMediaItem(
     rating: Int? = null,
     ratingWritable: Boolean? = null,
     streamAvailable: Boolean = false,
+    folder: CameraMediaFolder? = null,
 ): CameraMediaItem = CameraMediaItem(
     id = "ptp:${handle.toString(16).uppercase(Locale.ROOT).padStart(8, '0')}",
     name = filename,
@@ -2214,6 +2375,7 @@ private fun PtpObjectInfo.toMediaItem(
     contentType = contentTypeFor(filename, mediaKind(filename, objectFormat)),
     widthPixels = imageWidth.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt(),
     heightPixels = imageHeight.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt(),
+    folder = folder,
 )
 
 private fun CameraMediaItem.ptpHandle(): Long {

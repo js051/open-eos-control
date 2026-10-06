@@ -413,6 +413,9 @@ class UsbPtpCameraBackendTest {
         assertEquals(true, protected.ratingWritable)
         assertEquals(5, rated.rating)
         assertEquals(true, rated.ratingWritable)
+        assertEquals("Storage 00010001", item.folder?.label)
+        assertEquals(item.folder, protected.folder)
+        assertEquals(item.folder, rated.folder)
         assertTrue(CameraFeature.MEDIA_RATING in backend.observedFeatures())
         val setContainers = transport.sentContainers.filter { it.code == PtpOperationCode.SET_OBJECT_PROP_VALUE }
         assertEquals(listOf(PtpContainerType.COMMAND, PtpContainerType.DATA), setContainers.map(PtpContainer::type))
@@ -2167,6 +2170,7 @@ class UsbPtpCameraBackendTest {
         assertEquals(2, media.size)
         assertTrue(media.any { it.name == "IMG_0051.JPG" && it.kind == "image" })
         assertTrue(media.any { it.name.endsWith(".cr3") && it.kind == "raw" })
+        assertTrue(media.all { it.folder == null })
         assertEquals(
             listOf(0x51L, 0x52L),
             transport.sentContainers.filter {
