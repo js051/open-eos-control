@@ -1,5 +1,9 @@
 package dev.openeos.control.data
 
+import dev.openeos.control.ui.MediaFilter
+import dev.openeos.control.ui.MediaFolderFilter
+import dev.openeos.control.ui.MediaSort
+import dev.openeos.control.ui.mediaItemsForDisplay
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -404,6 +408,109 @@ class UsbPtpObservedFoldersTest {
         assertArrayEquals(ByteArray(JPEG.size), buffer)
     }
 
+    @Test
+    fun transientStorageInfoFailureKeepsObservedFolderThroughRecoveryAndInfoFilter() = runTest {
+        val parent = folder(10, "DCIM")
+        val image = media(42, parent = 10)
+        val wire = FolderWire(
+            listOf(parent, image),
+            storageInfoResponses = listOf(PtpResponseCode.OK, PtpResponseCode.DEVICE_BUSY, PtpResponseCode.OK),
+        )
+        val backend = backend(wire)
+        backend.initialize()
+        assertEquals(1, backend.status().storageDeviceCount)
+        val item = backend.listMedia().single()
+        val selected = MediaFolderFilter.Folder(requireNotNull(item.folder))
+        assertEquals(listOf(item.id), mediaItemsForDisplay(listOf(item), MediaFilter.ALL, MediaSort.CAMERA,
+            folderFilter = selected).map { it.id })
+
+        val failedStatus = backend.status()
+        assertTrue(failedStatus.rawStorageJson.contains("DeviceBusy"))
+        backend.capabilities()
+        val refreshed = backend.mediaInfo(item)
+        backend.close()
+
+        wire.assertCommands(storageCommands() + listCommands(listOf(parent, image)) +
+            storageCommands() + storageCommands() + command(PtpOperationCode.GET_OBJECT_INFO, 42))
+        // The real library filter sees the replacement returned by mediaInfo, as the VM does.
+        // This does not claim that opening preview alone replaces the library item.
+        val visible = mediaItemsForDisplay(listOf(refreshed), MediaFilter.ALL, MediaSort.CAMERA,
+            folderFilter = selected).map { it.id }
+        println("StorageInfo failure/recovery: original=${item.folder}; refreshed=${refreshed.folder}; visible=$visible")
+        assertEquals("Recovered metadata must remain in the selected observed folder", listOf(item.id), visible)
+        assertEquals(item.folder, refreshed.folder)
+    }
+
+    @Test
+    fun successfulEmptyStorageAfterTransientFailureRetiresObservedFolder() = runTest {
+        verifyConfirmedStorageChangeAfterFailure(emptyList(), restoreOriginalStorage = true)
+    }
+
+    @Test
+    fun successfulChangedStorageSetAfterTransientFailureRetiresObservedFolder() = runTest {
+        // The original object is still legitimately on S; only the confirmed storage set changes.
+        verifyConfirmedStorageChangeAfterFailure(listOf(STORAGE, STORAGE + 1), restoreOriginalStorage = false)
+    }
+
+    @Test
+    fun firstSuccessfulStatusCanRetireStorageIdsAlreadyObservedByListing() = runTest {
+        val parent = folder(10, "DCIM")
+        val image = media(42, parent = 10)
+        val changedIds = listOf(STORAGE, STORAGE + 1)
+        val wire = FolderWire(
+            listOf(parent, image),
+            storageIdResponses = listOf(listOf(STORAGE), changedIds),
+            storageInfoResponses = listOf(PtpResponseCode.OK, PtpResponseCode.OK),
+        )
+        val backend = backend(wire)
+        backend.initialize()
+        val item = backend.listMedia().single()
+        assertEquals("Storage 00010001 / DCIM", item.folder?.label)
+        assertEquals(2, backend.status().storageDeviceCount)
+        val refreshed = backend.mediaInfo(item)
+        backend.close()
+
+        wire.assertCommands(listCommands(listOf(parent, image)) + storageCommands(changedIds) +
+            command(PtpOperationCode.GET_OBJECT_INFO, 42))
+        assertNull("A listing's observed storage IDs count even before the first status refresh", refreshed.folder)
+    }
+
+    private suspend fun verifyConfirmedStorageChangeAfterFailure(
+        changedIds: List<Long>,
+        restoreOriginalStorage: Boolean,
+    ) {
+        val parent = folder(10, "DCIM")
+        val image = media(42, parent = 10)
+        val finalIds = if (restoreOriginalStorage) listOf(listOf(STORAGE)) else emptyList()
+        val infoResponses = listOf(PtpResponseCode.OK, PtpResponseCode.DEVICE_BUSY) +
+            List(changedIds.size) { PtpResponseCode.OK } + if (restoreOriginalStorage) listOf(PtpResponseCode.OK) else emptyList()
+        val wire = FolderWire(
+            listOf(parent, image),
+            storageIdResponses = listOf(listOf(STORAGE), listOf(STORAGE), listOf(STORAGE), changedIds) + finalIds,
+            storageInfoResponses = infoResponses,
+        )
+        val backend = backend(wire)
+        backend.initialize()
+        assertEquals(1, backend.status().storageDeviceCount)
+        val item = backend.listMedia().single()
+        assertEquals("Storage 00010001 / DCIM", item.folder?.label)
+        assertTrue(backend.status().rawStorageJson.contains("DeviceBusy"))
+        backend.capabilities()
+        if (restoreOriginalStorage) {
+            // A card returns after a confirmed empty set. Reused numeric IDs cannot resurrect
+            // a folder whose parent was not observed again; ObjectInfo is valid on storage S.
+            assertEquals(1, backend.status().storageDeviceCount)
+        }
+        val refreshed = backend.mediaInfo(item)
+        backend.close()
+
+        wire.assertCommands(storageCommands() + listCommands(listOf(parent, image)) + storageCommands() +
+            storageCommands(changedIds) + (if (restoreOriginalStorage) storageCommands() else emptyList()) +
+            command(PtpOperationCode.GET_OBJECT_INFO, 42))
+        println("Confirmed storage change after failure: ids=$changedIds; restored=$restoreOriginalStorage; folder=${refreshed.folder}")
+        assertNull("A confirmed empty/changed storage set must retire earlier folder observations", refreshed.folder)
+    }
+
     /** Same-backend lifecycle contract; CameraRepository normally creates a fresh backend on reconnect. */
     private suspend fun verifyResultAfterReplacement(operation: LateMediaOperation): List<String> = coroutineScope {
         val image = media(42)
@@ -482,10 +589,14 @@ class UsbPtpObservedFoldersTest {
         observed: List<PtpObjectInfo>,
         listings: List<List<Long>> = listOf(observed.map { it.handle }),
         private val advertiseRating: Boolean = false,
+        storageIdResponses: List<List<Long>>? = null,
+        storageInfoResponses: List<Int>? = null,
     ) : PtpTransport {
         val objects = observed.associateBy { it.handle }.toMutableMap()
         private val pendingListings = ArrayDeque(listings)
-        private var currentHandles = emptyList<Long>()
+        private val pendingStorageIds = storageIdResponses?.let { ArrayDeque(it) }
+        private val pendingStorageInfo = ArrayDeque(storageInfoResponses.orEmpty())
+        private val advertiseStorageInfo = storageInfoResponses != null
         private val incoming = ArrayDeque<PtpContainer>()
         private var request: PtpContainer? = null
         private var pendingRatingWrite: PtpContainer? = null
@@ -510,12 +621,22 @@ class UsbPtpObservedFoldersTest {
             sent += container.code to container.parameters()
             request = container
             val payload = when (container.code) {
-                PtpOperationCode.GET_DEVICE_INFO -> deviceInfo(advertiseRating)
-                PtpOperationCode.GET_STORAGE_IDS -> {
-                    currentHandles = pendingListings.removeFirst()
-                    u32Array(listOf(STORAGE))
+                PtpOperationCode.GET_DEVICE_INFO -> deviceInfo(advertiseRating, advertiseStorageInfo)
+                PtpOperationCode.GET_STORAGE_IDS -> u32Array(pendingStorageIds?.removeFirst() ?: listOf(STORAGE))
+                PtpOperationCode.GET_STORAGE_INFO -> {
+                    check(advertiseStorageInfo)
+                    val response = pendingStorageInfo.removeFirst()
+                    if (response != PtpResponseCode.OK) {
+                        incoming += PtpContainer(PtpContainerType.RESPONSE, response, container.transactionId)
+                        return
+                    }
+                    Writer().apply {
+                        u16(4); u16(2); u16(0)
+                        u64(1_048_576); u64(524_288); u32(100)
+                        string("Synthetic storage"); string("SYNTHETIC")
+                    }.bytes()
                 }
-                PtpOperationCode.GET_OBJECT_HANDLES -> u32Array(currentHandles.reversed())
+                PtpOperationCode.GET_OBJECT_HANDLES -> u32Array(pendingListings.removeFirst().reversed())
                 PtpOperationCode.GET_OBJECT_INFO -> PtpDatasets.encodeObjectInfo(objects.getValue(container.parameters().single()))
                 PtpOperationCode.GET_OBJECT, PtpOperationCode.GET_THUMB -> JPEG
                 PtpOperationCode.GET_PARTIAL_OBJECT -> JPEG.copyOfRange(
@@ -568,6 +689,8 @@ class UsbPtpObservedFoldersTest {
             )
             assertTrue(closed)
             assertTrue(incoming.isEmpty())
+            assertTrue(pendingStorageInfo.isEmpty())
+            assertTrue(pendingStorageIds == null || pendingStorageIds.isEmpty())
         }
     }
 
@@ -596,20 +719,24 @@ class UsbPtpObservedFoldersTest {
             command(PtpOperationCode.GET_STORAGE_IDS) + command(PtpOperationCode.GET_OBJECT_HANDLES, STORAGE, 0, 0) +
                 objects.flatMap { command(PtpOperationCode.GET_OBJECT_INFO, it.handle) }
 
+        private fun storageCommands(ids: List<Long> = listOf(STORAGE)) =
+            command(PtpOperationCode.GET_STORAGE_IDS) + ids.flatMap { command(PtpOperationCode.GET_STORAGE_INFO, it) }
+
         private fun ratingContractCommands() =
             command(PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED, PtpObjectFormat.EXIF_JPEG.toLong()) +
                 command(PtpOperationCode.GET_OBJECT_PROP_DESC, MtpObjectPropertyCode.RATING.toLong(), PtpObjectFormat.EXIF_JPEG.toLong())
 
         private fun u32Array(values: List<Long>) = Writer().apply { u32(values.size.toLong()); values.forEach(::u32) }.bytes()
 
-        private fun deviceInfo(advertiseRating: Boolean) = Writer().apply {
+        private fun deviceInfo(advertiseRating: Boolean, advertiseStorageInfo: Boolean) = Writer().apply {
             u16(100); u32(0); u16(100); string(""); u16(0)
             val operations = listOf(PtpOperationCode.GET_DEVICE_INFO, PtpOperationCode.OPEN_SESSION,
                 PtpOperationCode.CLOSE_SESSION, PtpOperationCode.GET_STORAGE_IDS, PtpOperationCode.GET_OBJECT_HANDLES,
                 PtpOperationCode.GET_OBJECT_INFO, PtpOperationCode.GET_OBJECT, PtpOperationCode.GET_THUMB,
                 PtpOperationCode.GET_PARTIAL_OBJECT, PtpOperationCode.SET_OBJECT_PROTECTION) +
-                if (advertiseRating) listOf(PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED, PtpOperationCode.GET_OBJECT_PROP_DESC,
-                    PtpOperationCode.GET_OBJECT_PROP_VALUE, PtpOperationCode.SET_OBJECT_PROP_VALUE) else emptyList()
+                (if (advertiseRating) listOf(PtpOperationCode.GET_OBJECT_PROPS_SUPPORTED, PtpOperationCode.GET_OBJECT_PROP_DESC,
+                    PtpOperationCode.GET_OBJECT_PROP_VALUE, PtpOperationCode.SET_OBJECT_PROP_VALUE) else emptyList()) +
+                if (advertiseStorageInfo) listOf(PtpOperationCode.GET_STORAGE_INFO) else emptyList()
             u32(operations.size.toLong()); operations.forEach(::u16)
             repeat(4) { u32(0) }
             string("Synthetic"); string("Folder fixture"); string("1"); string("SYNTHETIC-ONLY")
@@ -620,6 +747,7 @@ class UsbPtpObservedFoldersTest {
             fun u8(value: Int) { output.write(value) }
             fun u16(value: Int) { repeat(2) { output.write(value ushr (8 * it) and 0xff) } }
             fun u32(value: Long) { repeat(4) { output.write((value ushr (8 * it) and 0xff).toInt()) } }
+            fun u64(value: Long) { repeat(8) { output.write((value ushr (8 * it) and 0xff).toInt()) } }
             fun string(value: String) {
                 if (value.isEmpty()) output.write(0) else {
                     output.write(value.length + 1); output.write(value.toByteArray(Charsets.UTF_16LE)); u16(0)

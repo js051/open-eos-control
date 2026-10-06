@@ -35,6 +35,8 @@ class UsbPtpCameraBackend(
     private val mediaInfo = mutableMapOf<Long, PtpObjectInfo>()
     private val mediaFolderLock = Any()
     private var mediaFolderContext: MediaFolderContext? = null
+    // Successful StorageIDs are topology evidence even when the following StorageInfo fails.
+    private var confirmedStorageIds: Set<Long>? = null
     private val mediaRatingContracts = mutableMapOf<Int, MtpRatingContract?>()
     private val validatedMediaRatingFormats = mutableSetOf<Int>()
     private var propertyDescriptors: Map<Int, PtpDevicePropertyDescriptor> = emptyMap()
@@ -776,6 +778,10 @@ class UsbPtpCameraBackend(
         val info = requireDeviceInfo()
         val streamAvailable = info.supports(PtpOperationCode.GET_PARTIAL_OBJECT)
         val storageIds = ptp.storageIds()
+        synchronized(mediaFolderLock) {
+            // beginMediaFolderListing already retired the earlier listing's observations.
+            if (isCurrentMediaFolderContext(context)) confirmedStorageIds = storageIds.toSet()
+        }
         val folders = PtpObservedMediaFolders.Builder(storageIds)
         val handles = storageIds
             .flatMap { storageId ->
@@ -855,6 +861,7 @@ class UsbPtpCameraBackend(
 
     private fun resetObservedMediaFolders(ptp: PtpSession?) = synchronized(mediaFolderLock) {
         mediaFolderContext = ptp?.let { MediaFolderContext(it) }
+        confirmedStorageIds = null
         mediaInfo.clear()
         mediaRatingContracts.clear()
         validatedMediaRatingFormats.clear()
@@ -1864,25 +1871,26 @@ class UsbPtpCameraBackend(
         }
     }
 
-    private suspend fun readStorageSnapshot(): List<PtpStorageInfo> {
-        val ptp = requireSession()
-        return ptp.storageIds().map { storageId -> ptp.storageInfo(storageId) }
+    private suspend fun readStorageSnapshot(context: MediaFolderContext): List<PtpStorageInfo> {
+        val ptp = context.session
+        val storageIds = ptp.storageIds()
+        synchronized(mediaFolderLock) {
+            if (isCurrentMediaFolderContext(context)) {
+                val refreshedIds = storageIds.toSet()
+                if (confirmedStorageIds?.let { it != refreshedIds } == true) {
+                    resetObservedMediaFolders(context.session)
+                }
+                confirmedStorageIds = refreshedIds
+            }
+        }
+        return storageIds.map { storageId -> ptp.storageInfo(storageId) }
     }
 
     private suspend fun refreshStorageSnapshot(info: PtpDeviceInfo): Result<List<PtpStorageInfo>>? {
         if (!supportsStorage(info)) return null
         val context = captureMediaFolderContext(requireSession())
-        return runCatching { readStorageSnapshot() }.also { result ->
-            val refreshed = result.getOrDefault(emptyList())
-            if (
-                storageSnapshot.isNotEmpty() &&
-                storageSnapshot.map(PtpStorageInfo::storageId) != refreshed.map(PtpStorageInfo::storageId)
-            ) {
-                synchronized(mediaFolderLock) {
-                    if (isCurrentMediaFolderContext(context)) resetObservedMediaFolders(context.session)
-                }
-            }
-            storageSnapshot = refreshed
+        return runCatching { readStorageSnapshot(context) }.also { result ->
+            storageSnapshot = result.getOrDefault(emptyList())
             storageError = result.exceptionOrNull()?.message
         }
     }
