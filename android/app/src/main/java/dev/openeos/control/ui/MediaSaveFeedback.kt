@@ -10,6 +10,7 @@ sealed interface MediaSaveFeedback {
     data class Saving(val progress: CameraMediaTransferProgress) : MediaSaveFeedback
     data class Saved(val location: String) : MediaSaveFeedback
     data class Failed(val message: String) : MediaSaveFeedback
+    data class IncompleteFile(val cancelled: Boolean) : MediaSaveFeedback
     data object Cancelled : MediaSaveFeedback
 }
 

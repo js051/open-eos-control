@@ -88,9 +88,11 @@ private fun recordWindowFocusFailure(tag: String, activity: Activity, view: andr
     // that might cover the intended target, while preserving the original assertion failure.
     runCatching {
         val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-        TestStorage().openOutputFile("window-focus-$tag.png").use { output ->
-            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-        }
+        try {
+            TestStorage().openOutputFile("window-focus-$tag-${android.os.SystemClock.uptimeMillis()}.png").use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+            }
+        } finally { bitmap.recycle() }
     }.onFailure { println("WINDOW_FOCUS_SCREENSHOT_UNAVAILABLE ${it.javaClass.simpleName}") }
 }
 

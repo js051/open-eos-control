@@ -26,6 +26,7 @@ data class DownloadHistoryEntry(
     val startedAtMillis: Long,
     val finishedAtMillis: Long?,
     val outcome: DownloadHistoryOutcome,
+    val cleanupUnconfirmed: Boolean = false,
 )
 
 data class DownloadHistoryState(
@@ -143,11 +144,12 @@ class DownloadHistoryStore internal constructor(
     }
 
     /** First terminal result wins; an evicted/cleared/missing receipt is never inserted again. */
-    fun recordFinished(receipt: DownloadHistoryReceipt?, outcome: DownloadHistoryOutcome) {
+    fun recordFinished(receipt: DownloadHistoryReceipt?, outcome: DownloadHistoryOutcome, cleanupUnconfirmed: Boolean = false) {
         if (receipt == null || !outcome.isTerminal()) return
         synchronized(admissionLock) {
             if (!owns(receipt.request)) return
-            commands.trySend(Command.Finish(receipt, outcome, nowMillis().coerceAtLeast(0L)))
+            commands.trySend(Command.Finish(receipt, outcome, nowMillis().coerceAtLeast(0L),
+                cleanupUnconfirmed && (outcome == DownloadHistoryOutcome.FAILED || outcome == DownloadHistoryOutcome.CANCELLED)))
         }
     }
 
@@ -209,6 +211,7 @@ class DownloadHistoryStore internal constructor(
         updated[index] = updated[index].copy(
             outcome = command.outcome,
             finishedAtMillis = command.finishedAtMillis,
+            cleanupUnconfirmed = command.cleanupUnconfirmed,
         )
         replace(updated)
     }
@@ -250,6 +253,7 @@ class DownloadHistoryStore internal constructor(
             val receipt: DownloadHistoryReceipt,
             val outcome: DownloadHistoryOutcome,
             val finishedAtMillis: Long,
+            val cleanupUnconfirmed: Boolean,
         ) : Command
         data class Clear(val result: CompletableDeferred<Boolean>) : Command
         data class Barrier(val result: CompletableDeferred<Unit>) : Command

@@ -2,7 +2,12 @@ package dev.openeos.control.ui
 
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -85,7 +90,7 @@ class MediaOutputFinalizationTest {
         assertArrayEquals(ORIGINAL, destination.readBytes())
     }
 
-    @Test fun cleanupFailureIsSuppressedOnTheOriginalTransferFailure() = runTest {
+    @Test fun cleanupFailureIsTypedWhileTheOriginalTransferFailureRemainsPrimary() = runTest {
         val destination = temporary.newFile()
         val failure = IOException("Synthetic original transfer failure")
         val cleanupFailure = IOException("Synthetic cleanup failure")
@@ -98,7 +103,10 @@ class MediaOutputFinalizationTest {
             }
         }.exceptionOrNull()
         assertSame(failure, observed)
-        assertEquals(listOf(cleanupFailure), failure.suppressed.toList())
+        assertEquals(1, failure.suppressed.size)
+        assertTrue(failure.suppressed.single() is IncompleteMediaCleanupException)
+        assertSame(cleanupFailure, failure.suppressed.single().cause)
+        assertTrue(failure.hasUnconfirmedMediaCleanup())
     }
 
     @Test fun confirmingTwiceEmitsOnlyOneCompletion() = runTest {
@@ -129,6 +137,71 @@ class MediaOutputFinalizationTest {
         assertSame(failure, observed)
         assertEquals(0, cleanups)
         assertArrayEquals(ORIGINAL, destination.readBytes())
+    }
+
+    @Test fun alreadyCancelledParentStillRegistersAndFinishesOwnedCleanup() = runTest {
+        val destination = temporary.newFile()
+        val sentinel = temporary.newFile().apply { writeBytes(ORIGINAL) }
+        val parent = Job().apply { cancel() }
+        val cleanupEntered = CompletableDeferred<Unit>()
+        val releaseCleanup = CompletableDeferred<Unit>()
+        var registered: Job? = null
+        var cleanupCalls = 0
+        var transferCalls = 0
+        val output = MediaOutputFinalization(cleanupIncomplete = {
+            assertTrue("Registration must precede cleanup", registered != null)
+            cleanupCalls++
+            cleanupEntered.complete(Unit)
+            releaseCleanup.await()
+            assertTrue(destination.delete())
+        })
+        val transfer = CoroutineScope(coroutineContext + parent).launchAdmittedMediaOutput(
+            output,
+            register = { registered = it },
+        ) {
+            currentCoroutineContext().ensureActive()
+            transferCalls++
+        }
+        try {
+            cleanupEntered.await()
+            assertSame(transfer, registered)
+            assertFalse("The returned job owns the cleanup lifetime", transfer.isCompleted)
+            releaseCleanup.complete(Unit)
+            transfer.join()
+            assertTrue(transfer.isCancelled)
+            assertEquals(1, cleanupCalls)
+            assertEquals(0, transferCalls)
+            assertFalse(destination.exists())
+            assertArrayEquals(ORIGINAL, sentinel.readBytes())
+        } finally {
+            releaseCleanup.complete(Unit)
+            transfer.cancelAndJoin()
+        }
+    }
+
+    @Test fun cancellingWithTheOriginalCancellationDoesNotSuppressItself() = runTest {
+        val cancellation = CancellationException("Synthetic original cancellation")
+        val owner = Job()
+        var observed: Throwable? = null
+        // Stay on the cleanup dispatcher so ensureActive can return the original cancellation;
+        // dispatcher-boundary recovery is covered separately by the receipt race test.
+        val transfer = launch(owner + Dispatchers.IO) {
+            observed = runCatching {
+                withMediaOutputFinalization(cleanupIncomplete = { throw IOException("Synthetic cleanup refusal") }) {
+                    owner.cancel(cancellation)
+                    throw cancellation
+                }
+            }.exceptionOrNull()
+        }
+        transfer.join()
+        val failure = requireNotNull(observed)
+        assertTrue(failure is CancellationException)
+        assertEquals(cancellation.message, failure.message)
+        // Coroutine stack recovery may copy the cancellation, retaining the original as cause.
+        assertTrue(failure === cancellation || failure.cause === cancellation || failure.suppressed.any { it === cancellation })
+        assertTrue(failure.hasUnconfirmedMediaCleanup())
+        assertFalse("The escaping exception must never suppress itself", failure.suppressed.any { it === failure })
+        assertFalse("The original cancellation must never suppress itself", cancellation.suppressed.any { it === cancellation })
     }
 
     private companion object {
