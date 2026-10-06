@@ -110,29 +110,33 @@ fun CameraControlScreen(
     state: CameraUiState,
     actions: CameraActions,
 ) {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .testTag("camera-control-root")
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .pointerInput(state.hudVisible) {
-                var dragDistance = 0f
-                detectVerticalDragGestures(
-                    onVerticalDrag = { change, dragAmount ->
-                        change.consume()
-                        dragDistance += dragAmount
-                    },
-                    onDragEnd = {
-                        if (abs(dragDistance) >= 48.dp.toPx()) {
-                            actions.setHudVisible(!state.hudVisible)
-                        }
-                        dragDistance = 0f
-                    },
-                    onDragCancel = { dragDistance = 0f },
-                )
-            },
-    ) {
-        StableCameraControls(state, actions)
+    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        Box(
+            Modifier
+                .fillMaxWidth().weight(1f)
+                .testTag("camera-control-root")
+                .pointerInput(state.hudVisible) {
+                    var dragDistance = 0f
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { change, dragAmount ->
+                            change.consume()
+                            dragDistance += dragAmount
+                        },
+                        onDragEnd = {
+                            if (abs(dragDistance) >= 48.dp.toPx()) {
+                                actions.setHudVisible(!state.hudVisible)
+                            }
+                            dragDistance = 0f
+                        },
+                        onDragCancel = { dragDistance = 0f },
+                    )
+                },
+        ) {
+            StableCameraControls(state, actions)
+        }
+        if (state.showForegroundJpegImportStatus) {
+            ForegroundJpegImportEntry(state, actions)
+        }
     }
     SettingSheets(state, actions)
 }
