@@ -120,6 +120,11 @@ data class CameraUiState(
     val mediaPreviewLoading: Boolean = false,
     val mediaStreamSource: CameraMediaStreamSource? = null,
     val mediaSaveFeedback: Map<String, MediaSaveFeedback> = emptyMap(),
+    val foregroundJpegImport: ForegroundJpegImportStatus = ForegroundJpegImportStatus(),
+    // A previous connection's local-output cleanup warning does not belong to the new camera.
+    val foregroundImportCleanupUnconfirmed: Boolean = false,
+    // Kept across session reset until the previous local output owner has fully retired.
+    val foregroundImportOwnerActive: Boolean = false,
     val activeMediaDownloadName: String? = null,
     val mediaDownloadProgress: CameraMediaTransferProgress? = null,
     val lastDownloadedMediaName: String? = null,
@@ -194,6 +199,10 @@ data class CameraUiState(
 
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations ||
+            (CameraOperation.MEDIA in pendingOperations && foregroundJpegImport.phase in FOREGROUND_IMPORT_ACTIVE_PHASES &&
+                operation in FOREGROUND_IMPORT_CONTROL_OPERATIONS &&
+                !(operation == CameraOperation.RECORDING && status?.recording == true) &&
+                !(operation == CameraOperation.CAPTURE && bulbExposureActive)) ||
             ((shutterReleaseUnconfirmed || CameraOperation.SHUTTER_RELEASE in pendingOperations) &&
                 operation !in setOf(CameraOperation.SHUTTER_RELEASE, CameraOperation.STATUS, CameraOperation.USB, CameraOperation.BRIDGE)) ||
             (bulbExposureActive && operation != CameraOperation.CAPTURE &&
@@ -203,6 +212,31 @@ data class CameraUiState(
             (autofocusHoldState != AutofocusHoldState.IDLE && operation in HELD_AF_INTERLOCK_OPERATIONS) ||
             (CameraOperation.LIVE_VIEW in pendingOperations && operation in LIVE_VIEW_INTERLOCK_OPERATIONS)
 }
+
+internal val FOREGROUND_IMPORT_ACTIVE_PHASES = setOf(
+    ForegroundImportPhase.BASELINING, ForegroundImportPhase.WATCHING, ForegroundImportPhase.WAITING,
+    ForegroundImportPhase.SAVING, ForegroundImportPhase.STOPPING,
+)
+
+private val FOREGROUND_IMPORT_CONTROL_OPERATIONS = setOf(
+    CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING,
+    CameraOperation.SETTING, CameraOperation.DIRECTORY, CameraOperation.CLOCK,
+    CameraOperation.POWER, CameraOperation.MAINTENANCE,
+)
+
+internal fun CameraUiState.foregroundImportCameraIdle(): Boolean =
+    pendingOperations.isEmpty() && !bulbExposureActive && !shutterReleaseUnconfirmed &&
+        autofocusHoldState == AutofocusHoldState.IDLE && status?.recording != true &&
+        !mediaLibraryLoading && !captureReviewLoading && !mediaPreviewLoading && mediaPreviewItem == null &&
+        activeMediaDownloadName == null && activeMediaUploadName == null && mediaBatchProgress == null &&
+        mediaSaveFeedback.values.none { it.isPending } && !cameraImportPreparing
+
+internal fun CameraUiState.canEnableForegroundJpegImport(platformSupported: Boolean): Boolean =
+    platformSupported && !foregroundImportCleanupUnconfirmed && !foregroundImportOwnerActive &&
+        connected && !previewMode && transport == CameraTransport.CCAPI_NETWORK &&
+        supports(CameraFeature.MEDIA_BROWSER) && supports(CameraFeature.MEDIA_DOWNLOAD) &&
+        foregroundJpegImport.phase in setOf(ForegroundImportPhase.OFF, ForegroundImportPhase.STOPPED) &&
+        foregroundImportCameraIdle()
 
 internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
     shutterReleaseUnconfirmed -> this
