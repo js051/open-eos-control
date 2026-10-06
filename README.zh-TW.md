@@ -4,11 +4,11 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-目前的開發預覽版為 [v0.11.0](docs/releases/v0.11.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
+目前的開發預覽版為 [v0.12.0](docs/releases/v0.12.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
 
-本次 minor 預覽版串接 Android 拍攝確認、最近素材、全螢幕預覽與原檔保存，直接在預覽內顯示進度、取消、保存位置及明確重試。同時改善 Android、Desktop Bridge／PC 與 iOS 的部分命令及 Bulb 停止恢復路徑，並修正 Android API 26–32 的 USB host 已接收影像預覽讀取相容性。Camera Import artifact 1.1.0／wire 1.0 維持不變。
+本次 minor 預覽版新增 Android 已載入素材的日期、評分與已觀察資料夾挑選，離線查看最近 100 筆實際開始的原檔下載，並串接連線恢復與停錄影片查找。改善 SAF 取消清理、保留未確認清理警告，並修正離線與連線預覽導航。USB 資料夾來源只使用已取得的 metadata，不推測實體卡槽。Camera Import artifact 1.1.0／wire 1.0 維持不變。
 
-關閉仍在載入的 display 預覽仍不會取消該 display HTTP 請求；媒體操作可能持續忙碌直到讀取結束，較晚的失敗也可能成為全域錯誤。這個已知限制與取消原檔保存是不同操作。新增證據來自自動測試／fixture，不能當成真機或光學合焦驗證，也不代表完整 Camera Connect 功能已完成。精確證據、恢復方式與其餘限制請見[發行說明](docs/releases/v0.11.0.md)。
+關閉仍在載入的 display 預覽仍不會取消該 display HTTP 請求；媒體操作可能持續忙碌直到讀取結束，較晚的失敗也可能成為全域錯誤。這個已知限制與取消原檔保存是不同操作。篩選不代表全卡已掃描，下載紀錄也不驗證檔案仍存在或來源 checksum。新增證據來自自動測試／fixture；實體相機、手機、USB 與第三方文件提供者驗證仍待完成。升級注意、最終證據與其餘限制請見[發行說明](docs/releases/v0.12.0.md)。
 
 這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已有標準 USB/PTP backend 與依能力開放的 Canon EOS 控制。Android 與 iOS 現在都能透過同一套 camera contract 使用可執行的 Desktop Bridge，控制以 USB 接在電腦上的相機。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI／Desktop Bridge client 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
 
