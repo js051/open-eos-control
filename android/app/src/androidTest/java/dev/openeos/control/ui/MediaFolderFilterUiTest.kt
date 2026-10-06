@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -59,9 +60,38 @@ class MediaFolderFilterUiTest {
                 assertTrue(model.uiState.value.previewMode)
                 assertNull(model.uiState.value.transport)
             }
+            compose.awaitForegroundActivityWindow(compose.activity)
+            compose.onNodeWithContentDescription(text(R.string.preview_media, "R6M3_0001.CR3"))
+                .assertIsDisplayed().performTouchInput { click(center) }
+            compose.onNodeWithTag("media-viewer-content").assertIsDisplayed()
+            compose.onNodeWithText(text(R.string.offline_media_preview_placeholder)).assertIsDisplayed()
+            compose.onNodeWithContentDescription(text(R.string.download_media, "R6M3_0001.CR3")).assertDoesNotExist()
+            compose.onNodeWithContentDescription(text(R.string.previous_media)).assertDoesNotExist()
+            compose.onNodeWithContentDescription(text(R.string.next_media)).performTouchInput { click(center) }
+            compose.runOnIdle { assertEquals("preview-002", model.uiState.value.mediaPreviewItem?.id) }
+            compose.onNodeWithContentDescription(text(R.string.next_media)).assertDoesNotExist()
+            compose.onNodeWithContentDescription(text(R.string.previous_media)).performTouchInput { click(center) }
+            compose.runOnIdle { assertEquals("preview-001", model.uiState.value.mediaPreviewItem?.id) }
+            compose.onNodeWithContentDescription(text(R.string.previous_media)).assertDoesNotExist()
+            compose.pressFocusedDialogBack(compose.activity, "media-viewer-content")
+            compose.runOnIdle { assertNull(model.uiState.value.mediaPreviewItem) }
             chooseFolder("media-folder-unknown")
             assertGalleryIdsPresent("preview-003")
             assertGalleryIdsAbsent("preview-001", "preview-002")
+            compose.awaitForegroundActivityWindow(compose.activity)
+            compose.onNodeWithContentDescription(text(R.string.preview_media, "R6M3_0002.MP4"))
+                .assertIsDisplayed().performTouchInput { click(center) }
+            compose.onNodeWithText(text(R.string.offline_media_preview_placeholder)).assertIsDisplayed()
+            compose.onNodeWithContentDescription(text(R.string.download_media, "R6M3_0002.MP4")).assertDoesNotExist()
+            compose.onNodeWithContentDescription(text(R.string.previous_media)).assertDoesNotExist()
+            compose.onNodeWithContentDescription(text(R.string.next_media)).assertDoesNotExist()
+            compose.runOnIdle {
+                assertNull(model.uiState.value.mediaStreamSource)
+                assertNull(model.uiState.value.mediaPreviewBytes)
+                assertTrue(model.uiState.value.mediaSaveFeedback.isEmpty())
+            }
+            compose.onNodeWithContentDescription(text(R.string.close_media_preview)).performTouchInput { click(center) }
+            compose.onNodeWithTag("media-viewer-content").assertDoesNotExist()
             chooseFolder("media-folder-all")
             assertGalleryIdsPresent("preview-001", "preview-002", "preview-003")
             compose.runOnIdle {
@@ -73,6 +103,29 @@ class MediaFolderFilterUiTest {
             compose.runOnIdle { store.clear() }
             compose.waitUntil(15_000) { scope.isCompleted }
         }
+    }
+
+    @Test fun busyOfflineAndUnsupportedLiveMediaKeepPreviewEntryDisabled() {
+        val initial = CameraUiState().withOfflinePreview()
+        val image = initial.mediaItems.first()
+        val state = mutableStateOf(initial.copy(uiMode = UiMode.MEDIA, mediaItems = listOf(image),
+            pendingOperations = setOf(CameraOperation.MEDIA)))
+        var previews = 0
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            MediaScreen(state.value, connectionRecoveryTestActions().copy(openMediaPreview = { previews++ }))
+        } }
+        compose.awaitForegroundActivityWindow(compose.activity)
+        compose.onNodeWithContentDescription(text(R.string.select_media_item, image.name))
+            .assertIsDisplayed().assertHasNoClickAction().performTouchInput { click(center) }
+        compose.runOnIdle { state.value = state.value.copy(previewMode = false, pendingOperations = emptySet()) }
+        // The offline capability fixture does not advertise real MEDIA_PREVIEW support.
+        compose.onNodeWithContentDescription(text(R.string.select_media_item, image.name))
+            .assertIsDisplayed().assertHasNoClickAction().performTouchInput { click(center) }
+        val video = initial.mediaItems.single { it.isVideo }.copy(streamAvailable = false)
+        compose.runOnIdle { state.value = state.value.copy(mediaItems = listOf(video)) }
+        compose.onNodeWithContentDescription(text(R.string.select_media_item, video.name))
+            .assertIsDisplayed().assertHasNoClickAction().performTouchInput { click(center) }
+        compose.runOnIdle { assertEquals(0, previews) }
     }
 
     @Test fun folderFilteringKeepsHiddenSelectionAndBatchUsesExactLoadedIds() {
