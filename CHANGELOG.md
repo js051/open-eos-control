@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android USB PTP: derive optional loaded-media folders only from already observed StorageID and ObjectInfo parent associations, without folder lookups or slot guesses. Preserve partial-list provenance, isolate overlapping listings and reject late card-media results or stream reads after backend session replacement. Automated protocol/lifecycle evidence and the remaining storage-state limitation are recorded in the [USB folder validation notes](docs/validation/android-usb-observed-folders-2026-10-06.zh-TW.md); no new physical-device compatibility claim is added.
+
 - Android: use the SAF document deletion contract for interrupted originals and retain ownership from accepted file creation through cancellation cleanup. Stop automatic retries when cleanup is unconfirmed, preserve that risk in download history, and keep unstarted batch items distinct from the active partial file. See the [SAF cleanup validation notes](docs/validation/android-saf-cleanup-2026-10-05.zh-TW.md) for exact verification status; no process-death recovery or third-party provider compatibility is claimed.
 
 - Android and Desktop Bridge: expose optional, observed camera-folder provenance and let Android filter already loaded media by folder alongside date, rating and type. Keep unknown folders browseable, hidden selections intact and partial-library limits visible; never infer host paths, camera slots or recording-directory control. See the [folder journey validation notes](docs/validation/android-media-folder-filter-2026-10-05.zh-TW.md) for verification status and device limits.

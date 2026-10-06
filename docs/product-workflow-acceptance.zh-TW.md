@@ -14,7 +14,7 @@
 
 以上閉合的是各批明列的停止恢復與 Android 拍攝／保存範圍，不構成所有命令、gphoto2／EDSDK 或其他平台旅程的同等保證。真相機快門、光學對焦、實體手機／SAF provider、跨程序續傳與跨機型相容性仍依各自證據判定；沒有新增物理裝置驗證或發版。
 
-## Android 媒體與控制旅程進度（2026-10-05 UTC）
+## Android 媒體與控制旅程進度（2026-10-05 UTC，合併前快照）
 
 PR #205 將日期／評分挑片與最近 100 筆原檔下載紀錄合為一個媒體批次：原檔成功關閉／發佈後隔離取消與紀錄故障，重啟未完成項目顯示結果未確認。精確 head `1c672d5f18d084576fba23c2ffff518e5f4749d6` 的 [CI 37302730469](https://github.com/js051/open-eos-control/actions/runs/37302730469) 已全數通過適用 gate，API34／36 原始 XML 各264/264、0 failure/error/skip。這是 `PR ready` 證據，PR 仍為 draft／未合併；本地725 JVM與各階段測試修正另見[媒體 CI 紀錄](validation/android-media-journey-device-ci-2026-10-05.zh-TW.md)及 PR 摘要。歷史失敗保留，不能把所有輪次相加。
 
@@ -25,6 +25,18 @@ PR #205 將日期／評分挑片與最近 100 筆原檔下載紀錄合為一個�
 SAF 保存接續P2原檔目的地旅程：已重現並修正一般resolver刪除不符DocumentsProvider契約、拒刪後自動重試累積輸出，以及取消時遺失清理風險。輸出所有權定向26例JVM已通過，實際DocumentsUI／獨立test APK提供者已編譯；整合#207後同樹808 JVM、Lint與兩APK通過；裝置驗收尚待完成。詳見[SAF清理驗收](validation/android-saf-cleanup-2026-10-05.zh-TW.md)，不將編譯當作跨UID執行或實體provider證據。
 
 上述均是有界增量：不代表跨程序續傳、完整佇列恢復、下載去重、全卡素材因果或跨平台完成；真正相機／手機網路／USB／外部 SAF provider 尚待各自驗證。下方矩陣仍保留原始稽核基準，日期／評分與下載紀錄缺口的最新狀態以上述 #205 為準。
+
+## 主線收斂與 USB 資料夾候選（2026-10-06 UTC）
+
+上節保留合併前的階段證據；目前已接受的主線依序包含：
+
+- #205：main `dd9ddf9c4b4004efbb2505dd6fe0cf0267abae71`，[Main acceptance 37359620393](https://github.com/js051/open-eos-control/actions/runs/37359620393) 成功。
+- #206：精確來源 `f6d11629633b254bed487611bb29bbeec583b084` 的 [CI 37366695122 attempt2](https://github.com/js051/open-eos-control/actions/runs/37366695122) 成功，API 34／36 各 278/278、0 failure/error/skip；main `23da164b69be46ed3ef3e27001fd7156ab91086d` 的 [Main acceptance 37381268253](https://github.com/js051/open-eos-control/actions/runs/37381268253) 成功。前一 attempt 未取得 hosted runner，未執行產品測試，沒有計入通過數。
+- #207：精確來源 `782f64300c13c3313f1a7e485215fd79ab42c61c` 的 [CI 37381716001](https://github.com/js051/open-eos-control/actions/runs/37381716001) 成功，API 34／36 各 283/283、0 failure/error/skip；main `7e4e7cc869e745c3a6e47501f2990714112a8ac7` 的 [Main acceptance 37385302263](https://github.com/js051/open-eos-control/actions/runs/37385302263) 成功。每次 squash 的 tree 都與各自已驗來源一致，沒有跨平台或跨來源加總。
+
+下一個獨立 Android 候選補 USB 已載入資料夾來源：利用既有 ObjectInfo，不補查父節點；缺鏈仍未知，StorageID 不被當作實體卡槽。資料夾與 media cache 以 listing generation 隔離，媒體成功結果及 stream 以原 session 隔離。[新驗收紀錄](validation/android-usb-observed-folders-2026-10-06.zh-TW.md) 保留基準反例、129 項定向及同來源完整814項 JVM 通過結果，兩個數字不相加；Lint／APK與精確 PR gate 尚待完成。這是同 backend lifecycle 契約驗證；App 正常 reconnect 每次建立新 backend，不能將合成反例說成已重現 App 一般重連故障。
+
+此候選仍未取得自己的精確 PR／main acceptance；較廣的 storageSnapshot／storageError 隔離限制保留。SAF 清理批次 #208 亦未進入本節接受的主線，不能由 #205～#207 或 USB 候選的結果替代其驗收。最新已發布版本仍為 v0.11.0 Development Preview，沒有新增實機驗證或版本提升。
 
 ## 結論
 
