@@ -111,8 +111,11 @@ public actor DesktopBridgeClient {
     private var initializationCancelled = false
     private var isClosing = false
     private var closeWaiters: [CheckedContinuation<CameraShutterReleaseState, Never>] = []
+    private var completedCloseState = CameraShutterReleaseState.idle
     private var bulbOperationInFlight = false
-    private var bulbOperationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var bulbStartTask: Task<CameraStatus, Error>?
+    private var bulbStopTask: Task<CameraStatus, Error>?
+    private var bulbStopID: UUID?
     private var shutterRelease: ShutterReleaseObligation?
     private var ownsShutterStatus = false
     private var releaseRevision = UUID()
@@ -183,6 +186,9 @@ public actor DesktopBridgeClient {
     public func initialize() async throws {
         guard !isClosing else { throw DesktopBridgeError.sessionChanged }
         guard sessionID == nil else { return }
+        guard bulbStartTask == nil, bulbStopTask == nil, !bulbOperationInFlight else {
+            throw DesktopBridgeError.sessionChanged
+        }
         guard initializationToken == nil else { throw DesktopBridgeError.sessionChanged }
         let token = UUID()
         initializationToken = token
@@ -207,6 +213,7 @@ public actor DesktopBridgeClient {
             throw DesktopBridgeError.sessionChanged
         }
         sessionGeneration = UUID()
+        completedCloseState = .idle
         releaseRevision = UUID()
         shutterRelease = nil
         ownsShutterStatus = false
@@ -232,13 +239,17 @@ public actor DesktopBridgeClient {
             return await withCheckedContinuation { closeWaiters.append($0) }
         }
         initializationCancelled = true
-        guard let id = sessionID else { return .idle }
+        guard let id = sessionID else { return completedCloseState }
         isClosing = true
-        // A transport may ignore cancellation. Do not race DELETE against an
-        // already dispatched full_press and then let that start arrive afterward.
-        if bulbOperationInFlight {
-            await withCheckedContinuation { bulbOperationWaiters.append($0) }
-        }
+        // Cancel only our pending Start. A transport may ignore cancellation,
+        // so settlement must still precede the original session's DELETE.
+        // Stop can be reserved while it awaits Start, before it sets the wire
+        // operation flag. Retire both owned tasks before DELETE or reinitialize.
+        let pendingStart = bulbStartTask
+        let pendingStop = bulbStopTask
+        pendingStart?.cancel()
+        if let pendingStart { _ = await pendingStart.result }
+        if let pendingStop { _ = await pendingStop.result }
         await stopEventPolling()
         var result = CameraShutterReleaseState.idle
         do {
@@ -265,6 +276,7 @@ public actor DesktopBridgeClient {
         ownsShutterStatus = false
         eventPollingSupported = false
         liveViewMagnifications = []
+        completedCloseState = result
         isClosing = false
         let waiters = closeWaiters
         closeWaiters.removeAll()
@@ -519,7 +531,7 @@ public actor DesktopBridgeClient {
     public func startBulbExposure() async throws -> CameraStatus {
         try Task.checkCancellation()
         guard !isClosing else { throw DesktopBridgeError.sessionChanged }
-        guard shutterRelease == nil, !bulbOperationInFlight else {
+        guard shutterRelease == nil, !bulbOperationInFlight, bulbStopTask == nil else {
             throw DesktopBridgeError.shutterReleaseUnconfirmed
         }
         let startURL = try sessionEndpoint(["bulb", "start"])
@@ -529,10 +541,25 @@ public actor DesktopBridgeClient {
         ownsShutterStatus = true
         releaseRevision = UUID()
         bulbOperationInFlight = true
-        defer { finishBulbOperation() }
+        let task = Task { try await self.performBulbStart(url: startURL, generation: generation) }
+        bulbStartTask = task
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performBulbStart(url: URL, generation: UUID) async throws -> CameraStatus {
+        defer {
+            bulbStartTask = nil
+            finishBulbOperation()
+        }
         do {
+            try Task.checkCancellation()
+            guard !isClosing, sessionGeneration == generation else { throw DesktopBridgeError.sessionChanged }
             let body = try await requestJSON(
-                url: startURL, method: "POST", payload: [:], shutterOperation: true
+                url: url, method: "POST", payload: [:], shutterOperation: true
             )
             try Task.checkCancellation()
             guard sessionGeneration == generation else { throw DesktopBridgeError.sessionChanged }
@@ -558,23 +585,73 @@ public actor DesktopBridgeClient {
     public func stopBulbExposure() async throws -> CameraStatus {
         try Task.checkCancellation()
         guard !isClosing else { throw DesktopBridgeError.sessionChanged }
-        guard !bulbOperationInFlight else { throw DesktopBridgeError.shutterReleaseUnconfirmed }
         let generation = sessionGeneration
+        if let bulbStopTask {
+            let status = try await bulbStopTask.value
+            guard sessionGeneration == generation, !isClosing else { throw DesktopBridgeError.sessionChanged }
+            return status
+        }
+        // Capture immutable ownership before the first suspension. A delayed Stop
+        // must never reconstruct its target from a replacement session.
+        let id = UUID()
         let stopURL = try shutterRelease?.stopURL ?? sessionEndpoint(["bulb", "stop"])
+        let pendingStart = bulbStartTask
+        let acceptsLegacyStop = shutterRelease?.acceptsLegacyStop ?? true
+        bulbStopID = id
+        let task = Task {
+            try await self.performBulbStop(
+                id: id, generation: generation, stopURL: stopURL,
+                pendingStart: pendingStart, acceptsLegacyStop: acceptsLegacyStop
+            )
+        }
+        bulbStopTask = task
+        let status = try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        guard sessionGeneration == generation, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        return status
+    }
+
+    private func performBulbStop(
+        id: UUID, generation: UUID, stopURL: URL,
+        pendingStart: Task<CameraStatus, Error>?, acceptsLegacyStop: Bool
+    ) async throws -> CameraStatus {
+        var ownsOperation = false
+        defer {
+            // The worker retires its reservation, not a later-resuming caller.
+            if sessionGeneration == generation, bulbStopID == id {
+                if ownsOperation { finishBulbOperation() }
+                bulbStopTask = nil
+                bulbStopID = nil
+            }
+        }
+        guard sessionGeneration == generation, bulbStopID == id, !isClosing else {
+            throw DesktopBridgeError.sessionChanged
+        }
+        if let pendingStart {
+            pendingStart.cancel()
+            _ = await pendingStart.result
+            guard sessionGeneration == generation, bulbStopID == id, !isClosing else {
+                throw DesktopBridgeError.sessionChanged
+            }
+        }
+        try Task.checkCancellation()
+        guard !bulbOperationInFlight else { throw DesktopBridgeError.shutterReleaseUnconfirmed }
         // A normal legacy Stop without an earlier local Start remains usable.
         // Once any ambiguity occurs, only the new explicit proof may unlock it.
-        let acceptsLegacyStop = shutterRelease?.acceptsLegacyStop ?? true
         if shutterRelease == nil { shutterRelease = ShutterReleaseObligation(stopURL: stopURL) }
         ownsShutterStatus = true
         markShutterReleaseUnconfirmed(stopCompleted: false)
         bulbOperationInFlight = true
-        defer { finishBulbOperation() }
+        ownsOperation = true
         do {
             let body = try await requestJSON(
                 url: stopURL, method: "POST", payload: [:], shutterOperation: true
             )
             try Task.checkCancellation()
-            guard sessionGeneration == generation else { throw DesktopBridgeError.sessionChanged }
+            guard sessionGeneration == generation, bulbStopID == id else { throw DesktopBridgeError.sessionChanged }
             let legacyAcknowledgement = acceptsLegacyStop
                 && body["shutterReleaseUnconfirmed"] == nil
                 && Self.strictBool(body["bulbExposureActive"]) == false
@@ -586,7 +663,7 @@ public actor DesktopBridgeClient {
             guard !isClosing else { throw DesktopBridgeError.sessionChanged }
             return parseStatus(body)
         } catch {
-            if sessionGeneration == generation { markShutterReleaseUnconfirmed(stopCompleted: true) }
+            if sessionGeneration == generation, bulbStopID == id { markShutterReleaseUnconfirmed(stopCompleted: true) }
             throw error
         }
     }
@@ -1113,9 +1190,6 @@ public actor DesktopBridgeClient {
 
     private func finishBulbOperation() {
         bulbOperationInFlight = false
-        let waiters = bulbOperationWaiters
-        bulbOperationWaiters.removeAll()
-        waiters.forEach { $0.resume() }
     }
 
     private func markShutterReleaseUnconfirmed(stopCompleted: Bool) {

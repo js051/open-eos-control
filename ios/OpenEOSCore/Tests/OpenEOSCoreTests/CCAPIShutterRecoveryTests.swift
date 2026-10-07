@@ -179,7 +179,7 @@ final class CCAPIShutterRecoveryTests: XCTestCase {
         XCTAssertEqual(pendingRequests.shutterActions, ["full_press"])
         gate.open()
 
-        _ = try await start.value
+        await expectFailure { try await start.value }
         _ = try await stop.value
         let requests = await transport.requests()
         XCTAssertEqual(requests.shutterActions, ["full_press", "release"])

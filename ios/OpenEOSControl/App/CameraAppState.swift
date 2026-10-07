@@ -117,6 +117,8 @@ final class CameraAppState: ObservableObject {
     private let sessionFactory: (@MainActor () throws -> CameraSession)?
     private var sessionGeneration = UUID()
     private var disconnectTask: Task<Void, Never>?
+    private var pendingBulbStartID: UUID?
+    private var pendingBulbStartTask: Task<CameraStatus, Error>?
     private var applicationActive = true
     private var acknowledgedPreviousReleaseWarnings = Set<UUID>()
     private var liveViewTask: Task<Void, Never>?
@@ -152,7 +154,8 @@ final class CameraAppState: ObservableObject {
     var shutterReleaseUnconfirmed: Bool { shutterReleaseState.releaseUnconfirmed }
     var previousShutterReleaseUnconfirmed: Bool { !previousShutterReleaseWarnings.isEmpty }
     var canRetryShutterRelease: Bool {
-        (session != nil || isPreview) && shutterReleaseRequired && !busyOperations.contains(.capture)
+        (session != nil || isPreview) && shutterReleaseRequired
+            && (!busyOperations.contains(.capture) || pendingBulbStartID != nil)
     }
     var bulbMode: Bool {
         guard captureMode == .photo else { return false }
@@ -477,6 +480,9 @@ final class CameraAppState: ObservableObject {
 
     private func prepareDisconnect() -> CameraSession? {
         sessionGeneration = UUID()
+        pendingBulbStartTask?.cancel()
+        pendingBulbStartTask = nil
+        pendingBulbStartID = nil
         operationRevision &+= 1
         shutterReleaseState = .idle
         stopLiveViewLoop()
@@ -840,7 +846,17 @@ final class CameraAppState: ObservableObject {
         guard bulbMode, supports(.bulbExposure), stillCaptureTemperatureAllowed,
               busyOperations.isEmpty, begin(.capture) else { return }
         let generation = sessionGeneration
-        defer { end(.capture, generation: generation) }
+        let startID = UUID()
+        pendingBulbStartID = startID
+        defer {
+            // Stop takes over capture ownership before cancelling the pending Start.
+            // Its cleanup, or a replacement connection, must not be unlocked here.
+            if pendingBulbStartID == startID {
+                pendingBulbStartID = nil
+                pendingBulbStartTask = nil
+                end(.capture, generation: generation)
+            }
+        }
         if isPreview {
             shutterReleaseState = CameraShutterReleaseState(
                 releaseRequired: true, releaseUnconfirmed: false, bulbExposureActive: true
@@ -854,16 +870,22 @@ final class CameraAppState: ObservableObject {
             releaseRequired: true, releaseUnconfirmed: true, bulbExposureActive: nil
         )
         pauseLiveViewForBulb()
+        let startTask = Task { try await session.startBulbExposure() }
+        pendingBulbStartTask = startTask
         do {
-            let status = try await session.startBulbExposure()
+            let status = try await withTaskCancellationHandler {
+                try await startTask.value
+            } onCancel: {
+                startTask.cancel()
+            }
             let release = await session.shutterReleaseState()
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, pendingBulbStartID == startID else { return }
             applyShutterReleaseState(release)
             updateStatus(status.withShutterReleaseState(release))
             lastError = nil
         } catch {
             let release = await session.shutterReleaseState()
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, pendingBulbStartID == startID else { return }
             applyShutterReleaseState(release)
             if !release.releaseRequired {
                 resumeLiveViewAfterBulb(session: session, generation: generation)
@@ -876,6 +898,9 @@ final class CameraAppState: ObservableObject {
         guard canRetryShutterRelease else { return }
         let completedKnownExposure = bulbExposureActive && !shutterReleaseUnconfirmed
         let generation = sessionGeneration
+        let pendingStart = pendingBulbStartTask
+        pendingBulbStartTask = nil
+        pendingBulbStartID = nil
         busyOperations.insert(.capture)
         operationRevision &+= 1
         defer { end(.capture, generation: generation) }
@@ -887,7 +912,7 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         pauseLiveViewForBulb()
         do {
-            try await session.retryShutterRelease()
+            try await session.retryShutterRelease(cancelling: pendingStart)
             guard generation == sessionGeneration else { return }
             // A release ACK is authoritative, even if the subsequent status GET fails.
             applyShutterReleaseState(.idle)

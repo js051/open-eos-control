@@ -406,9 +406,11 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         await transport.enqueueHold(method: "POST", path: stopPath, key: "stop")
         let first = Task { try await client.retryShutterRelease() }
         try await waitForHold("stop", on: transport)
-        await assertThrows { try await client.retryShutterRelease() }
+        let second = Task { try await client.retryShutterRelease() }
+        await Task.yield()
         await transport.resume("stop", body: released)
         try await first.value
+        try await second.value
         let requests = await transport.requests()
         XCTAssertEqual(requests.filter { $0.path == stopPath }.count, 1)
         await assertIdle(client)
@@ -436,6 +438,127 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         let requests = await transport.requests()
         XCTAssertEqual(requests.last?.method, "DELETE")
         XCTAssertEqual(requests.last?.path, "/v1/session/session-a")
+    }
+
+    func testCancelledPendingStartCloseKeepsCommandsInOriginalSessionAcrossReinitialize() async throws {
+        // Behavioral coverage for both reused and different server IDs. The held
+        // transport proves ordering before settlement, not a caller scheduling race.
+        for replacementID in ["session-b", "session-a"] {
+            let transport = BridgeShutterTransport()
+            let client = try await initializedClient(transport)
+            await transport.enqueueHold(method: "POST", path: startPath, key: "old-start")
+            let start = Task { try await client.startBulbExposure() }
+            try await waitForHold("old-start", on: transport)
+            let stop = Task { try await client.stopBulbExposure() }
+            try await waitForHoldCancellation("old-start", on: transport)
+            let startStillHeld = await transport.isHeld("old-start")
+            XCTAssertTrue(startStillHeld, "Cancellation must not silently settle the transport gate")
+            // DELETE responds immediately after Start settles; no extra gate delays
+            // retirement or gives old caller continuations a manufactured window.
+            await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
+            await enqueueInitialization(transport, id: replacementID)
+            let replacement = Task {
+                let closed = await client.closeWithShutterReleaseState()
+                try await client.initialize()
+                return closed
+            }
+            try await waitForClosing(client)
+            await assertThrows { try await client.initialize() }
+            let beforeStartSettles = await transport.requests()
+            XCTAssertFalse(beforeStartSettles.contains { $0.method == "DELETE" || $0.path.hasSuffix("/bulb/stop") })
+            XCTAssertEqual(beforeStartSettles.filter { $0.method != "GET" }.map { "\($0.method) \($0.path)" }, [
+                "POST /v1/session", "POST \(startPath)",
+            ])
+            await transport.resume("old-start", body: active)
+            try await waitForRequest(method: "POST", path: "/v1/session", count: 2, on: transport)
+            let closed = try await replacement.value
+            XCTAssertEqual(closed, .idle)
+            await assertThrows { _ = try await start.value }
+            do {
+                _ = try await stop.value
+                XCTFail("A Stop waiting for Start must be invalidated by Close")
+            } catch {
+                XCTAssertEqual(error as? DesktopBridgeError, .sessionChanged)
+            }
+
+            let replacementStart = "/v1/session/\(replacementID)/bulb/start"
+            let replacementStop = "/v1/session/\(replacementID)/bulb/stop"
+            await transport.enqueueJSON(method: "POST", path: replacementStart, body: active)
+            _ = try await client.startBulbExposure()
+            await transport.enqueueHold(method: "POST", path: replacementStop, key: "new-stop")
+            let newStop = Task { try await client.stopBulbExposure() }
+            try await waitForHold("new-stop", on: transport)
+            await assertThrows { _ = try await client.startBulbExposure() }
+            let whileReplacementStops = await transport.requests()
+            XCTAssertEqual(whileReplacementStops.filter { $0.path.hasSuffix("/bulb/stop") }.map(\.path), [replacementStop])
+            await transport.resume("new-stop", body: released)
+            _ = try await newStop.value
+            await assertIdle(client)
+            let commands = await transport.requests().filter { $0.method != "GET" }.map { "\($0.method) \($0.path)" }
+            XCTAssertEqual(commands, [
+                "POST /v1/session", "POST \(startPath)", "DELETE /v1/session/session-a",
+                "POST /v1/session", "POST \(replacementStart)", "POST \(replacementStop)",
+            ])
+        }
+    }
+
+    func testHeldStopResponseCoalescesSecondStopAndBlocksCloseUntilSettlement() async throws {
+        let transport = BridgeShutterTransport()
+        let client = try await initializedClient(transport)
+        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
+        _ = try await client.startBulbExposure()
+        await transport.enqueueHold(method: "POST", path: stopPath, key: "old-stop")
+        let firstStop = Task { try await client.stopBulbExposure() }
+        try await waitForHold("old-stop", on: transport)
+        let secondEntered = expectation(description: "second Stop enters the client while its wire response is held")
+        let secondStop = Task {
+            try await client.recoveryStop(onEntry: { secondEntered.fulfill() })
+        }
+        await fulfillment(of: [secondEntered], timeout: 3)
+        let beforeClose = await transport.requests()
+        XCTAssertEqual(beforeClose.filter { $0.path == stopPath }.count, 1)
+        XCTAssertFalse(beforeClose.contains { $0.method == "DELETE" })
+
+        await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
+        await enqueueInitialization(transport, id: "session-b")
+        let replacement = Task {
+            let closed = await client.closeWithShutterReleaseState()
+            try await client.initialize()
+            return closed
+        }
+        try await waitForClosing(client)
+        await assertThrows { try await client.initialize() }
+        await assertThrows { _ = try await client.startBulbExposure() }
+        let stopStillHeld = await transport.isHeld("old-stop")
+        XCTAssertTrue(stopStillHeld)
+        let beforeStopSettles = await transport.requests()
+        XCTAssertEqual(beforeStopSettles.filter { $0.path == stopPath }.count, 1, "A second Stop shares the held release")
+        XCTAssertFalse(beforeStopSettles.contains { $0.method == "DELETE" }, "Close must await the actual Stop response")
+        XCTAssertEqual(beforeStopSettles.filter { $0.method != "GET" }.map { "\($0.method) \($0.path)" }, [
+            "POST /v1/session", "POST \(startPath)", "POST \(stopPath)",
+        ])
+
+        await transport.resume("old-stop", body: released)
+        try await waitForRequest(method: "POST", path: "/v1/session", count: 2, on: transport)
+        let closed = try await replacement.value
+        XCTAssertEqual(closed, .idle)
+        await assertThrows { _ = try await firstStop.value }
+        await assertThrows { _ = try await secondStop.value }
+        await assertIdle(client)
+        let replacementStart = "/v1/session/session-b/bulb/start"
+        let replacementStop = "/v1/session/session-b/bulb/stop"
+        await transport.enqueueJSON(method: "POST", path: replacementStart, body: active)
+        let started = try await client.startBulbExposure()
+        XCTAssertEqual(started.bulbExposureActive, true)
+        await transport.enqueueJSON(method: "POST", path: replacementStop, body: released)
+        let stopped = try await client.stopBulbExposure()
+        XCTAssertEqual(stopped.bulbExposureActive, false)
+        await assertIdle(client)
+        let commands = await transport.requests().filter { $0.method != "GET" }.map { "\($0.method) \($0.path)" }
+        XCTAssertEqual(commands, [
+            "POST /v1/session", "POST \(startPath)", "POST \(stopPath)", "DELETE /v1/session/session-a",
+            "POST /v1/session", "POST \(replacementStart)", "POST \(replacementStop)",
+        ])
     }
 
     func testCloseAfterInFlightStopAcknowledgementDoesNotRestoreAnObligation() async throws {
@@ -468,6 +591,8 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         XCTAssertFalse(warning.releaseRequired)
         XCTAssertTrue(warning.releaseUnconfirmed)
         await assertIdle(client)
+        let repeatedClose = await client.closeWithShutterReleaseState()
+        XCTAssertEqual(repeatedClose, warning, "Repeated close must retain the original cleanup outcome")
         await enqueueInitialization(transport, id: "session-b")
         try await client.initialize()
         try await client.retryShutterRelease()
@@ -582,6 +707,18 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         throw URLError(.timedOut)
     }
 
+    private func waitForRequest(
+        method: String, path: String, count: Int, on transport: BridgeShutterTransport
+    ) async throws {
+        for _ in 0..<500 {
+            let requests = await transport.requests()
+            if requests.filter({ $0.method == method && $0.path == path }).count >= count { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Transport did not receive \(count) requests for \(method) \(path)")
+        throw URLError(.timedOut)
+    }
+
     private func waitForClosing(_ client: DesktopBridgeClient) async throws {
         for _ in 0..<500 {
             do { try await client.initialize() }
@@ -590,6 +727,23 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         }
         XCTFail("Close did not begin")
         throw URLError(.timedOut)
+    }
+
+    private func waitForHoldCancellation(_ key: String, on transport: BridgeShutterTransport) async throws {
+        for _ in 0..<500 {
+            if await transport.wasHoldCancelled(key) { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Stop did not cancel the owned pending Start")
+        throw URLError(.timedOut)
+    }
+}
+
+// Test-only actor entry signal; the production client has no synchronization hook.
+private extension DesktopBridgeClient {
+    func recoveryStop(onEntry: @Sendable () -> Void) async throws -> CameraStatus {
+        onEntry()
+        return try await stopBulbExposure()
     }
 }
 
@@ -610,6 +764,7 @@ private actor BridgeShutterTransport: CameraHTTPTransport {
     private var recorded: [RecordedRequest] = []
     private var cancelledSends = 0
     private var held: [String: CheckedContinuation<CameraHTTPResponse, Error>] = [:]
+    private var cancelledHolds = Set<String>()
 
     func enqueueJSON(method: String = "GET", path: String, status: Int = 200, body: String) {
         stubs.append(Stub(
@@ -627,6 +782,8 @@ private actor BridgeShutterTransport: CameraHTTPTransport {
     }
 
     func isHeld(_ key: String) -> Bool { held[key] != nil }
+    func wasHoldCancelled(_ key: String) -> Bool { cancelledHolds.contains(key) }
+    private func recordHoldCancellation(_ key: String) { cancelledHolds.insert(key) }
 
     func resume(_ key: String, status: Int = 200, body: String) {
         held.removeValue(forKey: key)?.resume(returning: CameraHTTPResponse(statusCode: status, body: Data(body.utf8)))
@@ -657,8 +814,13 @@ private actor BridgeShutterTransport: CameraHTTPTransport {
         case .response(let response): return response
         case .failure: throw URLError(.networkConnectionLost)
         case .hold(let key):
-            // Deliberately ignore cancellation to exercise late transport replies.
-            return try await withCheckedThrowingContinuation { held[key] = $0 }
+            // Observe cancellation but deliberately withhold settlement until the
+            // test supplies a late response. Cancellation never opens this gate.
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { held[key] = $0 }
+            } onCancel: {
+                Task { await self.recordHoldCancellation(key) }
+            }
         }
     }
 
