@@ -376,9 +376,9 @@ class SavedJpegReceiverInstrumentedTest {
         val destroyedForRecreation = AtomicBoolean()
         val recreatedHost = AtomicReference<ComponentActivity>()
         val recreatedStopped = CountDownLatch(1)
-        val recreatedResumed = CountDownLatch(1)
+        val resumedAfterRelease = CountDownLatch(1)
         val releasingReceiver = AtomicBoolean()
-        val resumedWhileHeld = AtomicBoolean()
+        val resumedAfterSettlingWhileHeld = AtomicBoolean()
         val observer = ActivityLifecycleCallback { activity, stage ->
             if (activity === previous) {
                 if (stage == Stage.STOPPED) previousStopped.countDown()
@@ -388,8 +388,11 @@ class SavedJpegReceiverInstrumentedTest {
                 if (activity === recreatedHost.get()) {
                     if (stage == Stage.STOPPED) recreatedStopped.countDown()
                     if (stage == Stage.RESUMED) {
-                        if (!releasingReceiver.get()) resumedWhileHeld.set(true)
-                        recreatedResumed.countDown()
+                        // Relaunch may traverse RESUMED before returning to the original STOPPED
+                        // state. Only a later resume violates the settled background interval;
+                        // the completion latch must observe a fresh event after receiver release.
+                        if (releasingReceiver.get()) resumedAfterRelease.countDown()
+                        else if (recreatedStopped.count == 0L) resumedAfterSettlingWhileHeld.set(true)
                     }
                 }
             }
@@ -406,7 +409,7 @@ class SavedJpegReceiverInstrumentedTest {
                 assertSame(previous, activity)
                 assertEquals(Stage.STOPPED, lifecycle.getLifecycleStageOf(activity))
                 // ActivityScenario.recreate first demands RESUMED. Android's actual recreate
-                // preserves STOPPED on supported APIs without displacing the external receiver.
+                // returns to STOPPED on supported APIs while the external receiver holds its result.
                 activity.recreate()
             }
             assertTrue("Android must recreate the caller and leave it stopped behind the receiver",
@@ -424,8 +427,11 @@ class SavedJpegReceiverInstrumentedTest {
                 // Reattach the production composition to the actual recreated host. Its saved
                 // ActivityResultRegistry remains intact; wait for Compose only after receiver completion.
                 recreated.setContent(content = appContent)
+                assertEquals(Stage.STOPPED, lifecycle.getLifecycleStageOf(recreated))
+                assertEquals(Lifecycle.State.CREATED, recreated.lifecycle.currentState)
             }
-            assertFalse("The recreated caller must stay behind the held receiver", resumedWhileHeld.get())
+            assertFalse("After settling, the caller must stay stopped until receiver release",
+                resumedAfterSettlingWhileHeld.get())
             assertTrue(model.viewModelScope.coroutineContext[Job]!!.isActive)
             assertEquals(originals.mapTo(linkedSetOf()) { it.id }, model.savedJpegState.value.selectedIds)
             assertEquals(lease.token, model.cameraImportHandoffState.value.active?.token)
@@ -434,11 +440,19 @@ class SavedJpegReceiverInstrumentedTest {
             val stillHeld = control(SavedJpegReceiverActivity.INSPECT)
             assertEquals(1, stillHeld.getInt("receiver_launches"))
             assertEquals(0, stillHeld.getInt("receiver_results"))
+            assertNull("The held receiver must not complete the owner before release",
+                model.cameraImportHandoffState.value.lastResult)
+            assertEquals("Recreation must not satisfy the post-release resume wait", 1L, resumedAfterRelease.count)
             releasingReceiver.set(true)
             control(SavedJpegReceiverActivity.FINISH_HELD)
             assertTrue("Finishing the real receiver must naturally resume the recreated caller",
-                recreatedResumed.await(TIMEOUT, TimeUnit.MILLISECONDS))
-            assertFalse("The caller must not have resumed before receiver release", resumedWhileHeld.get())
+                resumedAfterRelease.await(TIMEOUT, TimeUnit.MILLISECONDS))
+            assertFalse("The settled caller must not have resumed before receiver release",
+                resumedAfterSettlingWhileHeld.get())
+            compose.activityRule.scenario.onActivity { recreated ->
+                assertSame(recreatedHost.get(), recreated)
+                assertEquals(Stage.RESUMED, lifecycle.getLifecycleStageOf(recreated))
+            }
             val completed = awaitHandoffResult()
             assertEquals(lease.token, model.cameraImportHandoffState.value.lastResult?.token)
             assertEquals(1, completed.getInt("receiver_launches"))
