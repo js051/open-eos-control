@@ -1,14 +1,16 @@
 package dev.openeos.control.ui
 
-import android.content.ContentProvider
 import android.content.ContentResolver
-import android.content.ContentValues
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ProviderInfo
 import android.database.Cursor
+import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.os.CancellationSignal
+import android.provider.DocumentsContract
+import android.provider.DocumentsProvider
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelStore
@@ -52,7 +54,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real ViewModel/HTTP/document-save route with private files; no picker or physical-camera evidence. */
+/** Real ViewModel/HTTP/DocumentsProvider dispatch; OS picker/grant evidence lives in CameraSafOsJourneyTest. */
 @SdkSuppress(minSdkVersion = 29)
 class CameraDownloadHistorySafJourneyTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
@@ -88,7 +90,10 @@ class CameraDownloadHistorySafJourneyTest {
         provider = PrivateDocumentProvider(destination)
         provider.attachInfo(context, ProviderInfo().apply {
             authority = provider.destinationUri.authority
-            exported = false
+            exported = true
+            grantUriPermissions = true
+            readPermission = "android.permission.MANAGE_DOCUMENTS"
+            writePermission = "android.permission.MANAGE_DOCUMENTS"
         })
         documentContext = ScopedDocumentContext(context, ContentResolver.wrap(provider))
         // Resolve the simulator hostname on the instrumentation thread; leave StrictMode intact.
@@ -176,6 +181,20 @@ class CameraDownloadHistorySafJourneyTest {
         assertArrayEquals(camera.imageBytes, provider.destination.readBytes())
         assertTrue(provider.deletedUris.isEmpty())
         assertTrue(model.uiState.value.mediaSaveFeedback[item.id] is MediaSaveFeedback.Saved)
+    }
+
+    @Test fun documentsProviderRejectsGenericDeleteAndDispatchesTheDocumentContract() {
+        val failure = runCatching {
+            documentContext.contentResolver.delete(provider.destinationUri, null, null)
+        }.exceptionOrNull()
+        assertTrue("DocumentsProvider's final generic delete must reject this route", failure is UnsupportedOperationException)
+        assertTrue(provider.destination.exists())
+        assertTrue(provider.deletedUris.isEmpty())
+
+        assertTrue(DocumentsContract.deleteDocument(documentContext.contentResolver, provider.destinationUri))
+        assertFalse(provider.destination.exists())
+        assertEquals(listOf(provider.destinationUri), provider.deletedUris.toList())
+        assertArrayEquals(unrelatedBytes, unrelated.readBytes())
     }
 
     @Test fun cancellingGatedOriginalRecordsCancelledAndDeletesOnlyItsOwnedDocument() {
@@ -272,36 +291,36 @@ class CameraDownloadHistorySafJourneyTest {
         override fun getContentResolver(): ContentResolver = resolver
     }
 
-    /** No registration, global provider, system resolver, or URI-to-filesystem path mapping. */
-    private class PrivateDocumentProvider(val destination: File) : ContentProvider() {
+    /** Genuine framework dispatch: inherited final delete() rejects the old resolver.delete route. */
+    private class PrivateDocumentProvider(val destination: File) : DocumentsProvider() {
         val destinationUri: Uri = Uri.parse("content://dev.openeos.synthetic.history/document/owned")
         val openModes = CopyOnWriteArrayList<String>()
         val deletedUris = CopyOnWriteArrayList<Uri>()
 
         override fun onCreate(): Boolean = true
-        override fun getType(uri: Uri): String {
-            check(uri == destinationUri)
-            return "image/jpeg"
-        }
-
-        override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
-            check(uri == destinationUri && mode == "w")
+        override fun openDocument(documentId: String, mode: String, signal: CancellationSignal?): ParcelFileDescriptor {
+            check(documentId == "owned" && mode == "w")
             openModes += mode
             return ParcelFileDescriptor.open(destination,
                 ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
         }
 
-        override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
-            check(uri == destinationUri && selection == null && selectionArgs == null)
-            deletedUris += uri
-            return if (destination.delete()) 1 else 0
+        override fun deleteDocument(documentId: String) {
+            check(documentId == "owned")
+            deletedUris += destinationUri
+            check(destination.delete()) { "Could not remove synthetic incomplete document" }
         }
 
-        override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? =
-            error("Synthetic document fixture does not support queries")
-        override fun insert(uri: Uri, values: ContentValues?): Uri? =
-            error("Synthetic document fixture does not create documents")
-        override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int =
-            error("Synthetic document fixture does not update documents")
+        override fun queryRoots(projection: Array<out String>?): Cursor =
+            error("This locally wrapped fixture has no picker roots")
+
+        override fun queryDocument(documentId: String, projection: Array<out String>?): Cursor {
+            check(documentId == "owned")
+            return MatrixCursor(arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_MIME_TYPE)).apply { addRow(arrayOf("owned", "image/jpeg")) }
+        }
+
+        override fun queryChildDocuments(parentDocumentId: String, projection: Array<out String>?, sortOrder: String?): Cursor =
+            error("This locally wrapped fixture has no child documents")
     }
 }

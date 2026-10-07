@@ -1,8 +1,8 @@
 # Android 前景 JPEG 自動匯入驗收
 
-日期：2026-10-06 UTC。來源基底：已接受的 `7e4e7cc869e745c3a6e47501f2990714112a8ac7`。本批對應[原產品矩陣](../product-workflow-acceptance.zh-TW.md)的 P2「拍後自動交付」，是一個新的明確啟用、限本次連線的前景工作流。
+初始日期：2026-10-06 UTC；2026-10-07 整合已發布 v0.12.0 的 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707`。原三筆功能提交以 `7e4e7cc869e745c3a6e47501f2990714112a8ac7` 為基底並完整保留。本批對應[原產品矩陣](../product-workflow-acceptance.zh-TW.md)的 P2「拍後自動交付」，是一個新的明確啟用、限本次連線的前景工作流。
 
-目前為本地候選，尚無本批 PR／精確 head CI。下列實作與測試來源不能提前當作 Android runtime 通過、main accepted 或物理相機驗證；最終本地測試結果另列於末節。此批不包含其他 SAF／USB／viewer 分支。
+目前為本地候選，尚無本批 PR／精確 head CI。下列實作與測試來源不能提前當作 Android runtime 通過、main accepted 或物理相機驗證；最終本地測試結果另列於末節。本輪正常合入已發布的 SAF／USB／viewer 主線內容，未帶入未發布的 USB 驗收文件後續差異。舊來源的通過數不能代替新整合來源的 gate。
 
 ## 可交付的使用流程
 
@@ -59,9 +59,13 @@
 - 08:28 UTC 的 compile／Lint 後續輪次已越過 `compileDebugAndroidTestKotlin` 至 `lintAnalyzeDebug`，但工具拒絕後 session 消失，沒有 terminal exit 或新 Lint XML。僅記錄已觀察到的編譯進度，整輪／Lint 保留 unknown；未反覆重跑、未替換必要 gate，也未沿用其他分支結果。
 - 本地沒有 KVM／加速 AVD，不以 CPU-only emulator 重跑取代必要 CI。遠端驗收必須使用本批 exact head，不能沿用其他 PR 的全綠結果。
 
+## 2026-10-07 主線整合
+
+正常合入 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707`；production 自動合併，產品矩陣的一處相鄰章節衝突保留双方公開紀錄，並分開標示歷史快照與本批候選。重新驗證本批完整 JVM、Camera Import contract、AndroidTest Kotlin／Java 編譯、fresh Lint 與精確 head API34／36，取得實際結果前維持待驗。先前兩次 compile／Lint unknown 原樣保留，不回頭重試該 tool action。
+
 ## Release Assessment
 
-- 最新發佈基準：`v0.11.0` Development Preview。
+- 最新發佈基準：`v0.12.0` Development Preview。
 - 建議 impact：`minor`，理由為新的使用者可見、明確啟用之自動交付能力。此文件不改版本、不建立 release 或授權 merge。
 - 未閉合項目：本批完整本地 gate、Android API34/36 exact-head CI、實體手機／相機的來源與容量／網路行為證據。
 - 物理裝置狀態：沒有新增。合成 HTTP／MediaStore 成功不代表 Canon 機身、USB、Bridge、外部 SAF、iOS 或 PC 同等可用。

@@ -737,6 +737,9 @@
     <string name="media_save_queued">Waiting to save this original…</string>
     <string name="media_save_failed">Could not save the original: %1$s</string>
     <string name="media_save_cancelled">Download cancelled.</string>
+    <string name="media_save_cancelled_cleanup_unconfirmed">Download cancelled. An incomplete file may remain; check the save location before saving again.</string>
+    <string name="media_save_failed_cleanup_unconfirmed">Download failed. An incomplete file may remain; check the save location before saving again.</string>
+    <string name="media_save_cleanup_unconfirmed">An incomplete download may remain in the chosen save location. Check it before saving again.</string>
     <string name="media_save_retry">Retry saving original</string>
     <string name="media_save_selected_document">your selected document</string>
     <string name="media_save_selected_folder">your selected folder</string>

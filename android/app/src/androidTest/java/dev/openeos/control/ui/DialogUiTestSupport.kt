@@ -3,6 +3,8 @@ package dev.openeos.control.ui
 import android.app.Activity
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,6 +26,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.services.storage.TestStorage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /** Give separate Dialog windows the overridden Android context, including nested AlertDialogs. */
 @Composable
@@ -88,10 +94,60 @@ private fun recordWindowFocusFailure(tag: String, activity: Activity, view: andr
     // that might cover the intended target, while preserving the original assertion failure.
     runCatching {
         val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-        TestStorage().openOutputFile("window-focus-$tag.png").use { output ->
-            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-        }
+        try {
+            TestStorage().openOutputFile("window-focus-$tag-${android.os.SystemClock.uptimeMillis()}.png").use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+            }
+        } finally { bitmap.recycle() }
     }.onFailure { println("WINDOW_FOCUS_SCREENSHOT_UNAVAILABLE ${it.javaClass.simpleName}") }
+    runCatching { recordFocusedWindowOwner(tag) }.onFailure {
+        println("WINDOW_FOCUS_OWNER_UNAVAILABLE tag=$tag reason=${it.cause?.javaClass?.simpleName ?: it.javaClass.simpleName}")
+    }
+}
+
+/** Extra system-window evidence is limited to the explicitly synthetic emulator suite. */
+private fun recordFocusedWindowOwner(tag: String) {
+    if (InstrumentationRegistry.getArguments().getString("requireSimulator") != "true" ||
+        Build.HARDWARE !in setOf("ranchu", "goldfish")) {
+        println("WINDOW_FOCUS_OWNER_SKIPPED tag=$tag reason=not_synthetic_emulator")
+        return
+    }
+    val stopped = AtomicBoolean(false)
+    val openPipe = AtomicReference<ParcelFileDescriptor?>()
+    val snapshot = FutureTask<String> {
+        // AOSP dumpsys -t is a seconds-based service deadline. Keep both the command and
+        // its pipe reads off main, with an outer deadline even if shell startup stalls.
+        val pipe = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("dumpsys -t 1 window displays"))
+        openPipe.set(pipe)
+        ParcelFileDescriptor.AutoCloseInputStream(pipe).bufferedReader().use { reader ->
+            if (stopped.get()) return@FutureTask "cancelled"
+            // Bound memory without readNBytes(), which is unavailable on our API 26 minimum.
+            val buffer = CharArray(65_536)
+            var used = 0
+            while (used < buffer.size && !stopped.get()) {
+                val count = reader.read(buffer, used, buffer.size - used)
+                if (count < 0) break
+                used += count
+            }
+            // Log only focus identifiers, never the full display/window/app dump. On API 36
+            // these fields live in the displays section, not the windows-only section.
+            val fields = String(buffer, 0, used).lineSequence().map(String::trim).filter {
+                it.startsWith("mCurrentFocus=") || it.startsWith("mFocusedApp=") ||
+                    it.startsWith("mTopFocusedDisplayId=")
+            }.take(4).joinToString(" | ") { it.take(512) }
+            "scanLimitReached=${used == buffer.size} ${fields.ifEmpty { "no_focus_fields" }}"
+        }
+    }
+    try {
+        Thread(snapshot, "window-focus-diagnostics").apply { isDaemon = true; start() }
+        // Emit on the calling test thread so a late worker can never log into another case.
+        println("WINDOW_FOCUS_OWNER tag=$tag ${snapshot.get(2, TimeUnit.SECONDS)}")
+    } finally {
+        stopped.set(true)
+        snapshot.cancel(true)
+        runCatching { openPipe.getAndSet(null)?.close() }
+    }
 }
 
 /** A deliberately square Dialog still needs a real landscape Activity behind it. Call on the UI thread. */

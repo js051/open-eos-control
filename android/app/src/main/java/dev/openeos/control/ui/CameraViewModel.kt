@@ -156,11 +156,21 @@ internal suspend fun <Result> retryMediaRead(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: IOException) {
-            if (attempt >= retryDelaysMillis.size) throw exception
+            // A new attempt may create another document. Never accumulate partials when
+            // the previous attempt could not release its output responsibility.
+            if (exception.hasUnconfirmedMediaCleanup() || attempt >= retryDelaysMillis.size) throw exception
             delay(retryDelaysMillis[attempt])
         }
     }
     error("Media read retry exhausted without a result.")
+}
+
+private fun deleteIncompleteMediaDocument(resolver: ContentResolver, destination: Uri) {
+    // SAF destinations are newly created by CreateDocument or createMediaDocument.
+    // DocumentsProvider.delete is final and unsupported; document operations use call().
+    check(DocumentsContract.deleteDocument(resolver, destination)) {
+        "Android could not remove the incomplete download."
+    }
 }
 
 private fun createMediaDocument(
@@ -1854,9 +1864,9 @@ class CameraViewModel(
         if (direction == 0 || _uiState.value.isBusy(CameraOperation.MEDIA)) return
         val currentId = _uiState.value.mediaPreviewItem?.id ?: return
         val index = items.indexOfFirst { it.id == currentId }
+        if (index < 0) return
         val next = items.getOrNull(index + direction) ?: return
-        _uiState.value.mediaStreamSource?.close()
-        _uiState.update { it.copy(mediaPreviewItem = null, mediaPreviewBytes = null, mediaStreamSource = null) }
+        // Validate the target before replacing the viewer or closing its active stream.
         openMediaPreview(next)
     }
 
@@ -2096,11 +2106,23 @@ class CameraViewModel(
         }
     }
 
-    private fun trackMediaSaveJob(request: MediaSaveRequest, job: Job?) {
+    private fun trackMediaSaveJob(
+        request: MediaSaveRequest,
+        job: Job?,
+        admittedDocumentOwner: CameraMediaItem? = null,
+        admittedDocumentOutput: MediaOutputFinalization? = null,
+    ) {
         mediaDownloadJob = job
         job?.invokeOnCompletion { cause ->
             // Includes cancellation while joining an earlier listing, before the transfer block runs.
-            if (cause is CancellationException) finishPendingMediaSave(request, MediaSaveFeedback.Cancelled)
+            if (cause is CancellationException) {
+                // Only the picker-created single output predates the transfer body. A batch
+                // marks its active output in that body; queued items never owned a document.
+                if (admittedDocumentOwner != null && admittedDocumentOutput?.cleanupUnconfirmed == true) {
+                    publishMediaSave(request, admittedDocumentOwner, MediaSaveFeedback.IncompleteFile(true))
+                }
+                finishPendingMediaSave(request, MediaSaveFeedback.Cancelled)
+            }
             updateMediaSave(request) {
                 it.copy(mediaBatchProgress = null, activeMediaDownloadName = null, mediaDownloadProgress = null)
             }
@@ -2345,35 +2367,31 @@ class CameraViewModel(
         val historyRequest = history?.captureRequest()
         val request = beginMediaSave(state, listOf(item))
         val location = context.getString(R.string.media_save_selected_document)
-        val job = launchCameraOperation(
+        val output = MediaOutputFinalization(cleanupIncomplete = { deleteIncompleteMediaDocument(resolver, destination) })
+        val download = AdmittedMediaDownload(output, history, historyRequest, item.name, DownloadHistoryDestination.DOCUMENT)
+        launchCameraOperation(
             CameraOperation.MEDIA,
-            onError = { finishPendingMediaSave(request, MediaSaveFeedback.Failed(formatException(it))) },
+            onError = {
+                finishPendingMediaSave(request, if (it.hasUnconfirmedMediaCleanup()) MediaSaveFeedback.IncompleteFile(false)
+                    else MediaSaveFeedback.Failed(formatException(it)))
+            },
+            admittedMediaDownload = download,
+            onRegistered = { trackMediaSaveJob(request, it, admittedDocumentOwner = item, admittedDocumentOutput = output) },
         ) {
-            withDownloadHistoryReceipt(history, historyRequest, item.name, DownloadHistoryDestination.DOCUMENT) { completed ->
-                publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
-                withMediaOutputFinalization(
-                    cleanupIncomplete = {
-                        check(resolver.delete(destination, null, null) == 1) { "Android could not remove the incomplete download." }
-                    },
-                    onFinalized = {
-                        completed()
-                        publishMediaSave(request, item, MediaSaveFeedback.Saved(location))
-                        updateMediaSave(request) { it.copy(lastDownloadedMediaName = item.name) }
-                    },
-                ) { finalized ->
-                    withContext(Dispatchers.IO) {
-                        val rawOutput = resolver.openOutputStream(destination, "w")
-                            ?: error("Android could not open the selected download destination.")
-                        BufferedOutputStream(rawOutput).use { output ->
-                            repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
-                        }
-                        // Successful close is the SAF checkpoint; no suspension before recording it.
-                        finalized.confirm()
-                    }
+            publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
+            withContext(Dispatchers.IO) {
+                val rawOutput = resolver.openOutputStream(destination, "w")
+                    ?: error("Android could not open the selected download destination.")
+                BufferedOutputStream(rawOutput).use { stream ->
+                    repository.downloadMedia(item, stream) { progress -> publishMediaSaveProgress(request, item, progress) }
+                }
+                // Successful close is the SAF checkpoint; no suspension before recording it.
+                download.confirm {
+                    publishMediaSave(request, item, MediaSaveFeedback.Saved(location))
+                    updateMediaSave(request) { it.copy(lastDownloadedMediaName = item.name) }
                 }
             }
         }
-        trackMediaSaveJob(request, job)
     }
 
     fun downloadMediaBatch(context: Context, items: List<CameraMediaItem>, destinationTree: Uri? = null) {
@@ -2425,7 +2443,7 @@ class CameraViewModel(
                                 withMediaOutputFinalization(
                                     cleanupIncomplete = {
                                         destination?.let {
-                                            check(resolver.delete(it, null, null) == 1) { "Android could not remove the incomplete download." }
+                                            deleteIncompleteMediaDocument(resolver, it)
                                         }
                                     },
                                     onFinalized = onFinalized,
@@ -2443,9 +2461,11 @@ class CameraViewModel(
                             }
                         }
                     } catch (exception: CancellationException) {
+                        if (exception.hasUnconfirmedMediaCleanup()) publishMediaSave(request, item, MediaSaveFeedback.IncompleteFile(true))
                         throw exception
                     } catch (exception: Exception) {
-                        publishMediaSave(request, item, MediaSaveFeedback.Failed(formatException(exception)))
+                        publishMediaSave(request, item, if (exception.hasUnconfirmedMediaCleanup()) MediaSaveFeedback.IncompleteFile(false)
+                            else MediaSaveFeedback.Failed(formatException(exception)))
                         throw exception
                     }
                 }
@@ -3030,6 +3050,8 @@ class CameraViewModel(
         afterFinally: () -> Unit = {},
         cancelMediaReads: Boolean = true,
         connectionAttempt: ConnectionAttemptTarget? = null,
+        admittedMediaDownload: AdmittedMediaDownload? = null,
+        onRegistered: (Job) -> Unit = {},
         block: suspend () -> Unit,
     ): Job? {
         if (_uiState.value.isBusy(operation)) return null
@@ -3061,25 +3083,28 @@ class CameraViewModel(
                 errorOperation = null,
             )
         }
-        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+        val execute: suspend () -> Unit = operation@{
             try {
-                if (operation == CameraOperation.CONNECT) {
-                    teardown?.join()
-                    previousJobs.forEach { it.join() }
-                    mediaUploadCleanupJob?.join()
+                val work: suspend () -> Unit = {
+                    if (operation == CameraOperation.CONNECT) {
+                        teardown?.join()
+                        previousJobs.forEach { it.join() }
+                        mediaUploadCleanupJob?.join()
+                    }
+                    mediaReadsToJoin.forEach { it.join() }
+                    coroutineContext.ensureActive()
+                    block()
+                    coroutineContext.ensureActive()
+                    if (generation == cameraSessionGeneration && operation in CAPABILITY_EVIDENCE_OPERATIONS) {
+                        refreshCapabilityEvidence()
+                    }
                 }
-                mediaReadsToJoin.forEach { it.join() }
-                coroutineContext.ensureActive()
-                block()
-                coroutineContext.ensureActive()
-                if (generation == cameraSessionGeneration && operation in CAPABILITY_EVIDENCE_OPERATIONS) {
-                    refreshCapabilityEvidence()
-                }
+                if (admittedMediaDownload == null) work() else admittedMediaDownload.run(work)
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
                 if (generation != cameraSessionGeneration ||
-                    (operation == CameraOperation.FOCUS && _uiState.value.info !== connection)) return@launch
+                    (operation == CameraOperation.FOCUS && _uiState.value.info !== connection)) return@operation
                 val safetyFailure = exception is ShutterReleaseException || exception is AutofocusReleaseException ||
                     exception is dev.openeos.control.data.CcapiLiveViewReleaseException
                 val recovery = if (connectionAttempt != null && !safetyFailure) {
@@ -3115,10 +3140,18 @@ class CameraViewModel(
                 }
             }
         }
-        cameraOperationJobs[operation] = job
-        job.invokeOnCompletion {
-            if (cameraOperationJobs[operation] === job) cameraOperationJobs.remove(operation)
+        val register: (Job) -> Unit = { job ->
+            cameraOperationJobs[operation] = job
+            job.invokeOnCompletion {
+                if (cameraOperationJobs[operation] === job) cameraOperationJobs.remove(operation)
+            }
+            onRegistered(job)
         }
+        if (admittedMediaDownload != null) {
+            return viewModelScope.launchAdmittedMediaOutput(admittedMediaDownload.output, register, execute)
+        }
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) { execute() }
+        register(job)
         job.start()
         return job
     }

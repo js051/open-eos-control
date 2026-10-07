@@ -14,19 +14,35 @@
 
 以上閉合的是各批明列的停止恢復與 Android 拍攝／保存範圍，不構成所有命令、gphoto2／EDSDK 或其他平台旅程的同等保證。真相機快門、光學對焦、實體手機／SAF provider、跨程序續傳與跨機型相容性仍依各自證據判定；沒有新增物理裝置驗證或發版。
 
-## Android 媒體與控制旅程進度（2026-10-05 UTC）
+## Android 媒體與控制旅程進度（2026-10-05 UTC，合併前快照）
 
 PR #205 將日期／評分挑片與最近 100 筆原檔下載紀錄合為一個媒體批次：原檔成功關閉／發佈後隔離取消與紀錄故障，重啟未完成項目顯示結果未確認。精確 head `1c672d5f18d084576fba23c2ffff518e5f4749d6` 的 [CI 37302730469](https://github.com/js051/open-eos-control/actions/runs/37302730469) 已全數通過適用 gate，API34／36 原始 XML 各264/264、0 failure/error/skip。這是 `PR ready` 證據，PR 仍為 draft／未合併；本地725 JVM與各階段測試修正另見[媒體 CI 紀錄](validation/android-media-journey-device-ci-2026-10-05.zh-TW.md)及 PR 摘要。歷史失敗保留，不能把所有輪次相加。
 
 控制旅程 PR #206 以 #205 為基底，整合連線設定歸屬、取消／失敗恢復及停錄後新可見影片查找。最終 head `cddab6207aa2d5fcb721e7cef85f1cdba64b7fd1` 的 [CI 37323715956](https://github.com/js051/open-eos-control/actions/runs/37323715956) 與 ci-complete 成功：API34／36各278/278、0 failure/error/skip，含兩個真 App 連線、兩個有效影片保存旅程，以及完整文字與三種真裁切／省略號反例。JVM／APK／signer及適用gate通過；本地完整JVM為776項。歷史CPU-only timeout及前兩輪失敗仍保留，不倒推其唯一根因。此為PR ready證據，仍draft／未合併；來源與紅綠機制見[控制旅程整合驗收](validation/android-control-journey-2026-10-05.zh-TW.md)及PR最終摘要。
 
-資料夾挑選接續P2，僅使用既有已載入素材的權威路徑資訊，與日期／評分／類型交集並保留隱藏選取。新增optional Bridge欄位不增加相機請求，USB／host／legacy無資料時保持未知；不包含拍攝卡槽或目錄mutation。本地793 JVM與374 Bridge測試已通過，新增5個UI旅程待該批精確CI，不能沿用#206結果。見[資料夾挑選驗收](validation/android-media-folder-filter-2026-10-05.zh-TW.md)。
+資料夾挑選 PR #207 接續P2，僅使用既有已載入素材的權威路徑資訊，與日期／評分／類型交集並保留隱藏選取。新增optional Bridge欄位不增加相機請求，USB／host／legacy無資料時保持未知；不包含拍攝卡槽或目錄mutation。最終 head `601c801f56dd5530817204559d12ec3afafeaa03` 的 [CI 37338824937](https://github.com/js051/open-eos-control/actions/runs/37338824937) 與 ci-complete 成功，API34／36原始XML各283/283、0 failure/error/skip，包含五個新增資料夾旅程；本地793 JVM與374 Bridge測試另保留。這是PR ready證據，仍draft／未合併。第一輪兩個fixture前提錯誤及API36另三個history Back失敗保留，最終通過不倒推原平台根因。見[資料夾挑選驗收](validation/android-media-folder-filter-2026-10-05.zh-TW.md)及PR最終摘要。
+
+SAF 保存接續P2原檔目的地旅程：已重現並修正一般resolver刪除不符DocumentsProvider契約、拒刪後自動重試累積輸出，以及取消時遺失清理風險。輸出所有權定向26例JVM已通過，實際DocumentsUI／獨立test APK提供者已編譯；整合#207後同樹808 JVM、Lint與兩APK通過；裝置驗收尚待完成。詳見[SAF清理驗收](validation/android-saf-cleanup-2026-10-05.zh-TW.md)，不將編譯當作跨UID執行或實體provider證據。
 
 上述均是有界增量：不代表跨程序續傳、完整佇列恢復、下載去重、全卡素材因果或跨平台完成；真正相機／手機網路／USB／外部 SAF provider 尚待各自驗證。下方矩陣仍保留原始稽核基準，日期／評分與下載紀錄缺口的最新狀態以上述 #205 為準。
 
-## P2 前景 JPEG 自動交付候選（2026-10-06 UTC）
+## 主線收斂與 USB 資料夾候選（2026-10-06 UTC）
 
-原矩陣的「拍後自動交付」已有獨立本地候選：Android 10+ 直接 CCAPI、每次連線明確啟用、兩次完整 baseline、新 ID／新鮮大小、單次 JPEG 原檔到 Gallery、背景／換 session 停止及清理警告。此處的「新」只表示 baseline 後新觀察到的 ID，不把快門 ACK、時間戳或檔名當拍攝因果。USB／Bridge、背景長駐及跨程序續傳不在本批。詳細容量／去重／安全停止與真 MediaStore 測試邊界見[本批契約與驗收](validation/android-foreground-jpeg-import-2026-10-06.zh-TW.md)。完整本地與 exact-head Android runtime gate 尚未閉合，不將原始矩陣缺口標成已接受完成。
+以下保留當時的分支驗收快照；後續主線交付已發布為 [v0.12.0 Development Preview](releases/v0.12.0.md)。歷史待驗項目不代表目前版本仍停在該狀態。
+
+上節保留合併前的階段證據；目前已接受的主線依序包含：
+
+- #205：main `dd9ddf9c4b4004efbb2505dd6fe0cf0267abae71`，[Main acceptance 37359620393](https://github.com/js051/open-eos-control/actions/runs/37359620393) 成功。
+- #206：精確來源 `f6d11629633b254bed487611bb29bbeec583b084` 的 [CI 37366695122 attempt2](https://github.com/js051/open-eos-control/actions/runs/37366695122) 成功，API 34／36 各 278/278、0 failure/error/skip；main `23da164b69be46ed3ef3e27001fd7156ab91086d` 的 [Main acceptance 37381268253](https://github.com/js051/open-eos-control/actions/runs/37381268253) 成功。前一 attempt 未取得 hosted runner，未執行產品測試，沒有計入通過數。
+- #207：精確來源 `782f64300c13c3313f1a7e485215fd79ab42c61c` 的 [CI 37381716001](https://github.com/js051/open-eos-control/actions/runs/37381716001) 成功，API 34／36 各 283/283、0 failure/error/skip；main `7e4e7cc869e745c3a6e47501f2990714112a8ac7` 的 [Main acceptance 37385302263](https://github.com/js051/open-eos-control/actions/runs/37385302263) 成功。每次 squash 的 tree 都與各自已驗來源一致，沒有跨平台或跨來源加總。
+
+下一個獨立 Android 候選補 USB 已載入資料夾來源：利用既有 ObjectInfo，不補查父節點；缺鏈仍未知，StorageID 不被當作實體卡槽。資料夾與 media cache 以 listing generation 隔離，媒體成功結果及 stream 以原 session 隔離。[新驗收紀錄](validation/android-usb-observed-folders-2026-10-06.zh-TW.md) 保留基準反例、129 項定向及同來源完整814項 JVM 通過結果，兩個數字不相加；Lint／APK與精確 PR gate 尚待完成。這是同 backend lifecycle 契約驗證；App 正常 reconnect 每次建立新 backend，不能將合成反例說成已重現 App 一般重連故障。
+
+此候選仍未取得自己的精確 PR／main acceptance；較廣的 storageSnapshot／storageError 隔離限制保留。SAF 清理批次 #208 亦未進入本節接受的主線，不能由 #205～#207 或 USB 候選的結果替代其驗收。最新已發布版本仍為 v0.11.0 Development Preview，沒有新增實機驗證或版本提升。
+
+## P2 前景 JPEG 自動交付整合候選（2026-10-07 UTC）
+
+本批在已發布 v0.12.0 的 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707` 上整合原三筆功能提交。原矩陣的「拍後自動交付」已有本地候選：Android 10+ 直接 CCAPI、每次連線明確啟用、兩次完整 baseline、新 ID／新鮮大小、單次 JPEG 原檔到 Gallery、背景／換 session 停止及清理警告。此處的「新」只表示 baseline 後新觀察到的 ID，不把快門 ACK、時間戳或檔名當拍攝因果。USB／Bridge、背景長駐及跨程序續傳不在本批。詳細容量／去重／安全停止與真 MediaStore 測試邊界見[本批契約與驗收](validation/android-foreground-jpeg-import-2026-10-06.zh-TW.md)。完整本地與 exact-head Android runtime gate 尚未閉合，不將原始矩陣缺口標成已接受完成。
 
 ## 結論
 
