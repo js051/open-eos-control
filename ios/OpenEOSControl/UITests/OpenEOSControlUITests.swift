@@ -366,10 +366,7 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
 
-        let app = launch(
-            appLanguage: "english", appleLanguage: "en", locale: "en_US",
-            traceLiveViewTapSelection: true
-        )
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
         let simulatorPreset = app.buttons["preset-simulator-button"]
         XCTAssertTrue(simulatorPreset.waitForExistence(timeout: 8))
         simulatorPreset.tap()
@@ -423,9 +420,9 @@ final class OpenEOSControlUITests: XCTestCase {
         let moreSettings = app.buttons["more-settings-menu-button"]
         XCTAssertTrue(waitForInteraction(moreSettings, timeout: 8))
         moreSettings.tap()
-        let tapAction = app.segmentedControls["live-view-tap-action-picker"]
+        let tapAction = app.otherElements["live-view-tap-action-control"]
         XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
-        guard await selectLiveViewTapAction(.whiteBalance, in: app, phase: "direct-ccapi") else { return }
+        guard selectLiveViewTapAction(.whiteBalance, in: app, phase: "direct-ccapi") else { return }
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
         liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
@@ -667,10 +664,7 @@ final class OpenEOSControlUITests: XCTestCase {
             #endif
         }
         _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
-        let app = launch(
-            appLanguage: "english", appleLanguage: "en", locale: "en_US",
-            traceLiveViewTapSelection: true
-        )
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
         let simulatorPreset = app.buttons["preset-simulator-button"]
         XCTAssertTrue(simulatorPreset.waitForExistence(timeout: 8))
         simulatorPreset.tap()
@@ -679,23 +673,26 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(app.images["live-view-decoded-frame"].waitForExistence(timeout: 30))
 
         openMoreSettingsForTapSelection(in: app)
-        let picker = app.segmentedControls["live-view-tap-action-picker"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 5))
-        XCTAssertTrue(picker.buttons[LiveViewTapSelection.focus.label].isSelected)
-        XCTAssertEqual(picker.value as? String, LiveViewTapSelection.focus.rawValue)
+        let control = app.otherElements["live-view-tap-action-control"]
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+        XCTAssertTrue(control.buttons[LiveViewTapSelection.focus.buttonIdentifier].isSelected)
+        XCTAssertFalse(control.buttons[LiveViewTapSelection.whiteBalance.buttonIdentifier].isSelected)
+        XCTAssertEqual(control.value as? String, LiveViewTapSelection.focus.rawValue)
         try await assertNoSimulatorLiveViewCommands()
 
         // Each change is a single real UI tap. Reopening must retain the
         // production choice, and choosing a mode must not operate the camera.
         for choice in [LiveViewTapSelection.whiteBalance, .focus] {
-            guard await selectLiveViewTapAction(choice, in: app, phase: "selection-only-\(choice.rawValue)") else { return }
+            guard selectLiveViewTapAction(choice, in: app, phase: "selection-only-\(choice.rawValue)") else { return }
             try await assertNoSimulatorLiveViewCommands()
             app.buttons["Done"].tap()
-            XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(control.waitForNonExistence(timeout: 5))
             openMoreSettingsForTapSelection(in: app)
-            XCTAssertTrue(picker.waitForExistence(timeout: 5))
-            XCTAssertTrue(picker.buttons[choice.label].isSelected)
-            XCTAssertEqual(picker.value as? String, choice.rawValue)
+            XCTAssertTrue(control.waitForExistence(timeout: 5))
+            for candidate in LiveViewTapSelection.allCases {
+                XCTAssertEqual(control.buttons[candidate.buttonIdentifier].isSelected, candidate == choice)
+            }
+            XCTAssertEqual(control.value as? String, choice.rawValue)
             try await assertNoSimulatorLiveViewCommands()
         }
     }
@@ -705,8 +702,7 @@ final class OpenEOSControlUITests: XCTestCase {
         appleLanguage: String,
         locale: String,
         environment: [String: String] = [:],
-        contentSizeCategory: String? = nil,
-        traceLiveViewTapSelection: Bool = false
+        contentSizeCategory: String? = nil
     ) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -719,9 +715,6 @@ final class OpenEOSControlUITests: XCTestCase {
         ]
         if let contentSizeCategory {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
-        }
-        if traceLiveViewTapSelection {
-            app.launchArguments.append("-traceLiveViewTapSelection")
         }
         app.launchEnvironment.merge(environment) { _, newValue in newValue }
         app.launch()
@@ -741,12 +734,7 @@ final class OpenEOSControlUITests: XCTestCase {
         case focus
         case whiteBalance
 
-        var label: String {
-            switch self {
-            case .focus: "Tap focus"
-            case .whiteBalance: "Click white balance"
-            }
-        }
+        var buttonIdentifier: String { "live-view-tap-action-\(rawValue)" }
     }
 
     private func openMoreSettingsForTapSelection(in app: XCUIApplication) {
@@ -760,130 +748,45 @@ final class OpenEOSControlUITests: XCTestCase {
     private func selectLiveViewTapAction(
         _ choice: LiveViewTapSelection, in app: XCUIApplication, phase: String,
         file: StaticString = #filePath, line: UInt = #line
-    ) async -> Bool {
-        let picker = app.segmentedControls["live-view-tap-action-picker"]
-        let segment = picker.buttons[choice.label]
-        let interactionWaitStarted = ProcessInfo.processInfo.systemUptime
-        guard waitForInteraction(segment, timeout: 5) else {
-            recordLiveViewTapSelection(in: app, phase: "\(phase)-not-interactive")
-            await recordSimulatorLiveViewCounts(phase: "\(phase)-not-interactive")
-            XCTFail("The \(choice.rawValue) segment did not become interactive", file: file, line: line)
+    ) -> Bool {
+        let control = app.otherElements["live-view-tap-action-control"]
+        let button = control.buttons[choice.buttonIdentifier]
+        guard waitForInteraction(button, timeout: 5) else {
+            XCTFail("The \(choice.rawValue) button did not become interactive", file: file, line: line)
             return false
         }
-        let interactionReadyAt = ProcessInfo.processInfo.systemUptime
-        // Match the original interaction sequence: no diagnostic AX reads,
-        // attachments, or logging between readiness and this single tap.
-        segment.tap()
-        let tapReturnedAt = ProcessInfo.processInfo.systemUptime
-        let deadline = tapReturnedAt + 5
+        // Use one real button tap, with no warmup, retry, or intervening AX reads.
+        button.tap()
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
         let selected = XCTNSPredicateExpectation(
             predicate: NSPredicate { candidate, _ in
                 (candidate as? XCUIElement)?.isSelected == true
             },
-            object: segment
+            object: button
         )
         let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
-        let completed = remaining > 0 && XCTWaiter().wait(for: [selected], timeout: remaining) == .completed
-        let selectionWaitEndedAt = ProcessInfo.processInfo.systemUptime
-        // Only after the original native-selection wait has completed or
-        // expired do we inspect cardinality, production value, and trace.
-        // These observations never grant another wait or change a failed result.
-        let pickers = app.segmentedControls.matching(identifier: "live-view-tap-action-picker")
-        let pickerCount = pickers.count
-        let observedSelected = pickerCount == 1 && pickers.firstMatch.buttons[choice.label].isSelected
-        let observedValue = pickerCount == 1 ? pickers.firstMatch.value as? String : nil
-        let observedTrace = pickerCount == 1 ? boundedTapSelectionTrace(pickers.firstMatch.label) : "unavailable"
-        recordTapSelectionDiagnostic(phase: "\(phase)-wait-budget", lines: [
-            "interaction-wait-seconds=\(interactionReadyAt - interactionWaitStarted)",
-            "tap-call-seconds=\(tapReturnedAt - interactionReadyAt)",
-            "remaining-before-wait=\(remaining)",
-            "selection-wait-seconds=\(selectionWaitEndedAt - tapReturnedAt)",
-            "selection-completed=\(completed)",
-            "post-wait-picker-count=\(pickerCount)",
-            "post-wait-selected=\(observedSelected)",
-            "post-wait-value=\(boundedTapSelectionValue(observedValue))",
-            "post-wait-trace=\(observedTrace)",
-        ])
-        recordLiveViewTapSelection(in: app, phase: "\(phase)-after-selection-wait")
-        guard completed else {
+        guard remaining > 0, XCTWaiter().wait(for: [selected], timeout: remaining) == .completed else {
             addScreenshot(name: phase == "direct-ccapi" ? "click-white-balance-selection-failed" : "\(phase)-tap-selection-failed")
-            await recordSimulatorLiveViewCounts(phase: "\(phase)-selection-failed")
-            XCTFail("The \(choice.rawValue) segment did not select within five seconds", file: file, line: line)
+            XCTFail("The \(choice.rawValue) button did not select within five seconds", file: file, line: line)
             return false
         }
-        guard pickerCount == 1, observedSelected, observedValue == choice.rawValue else {
-            await recordSimulatorLiveViewCounts(phase: "\(phase)-production-value-mismatch")
-            XCTFail("Native selection completed, but the post-wait selection, production value, or cardinality did not match", file: file, line: line)
+        // Selection and the production value must both agree before the test
+        // dismisses the sheet or performs a real Live View operation.
+        let controls = app.otherElements.matching(identifier: "live-view-tap-action-control")
+        guard controls.count == 1, control.value as? String == choice.rawValue else {
+            XCTFail("The production value or control cardinality did not match the selection", file: file, line: line)
             return false
         }
-        guard observedTrace != "unavailable" else {
-            // A non-publishing reference buffer can have a stale AX label.
-            // Even an empty writes list cannot prove the setter did not run;
-            // compare the captured OEC_TAP_SELECTION_SETTER stdout as well.
-            XCTFail("The opt-in DEBUG picker trace is unavailable; selection diagnosis is incomplete", file: file, line: line)
-            return false
+        for candidate in LiveViewTapSelection.allCases {
+            let buttons = control.buttons.matching(identifier: candidate.buttonIdentifier)
+            guard buttons.count == 1, buttons.firstMatch.isSelected == (candidate == choice) else {
+                XCTFail("The \(candidate.rawValue) button selection or cardinality did not match", file: file, line: line)
+                return false
+            }
+            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.width, 44, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.height, 44, file: file, line: line)
         }
         return true
-    }
-
-    private func recordLiveViewTapSelection(in app: XCUIApplication, phase: String) {
-        let pickers = app.segmentedControls.matching(identifier: "live-view-tap-action-picker")
-        var lines = ["picker-count=\(pickers.count)", "window=\(app.windows.firstMatch.frame)"]
-        let navigation = app.navigationBars["More settings"]
-        lines.append("more-settings-navigation=\(navigation.exists ? String(describing: navigation.frame) : "missing")")
-        for (index, scroll) in app.scrollViews.allElementsBoundByIndex.prefix(2).enumerated() {
-            lines.append("scroll[\(index)] frame=\(scroll.frame) hittable=\(scroll.isHittable)")
-        }
-        let liveView = app.descendants(matching: .any)["live-view-interaction-surface"]
-        lines.append("live-view-surface=\(liveView.exists ? String(describing: liveView.frame) : "missing")")
-        // Bound all enumeration and emit only these synthetic controls, not a
-        // whole accessibility tree, arbitrary labels, or camera information.
-        for (index, picker) in pickers.allElementsBoundByIndex.prefix(2).enumerated() {
-            lines.append("picker[\(index)] frame=\(picker.frame) enabled=\(picker.isEnabled) hittable=\(picker.isHittable) value=\(boundedTapSelectionValue(picker.value as? String))")
-            lines.append("picker[\(index)] trace=\(boundedTapSelectionTrace(picker.label))")
-            lines.append("picker[\(index)] button-count=\(picker.buttons.count)")
-            for choice in LiveViewTapSelection.allCases {
-                let segments = picker.buttons.matching(identifier: choice.label)
-                lines.append("\(choice.rawValue)-count=\(segments.count)")
-                for (segmentIndex, segment) in segments.allElementsBoundByIndex.prefix(2).enumerated() {
-                    let identifier = ["viewfinder", "eyedropper"].contains(segment.identifier) ? segment.identifier : "other"
-                    lines.append("\(choice.rawValue)[\(segmentIndex)] identifier=\(identifier) frame=\(segment.frame) selected=\(segment.isSelected) enabled=\(segment.isEnabled) hittable=\(segment.isHittable)")
-                }
-            }
-        }
-        recordTapSelectionDiagnostic(phase: phase, lines: lines)
-    }
-
-    private func boundedTapSelectionValue(_ value: String?) -> String {
-        guard let value, ["focus", "whiteBalance", "none"].contains(value) else { return "unavailable-or-unexpected" }
-        return value
-    }
-
-    private func boundedTapSelectionTrace(_ label: String) -> String {
-        guard label.hasPrefix("OEC_TAP_SELECTION_TRACE ") else { return "unavailable" }
-        return String(label.prefix(2048))
-    }
-
-    private func recordTapSelectionDiagnostic(phase: String, lines: [String]) {
-        let diagnostic = (["[OEC_TAP_SELECTION] \(phase)"] + lines).joined(separator: "\n")
-        print(diagnostic)
-        let attachment = XCTAttachment(string: diagnostic)
-        attachment.name = "live-view-tap-selection-\(phase)"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
-
-    private func recordSimulatorLiveViewCounts(phase: String) async {
-        guard let state = try? await simulatorRequest(path: "/ccapi/test/state") else {
-            recordTapSelectionDiagnostic(phase: phase, lines: ["simulator-counts=unavailable"])
-            return
-        }
-        let focus = (state["focus"] as? [String: Any])?["count"] as? NSNumber
-        let whiteBalance = (state["click_white_balance"] as? [String: Any])?["count"] as? NSNumber
-        recordTapSelectionDiagnostic(phase: phase, lines: [
-            "simulator-focus-count=\(focus.map { String($0.intValue) } ?? "unavailable")",
-            "simulator-white-balance-count=\(whiteBalance.map { String($0.intValue) } ?? "unavailable")",
-        ])
     }
 
     private func assertNoSimulatorLiveViewCommands(

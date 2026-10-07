@@ -721,12 +721,6 @@ private struct MonitoringAssistView: View {
     }
 }
 
-#if DEBUG
-private final class LiveViewTapSelectionTrace {
-    var entries: [String] = []
-}
-#endif
-
 private struct MoreSettingsView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
@@ -736,16 +730,13 @@ private struct MoreSettingsView: View {
     @State private var showSensorCleaningConfirmation = false
     @State private var directoryName = ""
     @State private var textDrafts: [String: String] = [:]
-    #if DEBUG
-    @State private var liveViewTapSelectionTrace = LiveViewTapSelectionTrace()
-    #endif
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if camera.supports(.clickWhiteBalance) {
-                        liveViewTapActionPicker
+                        liveViewTapActionRow
                         Divider().overlay(Color.cameraBorder)
                     }
                     if camera.supports(.cameraClockSync) {
@@ -826,7 +817,7 @@ private struct MoreSettingsView: View {
         advancedSettingsForMode(camera.capabilities?.settings ?? [], mode: camera.captureMode)
     }
 
-    private var liveViewTapActionPicker: some View {
+    private var liveViewTapActionRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("live_view_tap_action")
                 .font(.callout.weight(.semibold))
@@ -836,62 +827,40 @@ private struct MoreSettingsView: View {
         .padding(.vertical, 14)
     }
 
-    @ViewBuilder
     private var liveViewTapActionControl: some View {
-        #if DEBUG
-        if CommandLine.arguments.contains("-traceLiveViewTapSelection") {
-            // Synthetic UI tests can read the bounded setter trace without
-            // changing the actual selection value or extracting device logs.
-            liveViewTapActionControlContent.accessibilityLabel(Text(
-                "OEC_TAP_SELECTION_TRACE current=\(camera.liveViewTapAction.rawValue) " +
-                "effective=\(camera.effectiveLiveViewTapAction?.rawValue ?? "none") " +
-                "tapFocus=\(camera.supports(.tapFocus)) " +
-                "clickWhiteBalance=\(camera.supports(.clickWhiteBalance)) " +
-                "writes=[\(liveViewTapSelectionTrace.entries.joined(separator: "; "))]"
-            ))
-        } else {
-            liveViewTapActionControlContent
-        }
-        #else
-        liveViewTapActionControlContent
-        #endif
-    }
-
-    private var liveViewTapActionControlContent: some View {
-        Picker("live_view_tap_action", selection: liveViewTapActionBinding) {
+        HStack(spacing: 4) {
             if camera.supports(.tapFocus) {
-                Label("tap_action_focus", systemImage: "viewfinder").tag(LiveViewTapAction.focus)
+                liveViewTapActionButton(.focus, title: "tap_action_focus", systemImage: "viewfinder")
             }
-            Label("tap_action_white_balance", systemImage: "eyedropper").tag(LiveViewTapAction.whiteBalance)
+            liveViewTapActionButton(.whiteBalance, title: "tap_action_white_balance", systemImage: "eyedropper")
         }
-        .pickerStyle(.segmented)
-        .accessibilityIdentifier("live-view-tap-action-picker")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("live_view_tap_action"))
+        .accessibilityIdentifier("live-view-tap-action-control")
         .accessibilityValue(Text(camera.effectiveLiveViewTapAction?.rawValue ?? "none"))
     }
 
-    private var liveViewTapActionBinding: Binding<LiveViewTapAction> {
-        Binding(
-            get: { camera.effectiveLiveViewTapAction ?? .focus },
-            set: { newValue in
-                #if DEBUG
-                let oldValue = camera.liveViewTapAction
-                #endif
-                camera.liveViewTapAction = newValue
-                #if DEBUG
-                if CommandLine.arguments.contains("-traceLiveViewTapSelection") {
-                    let entry = "old=\(oldValue.rawValue) requested=\(newValue.rawValue) " +
-                        "actual=\(camera.liveViewTapAction.rawValue) " +
-                        "effective=\(camera.effectiveLiveViewTapAction?.rawValue ?? "none") " +
-                        "tapFocus=\(camera.supports(.tapFocus)) " +
-                        "clickWhiteBalance=\(camera.supports(.clickWhiteBalance))"
-                    // Retain a bounded reference buffer without publishing a
-                    // second SwiftUI state change from this diagnostic seam.
-                    liveViewTapSelectionTrace.entries = Array((liveViewTapSelectionTrace.entries + [entry]).suffix(6))
-                    print("[OEC_TAP_SELECTION_SETTER] \(entry)")
-                }
-                #endif
-            }
-        )
+    private func liveViewTapActionButton(
+        _ action: LiveViewTapAction, title: LocalizedStringKey, systemImage: String
+    ) -> some View {
+        let selected = camera.effectiveLiveViewTapAction == action
+        return Button {
+            // Choosing a mode only updates local state; a Live View tap sends the command.
+            camera.liveViewTapAction = action
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.callout.weight(.semibold))
+                .padding(.horizontal, 8)
+                .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+                .foregroundStyle(selected ? Color.cameraBackground : Color.cameraText)
+                .background(selected ? Color.cameraText : Color.cameraSurfaceRaised)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(title))
+        .accessibilityIdentifier("live-view-tap-action-\(action.rawValue)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var cameraClockRow: some View {
