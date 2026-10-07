@@ -4,7 +4,12 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-07
+
 - Android direct CCAPI (Android 10+): add explicit per-session foreground JPEG original delivery to Gallery, with two complete bounded baseline inventories, fresh stable metadata, a bounded queue, visible progress and stop/cleanup feedback. Newly observed IDs do not prove capture causality; existing files are not backfilled, and background import, cross-session deduplication and camera-command replay are not added. See the [foreground import validation notes](docs/validation/android-foreground-jpeg-import-2026-10-06.zh-TW.md) for acceptance and device boundaries.
+
+- Keep original control viewport/cutout/held-AF/zoom behavior when the foreground-import status row is absent, and consume system insets once when that row is present.
+- Development Preview only. API34/36 each pass 318 automated cases; physical Canon/phone/Wi-Fi validation remains pending. No saved-Gallery-to-Serein list, RAW conversion, USB/Bridge automatic import or iOS/PC feature parity is added. See [v0.13.0 release notes](docs/releases/v0.13.0.md).
 
 ## [0.12.0] - 2026-10-06
 
@@ -250,3 +255,4 @@ This preview still requires broader Canon EOS R6 Mark III physical-device valida
 [0.6.1]: https://github.com/js051/open-eos-control/releases/tag/v0.6.1
 [0.11.0]: https://github.com/js051/open-eos-control/releases/tag/v0.11.0
 [0.12.0]: https://github.com/js051/open-eos-control/releases/tag/v0.12.0
+[0.13.0]: https://github.com/js051/open-eos-control/releases/tag/v0.13.0
