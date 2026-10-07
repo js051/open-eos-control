@@ -1,6 +1,6 @@
 # PC 單次拍照、最近素材與原檔保存候選
 
-日期：2026-10-07 UTC。基底為 accepted main `1137bee3a35db89bc8fdb1d45f6529e7cafa0e7e`，tree `f9fdef829d189aaaf70fcd37a942d4c987831d47`。本批對應[產品流程矩陣](../product-workflow-acceptance.zh-TW.md)的 P1 拍攝確認及 P2 原檔交付；目前只有下列本地證據，尚未達到 PR ready，也沒有實機驗證。
+日期：2026-10-07 UTC。基底為 accepted main `1137bee3a35db89bc8fdb1d45f6529e7cafa0e7e`，tree `f9fdef829d189aaaf70fcd37a942d4c987831d47`。本批對應[產品流程矩陣](../product-workflow-acceptance.zh-TW.md)的 P1 拍攝確認及 P2 原檔交付。首輪 CI 已取得六個 browser 成功與一個保存歸屬反例；下述修復仍待新 head 的完整驗證，尚未達到 PR ready，也沒有實機驗證。
 
 ## 使用者流程與查找邊界
 
@@ -36,10 +36,24 @@
 
 此嘗試用既有系統 Chromium 154.0.8037.57、Playwright 1.62.1，與 CI 鎖定的 Playwright 1.62.0 bundle 不同；測試只有明確可選的 executable path，CI 預設不變。Python 為 3.12.14，uvicorn 0.52.1、FastAPI 0.141.1、Pillow 12.3.0、Pydantic 2.13.4。環境沒有 pytest，六項既有靜態 UI 契約尚未經原 pytest 入口執行，沒有自造替代 runner。
 
-因此七個 browser 場景、既有 browser／Python／lint 與 exact-head CI 都仍需正常環境驗證。靜態觀察到目的地 picker 等待後下載 URL 讀取當前 session，但普通 UI 的實際可達性尚未證明；`downloadMedia` 及其 session owner 尚未更改，不能宣稱已修復或已驗收此保存風險。
+以上為首次本地階段的環境限制；當時沒有修改 `downloadMedia` 或把靜態疑點當成已重現故障。後續正常 CI 已取得以下真實反例，不能再把它只描述為未證明的靜態風險。
+
+## 首輪 CI 保存反例與修復
+
+PR #218 首輪來源 `1f766da3139cdee5977a7a2cf7f6d866937c91e4` 的 [CI 37686494588／Desktop browser job](https://github.com/js051/open-eos-control/actions/runs/37686494588/job/113015641874) 實際執行七個新 browser 場景。前六個通過，包含候選換序、第二筆新素材、耗盡重查、清單失敗，以及 Blob／direct-writer 原檔與短檔重試；唯一失敗是最後的目的檔建立等待與斷線重連。
+
+反例經正式 UI 開啟預覽與保存，平台 picker 已返回、`createWritable()` 尚未完成時，正常關閉預覽、斷線與重新連線均可達。舊 handle 恢復後，production 向替代 session 發出舊 `SIM_0003.JPG` 的原檔 GET；原本應為空的 GET 清單實際非空。這是 PC DOM → 真 Bridge → synthetic Canon HTTP 的產品反例；平台檔案 handle 仍為受控 fixture，沒有冒稱真 OS picker 或實體磁碟測試。
+
+本次修復在開啟目的地前捕獲原 session 與每次下載的獨立 owner。恢復時若 session／owner 已失效，先 abort 尚未發布的 writer，不發原檔 GET。取消準備工作的標記與「仍有權清理目前工作」分開：斷線先取消、但尚未清除 session 時也不能繼續 GET，同一 owner 的 finally 仍會清理 preparing；舊 owner 的進度、錯誤與 finally 不覆寫新 session／新下載。既有 active-transfer 取消及原檔長度驗證保留，不擴充已提交完成檔案的撤回。
+
+**21:15:55–21:15:56，完整 `npm run test:modules` 再次通過，exit 0。** 九個模組腳本依原入口執行；capture-review 為 **21／21、0 failure／skip／cancel**，其中新增八個 owner／取消案例。這是同來源的新一輪結果，不與先前 13 例加總。Node 為 22.23.3，四個修復來源及 package 執行前後 SHA-256 一致；`app.js` 為 `07a1f24744cdfe53d939401620c93942e069a8b3cba59448e6da87e023709dc5`，focused 測試為 `fba735483676935e49affc2f514649148e7370d300dcc3e9eed969f91a2e9e63`。
+
+Fixture 的 `kind=info.filesize` 另修為與其自定原始 JPEG 的實際長度相同。Canon path-only listing 不讀取 info，Bridge 原本就以 `sizeBytes=0` 表示未知大小，因此先前 direct-writer 場景確實能進入 picker；沒有偽造大檔 metadata、變更正式下載門檻或強改 app state。
+
+原本七個 browser 場景與 picker 零 GET／abort／只拍一次斷言保留。在既有清單失敗場景補入 390×844 的英／繁中無橫向溢出、文字未裁切、重查可操作與截圖，仍要求不增加相機寫入。此窄版與原 browser 反例的修復結果尚待新 head 正常 CI；沒有重啟本地受阻的 browser。原 pytest、其他適用 gate 與精確提交結果仍以該新 run 為準。
 
 ## 範圍與發行判定
 
 不包含 REC／Bulb 擴充、自動傳圖、跨程序續傳、手機 Bridge CCAPI 入口或新 Serein 協定。沒有新增相機／手機／Windows 實體裝置證據。
 
-Release Assessment：比較來源為上述 accepted main（宣告版本 0.13.0）；2026-10-07 20:48 UTC 核對 GitHub，最新公開版本仍為 [v0.12.0 Development Preview](https://github.com/js051/open-eos-control/releases/tag/v0.12.0)。v0.13.0 尚未發布，其固定候選 `fb4f555` 不納入本批。此批修復既有 PC 拍後查找與失敗恢復，建議 impact 為 `patch`，不修改版本或發行通道。Browser 完整旅程與 picker 所有權仍未閉合，不能據本地 module 綠燈發布或標成 PR ready。
+Release Assessment：比較來源為上述 accepted main（宣告版本 0.13.0）；2026-10-07 20:48 UTC 核對 GitHub，最新公開版本仍為 [v0.12.0 Development Preview](https://github.com/js051/open-eos-control/releases/tag/v0.12.0)。v0.13.0 尚未發布，其固定候選 `fb4f555` 不納入本批。此批修復既有 PC 拍後查找與失敗恢復，建議 impact 為 `patch`，不修改版本或發行通道。保存歸屬已有修復及本地控制，但完整 browser／窄版旅程與 exact-head CI 仍未閉合，不能據 module 綠燈發布或標成 PR ready。

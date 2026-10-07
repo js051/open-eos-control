@@ -13,6 +13,7 @@ const { chromium } = require("playwright");
 
 const BRIDGE_ROOT = path.resolve(__dirname, "..");
 const SIMULATOR_ROOT = path.resolve(BRIDGE_ROOT, "../simulator");
+const RESULTS_DIR = path.join(BRIDGE_ROOT, "test-results");
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -138,6 +139,36 @@ async function assertOneCapture(origin) {
   assert.deepEqual(state.shutter_af_requests, [false], "Read-only recovery and transfer retry preserve AF intent");
 }
 
+async function assertNarrowRecoveryLayout(page, language) {
+  await page.locator("#latest-media-review").scrollIntoViewIfNeeded();
+  const geometry = await page.evaluate(() => {
+    const selectors = ["#latest-media-review-status", "#latest-media-review [data-i18n='latestMediaReviewLimit']", "#latest-media-retry"];
+    return {
+      viewportWidth: innerWidth,
+      pageWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+      elements: selectors.map((selector) => {
+        const element = document.querySelector(selector);
+        const bounds = element.getBoundingClientRect();
+        return { selector, left: bounds.left, right: bounds.right, width: bounds.width, height: bounds.height,
+          scrollWidth: element.scrollWidth, clientWidth: element.clientWidth,
+          scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
+      }),
+    };
+  });
+  assert.equal(geometry.viewportWidth, 390);
+  assert.ok(geometry.pageWidth <= geometry.viewportWidth + 1, `${language}: no horizontal page overflow`);
+  for (const element of geometry.elements) {
+    assert.ok(element.width > 0 && element.height > 0, `${language}: ${element.selector} must be visible`);
+    assert.ok(element.left >= -1 && element.right <= geometry.viewportWidth + 1,
+      `${language}: ${element.selector} must fit the narrow viewport`);
+    assert.ok(element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1,
+      `${language}: ${element.selector} must not clip its content`);
+  }
+  await page.locator("#latest-media-retry").click({ trial: true });
+  fs.mkdirSync(RESULTS_DIR, { recursive: true });
+  await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-capture-review-narrow-${language}.png`), fullPage: true });
+}
+
 const cases = [
   {
     name: "known candidates reordered",
@@ -207,9 +238,18 @@ const cases = [
       assert.match(await page.locator("#latest-media-review-status").innerText(), /list could not be read/i);
       assert.match(await page.locator("#latest-media-review").innerText(), /up to 8.*older file/s);
       const writes = cameraWrites.slice();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await assertNarrowRecoveryLayout(page, "en");
+      await retry.click();
+      await page.waitForFunction(() => {
+        const button = document.querySelector("#latest-media-retry");
+        return button && !button.disabled &&
+          /list could not be read/i.test(document.querySelector("#latest-media-review-status")?.textContent || "");
+      });
       await page.locator("#control-view .language-select").selectOption("zh-TW");
       assert.match(await page.locator("#latest-media-review-status").innerText(), /無法讀取.*不會再次拍攝/);
       assert.match(await page.locator("#latest-media-review").innerText(), /最多 8 筆.*舊檔/s);
+      await assertNarrowRecoveryLayout(page, "zh-TW");
       await configure(simulatorOrigin, { mode: "new-second" });
       await page.getByRole("button", { name: "重新查找", exact: true }).click();
       await waitForNew(page);

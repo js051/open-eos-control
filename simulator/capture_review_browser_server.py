@@ -92,7 +92,10 @@ async def synthetic_media_visibility(request: Request, call_next):
     if resource.startswith("/ccapi/ver100/contents/card1/100CANON/"):
         kind = request.query_params.get("kind")
         if kind == "info":
-            return await call_next(request)
+            item = main.canonical_media_item(resource.rsplit("/", 1)[-1])
+            information = main.media_info(item)
+            information["filesize"] = len(REPRESENTATIONS["original"])
+            return JSONResponse(content=information)
         representation = kind if kind in {"thumbnail", "display"} else "original"
         counter = {"thumbnail": "thumbnail_reads", "display": "preview_reads", "original": "original_reads"}
         fixture[counter[representation]] += 1

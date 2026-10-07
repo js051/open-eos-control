@@ -1146,6 +1146,7 @@
     mediaDetailsGeneration: 0,
     mediaDetailsBusy: false,
     mediaDownloadPreparing: false,
+    mediaDownloadOwner: null,
     mediaDownload: null,
     mediaUpload: null,
     latestMediaItem: null,
@@ -1775,6 +1776,7 @@
     state.mediaLoaded = false;
     state.mediaLoadStatus = "NOT_LOADED";
     state.mediaDownloadPreparing = false;
+    state.mediaDownloadOwner = null;
     state.mediaDownload = null;
     state.mediaUpload = null;
     state.latestMediaItem = null;
@@ -5311,6 +5313,11 @@
 
   async function downloadMedia(item) {
     if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD) || cameraInteractionBusy()) return;
+    const session = state.session;
+    const sessionId = session.id;
+    const owner = { cancelled: false, silent: false };
+    state.mediaDownloadOwner = owner;
+    const ownsDownload = () => state.mediaDownloadOwner === owner && state.session === session;
     state.mediaDownloadPreparing = true;
     setOperationState(t("preparingDownload"));
     renderMedia();
@@ -5321,11 +5328,14 @@
     let transfer = null;
     try {
       const destination = await chooseMediaWritable(item);
+      writable = destination.writable;
+      // Disconnect can finish while the browser is still creating the destination.
+      // An old handle must be discarded before any request can use another session.
+      if (!ownsDownload() || owner.cancelled) throw mediaTransfer.cancellationError();
       if (destination.cancelled) {
         setOperationState(t("ready"));
         return;
       }
-      writable = destination.writable;
       const controller = new AbortController();
       state.mediaDownloadPreparing = false;
       transfer = {
@@ -5344,21 +5354,22 @@
       renderMediaTransfer();
       renderMediaPreviewNavigation();
       const response = await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}`,
+        `/v1/session/${encodeURIComponent(sessionId)}/media/${encodeURIComponent(item.id)}`,
         { responseType: "response", signal: controller.signal },
       );
+      if (!ownsDownload() || owner.cancelled) throw mediaTransfer.cancellationError();
       const result = await mediaTransfer.readResponse(response, {
         signal: controller.signal,
         expectedBytes: item.sizeBytes,
         writeChunk: writable ? (chunk) => writable.write(chunk) : null,
         onProgress: (progress) => {
-          if (state.mediaDownload !== transfer) return;
+          if (!ownsDownload() || owner.cancelled || state.mediaDownload !== transfer) return;
           transfer.bytesTransferred = progress.bytesTransferred;
           transfer.totalBytes = progress.totalBytes;
           scheduleMediaTransferRender();
         },
       });
-      if (controller.signal.aborted) throw mediaTransfer.cancellationError();
+      if (controller.signal.aborted || owner.cancelled || !ownsDownload()) throw mediaTransfer.cancellationError();
       if (writable) {
         await writable.close();
         writableClosed = true;
@@ -5367,6 +5378,7 @@
       } else {
         throw new Error("Media download completed without a file destination.");
       }
+      if (!ownsDownload()) return;
       showToast(t("downloaded", { name: item.name }));
       setOperationState(t("ready"));
     } catch (error) {
@@ -5377,8 +5389,9 @@
           // The browser may already have closed or discarded the temporary file.
         }
       }
-      if (mediaTransfer.isAbortError(error) || transfer?.controller.signal.aborted) {
-        if (!transfer?.silent) {
+      if (!ownsDownload()) return;
+      if (owner.cancelled || mediaTransfer.isAbortError(error) || transfer?.controller.signal.aborted) {
+        if (!(transfer?.silent ?? owner.silent)) {
           showToast(t("downloadCancelled"));
           setOperationState(t("ready"));
         }
@@ -5388,16 +5401,23 @@
         showToast(normalized.message, true);
       }
     } finally {
-      clearScheduledMediaTransferRender();
-      state.mediaDownloadPreparing = false;
-      if (state.mediaDownload === transfer) state.mediaDownload = null;
-      renderMedia();
-      renderAvailability();
-      renderMediaPreviewNavigation();
+      if (ownsDownload()) {
+        clearScheduledMediaTransferRender();
+        state.mediaDownloadPreparing = false;
+        if (state.mediaDownload === transfer) state.mediaDownload = null;
+        state.mediaDownloadOwner = null;
+        renderMedia();
+        renderAvailability();
+        renderMediaPreviewNavigation();
+      }
     }
   }
 
   function cancelMediaDownload({ silent = false } = {}) {
+    if (state.mediaDownloadOwner) {
+      state.mediaDownloadOwner.cancelled = true;
+      state.mediaDownloadOwner.silent = silent;
+    }
     const transfer = state.mediaDownload;
     if (!transfer || transfer.controller.signal.aborted) return;
     transfer.silent = silent;
