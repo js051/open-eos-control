@@ -694,7 +694,6 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
             openMoreSettingsForTapSelection(in: app)
             XCTAssertTrue(picker.waitForExistence(timeout: 5))
-            recordLiveViewTapSelection(in: app, phase: "reopened-\(choice.rawValue)")
             XCTAssertTrue(picker.buttons[choice.label].isSelected)
             XCTAssertEqual(picker.value as? String, choice.rawValue)
             try await assertNoSimulatorLiveViewCommands()
@@ -762,59 +761,66 @@ final class OpenEOSControlUITests: XCTestCase {
         _ choice: LiveViewTapSelection, in app: XCUIApplication, phase: String,
         file: StaticString = #filePath, line: UInt = #line
     ) async -> Bool {
-        let pickers = app.segmentedControls.matching(identifier: "live-view-tap-action-picker")
-        guard pickers.count == 1 else {
-            recordLiveViewTapSelection(in: app, phase: "\(phase)-missing-or-duplicate")
-            await recordSimulatorLiveViewCounts(phase: "\(phase)-missing-or-duplicate")
-            XCTFail("Expected exactly one Live View tap-action picker", file: file, line: line)
-            return false
-        }
-        let picker = pickers.firstMatch
-        guard picker.label.hasPrefix("OEC_TAP_SELECTION_TRACE ") else {
-            recordLiveViewTapSelection(in: app, phase: "\(phase)-trace-unavailable")
-            XCTFail("The opt-in DEBUG picker trace is unavailable; selection diagnosis cannot proceed", file: file, line: line)
-            return false
-        }
+        let picker = app.segmentedControls["live-view-tap-action-picker"]
         let segment = picker.buttons[choice.label]
+        let interactionWaitStarted = ProcessInfo.processInfo.systemUptime
         guard waitForInteraction(segment, timeout: 5) else {
             recordLiveViewTapSelection(in: app, phase: "\(phase)-not-interactive")
             await recordSimulatorLiveViewCounts(phase: "\(phase)-not-interactive")
             XCTFail("The \(choice.rawValue) segment did not become interactive", file: file, line: line)
             return false
         }
-        recordLiveViewTapSelection(in: app, phase: "\(phase)-before-tap")
+        let interactionReadyAt = ProcessInfo.processInfo.systemUptime
+        // Match the original interaction sequence: no diagnostic AX reads,
+        // attachments, or logging between readiness and this single tap.
         segment.tap()
-        let deadline = ProcessInfo.processInfo.systemUptime + 5
-        // Capture a cheap immediate sample before waiting. Its cost belongs to
-        // the original five-second budget; diagnostic reads never replay a tap.
-        let immediateSelected = segment.isSelected
-        let immediateValue = picker.value as? String
-        recordTapSelectionDiagnostic(
-            phase: "\(phase)-immediate",
-            lines: [
-                "selected=\(immediateSelected)",
-                "value=\(boundedTapSelectionValue(immediateValue))",
-                "trace=\(boundedTapSelectionTrace(picker.label))",
-            ]
-        )
+        let tapReturnedAt = ProcessInfo.processInfo.systemUptime
+        let deadline = tapReturnedAt + 5
         let selected = XCTNSPredicateExpectation(
             predicate: NSPredicate { candidate, _ in
-                (candidate as? XCUIElement)?.isSelected == true &&
-                    picker.value as? String == choice.rawValue
+                (candidate as? XCUIElement)?.isSelected == true
             },
             object: segment
         )
         let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
         let completed = remaining > 0 && XCTWaiter().wait(for: [selected], timeout: remaining) == .completed
+        let selectionWaitEndedAt = ProcessInfo.processInfo.systemUptime
+        // Only after the original native-selection wait has completed or
+        // expired do we inspect cardinality, production value, and trace.
+        // These observations never grant another wait or change a failed result.
+        let pickers = app.segmentedControls.matching(identifier: "live-view-tap-action-picker")
+        let pickerCount = pickers.count
+        let observedSelected = pickerCount == 1 && pickers.firstMatch.buttons[choice.label].isSelected
+        let observedValue = pickerCount == 1 ? pickers.firstMatch.value as? String : nil
+        let observedTrace = pickerCount == 1 ? boundedTapSelectionTrace(pickers.firstMatch.label) : "unavailable"
         recordTapSelectionDiagnostic(phase: "\(phase)-wait-budget", lines: [
+            "interaction-wait-seconds=\(interactionReadyAt - interactionWaitStarted)",
+            "tap-call-seconds=\(tapReturnedAt - interactionReadyAt)",
             "remaining-before-wait=\(remaining)",
+            "selection-wait-seconds=\(selectionWaitEndedAt - tapReturnedAt)",
             "selection-completed=\(completed)",
+            "post-wait-picker-count=\(pickerCount)",
+            "post-wait-selected=\(observedSelected)",
+            "post-wait-value=\(boundedTapSelectionValue(observedValue))",
+            "post-wait-trace=\(observedTrace)",
         ])
         recordLiveViewTapSelection(in: app, phase: "\(phase)-after-selection-wait")
         guard completed else {
             addScreenshot(name: phase == "direct-ccapi" ? "click-white-balance-selection-failed" : "\(phase)-tap-selection-failed")
             await recordSimulatorLiveViewCounts(phase: "\(phase)-selection-failed")
-            XCTFail("The \(choice.rawValue) segment did not select with matching production value within five seconds", file: file, line: line)
+            XCTFail("The \(choice.rawValue) segment did not select within five seconds", file: file, line: line)
+            return false
+        }
+        guard pickerCount == 1, observedSelected, observedValue == choice.rawValue else {
+            await recordSimulatorLiveViewCounts(phase: "\(phase)-production-value-mismatch")
+            XCTFail("Native selection completed, but the post-wait selection, production value, or cardinality did not match", file: file, line: line)
+            return false
+        }
+        guard observedTrace != "unavailable" else {
+            // A non-publishing reference buffer can have a stale AX label.
+            // Even an empty writes list cannot prove the setter did not run;
+            // compare the captured OEC_TAP_SELECTION_SETTER stdout as well.
+            XCTFail("The opt-in DEBUG picker trace is unavailable; selection diagnosis is incomplete", file: file, line: line)
             return false
         }
         return true
