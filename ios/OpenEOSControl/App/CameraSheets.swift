@@ -736,7 +736,7 @@ private struct MoreSettingsView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if camera.supports(.clickWhiteBalance) {
-                        liveViewTapActionPicker
+                        liveViewTapActionRow
                         Divider().overlay(Color.cameraBorder)
                     }
                     if camera.supports(.cameraClockSync) {
@@ -817,29 +817,50 @@ private struct MoreSettingsView: View {
         advancedSettingsForMode(camera.capabilities?.settings ?? [], mode: camera.captureMode)
     }
 
-    private var liveViewTapActionPicker: some View {
+    private var liveViewTapActionRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("live_view_tap_action")
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(Color.cameraText)
-            Picker("live_view_tap_action", selection: liveViewTapActionBinding) {
-                if camera.supports(.tapFocus) {
-                    Label("tap_action_focus", systemImage: "viewfinder").tag(LiveViewTapAction.focus)
-                }
-                Label("tap_action_white_balance", systemImage: "eyedropper").tag(LiveViewTapAction.whiteBalance)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("live-view-tap-action-picker")
-            .accessibilityValue(Text(camera.effectiveLiveViewTapAction?.rawValue ?? "none"))
+            liveViewTapActionControl
         }
         .padding(.vertical, 14)
     }
 
-    private var liveViewTapActionBinding: Binding<LiveViewTapAction> {
-        Binding(
-            get: { camera.effectiveLiveViewTapAction ?? .focus },
-            set: { camera.liveViewTapAction = $0 }
-        )
+    private var liveViewTapActionControl: some View {
+        HStack(spacing: 4) {
+            if camera.supports(.tapFocus) {
+                liveViewTapActionButton(.focus, title: "tap_action_focus", systemImage: "viewfinder")
+            }
+            liveViewTapActionButton(.whiteBalance, title: "tap_action_white_balance", systemImage: "eyedropper")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("live_view_tap_action"))
+        .accessibilityIdentifier("live-view-tap-action-control")
+        .accessibilityValue(Text(camera.effectiveLiveViewTapAction?.rawValue ?? "none"))
+    }
+
+    private func liveViewTapActionButton(
+        _ action: LiveViewTapAction, title: LocalizedStringKey, systemImage: String
+    ) -> some View {
+        let selected = camera.effectiveLiveViewTapAction == action
+        return Button {
+            // Choosing a mode only updates local state; a Live View tap sends the command.
+            camera.liveViewTapAction = action
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.callout.weight(.semibold))
+                .padding(.horizontal, 8)
+                .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+                .foregroundStyle(selected ? Color.cameraBackground : Color.cameraText)
+                .background(selected ? Color.cameraText : Color.cameraSurfaceRaised)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(title))
+        .accessibilityIdentifier("live-view-tap-action-\(action.rawValue)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var cameraClockRow: some View {

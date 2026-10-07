@@ -420,23 +420,9 @@ final class OpenEOSControlUITests: XCTestCase {
         let moreSettings = app.buttons["more-settings-menu-button"]
         XCTAssertTrue(waitForInteraction(moreSettings, timeout: 8))
         moreSettings.tap()
-        let tapAction = app.segmentedControls["live-view-tap-action-picker"]
+        let tapAction = app.otherElements["live-view-tap-action-control"]
         XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
-        let clickWhiteBalance = tapAction.buttons["Click white balance"]
-        guard waitForInteraction(clickWhiteBalance, timeout: 5) else {
-            XCTFail("The white-balance segment did not become interactive.\n\(app.debugDescription)")
-            return
-        }
-        clickWhiteBalance.tap()
-        let selected = XCTNSPredicateExpectation(
-            predicate: NSPredicate { candidate, _ in (candidate as? XCUIElement)?.isSelected == true },
-            object: clickWhiteBalance
-        )
-        guard XCTWaiter().wait(for: [selected], timeout: 5) == .completed else {
-            addScreenshot(name: "click-white-balance-selection-failed")
-            XCTFail("The white-balance segment did not select.\n\(app.debugDescription)")
-            return
-        }
+        guard selectLiveViewTapAction(.whiteBalance, in: app, phase: "direct-ccapi") else { return }
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
         liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
@@ -666,6 +652,51 @@ final class OpenEOSControlUITests: XCTestCase {
         guard waitForConnectionScreen(in: app, timeout: 15) else { return }
     }
 
+    @MainActor
+    func testLiveViewTapActionSelectionRetainsStateWithoutSendingLiveViewCommands() async throws {
+        let available = await waitForSimulatorHealth()
+        guard available else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
+            return
+            #else
+            throw XCTSkip("Start the fake camera at \(simulatorURL.absoluteString) to run the network end-to-end test")
+            #endif
+        }
+        _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        let simulatorPreset = app.buttons["preset-simulator-button"]
+        XCTAssertTrue(simulatorPreset.waitForExistence(timeout: 8))
+        simulatorPreset.tap()
+        app.buttons["connect-button"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.images["live-view-decoded-frame"].waitForExistence(timeout: 30))
+
+        openMoreSettingsForTapSelection(in: app)
+        let control = app.otherElements["live-view-tap-action-control"]
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+        XCTAssertTrue(control.buttons[LiveViewTapSelection.focus.buttonIdentifier].isSelected)
+        XCTAssertFalse(control.buttons[LiveViewTapSelection.whiteBalance.buttonIdentifier].isSelected)
+        XCTAssertEqual(control.value as? String, LiveViewTapSelection.focus.rawValue)
+        try await assertNoSimulatorLiveViewCommands()
+
+        // Each change is a single real UI tap. Reopening must retain the
+        // production choice, and choosing a mode must not operate the camera.
+        for choice in [LiveViewTapSelection.whiteBalance, .focus] {
+            guard selectLiveViewTapAction(choice, in: app, phase: "selection-only-\(choice.rawValue)") else { return }
+            try await assertNoSimulatorLiveViewCommands()
+            app.buttons["Done"].tap()
+            XCTAssertTrue(control.waitForNonExistence(timeout: 5))
+            openMoreSettingsForTapSelection(in: app)
+            XCTAssertTrue(control.waitForExistence(timeout: 5))
+            for candidate in LiveViewTapSelection.allCases {
+                XCTAssertEqual(control.buttons[candidate.buttonIdentifier].isSelected, candidate == choice)
+            }
+            XCTAssertEqual(control.value as? String, choice.rawValue)
+            try await assertNoSimulatorLiveViewCommands()
+        }
+    }
+
     private func launch(
         appLanguage: String,
         appleLanguage: String,
@@ -697,6 +728,76 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private enum LiveViewTapSelection: String, CaseIterable {
+        case focus
+        case whiteBalance
+
+        var buttonIdentifier: String { "live-view-tap-action-\(rawValue)" }
+    }
+
+    private func openMoreSettingsForTapSelection(in app: XCUIApplication) {
+        openMoreActions(in: app)
+        let moreSettings = app.buttons["more-settings-menu-button"]
+        XCTAssertTrue(waitForInteraction(moreSettings, timeout: 8))
+        moreSettings.tap()
+    }
+
+    @MainActor
+    private func selectLiveViewTapAction(
+        _ choice: LiveViewTapSelection, in app: XCUIApplication, phase: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) -> Bool {
+        let control = app.otherElements["live-view-tap-action-control"]
+        let button = control.buttons[choice.buttonIdentifier]
+        guard waitForInteraction(button, timeout: 5) else {
+            XCTFail("The \(choice.rawValue) button did not become interactive", file: file, line: line)
+            return false
+        }
+        // Use one real button tap, with no warmup, retry, or intervening AX reads.
+        button.tap()
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        let selected = XCTNSPredicateExpectation(
+            predicate: NSPredicate { candidate, _ in
+                (candidate as? XCUIElement)?.isSelected == true
+            },
+            object: button
+        )
+        let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
+        guard remaining > 0, XCTWaiter().wait(for: [selected], timeout: remaining) == .completed else {
+            addScreenshot(name: phase == "direct-ccapi" ? "click-white-balance-selection-failed" : "\(phase)-tap-selection-failed")
+            XCTFail("The \(choice.rawValue) button did not select within five seconds", file: file, line: line)
+            return false
+        }
+        // Selection and the production value must both agree before the test
+        // dismisses the sheet or performs a real Live View operation.
+        let controls = app.otherElements.matching(identifier: "live-view-tap-action-control")
+        guard controls.count == 1, control.value as? String == choice.rawValue else {
+            XCTFail("The production value or control cardinality did not match the selection", file: file, line: line)
+            return false
+        }
+        for candidate in LiveViewTapSelection.allCases {
+            let buttons = control.buttons.matching(identifier: candidate.buttonIdentifier)
+            guard buttons.count == 1, buttons.firstMatch.isSelected == (candidate == choice) else {
+                XCTFail("The \(candidate.rawValue) button selection or cardinality did not match", file: file, line: line)
+                return false
+            }
+            // AX CGRect subtraction can report 43.99999999999994 for a 44pt frame.
+            // A millionth of a point covers representation error, not layout slack.
+            let coordinateRoundingTolerance = 0.000_001
+            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.width + coordinateRoundingTolerance, 44, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.height + coordinateRoundingTolerance, 44, file: file, line: line)
+        }
+        return true
+    }
+
+    private func assertNoSimulatorLiveViewCommands(
+        file: StaticString = #filePath, line: UInt = #line
+    ) async throws {
+        let state = try await simulatorRequest(path: "/ccapi/test/state")
+        XCTAssertEqual((state["focus"] as? [String: Any])?["count"] as? Int, 0, file: file, line: line)
+        XCTAssertEqual((state["click_white_balance"] as? [String: Any])?["count"] as? Int, 0, file: file, line: line)
     }
 
     private func scrollToInteraction(
