@@ -2,13 +2,20 @@ package dev.openeos.control.handoff;
 
 import android.app.Activity;
 import android.content.ClipData;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Binder;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
 import android.os.Process;
+import android.os.RemoteException;
+import android.os.ResultReceiver;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -33,6 +40,9 @@ public final class SavedJpegReceiverActivity extends Activity {
     public static final String OPERATION = "operation";
     public static final String MODE = "mode";
     public static final String REPORT = "report";
+    public static final String CONTROL_BINDER = "control-binder";
+    public static final String CONTROL_DESCRIPTOR = "dev.openeos.control.test.SavedJpegReceiverControl";
+    public static final int CONTROL_TRANSACTION = IBinder.FIRST_CALL_TRANSACTION;
     public static final String CONFIGURE = "configure";
     public static final String INSPECT = "inspect";
     public static final String CLEAN = "clean";
@@ -70,7 +80,7 @@ public final class SavedJpegReceiverActivity extends Activity {
             require(callerUid != Process.myUid(), "receiver-must-have-separate-uid");
             report.put("receiver_uid", Process.myUid()).put("caller_uid", callerUid);
             if (CONTROL_ACTION.equals(getIntent().getAction())) {
-                control(report);
+                control(report, callerUid);
             } else {
                 receive(caller, report);
             }
@@ -86,18 +96,8 @@ public final class SavedJpegReceiverActivity extends Activity {
         }
     }
 
-    private void control(JSONObject identity) throws Exception {
-        SharedPreferences preferences = SavedJpegReceiverWire.preferences(this);
+    private void control(JSONObject identity, int callerUid) throws Exception {
         String operation = getIntent().getStringExtra(OPERATION);
-        if (RELEASE_RECEIPT.equals(operation) || CLEAN.equals(operation)) {
-            java.util.concurrent.CountDownLatch gate = SavedJpegReceiverWire.receiptGate;
-            if (gate != null) gate.countDown();
-            SavedJpegReceiverWire.receiptGate = null;
-            if (RELEASE_RECEIPT.equals(operation)) {
-                setResult(RESULT_OK, new Intent().putExtra(REPORT, identity.toString()));
-                return;
-            }
-        }
         if (HOLD_GRANTS.equals(operation)) {
             require(heldActivity == null, "another-held-fixture-is-active");
             ClipData clip = getIntent().getClipData();
@@ -125,6 +125,26 @@ public final class SavedJpegReceiverActivity extends Activity {
             }, 60_000L);
             return;
         }
+        require(CONFIGURE.equals(operation), "control-capability-required");
+        JSONObject report = fixtureControl(getApplicationContext(), operation,
+                getIntent().getStringExtra(MODE), identity);
+        Bundle result = new Bundle();
+        result.putString(REPORT, report.toString());
+        // This capability reaches only the validated, separate-UID ActivityResult caller.
+        // Diagnostics/release must not launch another Activity while the real receiver is held.
+        result.putBinder(CONTROL_BINDER, new ControlCapability(getApplicationContext(), callerUid));
+        setResult(RESULT_OK, new Intent().putExtras(result));
+    }
+
+    private static JSONObject fixtureControl(Context context, String operation, String mode,
+                                             JSONObject identity) throws Exception {
+        SharedPreferences preferences = SavedJpegReceiverWire.preferences(context);
+        if (RELEASE_RECEIPT.equals(operation) || CLEAN.equals(operation)) {
+            java.util.concurrent.CountDownLatch gate = SavedJpegReceiverWire.receiptGate;
+            if (gate != null) gate.countDown();
+            SavedJpegReceiverWire.receiptGate = null;
+            if (RELEASE_RECEIPT.equals(operation)) return identity;
+        }
         if (PROBE_HELD_GRANTS.equals(operation)) {
             require(heldActivity != null, "held-fixture-is-not-active");
             ClipData clip = heldActivity.getIntent().getClipData();
@@ -132,9 +152,9 @@ public final class SavedJpegReceiverActivity extends Activity {
             JSONArray granted = new JSONArray();
             for (int i = 0; i < clip.getItemCount(); i++) {
                 Uri uri = clip.getItemAt(i).getUri();
-                granted.put(checkUriPermission(uri, Process.myPid(), Process.myUid(),
+                granted.put(context.checkUriPermission(uri, Process.myPid(), Process.myUid(),
                         Intent.FLAG_GRANT_READ_URI_PERMISSION) == PackageManager.PERMISSION_GRANTED);
-                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                try (InputStream input = context.getContentResolver().openInputStream(uri)) {
                     require(input != null && input.read() >= 0, "remaining-original-unreadable");
                     readable.put(true);
                 } catch (SecurityException expected) {
@@ -142,8 +162,7 @@ public final class SavedJpegReceiverActivity extends Activity {
                 }
             }
             identity.put("held_readable", readable).put("held_granted", granted);
-            setResult(RESULT_OK, new Intent().putExtra(REPORT, identity.toString()));
-            return;
+            return identity;
         }
         if (FINISH_HELD.equals(operation) || CLEAN.equals(operation)) {
             if (heldActivity != null) {
@@ -153,18 +172,14 @@ public final class SavedJpegReceiverActivity extends Activity {
                 heldActivity.finish();
                 heldActivity = null;
             }
-            if (FINISH_HELD.equals(operation)) {
-                setResult(RESULT_OK, new Intent().putExtra(REPORT, identity.toString()));
-                return;
-            }
+            if (FINISH_HELD.equals(operation)) return identity;
         }
         if (CONFIGURE.equals(operation) || CLEAN.equals(operation)) {
-            File[] receipts = SavedJpegReceiverWire.directory(this).listFiles();
+            File[] receipts = SavedJpegReceiverWire.directory(context).listFiles();
             if (receipts != null) for (File file : receipts) {
                 require(file.isFile() && file.getName().matches("[a-f0-9-]{36}\\.json")
                         && file.delete(), "receipt-cleanup-failed");
             }
-            String mode = getIntent().getStringExtra(MODE);
             require(preferences.edit().clear().putString(MODE, mode == null ? VALID : mode).commit(),
                     "fixture-configuration-failed");
             SavedJpegReceiverWire.receiptGate = BLOCK_RECEIPT.equals(mode)
@@ -179,7 +194,50 @@ public final class SavedJpegReceiverActivity extends Activity {
                 .put("receiver_launches", preferences.getInt("receiver_launches", 0))
                 .put("receiver_results", preferences.getInt("receiver_results", 0))
                 .put("receipt_blocked", preferences.getBoolean("receipt_blocked", false));
-        setResult(RESULT_OK, new Intent().putExtra(REPORT, report.toString()));
+        return report;
+    }
+
+    /** Only the held Activity can deliver the actual receipt and its Android URI grant. */
+    private static final class ControlCapability extends Binder {
+        private final Context context;
+        private final int callerUid;
+        private final Handler main;
+
+        ControlCapability(Context context, int callerUid) {
+            this.context = context;
+            this.callerUid = callerUid;
+            this.main = new Handler(context.getMainLooper());
+        }
+
+        @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
+                throws RemoteException {
+            if (code != CONTROL_TRANSACTION) return super.onTransact(code, data, reply, flags);
+            data.enforceInterface(CONTROL_DESCRIPTOR);
+            if (Binder.getCallingUid() != callerUid) throw new SecurityException("unexpected-control-uid");
+            String operation = data.readString();
+            require(INSPECT.equals(operation) || PROBE_HELD_GRANTS.equals(operation)
+                    || FINISH_HELD.equals(operation) || RELEASE_RECEIPT.equals(operation)
+                    || CLEAN.equals(operation), "unknown-control-operation");
+            ResultReceiver callback = data.readParcelable(ResultReceiver.class.getClassLoader());
+            require(callback != null && data.dataAvail() == 0, "invalid-control-callback");
+            // Serialize fixture Activity state on its own main thread. The Binder call itself
+            // never waits for the main thread, the held Activity, or blocked receipt I/O.
+            require(main.post(() -> {
+                Bundle response = new Bundle();
+                int resultCode = RESULT_OK;
+                try {
+                    JSONObject identity = new JSONObject().put("receiver_uid", Process.myUid())
+                            .put("caller_uid", callerUid);
+                    response.putString(REPORT, fixtureControl(context, operation, null, identity).toString());
+                } catch (Exception failure) {
+                    resultCode = RESULT_CANCELED;
+                    response.putString(REPORT, "{\"failure\":\"receiver-control-failed\"}");
+                }
+                callback.send(resultCode, response);
+            }), "control-main-thread-unavailable");
+            reply.writeNoException();
+            return true;
+        }
     }
 
     private void receive(String caller, JSONObject report) throws Exception {

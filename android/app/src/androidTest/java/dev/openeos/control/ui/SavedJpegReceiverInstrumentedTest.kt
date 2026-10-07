@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Process
 import android.os.Bundle
+import android.os.IBinder
+import android.os.Parcel
 import android.os.ResultReceiver
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
@@ -50,7 +52,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.json.JSONArray
-import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -63,6 +64,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestRule
+import org.junit.runners.model.Statement
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
@@ -82,7 +85,29 @@ import java.util.concurrent.atomic.AtomicReference
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 29)
 class SavedJpegReceiverInstrumentedTest {
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    @get:Rule(order = 0) val compose = createAndroidComposeRule<ComponentActivity>()
+    @get:Rule(order = 1) val cleanup = TestRule { statement, _ ->
+        object : Statement() {
+            override fun evaluate() {
+                var primaryFailure: Throwable? = null
+                try {
+                    statement.evaluate()
+                } catch (failure: Throwable) {
+                    primaryFailure = failure
+                    throw failure
+                } finally {
+                    try {
+                        tearDown()
+                    } catch (failure: Throwable) {
+                        // Keep the failing assertion visible in JUnit XML; cleanup still fails
+                        // an otherwise successful case and remains attached to a primary failure.
+                        if (primaryFailure == null) throw failure
+                        primaryFailure.addSuppressed(failure)
+                    }
+                }
+            }
+        }
+    }
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val testPackage get() = instrumentation.context.packageName
     private val context get() = compose.activity.applicationContext
@@ -108,6 +133,7 @@ class SavedJpegReceiverInstrumentedTest {
     private lateinit var unrelatedSentinel: File
     private var serverStarted = false
     private var retainedJobsBeforeConnection = emptySet<Job>()
+    private var receiverControl: IBinder? = null
 
     @Before fun setUp() {
         val testApplication = instrumentation.context.applicationInfo
@@ -179,12 +205,14 @@ class SavedJpegReceiverInstrumentedTest {
         assertEquals(0, camera.server.requestCount)
     }
 
-    @After fun tearDown() {
+    private fun tearDown() {
         camera.releaseGates()
-        // Release cross-process gates before waiting for the owning ViewModel to retire.
-        control(SavedJpegReceiverActivity.RELEASE_RECEIPT)
-        control(SavedJpegReceiverActivity.FINISH_HELD)
         try {
+            // Release cross-process gates before waiting for the owning ViewModel to retire.
+            if (receiverControl != null) {
+                control(SavedJpegReceiverActivity.RELEASE_RECEIPT)
+                control(SavedJpegReceiverActivity.FINISH_HELD)
+            }
             if (::model.isInitialized) {
                 val job = requireNotNull(model.viewModelScope.coroutineContext[Job])
                 val children = compose.runOnIdle { job.children.toList() }
@@ -209,7 +237,7 @@ class SavedJpegReceiverInstrumentedTest {
                     if (::initializationExpiryProbe.isInitialized) initializationExpiryProbe.deleteRecursively()
                     if (::unrelatedSession.isInitialized) unrelatedSession.deleteRecursively()
                     if (::historyDirectory.isInitialized) historyDirectory.deleteRecursively()
-                    control(SavedJpegReceiverActivity.CLEAN)
+                    if (receiverControl != null) control(SavedJpegReceiverActivity.CLEAN)
                 }
             }
         }
@@ -436,8 +464,8 @@ class SavedJpegReceiverInstrumentedTest {
         var pending: PendingActivityResult? = null
         try {
             val selected = store.snapshot(originals.mapTo(linkedSetOf()) { it.id })
-            val first = storage.preparePublishedJpegs(selected, retired, "synthetic-test", { _, _, _ -> }, {})
-            val second = storage.preparePublishedJpegs(selected, retained, "synthetic-test", { _, _, _ -> }, {})
+            val first = storage.preparePublishedJpegs(selected, retired, SYNTHETIC_PROVIDER_VERSION, { _, _, _ -> }, {})
+            val second = storage.preparePublishedJpegs(selected, retained, SYNTHETIC_PROVIDER_VERSION, { _, _, _ -> }, {})
             val firstUris = listOf(first.manifestUri) + first.representationUris
             val secondUris = listOf(second.manifestUri) + second.representationUris
             val ready = CountDownLatch(1)
@@ -493,7 +521,7 @@ class SavedJpegReceiverInstrumentedTest {
         val storage = CameraImportHandoffStorage(context)
         val reservation = storage.reserveLocalSession()
         val session = storage.preparePublishedJpegs(store.snapshot(originals.mapTo(linkedSetOf()) { it.id }),
-            reservation, "synthetic-test", { _, _, _ -> }, {})
+            reservation, SYNTHETIC_PROVIDER_VERSION, { _, _, _ -> }, {})
         try {
             val intent = SereinImportIntents.create(session, testPackage).apply {
                 removeFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
@@ -715,11 +743,47 @@ class SavedJpegReceiverInstrumentedTest {
     }
 
     private fun control(operation: String, mode: String? = null): JSONObject {
+        if (operation != SavedJpegReceiverActivity.CONFIGURE) {
+            check(mode == null)
+            return controlThroughCapability(operation)
+        }
         val result = launchForRealActivityResult(controlIntent(operation).apply {
             mode?.let { putExtra(SavedJpegReceiverActivity.MODE, it) }
         })
         assertEquals("The test APK control Activity must return a real ActivityResult", Activity.RESULT_OK, result.resultCode)
+        receiverControl = requireNotNull(result.data?.extras?.getBinder(SavedJpegReceiverActivity.CONTROL_BINDER)) {
+            "The validated receiver must return its cross-UID control capability"
+        }
         return JSONObject(requireNotNull(result.data?.getStringExtra(SavedJpegReceiverActivity.REPORT)))
+    }
+
+    /** Only diagnostic/release commands use Binder. Import and receipt delivery use Android. */
+    private fun controlThroughCapability(operation: String): JSONObject {
+        val received = LinkedBlockingQueue<Pair<Int, Bundle?>>(1)
+        val callback = object : ResultReceiver(null) {
+            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                received.offer(resultCode to resultData)
+            }
+        }
+        val request = Parcel.obtain()
+        val acknowledgement = Parcel.obtain()
+        try {
+            request.writeInterfaceToken(SavedJpegReceiverActivity.CONTROL_DESCRIPTOR)
+            request.writeString(operation)
+            request.writeParcelable(callback, 0)
+            assertTrue("The receiver must accept its diagnostic control transaction",
+                requireNotNull(receiverControl).transact(SavedJpegReceiverActivity.CONTROL_TRANSACTION,
+                    request, acknowledgement, 0))
+            acknowledgement.readException()
+        } finally {
+            request.recycle()
+            acknowledgement.recycle()
+        }
+        val response = received.poll(TIMEOUT, TimeUnit.MILLISECONDS)
+        assertNotNull("The receiver did not acknowledge diagnostic control: $operation", response)
+        val (resultCode, data) = requireNotNull(response)
+        assertEquals("The receiver diagnostic control failed: $operation", Activity.RESULT_OK, resultCode)
+        return JSONObject(requireNotNull(data?.getString(SavedJpegReceiverActivity.REPORT)))
     }
 
     private fun controlIntent(operation: String) = Intent(SavedJpegReceiverActivity.CONTROL_ACTION).apply {
@@ -765,6 +829,8 @@ class SavedJpegReceiverInstrumentedTest {
     companion object {
         private const val TIMEOUT = 20_000L
         private const val IMPORT_TIMEOUT = 30_000L
+        // Synthetic fixtures still obey the real contract's minimum provider version, 0.5.0.
+        private const val SYNTHETIC_PROVIDER_VERSION = "0.5.1-synthetic-test"
         private val SENTINEL = "SYNTHETIC unrelated cache session remains intact".toByteArray()
         private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }

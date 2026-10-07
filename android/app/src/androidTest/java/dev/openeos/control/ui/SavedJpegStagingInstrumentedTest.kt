@@ -144,7 +144,7 @@ class SavedJpegStagingInstrumentedTest {
         withOwnedFixtures {
             val retained = publish()
             val deleted = publish(cameraNumber = 2)
-            assertEquals(1, resolver.delete(deleted.saved.uri, null, null))
+            deleteOriginal(deleted)
             val storage = CameraImportHandoffStorage(context)
             val reservation = reserve(storage)
             val unrelated = reserve(storage)
@@ -352,6 +352,15 @@ class SavedJpegStagingInstrumentedTest {
 
         fun reserve(storage: CameraImportHandoffStorage): CameraImportStagingReservation =
             storage.reserveLocalSession().also { reservations += it }
+
+        fun deleteOriginal(original: PublishedFixture) {
+            val uri = original.saved.uri
+            check(uri in uris)
+            assertEquals(1, resolver.delete(uri, null, null))
+            // Retire only a confirmed deletion. MediaStore may reject a second
+            // delete once that exact row no longer establishes our ownership.
+            check(uris.remove(uri))
+        }
 
         fun close() {
             // Attempt every owned cleanup even if an earlier one fails.
