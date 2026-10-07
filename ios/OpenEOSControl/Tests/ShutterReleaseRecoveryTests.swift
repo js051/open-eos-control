@@ -6,6 +6,25 @@ import XCTest
 
 @MainActor
 final class ShutterReleaseRecoveryTests: XCTestCase {
+    func testStopCancelsOwnedStartBeforeItCanEnterEitherClient() async throws {
+        for bridge in [false, true] {
+            let transport = SuspendedShutterTransport()
+            let session: CameraSession = bridge
+                ? .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport))
+                : .ccapi(try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .simulator, transport: transport))
+            let start = Task {
+                // Model the interval before the app's owned task enters Core.
+                try await Task.sleep(for: .seconds(60))
+                return try await session.startBulbExposure()
+            }
+            try await session.retryShutterRelease(cancelling: start)
+            let result = await start.result
+            if case .success = result { XCTFail("Stop must cancel a Start which has not been dispatched") }
+            let mutations = await transport.mutations()
+            XCTAssertTrue(mutations.isEmpty)
+        }
+    }
+
     func testLostStartAndFailedCleanupKeepsStopOnlyUntilReleaseAcknowledgement() async throws {
         let transport = SuspendedShutterTransport()
         let state = try makeState(transport)
@@ -71,28 +90,147 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
         await state.disconnect()
     }
 
-    func testRepeatedStartAndStopTapsCannotDuplicateCommands() async throws {
+    func testPendingStartCanBeStoppedWithoutOpeningItsReplyGateAndRepeatedStopsStayBusy() async throws {
         let transport = SuspendedShutterTransport()
         let state = try makeState(transport)
         await state.connect()
-        await transport.enqueue("POST /ccapi/bulb/start", gate: "start")
+        await transport.enqueue("POST /ccapi/bulb/start", gate: "start", cancellable: true)
+        await transport.enqueue("POST /ccapi/bulb/stop", gate: "stop")
         let start = Task { await state.toggleBulbExposure() }
         try await waitForGate("start", on: transport)
-        await state.toggleBulbExposure()
+        XCTAssertTrue(state.canRetryShutterRelease, "A pending Start must leave an explicit Stop available")
         await state.captureStill()
         let starts = await transport.count("POST /ccapi/bulb/start")
         XCTAssertEqual(starts, 1)
-        await transport.release("start")
-        await start.value
-        await transport.enqueue("POST /ccapi/bulb/stop", gate: "stop")
-        let stop = Task { await state.retryShutterRelease() }
+        let stop = Task { await state.toggleBulbExposure() }
         try await waitForGate("stop", on: transport)
+        XCTAssertTrue(state.busyOperations.contains(.capture))
+        XCTAssertFalse(state.canRetryShutterRelease, "Stop owns capture until release settles")
         await state.retryShutterRelease()
         let stops = await transport.count("POST /ccapi/bulb/stop")
         XCTAssertEqual(stops, 1)
         await transport.release("stop")
         await stop.value
+        await start.value
+        let cancellations = await transport.cancelledGateCount
+        XCTAssertEqual(cancellations, 1)
         XCTAssertFalse(state.shutterReleaseRequired)
+        XCTAssertNil(state.lastError, "Deliberate cancellation must not restore Start's error")
+        await state.disconnect()
+    }
+
+    func testPendingStartStopFailureRemainsUnknownUntilAnotherExplicitStop() async throws {
+        let transport = SuspendedShutterTransport()
+        let state = try makeState(transport)
+        await state.connect()
+        await transport.enqueue("POST /ccapi/bulb/start", gate: "start", cancellable: true)
+        await transport.enqueue("POST /ccapi/bulb/stop", error: .timedOut)
+        let start = Task { await state.toggleBulbExposure() }
+        try await waitForGate("start", on: transport)
+        let stop = Task { await state.retryShutterRelease() }
+        try await waitForRequest("POST /ccapi/bulb/stop", on: transport)
+        await stop.value
+        await start.value
+        XCTAssertTrue(state.shutterReleaseUnconfirmed)
+        XCTAssertTrue(state.canRetryShutterRelease)
+        XCTAssertFalse(state.shutterFlash)
+        let firstStops = await transport.count("POST /ccapi/bulb/stop")
+        XCTAssertEqual(firstStops, 1, "One Stop must not hide a failed compensation with an automatic retry")
+        await state.retryShutterRelease()
+        XCTAssertFalse(state.shutterReleaseRequired)
+        let starts = await transport.count("POST /ccapi/bulb/start")
+        let stops = await transport.count("POST /ccapi/bulb/stop")
+        XCTAssertEqual(starts, 1)
+        XCTAssertEqual(stops, 2)
+        await state.disconnect()
+    }
+
+    func testBridgePendingStartStopCancelsOnlyStartAndKeepsFailureAvailableForRetry() async throws {
+        let transport = BridgeShutterRecoveryFixture(unknown: false, pendingStart: true, failFirstStop: true)
+        let state = CameraAppState(sessionFactory: {
+            .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport))
+        })
+        state.autoRefresh = false
+        await state.connect()
+        let start = Task { await state.toggleBulbExposure() }
+        try await waitForBridgeMutation("POST /v1/session/shutter-fixture-1/bulb/start", on: transport)
+        XCTAssertTrue(state.canRetryShutterRelease)
+        let stop = Task { await state.retryShutterRelease() }
+        try await waitForBridgeMutation("POST /v1/session/shutter-fixture-1/bulb/stop", on: transport)
+        await stop.value
+        await start.value
+        XCTAssertTrue(state.shutterReleaseUnconfirmed)
+        XCTAssertTrue(state.canRetryShutterRelease)
+        XCTAssertFalse(state.shutterFlash)
+        let cancellations = await transport.cancelledStartCount
+        XCTAssertEqual(cancellations, 1)
+        await state.retryShutterRelease()
+        XCTAssertFalse(state.shutterReleaseRequired)
+        XCTAssertNil(state.lastError)
+        let commands = await transport.mutations()
+        XCTAssertEqual(commands, [
+            "POST /v1/session", "POST /v1/session/shutter-fixture-1/bulb/start",
+            "POST /v1/session/shutter-fixture-1/bulb/stop", "POST /v1/session/shutter-fixture-1/bulb/stop",
+        ])
+        await state.disconnect()
+    }
+
+    func testBridgePendingStartDisconnectSettlesBeforeReplacementAndPreservesOnlyOldWarning() async throws {
+        for failClose in [false, true] {
+            let transport = BridgeShutterRecoveryFixture(unknown: false, failFirstClose: failClose, pendingStart: true)
+            let state = CameraAppState(sessionFactory: {
+                .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport))
+            })
+            state.autoRefresh = false
+            await state.connect()
+            let start = Task { await state.toggleBulbExposure() }
+            try await waitForBridgeMutation("POST /v1/session/shutter-fixture-1/bulb/start", on: transport)
+            state.requestDisconnect()
+            let reconnect = Task { await state.connect() }
+            try await waitForBridgeMutation("DELETE /v1/session/shutter-fixture-1", on: transport)
+            await reconnect.value
+            await start.value
+            XCTAssertEqual(state.info?.model, "Shutter recovery fixture shutter-fixture-2")
+            XCTAssertFalse(state.shutterReleaseRequired)
+            XCTAssertFalse(state.busyOperations.contains(.capture))
+            XCTAssertEqual(state.previousShutterReleaseUnconfirmed, failClose)
+            let cancellations = await transport.cancelledStartCount
+            XCTAssertEqual(cancellations, 1)
+            let commands = await transport.mutations()
+            XCTAssertEqual(commands, [
+                "POST /v1/session", "POST /v1/session/shutter-fixture-1/bulb/start",
+                "DELETE /v1/session/shutter-fixture-1", "POST /v1/session",
+            ])
+            await state.disconnect()
+        }
+    }
+
+    func testStopWaitsForCancellationIgnoringStartAndLateAcknowledgementCannotRestoreExposure() async throws {
+        let transport = SuspendedShutterTransport()
+        let state = try makeState(transport)
+        await state.connect()
+        await transport.enqueue("POST /ccapi/bulb/start", gate: "late-start")
+        await transport.enqueue("POST /ccapi/bulb/stop", gate: "release")
+        let start = Task { await state.toggleBulbExposure() }
+        try await waitForGate("late-start", on: transport)
+        let stop = Task { await state.retryShutterRelease() }
+        for _ in 0..<2_000 {
+            if !state.canRetryShutterRelease { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertFalse(state.canRetryShutterRelease)
+        let before = await transport.mutations()
+        XCTAssertEqual(before, ["POST /ccapi/bulb/start"], "Cleanup cannot race a request which ignored cancellation")
+        await transport.release("late-start")
+        try await waitForGate("release", on: transport)
+        XCTAssertFalse(state.bulbExposureActive)
+        XCTAssertTrue(state.busyOperations.contains(.capture))
+        await transport.release("release")
+        await stop.value
+        await start.value
+        XCTAssertFalse(state.shutterReleaseRequired)
+        XCTAssertFalse(state.busyOperations.contains(.capture))
+        XCTAssertNil(state.lastError)
         await state.disconnect()
     }
 
@@ -330,7 +468,7 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
         XCTAssertEqual(state.info?.model, "New fixture camera")
         XCTAssertTrue(state.busyOperations.contains(.capture), "An old defer must not unlock a new operation")
         XCTAssertTrue(state.shutterReleaseUnconfirmed)
-        XCTAssertFalse(state.canRetryShutterRelease)
+        XCTAssertTrue(state.canRetryShutterRelease, "The replacement's pending Start remains explicitly stoppable")
         await next.release("new-start")
         await newStart.value
         XCTAssertTrue(state.bulbExposureActive)
@@ -384,16 +522,20 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
         let next = SuspendedShutterTransport(model: "New fixture camera")
         let state = try makeState(old, next: next)
         await state.connect()
-        await old.enqueue("POST /ccapi/bulb/start", error: .networkConnectionLost, gate: "old-start")
+        await old.enqueue("POST /ccapi/bulb/start", gate: "old-start", cancellable: true)
         await old.enqueue("POST /ccapi/bulb/stop", error: .timedOut)
         await old.enqueue("POST /ccapi/bulb/stop", error: .timedOut)
         let oldStart = Task { await state.toggleBulbExposure() }
         try await waitForGate("old-start", on: old)
         state.requestDisconnect()
         let reconnect = Task { await state.connect() }
-        await old.release("old-start")
-        await oldStart.value
+        // A bounded observable wait fails before awaiting task values if cancellation
+        // regresses. No test code opens the old Start response barrier.
+        try await waitForRequest("GET /ccapi/info", on: next)
         await reconnect.value
+        await oldStart.value
+        let cancellations = await old.cancelledGateCount
+        XCTAssertEqual(cancellations, 1)
         XCTAssertEqual(state.info?.model, "New fixture camera")
         XCTAssertFalse(state.shutterReleaseRequired)
         XCTAssertTrue(state.previousShutterReleaseUnconfirmed)
@@ -430,6 +572,15 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
         throw URLError(.timedOut)
     }
 
+    private func waitForBridgeMutation(_ key: String, on transport: BridgeShutterRecoveryFixture) async throws {
+        for _ in 0..<2_000 {
+            if await transport.mutations().contains(key) { return }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("The Bridge fixture did not receive \(key)")
+        throw URLError(.timedOut)
+    }
+
     private func waitForRequest(
         _ key: String, count: Int = 1, on transport: SuspendedShutterTransport
     ) async throws {
@@ -449,26 +600,36 @@ private actor SuspendedShutterTransport: CameraHTTPTransport {
         let json: String?
         let error: URLError.Code?
         let gate: String?
+        let cancellable: Bool
     }
     private let model: String
     private var physicalShutterOpen = false
     private var plans: [String: [Plan]] = [:]
     private var requests: [String] = []
-    private var gates: [String: CheckedContinuation<Void, Never>] = [:]
+    private var gates: [String: CheckedContinuation<Void, Error>] = [:]
+    private(set) var cancelledGateCount = 0
 
     init(model: String = "Shutter fixture camera", initiallyActive: Bool = false) {
         self.model = model
         physicalShutterOpen = initiallyActive
     }
 
-    func enqueue(_ key: String, json: String? = nil, error: URLError.Code? = nil, gate: String? = nil) {
-        plans[key, default: []].append(Plan(json: json, error: error, gate: gate))
+    func enqueue(
+        _ key: String, json: String? = nil, error: URLError.Code? = nil,
+        gate: String? = nil, cancellable: Bool = false
+    ) {
+        plans[key, default: []].append(Plan(json: json, error: error, gate: gate, cancellable: cancellable))
     }
 
     func count(_ key: String) -> Int { requests.filter { $0 == key }.count }
     func mutations() -> [String] { requests.filter { !$0.hasPrefix("GET ") } }
     func isWaiting(_ gate: String) -> Bool { gates[gate] != nil }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
+    private func cancel(_ gate: String) {
+        guard let continuation = gates.removeValue(forKey: gate) else { return }
+        cancelledGateCount += 1
+        continuation.resume(throwing: CancellationError())
+    }
 
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
         let path = request.url!.path
@@ -480,7 +641,16 @@ private actor SuspendedShutterTransport: CameraHTTPTransport {
         if path == "/ccapi/bulb/stop", plan?.error == nil { physicalShutterOpen = false }
         let reply = plan?.json ?? defaultJSON(path)
         if let gate = plan?.gate {
-            await withCheckedContinuation { gates[gate] = $0 }
+            if plan?.cancellable == true {
+                try await withTaskCancellationHandler {
+                    try Task.checkCancellation()
+                    try await withCheckedThrowingContinuation { gates[gate] = $0 }
+                } onCancel: {
+                    Task { await self.cancel(gate) }
+                }
+            } else {
+                try await withCheckedThrowingContinuation { gates[gate] = $0 }
+            }
         } else if path == "/ccapi/events", plan == nil {
             try await Task.sleep(nanoseconds: 60_000_000_000)
         }

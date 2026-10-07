@@ -10,15 +10,21 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
         var active: Bool
     }
     private let initiallyUnknown: Bool
+    private let pendingStart: Bool
     private var failFirstClose: Bool
+    private var failFirstStop: Bool
     private var nextID = 0
     private var sessions: [String: State] = [:]
     private var requestLog: [String] = []
     private(set) var stopCount = 0
+    private(set) var cancelledStartCount = 0
+    private(set) var startCount = 0
 
-    init(unknown: Bool, failFirstClose: Bool = false) {
+    init(unknown: Bool, failFirstClose: Bool = false, pendingStart: Bool = false, failFirstStop: Bool = false) {
         initiallyUnknown = unknown
         self.failFirstClose = failFirstClose
+        self.pendingStart = pendingStart
+        self.failFirstStop = failFirstStop
     }
 
     func mutations() -> [String] { requestLog.filter { !$0.hasPrefix("GET ") } }
@@ -34,7 +40,7 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
         if key == "POST /v1/session" {
             nextID += 1
             let id = "shutter-fixture-\(nextID)"
-            sessions[id] = State(unknown: initiallyUnknown, active: !initiallyUnknown)
+            sessions[id] = State(unknown: initiallyUnknown, active: !initiallyUnknown && !pendingStart)
             NSLog("[OEC_SHUTTER_FIXTURE] session-open %@", id)
             return response(#"{"id":"\#(id)","engine":"libgphoto2"}"#)
         }
@@ -49,9 +55,28 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
         case ("GET", "info"):
             return response(#"{"connected":true,"model":"Shutter recovery fixture \#(id)","serial":"SYNTHETIC","api":"simulated-shutter-recovery"}"#)
         case ("GET", "capabilities"):
+            if pendingStart {
+                return response(#"{"profile":{"modelName":"Shutter recovery fixture","family":"UNKNOWN","priority":"RESEARCH"},"supported":["BULB_EXPOSURE"],"settings":[],"liveView":{"sources":[],"sizes":[]}}"#)
+            }
             return response(#"{"profile":{"modelName":"Shutter recovery fixture","family":"UNKNOWN","priority":"RESEARCH"},"supported":[],"settings":[],"liveView":{"sources":[],"sizes":[]}}"#)
+        case ("POST", "bulb/start") where pendingStart:
+            startCount += 1
+            sessions[id] = State(unknown: true, active: true)
+            do {
+                // No reply is released by the test. Deliberate Stop/Disconnect must
+                // cancel the same owned task which is suspended in this transport.
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                cancelledStartCount += 1
+                throw error
+            }
+            throw URLError(.timedOut)
         case ("POST", "bulb/stop"):
             stopCount += 1
+            if failFirstStop {
+                failFirstStop = false
+                throw URLError(.networkConnectionLost)
+            }
             let released = State(unknown: false, active: false)
             sessions[id] = released
             // This DEBUG-only transport accepts only its own generated session
@@ -85,6 +110,9 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
 
     private func statusJSON(_ state: State) -> String {
         let active = state.unknown ? "null" : String(state.active)
+        if pendingStart {
+            return #"{"connected":true,"mode":"Bulb","recording":false,"bulbExposureActive":\#(active),"shutterReleaseUnconfirmed":\#(state.unknown),"battery":{},"media":{},"exposure":{}}"#
+        }
         return #"{"connected":true,"mode":"Manual","recording":false,"bulbExposureActive":\#(active),"shutterReleaseUnconfirmed":\#(state.unknown),"temperature":"disablerelease","battery":{},"media":{},"exposure":{}}"#
     }
 }

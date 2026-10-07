@@ -76,6 +76,57 @@ final class OpenEOSControlUITests: XCTestCase {
         }
     }
 
+    func testPendingBulbStartLeavesStopEnabledAndLostReleaseCanBeRetried() throws {
+        for scenario in ["pending-start", "pending-start-lost-stop"] {
+            let app = launch(
+                appLanguage: "english", appleLanguage: "en", locale: "en_US",
+                environment: ["OEC_SHUTTER_RECOVERY_FIXTURE": scenario]
+            )
+            XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+            app.buttons["connect-button"].tap()
+            let shutter = app.buttons["shutter-button"]
+            XCTAssertTrue(waitForInteraction(shutter, timeout: 8))
+            XCTAssertTrue(shutter.label.contains("Start Bulb exposure"))
+            shutter.tap()
+            let stop = app.buttons["release-shutter-button"]
+            XCTAssertTrue(waitForInteraction(stop, timeout: 5), "A dispatched Start cannot disable its Stop")
+            stop.tap()
+            if scenario == "pending-start-lost-stop" {
+                XCTAssertTrue(waitForInteraction(stop, timeout: 5))
+                XCTAssertTrue(app.staticTexts["shutter-release-warning"].exists)
+                stop.tap()
+            }
+            XCTAssertTrue(stop.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(waitForInteraction(shutter, timeout: 5))
+            XCTAssertTrue(shutter.label.contains("Start Bulb exposure"))
+            XCTAssertFalse(app.alerts.firstMatch.exists, "Cancelled Start must not replace successful Stop with an error")
+            app.terminate()
+        }
+    }
+
+    func testPendingBulbStartDisconnectCanReconnectWithoutFinishingStartReply() throws {
+        let app = launch(
+            appLanguage: "english", appleLanguage: "en", locale: "en_US",
+            environment: ["OEC_SHUTTER_RECOVERY_FIXTURE": "pending-start"]
+        )
+        XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+        app.buttons["connect-button"].tap()
+        XCTAssertTrue(waitForInteraction(app.buttons["shutter-button"], timeout: 8))
+        app.buttons["shutter-button"].tap()
+        XCTAssertTrue(waitForInteraction(app.buttons["release-shutter-button"], timeout: 5))
+        openMoreActions(in: app)
+        let disconnect = app.buttons["disconnect-menu-button"]
+        XCTAssertTrue(scrollToInteraction(disconnect, in: app, timeout: 8))
+        disconnect.tap()
+        XCTAssertTrue(waitForConnectionScreen(in: app, timeout: 8))
+        XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+        app.buttons["connect-button"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["camera-model-status"], containing: "shutter-fixture-2", timeout: 8))
+        XCTAssertFalse(app.buttons["release-shutter-button"].exists)
+        XCTAssertFalse(app.staticTexts["previous-shutter-release-warning"].exists)
+        XCTAssertTrue(waitForInteraction(app.buttons["shutter-button"], timeout: 5))
+    }
+
     func testPreviousConnectionWarningStaysSeparateFromNewConnectionStop() throws {
         let app = launch(
             appLanguage: "english", appleLanguage: "en", locale: "en_US",
