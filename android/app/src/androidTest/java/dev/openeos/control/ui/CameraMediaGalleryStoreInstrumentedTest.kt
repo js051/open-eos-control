@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaDownloadResult
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CcapiClient
@@ -23,6 +24,9 @@ import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.File
+import java.io.FilterOutputStream
+import java.io.OutputStream
+import java.security.MessageDigest
 import java.util.UUID
 
 @SdkSuppress(minSdkVersion = 29)
@@ -234,5 +238,273 @@ class CameraMediaGalleryStoreInstrumentedTest {
         assertTrue(failure is IllegalStateException)
         assertEquals(0, completions)
         assertTrue(testUris().isEmpty())
+    }
+
+    @Test fun publicationEvidenceMatchesTheAlreadyPublishedRealRowAndExactOriginalDigest() = runBlocking {
+        val delivered = DeliveredJpegStore()
+        val camera = fixtureCamera()
+        var observed: PublishedGalleryOriginal? = null
+        var completions = 0
+        val uri = store.save(
+            model, item,
+            onFinalized = {
+                completions++
+                assertEquals(1, delivered.state.value.entries.size)
+            },
+            onPublished = { evidence ->
+                observed = evidence
+                resolver.query(evidence.uri, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null)!!.use {
+                    assertTrue(it.moveToFirst())
+                    assertEquals(0, it.getInt(0))
+                }
+                // This read is a test assertion only; the production observer performs no IO.
+                assertArrayEquals(jpeg, resolver.openInputStream(evidence.uri)!!.use { it.readBytes() })
+                delivered.recordPublished(camera, item, evidence)
+            },
+        ) { output ->
+            assertTrue(delivered.state.value.entries.isEmpty())
+            output.write(jpeg[0].toInt())
+            output.write(jpeg, 1, jpeg.size - 1)
+            CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+        }
+        val evidence = requireNotNull(observed)
+        assertEquals(uri, evidence.uri)
+        assertEquals(jpeg.size.toLong(), evidence.byteLength)
+        assertEquals(jpegDigest(), evidence.sha256)
+        assertEquals("image/jpeg", evidence.mimeType)
+        assertEquals(1, completions)
+        assertEquals(uri, delivered.state.value.entries.single().uri)
+        assertEquals(CameraImportOriginalEvidence(jpeg.size.toLong(), jpegDigest()), delivered.state.value.entries.single().evidence)
+    }
+
+    @Test fun cancelledSuspendReturnRetainsPublishedOriginalAndOneRegistryEntry() = runBlocking {
+        val delivered = DeliveredJpegStore()
+        val owner = Job()
+        val publishingStore = CameraMediaGalleryStore(resolver, publishOutput = { uri, values ->
+            resolver.update(uri, values, null, null).also { published ->
+                assertEquals(1, published)
+                // Cancel at the actual irreversible boundary, before onPublished or confirm.
+                owner.cancel()
+            }
+        })
+        var original: PublishedGalleryOriginal? = null
+        var completions = 0
+        val save = launch(owner) {
+            publishingStore.save(
+                model, item,
+                onFinalized = { completions++ },
+                onPublished = { evidence ->
+                    assertTrue(owner.isCancelled)
+                    original = evidence
+                    delivered.recordPublished(fixtureCamera(), item, evidence)
+                },
+            ) { output ->
+                output.write(jpeg)
+                CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+            }
+            fail("Cancellation must prevent the IO result from returning normally.")
+        }
+        save.join()
+        assertTrue(save.isCancelled)
+        assertEquals(1, completions)
+        val entry = delivered.state.value.entries.single()
+        assertEquals(entry.id, delivered.recordPublished(fixtureCamera(), item, requireNotNull(original)))
+        assertEquals(1, delivered.state.value.entries.size)
+        assertEquals(jpegDigest(), entry.evidence.sha256)
+        assertEquals(listOf(entry.uri.lastPathSegment), testUris().map { it.lastPathSegment })
+        assertPublishedOriginal(entry.uri)
+    }
+
+    @Test fun failingRegistryAndAvailabilityObserversStillRunMandatoryFinalization() = runBlocking {
+        var publications = 0
+        var unavailable = 0
+        var completions = 0
+        val uri = store.save(
+            model, item,
+            onFinalized = { completions++ },
+            onPublished = {
+                publications++
+                throw IOException("Synthetic registry observer failure")
+            },
+            onPublicationObserverFailure = {
+                unavailable++
+                throw IOException("Synthetic availability observer failure")
+            },
+        ) { output ->
+            output.write(jpeg)
+            CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+        }
+        assertEquals(1, publications)
+        assertEquals(1, unavailable)
+        assertEquals(1, completions)
+        assertPublishedOriginal(uri)
+    }
+
+    @Test fun failingHistoryObserverRetainsRegistrationAndPublishedOriginal() = runBlocking {
+        val delivered = DeliveredJpegStore()
+        var publicationSuccess = 0
+        var historyCompletions = 0
+        var unavailable = 0
+        val uri = store.save(
+            model, item,
+            onFinalized = {
+                publicationSuccess++
+                historyCompletions++
+                throw IOException("Synthetic history observer failure")
+            },
+            onPublished = { delivered.recordPublished(fixtureCamera(), item, it) },
+            onPublicationObserverFailure = { unavailable++ },
+        ) { output ->
+            output.write(jpeg)
+            CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+        }
+        assertEquals(1, publicationSuccess)
+        assertEquals(1, historyCompletions)
+        assertEquals(0, unavailable)
+        assertEquals(uri, delivered.state.value.entries.single().uri)
+        assertPublishedOriginal(uri)
+    }
+
+    @Test fun registryFailureSurfacesAvailabilityWithoutFailingGallerySuccess() = runBlocking {
+        val delivered = DeliveredJpegStore()
+        var completions = 0
+        val uri = store.save(
+            model, item,
+            onFinalized = { completions++ },
+            onPublished = { throw IOException("Synthetic unavailable registry") },
+            onPublicationObserverFailure = delivered::markRegistrationUnavailable,
+        ) { output ->
+            output.write(jpeg)
+            CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+        }
+        assertEquals(1, completions)
+        assertTrue(delivered.state.value.entries.isEmpty())
+        assertTrue(delivered.state.value.registrationUnavailable)
+        assertPublishedOriginal(uri)
+    }
+
+    @Test fun cancelledTruncatedAndMismatchedOutputsNeverRegister() = runBlocking {
+        val delivered = DeliveredJpegStore()
+        var publications = 0
+        var completions = 0
+        val scenarios: List<suspend (OutputStream) -> CameraMediaDownloadResult> = listOf(
+            { output -> output.write(jpeg, 0, 10); throw CancellationException("Synthetic transfer cancellation") },
+            { output -> output.write(jpeg, 0, 10); throw IOException("Synthetic transfer failure") },
+            { output -> output.write(jpeg, 0, 10); CameraMediaDownloadResult(item, 10L, "image/jpeg") },
+            { output -> output.write(jpeg); CameraMediaDownloadResult(item, jpeg.size.toLong() + 1L, "image/jpeg") },
+            { _ -> CameraMediaDownloadResult(item, 0L, "image/jpeg") },
+        )
+        scenarios.forEach { download ->
+            val failure = runCatching {
+                store.save(
+                    model, item,
+                    onFinalized = { completions++ },
+                    onPublished = {
+                        publications++
+                        delivered.recordPublished(fixtureCamera(), item, it)
+                    },
+                    download = download,
+                )
+            }.exceptionOrNull()
+            assertNotNull(failure)
+            assertTrue(testUris().isEmpty())
+            assertTrue(delivered.state.value.entries.isEmpty())
+        }
+        assertEquals(0, publications)
+        assertEquals(0, completions)
+    }
+
+    @Test fun writeCloseAndPublishFailuresRemoveTheRealPendingRowWithoutRegistration() = runBlocking {
+        val delivered = DeliveredJpegStore()
+        var publications = 0
+        var completions = 0
+        val failingStores = listOf(
+            CameraMediaGalleryStore(resolver, openOutput = { uri ->
+                object : FilterOutputStream(resolver.openOutputStream(uri, "w")!!) {
+                    override fun write(buffer: ByteArray, offset: Int, length: Int) {
+                        out.write(buffer, offset, minOf(10, length))
+                        throw IOException("Synthetic output write failure")
+                    }
+                }
+            }),
+            CameraMediaGalleryStore(resolver, openOutput = { uri ->
+                object : FilterOutputStream(resolver.openOutputStream(uri, "w")!!) {
+                    override fun close() {
+                        super.close()
+                        throw IOException("Synthetic output close failure")
+                    }
+                }
+            }),
+            CameraMediaGalleryStore(resolver, publishOutput = { _, _ -> 0 }),
+            CameraMediaGalleryStore(resolver, publishOutput = { _, _ -> throw IOException("Synthetic publish failure") }),
+        )
+        failingStores.forEach { failingStore ->
+            val failure = runCatching {
+                failingStore.save(
+                    model, item,
+                    onFinalized = { completions++ },
+                    onPublished = {
+                        publications++
+                        delivered.recordPublished(fixtureCamera(), item, it)
+                    },
+                ) { output ->
+                    output.write(jpeg)
+                    CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+                }
+            }.exceptionOrNull()
+            assertNotNull(failure)
+            assertTrue(testUris().isEmpty())
+            assertTrue(delivered.state.value.entries.isEmpty())
+        }
+        assertEquals(0, publications)
+        assertEquals(0, completions)
+    }
+
+    @Test fun nonJpegGallerySavesDoNotProduceJpegEvidenceOrInvokeObserver() = runBlocking {
+        var publications = 0
+        var completions = 0
+        listOf("MP4", "CR2").forEach { extension ->
+            val media = item.copy(name = "TEST.$extension", contentType = "application/octet-stream")
+            val uri = store.save(
+                model, media,
+                onFinalized = { completions++ },
+                onPublished = { publications++ },
+            ) { output ->
+                output.write(jpeg)
+                CameraMediaDownloadResult(media, jpeg.size.toLong(), null)
+            }
+            assertPublishedOriginal(uri)
+        }
+        assertEquals(0, publications)
+        assertEquals(2, completions)
+    }
+
+    @Test fun equalNamesRegisterSeparateRealGalleryCopies() = runBlocking {
+        val delivered = DeliveredJpegStore()
+        repeat(2) {
+            store.save(model, item, onPublished = { delivered.recordPublished(fixtureCamera(), item, it) }) { output ->
+                output.write(jpeg)
+                CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+            }
+        }
+        val entries = delivered.state.value.entries
+        assertEquals(2, entries.size)
+        assertNotEquals(entries[0].id, entries[1].id)
+        assertNotEquals(entries[0].uri, entries[1].uri)
+        assertEquals(entries[0].evidence, entries[1].evidence)
+        entries.forEach { assertPublishedOriginal(it.uri) }
+    }
+
+    private fun fixtureCamera() = CameraInfo(true, model, "SYNTHETIC-TEST-SERIAL", "fixture")
+
+    private fun jpegDigest(): String = MessageDigest.getInstance("SHA-256").digest(jpeg)
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+    private fun assertPublishedOriginal(uri: Uri) {
+        resolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null)!!.use {
+            assertTrue(it.moveToFirst())
+            assertEquals(0, it.getInt(0))
+        }
+        assertArrayEquals(jpeg, resolver.openInputStream(uri)!!.use { it.readBytes() })
     }
 }
