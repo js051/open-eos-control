@@ -31,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -54,22 +56,40 @@ fun OpenEosControlApp(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val downloadHistory by viewModel.downloadHistoryState.collectAsStateWithLifecycle()
     var showDownloadHistory by rememberSaveable { mutableStateOf(false) }
+    var showSavedJpegs by rememberSaveable { mutableStateOf(false) }
+    val savedJpegs by viewModel.savedJpegState.collectAsStateWithLifecycle()
+    val handoff by viewModel.cameraImportHandoffState.collectAsStateWithLifecycle()
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    var launchedHandoffToken by rememberSaveable { mutableStateOf<Long?>(null) }
     val context = LocalContext.current
     val mediaPickers = rememberCameraMediaPickerLaunchers(viewModel)
     val sereinLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
-        viewModel.handleSereinResult(context, result.resultCode, result.data)
+        val token = launchedHandoffToken
+        launchedHandoffToken = null
+        if (token != null) viewModel.handleSereinResult(context, token, result.resultCode, result.data)
     }
-    LaunchedEffect(state.pendingCameraImportHandoff) {
-        val session = state.pendingCameraImportHandoff ?: return@LaunchedEffect
+    LaunchedEffect(handoff.active?.token, handoff.active?.phase, lifecycleState) {
+        if (!lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
+        val token = handoff.active?.takeIf { it.phase == CameraImportHandoffPhase.READY }?.token ?: return@LaunchedEffect
+        val session = viewModel.claimSereinLaunch(token) ?: return@LaunchedEffect
+        launchedHandoffToken = token
         try {
-            sereinLauncher.launch(SereinImportIntents.create(session))
+            sereinLauncher.launch(SereinImportIntents.create(session, viewModel.cameraImportTargetPackage))
         } catch (_: ActivityNotFoundException) {
-            viewModel.handleSereinLaunchFailure(context, session.sessionId)
+            launchedHandoffToken = null
+            viewModel.handleSereinLaunchFailure(context, token)
         } catch (_: SecurityException) {
-            viewModel.handleSereinLaunchFailure(context, session.sessionId)
+            launchedHandoffToken = null
+            viewModel.handleSereinLaunchFailure(context, token)
+        } catch (_: IllegalStateException) {
+            launchedHandoffToken = null
+            viewModel.handleSereinLaunchFailure(context, token)
         }
+    }
+    LaunchedEffect(handoff.active?.cleanupUnconfirmed) {
+        if (handoff.active?.cleanupUnconfirmed == true) showSavedJpegs = true
     }
     val animatedControlRotation by animateFloatAsState(
         targetValue = controlRotationDegrees,
@@ -94,6 +114,7 @@ fun OpenEosControlApp(
         useSimulatorPreset = viewModel::useDevSimulatorPreset,
         enterOfflinePreview = viewModel::enterOfflinePreview,
         openDownloadHistory = { showDownloadHistory = true },
+        openSavedJpegs = { showSavedJpegs = true },
         connect = {
             viewModel.rememberConnection(context)
             viewModel.connect()
@@ -244,6 +265,20 @@ fun OpenEosControlApp(
                 }
             }
             LanguageSettingsSheet(state, actions)
+            if (showSavedJpegs) {
+                SavedJpegDialog(
+                    state = savedJpegs, handoff = handoff,
+                    automaticImportActive = state.foregroundImportOwnerActive,
+                    onToggle = viewModel::toggleSavedJpeg,
+                    onSend = { viewModel.sendSavedJpegs(context, savedJpegs.selectedIds) },
+                    onCancel = viewModel::cancelSavedJpegPreparation,
+                    onClear = viewModel::clearSavedJpegs,
+                    onRetryCleanup = viewModel::retryCameraImportCleanup,
+                    onStopAutomaticImport = viewModel::stopForegroundJpegImport,
+                    onRecheck = { viewModel.recheckSavedJpeg(context, it) },
+                    onDismiss = { showSavedJpegs = false },
+                )
+            }
             if (showDownloadHistory) {
                 DownloadHistoryDialog(
                     state = downloadHistory,
@@ -316,6 +351,7 @@ data class CameraActions(
     val useSimulatorPreset: () -> Unit,
     val enterOfflinePreview: () -> Unit,
     val openDownloadHistory: () -> Unit = {},
+    val openSavedJpegs: () -> Unit = {},
     val connect: () -> Unit,
     val connectBridge: () -> Unit,
     val cancelConnectionAttempt: () -> Unit = {},

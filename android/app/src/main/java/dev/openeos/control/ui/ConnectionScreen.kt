@@ -99,11 +99,19 @@ fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
                 }
                 Text(stringResource(R.string.connect_title), color = AppText, fontWeight = FontWeight.Bold)
                 Text(stringResource(R.string.connect_subtitle), color = AppSubtleText)
-                TextButton(
-                    onClick = actions.openDownloadHistory,
-                    modifier = Modifier.fillMaxWidth().testTag("download-history-open"),
-                ) {
-                    Text(stringResource(R.string.download_history_title))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = actions.openDownloadHistory,
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("download-history-open"),
+                    ) {
+                        Text(stringResource(R.string.download_history_title))
+                    }
+                    TextButton(
+                        onClick = actions.openSavedJpegs,
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("saved-jpegs-open"),
+                    ) {
+                        Text(stringResource(R.string.saved_jpegs_title))
+                    }
                 }
 
                 ConnectionChoiceSegment(
