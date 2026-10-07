@@ -1,17 +1,19 @@
 import asyncio
+import hashlib
 import json
 import re
 import struct
 import zlib
 from datetime import datetime
 from email.utils import format_datetime
+from functools import lru_cache
 from io import BytesIO
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image, ImageDraw
-from pydantic import BaseModel, Field, StrictBool, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 TemperatureStatusValue = Literal[
     "normal",
@@ -83,6 +85,35 @@ class SensorCleaningUpdate(BaseModel):
 
 class DirectoryCreateUpdate(BaseModel):
     directoryname: str = Field(default="", pattern=r"^(?:[A-Z0-9_]{5})?$")
+
+
+class CaptureDeliveryTestSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: StrictBool = True
+    listing_failures: StrictInt = Field(default=0, ge=0, le=20)
+    hidden_listing_reads: StrictInt = Field(default=0, ge=0, le=20)
+    thumbnail_failures: StrictInt = Field(default=0, ge=0, le=20)
+    display_failures: StrictInt = Field(default=0, ge=0, le=20)
+    original_failures: StrictInt = Field(default=0, ge=0, le=20)
+    original_delay_ms: StrictInt = Field(default=0, ge=0, le=60_000)
+
+
+def initial_capture_delivery_state() -> dict[str, object]:
+    return {
+        **CaptureDeliveryTestSettings(enabled=False).model_dump(),
+        "captured_ids": [],
+        "pending_capture_id": None,
+        "listing_get_count": 0,
+        "listing_failure_count": 0,
+        "listing_failures_remaining": 0,
+        "hidden_listing_reads_remaining": 0,
+        "hidden_listing_read_count": 0,
+        "listing_hidden_capture_id": None,
+        "representation_get_counts": {"thumbnail": 0, "display": 0, "original": 0, "info": 0},
+        "representation_failure_counts": {"thumbnail": 0, "display": 0, "original": 0},
+        "representation_failures_remaining": {"thumbnail": 0, "display": 0, "original": 0},
+    }
 
 
 capabilities = {
@@ -236,6 +267,7 @@ def initial_state() -> dict[str, object]:
         "canonical_event_active_requests": 0,
         "canonical_media_page_size": 0,
         "canonical_media_page_delay_ms": 0,
+        "capture_delivery": initial_capture_delivery_state(),
         "media_metadata_update_count": 0,
         "canonical_datetime": {
             "datetime": format_datetime(datetime.now().astimezone()),
@@ -485,6 +517,7 @@ async def get_test_state() -> dict[str, object]:
         "exposure": dict(state["exposure"]),
         "media_ids": [item["id"] for item in state["media"]],
         "media_metadata_update_count": state["media_metadata_update_count"],
+        "capture_delivery": capture_delivery_test_state(),
         "canonical": {
             "shutter_af_requests": list(state["canonical_shutter_af_requests"]),
             "af_start_count": state["canonical_af_start_count"],
@@ -529,6 +562,48 @@ async def set_test_media_pagination(payload: dict[str, object]) -> dict[str, int
     state["canonical_media_page_size"] = page_size
     state["canonical_media_page_delay_ms"] = page_delay_ms
     return {"page_size": page_size, "page_delay_ms": page_delay_ms}
+
+
+@app.post("/ccapi/test/capture-delivery")
+async def set_test_capture_delivery(payload: CaptureDeliveryTestSettings) -> dict[str, object]:
+    """Opt in; later configuration changes preserve captures and observed counters."""
+    fixture = state["capture_delivery"]
+    if not fixture["enabled"]:
+        fixture = initial_capture_delivery_state()
+    changes = payload.model_dump(exclude_unset=True)
+    fixture.update(changes)
+    fixture["enabled"] = payload.enabled
+    # Before capture, only store settings. Once armed, explicit changes take effect
+    # immediately, allowing a GET-only retry without sending another shutter POST.
+    if fixture["pending_capture_id"] is not None:
+        for setting in ("listing_failures", "hidden_listing_reads"):
+            if setting in changes:
+                fixture[f"{setting}_remaining"] = changes[setting]
+        if "hidden_listing_reads" in changes:
+            fixture["listing_hidden_capture_id"] = (
+                fixture["pending_capture_id"] if changes["hidden_listing_reads"] else None
+            )
+        for representation in ("thumbnail", "display", "original"):
+            setting = f"{representation}_failures"
+            if setting in changes:
+                fixture["representation_failures_remaining"][representation] = changes[setting]
+    state["capture_delivery"] = fixture
+    return capture_delivery_test_state()
+
+
+def capture_delivery_test_state() -> dict[str, object]:
+    fixture = state["capture_delivery"]
+    representations = {}
+    if fixture["enabled"]:
+        for representation, dimensions in CAPTURE_DELIVERY_DIMENSIONS.items():
+            data = capture_delivery_jpeg(representation)
+            representations[representation] = {
+                "byte_count": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "width": dimensions[0],
+                "height": dimensions[1],
+            }
+    return {**fixture, "representations": representations}
 
 
 @app.post("/ccapi/test/temperature")
@@ -2261,6 +2336,18 @@ async def canon_capture_still(payload: dict[str, object]) -> Response:
     state["canonical_shutter_af_requests"].append(payload["af"])
     state["capture_count"] += 1
     name = f"SIM_{state['capture_count'] + 2:04d}.JPG"
+    fixture = state["capture_delivery"]
+    if fixture["enabled"]:
+        fixture["captured_ids"].append(name)
+        fixture["pending_capture_id"] = name
+        fixture["listing_failures_remaining"] = fixture["listing_failures"]
+        fixture["hidden_listing_reads_remaining"] = fixture["hidden_listing_reads"]
+        fixture["listing_hidden_capture_id"] = name if fixture["hidden_listing_reads"] else None
+        fixture["representation_failures_remaining"] = {
+            "thumbnail": fixture["thumbnail_failures"],
+            "display": fixture["display_failures"],
+            "original": fixture["original_failures"],
+        }
     state["media"].insert(
         0,
         {
@@ -2488,6 +2575,24 @@ async def canon_contents(
     del order
     page_size = int(state["canonical_media_page_size"])
     media = list(state["media"])
+    fixture = state["capture_delivery"]
+    if fixture["enabled"]:
+        fixture["listing_get_count"] += 1
+        if fixture["listing_failures_remaining"]:
+            fixture["listing_failures_remaining"] -= 1
+            fixture["listing_failure_count"] += 1
+            raise HTTPException(status_code=503, detail="Synthetic post-capture listing failure")
+        hidden_id = fixture["listing_hidden_capture_id"]
+        if kind == "number" or page in {None, 1}:
+            hidden_id = fixture["pending_capture_id"] if fixture["hidden_listing_reads_remaining"] else None
+        if kind != "number" and page in {None, 1}:
+            # Keep later pages on this visibility snapshot; only page 1 consumes a retry.
+            fixture["listing_hidden_capture_id"] = hidden_id
+            if hidden_id is not None:
+                fixture["hidden_listing_reads_remaining"] -= 1
+                fixture["hidden_listing_read_count"] += 1
+        if hidden_id is not None:
+            media = [item for item in media if item["id"] != hidden_id]
     if kind == "number":
         page_count = 1 if page_size <= 0 else max(1, (len(media) + page_size - 1) // page_size)
         return {"pagenumber": page_count}
@@ -2511,6 +2616,22 @@ async def canon_contents(
 @app.get("/ccapi/ver100/contents/card1/100CANON/{item_id}")
 async def canon_media(item_id: str, kind: str | None = None) -> Response:
     item = canonical_media_item(item_id)
+    fixture = state["capture_delivery"]
+    if fixture["enabled"] and item_id in fixture["captured_ids"]:
+        representation = "original" if kind in {None, "main"} else kind
+        if representation not in fixture["representation_get_counts"]:
+            raise HTTPException(status_code=422, detail="Unsupported media representation")
+        fixture["representation_get_counts"][representation] += 1
+        if representation == "info":
+            return JSONResponse(content={**media_info(item), "filesize": len(capture_delivery_jpeg("original"))})
+        remaining = fixture["representation_failures_remaining"]
+        if item_id == fixture["pending_capture_id"] and remaining.get(representation, 0):
+            remaining[representation] -= 1
+            fixture["representation_failure_counts"][representation] += 1
+            raise HTTPException(status_code=503, detail=f"Synthetic {representation} GET failure")
+        if representation == "original" and fixture["original_delay_ms"]:
+            await asyncio.sleep(fixture["original_delay_ms"] / 1_000)
+        return Response(content=capture_delivery_jpeg(representation), media_type="image/jpeg")
     if kind == "info":
         return JSONResponse(content=media_info(item))
     if kind not in {None, "main", "thumbnail", "display"}:
@@ -2535,6 +2656,23 @@ async def canon_delete_media(item_id: str) -> Response:
     uploaded_media_payloads.pop(item_id, None)
     publish_event("contents")
     return Response(status_code=204)
+
+
+CAPTURE_DELIVERY_DIMENSIONS = {"thumbnail": (80, 60), "display": (320, 240), "original": (800, 600)}
+
+
+@lru_cache(maxsize=3)
+def capture_delivery_jpeg(representation: str) -> bytes:
+    """Stable synthetic JPEGs, independent of focus, recording, or other camera state."""
+    colors = {"thumbnail": (34, 139, 34), "display": (40, 100, 210), "original": (225, 100, 35)}
+    width, height = CAPTURE_DELIVERY_DIMENSIONS[representation]
+    image = Image.new("RGB", (width, height), color=colors[representation])
+    drawing = ImageDraw.Draw(image)
+    drawing.rectangle((width // 8, height // 8, width // 2, height // 2), fill=(240, 240, 240))
+    drawing.ellipse((width // 2, height // 2, 7 * width // 8, 7 * height // 8), fill=(30, 30, 30))
+    output = BytesIO()
+    image.save(output, format="JPEG", quality=92)
+    return output.getvalue()
 
 
 def camera_frame_jpeg() -> bytes:
